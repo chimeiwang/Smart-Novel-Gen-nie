@@ -1,0 +1,8 @@
+{
+  "node_version": "20",
+  "env": ".env",
+  "graphs": {
+    "novel_writer": "./src/agents/graph/studio-app.ts:graph"
+  }
+}
+

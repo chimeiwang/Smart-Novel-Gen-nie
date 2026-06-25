@@ -1,0 +1,3 @@
+字段契约基线 — 2026-06-09
+typecheck: PASS
+lint: 1 error (user-menu.tsx:26 react-hooks/set-state-in-effect), 3 warnings — 全部为已有问题

@@ -1,0 +1,493 @@
+/**
+ * Agent Runtime.
+ *
+ * Project-specific Agent protocol lives here. ModelRuntimePort only performs a
+ * single model/tool-call turn; this class owns the tool-call loop, control tool
+ * interception, terminal control handling, and visible-content aggregation.
+ */
+
+import type OpenAI from "openai";
+import { traceLLMCall, traceTool } from "@/agents/lib/langsmith-tracer";
+import { logger } from "@/shared/lib/logger";
+import { getTool } from "@/agents/tools/registry";
+import {
+  CONTROL_TOOL_NAMES,
+  formatControlToolValidationMessage,
+  parseControlEventArgsDetailed,
+} from "@/shared/contracts/agent-control";
+import {
+  aggregateVisibleParts,
+  ensureReasoningEffortPrompt,
+  getModelRuntime,
+  LegacyOpenAIRuntime,
+  type AgentRuntimeOptions,
+  type ModelToolCall,
+  type ModelRuntimePort,
+} from "./model-runtime";
+import type {
+  AgentControlEvent,
+  AgentTurnResult,
+  RuntimeToolCallRecord,
+  RuntimeToolResultRecord,
+  TokenUsage,
+} from "./turn-result";
+import { parseToolCallArguments } from "./tool-arguments";
+
+export type { AgentRuntimeOptions } from "./model-runtime";
+
+const MAX_INVALID_CONTROL_TOOL_ATTEMPTS = 2;
+
+interface ToolExecutionResult {
+  content: string;
+  fatal?: boolean;
+  terminal?: boolean;
+  unauthorized?: boolean;
+}
+
+interface AgentRoundToolExecutionResult extends ToolExecutionResult {
+  id: string;
+  parseError?: boolean;
+}
+
+interface AgentRuntimeImplDeps {
+  client?: OpenAI;
+  isAiConfigured?: () => boolean;
+  runtime?: ModelRuntimePort;
+}
+
+export interface AgentRuntime {
+  runTurn(options: AgentRuntimeOptions): Promise<AgentTurnResult>;
+}
+
+export class AgentRuntimeImpl implements AgentRuntime {
+  private readonly runtime?: ModelRuntimePort;
+  private readonly injectedClient?: OpenAI;
+  private readonly isConfigured?: () => boolean;
+
+  constructor(deps: AgentRuntimeImplDeps = {}) {
+    this.runtime = deps.runtime;
+    this.injectedClient = deps.client;
+    this.isConfigured = deps.isAiConfigured;
+  }
+
+  async runTurn(options: AgentRuntimeOptions): Promise<AgentTurnResult> {
+    const meta = options.metadata ?? {};
+    return traceLLMCall(
+      (meta.callType as string) || "agent-runtime",
+      meta as Record<string, unknown>,
+      async () => this.runToolLoop(options)
+    );
+  }
+
+  private async runToolLoop(options: AgentRuntimeOptions): Promise<AgentTurnResult> {
+    const runtime = this.resolveRuntime();
+    const requestId = logger.generateRequestId();
+    const messages = ensureReasoningEffortPrompt(options.messages);
+    const maxIterations = options.maxIterations ?? 10;
+
+    const controlEvents: AgentControlEvent[] = [];
+    const toolCalls: RuntimeToolCallRecord[] = [];
+    const toolResults: RuntimeToolResultRecord[] = [];
+    const visibleContentParts: string[] = [];
+    const invalidControlToolAttempts = new Map<string, number>();
+
+    let finalUsage: TokenUsage | undefined;
+    let lastAssistantText = "";
+    let lastReasoningContent = "";
+    let finishReason: string | undefined = "stop";
+
+    for (let iteration = 1; iteration <= maxIterations; iteration++) {
+      logger.info("AGENT_RUNTIME", `tool-call loop 第 ${iteration} 轮`, {
+        messageCount: messages.length,
+      });
+
+      const round = await runtime.runToolCallTurn({
+        messages,
+        tools: options.tools,
+        onChunk: options.onChunk,
+        metadata: options.metadata,
+        reasoningEffort: "medium",
+      });
+
+      finalUsage = round.usage ?? finalUsage;
+      finishReason = round.finishReason;
+      if (round.content) lastAssistantText = round.content;
+      if (round.reasoningContent) lastReasoningContent = round.reasoningContent;
+
+      const result = await this.finishAgentRound({
+        messages,
+        options,
+        requestId,
+        controlEvents,
+        toolCalls,
+        toolResults,
+        visibleContentParts,
+        invalidControlToolAttempts,
+        modelToolCalls: round.toolCalls,
+        fullTextContent: round.content,
+        reasoningContent: round.reasoningContent,
+        finishReason,
+        finalUsage,
+      });
+      if (result.done) return result.result;
+    }
+
+    return this.maxIterationFallback({
+      requestId,
+      visibleContentParts,
+      lastAssistantText,
+      lastReasoningContent,
+      controlEvents,
+      toolCalls,
+      toolResults,
+      finalUsage,
+      maxIterations,
+    });
+  }
+
+  private async finishAgentRound(params: {
+    messages: OpenAI.Chat.ChatCompletionMessageParam[];
+    options: AgentRuntimeOptions;
+    requestId: string;
+    controlEvents: AgentControlEvent[];
+    toolCalls: RuntimeToolCallRecord[];
+    toolResults: RuntimeToolResultRecord[];
+    visibleContentParts: string[];
+    invalidControlToolAttempts: Map<string, number>;
+    modelToolCalls: ModelToolCall[];
+    fullTextContent: string;
+    reasoningContent: string;
+    finishReason: string | undefined;
+    finalUsage: TokenUsage | undefined;
+  }): Promise<{ done: true; result: AgentTurnResult } | { done: false }> {
+    const {
+      messages,
+      options,
+      requestId,
+      controlEvents,
+      toolCalls,
+      toolResults,
+      visibleContentParts,
+      invalidControlToolAttempts,
+      modelToolCalls,
+      fullTextContent,
+      reasoningContent,
+      finishReason,
+      finalUsage,
+    } = params;
+
+    if (modelToolCalls.length === 0) {
+      const lastText =
+        fullTextContent ||
+        reasoningContent.slice(-500) ||
+        "模型未生成可见回复，请重试或缩小请求范围。";
+      const visibleContent = aggregateVisibleParts(visibleContentParts, lastText);
+      messages.push({ role: "assistant", content: lastText });
+      logger.llmResponse(requestId, visibleContent);
+      return {
+        done: true,
+        result: { visibleContent, controlEvents, toolCalls, toolResults, usage: finalUsage, finishReason },
+      };
+    }
+
+    if (fullTextContent.trim()) visibleContentParts.push(fullTextContent.trim());
+
+    messages.push({
+      role: "assistant",
+      content: fullTextContent || "",
+      reasoning_content: reasoningContent || undefined,
+      tool_calls: modelToolCalls as unknown as OpenAI.Chat.ChatCompletionMessageToolCall[],
+    } as any);
+
+    const results: AgentRoundToolExecutionResult[] = [];
+    for (const tc of modelToolCalls) {
+        const toolName = tc.function.name;
+        if (!this.isToolExposed(toolName, options.tools)) {
+          const result = formatUnauthorizedToolMessage(toolName, options.tools);
+          const args = { __unauthorizedTool: true };
+          toolCalls.push({
+            name: toolName,
+            toolKind: CONTROL_TOOL_NAMES.includes(toolName) ? "control" : getTool(toolName)?.toolKind ?? "read",
+            args,
+            timestamp: Date.now(),
+          });
+          toolResults.push({ name: toolName, result, timestamp: Date.now() });
+          logger.warn("AGENT_RUNTIME", "模型调用了未向当前 Agent 暴露的工具", {
+            requestId,
+            toolName,
+            exposedToolNames: getExposedToolNames(options.tools),
+          });
+          logger.llmToolCall(requestId, toolName, args, result);
+          results.push({ id: tc.id, content: result, fatal: true, unauthorized: true });
+          continue;
+        }
+        const parsedArgs = parseToolCallArguments(tc.function.arguments || "");
+        if (!parsedArgs.success) {
+          const result = formatToolArgumentsParseError(toolName, parsedArgs.error);
+          const args = {
+            __parseError: true,
+            rawArgumentsPreview: parsedArgs.error.rawArgumentsPreview,
+          };
+          toolCalls.push({
+            name: toolName,
+            toolKind: CONTROL_TOOL_NAMES.includes(toolName) ? "control" : getTool(toolName)?.toolKind ?? "read",
+            args,
+            timestamp: Date.now(),
+          });
+          toolResults.push({ name: toolName, result, timestamp: Date.now() });
+          logger.warn("AGENT_RUNTIME", "tool arguments JSON 解析失败", {
+            requestId,
+            toolName,
+            rawArgumentsPreview: parsedArgs.error.rawArgumentsPreview,
+            parseError: parsedArgs.error.message,
+          });
+          logger.llmToolCall(requestId, toolName, args, result);
+          results.push({ id: tc.id, content: result, fatal: true, parseError: true });
+          continue;
+        }
+        const args = parsedArgs.args;
+        options.onToolCall?.(toolName, args);
+        const result = await this.executeTool(
+          toolName,
+          args,
+          options,
+          controlEvents,
+          toolCalls,
+          toolResults,
+          invalidControlToolAttempts
+        );
+        logger.llmToolCall(requestId, toolName, args, result.content);
+        results.push({ id: tc.id, content: result.content, fatal: result.fatal, terminal: result.terminal });
+    }
+
+    const parseErrorResult = results.find((result) => result.parseError);
+    if (parseErrorResult) {
+      const visibleContent = aggregateVisibleParts(visibleContentParts, parseErrorResult.content);
+      logger.llmResponse(requestId, visibleContent);
+      return {
+        done: true,
+        result: {
+          visibleContent,
+          controlEvents,
+          toolCalls,
+          toolResults,
+          usage: finalUsage,
+          finishReason: "tool_parse_error",
+        },
+      };
+    }
+
+    const fatalResult = results.find((result) => result.fatal);
+    if (fatalResult) {
+      const visibleContent = aggregateVisibleParts(visibleContentParts, fatalResult.content);
+      const fatalFinishReason = fatalResult.unauthorized
+        ? "tool_authorization_error"
+        : "tool_validation_error";
+      logger.warn("AGENT_RUNTIME", "control tool 参数连续失败，提前停止工具循环", {
+        requestId,
+        result: fatalResult.content,
+      });
+      logger.llmResponse(requestId, visibleContent);
+      return {
+        done: true,
+        result: {
+          visibleContent,
+          controlEvents,
+          toolCalls,
+          toolResults,
+          usage: finalUsage,
+          finishReason: fatalFinishReason,
+        },
+      };
+    }
+
+    if (results.some((result) => result.terminal)) {
+      const visibleContent = aggregateVisibleParts(visibleContentParts, "");
+      logger.info("AGENT_RUNTIME", "terminal control tool 已触发，结束当前 Agent 回合", {
+        requestId,
+        controlEventTypes: controlEvents.map((event) => event.type),
+      });
+      logger.llmResponse(requestId, visibleContent);
+      return {
+        done: true,
+        result: {
+          visibleContent,
+          controlEvents,
+          toolCalls,
+          toolResults,
+          usage: finalUsage,
+          finishReason: "terminal_control_event",
+        },
+      };
+    }
+
+    for (const result of results) {
+      messages.push({ role: "tool", tool_call_id: result.id, content: result.content });
+    }
+    return { done: false };
+  }
+
+  private async executeTool(
+    toolName: string,
+    args: Record<string, unknown>,
+    options: AgentRuntimeOptions,
+    controlEvents: AgentControlEvent[],
+    toolCalls: RuntimeToolCallRecord[],
+    toolResults: RuntimeToolResultRecord[],
+    invalidControlToolAttempts: Map<string, number>
+  ): Promise<ToolExecutionResult> {
+    const now = Date.now();
+    const toolDef = getTool(toolName);
+    const toolKind = CONTROL_TOOL_NAMES.includes(toolName)
+      ? "control"
+      : toolDef?.toolKind ?? "read";
+    toolCalls.push({ name: toolName, toolKind, args, timestamp: now });
+
+    if (toolKind === "control") {
+      const parsed = parseControlEventArgsDetailed(toolName, args);
+      if (!parsed.success) {
+        const attempts = (invalidControlToolAttempts.get(toolName) ?? 0) + 1;
+        invalidControlToolAttempts.set(toolName, attempts);
+        const fatal = attempts >= MAX_INVALID_CONTROL_TOOL_ATTEMPTS;
+        const errorMsg = formatControlToolValidationMessage(
+          parsed.error,
+          attempts,
+          MAX_INVALID_CONTROL_TOOL_ATTEMPTS,
+          fatal
+        );
+        logger.warn("AGENT_RUNTIME", "control tool 参数校验失败", {
+          toolName,
+          args,
+          attempts,
+          fatal,
+          issues: parsed.error.issues,
+        });
+        toolResults.push({ name: toolName, result: errorMsg, timestamp: Date.now() });
+        return { content: errorMsg, fatal };
+      }
+
+      invalidControlToolAttempts.delete(toolName);
+      controlEvents.push(parsed.event);
+      const ack = JSON.stringify({ acknowledged: true, tool: toolName });
+      toolResults.push({ name: toolName, result: ack, timestamp: Date.now() });
+      logger.info("AGENT_RUNTIME", `control tool "${toolName}" 已拦截`, {
+        eventType: parsed.event.type,
+      });
+      return { content: ack, terminal: this.isTerminalControlEvent(parsed.event) };
+    }
+
+    try {
+      const result = await traceTool(
+        toolName,
+        {
+          ...(options.metadata ?? {}),
+          toolName,
+          toolKind,
+        },
+        async () => options.toolExecutor(toolName, args)
+      );
+      toolResults.push({ name: toolName, result, timestamp: Date.now() });
+      return { content: result };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : "未知错误";
+      const result = `工具执行错误: ${errorMsg}`;
+      toolResults.push({ name: toolName, result, timestamp: Date.now() });
+      return { content: result };
+    }
+  }
+
+  private isTerminalControlEvent(event: AgentControlEvent): boolean {
+    return event.type === "route_to_agent" || event.type === "request_revision";
+  }
+
+  private isToolExposed(toolName: string, tools: OpenAI.Chat.ChatCompletionTool[]): boolean {
+    return getExposedToolNames(tools).includes(toolName);
+  }
+
+  private maxIterationFallback(params: {
+    requestId: string;
+    visibleContentParts: string[];
+    lastAssistantText: string;
+    lastReasoningContent: string;
+    controlEvents: AgentControlEvent[];
+    toolCalls: RuntimeToolCallRecord[];
+    toolResults: RuntimeToolResultRecord[];
+    finalUsage: TokenUsage | undefined;
+    maxIterations: number;
+  }): AgentTurnResult {
+    const fallback = aggregateVisibleParts(
+      params.visibleContentParts,
+      params.lastAssistantText ||
+        params.lastReasoningContent.slice(-500) ||
+        "模型在多轮工具查询后仍未产出最终回复，请重试或缩小请求范围。"
+    );
+    logger.warn("AGENT_RUNTIME", "达到最大工具调用轮次，返回兜底内容", {
+      maxIterations: params.maxIterations,
+      fallbackLength: fallback.length,
+    });
+    logger.llmResponse(params.requestId, fallback);
+    return {
+      visibleContent: fallback,
+      controlEvents: params.controlEvents,
+      toolCalls: params.toolCalls,
+      toolResults: params.toolResults,
+      usage: params.finalUsage,
+      finishReason: "length",
+    };
+  }
+
+  private resolveRuntime(): ModelRuntimePort {
+    if (this.runtime) return this.runtime;
+    if (this.injectedClient || this.isConfigured) {
+      return new LegacyOpenAIRuntime({
+        client: this.injectedClient,
+        isAiConfigured: this.isConfigured,
+      });
+    }
+    return getModelRuntime();
+  }
+}
+
+function formatUnauthorizedToolMessage(
+  toolName: string,
+  tools: OpenAI.Chat.ChatCompletionTool[]
+): string {
+  const exposedToolNames = getExposedToolNames(tools);
+  const routeHint = exposedToolNames.includes("route_to_agent")
+    ? "如果当前任务不属于你的职责，请改用 route_to_agent 转交给主责 Agent。"
+    : "请改用当前 Agent 已暴露的工具，或缩小本轮任务范围。";
+
+  return [
+    `工具 "${toolName}" 未向当前 Agent 暴露，已停止本轮工具调用。`,
+    "",
+    "这通常表示当前 Agent 没有执行该职责的权限。不要尝试绕过工具边界。",
+    routeHint,
+    "",
+    "当前可用工具：",
+    exposedToolNames.length > 0 ? exposedToolNames.join(", ") : "(none)",
+  ].join("\n");
+}
+
+function getExposedToolNames(tools: OpenAI.Chat.ChatCompletionTool[]): string[] {
+  return tools
+    .filter((tool): tool is OpenAI.Chat.ChatCompletionFunctionTool => tool.type === "function")
+    .map((tool) => tool.function.name);
+}
+
+function formatToolArgumentsParseError(
+  toolName: string,
+  error: { message: string; rawArgumentsPreview: string }
+): string {
+  return [
+    `工具 "${toolName}" 参数 JSON 解析失败，已停止本轮工具调用。`,
+    "",
+    `解析错误：${error.message}`,
+    "",
+    "Raw arguments preview:",
+    "```text",
+    error.rawArgumentsPreview || "(empty)",
+    "```",
+    "",
+    "请重新调用该工具，并提供合法 JSON 对象参数。tool arguments 只能放短结构化命令；长正文、长总纲、世界设定、故事背景、章节组梗概、角色长设定或伏笔长说明，请使用对应 block 工具并放在 assistant 正文的 ARTIFACT_OUTPUT_START/END 标记块中。",
+  ].join("\n");
+}

@@ -1,0 +1,11 @@
+services:
+  app:
+    image: novel-writer:latest
+    pull_policy: never
+    network_mode: host
+    environment:
+      - HOSTNAME=0.0.0.0
+      - PORT=43119
+    env_file:
+      - .env.production
+    restart: unless-stopped

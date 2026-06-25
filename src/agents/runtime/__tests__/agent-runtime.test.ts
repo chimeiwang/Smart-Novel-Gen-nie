@@ -1,0 +1,1063 @@
+/**
+ * AgentRuntime 单元测试
+ *
+ * Phase 1：验证 AgentRuntimeImpl 的控制工具拦截逻辑和返回值结构。
+ * 使用 Node 原生 test runner + tsx。
+ *
+ * 运行方式：npx tsx --test src/agents/runtime/__tests__/agent-runtime.test.ts
+ */
+
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import type OpenAI from "openai";
+import "@/agents/tools";
+import { AgentRuntimeImpl } from "../agent-runtime";
+import {
+  __resetLangSmithTracerForTests,
+  __setLangSmithTraceRunnerForTests,
+  initLangSmithTracer,
+} from "@/agents/lib/langsmith-tracer";
+import {
+  formatControlToolValidationMessage,
+  parseControlEventArgs,
+  parseControlEventArgsDetailed,
+} from "@/shared/contracts/agent-control";
+import { getOpenAITools } from "@/agents/tools/registry";
+import type { AgentRuntimeOptions, AgentRuntime } from "../agent-runtime";
+import type { AgentTurnResult } from "../turn-result";
+
+function createStream(chunks: unknown[]): AsyncIterable<unknown> {
+  return {
+    async *[Symbol.asyncIterator]() {
+      for (const chunk of chunks) {
+        yield chunk;
+      }
+    },
+  };
+}
+
+function createToolCallStream(
+  toolName: string,
+  args: Record<string, unknown>,
+  content = ""
+): AsyncIterable<unknown> {
+  return createStream([
+    {
+      choices: [
+        {
+          delta: {
+            content,
+            tool_calls: [
+              {
+                index: 0,
+                id: `call_${toolName}`,
+                function: {
+                  name: toolName,
+                  arguments: JSON.stringify(args),
+                },
+              },
+            ],
+          },
+          finish_reason: "tool_calls",
+        },
+      ],
+    },
+  ]);
+}
+
+function createMultiToolCallStream(
+  toolCalls: Array<{ toolName: string; args: Record<string, unknown> }>,
+  content = ""
+): AsyncIterable<unknown> {
+  return createStream([
+    {
+      choices: [
+        {
+          delta: {
+            content,
+            tool_calls: toolCalls.map((toolCall, index) => ({
+              index,
+              id: `call_${toolCall.toolName}_${index}`,
+              function: {
+                name: toolCall.toolName,
+                arguments: JSON.stringify(toolCall.args),
+              },
+            })),
+          },
+          finish_reason: "tool_calls",
+        },
+      ],
+    },
+  ]);
+}
+
+function createRawToolCallStream(
+  toolName: string,
+  rawArguments: string,
+  content = ""
+): AsyncIterable<unknown> {
+  return createStream([
+    {
+      choices: [
+        {
+          delta: {
+            content,
+            tool_calls: [
+              {
+                index: 0,
+                id: `call_${toolName}`,
+                function: {
+                  name: toolName,
+                  arguments: rawArguments,
+                },
+              },
+            ],
+          },
+          finish_reason: "tool_calls",
+        },
+      ],
+    },
+  ]);
+}
+
+function createTextStream(content: string): AsyncIterable<unknown> {
+  return createStream([
+    {
+      choices: [
+        {
+          delta: { content },
+          finish_reason: "stop",
+        },
+      ],
+    },
+  ]);
+}
+
+function createMockClient(streams: AsyncIterable<unknown>[]) {
+  let calls = 0;
+  return {
+    get calls() {
+      return calls;
+    },
+    chat: {
+      completions: {
+        create: async () => {
+          const stream = streams[calls];
+          calls += 1;
+          if (!stream) {
+            throw new Error("unexpected extra LLM call");
+          }
+          return stream;
+        },
+      },
+    },
+  };
+}
+
+function createRuntimeOptions(): AgentRuntimeOptions {
+  return {
+    messages: [
+      { role: "system", content: "你是测试 Agent" },
+      { role: "user", content: "测试控制工具" },
+    ],
+    tools: getOpenAITools([
+      "route_to_agent",
+      "request_revision",
+      "propose_updates",
+      "get_novel_info",
+      "list_outline_summary",
+      "get_character_detail",
+    ]),
+    toolExecutor: async () => "read ok",
+    metadata: { callType: "test" },
+  };
+}
+
+async function withEnabledLangSmithForTest(fn: () => Promise<void>): Promise<void> {
+  const original = {
+    LANGSMITH_API_KEY: process.env.LANGSMITH_API_KEY,
+    LANGSMITH_TRACING: process.env.LANGSMITH_TRACING,
+    LANGSMITH_TRACING_ENABLED: process.env.LANGSMITH_TRACING_ENABLED,
+  };
+  process.env.LANGSMITH_API_KEY = "test-key";
+  process.env.LANGSMITH_TRACING = "true";
+  process.env.LANGSMITH_TRACING_ENABLED = "true";
+  __resetLangSmithTracerForTests();
+  await initLangSmithTracer();
+  try {
+    await fn();
+  } finally {
+    __setLangSmithTraceRunnerForTests(null);
+    __resetLangSmithTracerForTests();
+    if (original.LANGSMITH_API_KEY === undefined) delete process.env.LANGSMITH_API_KEY;
+    else process.env.LANGSMITH_API_KEY = original.LANGSMITH_API_KEY;
+    if (original.LANGSMITH_TRACING === undefined) delete process.env.LANGSMITH_TRACING;
+    else process.env.LANGSMITH_TRACING = original.LANGSMITH_TRACING;
+    if (original.LANGSMITH_TRACING_ENABLED === undefined) delete process.env.LANGSMITH_TRACING_ENABLED;
+    else process.env.LANGSMITH_TRACING_ENABLED = original.LANGSMITH_TRACING_ENABLED;
+  }
+}
+
+// ============================================
+// 1. parseControlEventArgs 纯函数测试
+// ============================================
+
+describe("parseControlEventArgs", () => {
+  it("解析 route_to_agent → RouteToAgentEvent", () => {
+    const event = parseControlEventArgs("route_to_agent", {
+      toAgent: "校验",
+      reason: "正文生成完毕，需要校验",
+      question: "请检查第一章的一致性",
+    });
+    assert.ok(event);
+    assert.equal(event!.type, "route_to_agent");
+    if (event!.type === "route_to_agent") {
+      assert.equal(event!.toAgent, "校验");
+      assert.equal(event!.reason, "正文生成完毕，需要校验");
+    }
+  });
+
+  it("解析 submit_quality_report → QualityReportEvent", () => {
+    const event = parseControlEventArgs("submit_quality_report", {
+      scores: { hook: 8, tension: 7, overall: 7 },
+      qualityGate: "revise",
+      rewriteBrief: "中段冲突不够激烈",
+    });
+    assert.ok(event);
+    assert.equal(event!.type, "submit_quality_report");
+    if (event!.type === "submit_quality_report") {
+      assert.equal(event!.scores.hook, 8);
+      assert.equal(event!.qualityGate, "revise");
+    }
+  });
+
+  it("解析 propose_updates → ProposalUpdatesEvent", () => {
+    const event = parseControlEventArgs("propose_updates", {
+      summary: "新增角色「张三」并更新地点「长安城」的描述",
+      updates: {
+        characters: [
+          { action: "create", name: "张三", personality: "勇敢果断", identity: "侠客" },
+        ],
+        locations: [
+          { action: "update", name: "长安城", description: "繁华的唐代都城，人口百万" },
+        ],
+      },
+    });
+    assert.ok(event);
+    assert.equal(event!.type, "propose_updates");
+    if (event!.type === "propose_updates") {
+      assert.ok(event!.updates, "应包含 updates payload");
+      assert.equal(event!.summary, "新增角色「张三」并更新地点「长安城」的描述");
+    }
+  });
+
+  it("propose_updates 拒绝缺少结构字段的大纲创建", () => {
+    const result = parseControlEventArgsDetailed("propose_updates", {
+      summary: "生成结构化大纲",
+      updates: {
+        outlineAdjustments: [
+          { action: "create", title: "只有标题的大纲节点" },
+        ],
+      },
+    });
+
+    assert.equal(result.success, false);
+    if (result.success) return;
+    assert.ok(result.error.issues.some((issue) => issue.path.endsWith("kind")));
+  });
+
+  it("解析 begin_artifact_output → BeginArtifactOutputEvent", () => {
+    const event = parseControlEventArgs("begin_artifact_output", {
+      kind: "outline_draft",
+      summary: "前十章大纲修改草案",
+      artifactKey: "outline-long-draft",
+      reviewerAgent: "编辑",
+      submitForReview: true,
+    });
+    assert.ok(event);
+    assert.equal(event!.type, "begin_artifact_output");
+    if (event!.type === "begin_artifact_output") {
+      assert.equal(event.kind, "outline_draft");
+      assert.equal(event.artifactKey, "outline-long-draft");
+      assert.equal(event.reviewerAgent, "编辑");
+    }
+  });
+
+  it("解析 show_review_artifact 支持 artifactKey", () => {
+    const event = parseControlEventArgs("show_review_artifact", {
+      artifactKey: "outline-revision-1",
+      reason: "草案已生成，请展示给用户确认。",
+    });
+    assert.ok(event);
+    assert.equal(event!.type, "show_review_artifact");
+    if (event!.type === "show_review_artifact") {
+      assert.equal(event.artifactKey, "outline-revision-1");
+      assert.equal(event.artifactId, undefined);
+    }
+  });
+
+  it("show_review_artifact 拒绝缺少 artifactId 和 artifactKey", () => {
+    const result = parseControlEventArgsDetailed("show_review_artifact", {
+      reason: "没有目标草案。",
+    });
+    assert.equal(result.success, false);
+    if (result.success) return;
+    assert.ok(result.error.issues.some((issue) => issue.path.endsWith("artifactId")));
+  });
+
+  it("解析 update builder control tools", () => {
+    const start = parseControlEventArgs("start_update_builder", {
+      summary: "批量重构大纲",
+      artifactKey: "outline-builder-1",
+      reviewerAgent: "编辑",
+      submitForReview: true,
+    });
+    assert.ok(start);
+    assert.equal(start!.type, "start_update_builder");
+
+    const append = parseControlEventArgs("append_update_batch", {
+      artifactKey: "outline-builder-1",
+      updates: {
+        outlineAdjustments: [
+          { action: "create", clientKey: "stage-1", title: "第一阶段", kind: "stage" },
+          { action: "create", clientKey: "unit-1", parentKey: "stage-1", title: "剧情单元", kind: "plot_unit" },
+        ],
+      },
+    });
+    assert.ok(append);
+    assert.equal(append!.type, "append_update_batch");
+
+    const text = parseControlEventArgs("put_update_text_block", {
+      artifactKey: "outline-builder-1",
+      section: "outlineContent",
+    });
+    assert.ok(text);
+    assert.equal(text!.type, "put_update_text_block");
+
+    const itemText = parseControlEventArgs("put_update_item_text_block", {
+      artifactKey: "outline-builder-1",
+      section: "outlineAdjustments",
+      field: "content",
+      targetKey: "unit-1",
+      summary: "写入章节组详细梗概",
+    });
+    assert.ok(itemText);
+    assert.equal(itemText!.type, "put_update_item_text_block");
+
+    const itemTextBlocks = parseControlEventArgs("put_update_item_text_blocks", {
+      artifactKey: "outline-builder-1",
+      blocks: [
+        {
+          section: "outlineAdjustments",
+          field: "content",
+          targetKey: "unit-1",
+          summary: "写入章节组详细梗概",
+        },
+      ],
+    });
+    assert.ok(itemTextBlocks);
+    assert.equal(itemTextBlocks!.type, "put_update_item_text_blocks");
+
+    const finish = parseControlEventArgs("finish_update_builder", {
+      artifactKey: "outline-builder-1",
+      summary: "批量大纲草案构建完成",
+      reviewerAgent: "编辑",
+      submitForReview: true,
+    });
+    assert.ok(finish);
+    assert.equal(finish!.type, "finish_update_builder");
+  });
+
+  it("解析 append_outline_tree → AppendOutlineTreeEvent", () => {
+    const event = parseControlEventArgs("append_outline_tree", {
+      artifactKey: "outline-builder-1",
+      summary: "追加第一阶段嵌套大纲树",
+      stages: [
+        {
+          title: "第一阶段 鹿溪镇暗流",
+          estimatedWordCount: 120000,
+          plotUnits: [
+            {
+              title: "鹿溪镇的暗流",
+              chapterGroups: [
+                {
+                  title: "裂痕",
+                  estimatedWordCount: 30000,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    assert.ok(event);
+    assert.equal(event!.type, "append_outline_tree");
+    if (event!.type === "append_outline_tree") {
+      assert.equal(event.stages[0].plotUnits?.[0].chapterGroups?.[0].title, "裂痕");
+    }
+  });
+
+  it("append_outline_tree 拒绝 content 字段，避免节点长文本进入 tool arguments", () => {
+    const result = parseControlEventArgsDetailed("append_outline_tree", {
+      artifactKey: "outline-builder-1",
+      stages: [
+        {
+          title: "第一阶段",
+          content: "这里即使很短也不允许，详细内容必须走 block。",
+          plotUnits: [
+            {
+              title: "鹿溪镇的暗流",
+              content: "剧情单元摘要也不能放这里。",
+              chapterGroups: [
+                { title: "裂痕", content: "章节组梗概不能放进 append_outline_tree。" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    assert.equal(result.success, false);
+    if (result.success) return;
+    const issueText = result.error.issues.map((issue) => `${issue.path}: ${issue.message}`).join("\n");
+    assert.match(issueText, /content/);
+    assert.match(issueText, /stages\.0/);
+  });
+
+  it("append_outline_tree 拒绝 LLM 手写 parentId/parentKey/clientKey", () => {
+    const result = parseControlEventArgsDetailed("append_outline_tree", {
+      artifactKey: "outline-builder-1",
+      stages: [
+        {
+          title: "第一阶段",
+          clientKey: "stage-1",
+          plotUnits: [
+            {
+              title: "鹿溪镇的暗流",
+              parentKey: "stage-1",
+              chapterGroups: [
+                { title: "裂痕", parentId: "outline-node-1" },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    assert.equal(result.success, false);
+    if (result.success) return;
+    assert.ok(result.error.issues.some((issue) => issue.path.includes("clientKey")));
+    assert.ok(result.error.issues.some((issue) => issue.path.includes("parentKey")));
+    assert.ok(result.error.issues.some((issue) => issue.path.includes("parentId")));
+  });
+
+  it("append_outline_tree 拒绝空 stages 和空标题", () => {
+    const emptyStages = parseControlEventArgsDetailed("append_outline_tree", {
+      artifactKey: "outline-builder-1",
+      stages: [],
+    });
+    assert.equal(emptyStages.success, false);
+    if (!emptyStages.success) {
+      assert.ok(emptyStages.error.issues.some((issue) => issue.path === "stages"));
+    }
+
+    const emptyTitle = parseControlEventArgsDetailed("append_outline_tree", {
+      artifactKey: "outline-builder-1",
+      stages: [{ title: "   " }],
+    });
+    assert.equal(emptyTitle.success, false);
+    if (!emptyTitle.success) {
+      assert.ok(emptyTitle.error.issues.some((issue) => issue.path === "stages.0.title"));
+    }
+  });
+
+  it("append_update_batch allows cross-batch outline parentKey to be completed later", () => {
+    const result = parseControlEventArgsDetailed("append_update_batch", {
+      artifactKey: "outline-builder-1",
+      updates: {
+        outlineAdjustments: [
+          { action: "create", clientKey: "unit-1", parentKey: "stage-1", title: "剧情单元", kind: "plot_unit" },
+        ],
+      },
+    });
+
+    assert.equal(result.success, true);
+  });
+
+  it("append_update_batch rejects long text sections in tool arguments", () => {
+    const result = parseControlEventArgsDetailed("append_update_batch", {
+      artifactKey: "outline-builder-1",
+      updates: {
+        outlineContent: "这段长总纲必须走 put_update_text_block",
+      },
+    });
+
+    assert.equal(result.success, false);
+    if (result.success) return;
+    assert.ok(result.error.issues.some((issue) => issue.path === "updates.outlineContent"));
+  });
+
+  it("append_update_batch rejects overlong item text fields", () => {
+    const result = parseControlEventArgsDetailed("append_update_batch", {
+      artifactKey: "outline-builder-1",
+      updates: {
+        outlineAdjustments: [
+          {
+            action: "create",
+            clientKey: "group-1",
+            parentKey: "unit-1",
+            title: "前三章",
+            kind: "chapter_group",
+            content: "长".repeat(241),
+          },
+        ],
+      },
+    });
+
+    assert.equal(result.success, false);
+    if (result.success) return;
+    assert.ok(result.error.issues.some((issue) => issue.path === "updates.outlineAdjustments.0.content"));
+  });
+
+  it("propose_updates rejects long text sections and overlong item fields", () => {
+    const sectionResult = parseControlEventArgsDetailed("propose_updates", {
+      summary: "错误提交长总纲",
+      updates: {
+        outlineContent: "这段长总纲必须走 put_update_text_block",
+      },
+    });
+    assert.equal(sectionResult.success, false);
+    if (!sectionResult.success) {
+      assert.ok(sectionResult.error.issues.some((issue) => issue.path === "updates.outlineContent"));
+    }
+
+    const itemResult = parseControlEventArgsDetailed("propose_updates", {
+      summary: "错误提交长章节组梗概",
+      updates: {
+        outlineAdjustments: [
+          {
+            action: "create",
+            title: "前三章",
+            kind: "chapter_group",
+            parentKey: "unit-1",
+            content: "梗".repeat(241),
+          },
+        ],
+      },
+    });
+    assert.equal(itemResult.success, false);
+    if (!itemResult.success) {
+      assert.ok(itemResult.error.issues.some((issue) => issue.path === "updates.outlineAdjustments.0.content"));
+    }
+  });
+
+  it("put_update_text_block rejects content argument and OpenAI schema does not require it", () => {
+    const result = parseControlEventArgsDetailed("put_update_text_block", {
+      artifactKey: "outline-builder-1",
+      section: "outlineContent",
+      content: "正文不能放在工具参数中",
+    });
+
+    assert.equal(result.success, false);
+    if (!result.success) {
+      assert.ok(result.error.issues.some((issue) => issue.message.includes("content")));
+    }
+
+    const tool = getOpenAITools(["put_update_text_block"])[0];
+    const parameters = tool.function.parameters as {
+      properties?: Record<string, unknown>;
+      required?: string[];
+    };
+    assert.equal(parameters.properties?.content, undefined);
+    assert.equal(parameters.required?.includes("content"), false);
+  });
+
+  it("begin_artifact_output 参数中不接受正文 content", () => {
+    const result = parseControlEventArgsDetailed("begin_artifact_output", {
+      kind: "outline_draft",
+      summary: "前十章大纲修改草案",
+      content: "这段正文不应该进入 tool arguments",
+    });
+
+    assert.equal(result.success, true);
+    if (!result.success) return;
+    assert.equal("content" in result.event, false);
+  });
+
+  it("解析 submit_beat_plan → BeatPlanProposalEvent", () => {
+    const event = parseControlEventArgs("submit_beat_plan", {
+      title: "第一章 Beat Plan",
+      beatCount: 5,
+      summary: "开场→冲突引入→第一次转折→中段高潮→结尾悬念",
+      chapterGoal: "让主角进入主线案件",
+      sceneBeats: [
+        {
+          order: 1,
+          goal: "发现线索",
+          conflict: "线索被对手封锁",
+          characters: ["主角"],
+          estimatedWords: 1200,
+          acceptanceCriteria: "主角必须做出主动选择",
+        },
+      ],
+    });
+    assert.ok(event);
+    assert.equal(event!.type, "submit_beat_plan");
+    if (event!.type === "submit_beat_plan") {
+      assert.equal(event!.beatCount, 5);
+      assert.equal(event!.chapterGoal, "让主角进入主线案件");
+      assert.equal(event!.sceneBeats?.[0]?.goal, "发现线索");
+      assert.deepEqual(event!.sceneBeats?.[0]?.characters, ["主角"]);
+    }
+  });
+
+  it("解析 submit_validation_report → ValidationReportEvent", () => {
+    const event = parseControlEventArgs("submit_validation_report", {
+      hasConflicts: true,
+      conflicts: [
+        {
+          type: "character",
+          summary: "角色「张三」的性格前后矛盾",
+          evidence: "第3段写他胆小，第8段写他勇猛",
+          suggestion: "统一性格设定或为变化增加铺垫",
+        },
+      ],
+    });
+    assert.ok(event);
+    assert.equal(event!.type, "submit_validation_report");
+    if (event!.type === "submit_validation_report") {
+      assert.equal(event!.hasConflicts, true);
+      assert.equal(event!.conflicts.length, 1);
+    }
+  });
+
+  it("解析 submit_evaluation → EvaluationEvent", () => {
+    const event = parseControlEventArgs("submit_evaluation", {
+      artifactKey: "outline-revision-1",
+      verdict: "revise",
+      summary: "前 3 章仍缺少小赢节点",
+      requiredChanges: "第 2 章需要补一个明确获得线索的小胜利",
+    });
+    assert.ok(event);
+    assert.equal(event!.type, "submit_evaluation");
+    if (event!.type === "submit_evaluation") {
+      assert.equal(event.verdict, "revise");
+      assert.equal(event.artifactKey, "outline-revision-1");
+    }
+  });
+
+  it("解析 request_revision → RevisionRequestEvent", () => {
+    const event = parseControlEventArgs("request_revision", {
+      toAgent: "剧情",
+      artifactKey: "outline-revision-1",
+      reason: "编辑复审未通过",
+      instructions: "保留主线，但提高第 1-3 章爽点密度。",
+    });
+    assert.ok(event);
+    assert.equal(event!.type, "request_revision");
+    if (event!.type === "request_revision") {
+      assert.equal(event.toAgent, "剧情");
+      assert.equal(event.instructions, "保留主线，但提高第 1-3 章爽点密度。");
+    }
+  });
+
+  it("未知 tool name 返回 null", () => {
+    const event = parseControlEventArgs("unknown_tool", { foo: "bar" });
+    assert.equal(event, null);
+  });
+
+  it("非法参数返回 null（缺少必需字段）", () => {
+    // route_to_agent 缺少 reason 字段
+    const event = parseControlEventArgs("route_to_agent", {
+      toAgent: "写作",
+      // reason 缺失
+    });
+    assert.equal(event, null);
+  });
+
+  it("非法参数返回 null（评分越界）", () => {
+    // hook 评分超过 10
+    const event = parseControlEventArgs("submit_quality_report", {
+      scores: { hook: 15 },
+      qualityGate: "pass",
+    });
+    assert.equal(event, null);
+  });
+
+  it("非法参数返回 null（qualityGate 非法值）", () => {
+    const event = parseControlEventArgs("submit_quality_report", {
+      scores: { overall: 5 },
+      qualityGate: "excellent", // 不是合法值
+    });
+    assert.equal(event, null);
+  });
+
+  it("非法参数返回 null（toAgent 非法值）", () => {
+    const event = parseControlEventArgs("route_to_agent", {
+      toAgent: "未知Agent",
+      reason: "test",
+    });
+    assert.equal(event, null);
+  });
+});
+
+describe("AgentRuntime terminal control tools", () => {
+  it("route_to_agent stops the current agent turn", async () => {
+    const client = createMockClient([
+      createToolCallStream("route_to_agent", {
+        toAgent: "剧情",
+        reason: "需要剧情顾问处理大纲结构",
+      }, "我将转交剧情顾问。"),
+      createTextStream("这段内容不应该出现。"),
+    ]);
+    const runtime = new AgentRuntimeImpl({
+      client: client as unknown as OpenAI,
+      isAiConfigured: () => true,
+    });
+
+    const result = await runtime.runTurn(createRuntimeOptions());
+
+    assert.equal(client.calls, 1);
+    assert.equal(result.finishReason, "terminal_control_event");
+    assert.equal(result.controlEvents.length, 1);
+    assert.equal(result.controlEvents[0].type, "route_to_agent");
+    assert.equal(result.visibleContent, "我将转交剧情顾问。");
+  });
+
+  it("request_revision stops the current agent turn", async () => {
+    const client = createMockClient([
+      createToolCallStream("request_revision", {
+        toAgent: "剧情",
+        reason: "复审未通过",
+        instructions: "补强第一章钩子",
+      }, "需要返工。"),
+      createTextStream("这段内容不应该出现。"),
+    ]);
+    const runtime = new AgentRuntimeImpl({
+      client: client as unknown as OpenAI,
+      isAiConfigured: () => true,
+    });
+
+    const result = await runtime.runTurn(createRuntimeOptions());
+
+    assert.equal(client.calls, 1);
+    assert.equal(result.finishReason, "terminal_control_event");
+    assert.equal(result.controlEvents.length, 1);
+    assert.equal(result.controlEvents[0].type, "request_revision");
+    assert.equal(result.visibleContent, "需要返工。");
+  });
+
+  it("propose_updates can continue to the next model round", async () => {
+    const client = createMockClient([
+      createToolCallStream("propose_updates", {
+        summary: "提交设定草案",
+        updates: {
+          characters: [{ action: "create", name: "张三", identity: "侠客" }],
+        },
+      }, "我先提交草案。"),
+      createTextStream("草案已提交，等待确认。"),
+    ]);
+    const runtime = new AgentRuntimeImpl({
+      client: client as unknown as OpenAI,
+      isAiConfigured: () => true,
+    });
+
+    const result = await runtime.runTurn(createRuntimeOptions());
+
+    assert.equal(client.calls, 2);
+    assert.equal(result.finishReason, "stop");
+    assert.equal(result.controlEvents.length, 1);
+    assert.equal(result.controlEvents[0].type, "propose_updates");
+    assert.match(result.visibleContent, /我先提交草案。/);
+    assert.match(result.visibleContent, /草案已提交，等待确认。/);
+  });
+
+  it("records propose_updates and route_to_agent from the same tool batch before stopping", async () => {
+    const stream = createStream([
+      {
+        choices: [
+          {
+            delta: {
+              content: "提交草案并转交复审。",
+              tool_calls: [
+                {
+                  index: 0,
+                  id: "call_propose",
+                  function: {
+                    name: "propose_updates",
+                    arguments: JSON.stringify({
+                      summary: "提交大纲草案",
+                      updates: {
+                        outlineAdjustments: [
+                          { action: "update", nodeTitle: "第一章", content: "增加章末钩子" },
+                        ],
+                      },
+                    }),
+                  },
+                },
+                {
+                  index: 1,
+                  id: "call_route",
+                  function: {
+                    name: "route_to_agent",
+                    arguments: JSON.stringify({
+                      toAgent: "编辑",
+                      reason: "请复审大纲草案",
+                    }),
+                  },
+                },
+              ],
+            },
+            finish_reason: "tool_calls",
+          },
+        ],
+      },
+    ]);
+    const client = createMockClient([stream, createTextStream("这段内容不应该出现。")]);
+    const runtime = new AgentRuntimeImpl({
+      client: client as unknown as OpenAI,
+      isAiConfigured: () => true,
+    });
+
+    const result = await runtime.runTurn(createRuntimeOptions());
+
+    assert.equal(client.calls, 1);
+    assert.equal(result.finishReason, "terminal_control_event");
+    assert.deepEqual(result.controlEvents.map((event) => event.type), ["propose_updates", "route_to_agent"]);
+    assert.equal(result.visibleContent, "提交草案并转交复审。");
+  });
+
+  it("does not turn invalid raw tool arguments into empty args", async () => {
+    const client = createMockClient([
+      createRawToolCallStream(
+        "propose_updates",
+        "{\"summary\":\"提交大纲草案\",\"updates\":",
+        "准备提交草案。"
+      ),
+      createTextStream("这段内容不应该出现。"),
+    ]);
+    const runtime = new AgentRuntimeImpl({
+      client: client as unknown as OpenAI,
+      isAiConfigured: () => true,
+    });
+
+    const result = await runtime.runTurn(createRuntimeOptions());
+
+    assert.equal(client.calls, 1);
+    assert.equal(result.finishReason, "tool_parse_error");
+    assert.equal(result.toolCalls.length, 1);
+    assert.equal(result.toolCalls[0].name, "propose_updates");
+    assert.equal(result.toolCalls[0].args.__parseError, true);
+    assert.equal(result.controlEvents.length, 0);
+    assert.match(result.visibleContent, /参数 JSON 解析失败/);
+    assert.doesNotMatch(result.visibleContent, /未保存任何变更/);
+  });
+
+  it("rejects model tool calls that were not exposed in the current tool list", async () => {
+    const client = createMockClient([
+      createToolCallStream("start_update_builder", {
+        summary: "越权构建大纲草案",
+        artifactKey: "outline-builder-unauthorized",
+      }, "我准备直接构建大纲草案。"),
+      createTextStream("这段内容不应该出现。"),
+    ]);
+    const runtime = new AgentRuntimeImpl({
+      client: client as unknown as OpenAI,
+      isAiConfigured: () => true,
+    });
+
+    const result = await runtime.runTurn({
+      ...createRuntimeOptions(),
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "route_to_agent",
+            description: "route only",
+            parameters: { type: "object", properties: {} },
+          },
+        },
+      ],
+    });
+
+    assert.equal(client.calls, 1);
+    assert.equal(result.finishReason, "tool_authorization_error");
+    assert.equal(result.controlEvents.length, 0);
+    assert.match(result.visibleContent, /未向当前 Agent 暴露/);
+    assert.match(result.visibleContent, /route_to_agent/);
+  });
+});
+
+describe("control tool 参数修复提示", () => {
+  it("propose_updates 空参会返回字段级 Zod issues 和 TS-like 修复格式", () => {
+    const result = parseControlEventArgsDetailed("propose_updates", {});
+    assert.equal(result.success, false);
+    if (result.success) return;
+
+    assert.equal(result.error.toolName, "propose_updates");
+    assert.ok(result.error.issues.some((issue) => issue.path === "summary"));
+    assert.ok(result.error.issues.some((issue) => issue.path === "updates"));
+    assert.match(result.error.expectedType, /type ProposeUpdatesArgs/);
+    assert.match(result.error.expectedType, /summary: string/);
+    assert.match(result.error.expectedType, /updates:/);
+    assert.match(result.error.minimalExample, /"summary"/);
+    assert.match(result.error.minimalExample, /"updates"/);
+  });
+
+  it("第一次校验失败会给模型可修复错误，并提示必要时读取角色能力卡", () => {
+    const result = parseControlEventArgsDetailed("propose_updates", {});
+    assert.equal(result.success, false);
+    if (result.success) return;
+
+    const message = formatControlToolValidationMessage(result.error, 1, 2);
+    assert.match(message, /第 1\/2 次/);
+    assert.match(message, /Zod issues:/);
+    assert.match(message, /Expected TypeScript shape:/);
+    assert.match(message, /Minimal valid example:/);
+    assert.match(message, /get_agent_capability_cards/);
+    assert.match(message, /tool arguments 只能放短结构化命令/);
+    assert.match(message, /ARTIFACT_OUTPUT_START\/END/);
+  });
+
+  it("第二次校验失败会返回硬停止文案，明确未保存任何变更", () => {
+    const result = parseControlEventArgsDetailed("propose_updates", {});
+    assert.equal(result.success, false);
+    if (result.success) return;
+
+    const message = formatControlToolValidationMessage(result.error, 2, 2, true);
+    assert.match(message, /连续 2 次校验失败/);
+    assert.match(message, /已停止本轮工具循环/);
+    assert.match(message, /未保存任何变更/);
+  });
+});
+
+// ============================================
+// 2. AgentRuntimeImpl 结构测试
+// ============================================
+
+describe("AgentRuntimeImpl", () => {
+  it("可以被实例化", () => {
+    const runtime = new AgentRuntimeImpl();
+    assert.ok(runtime);
+    assert.ok(typeof runtime.runTurn === "function");
+  });
+
+  it("实现 AgentRuntime 接口", () => {
+    const runtime: AgentRuntime = new AgentRuntimeImpl();
+    assert.ok(runtime);
+  });
+
+  it("runTurn 返回正确的结构（Mock 模式，AI 未配置）", async () => {
+    const runtime = new AgentRuntimeImpl({ isAiConfigured: () => false });
+
+    const options: AgentRuntimeOptions = {
+      messages: [
+        { role: "system", content: "你是一个测试 Agent。" },
+        { role: "user", content: "帮我分析当前章节。" },
+      ],
+      tools: [],
+      toolExecutor: async () => "ok",
+      metadata: { callType: "test" },
+    };
+
+    const result: AgentTurnResult = await runtime.runTurn(options);
+
+    // 验证返回结构
+    assert.equal(typeof result.visibleContent, "string");
+    assert.ok(Array.isArray(result.controlEvents));
+    assert.ok(Array.isArray(result.toolCalls));
+    assert.ok(Array.isArray(result.toolResults));
+    // 无工具调用时，controlEvents 应为空
+    assert.equal(result.controlEvents.length, 0);
+    assert.equal(result.toolCalls.length, 0);
+  });
+
+  it("executes model tool calls sequentially to avoid database connection spikes", async () => {
+    const client = createMockClient([
+      createMultiToolCallStream([
+        { toolName: "get_novel_info", args: {} },
+        { toolName: "list_outline_summary", args: {} },
+      ], "checking context"),
+      createTextStream("done"),
+    ]);
+    const runtime = new AgentRuntimeImpl({
+      client: client as unknown as OpenAI,
+      isAiConfigured: () => true,
+    });
+
+    let releaseFirstTool!: () => void;
+    let resolveFirstStarted!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      resolveFirstStarted = resolve;
+    });
+    const firstCanFinish = new Promise<void>((resolve) => {
+      releaseFirstTool = resolve;
+    });
+    const startedTools: string[] = [];
+
+    const runPromise = runtime.runTurn({
+      ...createRuntimeOptions(),
+      toolExecutor: async (toolName) => {
+        startedTools.push(toolName);
+        if (toolName === "get_novel_info") {
+          resolveFirstStarted();
+          await firstCanFinish;
+        }
+        return `result from ${toolName}`;
+      },
+    });
+
+    await firstStarted;
+    assert.deepEqual(startedTools, ["get_novel_info"]);
+
+    releaseFirstTool();
+    const result = await runPromise;
+
+    assert.deepEqual(startedTools, ["get_novel_info", "list_outline_summary"]);
+    assert.equal(result.visibleContent, "checking context\n\ndone");
+  });
+});
+
+describe("AgentRuntimeImpl LangSmith tracing", () => {
+  it("wraps read tool execution in LangSmith tool traces without changing output", async () => {
+    await withEnabledLangSmithForTest(async () => {
+      const traceCalls: Array<{ name: string; metadata: Record<string, unknown> }> = [];
+      __setLangSmithTraceRunnerForTests(async (name, metadata, fn) => {
+        traceCalls.push({ name, metadata });
+        return fn();
+      });
+
+      const client = createMockClient([
+        createToolCallStream("get_character_detail", { characterId: "char-1" }, "before tool"),
+        createTextStream("after tool"),
+      ]);
+      const runtime = new AgentRuntimeImpl({
+        client: client as unknown as OpenAI,
+        isAiConfigured: () => true,
+      });
+
+      const result = await runtime.runTurn({
+        ...createRuntimeOptions(),
+        metadata: {
+          callType: "test-tool-trace",
+          agentId: "写作",
+          taskId: "task-1",
+          novelId: "novel-1",
+          userId: "user-1",
+        },
+        toolExecutor: async (toolName) => `result from ${toolName}`,
+      });
+
+      assert.equal(result.toolResults[0].result, "result from get_character_detail");
+      assert.equal(result.visibleContent, "before tool\n\nafter tool");
+      const toolTrace = traceCalls.find((call) => call.name === "tool:get_character_detail");
+      assert.ok(toolTrace);
+      assert.equal(toolTrace.metadata.agentId, "写作");
+      assert.equal(toolTrace.metadata.taskId, "task-1");
+      assert.equal(toolTrace.metadata.novelId, "novel-1");
+      assert.equal(toolTrace.metadata.userId, "user-1");
+      assert.equal(toolTrace.metadata.toolKind, "read");
+    });
+  });
+});
