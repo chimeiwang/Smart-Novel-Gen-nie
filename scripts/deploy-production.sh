@@ -20,10 +20,12 @@ mkdir -p "$APP_DIR"
 cd "$APP_DIR"
 
 if [ ! -d .git ]; then
+  echo "Initializing repository in $APP_DIR"
   git init -b "$BRANCH"
   git remote add origin "$REPO_URL"
 fi
 
+echo "Fetching $BRANCH from $REPO_URL"
 git fetch origin "$BRANCH"
 git reset --hard "origin/$BRANCH"
 
@@ -32,6 +34,11 @@ if [ ! -f .env.production ]; then
   exit 1
 fi
 
+echo "Building Docker image $IMAGE_NAME"
 docker build -t "$IMAGE_NAME" .
+
+echo "Starting Docker Compose services"
 docker compose up -d
+
+echo "Pruning unused Docker images"
 docker image prune -f
