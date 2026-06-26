@@ -4,7 +4,7 @@
 >
 > 当前准则：Agent 正文是 Markdown；控制信息走 OpenAI tool_calls control tools；服务端 legacy JSON 解析已删除；`MemorySaver` 仅用于当前进程内 interrupt/resume，短期不做持久化 checkpointer。
 
-本文档用于把 NovelWriter 当前 Agent 系统从“可运行但难维护”的形态，重构为可恢复、可审计、可扩展的服务端 Agent 工作流。执行者可以按阶段逐条实现；每个阶段完成后必须运行验收命令，并更新相关文档。
+本文档用于把 InkForge（墨铸）当前 Agent 系统从“可运行但难维护”的形态，重构为可恢复、可审计、可扩展的服务端 Agent 工作流。执行者可以按阶段逐条实现；每个阶段完成后必须运行验收命令，并更新相关文档。
 
 ## 0. 执行原则
 

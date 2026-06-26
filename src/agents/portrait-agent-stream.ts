@@ -37,6 +37,7 @@ import path from "node:path";
 import OpenAI from "openai";
 
 import { getAiConfig, isAiConfigured } from "@/shared/env";
+import { chargeAiUsage, ensureCanStartModelCall, type ModelBillingMetadata } from "@/shared/lib/billing";
 
 /** 最大处理字数，超过此值触发分层抽样 */
 const MAX_PORTAIT_CHARS = 50000;
@@ -213,6 +214,7 @@ export class PortraitAgentStream {
     promptKey: PortraitPromptKey,
     sourceText: string,
     onChunk: (chunk: string) => void,
+    metadata?: ModelBillingMetadata,
   ): Promise<string> {
     if (!this.prompts) {
       await this.init();
@@ -227,23 +229,34 @@ export class PortraitAgentStream {
       return mockContent;
     }
 
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+      { role: "system", content: systemPrompt },
+      {
+        role: "user",
+        content: `请仅基于以下参考资料完成分析，如果证据不足请明确说明，不要编造。\n\n${sampledText}`,
+      },
+    ];
+    const { maxOutputTokens } = await ensureCanStartModelCall({
+      metadata: { ...metadata, model: this.model, agentId: metadata?.agentId ?? "Portrait" },
+      messages,
+      maxOutputTokens: 384000,
+    });
+
     // DeepSeek 思考模式参数
     const completionParams = {
       model: this.model,
-      messages: [
-        { role: "system", content: systemPrompt },
-        {
-          role: "user",
-          content: `请仅基于以下参考资料完成分析，如果证据不足请明确说明，不要编造。\n\n${sampledText}`,
-        },
-      ],
+      messages,
       stream: true,
+      max_tokens: maxOutputTokens,
       reasoning_effort: "high",
+      stream_options: { include_usage: true },
     };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const stream = await this.client.chat.completions.create(completionParams as any) as any;
 
     let fullContent = "";
+    let usage:
+      | { promptTokens: number; completionTokens: number; cachedTokens: number; totalTokens: number }
+      | undefined;
 
     for await (const chunk of stream) {
       const delta = chunk.choices[0]?.delta?.content || "";
@@ -251,7 +264,25 @@ export class PortraitAgentStream {
         fullContent += delta;
         onChunk(delta);
       }
+      if (chunk.usage) {
+        usage = {
+          promptTokens: chunk.usage.prompt_tokens ?? 0,
+          completionTokens: chunk.usage.completion_tokens ?? 0,
+          cachedTokens: chunk.usage.prompt_cache_hit_tokens ?? 0,
+          totalTokens: chunk.usage.total_tokens ?? 0,
+        };
+      }
     }
+
+    await chargeAiUsage({
+      metadata: {
+        ...metadata,
+        model: this.model,
+        agentId: metadata?.agentId ?? "Portrait",
+        note: `文风画像：${promptKey}`,
+      },
+      usage,
+    });
 
     return normalizeSectionText(fullContent);
   }

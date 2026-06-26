@@ -1,6 +1,6 @@
 services:
   app:
-    image: novel-writer:latest
+    image: inkforge:latest
     pull_policy: never
     network_mode: host
     environment:

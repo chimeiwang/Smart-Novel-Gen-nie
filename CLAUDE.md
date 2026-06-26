@@ -49,7 +49,7 @@
 
 ## 项目概述
 
-NovelWriter 是一款面向中文小说作者的本地优先智能创作工具。帮助作者管理小说、章节、设定、大纲、剧情进度、参考资料和文风，并提供 AI 续写能力。
+InkForge（墨铸）是一款面向中文小说作者的本地优先智能创作工具。帮助作者管理小说、章节、设定、大纲、剧情进度、参考资料和文风，并提供 AI 续写能力。
 
 ## 常用命令
 
@@ -102,7 +102,7 @@ src/
 - **路径别名**：`@/*` 映射到 `./src/*`
 - **无全局状态库**：使用服务端数据 + 组件本地状态
 - **Prisma 单例**：使用 globalThis 模式防止开发环境热更新时重复创建客户端
-- **前端设计规范**：新增或修改前端 UI、组件、CSS、交互状态前，必须先阅读并遵守根目录 `DESIGN.md`。整体方向以 Linear 为主参考、Vercel 为辅助参考，服务 NovelWriter 的中文长篇写作工作台。
+- **前端设计规范**：新增或修改前端 UI、组件、CSS、交互状态前，必须先阅读并遵守根目录 `DESIGN.md`。整体方向以 Linear 为主参考、Vercel 为辅助参考，服务 InkForge（墨铸）的中文长篇写作工作台。
 - **CSS 规范**：使用原生 CSS + 自定义属性，定义在 `globals.css`。优先使用已有类（`.panel`、`.stack`、`.button`、`.badge` 等），避免新增；新增视觉方案必须符合 `DESIGN.md`。
 - **无响应式设计**：本项目仅针对 PC 端，不需要响应式适配（不写 media query、不考虑移动端）。不同屏幕尺寸通过 CSS minmax 和 flex 自适应处理。
 
@@ -278,7 +278,7 @@ executor 自动调用作家重写
 
 ```bash
 LANGCHAIN_API_KEY="your_langsmith_api_key"
-LANGCHAIN_PROJECT="novel-writer"
+LANGCHAIN_PROJECT="inkforge"
 LANGCHAIN_TRACING_V2="true"
 ```
 
@@ -294,7 +294,7 @@ LANGCHAIN_TRACING_V2="true"
 **查看方法**：
 
 - 打开 LangSmith Dashboard
-- 选择项目 `novel-writer`（或你设置的项目名）
+- 选择项目 `inkforge`（或你设置的项目名）
 - 在 Traces 页面查看所有执行记录
 - 使用过滤条件查找特定任务或 Agent
 

@@ -51,6 +51,7 @@
 - 2026-06-22: v8.19 AgentUpdates 数据通道协议中心化：新增 `src/shared/contracts/agent-update-channels.ts` 作为短 tool arguments、长文本 marker block、`append_outline_tree` 禁用字段和 item block 白名单的单一来源；schema、builder、runtime 输出规则、control tool 描述和测试必须引用这套契约，避免各工具入口各自维护规则。
 - 2026-06-23: v8.20 ReviewArtifact 部分应用：`artifact_review` 用户决策可携带 `selectedUpdateRefs`，用户在审核结构化 `agent_updates` 草案时可以只应用部分 section/item；`applyReviewArtifact()` 会先过滤再校验并调用 `executeUpdates()`，未选择任何变更时不落库且回到 `awaiting_user`。
 - 2026-06-25: v8.21 监督式正文写作链路：`plan_chapter / write_chapter / rewrite_scene / review_chapter` 在 `prepareOperationContext` 刷新写作上下文；`NovelData.approvedBeatPlan` 纳入 Agent 上下文；`submit_beat_plan` 创建结构化 `beat_plan` ReviewArtifact，用户确认后落为 approved `ChapterBeatPlan / SceneBeat` 并 supersede 旧计划；`chapter_draft` 应用后自动确保 consistency / lore_sync / editorial / craft 四类质量检查项。
+- 2026-06-26: v8.22 积分计费边界：真实模型调用统一在 `ModelRuntimePort` / direct SDK wrapper 边界做余额预检和 usage 结算；`CreditLedger` 与 `User.creditBalanceMicros` 属于关键计费写入，必须同步执行，不得进入非关键 DB 写入队列。
 
 # 智能写作 Agent 流程图（v7.5 — Capability Cards + Markdown + Control Tools）
 
@@ -820,8 +821,9 @@ goal_defined → beat_plan_generating → beat_plan_review → writing
 ## 2026-06-21 非关键 DB 写入队列
 
 - `src/shared/lib/db-write-queue.ts` 提供进程内有界队列，默认最大 100 条、并发 3，只用于日志型或派生型写入。
-- 当前允许入队的写入包括 `TokenUsage` 统计记录，以及 workflow SSE 派生出来的用户可见 `WritingMessage` 持久化。队列满时丢弃新任务并记录 warning，不阻塞 LLM 调用、SSE 输出或主业务流程。
+- 当前允许入队的写入包括 workflow SSE 派生出来的用户可见 `WritingMessage` 持久化。队列满时丢弃新任务并记录 warning，不阻塞 LLM 调用、SSE 输出或主业务流程。
 - 禁止将关键业务状态写入放入该队列：`ReviewArtifact` 创建/复审/应用/丢弃、`WritingTask.phase` / `graphStateJson`、用户确认应用正式内容、权限校验相关写入，都必须继续走同步路径并显式处理失败。
+- 积分余额扣减和 `CreditLedger` 账本是关键计费状态，必须在模型调用边界同步完成；`TokenUsage` 只能作为同一结算路径中的内部统计副产物，不能再作为可丢弃的异步队列任务。
 - 高频但不会落库的 SSE 事件（例如 `agent_chunk`）不得入队，避免挤占 100 条日志写入容量。
 
 ## 2026-06-21 通用 AgentUpdates 构建器

@@ -49,7 +49,7 @@
 
 ## 项目要点
 
-NovelWriter 是面向中文小说作者的本地创作工具，包含项目/章节管理、设定管理、文风画像、AI 续写、写作会话、质量检查、待审核草案和多 Agent 协作。
+InkForge（墨铸）是面向中文小说作者的本地创作工具，包含项目/章节管理、设定管理、文风画像、AI 续写、写作会话、质量检查、待审核草案和多 Agent 协作。
 
 当前主数据库是 PostgreSQL；Prisma datasource 以 `prisma/schema.prisma` 为准。仓库中保留的早期 SQLite 迁移和 `dev.db` 只是历史遗留。
 
@@ -280,6 +280,6 @@ LangSmith 可选：
 
 ```bash
 LANGCHAIN_API_KEY=your_langsmith_api_key
-LANGCHAIN_PROJECT=novel-writer
+LANGCHAIN_PROJECT=inkforge
 LANGCHAIN_TRACING_V2=true
 ```

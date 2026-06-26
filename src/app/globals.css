@@ -339,6 +339,51 @@ button {
   justify-content: center;
 }
 
+.billing-balance {
+  font-size: 28px;
+  line-height: 36px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.billing-ledger-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.billing-ledger-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--divider);
+}
+
+.billing-ledger-row:last-child {
+  border-bottom: none;
+}
+
+.billing-ledger-amount {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.billing-ledger-amount strong {
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.billing-ledger-amount span {
+  color: var(--subtle);
+  font-size: 12px;
+  line-height: 16px;
+}
+
 /* 首页网格 */
 .grid-home {
   display: grid;

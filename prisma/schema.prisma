@@ -9,13 +9,15 @@ datasource db {
 }
 
 model User {
-  id           String       @id @default(cuid())
-  username     String       @unique
-  passwordHash String
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  novels       Novel[]
-  tokenUsages  TokenUsage[]
+  id                   String         @id @default(cuid())
+  username             String         @unique
+  passwordHash         String
+  creditBalanceMicros  BigInt         @default(0)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  novels               Novel[]
+  tokenUsages          TokenUsage[]
+  creditLedgerEntries  CreditLedger[]
 }
 
 model Novel {
@@ -672,6 +674,31 @@ model TokenUsage {
   @@index([userId, createdAt])
   @@index([agentId])
   @@index([novelId])
+}
+
+model CreditLedger {
+  id                    String   @id @default(cuid())
+  userId                String
+  type                  String
+  amountMicros          BigInt
+  balanceAfterMicros    BigInt
+  model                 String?
+  promptTokens          Int      @default(0)
+  completionTokens      Int      @default(0)
+  cachedTokens          Int      @default(0)
+  totalTokens           Int      @default(0)
+  agentId               String?
+  novelId               String?
+  requestId             String?
+  note                  String?
+  createdAt             DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, createdAt])
+  @@index([type])
+  @@index([requestId])
 }
 
 // 工作流运行记录（Phase 2：聊天与生产解耦）

@@ -1,34 +1,26 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useRef, useCallback, useEffect } from "react";
 import { logoutAction } from "@/app/actions";
-import {
-  calculateDeepSeekFlashCostCny,
-  formatTokenCount,
-  formatYuanAmount,
-  normalizeTokenUsageBreakdown,
-  type TokenUsageBreakdown,
-} from "@/shared/lib/token-cost";
 
 import "./user-menu.css";
 
 interface UserInfoBarProps {
   username: string;
-  monthlyUsage: TokenUsageBreakdown;
+  creditBalance: string;
 }
 
 /**
- * 可拖动的用户信息栏（姓名 + 本月 token 成本）
+ * 可拖动的用户信息栏（姓名 + 积分余额）
  * 退出按钮在各页面的 header 中独立显示
  */
-export function UserInfoBar({ username, monthlyUsage }: UserInfoBarProps) {
+export function UserInfoBar({ username, creditBalance }: UserInfoBarProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef({ isDragging: false, startX: 0, startY: 0, left: 0, top: 0 });
   const [position, setPosition] = useState<{ x: number; y: number } | null>(null);
   const [expanded, setExpanded] = useState(false);
-  const usage = normalizeTokenUsageBreakdown(monthlyUsage);
-  const cost = calculateDeepSeekFlashCostCny(usage);
 
   useEffect(() => {
     let frameId: number | null = null;
@@ -93,23 +85,15 @@ export function UserInfoBar({ username, monthlyUsage }: UserInfoBarProps) {
           aria-expanded={expanded}
           onClick={() => setExpanded((value) => !value)}
         >
-          本月 {formatYuanAmount(cost.totalYuan)}
+          余额 {creditBalance} 积分
         </button>
       </div>
       {expanded && (
-        <div className="user-info-token-details" data-no-drag>
-          <div>
-            <span>输入 token</span>
-            <strong>{formatTokenCount(Math.max(usage.promptTokens - usage.cachedTokens, 0))}</strong>
-          </div>
-          <div>
-            <span>输入缓存</span>
-            <strong>{formatTokenCount(usage.cachedTokens)}</strong>
-          </div>
-          <div>
-            <span>输出 token</span>
-            <strong>{formatTokenCount(usage.completionTokens)}</strong>
-          </div>
+        <div className="user-info-credit-details" data-no-drag>
+          <span>AI 调用会按 DeepSeek v4 flash 实际用量扣除积分。</span>
+          <Link href="/billing" className="user-info-link">
+            充值
+          </Link>
         </div>
       )}
     </div>

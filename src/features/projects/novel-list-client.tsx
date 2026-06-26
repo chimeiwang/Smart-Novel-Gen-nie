@@ -26,8 +26,8 @@ export function NovelListClient({ novels }: NovelListClientProps) {
       <main className="page stack">
         <div className="row row-between home-header">
           <div>
-            <div className="home-kicker">NovelWriter</div>
-            <h1 className="title-xl">智能小说工作台</h1>
+            <div className="home-kicker">InkForge</div>
+            <h1 className="title-xl">墨铸写作工作台</h1>
             <p className="home-subtitle">管理作品、章节、设定和 AI 协作流程。</p>
           </div>
           <div className="row">
@@ -36,6 +36,9 @@ export function NovelListClient({ novels }: NovelListClientProps) {
             </button>
             <Link href="/styles" className="button ghost">
               文风库
+            </Link>
+            <Link href="/billing" className="button ghost">
+              充值
             </Link>
             <LogoutButton />
           </div>

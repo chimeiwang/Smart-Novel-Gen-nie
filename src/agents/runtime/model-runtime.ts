@@ -17,9 +17,8 @@ import {
 } from "@langchain/core/messages";
 import { wrapOpenAI } from "langsmith/wrappers";
 import type { ZodSchema } from "zod";
-import { prisma } from "@/shared/db/prisma";
 import { getAiConfig, getLLMRuntimeName, isAiConfigured } from "@/shared/env";
-import { enqueueDbWrite } from "@/shared/lib/db-write-queue";
+import { chargeAiUsage, ensureCanStartModelCall } from "@/shared/lib/billing";
 import { logger } from "@/shared/lib/logger";
 import type { TokenUsage } from "./turn-result";
 
@@ -102,6 +101,10 @@ export interface ModelRuntimePort {
 interface RuntimeDeps {
   client?: OpenAI;
   isAiConfigured?: () => boolean;
+  billing?: {
+    ensureCanStartModelCall: typeof ensureCanStartModelCall;
+    chargeAiUsage: typeof chargeAiUsage;
+  };
 }
 
 const MAX_OUTPUT_TOKENS = 384000;
@@ -252,22 +255,15 @@ export async function recordTokenUsage(params: {
   }
 
   const config = getAiConfig();
-  try {
-    await prisma.tokenUsage.create({
-      data: {
-        userId,
-        model: model || config.model,
-        promptTokens: usage.promptTokens,
-        completionTokens: usage.completionTokens,
-        cachedTokens: usage.cachedTokens ?? 0,
-        totalTokens: usage.totalTokens,
-        agentId: agentId || null,
-        novelId: novelId || null,
-      },
-    });
-  } catch (error) {
-    logger.warn("TOKEN_USAGE", "记录 token 使用失败", { error: String(error) });
-  }
+  await chargeAiUsage({
+    metadata: {
+      userId,
+      model: model || config.model,
+      agentId,
+      novelId,
+    },
+    usage,
+  });
 }
 
 export function enqueueTokenUsageRecord(params: {
@@ -277,18 +273,10 @@ export function enqueueTokenUsageRecord(params: {
   agentId?: string;
   novelId?: string;
 }): boolean {
-  if (
-    !params.userId ||
-    !params.usage ||
-    (params.usage.promptTokens === 0 && params.usage.completionTokens === 0)
-  ) {
-    return false;
-  }
-
-  return enqueueDbWrite(
-    () => recordTokenUsage(params),
-    `token_usage:${params.agentId ?? "unknown"}`
-  );
+  void recordTokenUsage(params).catch((error) => {
+    logger.warn("TOKEN_USAGE", "记录 token 使用失败", { error: String(error) });
+  });
+  return Boolean(params.userId && params.usage);
 }
 
 export function generateMockResponse(prompt: string, _metadata?: LLMCallMetadata): string {
@@ -394,12 +382,12 @@ function createOpenAIClient(): OpenAI {
   }));
 }
 
-function createChatModel() {
+function createChatModel(maxTokens = MAX_OUTPUT_TOKENS) {
   const config = getAiConfig();
   return new ChatOpenAI({
     model: config.model,
     apiKey: config.apiKey,
-    maxTokens: MAX_OUTPUT_TOKENS,
+    maxTokens,
     streamUsage: true,
     configuration: {
       baseURL: config.baseUrl,
@@ -478,9 +466,11 @@ function textFromAIContent(content: unknown): string {
 
 abstract class BaseRuntime implements ModelRuntimePort {
   protected readonly isConfigured: () => boolean;
+  private readonly billing: NonNullable<RuntimeDeps["billing"]>;
 
   protected constructor(deps: RuntimeDeps = {}) {
     this.isConfigured = deps.isAiConfigured ?? isAiConfigured;
+    this.billing = deps.billing ?? { ensureCanStartModelCall, chargeAiUsage };
   }
 
   abstract streamText(options: TextRuntimeOptions): Promise<LLMResult>;
@@ -506,15 +496,22 @@ abstract class BaseRuntime implements ModelRuntimePort {
     };
   }
 
-  protected recordUsage(metadata: LLMCallMetadata | undefined, usage: TokenUsage | undefined): void {
+  protected async recordUsage(
+    metadata: LLMCallMetadata | undefined,
+    usage: TokenUsage | undefined
+  ): Promise<void> {
     const config = getAiConfig();
-    enqueueTokenUsageRecord({
-      userId: metadata?.userId,
-      model: config.model,
+    await this.billing.chargeAiUsage({
+      metadata: {
+        ...metadata,
+        model: config.model,
+      },
       usage,
-      agentId: metadata?.agentId,
-      novelId: metadata?.novelId,
     });
+  }
+
+  protected ensureCanStartModelCall(input: Parameters<typeof ensureCanStartModelCall>[0]) {
+    return this.billing.ensureCanStartModelCall(input);
   }
 }
 
@@ -536,6 +533,11 @@ export class LegacyOpenAIRuntime extends BaseRuntime {
       return this.handleMockText(options, true);
     }
 
+    const { maxOutputTokens } = await this.ensureCanStartModelCall({
+      metadata: { ...options.metadata, model: config.model },
+      messages: options.messages,
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
+    });
     const client = this.getClient();
     let fullContent = "";
     let usage: TokenUsage | undefined;
@@ -544,7 +546,7 @@ export class LegacyOpenAIRuntime extends BaseRuntime {
       model: config.model,
       messages: options.messages,
       stream: true,
-      max_tokens: MAX_OUTPUT_TOKENS,
+      max_tokens: maxOutputTokens,
       reasoning_effort: options.reasoningEffort ?? "high",
     } as any);
 
@@ -566,7 +568,7 @@ export class LegacyOpenAIRuntime extends BaseRuntime {
       }
     }
 
-    this.recordUsage(options.metadata, usage);
+    await this.recordUsage(options.metadata, usage);
     return { content: fullContent, usage, finishReason };
   }
 
@@ -576,11 +578,17 @@ export class LegacyOpenAIRuntime extends BaseRuntime {
       return this.handleMockText(options, false);
     }
 
+    const { maxOutputTokens } = await this.ensureCanStartModelCall({
+      metadata: { ...options.metadata, model: config.model },
+      messages: options.messages,
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
+    });
+
     const response = await this.getClient().chat.completions.create({
       model: config.model,
       messages: options.messages,
       stream: false,
-      max_tokens: MAX_OUTPUT_TOKENS,
+      max_tokens: maxOutputTokens,
       reasoning_effort: options.reasoningEffort ?? "high",
     } as any);
 
@@ -594,7 +602,7 @@ export class LegacyOpenAIRuntime extends BaseRuntime {
         }
       : undefined;
 
-    this.recordUsage(options.metadata, usage);
+    await this.recordUsage(options.metadata, usage);
     return { content, usage, finishReason: response.choices[0]?.finish_reason };
   }
 
@@ -612,11 +620,17 @@ export class LegacyOpenAIRuntime extends BaseRuntime {
 
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
+        const { maxOutputTokens } = await this.ensureCanStartModelCall({
+          metadata: { ...options.metadata, model: config.model },
+          messages,
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
+        });
+
         const response = await this.getClient().chat.completions.create({
           model: config.model,
           messages,
           stream: false,
-          max_tokens: MAX_OUTPUT_TOKENS,
+          max_tokens: maxOutputTokens,
           response_format: { type: "json_object" },
           reasoning_effort: "medium",
         } as any);
@@ -637,7 +651,7 @@ export class LegacyOpenAIRuntime extends BaseRuntime {
           throw new Error(`LLM 返回的不是合法 JSON: ${content.slice(0, 200)}`);
         }
         const data = schema.parse(json) as ReturnType<TSchema["parse"]>;
-        this.recordUsage(options.metadata, usage);
+        await this.recordUsage(options.metadata, usage);
         return { data, usage };
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
@@ -683,13 +697,20 @@ export class LegacyOpenAIRuntime extends BaseRuntime {
       messageCount: messages.length,
     });
 
+    const { maxOutputTokens } = await this.ensureCanStartModelCall({
+      metadata: { ...options.metadata, model: config.model },
+      messages,
+      extraPromptText: JSON.stringify(options.tools),
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
+    });
+
     const stream = await client.chat.completions.create({
       model: config.model,
       messages,
       tools: options.tools,
       tool_choice: "auto",
       stream: true,
-      max_tokens: MAX_OUTPUT_TOKENS,
+      max_tokens: maxOutputTokens,
       reasoning_effort: options.reasoningEffort ?? "medium",
     } as any);
 
@@ -741,7 +762,7 @@ export class LegacyOpenAIRuntime extends BaseRuntime {
     }));
 
     logger.llmResponse(requestId, content || reasoningContent.slice(-500));
-    this.recordUsage(options.metadata, usage);
+    await this.recordUsage(options.metadata, usage);
     return {
       content,
       reasoningContent,
@@ -758,7 +779,13 @@ export class LangChainModelRuntime extends LegacyOpenAIRuntime {
       return this.handleMockText(options, true);
     }
 
-    const model = createChatModel().withConfig({
+    const { maxOutputTokens } = await this.ensureCanStartModelCall({
+      metadata: { ...options.metadata, model: getAiConfig().model },
+      messages: options.messages,
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
+    });
+
+    const model = createChatModel(maxOutputTokens).withConfig({
       reasoning_effort: options.reasoningEffort ?? "high",
       stream_options: { include_usage: true },
     } as any);
@@ -769,7 +796,7 @@ export class LangChainModelRuntime extends LegacyOpenAIRuntime {
       applyLangChainStreamChunk(accumulator, chunk, options.onChunk);
     }
 
-    this.recordUsage(options.metadata, accumulator.usage);
+    await this.recordUsage(options.metadata, accumulator.usage);
     return {
       content: accumulator.content,
       usage: accumulator.usage,
@@ -782,7 +809,13 @@ export class LangChainModelRuntime extends LegacyOpenAIRuntime {
       return this.handleMockText(options, false);
     }
 
-    const model = createChatModel().withConfig({
+    const { maxOutputTokens } = await this.ensureCanStartModelCall({
+      metadata: { ...options.metadata, model: getAiConfig().model },
+      messages: options.messages,
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
+    });
+
+    const model = createChatModel(maxOutputTokens).withConfig({
       reasoning_effort: options.reasoningEffort ?? "high",
     } as any);
     const message = await model.invoke(openAIMessagesToLangChain(options.messages));
@@ -790,7 +823,7 @@ export class LangChainModelRuntime extends LegacyOpenAIRuntime {
     const usage = usageFromLangChain(message.usage_metadata);
     const metadata = message.response_metadata as Record<string, unknown> | undefined;
     const finishReason = typeof metadata?.finish_reason === "string" ? metadata.finish_reason : "stop";
-    this.recordUsage(options.metadata, usage);
+    await this.recordUsage(options.metadata, usage);
     return { content, usage, finishReason };
   }
 
@@ -807,7 +840,13 @@ export class LangChainModelRuntime extends LegacyOpenAIRuntime {
 
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const model = createChatModel().withConfig({
+        const { maxOutputTokens } = await this.ensureCanStartModelCall({
+          metadata: { ...options.metadata, model: getAiConfig().model },
+          messages,
+          maxOutputTokens: MAX_OUTPUT_TOKENS,
+        });
+
+        const model = createChatModel(maxOutputTokens).withConfig({
           response_format: { type: "json_object" },
           reasoning_effort: "medium",
         } as any);
@@ -821,7 +860,7 @@ export class LangChainModelRuntime extends LegacyOpenAIRuntime {
           throw new Error(`LLM 返回的不是合法 JSON: ${content.slice(0, 200)}`);
         }
         const data = schema.parse(json) as ReturnType<TSchema["parse"]>;
-        this.recordUsage(options.metadata, usage);
+        await this.recordUsage(options.metadata, usage);
         return { data, usage };
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
@@ -856,7 +895,14 @@ export class LangChainModelRuntime extends LegacyOpenAIRuntime {
       messageCount: messages.length,
     });
 
-    const model = createChatModel();
+    const { maxOutputTokens } = await this.ensureCanStartModelCall({
+      metadata: { ...options.metadata, model: getAiConfig().model },
+      messages,
+      extraPromptText: JSON.stringify(options.tools),
+      maxOutputTokens: MAX_OUTPUT_TOKENS,
+    });
+
+    const model = createChatModel(maxOutputTokens);
     const runnable = options.tools.length > 0
       ? model.bindTools(options.tools as any, {
           tool_choice: "auto",
@@ -881,7 +927,7 @@ export class LangChainModelRuntime extends LegacyOpenAIRuntime {
     }));
 
     logger.llmResponse(requestId, accumulator.content || accumulator.reasoningContent.slice(-500));
-    this.recordUsage(options.metadata, accumulator.usage);
+    await this.recordUsage(options.metadata, accumulator.usage);
     return {
       content: accumulator.content,
       reasoningContent: accumulator.reasoningContent,

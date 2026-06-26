@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import styles from "./workflow-events-inspector.module.css";
@@ -327,9 +328,9 @@ export function WorkflowEventsInspector() {
           <button className="button secondary" type="button" onClick={() => void loadRuns(selectedRunId)}>
             刷新
           </button>
-          <a className="button ghost" href="/">
+          <Link className="button ghost" href="/">
             返回项目
-          </a>
+          </Link>
         </div>
       </header>
 

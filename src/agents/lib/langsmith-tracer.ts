@@ -29,7 +29,7 @@ function getLangSmithConfig(): LangSmithConfig {
   const observability = getAgentObservabilityConfig();
   return {
     apiKey: process.env.LANGSMITH_API_KEY || process.env.LANGCHAIN_API_KEY,
-    project: process.env.LANGSMITH_PROJECT || process.env.LANGCHAIN_PROJECT || "novel-writer",
+    project: process.env.LANGSMITH_PROJECT || process.env.LANGCHAIN_PROJECT || "inkforge",
     tracing: observability.langSmithTracingEnabled &&
       (process.env.LANGSMITH_TRACING === "true" || process.env.LANGCHAIN_TRACING_V2 === "true"),
   };
@@ -62,8 +62,8 @@ export async function initLangSmithTracer(): Promise<void> {
 
   process.env.LANGSMITH_API_KEY = config.apiKey;
   process.env.LANGCHAIN_API_KEY = config.apiKey;
-  process.env.LANGSMITH_PROJECT = config.project || "novel-writer";
-  process.env.LANGCHAIN_PROJECT = config.project || "novel-writer";
+  process.env.LANGSMITH_PROJECT = config.project || "inkforge";
+  process.env.LANGCHAIN_PROJECT = config.project || "inkforge";
   process.env.LANGSMITH_TRACING = "true";
   process.env.LANGCHAIN_TRACING_V2 = "true";
 
@@ -95,7 +95,7 @@ export async function trace<T>(
   try {
     const traceMetadata = {
       ...metadata,
-      service: "novel-writer",
+      service: "inkforge",
     };
 
     if (injectedTraceRunner) {
@@ -203,7 +203,7 @@ export function createTraceMetadata(params: {
     agentId: params.agentId,
     callType: params.callType,
     timestamp: new Date().toISOString(),
-    service: "novel-writer",
+    service: "inkforge",
   };
 }
 

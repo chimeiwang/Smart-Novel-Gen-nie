@@ -70,7 +70,7 @@ export function createOperationTraceMetadata(
     activeAgent: state.activeAgent,
     activeArtifactId: state.activeArtifactId,
     artifactIteration: state.artifactIteration,
-    service: "novel-writer",
+    service: "inkforge",
   };
 }
 

@@ -12,9 +12,9 @@ import { cookies } from "next/headers";
 // ---- 常量 ----
 
 const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET ?? "novel-writer-default-secret-change-me"
+  process.env.JWT_SECRET ?? "inkforge-default-secret-change-me"
 );
-const COOKIE_NAME = "novel-writer-token";
+const COOKIE_NAME = "inkforge-token";
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 天
 
 // ---- 密码哈希 ----

@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 
 import { PortraitAgentStream, createPortraitAgentStream } from "@/agents/portrait-agent-stream";
 import { prisma } from "@/shared/db/prisma";
+import { getSession } from "@/shared/lib/auth";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -9,6 +10,11 @@ export const dynamic = "force-dynamic";
 type SectionKey = "creativeMethodology" | "uniqueMarkers" | "generationStyle" | "expressionFeatures" | "styleTraits";
 
 export async function POST(request: NextRequest) {
+  const session = await getSession();
+  if (!session) {
+    return new Response(JSON.stringify({ error: "未登录" }), { status: 401 });
+  }
+
   const { styleId, section } = await request.json();
 
   if (!styleId || !section) {
@@ -57,6 +63,11 @@ export async function POST(request: NextRequest) {
           (chunk) => {
             fullContent += chunk;
             send({ type: "chunk", content: chunk });
+          },
+          {
+            userId: session.userId,
+            agentId: "Portrait",
+            note: `文风画像：${section}`,
           }
         );
 

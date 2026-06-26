@@ -13,9 +13,9 @@ import type { NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 
 const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET ?? "novel-writer-default-secret-change-me"
+  process.env.JWT_SECRET ?? "inkforge-default-secret-change-me"
 );
-const COOKIE_NAME = "novel-writer-token";
+const COOKIE_NAME = "inkforge-token";
 
 const PUBLIC_PATHS = ["/login"];
 

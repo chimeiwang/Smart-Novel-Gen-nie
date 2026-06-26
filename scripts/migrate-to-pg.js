@@ -23,7 +23,7 @@ const PG_CONNECTION = process.env.DATABASE_URL;
 
 if (!PG_CONNECTION) {
   console.error("❌ 请设置 DATABASE_URL 环境变量指向 PostgreSQL");
-  console.error("   例如: export DATABASE_URL='postgresql://USER:PASSWORD@localhost:5432/novelwriter'");
+  console.error("   例如: export DATABASE_URL=your_postgresql_connection_string");
   process.exit(1);
 }
 

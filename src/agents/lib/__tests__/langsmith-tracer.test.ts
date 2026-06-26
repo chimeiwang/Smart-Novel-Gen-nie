@@ -43,7 +43,7 @@ describe("langsmith-tracer", () => {
   it("enables tracing when LANGSMITH_API_KEY and LANGSMITH_TRACING=true are configured", async () => {
     process.env.LANGSMITH_TRACING_ENABLED = "true";
     process.env.LANGSMITH_API_KEY = "test-key";
-    process.env.LANGSMITH_PROJECT = "novel-writer-test";
+    process.env.LANGSMITH_PROJECT = "inkforge-test";
     process.env.LANGSMITH_TRACING = "true";
 
     await initLangSmithTracer();
@@ -51,14 +51,14 @@ describe("langsmith-tracer", () => {
     const stats = getTracingStats();
     assert.equal(stats.initialized, true);
     assert.equal(stats.enabled, true);
-    assert.equal(stats.project, "novel-writer-test");
+    assert.equal(stats.project, "inkforge-test");
     assert.equal(process.env.LANGCHAIN_TRACING_V2, "true");
   });
 
   it("also enables tracing from LangChain-compatible LANGCHAIN_TRACING_V2=true", async () => {
     process.env.LANGSMITH_TRACING_ENABLED = "true";
     process.env.LANGCHAIN_API_KEY = "test-key";
-    process.env.LANGCHAIN_PROJECT = "novel-writer-langchain";
+    process.env.LANGCHAIN_PROJECT = "inkforge-langchain";
     process.env.LANGCHAIN_TRACING_V2 = "true";
     delete process.env.LANGSMITH_TRACING;
 
@@ -67,7 +67,7 @@ describe("langsmith-tracer", () => {
     const stats = getTracingStats();
     assert.equal(stats.initialized, true);
     assert.equal(stats.enabled, true);
-    assert.equal(stats.project, "novel-writer-langchain");
+    assert.equal(stats.project, "inkforge-langchain");
     assert.equal(process.env.LANGSMITH_TRACING, "true");
   });
 
@@ -116,7 +116,7 @@ describe("langsmith-tracer", () => {
         name: "tool:get_character_detail",
         metadata: {
           agentId: "写作",
-          service: "novel-writer",
+          service: "inkforge",
         },
       },
     ]);

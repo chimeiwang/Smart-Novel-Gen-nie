@@ -1,6 +1,6 @@
 # LangGraph Studio 接入说明
 
-本文档说明 NovelWriter 如何接入 LangGraph Studio 做本地可视化调试。
+本文档说明 InkForge（墨铸）如何接入 LangGraph Studio 做本地可视化调试。
 
 ## 启动 Studio
 
@@ -112,10 +112,10 @@ Studio 入口 `src/agents/graph/studio-app.ts` 会在导出 graph 前初始化 L
 
 ```bash
 LANGSMITH_API_KEY="your_langsmith_api_key"
-LANGSMITH_PROJECT="novel-writer"
+LANGSMITH_PROJECT="inkforge"
 LANGSMITH_TRACING="true"
 LANGCHAIN_API_KEY="your_langsmith_api_key"
-LANGCHAIN_PROJECT="novel-writer"
+LANGCHAIN_PROJECT="inkforge"
 LANGCHAIN_TRACING_V2="true"
 ```
 

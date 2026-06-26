@@ -39,6 +39,7 @@ import path from "node:path";
 import OpenAI from "openai";
 
 import { getAiConfig, isAiConfigured } from "@/shared/env";
+import { chargeAiUsage, ensureCanStartModelCall, type ModelBillingMetadata } from "@/shared/lib/billing";
 
 /** 最大处理字数，超过此值触发分层抽样 */
 const MAX_PORTAIT_CHARS = 50000;
@@ -208,27 +209,46 @@ async function generateSection(
   model: string,
   systemPrompt: string,
   sourceText: string,
+  metadata?: ModelBillingMetadata,
 ): Promise<string> {
   if (!isAiConfigured()) {
     return `【Mock】${systemPrompt.split("\n")[0]}\n\n基于以下文本生成的模拟画像内容...`;
   }
 
+  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+    {
+      role: "system",
+      content: systemPrompt,
+    },
+    {
+      role: "user",
+      content: `请仅基于以下参考资料完成分析，如果证据不足请明确说明，不要编造。输出必须精炼、可验证、中文不超过800字。\n\n${sourceText}`,
+    },
+  ];
+  const { maxOutputTokens } = await ensureCanStartModelCall({
+    metadata: { ...metadata, model },
+    messages,
+    maxOutputTokens: 384000,
+  });
+
   const response = await client.chat.completions.create({
     model,
-    messages: [
-      {
-        role: "system",
-        content: systemPrompt,
-      },
-      {
-        role: "user",
-        content: `请仅基于以下参考资料完成分析，如果证据不足请明确说明，不要编造。输出必须精炼、可验证、中文不超过800字。\n\n${sourceText}`,
-      },
-    ],
+    messages,
+    max_tokens: maxOutputTokens,
     reasoning_effort: "high",
-    // DeepSeek 思考模式参数
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any);
+
+  if (response.usage) {
+    await chargeAiUsage({
+      metadata: { ...metadata, model },
+      usage: {
+        promptTokens: response.usage.prompt_tokens,
+        completionTokens: response.usage.completion_tokens,
+        cachedTokens: (response.usage as any).prompt_cache_hit_tokens ?? 0,
+        totalTokens: response.usage.total_tokens,
+      },
+    });
+  }
 
   return response.choices[0]?.message?.content?.trim() ?? "";
 }
@@ -298,7 +318,10 @@ export class PortraitAgent {
    * @param sourceText - 样本文本
    * @returns 包含 5 个维度分析结果的完整画像
    */
-  async generatePortrait(sourceText: string): Promise<PortraitResult> {
+  async generatePortrait(
+    sourceText: string,
+    metadata?: ModelBillingMetadata
+  ): Promise<PortraitResult> {
     if (!this.prompts) {
       await this.init();
     }
@@ -309,23 +332,43 @@ export class PortraitAgent {
 
     // 生成五个维度
     const creativeMethodology = normalizeSectionText(
-      await generateSection(this.client, this.model, this.prompts!.creativeMethodology, sampledText),
+      await generateSection(this.client, this.model, this.prompts!.creativeMethodology, sampledText, {
+        ...metadata,
+        agentId: metadata?.agentId ?? "Portrait",
+        note: "文风画像：创作方法论",
+      }),
     );
 
     const uniqueMarkers = normalizeSectionText(
-      await generateSection(this.client, this.model, this.prompts!.uniqueMarkers, sampledText),
+      await generateSection(this.client, this.model, this.prompts!.uniqueMarkers, sampledText, {
+        ...metadata,
+        agentId: metadata?.agentId ?? "Portrait",
+        note: "文风画像：独特标记",
+      }),
     );
 
     const generationStyle = normalizeSectionText(
-      await generateSection(this.client, this.model, this.prompts!.generationStyle, sampledText),
+      await generateSection(this.client, this.model, this.prompts!.generationStyle, sampledText, {
+        ...metadata,
+        agentId: metadata?.agentId ?? "Portrait",
+        note: "文风画像：生成风格",
+      }),
     );
 
     const expressionFeatures = normalizeSectionText(
-      await generateSection(this.client, this.model, this.prompts!.expressionFeatures, sampledText),
+      await generateSection(this.client, this.model, this.prompts!.expressionFeatures, sampledText, {
+        ...metadata,
+        agentId: metadata?.agentId ?? "Portrait",
+        note: "文风画像：表达特征",
+      }),
     );
 
     const styleTraits = normalizeSectionText(
-      await generateSection(this.client, this.model, this.prompts!.styleTraits, sampledText),
+      await generateSection(this.client, this.model, this.prompts!.styleTraits, sampledText, {
+        ...metadata,
+        agentId: metadata?.agentId ?? "Portrait",
+        note: "文风画像：风格特质",
+      }),
     );
 
     return {

@@ -45,6 +45,13 @@ function createMockClient(streams: AsyncIterable<unknown>[]) {
   };
 }
 
+function createBillingStub() {
+  return {
+    ensureCanStartModelCall: async () => ({ maxOutputTokens: 1024 }),
+    chargeAiUsage: async () => {},
+  };
+}
+
 describe("LangChain stream adapter", () => {
   it("maps visible content, tool call chunks, usage, and finish reason", () => {
     const accumulator = createLangChainStreamAccumulator();
@@ -177,6 +184,7 @@ describe("ModelRuntime tool-call turn boundary", () => {
     const runtime = new LegacyOpenAIRuntime({
       client: client as never,
       isAiConfigured: () => true,
+      billing: createBillingStub(),
     });
 
     const result = await runtime.runToolCallTurn({

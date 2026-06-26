@@ -21,6 +21,11 @@ import {
   getSession,
 } from "@/shared/lib/auth";
 import { normalizeTokenUsageBreakdown, type TokenUsageBreakdown } from "@/shared/lib/token-cost";
+import {
+  SIGNUP_BONUS_MICROS,
+  SIGNUP_BONUS_CREDITS,
+  formatCreditMicros,
+} from "@/shared/lib/billing";
 
 type ReferenceMaterialType = "note" | "web" | "book" | "image" | "custom";
 type StyleSourceType = "manual" | "agent";
@@ -1433,7 +1438,7 @@ export async function deleteWritingStyleAction(input: {
 export async function generatePortraitAction(input: {
   styleId: string;
 }): Promise<{ taskId: string }> {
-  await requireCurrentSession();
+  const session = await requireCurrentSession();
 
   // 检查是否有参考资料
   const references = await prisma.styleReference.findMany({
@@ -1464,7 +1469,7 @@ export async function generatePortraitAction(input: {
   });
 
   // 异步执行画像生成（不等待结果，前端会轮询状态）
-  void generatePortraitAsync(input.styleId, task.id);
+  void generatePortraitAsync(input.styleId, task.id, session.userId);
 
   return { taskId: task.id };
 }
@@ -1474,7 +1479,11 @@ export async function generatePortraitAction(input: {
  * 完成后只更新数据库，不调用 revalidatePath
  * 前端通过轮询 getPortraitTaskStatusAction 获取状态并自行刷新
  */
-async function generatePortraitAsync(styleId: string, taskId: string): Promise<void> {
+async function generatePortraitAsync(
+  styleId: string,
+  taskId: string,
+  userId: string
+): Promise<void> {
   try {
     // 获取所有参考资料
     const references = await prisma.styleReference.findMany({
@@ -1502,7 +1511,11 @@ async function generatePortraitAsync(styleId: string, taskId: string): Promise<v
 
     // 调用 Agent 生成画像
     const agent = await createPortraitAgent();
-    const result = await agent.generatePortrait(sourceText);
+    const result = await agent.generatePortrait(sourceText, {
+      userId,
+      agentId: "Portrait",
+      note: "文风画像生成",
+    });
     const portraitMarkdown = agent.getPortraitMarkdown(result);
 
     // 更新数据库 - 任务成功
@@ -2152,6 +2165,68 @@ export async function loginAction(formData: FormData): Promise<{
   return { success: true };
 }
 
+export async function registerAction(formData: FormData): Promise<{
+  success: boolean;
+  error?: string;
+}> {
+  const username = String(formData.get("username") ?? "").trim().toLowerCase();
+  const password = String(formData.get("password") ?? "");
+  const confirmPassword = String(formData.get("confirmPassword") ?? "");
+
+  if (!username || !password || !confirmPassword) {
+    return { success: false, error: "请输入用户名、密码和确认密码" };
+  }
+
+  if (!/^[a-z0-9_-]{3,32}$/.test(username)) {
+    return { success: false, error: "用户名只能包含 3-32 位小写字母、数字、下划线或短横线" };
+  }
+
+  if (password.length < 6) {
+    return { success: false, error: "密码至少 6 位" };
+  }
+
+  if (password !== confirmPassword) {
+    return { success: false, error: "两次输入的密码不一致" };
+  }
+
+  try {
+    const passwordHash = await hashPassword(password);
+    const user = await prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({
+        data: {
+          username,
+          passwordHash,
+          creditBalanceMicros: SIGNUP_BONUS_MICROS,
+        },
+        select: { id: true, creditBalanceMicros: true },
+      });
+
+      await tx.creditLedger.create({
+        data: {
+          userId: created.id,
+          type: "signup_bonus",
+          amountMicros: SIGNUP_BONUS_MICROS,
+          balanceAfterMicros: created.creditBalanceMicros,
+          note: `注册赠送 ${SIGNUP_BONUS_CREDITS.toString()} 积分`,
+        },
+      });
+
+      return created;
+    });
+
+    const token = await createToken(user.id);
+    await setSessionCookie(token);
+    revalidatePath("/");
+    return { success: true };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes("Unique constraint") || message.includes("username")) {
+      return { success: false, error: "用户名已存在" };
+    }
+    return { success: false, error: "注册失败，请稍后重试" };
+  }
+}
+
 export async function logoutAction(): Promise<void> {
   await deleteSessionCookie();
   revalidatePath("/");
@@ -2225,5 +2300,26 @@ export async function getUserTokenStatsAction(): Promise<{
     monthlyTokens: monthlyUsage.totalTokens,
     totalUsage,
     monthlyUsage,
+  };
+}
+
+export async function getUserCreditSummaryAction(): Promise<{
+  balanceMicros: string;
+  balanceCredits: string;
+}> {
+  const session = await getSession();
+  if (!session) {
+    return { balanceMicros: "0", balanceCredits: "0" };
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { id: session.userId },
+    select: { creditBalanceMicros: true },
+  });
+
+  const balanceMicros = user?.creditBalanceMicros ?? BigInt(0);
+  return {
+    balanceMicros: balanceMicros.toString(),
+    balanceCredits: formatCreditMicros(balanceMicros),
   };
 }

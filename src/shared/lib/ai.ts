@@ -3,7 +3,7 @@
 import OpenAI from "openai";
 
 import { getAiConfig, isAiConfigured } from "@/shared/env";
-import { enqueueTokenUsageRecord } from "@/agents/lib/llm-wrapper";
+import { chargeAiUsage, ensureCanStartModelCall } from "@/shared/lib/billing";
 
 type ContinuationLength = "short" | "medium" | "long";
 
@@ -79,38 +79,51 @@ export async function generateContinuation(
     "请直接输出可接在正文后面的续写内容，不要解释，不要分点，不要加标题。",
   ].join("\n\n");
 
+  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+    {
+      role: "system",
+      content:
+        "你是一个中文小说续写助手。你必须严格参考提供的设定、剧情进度和文风画像进行续写，避免出现设定冲突。",
+    },
+    {
+      role: "user",
+      content: prompt,
+    },
+  ];
+
+  const { maxOutputTokens } = await ensureCanStartModelCall({
+    metadata: {
+      userId: caller?.userId,
+      model,
+      agentId: "Continuation",
+      novelId: caller?.novelId,
+    },
+    messages,
+    maxOutputTokens: 384000,
+  });
+
   const response = await client.chat.completions.create({
     model,
-    messages: [
-      {
-        role: "system",
-        content:
-          "你是一个中文小说续写助手。你必须严格参考提供的设定、剧情进度和文风画像进行续写，避免出现设定冲突。",
-      },
-      {
-        role: "user",
-        content: prompt,
-      },
-    ],
+    messages,
+    max_tokens: maxOutputTokens,
     reasoning_effort: "high",
-    // DeepSeek 思考模式参数
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any);
 
-  // 记录 token 使用
-  if (response.usage && caller?.userId) {
+  if (response.usage) {
     const cachedTokens = (response.usage as any).prompt_cache_hit_tokens ?? 0;
-    enqueueTokenUsageRecord({
-      userId: caller.userId,
-      model,
+    await chargeAiUsage({
+      metadata: {
+        userId: caller?.userId,
+        model,
+        agentId: "Continuation",
+        novelId: caller?.novelId,
+      },
       usage: {
         promptTokens: response.usage.prompt_tokens,
         completionTokens: response.usage.completion_tokens,
         cachedTokens: typeof cachedTokens === "number" ? cachedTokens : 0,
         totalTokens: response.usage.total_tokens,
       },
-      agentId: "Continuation",
-      novelId: caller.novelId,
     });
   }
 

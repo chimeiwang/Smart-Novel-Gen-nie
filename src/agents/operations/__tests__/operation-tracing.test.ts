@@ -76,7 +76,7 @@ describe("operation tracing", () => {
     assert.equal(metadata.activeAgent, "写作");
     assert.equal(metadata.activeArtifactId, "artifact-1");
     assert.equal(metadata.artifactIteration, 1);
-    assert.equal(metadata.service, "novel-writer");
+    assert.equal(metadata.service, "inkforge");
   });
 });
 

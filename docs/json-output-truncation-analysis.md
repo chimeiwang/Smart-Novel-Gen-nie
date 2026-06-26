@@ -43,7 +43,7 @@ extractDisplayContent() — writing-conversation.tsx
 
 ### 架构对比
 
-| | txt (NovelWriter) | mirawork-mono |
+| | txt (InkForge（墨铸）) | mirawork-mono |
 |---|---|---|
 | Agent 输出格式 | JSON 信封 `{"content": "...", "wantsToCall": "..."}` | 纯 Markdown 文本 |
 | 工具调用 | JSON 字段 `wantsToCall` → 代码解析路由 | 原生 OpenAI `tool_calls` 协议 |
