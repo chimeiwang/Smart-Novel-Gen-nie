@@ -5,6 +5,7 @@ APP_DIR="${APP_DIR:-/srv/smart-novel-gen}"
 REPO_URL="${REPO_URL:-https://github.com/chimeiwang/Smart-Novel-Gen-nie.git}"
 BRANCH="${BRANCH:-main}"
 IMAGE_NAME="${IMAGE_NAME:-inkforge:latest}"
+SKIP_DOCKER_BUILD="${SKIP_DOCKER_BUILD:-false}"
 
 if ! command -v git >/dev/null 2>&1; then
   echo "git is required on the deployment server" >&2
@@ -34,8 +35,12 @@ if [ ! -f .env.production ]; then
   exit 1
 fi
 
-echo "Building Docker image $IMAGE_NAME"
-docker build -t "$IMAGE_NAME" .
+if [ "$SKIP_DOCKER_BUILD" = "true" ]; then
+  echo "Using prebuilt Docker image $IMAGE_NAME"
+else
+  echo "Building Docker image $IMAGE_NAME"
+  docker build -t "$IMAGE_NAME" .
+fi
 
 echo "Starting Docker Compose services"
 docker compose up -d
