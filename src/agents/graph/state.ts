@@ -636,8 +636,6 @@ export interface WritingState {
 
   // === 质量检查（Phase 7 P1 修复：精确匹配 checkId） ===
   qualityCheckId?: string | null;
-  nextAgent?: CoreAgentId | null;
-  callChainDepth?: number;
 
   // === 控制事件（Phase 2：AgentRuntime control tool 产出） ===
   controlEvents?: AgentControlEvent[];

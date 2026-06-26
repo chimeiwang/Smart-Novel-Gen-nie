@@ -7,8 +7,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { ALL_CORE_AGENT_IDS } from "../agent";
-import { executeTool } from "@/agents/tools/registry";
-import "@/agents/tools/read/agent-capability-tools";
 import {
   AGENT_CAPABILITY_CARDS,
   buildIntentClassifierSystemPrompt,
@@ -37,16 +35,6 @@ describe("Agent capability cards", () => {
     assert.ok(text.includes("网文编辑"));
     assert.ok(text.includes("可保存 updates section：无保存型 updates"));
     assert.equal(text.includes("### 设定"), false);
-  });
-
-  it("注册为按需读取工具", async () => {
-    const all = await executeTool("get_agent_capability_cards", {}, { novelData: {} });
-    assert.ok(all.includes("### 设定"));
-    assert.ok(all.includes("### 编辑"));
-
-    const single = await executeTool("get_agent_capability_cards", { agentId: "剧情" }, { novelData: {} });
-    assert.ok(single.includes("### 剧情"));
-    assert.equal(single.includes("### 写作"), false);
   });
 
   it("初始分类器 prompt 使用能力卡而不是固定关键词规则", () => {

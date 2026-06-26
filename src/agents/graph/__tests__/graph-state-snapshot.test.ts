@@ -63,8 +63,6 @@ function createState(): GraphState {
     eventCallbacks: {
       写作: () => undefined,
     },
-    nextAgent: null,
-    callChainDepth: 2,
     qualityCheckId: "check-1",
     controlEvents: undefined,
     activeArtifactId: "artifact-1",

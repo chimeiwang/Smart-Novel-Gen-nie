@@ -18,7 +18,7 @@
 
 import type { AgentOutput, CoreAgentId, WritingState, AgentControlEvent } from "../graph/state";
 import { createAgentOutput } from "../graph/state";
-import { createToolExecutor, summarizeToolArgs } from "@/agents/lib/tools";
+import { createToolExecutor, summarizeToolArgs, summarizeToolResult } from "@/agents/lib/tools";
 import { getToolsByCapabilities, getOpenAITools, type ToolDefinition } from "@/agents/tools/registry";
 import { logger } from "@/shared/lib/logger";
 import { AGENT_UPDATE_CHANNEL_RULES_PROMPT } from "@/shared/contracts/agent-update-channels";
@@ -42,8 +42,7 @@ const NEW_MODE_SYSTEM_APPENDIX = `
 - 不要使用标题标记、表格、代码块、引用块、加粗标记或列表符号来组织格式。
 - 可以用普通自然段、短句分行、中文编号（例如“一、”“1.”）组织内容；这些符号只作为普通文本，不依赖前端格式转换。
 - 不要在正文外用 JSON 包裹，不要输出 \`{"content": "..."}\` 这种结构。
-- 需要调用其他 Agent 时，使用 route_to_agent 工具。
-- 如果你判断自己的能力不足以完成当前任务，或任务主责可能属于另一个 Agent，先调用 get_agent_capability_cards 阅读角色能力卡，再决定是否调用 route_to_agent；不要静默转交。
+- 如果你判断自己的能力不足以完成当前任务，直接用正文说明职责边界和缺口；不要自行转交给其他 Agent，工作流会负责分派。
 - 需要提交质量评分时，使用 submit_quality_report 工具。
 - 结构化大纲必须最终生成 outlineContent 和/或 outlineAdjustments；不要用 begin_artifact_output 替代结构化大纲节点树。
 ${AGENT_UPDATE_CHANNEL_RULES_PROMPT}
@@ -93,7 +92,7 @@ function isToolAllowedForAgent(tool: ToolDefinition, agentId: CoreAgentId): bool
 
 export function getToolNamesForAgent(definition: Pick<AgentDefinition, "id" | "toolCapabilities">): string[] {
   return Array.from(
-    getToolsByCapabilities([...definition.toolCapabilities, "agent.card.read"])
+    getToolsByCapabilities(definition.toolCapabilities)
   )
     .filter((tool) => isToolAllowedForAgent(tool, definition.id))
     .map((tool) => tool.name);
@@ -229,10 +228,21 @@ async function runAgentInNewMode(
         state.streamCallbacks?.[agentId]?.(chunk);
       },
       onToolCall: (toolName, args) => {
+        const argsSummary = summarizeToolArgs(args);
         sendStatus("querying", {
           message: msgs.querying ?? `正在调用工具: ${toolName}`,
           toolName,
-          argsSummary: summarizeToolArgs(args),
+          argsSummary: argsSummary === "无参数" ? undefined : argsSummary,
+          detailsHidden: true,
+        });
+      },
+      onToolResult: (toolName, _args, result) => {
+        const resultSummary = summarizeToolResult(toolName, result);
+        if (!resultSummary) return;
+        sendStatus("querying", {
+          message: resultSummary,
+          toolName,
+          resultSummary,
           detailsHidden: true,
         });
       },

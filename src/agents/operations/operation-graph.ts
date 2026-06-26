@@ -121,7 +121,7 @@ async function executeOperationNode(state: GraphState) {
     message: `正在执行${label}。`,
   });
 
-  const activeAgent = state.pendingAgentCall?.toAgent ?? state.nextAgent ?? operation?.primaryAgent ?? state.activeAgent ?? "编辑";
+  const activeAgent = state.pendingAgentCall?.toAgent ?? operation?.primaryAgent ?? state.activeAgent ?? "编辑";
   const result = await runOperationAgentWithLifecycle(
     state,
     activeAgent,
@@ -160,7 +160,6 @@ async function executeOperationNode(state: GraphState) {
 }
 
 function routeAfterExecute(state: GraphState) {
-  if (state.nextAgent) return "executeOperation";
   if (state.pendingUserResponse && state.activeArtifactId) return "awaitUserDecision";
   return "submitArtifactOrRespond";
 }
@@ -215,7 +214,7 @@ async function reviewArtifactNode(state: GraphState) {
     artifactId: state.activeArtifactId,
     artifactKey: `${state.taskId}:${operation.kind}`,
     revision: state.artifactIteration + 1,
-    depth: state.callChainDepth + 1,
+    depth: state.artifactIteration + 1,
   });
   emit(writer, "operation_stage", {
     stage: "审核草案",

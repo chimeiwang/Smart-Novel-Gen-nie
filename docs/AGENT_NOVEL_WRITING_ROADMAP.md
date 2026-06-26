@@ -164,14 +164,14 @@
 - [已完成] 评估章节钩子、爽点、期待感、节奏、冲突密度、尾钩。
 - [已完成] 判断读者是否知道主角要什么、阻力是什么、读完有什么情绪收益。
 - [已完成] 提供具体改法，不只给抽象评价。
-- [已完成] 严重影响追读时通过 `route_to_agent` control tool 给作家返工 brief。
+- [已完成] 严重影响追读时通过 `submit_quality_report` 记录返工 brief；需要复审返工的流程由 LangGraph `operationWorkflow` 决定。
 - [部分完成] 将评审报告保存为章节质量报告；六项评分、综合分、门禁建议、返工 brief 已结构化保存，问题列表尚未独立结构化。
 
 输出协议：
 
 - 可见评审报告直接输出 Markdown。
 - 评分、质量门禁和返工 brief 通过 `submit_quality_report` control tool 提交。
-- 严重问题通过 `route_to_agent` control tool 请求作家返工。
+- 严重问题通过结构化质量报告给出返工 brief；自动返工由 LangGraph 审核/返工边驱动。
 
 验收标准：
 

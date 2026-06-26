@@ -21,7 +21,6 @@ import type {
 } from "@/shared/contracts/agent-control";
 
 export type {
-  RouteToAgentEvent,
   QualityReportEvent,
   QualityScores,
   ProposalUpdatesEvent,
@@ -78,7 +77,7 @@ export interface TokenUsage {
  *
  * 由 AgentRuntime.runTurn() 返回。
  * - visibleContent：给前端渲染的段落文本（不套 JSON 外壳）
- * - controlEvents：给服务端（processResult/LangGraph）处理的结构化控制事件
+ * - controlEvents：给服务端（control-event-processor / LangGraph）处理的结构化控制事件
  * - toolCalls/toolResults：用于调试和追踪
  *
  * 注意：visibleContent 和 controlEvents 的来源严格分离。

@@ -43,8 +43,6 @@ function createState(): GraphState {
     errorMessage: null,
     streamCallbacks: {},
     eventCallbacks: {},
-    nextAgent: null,
-    callChainDepth: 0,
     qualityCheckId: null,
     controlEvents: undefined,
     activeArtifactId: "artifact-1",

@@ -187,8 +187,6 @@ export async function createInitialState(params: WorkflowInitialState): Promise<
     errorMessage: null,
     streamCallbacks: {},
     eventCallbacks: undefined,
-    nextAgent: null,
-    callChainDepth: 0,
     qualityCheckId: qualityCheckId ?? null,
     controlEvents: undefined,
     activeArtifactId: null,
@@ -397,8 +395,6 @@ export async function executeWritingWorkflow(
         const graphInput = {
           ...initialState,
           conversationHistory: history,
-          nextAgent: null,
-          callChainDepth: 0,
           streamCallbacks: createDirectStreamCallbacks(sendEvent),
           eventCallbacks: createDirectEventCallbacks(sendEvent),
         };
@@ -441,7 +437,6 @@ export async function executeWritingWorkflow(
             auditLog.recordPersistenceEvent("task_state_updated", {
               phase: fs.phase,
               activeAgent: fs.activeAgent,
-              callChainDepth: fs.callChainDepth,
             });
           }
           sendAgentDoneFallback(fs, sendEvent, sentKeys);
@@ -742,8 +737,6 @@ export async function resumeWriting(
             errorMessage: null,
             streamCallbacks: createDirectStreamCallbacks(sendEvent),
             eventCallbacks: createDirectEventCallbacks(sendEvent),
-            nextAgent: null,
-            callChainDepth: 0,
             qualityCheckId: null,
             controlEvents: undefined,
             activeArtifactId: null,
@@ -795,7 +788,6 @@ export async function resumeWriting(
           auditLog.recordPersistenceEvent("task_state_updated", {
             phase: fs.phase,
             activeAgent: fs.activeAgent,
-            callChainDepth: fs.callChainDepth,
           });
           sendAgentDoneFallback(fs, sendEvent, sentKeys);
           sendEvent("done", {

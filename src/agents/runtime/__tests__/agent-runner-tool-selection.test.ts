@@ -24,15 +24,10 @@ describe("AgentRunner tool selection", () => {
         "artifact.read",
         "control.quality",
         "control.evaluation",
-        "control.revision",
-        "control.route",
       ],
     });
 
-    assert.ok(toolNames.includes("route_to_agent"));
-    assert.ok(toolNames.includes("request_revision"));
     assert.ok(toolNames.includes("submit_evaluation"));
-    assert.ok(toolNames.includes("get_agent_capability_cards"));
     assert.equal(toolNames.includes("start_update_builder"), false);
     assert.equal(toolNames.includes("append_update_batch"), false);
     assert.equal(toolNames.includes("append_outline_tree"), false);
@@ -55,11 +50,9 @@ describe("AgentRunner tool selection", () => {
         "proposal.plot",
         "control.proposal",
         "control.builder",
-        "control.route",
       ],
     });
 
-    assert.ok(toolNames.includes("route_to_agent"));
     assert.ok(toolNames.includes("propose_updates"));
     assert.ok(toolNames.includes("start_update_builder"));
     assert.ok(toolNames.includes("append_update_batch"));
@@ -71,7 +64,7 @@ describe("AgentRunner tool selection", () => {
   });
 
   it("only exposes append_outline_tree to the plot Agent", () => {
-    const commonBuilderCapabilities = ["control.builder", "control.route"];
+    const commonBuilderCapabilities = ["control.builder"];
     const cases: Array<{ id: "设定" | "写作" | "校验" | "编辑"; capabilities: string[] }> = [
       { id: "设定", capabilities: commonBuilderCapabilities },
       { id: "写作", capabilities: commonBuilderCapabilities },
@@ -111,12 +104,10 @@ describe("AgentRunner tool selection", () => {
   it("honors tool agentIds in addition to capability", () => {
     const toolNames = getToolNamesForAgent({
       id: "写作",
-      toolCapabilities: ["control.evaluation", "control.revision", "control.route"],
+      toolCapabilities: ["control.evaluation"],
     });
 
-    assert.ok(toolNames.includes("route_to_agent"));
     assert.equal(toolNames.includes("submit_evaluation"), false);
-    assert.equal(toolNames.includes("request_revision"), false);
   });
 
   it("exposes review artifact display tool through control.artifact", () => {

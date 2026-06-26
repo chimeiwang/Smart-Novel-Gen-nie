@@ -74,7 +74,7 @@ export function createDirectEventCallbacks(
  */
 export function sanitizeStateUpdate(update: Record<string, unknown>): Record<string, unknown> {
   const allowedKeys = [
-    "phase", "activeAgent", "nextAgent", "callChainDepth",
+    "phase", "activeAgent",
     "pendingUserResponse", "errorMessage",
   ];
   const sanitized: Record<string, unknown> = {};

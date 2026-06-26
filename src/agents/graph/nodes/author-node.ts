@@ -12,7 +12,6 @@
  * ## Phase 7 迁移（Agent Runtime 协议重构）
  * - outputMode: "paragraph_text_with_control_tools"
  * - 正文直接输出段落文本（不经过 generatedContent JSON 字段）
- * - route_to_agent 替代 wantsToCall
  * - 后处理简化：不需要 JSON 字段提取
  */
 
@@ -39,7 +38,7 @@ const authorDefinition: AgentDefinition = {
   // Phase 7：新协议模式
   outputMode: "paragraph_text_with_control_tools",
 
-  toolCapabilities: ["novel.read", "character.read", "lore.read", "plot.read", "chapter.read", "style.read", "control.artifact", "control.route"],
+  toolCapabilities: ["novel.read", "character.read", "lore.read", "plot.read", "chapter.read", "style.read", "control.artifact"],
 
   /** 作家后处理：正文只进入工作流草案，不直接写入正式章节正文 */
   postProcess: async (writerOutput, state) => {
@@ -152,7 +151,7 @@ export async function authorNode(
 /**
  * 检查是否有来自校验员的改写请求。
  *
- * Phase E 返工：新协议下通过 route_to_agent → pendingAgentCall 传递改写上下文，
+ * Phase E 返工：新协议下通过 LangGraph review loop → pendingAgentCall 传递改写上下文，
  *   不再读取旧 JSON wantsToCall/conflicts 字段。
  */
 function checkRewriteRequest(

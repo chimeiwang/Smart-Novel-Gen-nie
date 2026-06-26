@@ -160,16 +160,17 @@ describe("ModelRuntime tool-call turn boundary", () => {
         choices: [
           {
             delta: {
-              content: "我会转交剧情顾问。",
+              content: "我会提交审核结论。",
               tool_calls: [
                 {
                   index: 0,
-                  id: "call_route",
+                  id: "call_evaluation",
                   function: {
-                    name: "route_to_agent",
+                    name: "submit_evaluation",
                     arguments: JSON.stringify({
-                      toAgent: "剧情",
-                      reason: "需要剧情顾问处理大纲结构",
+                      artifactKey: "draft-1",
+                      verdict: "pass",
+                      summary: "可以提交给用户确认。",
                     }),
                   },
                 },
@@ -188,14 +189,14 @@ describe("ModelRuntime tool-call turn boundary", () => {
     });
 
     const result = await runtime.runToolCallTurn({
-      messages: [{ role: "user", content: "转交剧情" }],
+      messages: [{ role: "user", content: "提交审核" }],
       tools: [],
     });
 
     assert.equal(client.calls, 1);
-    assert.equal(result.content, "我会转交剧情顾问。");
+    assert.equal(result.content, "我会提交审核结论。");
     assert.equal(result.toolCalls.length, 1);
-    assert.equal(result.toolCalls[0].function.name, "route_to_agent");
+    assert.equal(result.toolCalls[0].function.name, "submit_evaluation");
     assert.equal("controlEvents" in result, false);
   });
 });

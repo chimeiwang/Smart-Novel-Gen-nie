@@ -51,12 +51,11 @@ export async function executeCreativeOperation(
   }
 
   const def = getOperationDefinition(operation.kind);
-  const activeAgent = state.pendingAgentCall?.toAgent ?? state.nextAgent ?? def.primaryAgent;
+  const activeAgent = state.pendingAgentCall?.toAgent ?? def.primaryAgent;
   const runAgent = deps.runInternalAgent ?? runInternalAgent;
   const agentResult = await runAgent(activeAgent, {
     ...state,
     activeAgent,
-    nextAgent: null,
   });
   const output = readAgentOutput(activeAgent, agentResult);
   const controlEvents = agentResult.controlEvents as AgentControlEvent[] | undefined;
@@ -82,7 +81,6 @@ export async function executeCreativeOperation(
       statePatch: {
         ...agentResult,
         ...processedPatch,
-        nextAgent: null,
         pendingAgentCall: null,
         controlEvents: undefined,
         generatedContent: state.generatedContent,
@@ -111,7 +109,6 @@ export async function executeCreativeOperation(
         ...agentResult,
         ...processedPatch,
         activeArtifactId: artifact.id,
-        nextAgent: null,
         pendingAgentCall: null,
         controlEvents: undefined,
         generatedContent: state.generatedContent,
@@ -125,7 +122,6 @@ export async function executeCreativeOperation(
     statePatch: {
       ...agentResult,
       ...processedPatch,
-      nextAgent: null,
       pendingAgentCall: null,
       controlEvents: undefined,
       generatedContent: state.generatedContent,
@@ -141,10 +137,7 @@ function shouldCompleteWithControlResult(
 ): boolean {
   if (!controlEvents?.length) return false;
   if (!def.requiresArtifact || def.artifactPolicy === "agent_updates") return true;
-  if (statePatch.nextAgent) return true;
   return controlEvents.some((event) =>
-    event.type === "route_to_agent" ||
-    event.type === "request_revision" ||
     event.type === "begin_artifact_output" ||
     event.type === "submit_beat_plan" ||
     event.type === "submit_evaluation"
@@ -175,7 +168,6 @@ async function processOperationControlEvents(input: {
         taskId: state.taskId,
         chapterId: state.chapterId,
         qualityCheckId: state.qualityCheckId,
-        callChainDepth: state.callChainDepth ?? 0,
         novelData: state.novelData,
       },
       activeAgent,
@@ -193,7 +185,6 @@ async function processOperationControlEvents(input: {
       saveQualityCheckResult: deps.saveQualityCheckResult,
       interruptOnUserApproval: false,
       now: deps.now,
-      maxCallChainDepth: deps.maxCallChainDepth,
     }
   );
 
@@ -201,7 +192,6 @@ async function processOperationControlEvents(input: {
     statePatch: {
       ...agentResult,
       ...processed,
-      pendingAgentCall: processed.pendingAgentCall ?? null,
       generatedContent: state.generatedContent,
     },
     output,

@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import type OpenAI from "openai";
 import "@/agents/tools";
 import { AgentRuntimeImpl } from "../agent-runtime";
+import { LegacyOpenAIRuntime } from "../model-runtime";
 import {
   __resetLangSmithTracerForTests,
   __setLangSmithTraceRunnerForTests,
@@ -25,6 +26,23 @@ import {
 import { getOpenAITools } from "@/agents/tools/registry";
 import type { AgentRuntimeOptions, AgentRuntime } from "../agent-runtime";
 import type { AgentTurnResult } from "../turn-result";
+
+function createBillingStub() {
+  return {
+    ensureCanStartModelCall: async () => ({ maxOutputTokens: 1024 }),
+    chargeAiUsage: async () => {},
+  };
+}
+
+function createTestRuntime(client: unknown): AgentRuntimeImpl {
+  return new AgentRuntimeImpl({
+    runtime: new LegacyOpenAIRuntime({
+      client: client as never,
+      isAiConfigured: () => true,
+      billing: createBillingStub(),
+    }),
+  });
+}
 
 function createStream(chunks: unknown[]): AsyncIterable<unknown> {
   return {
@@ -161,8 +179,6 @@ function createRuntimeOptions(): AgentRuntimeOptions {
       { role: "user", content: "测试控制工具" },
     ],
     tools: getOpenAITools([
-      "route_to_agent",
-      "request_revision",
       "propose_updates",
       "get_novel_info",
       "list_outline_summary",
@@ -203,20 +219,6 @@ async function withEnabledLangSmithForTest(fn: () => Promise<void>): Promise<voi
 // ============================================
 
 describe("parseControlEventArgs", () => {
-  it("解析 route_to_agent → RouteToAgentEvent", () => {
-    const event = parseControlEventArgs("route_to_agent", {
-      toAgent: "校验",
-      reason: "正文生成完毕，需要校验",
-      question: "请检查第一章的一致性",
-    });
-    assert.ok(event);
-    assert.equal(event!.type, "route_to_agent");
-    if (event!.type === "route_to_agent") {
-      assert.equal(event!.toAgent, "校验");
-      assert.equal(event!.reason, "正文生成完毕，需要校验");
-    }
-  });
-
   it("解析 submit_quality_report → QualityReportEvent", () => {
     const event = parseControlEventArgs("submit_quality_report", {
       scores: { hook: 8, tension: 7, overall: 7 },
@@ -647,32 +649,8 @@ describe("parseControlEventArgs", () => {
     }
   });
 
-  it("解析 request_revision → RevisionRequestEvent", () => {
-    const event = parseControlEventArgs("request_revision", {
-      toAgent: "剧情",
-      artifactKey: "outline-revision-1",
-      reason: "编辑复审未通过",
-      instructions: "保留主线，但提高第 1-3 章爽点密度。",
-    });
-    assert.ok(event);
-    assert.equal(event!.type, "request_revision");
-    if (event!.type === "request_revision") {
-      assert.equal(event.toAgent, "剧情");
-      assert.equal(event.instructions, "保留主线，但提高第 1-3 章爽点密度。");
-    }
-  });
-
   it("未知 tool name 返回 null", () => {
     const event = parseControlEventArgs("unknown_tool", { foo: "bar" });
-    assert.equal(event, null);
-  });
-
-  it("非法参数返回 null（缺少必需字段）", () => {
-    // route_to_agent 缺少 reason 字段
-    const event = parseControlEventArgs("route_to_agent", {
-      toAgent: "写作",
-      // reason 缺失
-    });
     assert.equal(event, null);
   });
 
@@ -693,61 +671,9 @@ describe("parseControlEventArgs", () => {
     assert.equal(event, null);
   });
 
-  it("非法参数返回 null（toAgent 非法值）", () => {
-    const event = parseControlEventArgs("route_to_agent", {
-      toAgent: "未知Agent",
-      reason: "test",
-    });
-    assert.equal(event, null);
-  });
 });
 
-describe("AgentRuntime terminal control tools", () => {
-  it("route_to_agent stops the current agent turn", async () => {
-    const client = createMockClient([
-      createToolCallStream("route_to_agent", {
-        toAgent: "剧情",
-        reason: "需要剧情顾问处理大纲结构",
-      }, "我将转交剧情顾问。"),
-      createTextStream("这段内容不应该出现。"),
-    ]);
-    const runtime = new AgentRuntimeImpl({
-      client: client as unknown as OpenAI,
-      isAiConfigured: () => true,
-    });
-
-    const result = await runtime.runTurn(createRuntimeOptions());
-
-    assert.equal(client.calls, 1);
-    assert.equal(result.finishReason, "terminal_control_event");
-    assert.equal(result.controlEvents.length, 1);
-    assert.equal(result.controlEvents[0].type, "route_to_agent");
-    assert.equal(result.visibleContent, "我将转交剧情顾问。");
-  });
-
-  it("request_revision stops the current agent turn", async () => {
-    const client = createMockClient([
-      createToolCallStream("request_revision", {
-        toAgent: "剧情",
-        reason: "复审未通过",
-        instructions: "补强第一章钩子",
-      }, "需要返工。"),
-      createTextStream("这段内容不应该出现。"),
-    ]);
-    const runtime = new AgentRuntimeImpl({
-      client: client as unknown as OpenAI,
-      isAiConfigured: () => true,
-    });
-
-    const result = await runtime.runTurn(createRuntimeOptions());
-
-    assert.equal(client.calls, 1);
-    assert.equal(result.finishReason, "terminal_control_event");
-    assert.equal(result.controlEvents.length, 1);
-    assert.equal(result.controlEvents[0].type, "request_revision");
-    assert.equal(result.visibleContent, "需要返工。");
-  });
-
+describe("AgentRuntime control tools", () => {
   it("propose_updates can continue to the next model round", async () => {
     const client = createMockClient([
       createToolCallStream("propose_updates", {
@@ -758,10 +684,7 @@ describe("AgentRuntime terminal control tools", () => {
       }, "我先提交草案。"),
       createTextStream("草案已提交，等待确认。"),
     ]);
-    const runtime = new AgentRuntimeImpl({
-      client: client as unknown as OpenAI,
-      isAiConfigured: () => true,
-    });
+    const runtime = createTestRuntime(client);
 
     const result = await runtime.runTurn(createRuntimeOptions());
 
@@ -773,61 +696,6 @@ describe("AgentRuntime terminal control tools", () => {
     assert.match(result.visibleContent, /草案已提交，等待确认。/);
   });
 
-  it("records propose_updates and route_to_agent from the same tool batch before stopping", async () => {
-    const stream = createStream([
-      {
-        choices: [
-          {
-            delta: {
-              content: "提交草案并转交复审。",
-              tool_calls: [
-                {
-                  index: 0,
-                  id: "call_propose",
-                  function: {
-                    name: "propose_updates",
-                    arguments: JSON.stringify({
-                      summary: "提交大纲草案",
-                      updates: {
-                        outlineAdjustments: [
-                          { action: "update", nodeTitle: "第一章", content: "增加章末钩子" },
-                        ],
-                      },
-                    }),
-                  },
-                },
-                {
-                  index: 1,
-                  id: "call_route",
-                  function: {
-                    name: "route_to_agent",
-                    arguments: JSON.stringify({
-                      toAgent: "编辑",
-                      reason: "请复审大纲草案",
-                    }),
-                  },
-                },
-              ],
-            },
-            finish_reason: "tool_calls",
-          },
-        ],
-      },
-    ]);
-    const client = createMockClient([stream, createTextStream("这段内容不应该出现。")]);
-    const runtime = new AgentRuntimeImpl({
-      client: client as unknown as OpenAI,
-      isAiConfigured: () => true,
-    });
-
-    const result = await runtime.runTurn(createRuntimeOptions());
-
-    assert.equal(client.calls, 1);
-    assert.equal(result.finishReason, "terminal_control_event");
-    assert.deepEqual(result.controlEvents.map((event) => event.type), ["propose_updates", "route_to_agent"]);
-    assert.equal(result.visibleContent, "提交草案并转交复审。");
-  });
-
   it("does not turn invalid raw tool arguments into empty args", async () => {
     const client = createMockClient([
       createRawToolCallStream(
@@ -837,10 +705,7 @@ describe("AgentRuntime terminal control tools", () => {
       ),
       createTextStream("这段内容不应该出现。"),
     ]);
-    const runtime = new AgentRuntimeImpl({
-      client: client as unknown as OpenAI,
-      isAiConfigured: () => true,
-    });
+    const runtime = createTestRuntime(client);
 
     const result = await runtime.runTurn(createRuntimeOptions());
 
@@ -862,10 +727,7 @@ describe("AgentRuntime terminal control tools", () => {
       }, "我准备直接构建大纲草案。"),
       createTextStream("这段内容不应该出现。"),
     ]);
-    const runtime = new AgentRuntimeImpl({
-      client: client as unknown as OpenAI,
-      isAiConfigured: () => true,
-    });
+    const runtime = createTestRuntime(client);
 
     const result = await runtime.runTurn({
       ...createRuntimeOptions(),
@@ -873,8 +735,8 @@ describe("AgentRuntime terminal control tools", () => {
         {
           type: "function",
           function: {
-            name: "route_to_agent",
-            description: "route only",
+            name: "get_novel_info",
+            description: "read only",
             parameters: { type: "object", properties: {} },
           },
         },
@@ -885,7 +747,7 @@ describe("AgentRuntime terminal control tools", () => {
     assert.equal(result.finishReason, "tool_authorization_error");
     assert.equal(result.controlEvents.length, 0);
     assert.match(result.visibleContent, /未向当前 Agent 暴露/);
-    assert.match(result.visibleContent, /route_to_agent/);
+    assert.match(result.visibleContent, /get_novel_info/);
   });
 });
 
@@ -905,7 +767,7 @@ describe("control tool 参数修复提示", () => {
     assert.match(result.error.minimalExample, /"updates"/);
   });
 
-  it("第一次校验失败会给模型可修复错误，并提示必要时读取角色能力卡", () => {
+  it("第一次校验失败会给模型可修复错误", () => {
     const result = parseControlEventArgsDetailed("propose_updates", {});
     assert.equal(result.success, false);
     if (result.success) return;
@@ -915,7 +777,7 @@ describe("control tool 参数修复提示", () => {
     assert.match(message, /Zod issues:/);
     assert.match(message, /Expected TypeScript shape:/);
     assert.match(message, /Minimal valid example:/);
-    assert.match(message, /get_agent_capability_cards/);
+    assert.match(message, /正文中说明边界/);
     assert.match(message, /tool arguments 只能放短结构化命令/);
     assert.match(message, /ARTIFACT_OUTPUT_START\/END/);
   });
@@ -973,7 +835,7 @@ describe("AgentRuntimeImpl", () => {
     assert.equal(result.toolCalls.length, 0);
   });
 
-  it("executes model tool calls sequentially to avoid database connection spikes", async () => {
+  it("executes safe read tool calls in parallel", async () => {
     const client = createMockClient([
       createMultiToolCallStream([
         { toolName: "get_novel_info", args: {} },
@@ -981,10 +843,7 @@ describe("AgentRuntimeImpl", () => {
       ], "checking context"),
       createTextStream("done"),
     ]);
-    const runtime = new AgentRuntimeImpl({
-      client: client as unknown as OpenAI,
-      isAiConfigured: () => true,
-    });
+    const runtime = createTestRuntime(client);
 
     let releaseFirstTool!: () => void;
     let resolveFirstStarted!: () => void;
@@ -1009,12 +868,60 @@ describe("AgentRuntimeImpl", () => {
     });
 
     await firstStarted;
-    assert.deepEqual(startedTools, ["get_novel_info"]);
+    assert.deepEqual(startedTools, ["get_novel_info", "list_outline_summary"]);
 
     releaseFirstTool();
     const result = await runPromise;
 
     assert.deepEqual(startedTools, ["get_novel_info", "list_outline_summary"]);
+    assert.equal(result.visibleContent, "checking context\n\ndone");
+  });
+
+  it("limits parallel safe tool calls to five per batch", async () => {
+    const toolCalls = Array.from({ length: 6 }, () => ({ toolName: "get_novel_info", args: {} }));
+    const client = createMockClient([
+      createMultiToolCallStream(toolCalls, "checking context"),
+      createTextStream("done"),
+    ]);
+    const runtime = createTestRuntime(client);
+    let active = 0;
+    let maxActive = 0;
+
+    const result = await runtime.runTurn({
+      ...createRuntimeOptions(),
+      toolExecutor: async () => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        active -= 1;
+        return "ok";
+      },
+    });
+
+    assert.equal(maxActive, 5);
+    assert.equal(result.toolResults.length, 6);
+    assert.equal(result.visibleContent, "checking context\n\ndone");
+  });
+
+  it("emits tool result callbacks after read tools complete", async () => {
+    const client = createMockClient([
+      createToolCallStream("get_novel_info", {}, "checking context"),
+      createTextStream("done"),
+    ]);
+    const runtime = createTestRuntime(client);
+    const toolResults: Array<{ toolName: string; result: string }> = [];
+
+    const result = await runtime.runTurn({
+      ...createRuntimeOptions(),
+      toolExecutor: async () => JSON.stringify({ novelName: "遗产猎人", chapterTitle: "第一章" }),
+      onToolResult: (toolName, _args, toolResult) => {
+        toolResults.push({ toolName, result: toolResult });
+      },
+    });
+
+    assert.deepEqual(toolResults, [
+      { toolName: "get_novel_info", result: JSON.stringify({ novelName: "遗产猎人", chapterTitle: "第一章" }) },
+    ]);
     assert.equal(result.visibleContent, "checking context\n\ndone");
   });
 });
@@ -1032,10 +939,7 @@ describe("AgentRuntimeImpl LangSmith tracing", () => {
         createToolCallStream("get_character_detail", { characterId: "char-1" }, "before tool"),
         createTextStream("after tool"),
       ]);
-      const runtime = new AgentRuntimeImpl({
-        client: client as unknown as OpenAI,
-        isAiConfigured: () => true,
-      });
+      const runtime = createTestRuntime(client);
 
       const result = await runtime.runTurn({
         ...createRuntimeOptions(),

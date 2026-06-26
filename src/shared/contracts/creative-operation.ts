@@ -54,7 +54,7 @@ export type CreativeOperationOutputKind = z.infer<typeof CreativeOperationOutput
 export const CreativeOperationSchema = z.object({
   kind: CreativeOperationKindSchema,
   targetType: CreativeOperationTargetTypeSchema,
-  targetId: z.string().optional(),
+  targetId: z.preprocess((value) => value === null ? undefined : value, z.string().optional()),
   userGoal: z.string().min(1),
   primaryAgent: CoreAgentIdSchema,
   reviewers: z.array(CoreAgentIdSchema).default([]),

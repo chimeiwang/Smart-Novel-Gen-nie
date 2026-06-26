@@ -2,14 +2,14 @@
  * Control Tools 定义（Phase 0：协议落地）
  *
  * @module agents/tools/control/control-tools
- * @description Agent 控制面工具：路由、质量评分、更新提案、Beat Plan、校验报告。
+ * @description Agent 控制面工具：质量评分、更新提案、Beat Plan、校验报告、草案评审。
  *   替代 JSON 信封中的 wantsToCall / scores / qualityGate / updates / conflicts 字段。
  *
  *   这些工具的特点：
  *   - toolKind: "control" — runtime 会拦截并转为 AgentControlEvent
  *   - 参数短小、结构化 — 不承载长篇正文
- *   - 不直接写库 — 由 processResult 或 service 处理
- *   - 执行器返回简单确认 — 实际业务逻辑在 runtime/processResult 中
+ *   - 不直接写库 — 由 control-event-processor 或 service 处理
+ *   - 执行器返回简单确认 — 实际业务逻辑在 runtime / operationWorkflow 中
  *
  * @phase Phase 0 — 协议和接口落地
  */
@@ -18,7 +18,6 @@ import { registerTool } from "../registry";
 import { controlToolPermission } from "../permissions";
 import type { ToolCapability } from "../permissions";
 import {
-  RouteToAgentToolArgsSchema,
   QualityReportToolArgsSchema,
   ProposalUpdatesToolArgsSchema,
   StartUpdateBuilderToolArgsSchema,
@@ -33,7 +32,6 @@ import {
   BeatPlanProposalToolArgsSchema,
   ValidationReportToolArgsSchema,
   EvaluationToolArgsSchema,
-  RevisionRequestToolArgsSchema,
 } from "@/shared/contracts/agent-control";
 import {
   AGENT_UPDATE_CHANNEL_RULES_PROMPT,
@@ -69,50 +67,6 @@ registerTool(
 
 registerTool(
   {
-    name: "request_revision",
-    description:
-      "请求目标 Agent 对某个产物返工。适用于评估结论为 revise/block 且需要另一 Agent 修改时。" +
-      "必须尽量引用 artifactId；instructions 必须是可执行返工 brief；不要只写“请修改”。",
-    inputSchema: RevisionRequestToolArgsSchema,
-    permission: controlToolPermission("control.revision", ["编辑", "校验"]),
-    toolKind: "control",
-  },
-  async (args) => {
-    const a = args as { toAgent: string; artifactKey?: string; reason: string };
-    return JSON.stringify({
-      acknowledged: true,
-      routing_to: a.toAgent,
-      artifactKey: a.artifactKey,
-      reason: a.reason,
-    });
-  }
-);
-
-registerTool(
-  {
-    name: "route_to_agent",
-    description:
-      "请求将控制权转交给另一个 Agent。" +
-      "当你认为另一个 Agent 更适合处理当前请求，或者你的工作已完成需要另一个 Agent 继续时，调用此工具。" +
-      "如果你不确定目标 Agent，先调用 get_agent_capability_cards 读取角色能力卡，再以当前任务的主产物和各 Agent 能力边界选择 toAgent。" +
-      "注意：调用此工具后，你的长篇回复（评审报告、校验报告等）仍然保留在对话中，不会丢失。",
-    inputSchema: RouteToAgentToolArgsSchema,
-    permission: controlToolPermission("control.route"),
-    toolKind: "control",
-  },
-  async (args) => {
-    // control 工具的实际逻辑由 runtime 拦截处理。
-    // 此执行器仅返回确认，runtime 已在此之前构造 AgentControlEvent。
-    return JSON.stringify({
-      acknowledged: true,
-      routing_to: args.toAgent,
-      reason: args.reason,
-    });
-  }
-);
-
-registerTool(
-  {
     name: "submit_quality_report",
     description:
       "提交编辑评审或校验的质量评分报告。" +
@@ -142,7 +96,7 @@ registerTool(
       "向用户提议短小的设定/大纲/参考资料修改，并在参数中提交短结构化变更数据。" +
       "当你需要新增、修改、删除角色/地点/物品/势力/术语/角色经历/大纲状态/短小大纲修补/伏笔/参考资料时，调用此工具。" +
       "系统会先创建待审核草案 ReviewArtifact；只有用户最终确认应用后，才会保存到正式数据库。" +
-      "如果用户要求先由其他 Agent 审核、写入前审核、改到满意再写入，请提供 artifactKey，并设置 reviewerAgent 或随后 route_to_agent/request_revision。" +
+      "如果用户要求先由其他 Agent 审核、写入前审核、改到满意再写入，请提供 artifactKey，并设置 reviewerAgent。" +
       "" +
       "重要：" + AGENT_UPDATE_CHANNEL_RULES_PROMPT +
       "注意：tool arguments 本身必须是合法 JSON；summary、updates 等字符串字段里的中文正文引用不要使用半角英文双引号 \"，请改用中文引号「」或书名号《》。如果必须使用半角英文双引号，必须写成转义形式 \\\"，否则会导致工具参数 JSON 解析失败。" +

@@ -35,8 +35,6 @@ export type SerializableGraphStateSnapshot = {
   pendingAgentCall: PendingAgentCall | null;
   errorMessage: string | null;
   qualityCheckId: string | null;
-  nextAgent: CoreAgentId | null;
-  callChainDepth: number;
   controlEvents: AgentControlEvent[] | undefined;
   activeArtifactId: string | null;
   artifactMode: "none" | "review_loop";
@@ -71,8 +69,6 @@ export function serializeGraphStateSnapshot(state: GraphState): string {
     pendingAgentCall: state.pendingAgentCall,
     errorMessage: state.errorMessage,
     qualityCheckId: state.qualityCheckId ?? null,
-    nextAgent: state.nextAgent ?? null,
-    callChainDepth: state.callChainDepth ?? 0,
     controlEvents: state.controlEvents,
     activeArtifactId: state.activeArtifactId ?? null,
     artifactMode: state.artifactMode ?? "none",
@@ -133,8 +129,6 @@ export function deserializeGraphStateSnapshot(
       pendingAgentCall: parsed.pendingAgentCall ?? null,
       errorMessage: parsed.errorMessage ?? null,
       qualityCheckId: parsed.qualityCheckId ?? null,
-      nextAgent: parsed.nextAgent ?? null,
-      callChainDepth: parsed.callChainDepth ?? 0,
       controlEvents: parsed.controlEvents,
       activeArtifactId: parsed.activeArtifactId ?? null,
       artifactMode: parsed.artifactMode ?? "none",

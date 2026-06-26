@@ -9,6 +9,20 @@ import assert from "node:assert/strict";
 import { parseSseEvent, SSE_EVENT_TYPES } from "../sse-events";
 
 describe("SSE event contract", () => {
+  it("parses agent status tool result summaries", () => {
+    const event = parseSseEvent({
+      type: "agent_status",
+      agentId: "编辑",
+      status: "querying",
+      toolName: "get_novel_info",
+      resultSummary: "作品《遗产猎人》 · 当前章《第一章 遗孤与遗产》",
+      detailsHidden: true,
+    });
+
+    assert.equal(event?.type, "agent_status");
+    assert.equal(event?.resultSummary, "作品《遗产猎人》 · 当前章《第一章 遗孤与遗产》");
+  });
+
   it("parses update builder status events", () => {
     const started = parseSseEvent({
       type: "update_builder_started",

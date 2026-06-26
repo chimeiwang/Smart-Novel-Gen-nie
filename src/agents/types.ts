@@ -98,6 +98,7 @@ export interface AgentStatusEvent {
   error?: string;
   toolName?: string;
   argsSummary?: string;
+  resultSummary?: string;
   detailsHidden?: boolean;
 }
 

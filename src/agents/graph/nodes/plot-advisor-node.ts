@@ -11,7 +11,6 @@
  * ## Phase 4 迁移（Agent Runtime 协议重构）
  * - outputMode: "paragraph_text_with_control_tools"（首个迁移 Agent）
  * - 删除 JSON 输出格式要求
- * - route_to_agent 替代 wantsToCall
  * - 段落文本直接输出替代 JSON 信封
  */
 
@@ -39,7 +38,7 @@ const plotAdvisorDefinition: AgentDefinition = {
   // Phase 4：新协议模式（首个迁移 Agent）
   outputMode: "paragraph_text_with_control_tools",
 
-  toolCapabilities: ["novel.read", "character.read", "plot.read", "chapter.read", "artifact.read", "proposal.plot", "control.proposal", "control.builder", "control.artifact", "control.beat", "control.route"],
+  toolCapabilities: ["novel.read", "character.read", "plot.read", "chapter.read", "artifact.read", "proposal.plot", "control.proposal", "control.builder", "control.artifact", "control.beat"],
 
   allowedUpdateSections: ["outline", "outlineContent", "outlineAdjustments", "foreshadowing"],
 
@@ -133,9 +132,9 @@ function buildSystemPrompt(): string {
     "\n- 提交或定位到需要用户查看的草案后，可调用 show_review_artifact 请求前端打开草案弹窗；新建草案时优先传本轮使用的 artifactKey，不需要知道服务端 artifactId；这只是展示请求，不代表已经应用" +
     "\n- 批量创建大纲树时 → 使用 append_outline_tree 提交 stage → plotUnits → chapterGroups 嵌套树；不要提供 parentId、parentKey、clientKey 或 content。服务端会自动生成合法 outlineAdjustments。不要把结构化大纲写成纯文本 outline_draft" +
     "\n- 用户明确要求调整章节结构或更新伏笔时 → 提交 outline/outlineAdjustments/foreshadowing 待审核草案。系统会创建 ReviewArtifact，只有用户最终确认应用后才写入正式库" +
-    "\n- 用户要求“先审核、写入前审核、让编辑/校验复审、改到满意再写入”时 → 草案必须提供 artifactKey，并设置 reviewerAgent 或随后 route_to_agent，把同一个草案交给 reviewer；不要直接要求用户保存" +
+    "\n- 用户要求“先审核、写入前审核、让编辑/校验复审、改到满意再写入”时 → 草案必须提供 artifactKey，并设置 reviewerAgent，把同一个草案交给 reviewer；不要直接要求用户保存" +
     "\n- 当你收到包含 artifactId 的返工任务时 → 先调用 get_active_review_artifact 或 get_review_artifact 读取当前待审核草案；修改后仍围绕同一个 artifactKey/任务提交新 revision" +
-    "\n- 需要当前 Agent 职责外的成果时 → 阅读 Agent 能力卡，选择主责 Agent，并使用 route_to_agent 提供清晰 brief" +
+    "\n- 需要当前 Agent 职责外的成果时 → 在正文中说明缺口和建议的主责方向，不要提交越界草案" +
     "\n\n" + PLOT_UPDATE_SCHEMA_PROMPT;
 }
 

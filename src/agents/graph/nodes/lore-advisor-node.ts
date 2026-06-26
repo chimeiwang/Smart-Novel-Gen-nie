@@ -11,7 +11,6 @@
  * ## Phase 6 迁移（Agent Runtime 协议重构）
  * - outputMode: "paragraph_text_with_control_tools"
  * - propose_updates 替代 updates JSON 字段
- * - route_to_agent 替代 wantsToCall
  * - 段落文本直接输出替代 JSON 信封
  */
 
@@ -36,7 +35,7 @@ const loreAdvisorDefinition: AgentDefinition = {
   // Phase 6：新协议模式
   outputMode: "paragraph_text_with_control_tools",
 
-  toolCapabilities: ["novel.read", "character.read", "lore.read", "plot.read", "artifact.read", "proposal.lore", "control.proposal", "control.builder", "control.artifact", "control.route"],
+  toolCapabilities: ["novel.read", "character.read", "lore.read", "plot.read", "artifact.read", "proposal.lore", "control.proposal", "control.builder", "control.artifact"],
 
   allowedUpdateSections: [
     "characters", "locations", "items", "factions", "glossaries",
@@ -63,7 +62,7 @@ const loreAdvisorDefinition: AgentDefinition = {
       messages.push({
         role: "system",
         content: "## 当前小说摘要索引\n\n" + contextIndex +
-          "\n\n请先基于用户目标判断相关性；如果当前任务主产物不属于设定体系，阅读 Agent 能力卡后选择主责 Agent，并使用 route_to_agent 转交，不要自己提交越界 updates。",
+          "\n\n请先基于用户目标判断相关性；如果当前任务主产物不属于设定体系，说明职责边界和需要的主责方向，不要自己提交越界 updates。",
       });
     }
 
@@ -95,7 +94,7 @@ function buildSystemPrompt(): string {
     "\n你不是固定的设定表单生成器，也不只是新增/修改设定的工具人。" +
     "\n你从世界观、角色、势力、地点、物品、术语、角色经历和设定一致性角度，帮助用户理解、评价、创建、调整和维护设定。" +
     "\n用户可能让你评价角色设定质量、检查世界观理解成本、讨论某个设定能不能支撑剧情、补全设定缺口，或生成待保存的设定变更。先理解任务目标，再行动。" +
-    "\n如果用户点名你但请求的主产物不属于设定体系，先阅读 Agent 能力卡判断主责 Agent，再输出一句可见说明并使用 route_to_agent 转交；不要自己处理或保存越界任务。" +
+    "\n如果用户点名你但请求的主产物不属于设定体系，输出一句可见说明并等待工作流重新分派；不要自己处理或保存越界任务。" +
     "\n\n## 核心原则" +
     "\n\n### 1. 思考 → 行动 → 观察 → 调整" +
     "\n- 先判断用户要处理的设定对象和目标：讨论、评价、创建、修改、同步、排错还是准备给其他 Agent 使用。" +
@@ -124,9 +123,9 @@ function buildSystemPrompt(): string {
     "\n- 完成任务后 → 主动提出 1-3 个下一步建议" +
     `\n- 需要修改设定时 → 短小变更使用 propose_updates；批量角色/地点/物品/势力/术语/角色经历、长世界设定或故事背景使用 ${LORE_UPDATE_BUILDER_TOOL_CHAIN_TEXT} 构建待审核草案。系统会创建 ReviewArtifact，只有用户最终确认应用后才写入正式设定库` +
     "\n- 提交或定位到需要用户查看的草案后，可调用 show_review_artifact 请求前端打开草案弹窗；新建草案时优先传本轮使用的 artifactKey，不需要知道服务端 artifactId；这只是展示请求，不代表已经应用" +
-    "\n- 用户要求“先审核、写入前审核、让某 Agent 复审、改到满意再写入”时 → 草案必须提供 artifactKey，并设置 reviewerAgent 或随后 route_to_agent；不要直接要求用户保存" +
+    "\n- 用户要求“先审核、写入前审核、让某 Agent 复审、改到满意再写入”时 → 草案必须提供 artifactKey，并设置 reviewerAgent；不要直接要求用户保存" +
     "\n- 当你收到包含 artifactId 的返工任务时 → 先调用 get_active_review_artifact 或 get_review_artifact 读取当前待审核草案；修改后围绕同一个 artifactKey/任务提交新 revision" +
-    "\n- 需要当前 Agent 职责外的成果时 → 根据 Agent 能力卡选择主责 Agent 并使用 route_to_agent，不要调用 propose_updates 提交越界 section" +
+    "\n- 需要当前 Agent 职责外的成果时 → 在正文中说明缺口，不要调用 propose_updates 提交越界 section" +
     "\n\n### 6. 章节设定维护" +
     '\n当用户要求"同步最近章节设定"时：' +
     "\n- 先调用 get_recent_chapters 获取正文" +

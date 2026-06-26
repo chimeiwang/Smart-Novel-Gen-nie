@@ -44,8 +44,6 @@ function createState(kind: CreativeOperationKind): WritingState {
     errorMessage: null,
     streamCallbacks: {},
     eventCallbacks: undefined,
-    nextAgent: null,
-    callChainDepth: 0,
     qualityCheckId: null,
     controlEvents: undefined,
     activeArtifactId: null,
@@ -58,35 +56,6 @@ function createState(kind: CreativeOperationKind): WritingState {
 }
 
 describe("executeCreativeOperation control events", () => {
-  it("routes terminal control events from direct-reply operations", async () => {
-    const output: AgentOutput = {
-      agentId: "编辑",
-      agentName: "网文编辑",
-      content: "需要剧情返工。",
-      insights: [],
-      proactiveSuggestions: [],
-    };
-
-    const result = await executeCreativeOperation(createState("review_chapter"), {
-      runInternalAgent: async () => ({
-        editorOutput: output,
-        activeAgent: "编辑",
-        controlEvents: [{
-          type: "request_revision",
-          toAgent: "剧情",
-          reason: "大纲需要返工",
-          instructions: "补强前三章钩子。",
-        }],
-      }),
-      now: () => 1000,
-    });
-
-    assert.equal(result.statePatch.nextAgent, "剧情");
-    assert.equal(result.statePatch.pendingAgentCall?.toAgent, "剧情");
-    assert.match(result.statePatch.pendingAgentCall?.specificQuestion ?? "", /前三章/);
-    assert.equal(result.statePatch.controlEvents, undefined);
-  });
-
   it("emits artifact review events for agent-update operations with reviewerAgent", async () => {
     const output: AgentOutput = {
       agentId: "设定",
@@ -149,10 +118,7 @@ describe("executeCreativeOperation control events", () => {
     });
 
     assert.equal(result.statePatch.activeArtifactId, "artifact-1");
-    assert.equal(result.statePatch.nextAgent, "校验");
-    assert.equal(result.statePatch.pendingAgentCall?.toAgent, "校验");
     assert.ok(emitted.some((event) => event.type === "artifact_submitted"));
-    assert.ok(emitted.some((event) => event.type === "artifact_review_started"));
   });
 
   it("create_outline uses agent_updates artifacts for structured outline drafts", async () => {
@@ -236,7 +202,6 @@ describe("executeCreativeOperation control events", () => {
     assert.equal(capturedUpdates[0]?.outlineContent, undefined);
     assert.equal(capturedUpdates[0]?.outlineAdjustments?.length, 2);
     assert.equal(result.statePatch.activeArtifactId, "outline-artifact-1");
-    assert.equal(result.statePatch.nextAgent, "\u7f16\u8f91");
   });
 
   it("creates a structured beat plan artifact from submit_beat_plan", async () => {
@@ -326,11 +291,8 @@ describe("executeCreativeOperation control events", () => {
 
     assert.equal(result.artifact?.id, undefined);
     assert.equal(result.statePatch.activeArtifactId, "beat-plan-artifact-1");
-    assert.equal(result.statePatch.nextAgent, "编辑");
-    assert.equal(result.statePatch.pendingAgentCall?.toAgent, "编辑");
     assert.equal(textArtifactCalled, false);
     assert.ok(emitted.some((event) => event.type === "artifact_submitted"));
-    assert.ok(emitted.some((event) => event.type === "artifact_review_started"));
     assert.ok(emitted.some((event) => event.type === "beat_plan_submitted"));
   });
 
@@ -419,7 +381,6 @@ describe("executeCreativeOperation control events", () => {
     });
 
     assert.equal(result.statePatch.activeArtifactId, "artifact-1");
-    assert.equal(result.statePatch.nextAgent, null);
     assert.equal(result.statePatch.reviserAgent, null);
     assert.equal(result.statePatch.reviewerAgent, "\u7f16\u8f91");
     assert.equal(result.statePatch.controlEvents, undefined);

@@ -62,7 +62,7 @@ export default async function BillingPage() {
           <div className="panel-body stack">
             <div className="billing-balance">{formatCreditMicros(user.creditBalanceMicros)} 积分</div>
             <p className="muted">
-              100 积分对应 ¥0.1。AI 调用会按 DeepSeek v4 flash 实际用量扣除积分。
+              AI 调用会按实际用量扣除积分。
             </p>
           </div>
         </section>

@@ -2,8 +2,7 @@
  * Agent 能力卡契约。
  *
  * @module shared/contracts/agent-capabilities
- * @description 初始路由可直接使用；Agent 运行时通过 get_agent_capability_cards 工具按需读取。
- *  模型负责阅读能力卡并选择主责 Agent；runtime 仍负责校验目标 Agent、工具 schema 和可保存 section。
+ * @description 初始创作操作路由使用。运行中 Agent 不再读取能力卡自行转交。
  */
 
 import type { AgentUpdateSection } from "./agent-updates";
@@ -16,7 +15,7 @@ export interface AgentCapabilityCard {
   canHandle: string[];
   cannotHandle: string[];
   updateSections: AgentUpdateSection[];
-  handoffNotes: string[];
+  routingNotes: string[];
 }
 
 export const AGENT_CAPABILITY_CARDS: Record<CoreAgentId, AgentCapabilityCard> = {
@@ -45,7 +44,7 @@ export const AGENT_CAPABILITY_CARDS: Record<CoreAgentId, AgentCapabilityCard> = 
       "worldSetting",
       "storyBackground",
     ],
-    handoffNotes: [
+    routingNotes: [
       "任务主产物是大纲、伏笔或章节节奏时，选择更适合的 Agent 承接",
       "任务主产物是角色字段、世界规则或设定条目时，由设定顾问承接",
     ],
@@ -66,9 +65,9 @@ export const AGENT_CAPABILITY_CARDS: Record<CoreAgentId, AgentCapabilityCard> = 
       "不主责提交商业质量评分或正式一致性校验报告",
     ],
     updateSections: ["outline", "outlineContent", "outlineAdjustments", "foreshadowing"],
-    handoffNotes: [
+    routingNotes: [
       "任务主产物是剧情结构、章节安排或伏笔变更时，由剧情顾问承接",
-      "剧情方案需要落到角色不变量或世界规则时，可再转交设定顾问补充",
+      "剧情方案需要落到角色不变量或世界规则时，入口路由应选择设定顾问补充",
     ],
   },
   "写作": {
@@ -86,9 +85,9 @@ export const AGENT_CAPABILITY_CARDS: Record<CoreAgentId, AgentCapabilityCard> = 
       "不主责提交商业评分或一致性校验报告",
     ],
     updateSections: [],
-    handoffNotes: [
+    routingNotes: [
       "任务主产物是正文文本时，由作家承接",
-      "写作前缺少结构方案时，可先转交剧情顾问；缺少设定依据时，可转交设定顾问",
+      "写作前缺少结构方案时，入口路由应选择剧情顾问；缺少设定依据时，入口路由应选择设定顾问",
     ],
   },
   "校验": {
@@ -106,9 +105,9 @@ export const AGENT_CAPABILITY_CARDS: Record<CoreAgentId, AgentCapabilityCard> = 
       "不主责维护设定字段，除非只是指出应由谁修正",
     ],
     updateSections: [],
-    handoffNotes: [
+    routingNotes: [
       "任务目标是查错、审计、一致性、冲突、OOC 或逻辑风险时，由校验员承接",
-      "发现需要改写正文时可转交作家；发现设定缺口时可转交设定顾问",
+      "发现需要改写正文时，入口路由应选择作家；发现设定缺口时，入口路由应选择设定顾问",
     ],
   },
   "编辑": {
@@ -127,9 +126,9 @@ export const AGENT_CAPABILITY_CARDS: Record<CoreAgentId, AgentCapabilityCard> = 
       "不主责做正式一致性冲突审计",
     ],
     updateSections: [],
-    handoffNotes: [
+    routingNotes: [
       "任务目标是商业判断、读者兴趣、钩子、爽点、节奏、追读或技法评审时，由编辑承接",
-      "评审后需要具体结构修改时可转交剧情顾问；需要正文返工时可转交作家；需要补设定时可转交设定顾问",
+      "评审后需要具体结构修改时，入口路由应选择剧情顾问；需要正文返工时，入口路由应选择作家；需要补设定时，入口路由应选择设定顾问",
     ],
   },
 };
@@ -149,23 +148,23 @@ export function formatSingleAgentCapabilityCard(agentId: CoreAgentId): string {
     `能处理：${card.canHandle.join("；")}`,
     `不主责：${card.cannotHandle.join("；")}`,
     `可保存 updates section：${updateText}`,
-    `转交提示：${card.handoffNotes.join("；")}`,
+    `路由提示：${card.routingNotes.join("；")}`,
   ].join("\n");
 }
 
 function buildAgentCapabilityRoutingGuide(): string {
   return [
-    "## Agent 能力卡（路由和转交依据）",
+    "## Agent 能力卡（入口路由依据）",
     "你需要像阅读 skills 一样阅读下面的能力卡，再判断哪个 Agent 是当前任务的主责方。",
     "",
     formatAgentCapabilityCards(),
     "",
     "## 路由原则",
     "- 选择最能产出本轮主要成果的 Agent，而不是只根据关键词匹配。",
-    "- 混合任务优先选择主产物所属 Agent；由主责 Agent 再拆分需要其他 Agent 补充的子任务。",
-    "- 如果当前 Agent 不是主责方，先用一句可见回复说明转交原因，再调用 route_to_agent。",
-    "- 不要静默转交；不要在职责外强行保存不属于当前 Agent 的 updates。",
-    "- 代码会继续校验目标 Agent、工具参数和可保存 section；你只负责做清晰的任务归属判断。",
+    "- 混合任务优先选择主产物所属 Agent。",
+    "- 不要把运行中转交作为默认方案；需要跨角色协作时，由 LangGraph 的 operationWorkflow 和审核/返工边控制。",
+    "- 不要在职责外强行保存不属于当前 Agent 的 updates。",
+    "- 代码会继续校验工具参数和可保存 section；你只负责做清晰的入口任务归属判断。",
   ].join("\n");
 }
 

@@ -105,8 +105,6 @@ async function main() {
     errorMessage: null,
     streamCallbacks: {},
     eventCallbacks: undefined,
-    nextAgent: null,
-    callChainDepth: 0,
     qualityCheckId: null,
     controlEvents: undefined,
     activeArtifactId: null,

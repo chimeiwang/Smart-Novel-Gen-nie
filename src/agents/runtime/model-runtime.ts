@@ -47,6 +47,7 @@ export interface AgentRuntimeOptions {
   maxIterations?: number;
   onChunk?: StreamCallback;
   onToolCall?: (toolName: string, args: Record<string, unknown>) => void;
+  onToolResult?: (toolName: string, args: Record<string, unknown>, result: string) => void;
   metadata?: LLMCallMetadata;
 }
 

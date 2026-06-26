@@ -56,8 +56,6 @@ export const WritingStateAnnotation = Annotation.Root({
   errorMessage: Annotation<string | null>,
   streamCallbacks: Annotation<Record<string, (chunk: string) => void>>,
   eventCallbacks: Annotation<Record<string, (type: string, payload: Record<string, unknown>) => void> | undefined>,
-  nextAgent: Annotation<CoreAgentId | null>,
-  callChainDepth: Annotation<number>,
   qualityCheckId: Annotation<string | null>,
   controlEvents: Annotation<AgentControlEvent[] | undefined>,
   activeArtifactId: Annotation<string | null>,
@@ -181,7 +179,6 @@ async function initSessionNode(state: GraphState) {
     currentOperation,
     operationMode: "operation_graph" as const,
     operationStage: "识别创作操作",
-    callChainDepth: 0,
   };
 }
 

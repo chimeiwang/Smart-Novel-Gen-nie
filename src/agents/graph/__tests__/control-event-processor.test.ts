@@ -102,7 +102,6 @@ describe("processControlEvents", () => {
           taskId: "task-1",
           chapterId: "chapter-1",
           qualityCheckId: null,
-          callChainDepth: 0,
           novelData: {
             novelId: "novel-1",
             chapterId: "chapter-1",
@@ -161,9 +160,7 @@ describe("processControlEvents", () => {
       }
     );
 
-    assert.deepEqual(createdUpdates, event.updates);
-    assert.equal(result.nextAgent, null);
-    assert.equal(result.activeArtifactId, "artifact-1");
+    assert.deepEqual(createdUpdates, event.updates);    assert.equal(result.activeArtifactId, "artifact-1");
     assert.equal(emitted[0].type, "artifact_submitted");
     assert.equal(emitted[0].payload.artifactId, "artifact-1");
   });
@@ -188,7 +185,6 @@ describe("processControlEvents", () => {
           taskId: "task-1",
           chapterId: "chapter-1",
           qualityCheckId: null,
-          callChainDepth: 0,
           novelData: {
             novelId: "novel-1",
             chapterId: "chapter-1",
@@ -251,10 +247,7 @@ describe("processControlEvents", () => {
 
     assert.equal(createdContent, "第一章 遗孤与遗产\n\n主角发现遗产线索，并在章末遇到第一次反转。");
     assert.equal(result.activeArtifactId, "artifact-text-1");
-    assert.equal(result.nextAgent, "编辑");
-    assert.equal(result.pendingAgentCall?.toAgent, "编辑");
     assert.ok(emitted.some((entry) => entry.type === "artifact_submitted"));
-    assert.ok(emitted.some((entry) => entry.type === "artifact_review_started"));
   });
 
   it("show_review_artifact emits a validated display event", async () => {
@@ -272,7 +265,6 @@ describe("processControlEvents", () => {
           taskId: "task-1",
           chapterId: "chapter-1",
           qualityCheckId: null,
-          callChainDepth: 0,
           novelData: createNovelData(),
         },
         activeAgent: "设定",
@@ -339,7 +331,6 @@ describe("processControlEvents", () => {
           taskId: "task-1",
           chapterId: "chapter-1",
           qualityCheckId: null,
-          callChainDepth: 0,
           novelData: createNovelData(),
         },
         activeAgent: "设定",
@@ -403,7 +394,6 @@ describe("processControlEvents", () => {
           taskId: "task-1",
           chapterId: "chapter-1",
           qualityCheckId: null,
-          callChainDepth: 0,
           novelData: {
             novelId: "novel-1",
             chapterId: "chapter-1",
@@ -479,140 +469,6 @@ describe("processControlEvents", () => {
     );
   });
 
-  it("route_to_agent 自动返回下一 Agent 和调用消息", async () => {
-    const emitted: Array<{ type: string; payload: Record<string, unknown> }> = [];
-    const history: AgentMessage[] = [
-      {
-        id: "m1",
-        agentId: "编辑",
-        agentName: "网文编辑",
-        content: "需要作家重写中段。",
-        timestamp: 1,
-      },
-    ];
-
-    const event: AgentControlEvent = {
-      type: "route_to_agent",
-      toAgent: "写作",
-      reason: "中段冲突不足，需要重写",
-      question: "请按返工 brief 重写中段。",
-      contentToRewrite: "原中段正文",
-    };
-
-    const result = await processControlEvents(
-      {
-        events: [event],
-        state: {
-          taskId: "task-1",
-          chapterId: "chapter-1",
-          qualityCheckId: null,
-          callChainDepth: 2,
-        },
-        activeAgent: "编辑",
-        output: {
-          agentId: "编辑",
-          agentName: "网文编辑",
-          content: "## 编辑意见\n\n中段需要重写。",
-        },
-        updatedHistory: history,
-      },
-      {
-        emitEvent: (type, payload) => emitted.push({ type, payload }),
-        interrupt: () => {
-          throw new Error("route_to_agent 不应再触发用户确认 interrupt");
-        },
-        now: () => 12345,
-      }
-    );
-
-    assert.equal(result.nextAgent, "写作");
-    assert.equal(result.callChainDepth, 3);
-    assert.equal(result.conversationHistory.length, 2);
-    assert.equal(result.conversationHistory[1].id, "call_12345");
-    assert.equal(result.pendingAgentCall?.contentToRewrite, "原中段正文");
-    assert.equal(emitted[0].type, "call_confirmed");
-    assert.equal(emitted[0].payload.depth, 3);
-  });
-
-  it("route_to_agent preserves a direct task brief for the target Agent", async () => {
-    const event: AgentControlEvent = {
-      type: "route_to_agent",
-      toAgent: "剧情",
-      reason: "编辑评审认为前十章只抑不扬",
-      question: "请重构前十章，完成后必须交回编辑复审。",
-      contentToRewrite: "前十章大纲",
-    };
-
-    const result = await processControlEvents(
-      {
-        events: [event],
-        state: {
-          taskId: "task-1",
-          chapterId: "chapter-1",
-          qualityCheckId: null,
-          callChainDepth: 0,
-        },
-        activeAgent: "编辑",
-        output: {
-          agentId: "编辑",
-          agentName: "网文编辑",
-          content: "## 编辑意见\n\n需要返工。",
-        },
-        updatedHistory: [],
-      },
-      {
-        emitEvent: () => {},
-        now: () => 456,
-      }
-    );
-
-    assert.equal(result.nextAgent, "剧情");
-    assert.equal(result.pendingAgentCall?.fromAgent, "编辑");
-    assert.equal(result.pendingAgentCall?.toAgent, "剧情");
-    assert.equal(result.pendingAgentCall?.reason, "编辑评审认为前十章只抑不扬");
-    assert.equal(result.pendingAgentCall?.specificQuestion, "请重构前十章，完成后必须交回编辑复审。");
-    assert.equal(result.pendingAgentCall?.contentToRewrite, "前十章大纲");
-    assert.equal(result.conversationHistory[0].isCallMessage, true);
-  });
-
-  it("request_revision routes back to requested Agent with revision brief", async () => {
-    const event = {
-      type: "request_revision",
-      toAgent: "剧情",
-      artifactKey: "outline-revision-1",
-      reason: "编辑复审未通过",
-      instructions: "第 2 章需要补一个明确小赢节点。",
-    } as AgentControlEvent;
-
-    const result = await processControlEvents(
-      {
-        events: [event],
-        state: {
-          taskId: "task-1",
-          chapterId: "chapter-1",
-          qualityCheckId: null,
-          callChainDepth: 1,
-        },
-        activeAgent: "编辑",
-        output: {
-          agentId: "编辑",
-          agentName: "网文编辑",
-          content: "## 复审\n\n仍需修改。",
-        },
-        updatedHistory: [],
-      },
-      {
-        emitEvent: () => {},
-        now: () => 789,
-      }
-    );
-
-    assert.equal(result.nextAgent, "剧情");
-    assert.equal(result.pendingAgentCall?.fromAgent, "编辑");
-    assert.equal(result.pendingAgentCall?.toAgent, "剧情");
-    assert.match(result.pendingAgentCall?.specificQuestion ?? "", /小赢节点/);
-    assert.equal(result.callChainDepth, 2);
-  });
 
   it("submit_evaluation pass marks artifact awaiting user approval", async () => {
     const emitted: Array<{ type: string; payload: Record<string, unknown> }> = [];
@@ -631,7 +487,6 @@ describe("processControlEvents", () => {
           taskId: "task-1",
           chapterId: "chapter-1",
           qualityCheckId: null,
-          callChainDepth: 0,
         },
         activeAgent: "编辑",
         output: {
@@ -673,9 +528,7 @@ describe("processControlEvents", () => {
       }
     );
 
-    assert.equal(result.activeArtifactId, "artifact-1");
-    assert.equal(result.nextAgent, null);
-    assert.ok(emitted.some((entry) => entry.type === "workflow_evaluation_submitted"));
+    assert.equal(result.activeArtifactId, "artifact-1");    assert.ok(emitted.some((entry) => entry.type === "workflow_evaluation_submitted"));
     assert.ok(emitted.some((entry) => entry.type === "artifact_awaiting_user_approval"));
   });
 
@@ -697,7 +550,6 @@ describe("processControlEvents", () => {
             taskId: "task-1",
             chapterId: "chapter-1",
             qualityCheckId: null,
-            callChainDepth: 0,
           },
           activeAgent: "编辑",
           output: {
@@ -760,7 +612,6 @@ describe("processControlEvents", () => {
           taskId: "task-1",
           chapterId: "chapter-1",
           qualityCheckId: null,
-          callChainDepth: 0,
         },
         activeAgent: "编辑",
         output: {
@@ -875,7 +726,6 @@ describe("ReviewArtifact lifecycle routing", () => {
           taskId: "task-1",
           chapterId: "chapter-1",
           qualityCheckId: null,
-          callChainDepth: 0,
           novelData: {
             novelId: "novel-1",
             chapterId: "chapter-1",
@@ -974,11 +824,8 @@ describe("ReviewArtifact lifecycle routing", () => {
         },
       ],
     });
-    assert.equal(persisted[0].status, "under_review");
-    assert.equal(result.nextAgent, "编辑");
-    assert.equal(result.activeArtifactId, "artifact-builder-1");
+    assert.equal(persisted[0].status, "under_review");    assert.equal(result.activeArtifactId, "artifact-builder-1");
     assert.ok(emitted.some((entry) => entry.type === "artifact_submitted"));
-    assert.ok(emitted.some((entry) => entry.type === "artifact_review_started"));
   });
 
   it("update builder expands append_outline_tree before reviewer routing", async () => {
@@ -1034,7 +881,6 @@ describe("ReviewArtifact lifecycle routing", () => {
           taskId: "task-1",
           chapterId: "chapter-1",
           qualityCheckId: null,
-          callChainDepth: 0,
           novelData: createNovelData({
             novelName: "遗产猎人",
             chapterTitle: "第一章",
@@ -1112,11 +958,8 @@ describe("ReviewArtifact lifecycle routing", () => {
         },
       ],
     });
-    assert.equal(persisted[0].status, "under_review");
-    assert.equal(result.nextAgent, "编辑");
-    assert.equal(result.activeArtifactId, "artifact-tree-builder-1");
+    assert.equal(persisted[0].status, "under_review");    assert.equal(result.activeArtifactId, "artifact-tree-builder-1");
     assert.ok(emitted.some((entry) => entry.type === "update_builder_outline_tree_appended"));
-    assert.ok(emitted.some((entry) => entry.type === "artifact_review_started"));
   });
 
   it("put_update_item_text_block emits ignored events for invalid item text writes", async () => {
@@ -1185,7 +1028,6 @@ describe("ReviewArtifact lifecycle routing", () => {
             taskId: "task-1",
             chapterId: "chapter-1",
             qualityCheckId: null,
-            callChainDepth: 0,
             novelData: createNovelData({
               novelName: "遗产猎人",
               chapterTitle: "第一章",
@@ -1263,7 +1105,6 @@ describe("ReviewArtifact lifecycle routing", () => {
           taskId: "task-1",
           chapterId: "chapter-1",
           qualityCheckId: null,
-          callChainDepth: 0,
           novelData: {
             novelId: "novel-1",
             chapterId: "chapter-1",
@@ -1348,7 +1189,6 @@ describe("ReviewArtifact lifecycle routing", () => {
           taskId: "task-1",
           chapterId: "chapter-1",
           qualityCheckId: null,
-          callChainDepth: 0,
           novelData: createNovelData(),
         },
         activeAgent: "设定",
@@ -1421,7 +1261,6 @@ describe("ReviewArtifact lifecycle routing", () => {
           taskId: "task-1",
           chapterId: "chapter-1",
           qualityCheckId: null,
-          callChainDepth: 0,
           novelData: {
             novelId: "novel-1",
             chapterId: "chapter-1",
@@ -1482,9 +1321,7 @@ describe("ReviewArtifact lifecycle routing", () => {
       }
     );
 
-    assert.equal(persisted[0].status, "draft");
-    assert.equal(result.nextAgent, null);
-    assert.ok(emitted.some((entry) => entry.type === "update_builder_validation_failed"));
+    assert.equal(persisted[0].status, "draft");    assert.ok(emitted.some((entry) => entry.type === "update_builder_validation_failed"));
     assert.ok(!emitted.some((entry) => entry.type === "artifact_review_started"));
   });
 
@@ -1510,7 +1347,6 @@ describe("ReviewArtifact lifecycle routing", () => {
           taskId: "task-1",
           chapterId: "chapter-1",
           qualityCheckId: null,
-          callChainDepth: 1,
           novelData: {
             novelId: "novel-1",
             chapterId: "chapter-1",
@@ -1567,193 +1403,7 @@ describe("ReviewArtifact lifecycle routing", () => {
         now: () => 2468,
       }
     );
-
-    assert.equal(result.nextAgent, "编辑");
-    assert.equal(result.callChainDepth, 2);
     assert.equal(result.activeArtifactId, "artifact-review-1");
-    assert.equal(result.pendingAgentCall?.fromAgent, "剧情");
-    assert.equal(result.pendingAgentCall?.toAgent, "编辑");
-    assert.match(result.pendingAgentCall?.specificQuestion ?? "", /artifact-review-1/);
     assert.ok(emitted.some((entry) => entry.type === "artifact_submitted"));
-    assert.ok(emitted.some((entry) => entry.type === "artifact_review_started"));
-  });
-});
-
-describe("self-route protection", () => {
-  const AGENT_PLOT = "\u5267\u60c5" as CoreAgentId;
-  const AGENT_EDITOR = "\u7f16\u8f91" as CoreAgentId;
-
-  it("ignores route_to_agent when it targets the active agent", async () => {
-    const emitted: Array<{ type: string; payload: Record<string, unknown> }> = [];
-    const event: AgentControlEvent = {
-      type: "route_to_agent",
-      toAgent: AGENT_PLOT,
-      reason: "self route should not keep the graph cycling",
-      question: "continue the same task",
-    };
-
-    const result = await processControlEvents(
-      {
-        events: [event],
-        state: {
-          taskId: "task-1",
-          chapterId: "chapter-1",
-          qualityCheckId: null,
-          callChainDepth: 3,
-        },
-        activeAgent: AGENT_PLOT,
-        output: {
-          agentId: AGENT_PLOT,
-          agentName: "Plot Advisor",
-          content: "done",
-        },
-        updatedHistory: [],
-      },
-      {
-        emitEvent: (type, payload) => emitted.push({ type, payload }),
-        now: () => 1000,
-      }
-    );
-
-    assert.equal(result.nextAgent, null);
-    assert.equal(result.pendingAgentCall, undefined);
-    assert.equal(result.callChainDepth, undefined);
-    assert.ok(emitted.some((entry) => entry.type === "route_ignored"));
-  });
-
-  it("ignores request_revision when it targets the active agent", async () => {
-    const emitted: Array<{ type: string; payload: Record<string, unknown> }> = [];
-    const event: AgentControlEvent = {
-      type: "request_revision",
-      toAgent: AGENT_EDITOR,
-      artifactKey: "outline-review",
-      reason: "self revision should not keep the graph cycling",
-      instructions: "revise without routing to self",
-    };
-
-    const result = await processControlEvents(
-      {
-        events: [event],
-        state: {
-          taskId: "task-1",
-          chapterId: "chapter-1",
-          qualityCheckId: null,
-          callChainDepth: 3,
-        },
-        activeAgent: AGENT_EDITOR,
-        output: {
-          agentId: AGENT_EDITOR,
-          agentName: "Editor",
-          content: "revision requested",
-        },
-        updatedHistory: [],
-      },
-      {
-        emitEvent: (type, payload) => emitted.push({ type, payload }),
-        now: () => 1001,
-      }
-    );
-
-    assert.equal(result.nextAgent, null);
-    assert.equal(result.pendingAgentCall, undefined);
-    assert.equal(result.callChainDepth, undefined);
-    assert.ok(emitted.some((entry) => entry.type === "route_ignored"));
-  });
-
-  it("self-route does not block propose_updates reviewer routing", async () => {
-    const emitted: Array<{ type: string; payload: Record<string, unknown> }> = [];
-    const events: AgentControlEvent[] = [
-      {
-        type: "propose_updates",
-        summary: "submit outline revision",
-        artifactKey: "outline-commercial-revision",
-        reviewerAgent: AGENT_EDITOR,
-        updates: {
-          outlineAdjustments: [
-            {
-              action: "update",
-              nodeTitle: "chapter one",
-              content: "add a stronger ending hook",
-            },
-          ],
-        },
-      },
-      {
-        type: "route_to_agent",
-        toAgent: AGENT_PLOT,
-        reason: "invalid self route after submitting the artifact",
-      },
-    ];
-
-    const result = await processControlEvents(
-      {
-        events,
-        state: {
-          taskId: "task-1",
-          chapterId: "chapter-1",
-          qualityCheckId: null,
-          callChainDepth: 1,
-          novelData: {
-            novelId: "novel-1",
-            chapterId: "chapter-1",
-            novelName: "Novel",
-            chapterTitle: "Chapter 1",
-            chapterContent: "",
-            outlineSummary: "",
-            outlineNodes: [],
-            plotProgress: { currentStage: "opening" },
-            storyBackground: "",
-            worldSetting: "",
-            writingBible: null,
-            storyProgress: "",
-            characters: [],
-            items: [],
-            locations: [],
-            factions: [],
-            glossaries: [],
-            foreshadowings: [],
-            references: [],
-            styleProfile: "",
-          },
-        },
-        activeAgent: AGENT_PLOT,
-        output: {
-          agentId: AGENT_PLOT,
-          agentName: "Plot Advisor",
-          content: "submitted",
-        },
-        updatedHistory: [],
-      },
-      {
-        emitEvent: (type, payload) => emitted.push({ type, payload }),
-        createOrUpdateAgentUpdatesArtifact: async (input) => ({
-          id: "artifact-review-2",
-          novelId: input.novelId,
-          chapterId: input.chapterId ?? null,
-          taskId: input.taskId ?? null,
-          workflowRunId: null,
-          artifactKey: input.artifactKey ?? null,
-          kind: "agent_updates",
-          status: "under_review",
-          title: null,
-          summary: input.summary,
-          payload: { kind: "agent_updates", updates: input.updates },
-          diff: [],
-          createdByAgent: input.agentId,
-          updatedByAgent: input.agentId,
-          reviewerAgent: input.reviewerAgent ?? null,
-          revision: 1,
-          createdAt: new Date(0).toISOString(),
-          updatedAt: new Date(0).toISOString(),
-        }),
-        now: () => 1002,
-      }
-    );
-
-    assert.equal(result.nextAgent, AGENT_EDITOR);
-    assert.equal(result.pendingAgentCall?.toAgent, AGENT_EDITOR);
-    assert.equal(result.activeArtifactId, "artifact-review-2");
-    assert.ok(emitted.some((entry) => entry.type === "route_ignored"));
-    assert.ok(emitted.some((entry) => entry.type === "artifact_review_started"));
   });
 });

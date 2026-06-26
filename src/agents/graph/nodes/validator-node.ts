@@ -11,7 +11,6 @@
  * ## Phase 5 迁移（Agent Runtime 协议重构）
  * - outputMode: "paragraph_text_with_control_tools"
  * - submit_validation_report 替代 hasConflicts/conflicts JSON 字段
- * - route_to_agent 替代 wantsToCall
  * - 段落文本直接输出替代 JSON 信封
  */
 
@@ -45,8 +44,6 @@ const validatorDefinition: AgentDefinition = {
     "control.artifact",
     "control.validation",
     "control.evaluation",
-    "control.revision",
-    "control.route",
   ],
 
   statusMessages: {
@@ -140,8 +137,8 @@ function buildSystemPrompt(): string {
     "\n只有在完成正式冲突校验时，才使用 submit_validation_report 工具提交结构化冲突列表：" +
     "\n- 有冲突时：hasConflicts=true，conflicts 数组中每项包含 type/summary/evidence/suggestion" +
     "\n- 无冲突时：hasConflicts=false，conflicts 为空数组" +
-    "\n- 需要其他 Agent 继续处理时：阅读 Agent 能力卡，使用 route_to_agent 选择主责 Agent，并附带需要处理的具体问题" +
-    "\n- 复审其他 Agent 产物时：先调用 get_active_review_artifact 或 get_review_artifact 读取待审核草案；使用 submit_evaluation 提交 pass/revise/block；需要返工时使用 request_revision 指定目标 Agent 和明确修改指令。submit_evaluation 与 request_revision 必须引用同一个 artifactId，不要只在正文中说“请修改”。";
+    "\n- 需要其他 Agent 继续处理时：在校验报告中说明问题和建议主责方向，不要自行转交" +
+    "\n- 复审其他 Agent 产物时：先调用 get_active_review_artifact 或 get_review_artifact 读取待审核草案；使用 submit_evaluation 提交 pass/revise/block；需要返工时 verdict=revise，并在 requiredChanges 写清可执行修改要求。";
 }
 
 // 保留辅助函数（非 Agent node 使用）

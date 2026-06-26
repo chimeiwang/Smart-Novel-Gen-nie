@@ -89,6 +89,7 @@ export const AgentStatusEventSchema = z.object({
   error: z.string().optional(),
   toolName: z.string().optional(),
   argsSummary: z.string().optional(),
+  resultSummary: z.string().optional(),
   detailsHidden: z.boolean().optional(),
 });
 

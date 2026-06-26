@@ -11,7 +11,6 @@
  * ## Phase 5 迁移（Agent Runtime 协议重构）
  * - outputMode: "paragraph_text_with_control_tools"
  * - submit_quality_report 替代 scores/qualityGate/rewriteBrief JSON 字段
- * - route_to_agent 替代 wantsToCall
  * - 段落文本直接输出替代 JSON 信封
  */
 
@@ -47,8 +46,6 @@ const editorDefinition: AgentDefinition = {
     "control.artifact",
     "control.quality",
     "control.evaluation",
-    "control.revision",
-    "control.route",
   ],
   maxIterations: 12,
 
@@ -151,9 +148,9 @@ function buildCraftSystemPrompt(): string {
     "1. 围绕用户指定对象输出技法诊断，不要强行套章节评分表。",
     "2. 能给具体修改示例时，给出改前/改后或可执行写法。",
     "3. 只有正式评审章节正文或质量检查任务时，才使用 submit_quality_report 提交评分。",
-    "4. 严重问题需要其他 Agent 继续处理时，阅读 Agent 能力卡，使用 route_to_agent 选择主责 Agent，并提供可执行 brief。",
-    "5. 当你在复审其他 Agent 的产物时，先调用 get_active_review_artifact 或 get_review_artifact 读取待审核草案；必须使用 submit_evaluation 提交 pass/revise/block 结论；需要返工时使用 request_revision 指定目标 Agent 和明确修改指令。submit_evaluation 与 request_revision 必须引用同一个 artifactId，不要只在正文中说“请修改”。",
-    "6. 你可以评审大纲，但不能自己构建或改写大纲更新草案；需要重构大纲、创建大纲树或修改 outlineAdjustments 时，必须用 request_revision 或 route_to_agent 把可执行 brief 交给剧情 Agent。",
+    "4. 严重问题需要其他 Agent 继续处理时，在评审正文中说明问题和建议主责方向，不要自行转交。",
+    "5. 当你在复审其他 Agent 的产物时，先调用 get_active_review_artifact 或 get_review_artifact 读取待审核草案；必须使用 submit_evaluation 提交 pass/revise/block 结论；需要返工时 verdict=revise，并在 requiredChanges 写清可执行修改要求。",
+    "6. 你可以评审大纲，但不能自己构建或改写大纲更新草案；需要重构大纲、创建大纲树或修改 outlineAdjustments 时，用 submit_evaluation(revise) 说明需要剧情 Agent 处理的修改要求。",
     "",
     "## 你的回复",
     "直接以自然段文本输出完整的技法评审报告。不要用 JSON 包裹，不要使用标题、列表、表格、代码块、引用块或加粗等格式标记。",
@@ -187,9 +184,9 @@ function buildSystemPrompt(): string {
     "1. 直接以自然段文本输出完整评审，不要用 JSON 包裹，不要使用标题、列表、表格、代码块、引用块或加粗等格式标记。",
     "2. 先给结论，再给证据和改法；指出大卖潜力时必须说明依赖条件和短板。",
     "3. 不要把所有任务套入章节评分表。只有正式评审章节正文或质量检查任务时，才使用 submit_quality_report。",
-    "4. 严重问题需要其他 Agent 处理时，使用 route_to_agent 并给明确 brief。",
-    "5. 复审其他 Agent 产物时，先调用 get_active_review_artifact 或 get_review_artifact 读取待审核草案；使用 submit_evaluation 表达通过/返工/阻塞；需要返工时使用 request_revision，instructions 必须能直接执行。submit_evaluation 与 request_revision 必须引用同一个 artifactId。",
-    "6. 你可以评审大纲，但不能自己构建或改写大纲更新草案；需要重构大纲、创建大纲树或修改 outlineAdjustments 时，必须用 request_revision 或 route_to_agent 把可执行 brief 交给剧情 Agent。",
+    "4. 严重问题需要其他 Agent 处理时，在评审正文中说明问题和建议主责方向，不要自行转交。",
+    "5. 复审其他 Agent 产物时，先调用 get_active_review_artifact 或 get_review_artifact 读取待审核草案；使用 submit_evaluation 表达通过/返工/阻塞；需要返工时 verdict=revise，requiredChanges 必须能直接执行。",
+    "6. 你可以评审大纲，但不能自己构建或改写大纲更新草案；需要重构大纲、创建大纲树或修改 outlineAdjustments 时，用 submit_evaluation(revise) 写清需要剧情 Agent 处理的修改要求。",
     "7. 轻微问题只给建议，不触发返工。",
   ].join("\n");
 }

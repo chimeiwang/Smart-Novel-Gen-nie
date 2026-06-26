@@ -136,7 +136,7 @@ src/
 - LangGraph 承接 CreativeOperation 路由后的执行编排、状态、路由、interrupt、短流程恢复和后续可扩展的 checkpointer 能力。
 - 项目自研层包括 `AgentDefinition`、`AgentRunner`、control tools、ReviewArtifact、SSE 协议和业务契约。
 - 新能力应扩展这些既有层，不要另起一套 Agent 框架或流程引擎。
-- `AgentRuntimeImpl` 是唯一多轮 tool-call loop 和 control tool 捕获层；`ModelRuntimePort` 只做模型供应商适配，不解析 `route_to_agent`、`propose_updates` 等业务控制事件。
+- `AgentRuntimeImpl` 是唯一多轮 tool-call loop 和 control tool 捕获层；`ModelRuntimePort` 只做模型供应商适配，不解析 `propose_updates`、`submit_evaluation` 等业务控制事件。
 
 ### CreativeOperation 入口
 
@@ -157,7 +157,6 @@ src/
 
 | Tool | 作用 |
 |------|------|
-| `route_to_agent` | Agent 间转交 |
 | `propose_updates` | 生成短小的待审核更新草案 |
 | `start_update_builder` | 开始或打开批量 AgentUpdates 草稿箱 |
 | `append_update_batch` | 向草稿箱批量追加结构化变更 |
@@ -168,11 +167,10 @@ src/
 | `submit_validation_report` | 提交一致性冲突报告 |
 | `submit_beat_plan` | 提交章节 Beat Plan 摘要 |
 | `submit_evaluation` | 对 ReviewArtifact 提交 pass/revise/block 复审 |
-| `request_revision` | 请求目标 Agent 返工 |
 
-`route_to_agent` 和 `request_revision` 是旧 Agent 子图的终止型 control tools；Runtime 捕获后结束当前 Agent 回合，把后续路由交给 LangGraph。新的创作操作图默认不向内部执行角色暴露这两个工具，主流程跳转由创作操作图决定。
+Agent 间流程跳转不再通过 control tool 表达。入口路由由 `CreativeOperation` 分类决定，审核、返工、用户确认由 `operationWorkflow` 的 LangGraph 节点和 conditional edges 决定。Agent 发现职责外需求时只能在正文中说明边界和缺口，不得自行转交。
 
-AgentRunner 只能向模型暴露当前 Agent 的 `toolCapabilities` 允许的工具，并且必须尊重工具自身的 `permission.agentIds` 白名单；禁止把所有 control tools 无条件给所有 Agent。Runtime 还会拒绝本轮未暴露的 tool call。当前 Agent 发现任务不是自己的职责时，应通过 `get_agent_capability_cards` 判断主责 Agent，然后使用 `route_to_agent`；复审中要求返工时使用 `request_revision`，不要自己越权调用 builder 或 proposal 工具。
+AgentRunner 只能向模型暴露当前 Agent 的 `toolCapabilities` 允许的工具，并且必须尊重工具自身的 `permission.agentIds` 白名单；禁止把所有 control tools 无条件给所有 Agent。Runtime 还会拒绝本轮未暴露的 tool call。复审中要求返工时使用 `submit_evaluation(revise)` 和 `requiredChanges`，由 LangGraph 返工边把 brief 交给主责 Agent。
 
 ### LangGraph 编排
 
@@ -185,7 +183,6 @@ START → initSession → operationWorkflow 创作操作图 → END
 
 - `initSession` 负责识别创作操作，并写入 `currentOperation`。
 - `operationWorkflow` 位于 `src/agents/operations/operation-graph.ts`，按“识别创作操作 → 准备操作上下文 → 执行创作操作 → 提交草案或直接回复 → 审核草案 → 返工草案 → 等待用户决策 → 建议下一步”推进。
-- `chapterWorkflow` 子图仍保留为旧 Agent 兼容路径，不是新入口主干。
 - 使用 `StateGraph`、`Annotation.Root`、conditional edges、`Command`、`interrupt()` 和 `MemorySaver`。`MemorySaver` 仅用于当前进程内短流程，不是生产级停机恢复承诺。
 - 新增多 Agent 循环、人工确认、动态分派、并行子任务或长流程恢复时，必须优先使用 LangGraph 原生能力。
 

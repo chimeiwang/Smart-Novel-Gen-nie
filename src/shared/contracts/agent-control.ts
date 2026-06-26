@@ -36,22 +36,6 @@ import {
 import { TextReviewArtifactKindSchema } from "./review-artifact";
 
 // ============================================
-// route_to_agent — 替代 wantsToCall
-// ============================================
-
-export const RouteToAgentEventSchema = z.object({
-  type: z.literal("route_to_agent"),
-  toAgent: z.enum(["设定", "剧情", "写作", "校验", "编辑"]),
-  reason: z.string().min(1).max(500),
-  question: z.string().max(2000).optional(),
-  contentToRewrite: z.string().max(10000).optional(),
-});
-export type RouteToAgentEvent = z.infer<typeof RouteToAgentEventSchema>;
-
-/** route_to_agent tool 的入参 schema（给 OpenAI function calling 用） */
-export const RouteToAgentToolArgsSchema = RouteToAgentEventSchema.omit({ type: true });
-
-// ============================================
 // submit_quality_report — 替代 scores + qualityGate + rewriteBrief
 // ============================================
 
@@ -489,7 +473,7 @@ export type ValidationReportEvent = z.infer<typeof ValidationReportEventSchema>;
 export const ValidationReportToolArgsSchema = ValidationReportEventSchema.omit({ type: true });
 
 // ============================================
-// evaluator/reviser loop — 通用评估与返工控制
+// evaluator/reviser loop — 通用评估控制
 // ============================================
 
 export const EvaluationEventSchema = z.object({
@@ -505,25 +489,11 @@ export type EvaluationEvent = z.infer<typeof EvaluationEventSchema>;
 /** submit_evaluation tool 的入参 schema */
 export const EvaluationToolArgsSchema = EvaluationEventSchema.omit({ type: true });
 
-export const RevisionRequestEventSchema = z.object({
-  type: z.literal("request_revision"),
-  toAgent: CoreAgentIdSchema,
-  artifactId: z.string().min(1).max(200).optional(),
-  artifactKey: z.string().min(1).max(200).optional(),
-  reason: z.string().min(1).max(500),
-  instructions: z.string().min(1).max(2000),
-});
-export type RevisionRequestEvent = z.infer<typeof RevisionRequestEventSchema>;
-
-/** request_revision tool 的入参 schema */
-export const RevisionRequestToolArgsSchema = RevisionRequestEventSchema.omit({ type: true });
-
 // ============================================
 // Control Event Union
 // ============================================
 
 export const AgentControlEventSchema = z.discriminatedUnion("type", [
-  RouteToAgentEventSchema,
   QualityReportEventSchema,
   ProposalUpdatesEventSchema,
   StartUpdateBuilderEventSchema,
@@ -538,7 +508,6 @@ export const AgentControlEventSchema = z.discriminatedUnion("type", [
   BeatPlanProposalEventSchema,
   ValidationReportEventSchema,
   EvaluationEventSchema,
-  RevisionRequestEventSchema,
 ]);
 export type AgentControlEvent = z.infer<typeof AgentControlEventSchema>;
 
@@ -548,7 +517,6 @@ export type AgentControlEvent = z.infer<typeof AgentControlEventSchema>;
 
 /** control tool name → Zod args schema 的映射 */
 export const CONTROL_TOOL_ARGS_SCHEMAS: Record<string, z.ZodType<Record<string, unknown>>> = {
-  route_to_agent: RouteToAgentToolArgsSchema,
   submit_quality_report: QualityReportToolArgsSchema,
   propose_updates: ProposalUpdatesToolArgsSchema,
   start_update_builder: StartUpdateBuilderToolArgsSchema,
@@ -563,7 +531,6 @@ export const CONTROL_TOOL_ARGS_SCHEMAS: Record<string, z.ZodType<Record<string, 
   submit_beat_plan: BeatPlanProposalToolArgsSchema,
   submit_validation_report: ValidationReportToolArgsSchema,
   submit_evaluation: EvaluationToolArgsSchema,
-  request_revision: RevisionRequestToolArgsSchema,
 };
 
 /** 所有 control tool 名称 */
@@ -587,21 +554,6 @@ export type ControlToolParseResult =
   | { success: false; error: ControlToolValidationError };
 
 const CONTROL_TOOL_REPAIR_HINTS: Record<string, { expectedType: string; minimalExample: string }> = {
-  route_to_agent: {
-    expectedType: [
-      "type RouteToAgentArgs = {",
-      "  toAgent: \"设定\" | \"剧情\" | \"写作\" | \"校验\" | \"编辑\";",
-      "  reason: string; // required, 1-500 chars",
-      "  question?: string; // optional, <= 2000 chars",
-      "  contentToRewrite?: string; // optional, <= 10000 chars",
-      "};",
-    ].join("\n"),
-    minimalExample: JSON.stringify({
-      toAgent: "剧情",
-      reason: "当前任务主产物是大纲结构调整，需要剧情顾问承接。",
-      question: "请根据编辑意见调整前三章大纲节奏。",
-    }, null, 2),
-  },
   submit_quality_report: {
     expectedType: [
       "type SubmitQualityReportArgs = {",
@@ -931,23 +883,6 @@ const CONTROL_TOOL_REPAIR_HINTS: Record<string, { expectedType: string; minimalE
       requiredChanges: "第 2 章补一个可见线索，让读者感到主角有阶段性收获。",
     }, null, 2),
   },
-  request_revision: {
-    expectedType: [
-      "type RequestRevisionArgs = {",
-      "  toAgent: \"设定\" | \"剧情\" | \"写作\" | \"校验\" | \"编辑\";",
-      "  artifactId?: string; // required when available; active artifact is used as fallback",
-      "  artifactKey?: string; // optional, stable key for the artifact to revise",
-      "  reason: string; // required, 1-500 chars",
-      "  instructions: string; // required, 1-2000 chars",
-      "};",
-    ].join("\n"),
-    minimalExample: JSON.stringify({
-      toAgent: "剧情",
-      artifactKey: "outline-revision-1",
-      reason: "编辑复审未通过。",
-      instructions: "保留主线，但提高第 1-3 章爽点密度，并完成后交回评估。",
-    }, null, 2),
-  },
 };
 
 function issuesFromZod(error: z.ZodError): ControlToolValidationIssue[] {
@@ -997,8 +932,6 @@ export function parseControlEventArgsDetailed(
   }
 
   switch (toolName) {
-    case "route_to_agent":
-      return { success: true, event: { type: "route_to_agent", ...result.data } as RouteToAgentEvent };
     case "submit_quality_report":
       return { success: true, event: { type: "submit_quality_report", ...result.data } as QualityReportEvent };
     case "propose_updates":
@@ -1027,8 +960,6 @@ export function parseControlEventArgsDetailed(
       return { success: true, event: { type: "submit_validation_report", ...result.data } as ValidationReportEvent };
     case "submit_evaluation":
       return { success: true, event: { type: "submit_evaluation", ...result.data } as EvaluationEvent };
-    case "request_revision":
-      return { success: true, event: { type: "request_revision", ...result.data } as RevisionRequestEvent };
     default:
       return {
         success: false,
@@ -1053,7 +984,7 @@ export function formatControlToolValidationMessage(
     : `control tool "${error.toolName}" 参数校验失败（第 ${attempt}/${maxAttempts} 次）。`;
   const nextStep = fatal
     ? "未保存任何变更。请重试或缩小修改范围。"
-    : `请修正 tool arguments 后重试；${AGENT_UPDATE_CHANNEL_RULES_PROMPT.replace(/\n/g, " ")} 如果当前任务不属于你的职责，先调用 get_agent_capability_cards，再 route_to_agent。`;
+    : `请修正 tool arguments 后重试；${AGENT_UPDATE_CHANNEL_RULES_PROMPT.replace(/\n/g, " ")} 如果当前任务不属于你的职责，请在正文中说明边界并等待工作流重新分派。`;
 
   return [
     status,

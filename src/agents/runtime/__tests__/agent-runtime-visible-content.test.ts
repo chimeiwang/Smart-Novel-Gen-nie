@@ -52,16 +52,6 @@ describe("visibleContent 聚合（模拟）", () => {
     assert.equal(aggregated.indexOf("## 评审报告"), aggregated.lastIndexOf("## 评审报告"));
   });
 
-  it("parseControlEventArgs 正确解析 control tool → controlEvent 不变", () => {
-    // 验证 control event 解析仍完好（Phase B 不影响此路径）
-    const event = parseControlEventArgs("route_to_agent", {
-      toAgent: "校验",
-      reason: "正文生成完毕",
-    });
-    assert.ok(event);
-    assert.equal(event!.type, "route_to_agent");
-  });
-
   it("submit_quality_report 在长篇报告后调用 → 评分不丢失", () => {
     const event = parseControlEventArgs("submit_quality_report", {
       scores: { hook: 8, tension: 7, payoff: 6, pacing: 8, endingHook: 9, readerPromise: 7, overall: 7 },

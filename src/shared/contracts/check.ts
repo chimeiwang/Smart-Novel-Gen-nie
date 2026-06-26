@@ -157,7 +157,7 @@ void async function main() {
         },
       },
     },
-    { name: "state_update", event: { type: "state_update", node: "processResult", phase: "active" } },
+    { name: "state_update", event: { type: "state_update", node: "operationWorkflow", phase: "active" } },
   ];
 
   let sseFailCount = 0;

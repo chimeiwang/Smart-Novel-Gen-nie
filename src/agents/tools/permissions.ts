@@ -7,7 +7,7 @@
  * 执行规则：
  * - readOnly && concurrencySafe → 可并行执行
  * - !readOnly → 一律不允许 LLM 直接执行写库，只能生成 proposal
- * - requiresConfirmation → proposal 交给 processResult interrupt
+ * - requiresConfirmation → proposal 交给 ReviewArtifact / operationWorkflow interrupt
  *
  * @phase Phase 3 — 工具层重构
  */
@@ -21,18 +21,15 @@ export type ToolCapability =
   | "chapter.read"
   | "style.read"
   | "artifact.read"
-  | "agent.card.read"
   | "proposal.lore"
   | "proposal.plot"
-  | "control.route"
   | "control.quality"
   | "control.proposal"
   | "control.builder"
   | "control.artifact"
   | "control.beat"
   | "control.validation"
-  | "control.evaluation"
-  | "control.revision";
+  | "control.evaluation";
 
 /** 工具权限元信息 */
 export interface ToolPermission {

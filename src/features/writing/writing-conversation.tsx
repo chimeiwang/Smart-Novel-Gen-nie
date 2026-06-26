@@ -33,6 +33,7 @@ import {
 } from "./session-task-state";
 import { shouldPersistOptimisticWritingMessage } from "./message-persistence";
 import { createAsyncActionGuard } from "./send-guard";
+import { getToolActivityLabel, isVisibleToolActivity } from "./tool-activity";
 import "./writing-conversation.css";
 
 type WritingConversationProps = {
@@ -256,23 +257,46 @@ type FlowLogEntry = {
   duration?: number;
 };
 
-/** SSE 事件类型从共享契约导入 + Agent 客户端事件 */
-type ExtendedEvent = WritingSseEvent | OrchestrationEvent;
+type ToolActivityStatus =
+  | "understanding"
+  | "thinking"
+  | "asking"
+  | "discussing"
+  | "drafting"
+  | "refining"
+  | "querying"
+  | "responding"
+  | "parsing"
+  | "suggestions"
+  | "completed"
+  | "done"
+  | "error"
+  | string;
 
-/** AI 思考状态 */
-type AgentStatus = {
-  agentId: string;
-  status: string;
+type ToolActivityEntry = {
+  id: string;
+  status: ToolActivityStatus;
+  label: string;
   message: string;
-  question?: string;
-  targetType?: string;
-  targetName?: string;
-  changes?: string;
+  agentId?: string;
   toolName?: string;
+  toolLabel?: string;
   argsSummary?: string;
-  detailsHidden?: boolean;
+  resultSummary?: string;
   timestamp: number;
 };
+
+type ToolActivityRound = {
+  id: string;
+  anchorMessageId?: string;
+  entries: ToolActivityEntry[];
+  expanded: boolean;
+  running: boolean;
+  updatedAt: number;
+};
+
+/** SSE 事件类型从共享契约导入 + Agent 客户端事件 */
+type ExtendedEvent = WritingSseEvent | OrchestrationEvent;
 
 type QualityCheckQueueProps = {
   checks: QualityCheckData[];
@@ -646,9 +670,9 @@ export function WritingConversation({
   const [cursorPosition, setCursorPosition] = useState(0);
   const [showFlowLog, setShowFlowLog] = useState(false);
   const [flowLogs, setFlowLogs] = useState<FlowLogEntry[]>([]);
+  const [activityRounds, setActivityRounds] = useState<ToolActivityRound[]>([]);
+  const activeActivityRoundRef = useRef<string | null>(null);
 
-  // AI 思考状态
-  const [agentStatus, setAgentStatus] = useState<AgentStatus | null>(null);
   const [currentOperation, setCurrentOperation] = useState<CreativeOperation | null>(null);
   const [currentOperationStage, setCurrentOperationStage] = useState<string | null>(null);
 
@@ -813,6 +837,8 @@ export function WritingConversation({
         setPhase(sessionTaskState.phase);
         setCurrentOperation(sessionTaskState.currentOperation);
         setCurrentOperationStage(sessionTaskState.operationStage);
+        activeActivityRoundRef.current = null;
+        setActivityRounds([]);
         pendingReviewArtifactRefreshRef.current =
           sessionTaskState.shouldRefreshAwaitingReviewArtifact;
       }
@@ -834,6 +860,8 @@ export function WritingConversation({
         await loadSessions();
         setCurrentSessionId(session.id);
         setMessages([]);
+        activeActivityRoundRef.current = null;
+        setActivityRounds([]);
         setPhase("idle");
         setTaskId(null);
         taskIdRef.current = null;
@@ -931,6 +959,7 @@ export function WritingConversation({
       saveMessageToServer(msg.role, msg.content, msg.agentId, msg.intent, sessionId);
     }
     setTimeout(scrollToBottom, 50);
+    return newMsg.id;
   }, [saveMessageToServer]);
 
   const getAgentInfo = (agentId: string) => {
@@ -941,30 +970,104 @@ export function WritingConversation({
     return AGENT_REGISTRY.find((a) => a.id === agentId)?.name ?? agentId;
   }, []);
 
+  const startActivityRound = useCallback((anchorMessageId?: string) => {
+    const roundId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    activeActivityRoundRef.current = roundId;
+    setActivityRounds((prev) => [
+      ...prev,
+      {
+        id: roundId,
+        anchorMessageId,
+        entries: [],
+        expanded: true,
+        running: true,
+        updatedAt: Date.now(),
+      },
+    ]);
+    return roundId;
+  }, []);
+
+  const ensureActivityRound = useCallback(() => {
+    if (activeActivityRoundRef.current) return activeActivityRoundRef.current;
+    return startActivityRound();
+  }, [startActivityRound]);
+
+  const addActivityEntry = useCallback((entry: Omit<ToolActivityEntry, "id" | "timestamp">) => {
+    const roundId = ensureActivityRound();
+    const nextEntry: ToolActivityEntry = {
+      ...entry,
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      timestamp: Date.now(),
+    };
+    setActivityRounds((prev) =>
+      prev.map((round) =>
+        round.id === roundId
+          ? { ...round, entries: [...round.entries, nextEntry], running: true, expanded: true, updatedAt: Date.now() }
+          : round
+      )
+    );
+  }, [ensureActivityRound]);
+
+  const attachActivityRoundToMessage = useCallback((messageId: string) => {
+    const roundId = activeActivityRoundRef.current;
+    if (!roundId) return;
+    setActivityRounds((prev) =>
+      prev.map((round) =>
+        round.id === roundId ? { ...round, anchorMessageId: messageId, updatedAt: Date.now() } : round
+      )
+    );
+  }, []);
+
+  const finishActivityRound = useCallback((status: "done" | "error" = "done") => {
+    const roundId = activeActivityRoundRef.current;
+    if (!roundId) return;
+    setActivityRounds((prev) =>
+      prev.map((round) =>
+        round.id === roundId
+          ? {
+              ...round,
+              running: false,
+              expanded: false,
+              updatedAt: Date.now(),
+              entries: status === "error"
+                ? [
+                    ...round.entries,
+                    {
+                      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                      status: "error",
+                      label: "出错",
+                      message: "处理出错",
+                      timestamp: Date.now(),
+                    },
+                  ]
+                : round.entries,
+            }
+          : round
+      )
+    );
+    activeActivityRoundRef.current = null;
+  }, []);
+
+  const collapseActivityRound = useCallback(() => {
+    const roundId = activeActivityRoundRef.current;
+    if (!roundId) return;
+    setActivityRounds((prev) =>
+      prev.map((round) =>
+        round.id === roundId ? { ...round, running: false, expanded: false, updatedAt: Date.now() } : round
+      )
+    );
+  }, []);
+
+  const toggleActivityRound = useCallback((roundId: string) => {
+    setActivityRounds((prev) =>
+      prev.map((round) => round.id === roundId ? { ...round, expanded: !round.expanded } : round)
+    );
+  }, []);
+
   const formatOperationLog = useCallback((operation: CreativeOperation): string => {
     const label = getCreativeOperationLabel(operation.kind);
     return `${label} → ${getAgentName(operation.primaryAgent)} · ${operation.userGoal}`;
   }, [getAgentName]);
-
-  /** 获取状态图标 */
-  const getStatusIcon = (status: string): string => {
-    const icons: Record<string, string> = {
-      understanding: "🔍",
-      thinking: "💭",
-      asking: "❓",
-      discussing: "💬",
-      drafting: "✍️",
-      refining: "🔧",
-      querying: "📚",
-      responding: "✍️",
-      parsing: "🧩",
-      suggestions: "💡",
-      completed: "✅",
-      done: "✅",
-      error: "❌",
-    };
-    return icons[status] || "🤔";
-  };
 
   /** 获取状态标签 */
   const getStatusLabel = (status: string): string => {
@@ -1178,27 +1281,35 @@ export function WritingConversation({
         break;
 
       case "agent_status":
-        const statusMessage = event.toolName
-          ? `正在调用工具: ${event.toolName}`
-          : event.message || "";
-        setAgentStatus({
-          agentId: event.agentId,
-          status: event.status || "unknown",
-          message: statusMessage,
-          question: event.question,
-          targetType: event.targetType,
-          targetName: event.targetName,
-          changes: event.changes,
-          toolName: event.toolName,
-          argsSummary: event.argsSummary,
-          detailsHidden: event.detailsHidden,
-          timestamp: Date.now(),
-        });
+        if (event.toolName && isVisibleToolActivity(event.toolName)) {
+          const toolLabel = getToolActivityLabel(event.toolName);
+          const resultSummary = "resultSummary" in event && typeof event.resultSummary === "string"
+            ? event.resultSummary
+            : "";
+          addActivityEntry({
+            status: "querying",
+            label: getStatusLabel("querying"),
+            message: resultSummary || `正在${toolLabel}`,
+            agentId: event.agentId,
+            toolName: event.toolName,
+            toolLabel,
+            argsSummary: event.argsSummary && event.argsSummary !== "无参数" ? event.argsSummary : undefined,
+            resultSummary,
+          });
+        } else if (!event.toolName) {
+          const status = event.status || "thinking";
+          addActivityEntry({
+            status,
+            label: getStatusLabel(status),
+            message: event.message || getStatusLabel(status),
+            agentId: event.agentId,
+          });
+        }
         addFlowLog({ 
           type: "agent_status",
           agentId: event.agentId,
           content: event.toolName
-            ? `调用工具：${event.toolName}${event.argsSummary ? `（${event.argsSummary}）` : ""}${event.detailsHidden ? "，结果已隐藏" : ""}`
+            ? `调用工具：${event.toolName}${event.argsSummary ? `（${event.argsSummary}）` : ""}${"resultSummary" in event && event.resultSummary ? ` → ${event.resultSummary}` : ""}${event.detailsHidden ? "，结果已隐藏" : ""}`
             : `[${event.status}] ${event.message}${event.question ? `\n问题: ${event.question}` : ""}`
         });
         break;
@@ -1230,7 +1341,7 @@ export function WritingConversation({
         });
 
         if (finalContent) {
-          addMessage({
+          const messageId = addMessage({
             role: "agent",
             agentId: event.agentId,
             agentName: getAgentName(event.agentId),
@@ -1238,6 +1349,7 @@ export function WritingConversation({
             isNewProtocol: true, // Phase D：新协议消息，不解析 assistant prose
             persist: false,
           });
+          attachActivityRoundToMessage(messageId);
           // Phase D：scores/qualityGate 仅从 SSE event 读取（服务端已通过 processControlEvents 落库）
           // 前端不再从 assistant prose 解析这些字段
           saveActiveQualityCheckResult(event.agentId, finalContent, {
@@ -1250,8 +1362,7 @@ export function WritingConversation({
         setStreamingContent("");
         streamingRef.current = { agentId: "", content: "" };
         agentStartTimes.current.delete(event.agentId);
-        // 清空 AI 思考状态
-        setAgentStatus(null);
+        collapseActivityRound();
         addFlowLog({
           type: "agent_done",
           agentId: event.agentId,
@@ -1466,6 +1577,7 @@ export function WritingConversation({
 
       case "completed":
       case "done":
+        finishActivityRound("done");
         setPhase(resolveTerminalStreamPhase<WritingPhase>({
           visibleArtifactStatus: activeReviewArtifactRef.current?.status ?? null,
           completedPhase: "completed",
@@ -1479,6 +1591,7 @@ export function WritingConversation({
         break;
 
       case "error":
+        finishActivityRound("error");
         if (reviewArtifactActionRef.current?.status === "pending") {
           updateReviewArtifactAction({
             ...reviewArtifactActionRef.current,
@@ -1499,7 +1612,7 @@ export function WritingConversation({
         console.debug("[SSE] 未处理的事件类型:", (event as ExtendedEvent).type, event);
         break;
     }
-  }, [messages.length, addMessage, addFlowLog, formatOperationLog, getAgentName, loadSessions, loadReviewArtifacts, onComplete, openReviewArtifactModal, scheduleReviewArtifactModalClose, saveActiveQualityCheckResult, setWorkflowReviewArtifact, updateReviewArtifactAction]);
+  }, [messages.length, addActivityEntry, addMessage, addFlowLog, attachActivityRoundToMessage, collapseActivityRound, finishActivityRound, formatOperationLog, getAgentName, loadSessions, loadReviewArtifacts, onComplete, openReviewArtifactModal, scheduleReviewArtifactModalClose, saveActiveQualityCheckResult, setWorkflowReviewArtifact, updateReviewArtifactAction]);
 
   const runSendAction = useCallback(<T,>(action: () => Promise<T>) => {
     return sendGuardRef.current.run(action);
@@ -1517,6 +1630,7 @@ export function WritingConversation({
 
     setUserInput("");
     addMessage({ role: "user", content: userMessage, sessionId: sessionIdForRequest, persist: false });
+    startActivityRound();
     addFlowLog({ type: "user", content: `用户: ${userMessage.slice(0, 50)}${userMessage.length > 50 ? "..." : ""}` });
     setPhase("discussing");
     setIsSending(true);
@@ -1580,6 +1694,7 @@ export function WritingConversation({
 
       setUserInput("");
       addMessage({ role: "user", content: message, persist: false });
+      startActivityRound();
       setIsSending(true);
 
       const controller = new AbortController();
@@ -2393,6 +2508,60 @@ export function WritingConversation({
     await guarded;
   };
 
+  const getActivityRoundTitle = (round: ToolActivityRound) => {
+    const queryCount = round.entries.filter((entry) => entry.status === "querying" && entry.toolName && !entry.resultSummary).length;
+    const latest = round.entries[round.entries.length - 1];
+    const stateLabel = round.running ? latest?.label ?? "处理中" : "已完成";
+    return `${stateLabel}${queryCount > 0 ? ` · 查询 ${queryCount} 次` : ""}`;
+  };
+
+  const getActivityGroups = (round: ToolActivityRound) => {
+    const groups = [
+      { key: "thinking", label: "思考", entries: round.entries.filter((entry) => entry.status !== "querying" && entry.status !== "responding" && entry.status !== "parsing") },
+      { key: "querying", label: "查询", entries: round.entries.filter((entry) => entry.status === "querying") },
+      { key: "responding", label: "生成", entries: round.entries.filter((entry) => entry.status === "responding") },
+      { key: "parsing", label: "整理", entries: round.entries.filter((entry) => entry.status === "parsing") },
+    ];
+    return groups.filter((group) => group.entries.length > 0);
+  };
+
+  const renderActivityRound = (round: ToolActivityRound) => {
+    if (round.entries.length === 0) return null;
+    return (
+      <div key={round.id} className={`activity-round ${round.running ? "is-running" : "is-finished"}`}>
+        <button
+          type="button"
+          className="activity-round-toggle"
+          onClick={() => toggleActivityRound(round.id)}
+          aria-expanded={round.expanded}
+        >
+          <span className="activity-caret" aria-hidden="true">{round.expanded ? "⌄" : "›"}</span>
+          <span className="activity-summary">{getActivityRoundTitle(round)}</span>
+        </button>
+        {round.expanded ? (
+          <div className="activity-groups">
+            {getActivityGroups(round).map((group) => (
+              <div key={group.key} className={`activity-group activity-group-${group.key}`}>
+                <div className="activity-group-label">{group.label}</div>
+                <div className="activity-group-items">
+                  {group.entries.map((entry) => (
+                    <div key={entry.id} className={`activity-item ${entry.resultSummary ? "has-result" : ""}`}>
+                      <span className="activity-dot" aria-hidden="true" />
+                      <span className="activity-item-main">
+                        {entry.resultSummary || entry.toolLabel || entry.message}
+                        {entry.argsSummary ? <span className="activity-args">参数：{entry.argsSummary}</span> : null}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
   const renderQuickReviewActions = (artifact: ReviewArtifactData) => {
     const localDraftForApply = getLocalReviewDraftForApply(artifact);
     const action = getReviewArtifactAction(artifact.id);
@@ -2430,6 +2599,9 @@ export function WritingConversation({
       </>
     );
   };
+
+  const pendingActivityRounds = activityRounds.filter((round) => !round.anchorMessageId);
+  const shouldShowStreamingMessage = Boolean(currentStreamingAgent && (streamingContent || pendingActivityRounds.length > 0));
 
   const currentSession = sessions.find(s => s.id === currentSessionId);
   const workflowReviewArtifact = resolveVisibleReviewArtifact(optimisticReviewArtifact, messages);
@@ -2546,56 +2718,60 @@ export function WritingConversation({
           const isUser = msg.role === "user";
           const info = msg.agentId ? getAgentInfo(msg.agentId) : null;
           const isEditing = editingMessageId === msg.id;
+          const anchoredRounds = activityRounds.filter((round) => round.anchorMessageId === msg.id);
 
           return (
-            <div key={msg.id} className={`message ${isUser ? "message-user" : "message-agent"}`}>
-              {!isUser && (
-                <div className={`message-avatar tone-${info?.tone ?? "gray"}`}>
-                  {info?.emoji}
-                </div>
-              )}
-              <div className="message-body">
-                <div className="message-header">
-                  {msg.agentName || (msg.role === "system" ? "系统" : msg.role === "user" ? "我" : "助手")}
-                </div>
-	                <div className="message-content">
-	                  <ParagraphText text={renderParagraphMessageContent(msg)} />
-	                </div>
-                {msg.intent && (
-                  <div className="message-intent">{msg.intent}</div>
-                )}
-                <div className="message-actions">
-                  {!isUser && msg.agentId && (
-                    <button className="action-btn" title="重试" onClick={() => {
-                      const prevUserMsg = messages.slice(0, index).reverse().find(m => m.role === "user");
-                      if (prevUserMsg) handleSendMessage(prevUserMsg.content);
-                    }}>↩</button>
-                  )}
-                  <button className="action-btn" title="删除（从上下文移除）" onClick={() => {
-                    setMessages(prev => prev.filter(m => m.id !== msg.id));
-                  }}>✕</button>
-                  {hasCopyableContent(msg.content) && (
-                    <button className={`copy-btn ${copiedMessageId === msg.id ? "copied" : ""}`} onClick={() => copyFullVersion(msg)}>
-                      {copiedMessageId === msg.id ? "已复制 ✓" : "复制"}
-                    </button>
-                  )}
-                  {isUser && !isSending && (
-                    <button className="edit-btn" onClick={() => startEditMessage(msg)}>✏️</button>
-                  )}
-                </div>
-                {isEditing && (
-                  <div className="edit-hint">
-                    编辑中... 按发送重新提交
-                    <button onClick={cancelEdit}>取消</button>
+            <div key={msg.id} className="message-group">
+              <div className={`message ${isUser ? "message-user" : "message-agent"}`}>
+                {!isUser && (
+                  <div className={`message-avatar tone-${info?.tone ?? "gray"}`}>
+                    {info?.emoji}
                   </div>
                 )}
+                <div className="message-body">
+                  <div className="message-header">
+                    {msg.agentName || (msg.role === "system" ? "系统" : msg.role === "user" ? "我" : "助手")}
+                  </div>
+                  <div className="message-content">
+                    {anchoredRounds.map(renderActivityRound)}
+                    <ParagraphText text={renderParagraphMessageContent(msg)} />
+                  </div>
+                  {msg.intent && (
+                    <div className="message-intent">{msg.intent}</div>
+                  )}
+                  <div className="message-actions">
+                    {!isUser && msg.agentId && (
+                      <button className="action-btn" title="重试" onClick={() => {
+                        const prevUserMsg = messages.slice(0, index).reverse().find(m => m.role === "user");
+                        if (prevUserMsg) handleSendMessage(prevUserMsg.content);
+                      }}>↩</button>
+                    )}
+                    <button className="action-btn" title="删除（从上下文移除）" onClick={() => {
+                      setMessages(prev => prev.filter(m => m.id !== msg.id));
+                    }}>✕</button>
+                    {hasCopyableContent(msg.content) && (
+                      <button className={`copy-btn ${copiedMessageId === msg.id ? "copied" : ""}`} onClick={() => copyFullVersion(msg)}>
+                        {copiedMessageId === msg.id ? "已复制 ✓" : "复制"}
+                      </button>
+                    )}
+                    {isUser && !isSending && (
+                      <button className="edit-btn" onClick={() => startEditMessage(msg)}>✏️</button>
+                    )}
+                  </div>
+                  {isEditing && (
+                    <div className="edit-hint">
+                      编辑中... 按发送重新提交
+                      <button onClick={cancelEdit}>取消</button>
+                    </div>
+                  )}
+                </div>
+                {isUser && <div className="message-avatar user-avatar">我</div>}
               </div>
-              {isUser && <div className="message-avatar user-avatar">我</div>}
             </div>
           );
         })}
 
-        {currentStreamingAgent && streamingContent && (
+        {shouldShowStreamingMessage && currentStreamingAgent && (
           <div className="message message-agent">
             <div className={`message-avatar tone-${getAgentInfo(currentStreamingAgent).tone}`}>
               {getAgentInfo(currentStreamingAgent).emoji}
@@ -2603,8 +2779,9 @@ export function WritingConversation({
             <div className="message-body">
               <div className="message-header">{getAgentName(currentStreamingAgent)}</div>
               <div className="message-content streaming">
-                <ParagraphText text={streamingContent} />
-                <span className="cursor">●</span>
+                {pendingActivityRounds.map(renderActivityRound)}
+                {streamingContent ? <ParagraphText text={streamingContent} /> : null}
+                {streamingContent ? <span className="cursor">●</span> : null}
               </div>
             </div>
           </div>
@@ -2623,36 +2800,6 @@ export function WritingConversation({
               <div className="operation-status-flags">
                 {currentOperation.requiresArtifact ? <span>待审核草案</span> : null}
                 {currentOperation.requiresUserApproval ? <span>用户确认</span> : null}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* AI 思考状态卡片 */}
-        {currentStreamingAgent && agentStatus && (
-          <div className={`agent-status-card status-${agentStatus.status}`}>
-            <div className="agent-status-header">
-              <span className="status-icon">{getStatusIcon(agentStatus.status)}</span>
-              <span className="status-label">AI 正在{getStatusLabel(agentStatus.status)}</span>
-            </div>
-            <div className="agent-status-message">{agentStatus.message}</div>
-            {agentStatus.toolName && (
-              <div className="agent-status-detail">
-                工具：{agentStatus.toolName}
-                {agentStatus.argsSummary && ` · 参数：${agentStatus.argsSummary}`}
-                {agentStatus.detailsHidden && " · 返回内容默认隐藏"}
-              </div>
-            )}
-            {agentStatus.question && (
-              <div className="agent-status-question">
-                <span className="question-icon">❓</span>
-                <span>{agentStatus.question}</span>
-              </div>
-            )}
-            {agentStatus.targetType && (
-              <div className="agent-status-detail">
-                设定类型：{agentStatus.targetType}
-                {agentStatus.targetName && ` · ${agentStatus.targetName}`}
               </div>
             )}
           </div>

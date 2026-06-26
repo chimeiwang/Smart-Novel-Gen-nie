@@ -174,6 +174,14 @@
   margin-bottom: 20px;
 }
 
+.writing-chat .message-group {
+  margin-bottom: 16px;
+}
+
+.writing-chat .message-group > .message {
+  margin-bottom: 8px;
+}
+
 .writing-chat .message-user {
   flex-direction: row-reverse;
 }
@@ -199,6 +207,14 @@
 .writing-chat .message-body {
   max-width: 85%;
   min-width: 200px;
+}
+
+.writing-chat .message-agent .message-body {
+  width: min(720px, calc(100% - 48px));
+}
+
+.writing-chat .message-user .message-body {
+  width: fit-content;
 }
 
 .writing-chat .message-header {
@@ -1154,6 +1170,107 @@
 .writing-chat .flow-error { background: rgba(255,77,77,0.1); }
 .writing-chat .flow-error .flow-text { color: #ff4d4f; }
 
+.writing-chat .activity-round {
+  margin: 0 0 12px;
+  padding: 0 0 10px;
+  border-bottom: 1px solid var(--divider, #ebe5d9);
+  color: var(--text-muted, #767d86);
+  font-size: 13px;
+}
+
+.writing-chat .activity-round-toggle {
+  width: 100%;
+  min-height: 24px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.writing-chat .activity-round-toggle:hover {
+  color: var(--text-secondary, #4f565f);
+}
+
+.writing-chat .activity-caret {
+  width: 16px;
+  color: var(--text-subtle, #9a9fa6);
+  font-size: 16px;
+  line-height: 16px;
+}
+
+.writing-chat .activity-summary {
+  color: var(--text-muted, #767d86);
+  font-weight: 600;
+}
+
+.writing-chat .activity-groups {
+  display: grid;
+  gap: 6px;
+  padding: 8px 0 0 22px;
+}
+
+.writing-chat .activity-group {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.writing-chat .activity-group-label {
+  color: var(--text-muted, #767d86);
+  font-weight: 600;
+}
+
+.writing-chat .activity-group-items {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.writing-chat .activity-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+
+.writing-chat .activity-dot {
+  width: 5px;
+  height: 5px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--border-strong, #d6ccbb);
+  flex: 0 0 auto;
+}
+
+.writing-chat .activity-item.has-result .activity-dot {
+  background: var(--text-muted, #767d86);
+}
+
+.writing-chat .activity-item-main {
+  min-width: 0;
+  color: var(--text-secondary, #4f565f);
+  overflow-wrap: anywhere;
+}
+
+.writing-chat .activity-item.has-result .activity-item-main {
+  color: var(--text, #1f2328);
+}
+
+.writing-chat .activity-args {
+  display: block;
+  margin-top: 1px;
+  color: var(--text-subtle, #9a9fa6);
+  font-family: var(--font-mono, "Geist Mono", "JetBrains Mono", ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 17px;
+}
+
 /* 输入区域 */
 .writing-chat .chat-input {
   background: white;
@@ -1643,138 +1760,6 @@
 .writing-chat .session-item:hover .delete-btn { opacity: 1; }
 .writing-chat .delete-btn:hover { background: #ff4d4f; color: white; }
 
-/* AI 思考状态卡片 */
-.writing-chat .agent-status-card {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 12px;
-  padding: 16px;
-  margin: 12px 0;
-  color: white;
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-  animation: slideIn 0.3s ease-out;
-  max-width: 100%;
-  overflow-wrap: break-word;
-  word-wrap: break-word;
-  word-break: break-word;
-}
-
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.writing-chat .agent-status-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-  font-size: 13px;
-  opacity: 0.9;
-}
-
-.writing-chat .agent-status-header .status-icon {
-  font-size: 16px;
-  animation: pulse 1.5s infinite;
-  flex-shrink: 0;
-}
-
-@keyframes pulse {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.1); }
-}
-
-.writing-chat .agent-status-message {
-  font-size: 14px;
-  font-weight: 500;
-  margin-bottom: 8px;
-  line-height: 1.4;
-  overflow-wrap: break-word;
-  word-wrap: break-word;
-  word-break: break-word;
-}
-
-.writing-chat .agent-status-question {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.15);
-  border-radius: 8px;
-  font-size: 13px;
-  margin-top: 10px;
-}
-
-.writing-chat .agent-status-question .question-icon {
-  font-size: 14px;
-  flex-shrink: 0;
-}
-
-.writing-chat .agent-status-question span:last-child {
-  overflow-wrap: break-word;
-  word-wrap: break-word;
-  word-break: break-word;
-}
-
-.writing-chat .agent-status-detail {
-  font-size: 12px;
-  opacity: 0.8;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.2);
-  overflow-wrap: break-word;
-  word-wrap: break-word;
-}
-
-/* 不同状态的配色 */
-.writing-chat .agent-status-card.status-understanding {
-  background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
-}
-
-.writing-chat .agent-status-card.status-thinking {
-  background: linear-gradient(135deg, #9b59b6 0%, #8e44ad 100%);
-}
-
-.writing-chat .agent-status-card.status-asking {
-  background: linear-gradient(135deg, #e67e22 0%, #d35400 100%);
-}
-
-.writing-chat .agent-status-card.status-discussing {
-  background: linear-gradient(135deg, #1abc9c 0%, #16a085 100%);
-}
-
-.writing-chat .agent-status-card.status-drafting {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-}
-
-.writing-chat .agent-status-card.status-refining {
-  background: linear-gradient(135deg, #f39c12 0%, #e74c3c 100%);
-}
-
-.writing-chat .agent-status-card.status-querying {
-  background: linear-gradient(135deg, #34495e 0%, #2c3e50 100%);
-}
-
-.writing-chat .agent-status-card.status-responding,
-.writing-chat .agent-status-card.status-parsing,
-.writing-chat .agent-status-card.status-suggestions {
-  background: linear-gradient(135deg, #2f54eb 0%, #13c2c2 100%);
-}
-
-.writing-chat .agent-status-card.status-completed,
-.writing-chat .agent-status-card.status-done {
-  background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%);
-}
-
-.writing-chat .agent-status-card.status-error {
-  background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
-}
-
 .writing-chat .operation-status-card {
   margin: 10px 0;
   padding: 12px 14px;
@@ -2151,48 +2136,9 @@
   color: #c92a2a;
 }
 
-.writing-chat .agent-status-card,
-.writing-chat .agent-status-card.status-understanding,
-.writing-chat .agent-status-card.status-thinking,
-.writing-chat .agent-status-card.status-asking,
-.writing-chat .agent-status-card.status-discussing,
-.writing-chat .agent-status-card.status-drafting,
-.writing-chat .agent-status-card.status-refining,
-.writing-chat .agent-status-card.status-querying,
-.writing-chat .agent-status-card.status-responding,
-.writing-chat .agent-status-card.status-parsing,
-.writing-chat .agent-status-card.status-suggestions {
-  background: var(--accent-soft);
-  border: 1px solid #cfe7ff;
-  color: var(--accent-hover);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow);
-}
-
-.writing-chat .agent-status-card.status-completed,
-.writing-chat .agent-status-card.status-done {
-  background: #eafaf1;
-  border-color: #ccefd9;
-  color: #1f8f4d;
-}
-
-.writing-chat .agent-status-card.status-error {
-  background: #fff0f0;
-  border-color: #ffd6d6;
-  color: #c92a2a;
-}
-
 .writing-chat .operation-status-card {
   background: #f8fbff;
   border-color: #cfe7ff;
   border-radius: var(--radius);
   box-shadow: var(--shadow);
-}
-
-.writing-chat .agent-status-question {
-  background: rgba(255, 255, 255, 0.65);
-}
-
-.writing-chat .agent-status-detail {
-  border-top-color: rgba(47, 128, 237, 0.18);
 }

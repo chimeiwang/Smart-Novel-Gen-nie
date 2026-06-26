@@ -87,7 +87,7 @@ export const LORE_UPDATE_SCHEMA_PROMPT = [
   "}",
   "```",
   "",
-  "大纲、章节结构、伏笔安排不属于设定顾问的保存边界；遇到这类修改请求，请阅读 Agent 能力卡后用 route_to_agent 转交给主责 Agent。",
+  "大纲、章节结构、伏笔安排不属于设定顾问的保存边界；遇到这类修改请求，请说明职责边界并等待工作流重新分派。",
   "",
   "### 角色 characters[]",
   "允许字段：action, id, characterId, name, aliases, gender, age, appearance, personality, identity, background, coreDesire, behaviorBoundaries, speechStyle, relationshipPrinciples, shortTermGoal, factionId, powerLevel, combatAbility, specialSkills, currentStatus, statusNote, fieldChanges。",

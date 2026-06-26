@@ -173,55 +173,56 @@ src/agents/
 └── index.ts                # 统一导出
 ```
 
-### v5.2 关键设计决策
+### v5.2 历史设计决策
 
 1. **工具调用**：设定顾问、剧情顾问、校验员使用 `callLLMWithTools`，Agent 按需查询数据
 2. **分层上下文**：设定/剧情顾问使用 `buildContextIndex()`（~200 token），作家/校验员使用完整上下文
 3. **智能路由**：`@Agent` 前缀快速匹配 + LLM 意图分类回退，confidence < 0.7 回退 statusReport
-4. **JSON 输出**：所有 Agent 统一输出 JSON（content + wantsToCall + insights + proactiveSuggestions）
+4. **JSON 输出**：历史版本曾使用 JSON 信封；当前主路径已迁移为段落文本 + tool calls
 5. **回退兼容**：JSON 解析失败时自动回退到原有正则/字符串匹配
 
-### 已完成 Agent 列表（v5.2 四Agent + 工具调用）
+### 当前 Agent 列表
 
 | Agent ID | Node 文件 | 功能简介 | LLM 调用方式 |
 |---------|----------|---------|------------|
-| 设定 | nodes/lore-advisor-node.ts | 设定顾问，通过 11 个工具查询设定，JSON 输出 | callLLMWithTools |
-| 剧情 | nodes/plot-advisor-node.ts | 剧情顾问，通过 9 个工具查询大纲/伏笔，JSON 输出 | callLLMWithTools |
-| 写作 | nodes/author-node.ts | 作家，JSON 输出 + 流式生成 | callLLM（流式） |
-| 校验 | nodes/validator-node.ts | 校验员，通过 7 个工具校验一致性，JSON 输出 | callLLMWithTools |
+| 设定 | nodes/lore-advisor-node.ts | 设定顾问，按需查询设定并提交待审核草案 | AgentRuntime tool-call loop |
+| 剧情 | nodes/plot-advisor-node.ts | 剧情顾问，按需查询大纲/伏笔并提交待审核草案 | AgentRuntime tool-call loop |
+| 写作 | nodes/author-node.ts | 作家，生成正文/改写草案 | AgentRuntime tool-call loop |
+| 校验 | nodes/validator-node.ts | 校验员，提交一致性报告或草案评审 | AgentRuntime tool-call loop |
+| 编辑 | nodes/editor-node.ts | 网文编辑，提交商业性评分或草案评审 | AgentRuntime tool-call loop |
 | PortraitAgentStream | portrait-agent-stream.ts | 文风画像生成（流式版） | callLLM（流式） |
 
-### Agent开发规范（v5.2）
+### Agent开发规范
 
 1. **每个 Agent 独立一个文件**：命名格式 `nodes/xxx-node.ts`
 2. 文件顶部必须包含完整的 JSDoc 注释
-3. 设定/剧情/校验 Agent 使用 `callLLMWithTools` + `buildContextIndex()` 分层上下文
-4. 作家 Agent 使用 `callLLM`（流式）+ `buildNovelContext()` 完整上下文
-5. 所有 Agent 输出统一使用 `parseAgentResponse()` 解析（JSON 优先，回退正则）
+3. Agent 使用声明式 `AgentDefinition` + `runAgent()` 进入统一运行管道
+4. Agent 可见输出是段落文本；控制信息只能通过 tool calls
+5. 不从 assistant 正文解析路由、评分、设定更新或返工结论
 6. 新 Agent 完成后：
    - 在 `src/agents/graph/nodes/index.ts` 添加导出
    - 在 `src/agents/graph/state.ts` 的 `CORE_AGENT_IDS` 中添加 ID
-   - 在 `src/agents/graph/executor.ts` 的 `importAgentNode` 中添加路由
-   - 在 `executor.ts` 的 `buildGraph()` 中注册节点和边
+   - 在 `src/agents/operations/operation-definition.ts` 中声明相关 CreativeOperation 入口
+   - 如需新流程，优先扩展 LangGraph `operationWorkflow`
    - 在 `AGENTS.md` 的 Agent 列表和流程图中添加
    - 在 `CLAUDE.md` 本节的「已完成 Agent 列表」添加一行
 
 ### 智能写作系统（v5.2 StateGraph 协作模式）
 
-智能写作功能基于 4 个核心 Agent 协作，通过 LangGraph StateGraph 编排。用户通过 `@xxx` 或自然语言直接调用指定 Agent（LLM 智能路由）。
+智能写作功能基于核心 Agent 协作，通过 LangGraph StateGraph 编排。用户通过 `@xxx` 或自然语言触发 `CreativeOperation`，再由 `operationWorkflow` 执行、审核、返工和等待用户确认。
 
 **图结构**：
 ```
-START → initSession → [LLM分类/关键词路由] → Agent节点 → processResult → [条件路由] → END
+START → initSession → operationWorkflow/statusReport → END
 ```
 
 **核心设计**：
 
 - **工具调用**：设定/剧情/校验 Agent 通过 `callLLMWithTools` 按需查询数据，而非被动接受全部上下文
 - **分层上下文**：`buildContextIndex()`（~200 token）替代 `buildNovelContext()`（~5000 token）用于查询型 Agent
-- **对话历史机制**：所有 Agent 输出由 `processResult` 节点统一追加到 `conversationHistory`
-- **Agent 间调用协议**：Agent 输出 JSON 中的 `wantsToCall` 字段，由 `processResult` 节点处理路由
-- **调用链深度限制**：最大 5 层，通过 `callChainDepth` 状态字段跟踪
+- **对话历史机制**：Agent 可见输出进入 `conversationHistory`，控制信息通过 tool calls 进入服务端处理
+- **Agent 路由边界**：Agent 不再输出路由字段或调用路由工具；入口分派、审核和返工由 LangGraph 图决定
+- **返工循环限制**：ReviewArtifact 审核/返工通过 `artifactIteration/maxArtifactIterations` 控制
 - **主动智能**：Agent 通过 `insights` 发现缺口/矛盾，通过 `proactiveSuggestions` 建议下一步
 
 **指令路由**：
@@ -239,17 +240,17 @@ START → initSession → [LLM分类/关键词路由] → Agent节点 → proces
 ```
 用户: @写作 生成第一章结尾
   ↓
-作家生成正文
+initSession 识别为生成正文草案
   ↓
-作家输出 wantsToCall: "校验"
+operationWorkflow.executeOperation 调用写作 Agent 生成 ReviewArtifact
   ↓
-executor 自动调用校验员
+operationWorkflow.reviewArtifact 调用校验/编辑 Agent 复审
   ↓
-校验员发现冲突 → wantsToCall: "写作"
+reviewer 通过 submit_evaluation(revise) 提交返工意见
   ↓
-executor 自动调用作家重写
+operationWorkflow.reviseArtifact 把返工 brief 交回主责 Agent
   ↓
-作家重写 → 再次校验 → 通过
+通过后 awaitUserDecision interrupt 等待用户确认应用
 ```
 
 **API 端点**：
@@ -328,13 +329,14 @@ LANGCHAIN_TRACING_V2="true"
 
 ### 5. 图执行需要专门的"处理"节点
 
-用 LangGraph 重写 executor 时，最大的设计决策是引入 `processResult` 节点。Agent 节点只负责调用 LLM 并返回结果，`processResult` 统一负责：
+当前主线已收口到 `operationWorkflow`。Agent 节点只负责调用 LLM 并返回可见文本与 control events，业务流程由 LangGraph 节点和边负责：
 
-- 将 Agent 输出追加到 `conversationHistory`
-- 检查 `wantsToCall` 并设置 `nextAgent`
-- 管理 `callChainDepth` 防止死循环
+- `executeOperation` 执行主责 Agent
+- `reviewArtifact` 读取草案并提交结构化评审
+- `reviseArtifact` 写入返工 brief
+- `awaitUserDecision` 通过 `interrupt()` 等待用户确认
 
-这样 Agent 节点职责单一，调用链逻辑集中管理，条件路由只需查 `nextAgent` 即可。
+这样 Agent 节点职责单一，流程控制留在 LangGraph，而不是散落在 Agent 输出正文里。
 
 ### 6. SSE 事件传递和状态绑定更安全
 

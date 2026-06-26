@@ -16,14 +16,12 @@ import type {
   CoreAgentId,
   NovelData,
 } from "./state";
-import { AGENT_NAMES, isValidAgentId } from "./state";
 import { trySaveQualityCheckResult as defaultSaveQualityCheckResult } from "@/agents/lib/quality-check-service";
 import { hasAgentUpdates } from "./lore-update-schema";
 import { sanitizeAgentUpdates } from "@/shared/contracts/agent-updates";
 import { logger } from "@/shared/lib/logger";
 import type { AgentUpdateSection } from "@/shared/contracts/agent-updates";
 import type { ShowReviewArtifactEvent } from "@/shared/contracts/agent-control";
-import { splitControlEvents } from "./control-event-router";
 import {
   createOrUpdateAgentUpdatesArtifact as defaultCreateOrUpdateAgentUpdatesArtifact,
   createOrUpdateBeatPlanArtifact as defaultCreateOrUpdateBeatPlanArtifact,
@@ -86,22 +84,11 @@ export interface ControlEventProcessorState {
   taskId: string;
   chapterId: string;
   qualityCheckId?: string | null;
-  callChainDepth: number;
   novelData?: NovelData;
 }
 
 export interface ControlEventProcessResult {
   conversationHistory: AgentMessage[];
-  nextAgent: CoreAgentId | null;
-  callChainDepth?: number;
-  pendingAgentCall?: {
-    fromAgent: CoreAgentId;
-    toAgent: CoreAgentId;
-    reason: string;
-    specificQuestion?: string;
-    contentToRewrite?: string;
-    timestamp: number;
-  };
   pendingUpdates?: AgentUpdates | null;
   activeArtifactId?: string | null;
   artifactIteration?: number;
@@ -198,7 +185,6 @@ export interface ControlEventProcessorDeps {
   ) => Promise<unknown>;
   interruptOnUserApproval?: boolean;
   now?: () => number;
-  maxCallChainDepth?: number;
 }
 
 export interface ProcessControlEventsInput {
@@ -251,38 +237,12 @@ export async function processControlEvents(
   const saveQualityCheckResult = deps.saveQualityCheckResult ?? defaultSaveQualityCheckResult;
   const interruptOnUserApproval = deps.interruptOnUserApproval ?? true;
   const now = deps.now ?? Date.now;
-  const maxCallChainDepth = deps.maxCallChainDepth ?? DEFAULT_MAX_CALL_CHAIN_DEPTH;
 
   logger.info("CONTROL_EVENTS", "处理 controlEvents", {
     count: events.length,
     types: events.map((e) => e.type),
     agentId: activeAgent,
   });
-
-  const { sideEffectEvents, routeEvent, ignoredRouteEvents } = splitControlEvents(events);
-  const effectiveRouteEvent =
-    routeEvent && "toAgent" in routeEvent && routeEvent.toAgent === activeAgent
-      ? null
-      : routeEvent;
-  if (ignoredRouteEvents.length > 0) {
-    logger.warn("CONTROL_EVENTS", "同轮存在多个路由事件，仅处理第一个", {
-      handled: routeEvent?.type,
-      ignored: ignoredRouteEvents.map((event) => event.type),
-    });
-  }
-  if (routeEvent && !effectiveRouteEvent) {
-    logger.warn("CONTROL_EVENTS", "忽略指向当前 Agent 的自路由事件，避免 Graph 自循环", {
-      routeType: routeEvent.type,
-      activeAgent,
-      targetAgent: routeEvent.toAgent,
-    });
-    emitEvent("route_ignored", {
-      reason: "self_route",
-      routeType: routeEvent.type,
-      fromAgent: activeAgent,
-      toAgent: routeEvent.toAgent,
-    });
-  }
 
   let activeArtifactId: string | null = null;
   let artifactToReview: ReviewArtifactDto | null = null;
@@ -361,7 +321,7 @@ export async function processControlEvents(
     };
   }
 
-  for (const event of sideEffectEvents) {
+  for (const event of events) {
     switch (event.type) {
       case "propose_updates": {
         const sanitized = sanitizeUpdatesForAgent(event.updates, activeAgent);
@@ -763,7 +723,6 @@ export async function processControlEvents(
             if (decision) {
               return {
                 conversationHistory: updatedHistory,
-                nextAgent: null,
                 activeArtifactId: artifact.id,
                 pendingUserResponse: true,
                 reviewerAgent: activeAgent,
@@ -899,157 +858,9 @@ export async function processControlEvents(
     });
   }
 
-  if (!effectiveRouteEvent && artifactToReview?.reviewerAgent) {
-    const targetAgent = artifactToReview.reviewerAgent;
-    if (isValidAgentId(targetAgent) && targetAgent !== activeAgent && state.callChainDepth < maxCallChainDepth) {
-      const nextDepth = state.callChainDepth + 1;
-      const reviewBrief = [
-        "请复审待审核草案，并提交结构化审核结论。",
-        `草案ID：${artifactToReview.id}`,
-        artifactToReview.artifactKey ? `产物标识：${artifactToReview.artifactKey}` : "",
-        `草案版本：v${artifactToReview.revision}`,
-        "复审时先调用 get_active_review_artifact 或 get_review_artifact 读取草案。",
-        "通过时调用 submit_evaluation(pass)，需要返工时调用 submit_evaluation(revise) 并说明 requiredChanges。",
-      ].filter(Boolean).join("\n");
-      const callMessage: AgentMessage = {
-        id: `artifact_review_${now()}`,
-        agentId: activeAgent,
-        agentName: AGENT_NAMES[activeAgent],
-        content: `${AGENT_NAMES[targetAgent]}：${reviewBrief}`,
-        timestamp: now(),
-        isCallMessage: true,
-        callTarget: targetAgent,
-      };
-      emitEvent("artifact_review_started", {
-        fromAgent: activeAgent,
-        toAgent: targetAgent,
-        artifactId: artifactToReview.id,
-        artifactKey: artifactToReview.artifactKey,
-        revision: artifactToReview.revision,
-        depth: nextDepth,
-      });
-      return {
-        conversationHistory: [...updatedHistory, callMessage],
-        nextAgent: targetAgent,
-        callChainDepth: nextDepth,
-        controlEvents: undefined,
-        pendingAgentCall: {
-          fromAgent: activeAgent,
-          toAgent: targetAgent,
-          reason: "待审核草案进入 Agent 复审",
-          specificQuestion: reviewBrief,
-          timestamp: now(),
-        },
-        activeArtifactId: artifactToReview.id,
-      };
-    }
-  }
-
-  for (const event of effectiveRouteEvent ? [effectiveRouteEvent] : []) {
-    switch (event.type) {
-      case "route_to_agent": {
-        const targetAgent = event.toAgent as CoreAgentId;
-        if (!isValidAgentId(targetAgent) || state.callChainDepth >= maxCallChainDepth) {
-          logger.warn("CONTROL_EVENTS", "route_to_agent 目标无效或调用链过深", {
-            targetAgent,
-            depth: state.callChainDepth,
-          });
-          break;
-        }
-
-        const nextDepth = state.callChainDepth + 1;
-        const callMessage: AgentMessage = {
-          id: `call_${now()}`,
-          agentId: activeAgent,
-          agentName: AGENT_NAMES[activeAgent],
-          content: `${AGENT_NAMES[targetAgent]}：${event.reason}${event.question ? `\n${event.question}` : ""}`,
-          timestamp: now(),
-          isCallMessage: true,
-          callTarget: targetAgent,
-        };
-        const newHistory = [...updatedHistory, callMessage];
-        emitEvent("call_confirmed", {
-          fromAgent: activeAgent,
-          toAgent: targetAgent,
-          depth: nextDepth,
-        });
-        return {
-          conversationHistory: newHistory,
-          nextAgent: targetAgent,
-          callChainDepth: nextDepth,
-          controlEvents: undefined,
-          pendingAgentCall: {
-            fromAgent: activeAgent,
-            toAgent: targetAgent,
-            reason: event.reason,
-            specificQuestion: event.question,
-            contentToRewrite: event.contentToRewrite,
-            timestamp: now(),
-          },
-          activeArtifactId,
-        };
-      }
-
-      case "request_revision": {
-        const targetAgent = event.toAgent as CoreAgentId;
-        if (!isValidAgentId(targetAgent) || state.callChainDepth >= maxCallChainDepth) {
-          logger.warn("CONTROL_EVENTS", "request_revision 目标无效或调用链过深", {
-            targetAgent,
-            depth: state.callChainDepth,
-          });
-          break;
-        }
-
-        const nextDepth = state.callChainDepth + 1;
-        const brief = [
-          event.reason,
-          (event.artifactId ?? activeArtifactId) ? `草案ID：${event.artifactId ?? activeArtifactId}` : "",
-          event.artifactKey ? `产物标识：${event.artifactKey}` : "",
-          event.instructions,
-        ].filter(Boolean).join("\n");
-        const callMessage: AgentMessage = {
-          id: `revision_${now()}`,
-          agentId: activeAgent,
-          agentName: AGENT_NAMES[activeAgent],
-          content: `${AGENT_NAMES[targetAgent]}：${brief}`,
-          timestamp: now(),
-          isCallMessage: true,
-          callTarget: targetAgent,
-        };
-
-        emitEvent("revision_requested", {
-          fromAgent: activeAgent,
-          toAgent: targetAgent,
-          artifactKey: event.artifactKey,
-          artifactId: event.artifactId ?? activeArtifactId,
-          depth: nextDepth,
-        });
-
-        return {
-          conversationHistory: [...updatedHistory, callMessage],
-          nextAgent: targetAgent,
-          callChainDepth: nextDepth,
-          controlEvents: undefined,
-          pendingAgentCall: {
-            fromAgent: activeAgent,
-            toAgent: targetAgent,
-            reason: event.reason,
-            specificQuestion: event.instructions,
-            timestamp: now(),
-          },
-          activeArtifactId: event.artifactId ?? activeArtifactId,
-        };
-      }
-
-      default:
-        break;
-    }
-  }
-
   return {
     conversationHistory: updatedHistory,
-    nextAgent: null,
-    activeArtifactId,
+    activeArtifactId: activeArtifactId ?? artifactToReview?.id ?? null,
     pendingUserResponse: awaitingUserReview ? true : undefined,
     reviewerAgent: lastReviewerAgent,
     reviserAgent: awaitingUserReview ? null : undefined,

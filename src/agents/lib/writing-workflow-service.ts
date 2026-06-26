@@ -264,7 +264,7 @@ export function buildCraftReviewPrompt(): string {
 
 ## 输出要求
 1. 每个维度给出优劣分析和具体建议
-2. 严重问题需要其他 Agent 继续处理时，阅读 Agent 能力卡后使用 route_to_agent 选择主责 Agent，并提供可执行 brief
+2. 严重问题需要其他 Agent 继续处理时，在评审意见中说明问题和建议主责方向，不要自行转交
 3. 轻微问题只给建议，不触发返工
 4. 给出具体的修改示例（改前 vs 改后）`;
 }

@@ -33,6 +33,24 @@ describe("CreativeOperation contract", () => {
     assert.equal(result.success, true);
   });
 
+  it("将模型返回的 null targetId 归一为空字段", () => {
+    const result = CreativeOperationSchema.parse({
+      kind: "write_chapter",
+      targetType: "chapter",
+      targetId: null,
+      userGoal: "根据大纲写第三章",
+      primaryAgent: "写作",
+      reviewers: ["校验", "编辑"],
+      outputKind: "chapter_text",
+      requiresArtifact: true,
+      requiresUserApproval: true,
+      confidence: 0.91,
+      reasoning: "用户明确要求生成正文。",
+    });
+
+    assert.equal(result.targetId, undefined);
+  });
+
   it("@设定 默认映射到设定草案操作", () => {
     assert.deepEqual(
       getDefaultOperationForAgent("设定", "@设定 给主角补充宗门背景"),
