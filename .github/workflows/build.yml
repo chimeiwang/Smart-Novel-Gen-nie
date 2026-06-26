@@ -1,4 +1,4 @@
-name: CI
+name: CI and Deploy
 
 on:
   push:
@@ -6,8 +6,15 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: production-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build:
+  ci:
     runs-on: ubuntu-latest
 
     env:
@@ -42,3 +49,24 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  deploy:
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy over SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/deploy_key \
+            "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}" \
+            "APP_DIR='${{ vars.APP_DIR }}' REPO_URL='https://github.com/chimeiwang/Smart-Novel-Gen-nie.git' BRANCH='main' bash -s" \
+            < scripts/deploy-production.sh
