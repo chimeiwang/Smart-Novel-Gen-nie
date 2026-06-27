@@ -13,7 +13,12 @@ import { addAgentMessage } from "@/agents/graph/context-manager";
 import { getCreativeOperationLabel, type CreativeOperationKind } from "@/shared/contracts/creative-operation";
 import { getOperationDefinition } from "./operation-definition";
 import { executeCreativeOperation } from "./operation-executor";
-import { submitArtifactEvaluation, toReviewArtifactDto } from "@/agents/artifacts/artifact-service";
+import {
+  applyArtifactEvaluationPatch,
+  markArtifactAwaitingUser,
+  submitArtifactEvaluation,
+  toReviewArtifactDto,
+} from "@/agents/artifacts/artifact-service";
 import { markTaskAwaitingUserReview } from "@/agents/graph/task-state";
 import { createArtifactReviewInterrupt } from "@/shared/contracts/user-decision";
 import { interrupt as langGraphInterrupt } from "@langchain/langgraph";
@@ -29,30 +34,47 @@ export function buildOperationGraph(annotation: typeof WritingStateAnnotation) {
     .addNode("executeOperation", withOperationTrace("execute_operation", executeOperationNode))
     .addNode("submitArtifactOrRespond", withOperationTrace("submit_or_respond", submitArtifactOrRespondNode))
     .addNode("reviewArtifact", withOperationTrace("review_artifact", reviewArtifactNode))
+    .addNode("applyArtifactPatch", withOperationTrace("apply_artifact_patch", applyArtifactPatchNode))
     .addNode("reviseArtifact", withOperationTrace("revise_artifact", reviseArtifactNode))
     .addNode("awaitUserDecision", withOperationTrace("await_user_decision", awaitUserDecisionNode))
     .addNode("suggestNextAction", withOperationTrace("suggest_next_action", suggestNextActionNode))
     .addEdge(START, "prepareOperationContext")
     .addEdge("prepareOperationContext", "executeOperation")
-    .addConditionalEdges("executeOperation", routeAfterExecute, {
-      executeOperation: "executeOperation",
-      awaitUserDecision: "awaitUserDecision",
-      submitArtifactOrRespond: "submitArtifactOrRespond",
-    })
-    .addConditionalEdges("submitArtifactOrRespond", routeAfterSubmit, {
-      reviewArtifact: "reviewArtifact",
-      suggestNextAction: "suggestNextAction",
-    })
-    .addConditionalEdges("reviewArtifact", routeAfterReview, {
-      reviseArtifact: "reviseArtifact",
-      awaitUserDecision: "awaitUserDecision",
-      suggestNextAction: "suggestNextAction",
-    })
+    .addConditionalEdges("executeOperation", routeAfterExecute, OPERATION_EXECUTE_ROUTES)
+    .addConditionalEdges("submitArtifactOrRespond", routeAfterSubmit, OPERATION_SUBMIT_ROUTES)
+    .addConditionalEdges("reviewArtifact", routeAfterReview, OPERATION_REVIEW_ROUTES)
+    .addConditionalEdges("applyArtifactPatch", routeAfterPatch, OPERATION_PATCH_ROUTES)
     .addEdge("reviseArtifact", "executeOperation")
     .addEdge("awaitUserDecision", "suggestNextAction")
     .addEdge("suggestNextAction", END)
     .compile();
 }
+
+export const OPERATION_EXECUTE_ROUTES = {
+  executeOperation: "executeOperation",
+  awaitUserDecision: "awaitUserDecision",
+  submitArtifactOrRespond: "submitArtifactOrRespond",
+} as const;
+
+export const OPERATION_SUBMIT_ROUTES = {
+  reviewArtifact: "reviewArtifact",
+  suggestNextAction: "suggestNextAction",
+} as const;
+
+export const OPERATION_REVIEW_ROUTES = {
+  applyArtifactPatch: "applyArtifactPatch",
+  reviewArtifact: "reviewArtifact",
+  reviseArtifact: "reviseArtifact",
+  awaitUserDecision: "awaitUserDecision",
+  suggestNextAction: "suggestNextAction",
+} as const;
+
+export const OPERATION_PATCH_ROUTES = {
+  reviewArtifact: "reviewArtifact",
+  reviseArtifact: "reviseArtifact",
+  awaitUserDecision: "awaitUserDecision",
+  suggestNextAction: "suggestNextAction",
+} as const;
 
 export function createOperationTraceMetadata(
   state: GraphState,
@@ -159,7 +181,7 @@ async function executeOperationNode(state: GraphState) {
   };
 }
 
-function routeAfterExecute(state: GraphState) {
+function routeAfterExecute(state: GraphState): keyof typeof OPERATION_EXECUTE_ROUTES {
   if (state.pendingUserResponse && state.activeArtifactId) return "awaitUserDecision";
   return "submitArtifactOrRespond";
 }
@@ -189,7 +211,7 @@ async function submitArtifactOrRespondNode(state: GraphState) {
   return { operationStage: "提交待审核草案" };
 }
 
-function routeAfterSubmit(state: GraphState) {
+function routeAfterSubmit(state: GraphState): keyof typeof OPERATION_SUBMIT_ROUTES {
   const operation = state.currentOperation;
   if (!operation) return "suggestNextAction";
   const def = getOperationDefinition(operation.kind);
@@ -231,12 +253,15 @@ async function reviewArtifactNode(state: GraphState) {
   const structuredEvaluation = readEvaluationEvent(reviewPatch);
   const verdict = structuredEvaluation?.verdict ?? inferReviewVerdict(reviewPatch, reviewer);
   const summary = structuredEvaluation?.summary ?? inferReviewSummary(reviewPatch, reviewer);
+  const requiredChanges = structuredEvaluation?.requiredChanges ?? (verdict === "pass" ? undefined : summary);
+  const revisionMode = verdict === "revise" ? structuredEvaluation?.revisionMode ?? "rewrite" : "rewrite";
+  const patches = verdict === "revise" ? structuredEvaluation?.patches : undefined;
   const artifact = await submitArtifactEvaluation({
     artifactId: state.activeArtifactId,
     evaluatorAgent: reviewer,
     verdict,
     summary,
-    requiredChanges: structuredEvaluation?.requiredChanges ?? (verdict === "pass" ? undefined : summary),
+    requiredChanges,
   });
 
   emit(writer, "workflow_evaluation_submitted", {
@@ -254,14 +279,18 @@ async function reviewArtifactNode(state: GraphState) {
     artifactIteration: state.artifactIteration + 1,
     errorMessage: verdict === "block" ? summary : null,
     reviewerAgent: reviewer,
-    reviserAgent: verdict === "pass" ? null : def.primaryAgent,
+    reviserAgent: verdict === "revise" && revisionMode === "rewrite" ? def.primaryAgent : null,
+    pendingArtifactRevision: verdict === "revise"
+      ? { summary, requiredChanges, revisionMode, patches }
+      : null,
     controlEvents: undefined,
   };
 }
 
-function routeAfterReview(state: GraphState) {
+export function routeAfterReview(state: GraphState): keyof typeof OPERATION_REVIEW_ROUTES {
   const operation = state.currentOperation;
   if (state.errorMessage) return "suggestNextAction";
+  if (state.pendingArtifactRevision?.revisionMode === "patch") return "applyArtifactPatch";
   if (state.reviserAgent && state.artifactIteration < state.maxArtifactIterations) {
     return "reviseArtifact";
   }
@@ -290,6 +319,79 @@ export function hasNextReviewer(state: GraphState, reviewers: CoreAgentId[]): bo
   return currentIndex >= 0 && currentIndex < reviewers.length - 1;
 }
 
+async function applyArtifactPatchNode(state: GraphState) {
+  const writer = getWriter();
+  const operation = state.currentOperation;
+  const pending = state.pendingArtifactRevision;
+  const label = operation ? getCreativeOperationLabel(operation.kind) : "待审核草案";
+  emit(writer, "operation_stage", {
+    stage: "应用小修",
+    label,
+    message: `正在应用${label}的小修补丁。`,
+  });
+
+  if (!state.activeArtifactId || !pending?.patches?.length) {
+    emit(writer, "operation_stage", {
+      stage: "应用小修",
+      label,
+      message: "小修补丁缺失，改为交回主责 Agent 返工。",
+    });
+    return {
+      operationStage: "应用小修",
+      pendingArtifactRevision: null,
+      reviserAgent: operation?.primaryAgent ?? state.reviserAgent,
+    };
+  }
+
+  const result = await applyArtifactEvaluationPatch({
+    artifactId: state.activeArtifactId,
+    evaluatorAgent: state.activeAgent ?? state.reviewerAgent ?? "编辑",
+    summary: pending.summary,
+    patches: pending.patches,
+    novelData: state.novelData,
+  });
+
+  if (!result.success) {
+    emit(writer, "operation_stage", {
+      stage: "应用小修",
+      label,
+      message: `小修补丁无法安全应用：${result.reason}。改为交回主责 Agent 返工。`,
+    });
+    return {
+      operationStage: "应用小修",
+      pendingArtifactRevision: null,
+      reviserAgent: operation?.primaryAgent ?? state.reviserAgent,
+    };
+  }
+
+  emit(writer, "artifact_submitted", {
+    agentId: state.activeAgent ?? state.reviewerAgent ?? operation?.primaryAgent ?? "编辑",
+    artifact: result.artifact,
+    artifactId: result.artifact.id,
+    status: result.artifact.status,
+    revision: result.artifact.revision,
+  });
+
+  return {
+    activeArtifactId: result.artifact.id,
+    operationStage: "应用小修",
+    pendingArtifactRevision: null,
+    reviserAgent: null,
+  };
+}
+
+export function routeAfterPatch(state: GraphState): keyof typeof OPERATION_PATCH_ROUTES {
+  const operation = state.currentOperation;
+  if (state.errorMessage) return "suggestNextAction";
+  if (state.reviserAgent && state.artifactIteration < state.maxArtifactIterations) {
+    return "reviseArtifact";
+  }
+  if (operation && hasNextReviewer(state, getOperationDefinition(operation.kind).reviewers)) {
+    return "reviewArtifact";
+  }
+  return "awaitUserDecision";
+}
+
 async function reviseArtifactNode(state: GraphState) {
   const writer = getWriter();
   const operation = state.currentOperation;
@@ -302,6 +404,7 @@ async function reviseArtifactNode(state: GraphState) {
   return {
     operationStage: "返工草案",
     reviserAgent: null,
+    pendingArtifactRevision: null,
     pendingAgentCall: operation
       ? {
           fromAgent: state.activeAgent ?? "编辑",
@@ -319,6 +422,7 @@ async function awaitUserDecisionNode(state: GraphState) {
   const writer = getWriter();
   if (!state.activeArtifactId || !state.currentOperation) return { operationStage: "整理结果" };
   const label = getCreativeOperationLabel(state.currentOperation.kind);
+  await markArtifactAwaitingUser({ artifactId: state.activeArtifactId });
   await markTaskAwaitingUserReview({
     taskId: state.taskId,
     artifactId: state.activeArtifactId,
@@ -418,13 +522,21 @@ function readReviewerOutput(
 
 export function readEvaluationEvent(
   patch: Partial<WritingState>
-): { verdict: "pass" | "revise" | "block"; summary: string; requiredChanges?: string } | null {
+): {
+  verdict: "pass" | "revise" | "block";
+  summary: string;
+  requiredChanges?: string;
+  revisionMode?: "patch" | "rewrite";
+  patches?: NonNullable<WritingState["pendingArtifactRevision"]>["patches"];
+} | null {
   const event = patch.controlEvents?.find((item) => item.type === "submit_evaluation");
   if (!event || event.type !== "submit_evaluation") return null;
   return {
     verdict: event.verdict,
     summary: event.summary,
     requiredChanges: event.requiredChanges,
+    revisionMode: event.revisionMode,
+    patches: event.patches,
   };
 }
 

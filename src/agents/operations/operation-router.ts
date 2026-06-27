@@ -68,6 +68,7 @@ export async function routeCreativeOperation(input: {
     const { data } = await callLLMStructured(IntentClassificationSchema, {
       prompt: `用户消息：${input.userMessage}`,
       systemPrompt: buildIntentClassifierSystemPrompt(),
+      profile: "fast",
       metadata: { callType: "创作操作识别", userId: input.userId, novelId: input.novelId },
     });
     const operation = normalizeOperation(

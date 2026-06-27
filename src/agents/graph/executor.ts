@@ -15,8 +15,10 @@
 // 核心入口（API 路由使用）
 export {
   executeWritingWorkflow,
+  startWritingWorkflow,
   resumeWriting,
   createInitialState,
+  createWorkflowTask,
   type WorkflowInitialState,
 } from "./workflow-runner";
 

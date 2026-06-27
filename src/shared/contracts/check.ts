@@ -50,7 +50,6 @@ void async function main() {
   if (typeSet.size !== types.length) {
     errors.push("质量检查定义中存在重复 type");
   }
-  if (types.length < 4) errors.push("质量检查类型少于 4 种");
   console.log(`  ${types.length} 种类型全部完整 ✓`);
 
   // 1b. 状态枚举校验

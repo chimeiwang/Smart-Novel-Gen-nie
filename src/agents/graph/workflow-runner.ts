@@ -55,6 +55,8 @@ import {
 } from "./graph-state-snapshot";
 import { persistWorkflowMessage } from "./workflow-message-store";
 
+const SSE_CLIENT_CANCELLED_MESSAGE = "SSE_CLIENT_CANCELLED";
+
 // ============================================
 // 入口参数
 // ============================================
@@ -70,6 +72,27 @@ export interface WorkflowInitialState {
   qualityCheckId?: string | null;
   /** 本次启用的 Agent 列表（不传默认全选） */
   selectedAgents?: string[];
+}
+
+export async function createWorkflowTask(params: WorkflowInitialState): Promise<string> {
+  const { novelId, chapterId, writingSessionId, targetWordCount, selectedAgents } = params;
+  const effectiveAgents = selectedAgents && selectedAgents.length > 0
+    ? selectedAgents.filter((id) => CORE_AGENT_IDS.includes(id as any))
+    : [...CORE_AGENT_IDS];
+
+  const task = await prisma.writingTask.create({
+    data: {
+      novelId,
+      chapterId,
+      writingSessionId: writingSessionId ?? null,
+      targetWordCount,
+      selectedAgents: effectiveAgents.join(","),
+      phase: "active",
+      conversationHistory: "[]",
+    },
+  });
+
+  return task.id;
 }
 
 async function cleanupGraphCheckpoint(taskId: string, auditLog?: WorkflowEventFileLogger): Promise<void> {
@@ -144,25 +167,10 @@ export async function createInitialState(params: WorkflowInitialState): Promise<
   logger.info("WORKFLOW", "创建初始状态", { novelId, chapterId, selectedAgents });
 
   const novelData = await aggregateNovelContextLightweight(novelId, chapterId);
-
-  const effectiveAgents = selectedAgents && selectedAgents.length > 0
-    ? selectedAgents.filter((id) => CORE_AGENT_IDS.includes(id as any))
-    : [...CORE_AGENT_IDS];
-
-  const task = await prisma.writingTask.create({
-    data: {
-      novelId,
-      chapterId,
-      writingSessionId: writingSessionId ?? null,
-      targetWordCount,
-      selectedAgents: effectiveAgents.join(","),
-      phase: "active",
-      conversationHistory: "[]",
-    },
-  });
+  const taskId = await createWorkflowTask(params);
 
   return {
-    taskId: task.id,
+    taskId,
     userId,
     novelId,
     chapterId,
@@ -193,6 +201,59 @@ export async function createInitialState(params: WorkflowInitialState): Promise<
     artifactMode: "none",
     reviewerAgent: null,
     reviserAgent: null,
+    pendingArtifactRevision: null,
+    artifactIteration: 0,
+    maxArtifactIterations: 5,
+  };
+}
+
+async function createInitialStateForTask(
+  taskId: string,
+  params: WorkflowInitialState,
+  sendEvent?: SendEventFn
+): Promise<GraphState> {
+  const { novelId, chapterId, targetWordCount, userMessage, userId, qualityCheckId } = params;
+  logger.info("WORKFLOW", "创建初始状态", { taskId, novelId, chapterId, selectedAgents: params.selectedAgents });
+  sendEvent?.("agent_status", {
+    agentId: "system",
+    status: "thinking",
+    message: "正在准备创作上下文...",
+  });
+  const novelData = await aggregateNovelContextLightweight(novelId, chapterId);
+
+  return {
+    taskId,
+    userId,
+    novelId,
+    chapterId,
+    targetWordCount,
+    phase: "active",
+    userMessage,
+    pendingUserResponse: false,
+    conversationHistory: [],
+    activeAgent: null,
+    currentOperation: null,
+    operationMode: "operation_graph",
+    operationStage: null,
+    loreAdvisorOutput: null,
+    plotAdvisorOutput: null,
+    writerOutput: null,
+    validatorOutput: null,
+    editorOutput: null,
+    generatedContent: "",
+    pendingUpdates: null,
+    novelData: { ...novelData, novelId, chapterId } as WritingState["novelData"],
+    pendingAgentCall: null,
+    errorMessage: null,
+    streamCallbacks: {},
+    eventCallbacks: undefined,
+    qualityCheckId: qualityCheckId ?? null,
+    controlEvents: undefined,
+    activeArtifactId: null,
+    artifactMode: "none",
+    reviewerAgent: null,
+    reviserAgent: null,
+    pendingArtifactRevision: null,
     artifactIteration: 0,
     maxArtifactIterations: 5,
   };
@@ -216,6 +277,7 @@ function createSSEStream(
 ): Response {
   const encoder = new TextEncoder();
   let streamController: ReadableStreamDefaultController | null = null;
+  let clientCancelled = false;
   const sentAgentDoneKeys = new Set<string>();
   const auditLog = createWorkflowEventFileLogger({ taskId, ...auditContext });
 
@@ -298,6 +360,7 @@ function createSSEStream(
     type === "artifact_deleted";
 
   const sendEvent: SendEventFn = (type, data = {}) => {
+    if (clientCancelled) throw new Error(SSE_CLIENT_CANCELLED_MESSAGE);
     try {
       if (streamController) {
         if (type === "agent_done" && data.agentId && typeof data.content === "string") {
@@ -329,6 +392,7 @@ function createSSEStream(
       logger.info("SSE", `ReadableStream start${logPrefix} 被调用`);
     },
     cancel() {
+      clientCancelled = true;
       streamController = null;
       logger.info("SSE", `ReadableStream cancel${logPrefix} 被调用`);
     },
@@ -339,6 +403,11 @@ function createSSEStream(
 
   // 异步启动，完成或出错后关闭流
   runner(sendEvent, sentAgentDoneKeys, config, closeStream, auditLog).catch((error) => {
+    if (error instanceof Error && error.message === SSE_CLIENT_CANCELLED_MESSAGE) {
+      auditLog.recordWorkflowEvent("sse_client_cancelled", { logPrefix });
+      logger.info("SSE", `客户端已断开，停止工作流${logPrefix}`, { taskId });
+      return;
+    }
     const msg = error instanceof Error ? error.message : "未知错误";
     auditLog.recordError("workflow_runner_error", error);
     logger.error("WORKFLOW", `工作流${logPrefix}错误: ${msg}`, { taskId });
@@ -352,6 +421,123 @@ function createSSEStream(
 // ============================================
 // executeWritingWorkflow
 // ============================================
+
+async function runInitialStateWorkflow(
+  initialState: WritingState | GraphState,
+  sendEvent: SendEventFn,
+  sentKeys: Set<string>,
+  config: { configurable: { thread_id: string } },
+  close: () => void,
+  auditLog: WorkflowEventFileLogger
+): Promise<void> {
+  const taskId = initialState.taskId;
+  await traceWorkflowExecution(
+    "writing-workflow",
+    createTraceMetadata({ taskId, novelId: initialState.novelId, chapterId: initialState.chapterId, callType: "writing-workflow" }),
+    async () => {
+      auditLog.recordWorkflowEvent("workflow_started", {
+        novelId: initialState.novelId,
+        chapterId: initialState.chapterId,
+        targetWordCount: initialState.targetWordCount,
+      });
+
+      const graph = getGraph();
+      const history = await loadHistoryFromDb(taskId);
+      auditLog.recordPersistenceEvent("history_loaded", { historyCount: history.length });
+      const writingSessionId = await getWritingSessionIdForTask(taskId);
+      await persistWorkflowMessage({
+        sessionId: writingSessionId,
+        taskId,
+        role: "user",
+        content: initialState.userMessage,
+        eventType: "user",
+      });
+
+      const graphInput = {
+        ...initialState,
+        conversationHistory: history,
+        streamCallbacks: createDirectStreamCallbacks(sendEvent),
+        eventCallbacks: createDirectEventCallbacks(sendEvent),
+      };
+
+      let wasInterrupted = false;
+      let invokeFinalState: GraphState | null = null;
+      if (shouldUseLangGraphStreamEvents()) {
+        const sse = createSSEController(sendEvent, auditLog);
+        const eventStream = graph.streamEvents(graphInput as unknown as GraphState, {
+          ...config,
+          version: "v2",
+          streamMode: STREAM_MODES,
+        });
+
+        for await (const event of eventStream) {
+          const result = sse.handleEvent(event);
+          if (result === "interrupt") {
+            wasInterrupted = true;
+            auditLog.recordWorkflowEvent("workflow_interrupted");
+            break;
+          }
+        }
+      } else {
+        const result = await graph.invoke(graphInput as unknown as GraphState, config);
+        wasInterrupted = emitInterruptFromInvokeResult(result, sendEvent);
+        if (wasInterrupted) auditLog.recordWorkflowEvent("workflow_interrupted");
+        invokeFinalState = graphStateFromInvokeResult(result);
+      }
+
+      const fs = await getGraphStateAfterRun(graph, config, invokeFinalState);
+      if (fs) {
+        if (!wasInterrupted) {
+          await saveHistoryToDb(taskId, fs.conversationHistory);
+          auditLog.recordPersistenceEvent("history_saved", {
+            historyCount: fs.conversationHistory.length,
+          });
+          await updateTaskState(fs);
+          auditLog.recordPersistenceEvent("task_state_updated", {
+            phase: fs.phase,
+            activeAgent: fs.activeAgent,
+          });
+        }
+        sendAgentDoneFallback(fs, sendEvent, sentKeys);
+        if (!wasInterrupted) {
+          sendEvent("done", {
+            taskId,
+            conversationSummary: buildContextSummary(fs as unknown as WritingState),
+            activeAgent: fs.activeAgent,
+          });
+          auditLog.recordWorkflowEvent("workflow_completed", {
+            activeAgent: fs.activeAgent,
+            phase: fs.phase,
+          });
+          await cleanupGraphCheckpoint(taskId, auditLog);
+        }
+      }
+      close();
+    }
+  );
+}
+
+export async function startWritingWorkflow(params: WorkflowInitialState): Promise<Response> {
+  const taskId = await createWorkflowTask(params);
+  logger.info("WORKFLOW", "开始执行工作流", { taskId });
+
+  return createSSEStream(
+    taskId,
+    "",
+    {
+      runKind: "writing-workflow",
+      userId: params.userId,
+      novelId: params.novelId,
+      chapterId: params.chapterId,
+      qualityCheckId: params.qualityCheckId ?? null,
+    },
+    async (sendEvent, sentKeys, config, close, auditLog) => {
+      sendEvent("start", { taskId });
+      const initialState = await createInitialStateForTask(taskId, params, sendEvent);
+      await runInitialStateWorkflow(initialState, sendEvent, sentKeys, config, close, auditLog);
+    }
+  );
+}
 
 export async function executeWritingWorkflow(
   initialState: WritingState | GraphState
@@ -370,92 +556,8 @@ export async function executeWritingWorkflow(
       qualityCheckId: initialState.qualityCheckId,
     },
     async (sendEvent, sentKeys, config, close, auditLog) => {
-    await traceWorkflowExecution(
-      "writing-workflow",
-      createTraceMetadata({ taskId, novelId: initialState.novelId, chapterId: initialState.chapterId, callType: "writing-workflow" }),
-      async () => {
-        auditLog.recordWorkflowEvent("workflow_started", {
-          novelId: initialState.novelId,
-          chapterId: initialState.chapterId,
-          targetWordCount: initialState.targetWordCount,
-        });
-
-        const graph = getGraph();
-        const history = await loadHistoryFromDb(taskId);
-        auditLog.recordPersistenceEvent("history_loaded", { historyCount: history.length });
-        const writingSessionId = await getWritingSessionIdForTask(taskId);
-        await persistWorkflowMessage({
-          sessionId: writingSessionId,
-          taskId,
-          role: "user",
-          content: initialState.userMessage,
-          eventType: "user",
-        });
-
-        const graphInput = {
-          ...initialState,
-          conversationHistory: history,
-          streamCallbacks: createDirectStreamCallbacks(sendEvent),
-          eventCallbacks: createDirectEventCallbacks(sendEvent),
-        };
-
-        sendEvent("start", { taskId });
-
-        let wasInterrupted = false;
-        let invokeFinalState: GraphState | null = null;
-        if (shouldUseLangGraphStreamEvents()) {
-          const sse = createSSEController(sendEvent, auditLog);
-          const eventStream = graph.streamEvents(graphInput as unknown as GraphState, {
-            ...config,
-            version: "v2",
-            streamMode: STREAM_MODES,
-          });
-
-          for await (const event of eventStream) {
-            const result = sse.handleEvent(event);
-            if (result === "interrupt") {
-              wasInterrupted = true;
-              auditLog.recordWorkflowEvent("workflow_interrupted");
-              break;
-            }
-          }
-        } else {
-          const result = await graph.invoke(graphInput as unknown as GraphState, config);
-          wasInterrupted = emitInterruptFromInvokeResult(result, sendEvent);
-          if (wasInterrupted) auditLog.recordWorkflowEvent("workflow_interrupted");
-          invokeFinalState = graphStateFromInvokeResult(result);
-        }
-
-        const fs = await getGraphStateAfterRun(graph, config, invokeFinalState);
-        if (fs) {
-          if (!wasInterrupted) {
-            await saveHistoryToDb(taskId, fs.conversationHistory);
-            auditLog.recordPersistenceEvent("history_saved", {
-              historyCount: fs.conversationHistory.length,
-            });
-            await updateTaskState(fs);
-            auditLog.recordPersistenceEvent("task_state_updated", {
-              phase: fs.phase,
-              activeAgent: fs.activeAgent,
-            });
-          }
-          sendAgentDoneFallback(fs, sendEvent, sentKeys);
-          if (!wasInterrupted) {
-            sendEvent("done", {
-              taskId,
-              conversationSummary: buildContextSummary(fs as unknown as WritingState),
-              activeAgent: fs.activeAgent,
-            });
-            auditLog.recordWorkflowEvent("workflow_completed", {
-              activeAgent: fs.activeAgent,
-              phase: fs.phase,
-            });
-            await cleanupGraphCheckpoint(taskId, auditLog);
-          }
-        }
-        close();
-      }
-    );
+      sendEvent("start", { taskId });
+      await runInitialStateWorkflow(initialState, sendEvent, sentKeys, config, close, auditLog);
     }
   );
 }
@@ -743,6 +845,7 @@ export async function resumeWriting(
             artifactMode: "none",
             reviewerAgent: null,
             reviserAgent: null,
+            pendingArtifactRevision: null,
             artifactIteration: 0,
             maxArtifactIterations: 5,
           };

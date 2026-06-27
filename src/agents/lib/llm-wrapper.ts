@@ -12,10 +12,12 @@ import { traceLLMCall } from "@/agents/lib/langsmith-tracer";
 import {
   ensureReasoningEffortPrompt,
   generateMockResponse,
+  getModelCallBudget,
   getModelRuntime,
   hasReasoningEffortPrompt,
   type LLMCallMetadata,
   type LLMResult,
+  type ModelCallProfile,
   type StreamCallback,
 } from "@/agents/runtime/model-runtime";
 
@@ -126,6 +128,7 @@ export async function callLLMStructured<TSchema extends ZodSchema>(
     prompt: string;
     systemPrompt?: string;
     metadata?: LLMCallMetadata;
+    profile?: ModelCallProfile;
   }
 ): Promise<{
   data: ReturnType<TSchema["parse"]>;
@@ -134,10 +137,13 @@ export async function callLLMStructured<TSchema extends ZodSchema>(
   const requestId = logger.generateRequestId();
   let systemContent = options.systemPrompt ?? "";
   systemContent += "\n\n【重要】你必须只返回一个合法的 JSON 对象，不要包含任何其他文字、注释或 Markdown 标记。";
-  const messages = ensureReasoningEffortPrompt([
+  const baseMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: systemContent },
     { role: "user", content: options.prompt },
-  ]);
+  ];
+  const messages = options.profile === "fast"
+    ? baseMessages
+    : ensureReasoningEffortPrompt(baseMessages);
   logger.llmRequest(requestId, messages);
 
   return traceLLMCall(
@@ -147,9 +153,12 @@ export async function callLLMStructured<TSchema extends ZodSchema>(
       const result = await getModelRuntime().completeStructured(schema, {
         messages,
         metadata: options.metadata,
+        profile: options.profile,
       });
       logger.info("LLM", "结构化输出成功", {
         requestId,
+        profile: options.profile ?? "normal",
+        maxOutputTokens: getModelCallBudget(options.profile),
         tokens: result.usage?.totalTokens,
       });
       return result;

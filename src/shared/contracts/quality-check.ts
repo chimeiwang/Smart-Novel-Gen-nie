@@ -65,27 +65,9 @@ export interface QualityCheckDefinition {
 export const QUALITY_CHECK_DEFINITIONS: QualityCheckDefinition[] = [
   {
     type: "consistency",
-    title: "一致性校验",
-    summary: "检查正文与设定的一致性、角色 OOC、伏笔回收、逻辑矛盾",
+    title: "一致性终检",
+    summary: "最终检查正文与设定的一致性、角色 OOC、伏笔回收、逻辑矛盾",
     agentId: "校验",
-  },
-  {
-    type: "lore_sync",
-    title: "同步设定",
-    summary: "从最近章节正文提取明确事实，更新角色经历和阶段状态",
-    agentId: "设定",
-  },
-  {
-    type: "editorial",
-    title: "商业性评审",
-    summary: "评估开篇钩子、冲突强度、爽点兑现、节奏、尾钩、读者承诺",
-    agentId: "编辑",
-  },
-  {
-    type: "craft",
-    title: "技法评审",
-    summary: "检查场景结构（目标→阻力→转折→代价→结果→余波），反流水账",
-    agentId: "编辑",
   },
 ];
 
@@ -101,7 +83,7 @@ export const QUALITY_CHECK_AGENT_MAP: Record<QualityCheckType, string> =
 
 /** type → 默认运行消息 */
 export const QUALITY_CHECK_MESSAGE_MAP: Record<QualityCheckType, string> = {
-  consistency: "@校验 检查当前章节正文是否存在 OOC、前后设定冲突、世界规则矛盾、伏笔误用或剧情逻辑问题。请给出明确证据和可执行修改建议。",
+  consistency: "@校验 对当前章节正文做一致性终检：检查是否存在 OOC、前后设定冲突、世界规则矛盾、伏笔误用或剧情逻辑问题。请给出明确证据和可执行修改建议。",
   lore_sync: "@设定 根据最近章节正文同步更新设定：提取明确发生的事实变化（生死/失踪/被囚、身份揭露、实力突破、物品归属、势力归属、重要经历），生成 characterExperiences 和必要的状态更新。不要因为临时情绪或场景描写覆盖核心画像字段。",
   editorial: "@编辑 从网文商业性角度评审当前章节：检查开篇钩子、主角目标、冲突强度、爽点兑现、信息差、节奏、章节尾钩和读者承诺。如果明显影响追读，请给作家明确返工 brief。",
   craft: "@编辑 从作家技法和反流水账角度评审当前章节：检查每个主要场景是否有目标、阻力、转折、代价、结果和余波，并给出可执行改法。",

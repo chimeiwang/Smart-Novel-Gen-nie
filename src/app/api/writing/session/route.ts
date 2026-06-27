@@ -8,8 +8,7 @@
 import { NextRequest } from "next/server";
 
 import {
-  createInitialState,
-  executeWritingWorkflow,
+  startWritingWorkflow,
 } from "@/agents/graph";
 import { prisma } from "@/shared/db/prisma";
 import { getSession } from "@/shared/lib/auth";
@@ -85,7 +84,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const initialState = await createInitialState({
+    return await startWritingWorkflow({
       novelId,
       chapterId,
       writingSessionId: writingSessionId ?? null,
@@ -94,8 +93,6 @@ export async function POST(request: NextRequest) {
       userId: session.userId,
       selectedAgents: selectedAgents ?? undefined,
     });
-
-    return await executeWritingWorkflow(initialState);
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : "服务器内部错误";
     logger.error("API", `写作 workflow 请求错误: ${errorMsg}`, {

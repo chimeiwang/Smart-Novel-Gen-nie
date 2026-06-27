@@ -59,7 +59,7 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
               <textarea
                 className="textarea"
                 name="summary"
-                placeholder="写一句故事设定，方便后续大纲和 AI 续写统一方向"
+                placeholder="写一句故事设定，方便后续大纲和智能写作统一方向"
                 value={summary}
                 onChange={(e) => setSummary(e.target.value)}
               />

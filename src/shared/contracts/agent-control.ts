@@ -476,6 +476,19 @@ export const ValidationReportToolArgsSchema = ValidationReportEventSchema.omit({
 // evaluator/reviser loop — 通用评估控制
 // ============================================
 
+export const EvaluationPatchSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("text_replace"),
+    find: z.string().min(1).max(1000),
+    replace: z.string().max(2000),
+  }).strict(),
+  z.object({
+    kind: z.literal("agent_updates_merge"),
+    updates: AgentUpdatesSchema,
+  }).strict(),
+]);
+export type EvaluationPatch = z.infer<typeof EvaluationPatchSchema>;
+
 export const EvaluationEventSchema = z.object({
   type: z.literal("submit_evaluation"),
   artifactId: z.string().min(1).max(200).optional(),
@@ -483,6 +496,8 @@ export const EvaluationEventSchema = z.object({
   verdict: z.enum(["pass", "revise", "block"]),
   summary: z.string().min(1).max(1000),
   requiredChanges: z.string().max(2000).optional(),
+  revisionMode: z.enum(["patch", "rewrite"]).optional(),
+  patches: z.array(EvaluationPatchSchema).max(20).optional(),
 });
 export type EvaluationEvent = z.infer<typeof EvaluationEventSchema>;
 
@@ -874,6 +889,8 @@ const CONTROL_TOOL_REPAIR_HINTS: Record<string, { expectedType: string; minimalE
       "  verdict: \"pass\" | \"revise\" | \"block\";",
       "  summary: string; // required, 1-1000 chars",
       "  requiredChanges?: string; // optional, <= 2000 chars",
+      "  revisionMode?: \"patch\" | \"rewrite\"; // only for verdict=revise",
+      "  patches?: Array<{ kind: \"text_replace\"; find: string; replace: string } | { kind: \"agent_updates_merge\"; updates: AgentUpdates }>;",
       "};",
     ].join("\n"),
     minimalExample: JSON.stringify({
@@ -881,6 +898,7 @@ const CONTROL_TOOL_REPAIR_HINTS: Record<string, { expectedType: string; minimalE
       verdict: "revise",
       summary: "前三章仍缺少明确小胜利。",
       requiredChanges: "第 2 章补一个可见线索，让读者感到主角有阶段性收获。",
+      revisionMode: "rewrite",
     }, null, 2),
   },
 };

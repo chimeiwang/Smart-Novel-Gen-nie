@@ -26,13 +26,16 @@ function createStream(chunks: unknown[]): AsyncIterable<unknown> {
 
 function createMockClient(streams: AsyncIterable<unknown>[]) {
   let calls = 0;
+  const requests: unknown[] = [];
   return {
     get calls() {
       return calls;
     },
+    requests,
     chat: {
       completions: {
-        create: async () => {
+        create: async (request: unknown) => {
+          requests.push(request);
           const stream = streams[calls];
           calls += 1;
           if (!stream) {
@@ -47,7 +50,9 @@ function createMockClient(streams: AsyncIterable<unknown>[]) {
 
 function createBillingStub() {
   return {
-    ensureCanStartModelCall: async () => ({ maxOutputTokens: 1024 }),
+    ensureCanStartModelCall: async (input: { maxOutputTokens?: number }) => ({
+      maxOutputTokens: input.maxOutputTokens ?? 1024,
+    }),
     chargeAiUsage: async () => {},
   };
 }
@@ -198,5 +203,33 @@ describe("ModelRuntime tool-call turn boundary", () => {
     assert.equal(result.toolCalls.length, 1);
     assert.equal(result.toolCalls[0].function.name, "submit_evaluation");
     assert.equal("controlEvents" in result, false);
+  });
+});
+
+describe("ModelCallProfile", () => {
+  it("uses a fast profile without reasoning effort for structured calls", async () => {
+    const response = {
+      choices: [{ message: { content: JSON.stringify({ ok: true }) }, finish_reason: "stop" }],
+      usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+    };
+    const client = createMockClient([response as never]);
+    const runtime = new LegacyOpenAIRuntime({
+      client: client as never,
+      isAiConfigured: () => true,
+      billing: createBillingStub(),
+    });
+
+    const result = await runtime.completeStructured(
+      { parse: (value: unknown) => value } as never,
+      {
+        profile: "fast",
+        messages: [{ role: "user", content: "route" }],
+      }
+    );
+
+    assert.deepEqual(result.data, { ok: true });
+    assert.equal(client.calls, 1);
+    assert.equal((client.requests[0] as { max_tokens?: number }).max_tokens, 3000);
+    assert.equal("reasoning_effort" in (client.requests[0] as Record<string, unknown>), false);
   });
 });

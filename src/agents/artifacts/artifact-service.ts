@@ -7,8 +7,10 @@
 
 import { prisma } from "@/shared/db/prisma";
 import type { AgentUpdates } from "@/shared/contracts/agent-updates";
+import { AgentUpdatesSchema, hasAgentUpdates } from "@/shared/contracts/agent-updates";
 import type { CoreAgentId, NovelData } from "@/agents/graph/state";
 import type { BeatPlanDraft } from "@/shared/contracts/beat-plan";
+import type { EvaluationPatch } from "@/shared/contracts/agent-control";
 import type {
   ReviewArtifactDto,
   ReviewArtifactEvaluationVerdict,
@@ -22,6 +24,7 @@ import {
   ReviewArtifactStatusSchema,
 } from "@/shared/contracts/review-artifact";
 import { buildUpdateDiffs, type UpdateDiffItem } from "./artifact-diff";
+import { mergeAgentUpdates } from "./update-builder";
 
 type ArtifactRecord = {
   id: string;
@@ -65,6 +68,108 @@ function parseJson<T>(value: string | null, fallback: T): T {
 
 function parseArtifactStatus(status: string): ReviewArtifactStatus {
   return ReviewArtifactStatusSchema.parse(status);
+}
+
+export type ArtifactPatchApplyResult =
+  | {
+      success: true;
+      payload: ReviewArtifactPayload;
+      diff: UpdateDiffItem[] | null;
+      summary: string;
+    }
+  | {
+      success: false;
+      reason: string;
+    };
+
+export function applyEvaluationPatchesToPayload(input: {
+  payload: ReviewArtifactPayload;
+  patches: EvaluationPatch[];
+}): ArtifactPatchApplyResult {
+  let payload = input.payload;
+
+  for (const patch of input.patches) {
+    if (patch.kind === "text_replace") {
+      const result = applyTextReplacePatch(payload, patch.find, patch.replace);
+      if (!result.success) return result;
+      payload = result.payload;
+      continue;
+    }
+
+    if (payload.kind !== "agent_updates") {
+      return { success: false, reason: "agent_updates_merge 只能用于 agent_updates 草案" };
+    }
+    const updateResult = AgentUpdatesSchema.safeParse(patch.updates);
+    if (!updateResult.success) {
+      return { success: false, reason: "agent_updates_merge updates 结构无效" };
+    }
+    if (!hasAgentUpdates(updateResult.data)) {
+      return { success: false, reason: "agent_updates_merge 缺少有效变更" };
+    }
+    payload = {
+      kind: "agent_updates",
+      updates: mergeAgentUpdates(payload.updates, updateResult.data),
+    };
+  }
+
+  return {
+    success: true,
+    payload,
+    diff: null,
+    summary: "补丁已应用",
+  };
+}
+
+function applyTextReplacePatch(
+  payload: ReviewArtifactPayload,
+  find: string,
+  replace: string
+): ArtifactPatchApplyResult {
+  if ("content" in payload) {
+    const result = replaceUnique(payload.content, find, replace);
+    if (!result.success) return result;
+    return {
+      success: true,
+      payload: { ...payload, content: result.content } as ReviewArtifactPayload,
+      diff: null,
+      summary: "文本补丁已应用",
+    };
+  }
+
+  if (payload.kind === "freeform_markdown") {
+    const result = replaceUnique(payload.markdown, find, replace);
+    if (!result.success) return result;
+    return {
+      success: true,
+      payload: { ...payload, markdown: result.content },
+      diff: null,
+      summary: "文本补丁已应用",
+    };
+  }
+
+  return { success: false, reason: `text_replace 不支持 ${payload.kind} 草案` };
+}
+
+function replaceUnique(
+  content: string,
+  find: string,
+  replace: string
+): { success: true; content: string } | { success: false; reason: string } {
+  const count = countOccurrences(content, find);
+  if (count !== 1) {
+    return { success: false, reason: `text_replace 需要唯一匹配，实际匹配 ${count} 次` };
+  }
+  return { success: true, content: content.replace(find, replace) };
+}
+
+function countOccurrences(content: string, find: string): number {
+  let count = 0;
+  let index = content.indexOf(find);
+  while (index >= 0) {
+    count += 1;
+    index = content.indexOf(find, index + find.length);
+  }
+  return count;
 }
 
 export function toReviewArtifactDto(record: ArtifactRecord): ReviewArtifactDto {
@@ -801,6 +906,83 @@ export async function submitArtifactEvaluation(input: {
   });
 
   return toReviewArtifactDto(updated);
+}
+
+export type ArtifactEvaluationPatchResult =
+  | { success: true; artifact: ReviewArtifactDto }
+  | { success: false; reason: string };
+
+export async function applyArtifactEvaluationPatch(input: {
+  artifactId: string;
+  evaluatorAgent: CoreAgentId;
+  summary: string;
+  patches: EvaluationPatch[];
+  novelData?: NovelData;
+}): Promise<ArtifactEvaluationPatchResult> {
+  if (input.patches.length <= 0) {
+    return { success: false, reason: "缺少可应用补丁" };
+  }
+
+  const artifact = await prisma.reviewArtifact.findUnique({
+    where: { id: input.artifactId },
+  });
+  if (!artifact) return { success: false, reason: "待审核草案不存在" };
+  const status = parseArtifactStatus(artifact.status);
+  if (!["draft", "under_review", "awaiting_user"].includes(status)) {
+    return { success: false, reason: "当前草案状态不能应用小修补丁" };
+  }
+
+  const payloadResult = ReviewArtifactPayloadSchema.safeParse(parseJson(artifact.payloadJson, null));
+  if (!payloadResult.success) return { success: false, reason: "待审核草案 payload 无效" };
+
+  const patchResult = applyEvaluationPatchesToPayload({
+    payload: payloadResult.data,
+    patches: input.patches,
+  });
+  if (!patchResult.success) return patchResult;
+
+  const nextDiff = patchResult.payload.kind === "agent_updates"
+    ? await buildAuthoritativeUpdateDiffs({
+        novelId: artifact.novelId,
+        chapterId: artifact.chapterId,
+        updates: patchResult.payload.updates,
+        fallbackNovelData: input.novelData,
+      })
+    : null;
+
+  const nextRevision = artifact.revision + 1;
+  const payloadJson = JSON.stringify(patchResult.payload);
+  const diffJson = nextDiff ? JSON.stringify(nextDiff) : null;
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const next = await tx.reviewArtifact.update({
+      where: { id: artifact.id },
+      data: {
+        summary: input.summary,
+        payloadJson,
+        diffJson,
+        updatedByAgent: input.evaluatorAgent,
+        reviewerAgent: input.evaluatorAgent,
+        revision: nextRevision,
+      },
+    });
+    await tx.reviewArtifactRevision.create({
+      data: {
+        artifactId: next.id,
+        revision: nextRevision,
+        summary: input.summary,
+        payloadJson,
+        diffJson,
+        createdByAgent: input.evaluatorAgent,
+      },
+    });
+    return tx.reviewArtifact.findUniqueOrThrow({
+      where: { id: next.id },
+      include: { evaluations: { orderBy: { createdAt: "desc" } } },
+    });
+  });
+
+  return { success: true, artifact: toReviewArtifactDto(updated) };
 }
 
 export async function markArtifactUnderReview(input: {

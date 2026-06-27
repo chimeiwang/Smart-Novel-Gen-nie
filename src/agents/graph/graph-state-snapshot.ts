@@ -40,6 +40,7 @@ export type SerializableGraphStateSnapshot = {
   artifactMode: "none" | "review_loop";
   reviewerAgent: CoreAgentId | null;
   reviserAgent: CoreAgentId | null;
+  pendingArtifactRevision: GraphState["pendingArtifactRevision"];
   artifactIteration: number;
   maxArtifactIterations: number;
 };
@@ -74,6 +75,7 @@ export function serializeGraphStateSnapshot(state: GraphState): string {
     artifactMode: state.artifactMode ?? "none",
     reviewerAgent: state.reviewerAgent ?? null,
     reviserAgent: state.reviserAgent ?? null,
+    pendingArtifactRevision: state.pendingArtifactRevision ?? null,
     artifactIteration: state.artifactIteration ?? 0,
     maxArtifactIterations: state.maxArtifactIterations ?? 5,
   };
@@ -134,6 +136,7 @@ export function deserializeGraphStateSnapshot(
       artifactMode: parsed.artifactMode ?? "none",
       reviewerAgent: parsed.reviewerAgent ?? null,
       reviserAgent: parsed.reviserAgent ?? null,
+      pendingArtifactRevision: parsed.pendingArtifactRevision ?? null,
       artifactIteration: parsed.artifactIteration ?? 0,
       maxArtifactIterations: parsed.maxArtifactIterations ?? 5,
     };

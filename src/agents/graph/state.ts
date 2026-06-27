@@ -12,7 +12,7 @@
 
 // AgentUpdates 及其依赖类型在此文件中定义，不再从 types.ts 导入
 
-import type { AgentControlEvent } from "@/shared/contracts/agent-control";
+import type { AgentControlEvent, EvaluationPatch } from "@/shared/contracts/agent-control";
 import type { CreativeOperation } from "@/shared/contracts/creative-operation";
 import {
   AGENT_META_MAP,
@@ -645,6 +645,12 @@ export interface WritingState {
   artifactMode?: "none" | "review_loop";
   reviewerAgent?: CoreAgentId | null;
   reviserAgent?: CoreAgentId | null;
+  pendingArtifactRevision?: {
+    summary: string;
+    requiredChanges?: string;
+    revisionMode: "patch" | "rewrite";
+    patches?: EvaluationPatch[];
+  } | null;
   artifactIteration?: number;
   maxArtifactIterations?: number;
 }

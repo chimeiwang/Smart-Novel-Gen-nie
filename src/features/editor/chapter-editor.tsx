@@ -1,17 +1,18 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
 import {
-  generateContinuationAction,
   saveChapterDraftAction,
   setChapterStatusAction,
+  updateChapterQualityCheckStatusAction,
   updateChapterProgressAction,
 } from "@/app/actions";
+import type { QualityCheckDto } from "@/shared/contracts/quality-check";
 import { countTextLength } from "@/shared/lib/word-count";
 
 type ChapterEditorProps = {
-  novelId: string;
   chapter: {
     id: string;
     title: string;
@@ -20,22 +21,25 @@ type ChapterEditorProps = {
     completedAt: string | null;
   };
   chapterProgress: string | null;
+  qualityChecks?: QualityCheckDto[];
   styleName?: string | null;
 };
 
 export function ChapterEditor({
-  novelId,
   chapter,
   chapterProgress,
+  qualityChecks = [],
   styleName,
 }: ChapterEditorProps) {
+  const router = useRouter();
   const [title, setTitle] = useState(chapter.title);
   const [content, setContent] = useState(chapter.content);
   const [saveStatus, setSaveStatus] = useState("已同步");
-  const [length, setLength] = useState<"short" | "medium" | "long">("medium");
-  const [isGenerating, startGenerating] = useTransition();
   const [chapterStatus, setChapterStatus] = useState(chapter.status);
   const [, startStatusTransition] = useTransition();
+  const [showQualityDialog, setShowQualityDialog] = useState(false);
+  const [runningCheckId, setRunningCheckId] = useState<string | null>(null);
+  const [qualityError, setQualityError] = useState<string | null>(null);
 
   // 章节进展状态
   const [progressContent, setProgressContent] = useState(chapterProgress ?? "");
@@ -71,23 +75,12 @@ export function ChapterEditor({
   }, [chapter.id, content, title]);
 
   const chapterWordCount = useMemo(() => countTextLength(content), [content]);
-
-  const handleGenerate = () => {
-    startGenerating(async () => {
-      setSaveStatus("AI 续写中...");
-      const generated = await generateContinuationAction({
-        novelId,
-        chapterId: chapter.id,
-        length,
-      });
-
-      if (generated) {
-        setContent((current) => `${current.trimEnd()}\n\n${generated.trim()}`);
-      }
-
-      setSaveStatus("AI 续写完成，等待自动保存");
-    });
-  };
+  const visibleChecks = chapterStatus === "review" || chapterStatus === "completed"
+    ? qualityChecks.filter((check) => check.type === "consistency")
+    : [];
+  const openCheckCount = visibleChecks.filter((check) => check.status === "pending" || check.status === "failed").length;
+  const doneCheckCount = visibleChecks.filter((check) => check.status === "completed" || check.status === "skipped").length;
+  const flowSteps = getChapterFlowSteps(chapterStatus, visibleChecks.length, doneCheckCount);
 
   const handleSaveProgress = () => {
     startProgressTransition(async () => {
@@ -99,13 +92,60 @@ export function ChapterEditor({
   };
 
   const handleStatusChange = (status: "drafting" | "review" | "completed") => {
+    setQualityError(null);
     startStatusTransition(async () => {
-      await setChapterStatusAction({
-        chapterId: chapter.id,
-        status,
-      });
-      setChapterStatus(status);
+      try {
+        await setChapterStatusAction({
+          chapterId: chapter.id,
+          status,
+        });
+        setChapterStatus(status);
+        router.refresh();
+      } catch (error) {
+        setQualityError(error instanceof Error ? error.message : "章节状态更新失败");
+        if (status === "completed") setShowQualityDialog(true);
+      }
     });
+  };
+
+  const runQualityCheck = async (check: QualityCheckDto) => {
+    setRunningCheckId(check.id);
+    setQualityError(null);
+    try {
+      const response = await fetch("/api/quality-check/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ checkId: check.id }),
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        let message = "一致性终检启动失败";
+        try {
+          const parsed = JSON.parse(text) as { error?: string };
+          message = parsed.error || message;
+        } catch {
+          message = text || message;
+        }
+        setQualityError(message);
+        return;
+      }
+      await response.text();
+      router.refresh();
+    } catch (error) {
+      setQualityError(error instanceof Error ? error.message : "一致性终检启动失败");
+    } finally {
+      setRunningCheckId(null);
+    }
+  };
+
+  const markQualityCheck = async (check: QualityCheckDto, status: "skipped" | "pending") => {
+    setRunningCheckId(check.id);
+    try {
+      await updateChapterQualityCheckStatusAction({ id: check.id, status });
+      router.refresh();
+    } finally {
+      setRunningCheckId(null);
+    }
   };
 
   return (
@@ -120,20 +160,75 @@ export function ChapterEditor({
           {styleName ? <span className="badge">文风：{styleName}</span> : null}
         </div>
         <div className="row editor-actions">
-          <select
-            className="select"
-            value={length}
-            onChange={(event) =>
-              setLength(event.target.value as "short" | "medium" | "long")
-            }
+          <div className="chapter-flow-compact">
+            <div className="chapter-flow-compact-main">
+              <span className={`chapter-flow-dot ${chapterStatus}`} />
+              <span>{getChapterFlowHeadline(chapterStatus, visibleChecks.length, openCheckCount)}</span>
+            </div>
+            <div className="chapter-flow-popover">
+              {flowSteps.map((step, index) => (
+                <div className={`chapter-flow-popover-step ${step.state}`} key={step.title}>
+                  <span>{step.state === "done" ? "✓" : index + 1}</span>
+                  <div>
+                    <strong>{step.title}</strong>
+                    <p>{step.desc}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <button
+            className="button ghost sm"
+            type="button"
+            onClick={() => setShowProgress(!showProgress)}
           >
-            <option value="short">短续写</option>
-            <option value="medium">中续写</option>
-            <option value="long">长续写</option>
-          </select>
-          <button className="button sm editor-ai-button" type="button" onClick={handleGenerate}>
-            {isGenerating ? "生成中..." : "AI 续写"}
+            {showProgress ? "隐藏章节进展" : "章节进展"}
           </button>
+          <button
+            className="button ghost sm"
+            type="button"
+            onClick={() => setShowQualityDialog(true)}
+            disabled={visibleChecks.length === 0}
+            title={visibleChecks.length === 0 ? "送审后生成一致性终检" : "查看一致性终检"}
+          >
+            一致性终检{visibleChecks.length > 0 ? ` ${doneCheckCount}/${visibleChecks.length}` : ""}
+          </button>
+          {chapterStatus === "review" ? (
+            <button
+              className="button ghost sm"
+              type="button"
+              onClick={() => handleStatusChange("drafting")}
+            >
+              退回草稿
+            </button>
+          ) : null}
+          {chapterStatus === "completed" ? (
+            <button
+              className="button ghost sm"
+              type="button"
+              onClick={() => handleStatusChange("drafting")}
+            >
+              重新编辑
+            </button>
+          ) : null}
+          {chapterStatus === "drafting" ? (
+            <button
+              className="button secondary sm"
+              type="button"
+              onClick={() => handleStatusChange("review")}
+            >
+              送审
+            </button>
+          ) : null}
+          {chapterStatus === "review" ? (
+            <button
+              className="button sm"
+              type="button"
+              onClick={() => handleStatusChange("completed")}
+            >
+              标记完成
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -181,47 +276,64 @@ export function ChapterEditor({
         ) : null}
 
       </div>
-
-      <div className="panel-footer">
-        <div className="row row-between">
-          <button
-            className="button ghost sm"
-            type="button"
-            onClick={() => setShowProgress(!showProgress)}
-          >
-            {showProgress ? "隐藏章节进展" : "章节进展"}
-          </button>
-          <div className="row">
-            {chapterStatus !== "drafting" ? (
-              <button
-                className="button ghost sm"
-                type="button"
-                onClick={() => handleStatusChange("drafting")}
-              >
-                退回草稿
-              </button>
-            ) : null}
-            {chapterStatus !== "review" ? (
-              <button
-                className="button secondary sm"
-                type="button"
-                onClick={() => handleStatusChange("review")}
-              >
-                送审
-              </button>
-            ) : null}
-            {chapterStatus !== "completed" ? (
-              <button
-                className="button sm"
-                type="button"
-                onClick={() => handleStatusChange("completed")}
-              >
-                标记完成
-              </button>
-            ) : null}
+      {showQualityDialog ? (
+        <div className="modal-backdrop" onClick={() => setShowQualityDialog(false)}>
+          <div className="modal chapter-check-dialog" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <h3>一致性终检</h3>
+                <p className="muted">正文送审后，最后检查设定一致性、角色边界、伏笔和逻辑问题。</p>
+              </div>
+              <button className="button ghost sm" type="button" onClick={() => setShowQualityDialog(false)}>关闭</button>
+            </div>
+            <div className="modal-body chapter-check-list">
+              {visibleChecks.length === 0 ? (
+                <p className="muted">当前章节还未送审。点击“送审”后会生成一致性终检。</p>
+              ) : null}
+              {qualityError ? <p className="muted error-text">{qualityError}</p> : null}
+              {visibleChecks.map((check) => {
+                const finished = check.status === "completed" || check.status === "skipped";
+                const busy = runningCheckId === check.id;
+                return (
+                  <div className="chapter-check-row" key={check.id}>
+                    <div className="chapter-check-row-main">
+                      <div className="row">
+                        <span className={`chapter-check-status ${check.status}`}>{getQualityStatusLabel(check.status)}</span>
+                        <strong>{check.title}</strong>
+                        {check.qualityGate ? <span className={`quality-gate ${check.qualityGate}`}>{getQualityGateLabel(check.qualityGate)}</span> : null}
+                      </div>
+                      {check.summary ? <p>{check.summary}</p> : null}
+                      <QualityScoreStrip check={check} />
+                      {check.result ? (
+                        <details className="chapter-check-result">
+                          <summary>查看报告</summary>
+                          <div>{check.result}</div>
+                        </details>
+                      ) : null}
+                    </div>
+                    <div className="chapter-check-actions">
+                      {!finished ? (
+                        <>
+                          <button className="button sm" type="button" disabled={Boolean(runningCheckId)} onClick={() => void runQualityCheck(check)}>
+                            {busy ? "执行中..." : "执行"}
+                          </button>
+                          <button className="button ghost sm" type="button" disabled={Boolean(runningCheckId)} onClick={() => void markQualityCheck(check, "skipped")}>
+                            跳过
+                          </button>
+                        </>
+                      ) : check.status === "skipped" ? (
+                        <button className="button ghost sm" type="button" disabled={Boolean(runningCheckId)} onClick={() => void markQualityCheck(check, "pending")}>
+                          重置
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }
@@ -230,4 +342,71 @@ function getChapterStatusLabel(status: string) {
   if (status === "review") return "待审";
   if (status === "completed") return "已完成";
   return "草稿";
+}
+
+function getChapterFlowHeadline(status: string, checkCount: number, openCheckCount: number) {
+  if (status === "completed") return "本章已完成";
+  if (status === "review" && openCheckCount > 0) return "一致性终检待处理";
+  if (status === "review" && checkCount > 0) return "一致性终检已处理，等待完成章节";
+  return "草稿中，正文和计划可以继续调整";
+}
+
+function getChapterFlowSteps(status: string, checkCount: number, doneCheckCount: number) {
+  const inReview = status === "review" || status === "completed";
+  return [
+    { title: "规划", desc: "在智能写作中生成或讨论本章计划。", state: "done" },
+    { title: "写正文", desc: "正文编辑器保存正式章节文本。", state: status === "drafting" ? "current" : "done" },
+    { title: "送审", desc: "送审后生成一致性终检。", state: inReview ? "done" : "blocked" },
+    { title: "一致性终检", desc: checkCount > 0 ? `${doneCheckCount}/${checkCount} 已处理` : "送审后出现。", state: checkCount > 0 && doneCheckCount < checkCount ? "current" : checkCount > 0 ? "done" : "blocked" },
+    { title: "完成", desc: "终检处理完后标记完成。", state: status === "completed" ? "done" : inReview && checkCount > 0 && doneCheckCount === checkCount ? "current" : "blocked" },
+  ] as const;
+}
+
+function getQualityStatusLabel(status: string) {
+  if (status === "running") return "执行中";
+  if (status === "completed") return "完成";
+  if (status === "skipped") return "跳过";
+  if (status === "failed") return "失败";
+  return "待处理";
+}
+
+function getQualityGateLabel(gate: string) {
+  if (gate === "rewrite") return "建议返工";
+  if (gate === "revise") return "建议修改";
+  if (gate === "pass") return "可通过";
+  return gate;
+}
+
+function getScoreTone(score: number) {
+  if (score <= 5) return "low";
+  if (score <= 7) return "mid";
+  return "high";
+}
+
+function QualityScoreStrip({ check }: { check: QualityCheckDto }) {
+  const scores = [
+    ["钩子", check.scoreHook],
+    ["冲突", check.scoreTension],
+    ["爽点", check.scorePayoff],
+    ["节奏", check.scorePacing],
+    ["尾钩", check.scoreEndingHook],
+    ["承诺", check.scoreReaderPromise],
+  ] as const;
+  const visibleScores = scores.filter(([, score]) => typeof score === "number");
+  if (visibleScores.length === 0 && typeof check.scoreOverall !== "number") return null;
+
+  return (
+    <div className="quality-score-strip">
+      {typeof check.scoreOverall === "number" ? (
+        <span className={`quality-score overall ${getScoreTone(check.scoreOverall)}`}>
+          综合 {check.scoreOverall}/10
+        </span>
+      ) : null}
+      {visibleScores.map(([label, score]) => (
+        <span key={label} className={`quality-score ${getScoreTone(score ?? 0)}`}>
+          {label} {score}/10
+        </span>
+      ))}
+    </div>
+  );
 }

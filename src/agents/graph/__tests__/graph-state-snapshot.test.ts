@@ -69,6 +69,7 @@ function createState(): GraphState {
     artifactMode: "review_loop",
     reviewerAgent: "编辑",
     reviserAgent: null,
+    pendingArtifactRevision: null,
     artifactIteration: 1,
     maxArtifactIterations: 5,
   };

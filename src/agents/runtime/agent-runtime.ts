@@ -196,7 +196,6 @@ export class AgentRuntimeImpl implements AgentRuntime {
     messages.push({
       role: "assistant",
       content: fullTextContent || "",
-      reasoning_content: reasoningContent || undefined,
       tool_calls: modelToolCalls as unknown as OpenAI.Chat.ChatCompletionMessageToolCall[],
     } as any);
 

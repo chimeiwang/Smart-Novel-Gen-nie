@@ -7,7 +7,6 @@ import { redirect } from "next/navigation";
 
 import { createPortraitAgent } from "@/agents";
 import { prisma } from "@/shared/db/prisma";
-import { generateContinuation } from "@/shared/lib/ai";
 import { executeUpdates } from "@/agents/lib/db-operations";
 import { authorizeNovel, authorizeWritingTask } from "@/agents/lib/task-auth";
 import { DEFAULT_ENABLED_AGENTS, DEFAULT_ENABLED_AGENTS_STRING } from "@/shared/contracts/agent";
@@ -274,6 +273,21 @@ export async function setChapterStatusAction(input: {
   status: "drafting" | "review" | "completed";
 }) {
   await requireChapterAccess(input.chapterId);
+
+  if (input.status === "completed") {
+    const consistencyCheck = await prisma.chapterQualityCheck.findUnique({
+      where: {
+        chapterId_type: {
+          chapterId: input.chapterId,
+          type: "consistency",
+        },
+      },
+      select: { status: true },
+    });
+    if (!consistencyCheck || !["completed", "skipped"].includes(consistencyCheck.status)) {
+      throw new Error("一致性终检完成或跳过后，才能标记章节完成。");
+    }
+  }
 
   const chapter = await prisma.chapter.update({
     where: { id: input.chapterId },
@@ -1606,170 +1620,6 @@ export async function applyWritingStyleAction(input: {
   });
 
   revalidatePath(`/workspace/${input.novelId}`);
-}
-
-// ============================================
-// AI 续写相关
-// ============================================
-
-export async function generateContinuationAction(input: {
-  novelId: string;
-  chapterId: string;
-  length: "short" | "medium" | "long";
-}) {
-  await requireNovelAccess(input.novelId);
-
-  const novel = await prisma.novel.findUnique({
-    where: { id: input.novelId },
-    include: {
-      chapters: {
-        orderBy: { order: "asc" },
-      },
-      characters: {
-        include: {
-          faction: true,
-        },
-      },
-      items: {
-        include: {
-          owner: true,
-        },
-      },
-      locations: true,
-      factions: true,
-      glossaries: true,
-      outline: true,
-      plotProgress: true,
-      references: {
-        orderBy: { updatedAt: "desc" },
-        take: 5,
-      },
-      appliedStyle: true,
-    },
-  });
-
-  if (!novel) {
-    return "";
-  }
-
-  const chapters = novel.chapters as Array<{ id: string; title: string; content: string }>;
-  const outlineContent = novel.outline?.content ?? "";
-  const references = novel.references as Array<{ title: string; content: string }>;
-
-  const chapter = chapters.find((item) => item.id === input.chapterId);
-
-  if (!chapter) {
-    return "";
-  }
-
-  const plotProgress = novel.plotProgress
-    ? [
-        `当前阶段：${novel.plotProgress.currentStage}`,
-        `当前目标：${novel.plotProgress.currentGoal ?? "无"}`,
-        `当前冲突：${novel.plotProgress.currentConflict ?? "无"}`,
-        `下一里程碑：${novel.plotProgress.nextMilestone ?? "无"}`,
-      ].join("\n")
-    : "";
-
-  // 构建设定摘要
-  const loreParts: string[] = [];
-
-  // 角色
-  if (novel.characters.length > 0) {
-    const characterSummary = novel.characters
-      .slice(0, 15)
-      .map((c) => {
-        const parts = [c.name];
-        if (c.identity) parts.push(`身份：${c.identity}`);
-        if (c.faction) parts.push(`所属：${c.faction.name}`);
-        if (c.personality) parts.push(`性格：${c.personality}`);
-        if (c.coreDesire) parts.push(`核心欲望：${c.coreDesire}`);
-        if (c.behaviorBoundaries) parts.push(`行为边界：${c.behaviorBoundaries}`);
-        if (c.shortTermGoal) parts.push(`短期目标：${c.shortTermGoal}`);
-        if (c.appearance) parts.push(`外貌：${c.appearance}`);
-        return parts.join("，");
-      })
-      .join("\n");
-    loreParts.push(`【角色】\n${characterSummary}`);
-  }
-
-  // 物品
-  if (novel.items.length > 0) {
-    const itemSummary = novel.items
-      .slice(0, 10)
-      .map((i) => {
-        const parts = [i.name];
-        if (i.type) parts.push(`类型：${i.type}`);
-        if (i.rarity) parts.push(`稀有度：${i.rarity}`);
-        if (i.owner) parts.push(`持有者：${i.owner.name}`);
-        return parts.join("，");
-      })
-      .join("\n");
-    loreParts.push(`【物品】\n${itemSummary}`);
-  }
-
-  // 地点
-  if (novel.locations.length > 0) {
-    const locationSummary = novel.locations
-      .slice(0, 10)
-      .map((l) => {
-        const parts = [l.name];
-        if (l.type) parts.push(`类型：${l.type}`);
-        if (l.climate) parts.push(`气候：${l.climate}`);
-        return parts.join("，");
-      })
-      .join("\n");
-    loreParts.push(`【地点】\n${locationSummary}`);
-  }
-
-  // 势力
-  if (novel.factions.length > 0) {
-    const factionSummary = novel.factions
-      .slice(0, 5)
-      .map((f) => {
-        const parts = [f.name];
-        if (f.type) parts.push(`类型：${f.type}`);
-        if (f.description) parts.push(`描述：${f.description}`);
-        return parts.join("，");
-      })
-      .join("\n");
-    loreParts.push(`【势力】\n${factionSummary}`);
-  }
-
-  // 术语
-  if (novel.glossaries.length > 0) {
-    const glossarySummary = novel.glossaries
-      .slice(0, 10)
-      .map((g) => `${g.term}：${g.definition}`)
-      .join("\n");
-    loreParts.push(`【术语】\n${glossarySummary}`);
-  }
-
-  const loreSummary = loreParts.join("\n\n");
-
-  const referenceSummary = references
-    .map((item) => `${item.title}：${item.content}`)
-    .join("\n");
-
-  // 使用结构化画像文本。portraitMarkdown 是历史字段名。
-  const styleProfile = novel.appliedStyle?.portraitMarkdown ?? "";
-
-  const session = await requireCurrentSession();
-
-  return generateContinuation({
-    novelName: novel.name,
-    chapterTitle: chapter.title,
-    content: chapter.content,
-    outlineSummary: outlineContent,
-    plotProgress,
-    loreSummary,
-    referenceSummary,
-    styleProfile,
-    length: input.length,
-  }, {
-    userId: session.userId,
-    novelId: input.novelId,
-  });
 }
 
 // ============================================

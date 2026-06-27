@@ -6,14 +6,11 @@ import { useState } from "react";
 import { type AgentId } from "@/agents/client";
 import { AgentSelector, getDefaultSelectedAgents } from "@/features/writing/agent-selector";
 import { WritingConversation } from "@/features/writing/writing-conversation";
-import type { QualityCheckDto } from "@/shared/contracts/quality-check";
 
 type SmartWritingPanelProps = {
   novelId: string;
   currentChapterId?: string;
   defaultWordCount?: number;
-  chapterStatus?: string;
-  qualityChecks?: QualityCheckDto[];
 };
 
 /**
@@ -24,8 +21,6 @@ export function SmartWritingPanel({
   novelId,
   currentChapterId,
   defaultWordCount = 4000,
-  chapterStatus,
-  qualityChecks = [],
 }: SmartWritingPanelProps) {
   const router = useRouter();
 
@@ -49,8 +44,6 @@ export function SmartWritingPanel({
           chapterId={currentChapterId}
           selectedAgents={selectedAgents}
           targetWordCount={targetWordCount}
-          chapterStatus={chapterStatus}
-          qualityChecks={qualityChecks}
           onComplete={() => router.refresh()}
         />
       ) : (

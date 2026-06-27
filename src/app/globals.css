@@ -672,17 +672,275 @@ button {
 
 .editor-actions {
   flex: 0 0 auto;
-  flex-wrap: nowrap;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
-.editor-actions .select {
-  width: 104px;
-  min-width: 104px;
+.chapter-flow-compact {
+  position: relative;
+  align-self: flex-start;
+  z-index: 2;
 }
 
-.editor-ai-button {
-  min-width: 76px;
+.chapter-flow-compact-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.chapter-flow-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--muted);
+}
+
+.chapter-flow-dot.review {
+  background: var(--warning);
+}
+
+.chapter-flow-dot.completed {
+  background: var(--success);
+}
+
+.chapter-flow-popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 360px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow-popover);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.chapter-flow-compact:hover .chapter-flow-popover,
+.chapter-flow-compact:focus-within .chapter-flow-popover {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+.chapter-flow-popover-step {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 8px;
+  padding: 7px;
+  border-radius: var(--radius-md);
+}
+
+.chapter-flow-popover-step.current {
+  background: var(--panel-soft);
+}
+
+.chapter-flow-popover-step.blocked {
+  opacity: 0.58;
+}
+
+.chapter-flow-popover-step > span {
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+
+.chapter-flow-popover-step.done > span {
+  background: var(--success);
+  color: #fff;
+}
+
+.chapter-flow-popover-step.current > span {
+  background: var(--accent);
+  color: #fff;
+}
+
+.chapter-flow-popover-step strong {
+  display: block;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.chapter-flow-popover-step p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 17px;
+}
+
+.chapter-check-dialog {
+  width: min(760px, calc(100vw - 40px));
+}
+
+.chapter-check-dialog .modal-header {
+  align-items: flex-start;
+}
+
+.chapter-check-dialog h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 22px;
+}
+
+.chapter-check-dialog .modal-header p {
+  margin: 2px 0 0;
+}
+
+.chapter-check-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: min(62vh, 620px);
+  overflow: auto;
+}
+
+.chapter-check-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+
+.chapter-check-row-main {
+  min-width: 0;
+}
+
+.chapter-check-row-main > .row {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.chapter-check-row-main strong {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.chapter-check-row-main p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.chapter-check-status,
+.quality-gate,
+.quality-score {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+}
+
+.chapter-check-status {
+  background: var(--panel-soft);
+  color: var(--muted);
+}
+
+.chapter-check-status.pending {
+  background: #eaf1ff;
+  color: #2563eb;
+}
+
+.chapter-check-status.running {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.chapter-check-status.completed,
+.quality-gate.pass,
+.quality-score.high {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.chapter-check-status.failed,
+.quality-gate.rewrite,
+.quality-score.low {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.chapter-check-status.skipped {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.quality-gate.revise,
+.quality-score.mid {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.quality-score-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.quality-score {
+  border: 1px solid var(--border);
+  background: var(--panel-soft);
+  color: var(--muted);
+}
+
+.quality-score.overall {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.chapter-check-result {
+  margin-top: 8px;
+  padding: 8px 10px;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-soft);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.chapter-check-result summary {
+  cursor: pointer;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.chapter-check-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
 }
 
 /* 空聊天区域 */
@@ -2156,11 +2414,12 @@ button {
 /* 工作台按钮最终收敛：覆盖旧聊天样式，避免胶囊按钮、绿色按钮和文字竖排 */
 .panel-header .row,
 .editor-actions {
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
 }
 
 .editor-actions .button,
-.editor-actions .select {
+.editor-actions .select,
+.editor-actions .chapter-flow-compact-main {
   white-space: nowrap;
 }
 
@@ -2187,6 +2446,41 @@ button {
 .writing-chat .agent-icon,
 .writing-chat .message-avatar {
   border-radius: var(--radius-sm);
+}
+
+.writing-chat .agent-quick-btns {
+  display: grid;
+  gap: 14px;
+  justify-content: stretch;
+  max-width: 560px;
+}
+
+.writing-chat .agent-quick-section {
+  display: grid;
+  gap: 7px;
+}
+
+.writing-chat .agent-quick-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
+.writing-chat .agent-quick-label {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.writing-chat .agent-item.active {
+  background: var(--panel-soft);
+}
+
+.writing-chat .agent-picker .agent-id {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .writing-chat .send-btn,

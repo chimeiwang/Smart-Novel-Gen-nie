@@ -11,11 +11,10 @@
 import { prisma } from "@/shared/db/prisma";
 import { logger } from "@/shared/lib/logger";
 import type { AgentQualityFields, AgentVisibleOutput, CoreAgentId } from "../graph/state";
-import { evaluateQualityGate, DEFAULT_QUALITY_GATE } from "./writing-workflow-service";
+import { evaluateQualityGate } from "./writing-workflow-service";
 import {
   QUALITY_CHECK_DEFINITIONS,
   QUALITY_CHECK_AGENT_MAP,
-  type QualityCheckType,
 } from "@/shared/contracts/quality-check";
 
 // ============================================
@@ -142,6 +141,69 @@ export async function trySaveQualityCheckResult(
   }
 }
 
+export async function saveQualityCheckReport(input: {
+  checkId: string;
+  result: string;
+  qualityGate?: "pass" | "revise" | "rewrite" | null;
+  rewriteBrief?: string | null;
+}): Promise<QualityCheckResult> {
+  const content = input.result.trim();
+  if (!content) {
+    await markCheckFailed(input.checkId, "校验 Agent 未返回可保存的报告");
+    return {
+      checkId: input.checkId,
+      checkType: "consistency",
+      success: false,
+      status: "failed",
+      error: "校验 Agent 未返回可保存的报告",
+    };
+  }
+
+  try {
+    const check = await prisma.chapterQualityCheck.update({
+      where: { id: input.checkId },
+      data: {
+        status: "completed",
+        result: content,
+        qualityGate: input.qualityGate ?? null,
+        rewriteBrief: input.rewriteBrief ?? null,
+        scoreHook: null,
+        scoreTension: null,
+        scorePayoff: null,
+        scorePacing: null,
+        scoreEndingHook: null,
+        scoreReaderPromise: null,
+        scoreOverall: null,
+      },
+      select: { type: true },
+    });
+
+    logger.info("QUALITY_CHECK", "一致性终检报告已保存", {
+      checkId: input.checkId,
+      checkType: check.type,
+    });
+
+    return {
+      checkId: input.checkId,
+      checkType: check.type,
+      success: true,
+      status: "completed",
+      result: content,
+      qualityGate: input.qualityGate ?? undefined,
+      rewriteBrief: input.rewriteBrief ?? undefined,
+    };
+  } catch (error) {
+    await markCheckFailed(input.checkId, String(error));
+    return {
+      checkId: input.checkId,
+      checkType: "consistency",
+      success: false,
+      status: "failed",
+      error: String(error),
+    };
+  }
+}
+
 /**
  * 将质量检查结果写入数据库
  */
@@ -216,7 +278,7 @@ async function saveCheckResult(
 /**
  * 标记检查项为 failed（保存异常时调用）
  */
-async function markCheckFailed(checkId: string, error: string): Promise<void> {
+export async function markCheckFailed(checkId: string, error: string): Promise<void> {
   try {
     await prisma.chapterQualityCheck.update({
       where: { id: checkId },

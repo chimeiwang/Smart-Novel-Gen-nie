@@ -700,6 +700,8 @@ export async function processControlEvents(
           verdict: event.verdict,
           summary: event.summary,
           requiredChanges: event.requiredChanges,
+          revisionMode: event.revisionMode,
+          patches: event.patches,
         });
         if (artifact && event.verdict === "pass") {
           await markTaskAwaitingUserReview({

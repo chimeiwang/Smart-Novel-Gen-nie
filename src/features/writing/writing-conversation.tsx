@@ -3,10 +3,7 @@
 import { useCallback, useOptimistic, useRef, useState, useTransition, useEffect } from "react";
 
 import { AGENT_REGISTRY, type AgentId, type OrchestrationEvent } from "@/agents/client";
-import { acceptGeneratedContentAction, updateChapterQualityCheckStatusAction } from "@/app/actions";
-import type { QualityCheckDto } from "@/shared/contracts/quality-check";
-import { normalizeQualityScores, QUALITY_CHECK_AGENT_MAP } from "@/shared/contracts/quality-check";
-import type { QualityScores } from "@/shared/contracts/quality-check";
+import { acceptGeneratedContentAction } from "@/app/actions";
 import type { WritingSseEvent } from "@/shared/contracts/sse-events";
 import { parseSseEvent } from "@/shared/contracts/sse-events";
 import type { CreativeOperation } from "@/shared/contracts/creative-operation";
@@ -41,12 +38,8 @@ type WritingConversationProps = {
   chapterId: string;
   selectedAgents: AgentId[];
   targetWordCount: number;
-  chapterStatus?: string;
-  qualityChecks?: QualityCheckDto[];
   onComplete?: () => void;
 };
-
-type QualityCheckData = QualityCheckDto;
 
 // 会话类型
 type Session = {
@@ -241,6 +234,7 @@ type OutlinePreviewNode = {
 
 // Agent 信息（v5.2 中文 ID，Phase 1.3 清理旧 ID 回退）
 const AGENT_INFO: Record<string, { tone: string; emoji: string }> = {
+  system: { tone: "gray", emoji: "系" },
   设定: { tone: "blue", emoji: "设" },
   剧情: { tone: "orange", emoji: "剧" },
   写作: { tone: "purple", emoji: "写" },
@@ -297,117 +291,6 @@ type ToolActivityRound = {
 
 /** SSE 事件类型从共享契约导入 + Agent 客户端事件 */
 type ExtendedEvent = WritingSseEvent | OrchestrationEvent;
-
-type QualityCheckQueueProps = {
-  checks: QualityCheckData[];
-  pending: boolean;
-  onRun: (check: QualityCheckData) => void;
-  onMark: (check: QualityCheckData, status: "skipped" | "pending") => void;
-};
-
-function QualityCheckQueue({
-  checks,
-  pending,
-  onRun,
-  onMark,
-}: QualityCheckQueueProps) {
-  return (
-    <div className="updates-card">
-      <div className="updates-header">
-        <span>章节检查队列</span>
-      </div>
-      <div className="updates-body">
-        {checks.map((check) => {
-          const runnable = check.type === "consistency" || check.type === "lore_sync" || check.type === "editorial" || check.type === "craft";
-          const finished = check.status === "completed" || check.status === "skipped";
-          return (
-            <div key={check.id} className="updates-item quality-check-item">
-              <span className={`action-badge ${check.status}`}>{getQualityStatusLabel(check.status)}</span>
-              <span className="item-name">{check.title}</span>
-              {check.summary ? <span className="muted">{check.summary}</span> : null}
-              <QualityScoreStrip check={check} />
-              {check.qualityGate ? (
-                <span className={`quality-gate ${check.qualityGate}`}>
-                  {getQualityGateLabel(check.qualityGate)}
-                </span>
-              ) : null}
-              {check.result ? (
-                <details className="quality-check-result">
-                  <summary>查看报告</summary>
-                  <ParagraphText text={normalizeParagraphTextDisplay(check.result)} />
-                </details>
-              ) : null}
-              <div className="row">
-                {runnable && !finished ? (
-                  <button
-                    className="button sm"
-                    type="button"
-                    disabled={pending}
-                    onClick={() => onRun(check)}
-                  >
-                    执行
-                  </button>
-                ) : null}
-                {!finished ? (
-                  <button
-                    className="button ghost sm"
-                    type="button"
-                    disabled={pending}
-                    onClick={() => onMark(check, "skipped")}
-                  >
-                    跳过
-                  </button>
-                ) : null}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function QualityScoreStrip({ check }: { check: QualityCheckData }) {
-  const scores = [
-    ["钩子", check.scoreHook],
-    ["冲突", check.scoreTension],
-    ["爽点", check.scorePayoff],
-    ["节奏", check.scorePacing],
-    ["尾钩", check.scoreEndingHook],
-    ["承诺", check.scoreReaderPromise],
-  ] as const;
-  const visibleScores = scores.filter(([, score]) => typeof score === "number");
-  if (visibleScores.length === 0 && typeof check.scoreOverall !== "number") return null;
-
-  return (
-    <div className="quality-score-strip">
-      {typeof check.scoreOverall === "number" ? (
-        <span className={`quality-score overall ${getScoreTone(check.scoreOverall)}`}>
-          综合 {check.scoreOverall}/10
-        </span>
-      ) : null}
-      {visibleScores.map(([label, score]) => (
-        <span key={label} className={`quality-score ${getScoreTone(score ?? 0)}`}>
-          {label} {score}/10
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function getQualityStatusLabel(status: string) {
-  if (status === "running") return "执行中";
-  if (status === "completed") return "完成";
-  if (status === "skipped") return "跳过";
-  return "待处理";
-}
-
-function getQualityGateLabel(gate: string) {
-  if (gate === "rewrite") return "建议返工";
-  if (gate === "revise") return "建议修改";
-  if (gate === "pass") return "可通过";
-  return gate;
-}
 
 function getReviewArtifactStatusLabel(status: string, optimisticStatus?: ReviewArtifactData["optimisticStatus"]) {
   if (optimisticStatus === "applying") return "应用中";
@@ -607,8 +490,6 @@ export function WritingConversation({
   chapterId,
   selectedAgents,
   targetWordCount,
-  chapterStatus,
-  qualityChecks = [],
   onComplete,
 }: WritingConversationProps) {
   // 会话状态
@@ -642,15 +523,16 @@ export function WritingConversation({
   const [generatedContent, setGeneratedContent] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
-  const [checkPending, startCheckTransition] = useTransition();
 
   const [userInput, setUserInput] = useState("");
   const [isSending, setIsSending] = useState(false);
+  const [isAssigningTask, setIsAssigningTask] = useState(false);
   const [currentStreamingAgent, setCurrentStreamingAgent] = useState<string | null>(null);
   const [streamingContent, setStreamingContent] = useState("");
 
   const [showAgentPicker, setShowAgentPicker] = useState(false);
   const [agentPickerQuery, setAgentPickerQuery] = useState("");
+  const [agentPickerActiveIndex, setAgentPickerActiveIndex] = useState(0);
 
   // 中断控制
   const abortRef = useRef<AbortController | null>(null);
@@ -663,6 +545,7 @@ export function WritingConversation({
       abortRef.current = null;
     }
     setIsSending(false);
+    setIsAssigningTask(false);
     setCurrentStreamingAgent(null);
     setStreamingContent("");
     streamingRef.current = { agentId: "", content: "" };
@@ -839,6 +722,7 @@ export function WritingConversation({
         setCurrentOperationStage(sessionTaskState.operationStage);
         activeActivityRoundRef.current = null;
         setActivityRounds([]);
+        setIsAssigningTask(false);
         pendingReviewArtifactRefreshRef.current =
           sessionTaskState.shouldRefreshAwaitingReviewArtifact;
       }
@@ -862,6 +746,7 @@ export function WritingConversation({
         setMessages([]);
         activeActivityRoundRef.current = null;
         setActivityRounds([]);
+        setIsAssigningTask(false);
         setPhase("idle");
         setTaskId(null);
         taskIdRef.current = null;
@@ -967,6 +852,7 @@ export function WritingConversation({
   };
 
   const getAgentName = useCallback((agentId: string): string => {
+    if (agentId === "system") return "系统";
     return AGENT_REGISTRY.find((a) => a.id === agentId)?.name ?? agentId;
   }, []);
 
@@ -1101,52 +987,39 @@ export function WritingConversation({
       if (!textAfterAt.includes(" ") && textAfterAt.length <= 20) {
         setAgentPickerQuery(textAfterAt);
         setShowAgentPicker(true);
+        setAgentPickerActiveIndex(0);
         return;
       }
     }
 
     setShowAgentPicker(false);
     setAgentPickerQuery("");
+    setAgentPickerActiveIndex(0);
   }, []);
 
-  const insertAgentMention = useCallback((_agentId: string, agentName: string) => {
+  const insertAgentMention = useCallback((agentId: string) => {
     const textBeforeCursor = userInput.slice(0, cursorPosition);
     const lastAtIndex = textBeforeCursor.lastIndexOf("@");
 
     if (lastAtIndex !== -1) {
       const beforeAt = userInput.slice(0, lastAtIndex);
       const afterCursor = userInput.slice(cursorPosition);
-      const newValue = `${beforeAt}@${agentName} ${afterCursor}`;
+      const mention = `@${agentId}`;
+      const newValue = `${beforeAt}${mention} ${afterCursor}`;
       setUserInput(newValue);
       setShowAgentPicker(false);
       setAgentPickerQuery("");
+      setAgentPickerActiveIndex(0);
 
       setTimeout(() => {
         inputRef.current?.focus();
-        const newCursorPos = beforeAt.length + agentName.length + 2;
+        const newCursorPos = beforeAt.length + mention.length + 1;
         inputRef.current?.setSelectionRange(newCursorPos, newCursorPos);
       }, 0);
     }
   }, [userInput, cursorPosition]);
 
   const agentStartTimes = useRef<Map<string, number>>(new Map());
-  const activeQualityCheckRef = useRef<QualityCheckData | null>(null);
-
-  const saveActiveQualityCheckResult = useCallback((
-    agentId: string,
-    content: string,
-    meta: { scores?: QualityScores; qualityGate?: "pass" | "revise" | "rewrite"; rewriteBrief?: string } = {}
-  ) => {
-    const activeCheck = activeQualityCheckRef.current;
-    if (!activeCheck || !content.trim()) return;
-
-    const expectedAgent = QUALITY_CHECK_AGENT_MAP[activeCheck.type as keyof typeof QUALITY_CHECK_AGENT_MAP];
-    if (expectedAgent && expectedAgent !== agentId) return;
-
-    // Phase 1：评分已由服务端 trySaveQualityCheckResult 落库，前端不再重复保存
-    activeQualityCheckRef.current = null;
-    onComplete?.();
-  }, [onComplete]);
 
   const addFlowLog = useCallback((entry: Omit<FlowLogEntry, "id" | "timestamp">) => {
     const newEntry: FlowLogEntry = {
@@ -1260,7 +1133,12 @@ export function WritingConversation({
         setFlowLogs([]);
         setCurrentOperation(null);
         setCurrentOperationStage(null);
+        setIsAssigningTask(true);
         addFlowLog({ type: "user", content: "会话开始" });
+        break;
+
+      case "classifying_intent":
+        setIsAssigningTask(true);
         break;
 
       case "phase_start":
@@ -1273,6 +1151,7 @@ export function WritingConversation({
         break;
 
       case "agent_start":
+        setIsAssigningTask(false);
         setCurrentStreamingAgent(event.agentId);
         setStreamingContent("");
         streamingRef.current = { agentId: event.agentId, content: "" };
@@ -1350,13 +1229,6 @@ export function WritingConversation({
             persist: false,
           });
           attachActivityRoundToMessage(messageId);
-          // Phase D：scores/qualityGate 仅从 SSE event 读取（服务端已通过 processControlEvents 落库）
-          // 前端不再从 assistant prose 解析这些字段
-          saveActiveQualityCheckResult(event.agentId, finalContent, {
-            scores: "scores" in event ? event.scores as QualityScores | undefined : undefined,
-            qualityGate: "qualityGate" in event ? event.qualityGate as "pass" | "revise" | "rewrite" | undefined : undefined,
-            rewriteBrief: "rewriteBrief" in event ? (event.rewriteBrief ?? undefined) as string | undefined : undefined,
-          });
         }
         setCurrentStreamingAgent(null);
         setStreamingContent("");
@@ -1373,6 +1245,7 @@ export function WritingConversation({
 
       case "operation_classified":
         setCurrentOperation(event.operation);
+        setIsAssigningTask(false);
         break;
 
       case "operation_stage":
@@ -1612,7 +1485,7 @@ export function WritingConversation({
         console.debug("[SSE] 未处理的事件类型:", (event as ExtendedEvent).type, event);
         break;
     }
-  }, [messages.length, addActivityEntry, addMessage, addFlowLog, attachActivityRoundToMessage, collapseActivityRound, finishActivityRound, formatOperationLog, getAgentName, loadSessions, loadReviewArtifacts, onComplete, openReviewArtifactModal, scheduleReviewArtifactModalClose, saveActiveQualityCheckResult, setWorkflowReviewArtifact, updateReviewArtifactAction]);
+  }, [messages.length, addActivityEntry, addMessage, addFlowLog, attachActivityRoundToMessage, collapseActivityRound, finishActivityRound, formatOperationLog, getAgentName, loadSessions, loadReviewArtifacts, onComplete, openReviewArtifactModal, scheduleReviewArtifactModalClose, setWorkflowReviewArtifact, updateReviewArtifactAction]);
 
   const runSendAction = useCallback(<T,>(action: () => Promise<T>) => {
     return sendGuardRef.current.run(action);
@@ -1631,6 +1504,7 @@ export function WritingConversation({
     setUserInput("");
     addMessage({ role: "user", content: userMessage, sessionId: sessionIdForRequest, persist: false });
     startActivityRound();
+    setIsAssigningTask(true);
     addFlowLog({ type: "user", content: `用户: ${userMessage.slice(0, 50)}${userMessage.length > 50 ? "..." : ""}` });
     setPhase("discussing");
     setIsSending(true);
@@ -1658,6 +1532,7 @@ export function WritingConversation({
     } catch (err) {
       setError(err instanceof Error ? err.message : "未知错误");
       setPhase("error");
+      setIsAssigningTask(false);
     } finally {
       setIsSending(false);
       setCurrentStreamingAgent(null);
@@ -1752,64 +1627,6 @@ export function WritingConversation({
     } else {
       await handleStartDiscussion(message);
     }
-  };
-
-  const handleRunAllPendingQualityChecks = async () => {
-    const runnableChecks = qualityChecks.filter((check) => check.status === "pending" || check.status === "failed");
-    if (runnableChecks.length === 0) return;
-    setIsSending(true);
-    try {
-      for (const check of runnableChecks) {
-        activeQualityCheckRef.current = check;
-        const response = await fetch("/api/quality-check/run", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ checkId: check.id, taskId }),
-        });
-        if (!response.ok) continue;
-        await processStream(response);
-      }
-    } finally {
-      setIsSending(false);
-      activeQualityCheckRef.current = null;
-    }
-  };
-
-  const runQualityCheck = (check: QualityCheckData) => {
-    startCheckTransition(async () => {
-      activeQualityCheckRef.current = check;
-
-      // P0 修复：唯一入口——/api/quality-check/run，服务端完成全部流程
-      // 评分由 trySaveQualityCheckResult 自动落库，前端只消费 SSE 展示
-      try {
-        const response = await fetch("/api/quality-check/run", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ checkId: check.id, taskId }),
-        });
-        if (!response.ok) {
-          console.error("质量检查启动失败", response.status);
-          return;
-        }
-        await processStream(response);
-      } catch (err) {
-        console.error("启动质量检查失败", err);
-      }
-    });
-  };
-
-  const markQualityCheck = (check: QualityCheckData, status: "skipped" | "pending") => {
-    startCheckTransition(async () => {
-      // Phase 1：只允许人工状态变更，completed 由服务端 trySaveQualityCheckResult 写入
-      await updateChapterQualityCheckStatusAction({
-        id: check.id,
-        status,
-      });
-      if (activeQualityCheckRef.current?.id === check.id) {
-        activeQualityCheckRef.current = null;
-      }
-      onComplete?.();
-    });
   };
 
   const processStream = async (response: Response) => {
@@ -2601,7 +2418,8 @@ export function WritingConversation({
   };
 
   const pendingActivityRounds = activityRounds.filter((round) => !round.anchorMessageId);
-  const shouldShowStreamingMessage = Boolean(currentStreamingAgent && (streamingContent || pendingActivityRounds.length > 0));
+  const streamingDisplayAgent = currentStreamingAgent ?? "system";
+  const shouldShowStreamingMessage = Boolean(pendingActivityRounds.length > 0 || (currentStreamingAgent && streamingContent));
 
   const currentSession = sessions.find(s => s.id === currentSessionId);
   const workflowReviewArtifact = resolveVisibleReviewArtifact(optimisticReviewArtifact, messages);
@@ -2619,6 +2437,7 @@ export function WritingConversation({
         a.id.toLowerCase().includes(agentPickerQuery.toLowerCase())
       )
     : availableAgents;
+  const visibleAgentOptions = filteredAgents.slice(0, 5);
 
   return (
     <div className="writing-chat">
@@ -2661,58 +2480,38 @@ export function WritingConversation({
             <div className="welcome-icon">💬</div>
             <div className="welcome-text">开始一段新的讨论吧</div>
             <div className="agent-quick-btns">
-              <button
-                className="agent-quick-btn"
-                onClick={handleSyncRecentLore}
-                disabled={isSending}
-              >
-                <span className="agent-icon tone-blue">设</span>
-                <span className="agent-name">同步设定</span>
-              </button>
-              <button
-                className="agent-quick-btn"
-                onClick={handlePlanChapter}
-                disabled={isSending}
-              >
-                <span className="agent-icon tone-blue">规</span>
-                <span className="agent-name">规划本章</span>
-              </button>
-              <button
-                className="agent-quick-btn"
-                onClick={handleWriteFromPlan}
-                disabled={isSending}
-              >
-                <span className="agent-icon tone-green">写</span>
-                <span className="agent-name">按计划写正文</span>
-              </button>
-              {AGENT_REGISTRY.map(agent => {
-                const info = getAgentInfo(agent.id);
-                return (
+              <div className="agent-quick-section">
+                <div className="agent-quick-label">常用操作</div>
+                <div className="agent-quick-row">
                   <button
-                    key={agent.id}
                     className="agent-quick-btn"
-                    onClick={() => {
-                      setUserInput(`@${agent.name} `);
-                      inputRef.current?.focus();
-                    }}
+                    onClick={handleSyncRecentLore}
+                    disabled={isSending}
                   >
-                    <span className={`agent-icon tone-${info.tone}`}>{info.emoji}</span>
-                    <span className="agent-name">{agent.name}</span>
+                    <span className="agent-icon tone-blue">设</span>
+                    <span className="agent-name">同步设定</span>
                   </button>
-                );
-              })}
+                  <button
+                    className="agent-quick-btn"
+                    onClick={handlePlanChapter}
+                    disabled={isSending}
+                  >
+                    <span className="agent-icon tone-blue">规</span>
+                    <span className="agent-name">规划本章</span>
+                  </button>
+                  <button
+                    className="agent-quick-btn"
+                    onClick={handleWriteFromPlan}
+                    disabled={isSending}
+                  >
+                    <span className="agent-icon tone-green">写</span>
+                    <span className="agent-name">按计划写正文</span>
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}
-
-        {qualityChecks.length > 0 && (chapterStatus === "review" || chapterStatus === "completed") ? (
-          <QualityCheckQueue
-            checks={qualityChecks}
-            pending={checkPending}
-            onRun={runQualityCheck}
-            onMark={markQualityCheck}
-          />
-        ) : null}
 
         {messages.map((msg, index) => {
           const isUser = msg.role === "user";
@@ -2771,13 +2570,17 @@ export function WritingConversation({
           );
         })}
 
+        {isAssigningTask ? (
+          <div className="assignment-status" aria-live="polite">正在分配任务</div>
+        ) : null}
+
         {shouldShowStreamingMessage && currentStreamingAgent && (
           <div className="message message-agent">
-            <div className={`message-avatar tone-${getAgentInfo(currentStreamingAgent).tone}`}>
-              {getAgentInfo(currentStreamingAgent).emoji}
+            <div className={`message-avatar tone-${getAgentInfo(streamingDisplayAgent).tone}`}>
+              {getAgentInfo(streamingDisplayAgent).emoji}
             </div>
             <div className="message-body">
-              <div className="message-header">{getAgentName(currentStreamingAgent)}</div>
+              <div className="message-header">{getAgentName(streamingDisplayAgent)}</div>
               <div className="message-content streaming">
                 {pendingActivityRounds.map(renderActivityRound)}
                 {streamingContent ? <ParagraphText text={streamingContent} /> : null}
@@ -2885,12 +2688,6 @@ export function WritingConversation({
                 <button onClick={handlePlanChapter}>规划本章</button>
                 {hasWriter && <button onClick={handleWriteFromPlan}>按计划写正文</button>}
                 {hasWriter && <button onClick={() => handleSendMessage("开始生成正文")}>开始写作</button>}
-                <button
-                  onClick={handleRunAllPendingQualityChecks}
-                  disabled={isSending || !qualityChecks.some((check) => check.status === "pending" || check.status === "failed")}
-                >
-                  运行章后检查
-                </button>
                 <button onClick={() => handleSendMessage("保存讨论结果")}>保存设定</button>
                 <button onClick={handleSyncRecentLore}>同步设定</button>
               </>
@@ -2907,11 +2704,21 @@ export function WritingConversation({
             placeholder="输入消息...（@ 邀请助手）"
             rows={1}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !showAgentPicker) {
+              if (showAgentPicker && visibleAgentOptions.length > 0 && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+                e.preventDefault();
+                setAgentPickerActiveIndex((current) => {
+                  const delta = e.key === "ArrowDown" ? 1 : -1;
+                  return (current + delta + visibleAgentOptions.length) % visibleAgentOptions.length;
+                });
+              } else if (showAgentPicker && visibleAgentOptions.length > 0 && e.key === "Enter") {
+                e.preventDefault();
+                insertAgentMention(visibleAgentOptions[agentPickerActiveIndex]?.id ?? visibleAgentOptions[0].id);
+              } else if (e.key === "Enter" && !e.shiftKey && !showAgentPicker) {
                 e.preventDefault();
                 handleSendMessage();
               } else if (e.key === "Escape") {
                 setShowAgentPicker(false);
+                setAgentPickerActiveIndex(0);
                 if (editingMessageId) cancelEdit();
               }
             }}
@@ -2922,14 +2729,22 @@ export function WritingConversation({
           </button>
         </div>
 
-        {showAgentPicker && filteredAgents.length > 0 && (
-          <div className="agent-picker">
-            {filteredAgents.slice(0, 5).map(agent => {
+        {showAgentPicker && visibleAgentOptions.length > 0 && (
+          <div className="agent-picker" role="listbox" aria-label="选择 Agent">
+            {visibleAgentOptions.map((agent, index) => {
               const info = getAgentInfo(agent.id);
               return (
-                <button key={agent.id} className="agent-item" onClick={() => insertAgentMention(agent.id, agent.name)}>
+                <button
+                  key={agent.id}
+                  className={`agent-item ${index === agentPickerActiveIndex ? "active" : ""}`}
+                  onMouseEnter={() => setAgentPickerActiveIndex(index)}
+                  onClick={() => insertAgentMention(agent.id)}
+                  role="option"
+                  aria-selected={index === agentPickerActiveIndex}
+                >
                   <span className={`agent-icon tone-${info.tone}`}>{info.emoji}</span>
                   <span className="agent-name">{agent.name}</span>
+                  <span className="agent-id">@{agent.id}</span>
                 </button>
               );
             })}

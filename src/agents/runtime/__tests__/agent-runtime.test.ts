@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import type OpenAI from "openai";
 import "@/agents/tools";
 import { AgentRuntimeImpl } from "../agent-runtime";
-import { LegacyOpenAIRuntime } from "../model-runtime";
+import { LegacyOpenAIRuntime, type ModelRuntimePort, type ToolCallTurnOptions } from "../model-runtime";
 import {
   __resetLangSmithTracerForTests,
   __setLangSmithTraceRunnerForTests,
@@ -640,12 +640,33 @@ describe("parseControlEventArgs", () => {
       verdict: "revise",
       summary: "前 3 章仍缺少小赢节点",
       requiredChanges: "第 2 章需要补一个明确获得线索的小胜利",
+      revisionMode: "patch",
+      patches: [
+        { kind: "text_replace", find: "前天接了个活", replace: "今天接了个活" },
+      ],
     });
     assert.ok(event);
     assert.equal(event!.type, "submit_evaluation");
     if (event!.type === "submit_evaluation") {
       assert.equal(event.verdict, "revise");
       assert.equal(event.artifactKey, "outline-revision-1");
+      assert.equal(event.revisionMode, "patch");
+      assert.equal(event.patches?.[0]?.kind, "text_replace");
+    }
+  });
+
+  it("解析旧 submit_evaluation revise 参数仍然有效", () => {
+    const event = parseControlEventArgs("submit_evaluation", {
+      artifactKey: "outline-revision-1",
+      verdict: "revise",
+      summary: "需要重构这一段。",
+    });
+
+    assert.ok(event);
+    assert.equal(event!.type, "submit_evaluation");
+    if (event!.type === "submit_evaluation") {
+      assert.equal(event.revisionMode, undefined);
+      assert.equal(event.patches, undefined);
     }
   });
 
@@ -833,6 +854,51 @@ describe("AgentRuntimeImpl", () => {
     // 无工具调用时，controlEvents 应为空
     assert.equal(result.controlEvents.length, 0);
     assert.equal(result.toolCalls.length, 0);
+  });
+
+  it("不会把 reasoning_content 回灌到下一轮 messages", async () => {
+    const calls: ToolCallTurnOptions[] = [];
+    const runtimePort: ModelRuntimePort = {
+      streamText: async () => ({ content: "" }),
+      completeText: async () => ({ content: "" }),
+      completeStructured: (async (schema) => ({ data: schema.parse({}) })) as ModelRuntimePort["completeStructured"],
+      runToolCallTurn: async (options) => {
+        calls.push(options);
+        if (calls.length === 1) {
+          return {
+            content: "",
+            reasoningContent: "很长的内部推理",
+            toolCalls: [
+              {
+                id: "call_get_novel_info",
+                type: "function",
+                function: {
+                  name: "get_novel_info",
+                  arguments: "{}",
+                },
+              },
+            ],
+            finishReason: "tool_calls",
+          };
+        }
+        return {
+          content: "done",
+          reasoningContent: "",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+    };
+    const runtime = new AgentRuntimeImpl({ runtime: runtimePort });
+
+    await runtime.runTurn({
+      ...createRuntimeOptions(),
+      tools: getOpenAITools(["get_novel_info"]),
+      toolExecutor: async () => "read ok",
+    });
+
+    assert.equal(calls.length, 2);
+    assert.equal(JSON.stringify(calls[1].messages).includes("reasoning_content"), false);
   });
 
   it("executes safe read tool calls in parallel", async () => {

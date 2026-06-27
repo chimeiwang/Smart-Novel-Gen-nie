@@ -82,11 +82,13 @@ export interface TextRuntimeOptions {
   metadata?: LLMCallMetadata;
   mockPrompt?: string;
   reasoningEffort?: "medium" | "high";
+  profile?: ModelCallProfile;
 }
 
 export interface StructuredRuntimeOptions {
   messages: OpenAI.Chat.ChatCompletionMessageParam[];
   metadata?: LLMCallMetadata;
+  profile?: ModelCallProfile;
 }
 
 export interface ModelRuntimePort {
@@ -108,7 +110,10 @@ interface RuntimeDeps {
   };
 }
 
+export type ModelCallProfile = "normal" | "fast";
+
 const MAX_OUTPUT_TOKENS = 384000;
+const FAST_OUTPUT_TOKENS = 3000;
 const REASONING_EFFORT_MARKER = "Reasoning Effort: Absolute maximum";
 const REASONING_EFFORT_PROMPT = `Reasoning Effort: Absolute maximum with no shortcuts permitted.
 You MUST be very thorough in your thinking and comprehensively decompose the problem to resolve the root cause, rigorously stress-testing your logic against all potential paths, edge cases, and adversarial scenarios.
@@ -141,6 +146,21 @@ export function ensureReasoningEffortPrompt(
     next.unshift({ role: "system", content: REASONING_EFFORT_PROMPT });
   }
   return next;
+}
+
+export function getModelCallBudget(profile: ModelCallProfile | undefined): number {
+  return profile === "fast" ? FAST_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS;
+}
+
+function withReasoningConfig(
+  config: Record<string, unknown>,
+  options: { profile?: ModelCallProfile; reasoningEffort?: "medium" | "high"; fallback: "medium" | "high" }
+): Record<string, unknown> {
+  if (options.profile === "fast") return config;
+  return {
+    ...config,
+    reasoning_effort: options.reasoningEffort ?? options.fallback,
+  };
 }
 
 export function aggregateVisibleParts(parts: string[], lastText: string): string {
@@ -537,19 +557,18 @@ export class LegacyOpenAIRuntime extends BaseRuntime {
     const { maxOutputTokens } = await this.ensureCanStartModelCall({
       metadata: { ...options.metadata, model: config.model },
       messages: options.messages,
-      maxOutputTokens: MAX_OUTPUT_TOKENS,
+      maxOutputTokens: getModelCallBudget(options.profile),
     });
     const client = this.getClient();
     let fullContent = "";
     let usage: TokenUsage | undefined;
     let finishReason = "stop";
-    const response = await client.chat.completions.create({
+    const response = await client.chat.completions.create(withReasoningConfig({
       model: config.model,
       messages: options.messages,
       stream: true,
       max_tokens: maxOutputTokens,
-      reasoning_effort: options.reasoningEffort ?? "high",
-    } as any);
+    }, { profile: options.profile, reasoningEffort: options.reasoningEffort, fallback: "high" }) as any);
 
     for await (const chunk of response as any) {
       const choice = chunk.choices?.[0];
@@ -582,16 +601,15 @@ export class LegacyOpenAIRuntime extends BaseRuntime {
     const { maxOutputTokens } = await this.ensureCanStartModelCall({
       metadata: { ...options.metadata, model: config.model },
       messages: options.messages,
-      maxOutputTokens: MAX_OUTPUT_TOKENS,
+      maxOutputTokens: getModelCallBudget(options.profile),
     });
 
-    const response = await this.getClient().chat.completions.create({
+    const response = await this.getClient().chat.completions.create(withReasoningConfig({
       model: config.model,
       messages: options.messages,
       stream: false,
       max_tokens: maxOutputTokens,
-      reasoning_effort: options.reasoningEffort ?? "high",
-    } as any);
+    }, { profile: options.profile, reasoningEffort: options.reasoningEffort, fallback: "high" }) as any);
 
     const content = response.choices[0]?.message?.content ?? "";
     const usage = response.usage
@@ -624,17 +642,16 @@ export class LegacyOpenAIRuntime extends BaseRuntime {
         const { maxOutputTokens } = await this.ensureCanStartModelCall({
           metadata: { ...options.metadata, model: config.model },
           messages,
-          maxOutputTokens: MAX_OUTPUT_TOKENS,
+          maxOutputTokens: getModelCallBudget(options.profile),
         });
 
-        const response = await this.getClient().chat.completions.create({
+        const response = await this.getClient().chat.completions.create(withReasoningConfig({
           model: config.model,
           messages,
           stream: false,
           max_tokens: maxOutputTokens,
           response_format: { type: "json_object" },
-          reasoning_effort: "medium",
-        } as any);
+        }, { profile: options.profile, fallback: "medium" }) as any);
 
         const content = response.choices[0]?.message?.content ?? "";
         const usage = response.usage
@@ -656,7 +673,10 @@ export class LegacyOpenAIRuntime extends BaseRuntime {
         return { data, usage };
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
-        logger.warn("LLM", `结构化输出 attempt ${attempt + 1} 失败: ${lastError.message}`);
+        logger.warn("LLM", `结构化输出 attempt ${attempt + 1} 失败: ${lastError.message}`, {
+          profile: options.profile ?? "normal",
+          maxOutputTokens: getModelCallBudget(options.profile),
+        });
         if (attempt === 0) {
           messages.push(
             { role: "assistant", content: "（上一次输出格式错误，请返回合法 JSON）" },
@@ -783,13 +803,12 @@ export class LangChainModelRuntime extends LegacyOpenAIRuntime {
     const { maxOutputTokens } = await this.ensureCanStartModelCall({
       metadata: { ...options.metadata, model: getAiConfig().model },
       messages: options.messages,
-      maxOutputTokens: MAX_OUTPUT_TOKENS,
+      maxOutputTokens: getModelCallBudget(options.profile),
     });
 
-    const model = createChatModel(maxOutputTokens).withConfig({
-      reasoning_effort: options.reasoningEffort ?? "high",
+    const model = createChatModel(maxOutputTokens).withConfig(withReasoningConfig({
       stream_options: { include_usage: true },
-    } as any);
+    }, { profile: options.profile, reasoningEffort: options.reasoningEffort, fallback: "high" }) as any);
     const stream = await model.stream(openAIMessagesToLangChain(options.messages));
     const accumulator = createLangChainStreamAccumulator();
 
@@ -813,12 +832,12 @@ export class LangChainModelRuntime extends LegacyOpenAIRuntime {
     const { maxOutputTokens } = await this.ensureCanStartModelCall({
       metadata: { ...options.metadata, model: getAiConfig().model },
       messages: options.messages,
-      maxOutputTokens: MAX_OUTPUT_TOKENS,
+      maxOutputTokens: getModelCallBudget(options.profile),
     });
 
-    const model = createChatModel(maxOutputTokens).withConfig({
-      reasoning_effort: options.reasoningEffort ?? "high",
-    } as any);
+    const model = createChatModel(maxOutputTokens).withConfig(
+      withReasoningConfig({}, { profile: options.profile, reasoningEffort: options.reasoningEffort, fallback: "high" }) as any
+    );
     const message = await model.invoke(openAIMessagesToLangChain(options.messages));
     const content = textFromAIContent(message.content);
     const usage = usageFromLangChain(message.usage_metadata);
@@ -844,13 +863,12 @@ export class LangChainModelRuntime extends LegacyOpenAIRuntime {
         const { maxOutputTokens } = await this.ensureCanStartModelCall({
           metadata: { ...options.metadata, model: getAiConfig().model },
           messages,
-          maxOutputTokens: MAX_OUTPUT_TOKENS,
+          maxOutputTokens: getModelCallBudget(options.profile),
         });
 
-        const model = createChatModel(maxOutputTokens).withConfig({
+        const model = createChatModel(maxOutputTokens).withConfig(withReasoningConfig({
           response_format: { type: "json_object" },
-          reasoning_effort: "medium",
-        } as any);
+        }, { profile: options.profile, fallback: "medium" }) as any);
         const message = await model.invoke(openAIMessagesToLangChain(messages));
         const content = textFromAIContent(message.content);
         const usage = usageFromLangChain(message.usage_metadata);
@@ -865,7 +883,10 @@ export class LangChainModelRuntime extends LegacyOpenAIRuntime {
         return { data, usage };
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
-        logger.warn("LLM", `结构化输出 attempt ${attempt + 1} 失败: ${lastError.message}`);
+        logger.warn("LLM", `结构化输出 attempt ${attempt + 1} 失败: ${lastError.message}`, {
+          profile: options.profile ?? "normal",
+          maxOutputTokens: getModelCallBudget(options.profile),
+        });
         if (attempt === 0) {
           messages.push(
             { role: "assistant", content: "（上一次输出格式错误，请返回合法 JSON）" },

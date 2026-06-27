@@ -50,7 +50,8 @@ registerTool(
     name: "submit_evaluation",
     description:
       "提交通用评估结论，用于 evaluator/reviser 循环。适用于编辑或校验对其他 Agent 产物进行复审时，表达 pass、revise 或 block。" +
-      "必须尽量引用 artifactId；长篇评审报告保留在正文文本中；此工具只提交结构化结论和必要修改摘要。",
+      "必须尽量引用 artifactId；长篇评审报告保留在正文文本中；此工具只提交结构化结论和必要修改摘要。" +
+      "verdict=revise 时，小修使用 revisionMode=patch 并提交 patches；大改或无法安全定位修改时使用 revisionMode=rewrite。",
     inputSchema: EvaluationToolArgsSchema,
     permission: controlToolPermission("control.evaluation", ["编辑", "校验"]),
     toolKind: "control",

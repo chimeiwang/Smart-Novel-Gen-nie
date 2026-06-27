@@ -58,6 +58,7 @@ function createState(overrides: Partial<WritingState> = {}): WritingState {
     artifactMode: "none",
     reviewerAgent: null,
     reviserAgent: null,
+    pendingArtifactRevision: null,
     artifactIteration: 0,
     maxArtifactIterations: 5,
     ...overrides,

@@ -62,6 +62,7 @@ export const WritingStateAnnotation = Annotation.Root({
   artifactMode: Annotation<"none" | "review_loop">,
   reviewerAgent: Annotation<CoreAgentId | null>,
   reviserAgent: Annotation<CoreAgentId | null>,
+  pendingArtifactRevision: Annotation<WritingState["pendingArtifactRevision"]>,
   artifactIteration: Annotation<number>,
   maxArtifactIterations: Annotation<number>,
 });
@@ -141,11 +142,18 @@ async function initSessionNode(state: GraphState) {
 
   const updatedState = addUserMessage(state as unknown as WritingState, userMessage);
   emit(writer, "classifying_intent", { message: "正在识别创作操作..." });
+  emit(writer, "agent_status", {
+    agentId: "system",
+    status: "thinking",
+    message: "正在识别创作操作...",
+  });
+  const classifyStart = Date.now();
   const routed = await routeCreativeOperation({
     userMessage,
     userId: state.userId,
     novelId: state.novelId,
   });
+  const classifyDurationMs = Date.now() - classifyStart;
   const currentOperation = routed.operation;
   const resolvedAgent = currentOperation.primaryAgent;
   const label = getCreativeOperationLabel(currentOperation.kind);
@@ -170,7 +178,12 @@ async function initSessionNode(state: GraphState) {
   emit(writer, "operation_stage", {
     stage: "识别创作操作",
     label,
-    message: `已识别为${label}。`,
+    message: `已识别为${label}，耗时 ${classifyDurationMs}ms。`,
+  });
+  emit(writer, "agent_status", {
+    agentId: "system",
+    status: "completed",
+    message: `已识别为${label}，耗时 ${classifyDurationMs}ms。`,
   });
 
   return {

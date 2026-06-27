@@ -409,7 +409,6 @@ export default async function WorkspacePage({
 
         <ChapterEditor
           key={currentChapter.id}
-          novelId={novel.id}
           chapter={{
             id: currentChapter.id,
             title: currentChapter.title,
@@ -418,31 +417,32 @@ export default async function WorkspacePage({
             completedAt: currentChapter.completedAt?.toISOString() ?? null,
           }}
           chapterProgress={currentChapter.chapterProgress?.content ?? null}
+          qualityChecks={currentChapter.qualityChecks
+            .filter((check) => check.type === "consistency")
+            .map((check) => ({
+              id: check.id,
+              chapterId: currentChapter.id,
+              type: check.type,
+              status: check.status,
+              title: check.title,
+              summary: check.summary,
+              result: check.result,
+              scoreHook: check.scoreHook,
+              scoreTension: check.scoreTension,
+              scorePayoff: check.scorePayoff,
+              scorePacing: check.scorePacing,
+              scoreEndingHook: check.scoreEndingHook,
+              scoreReaderPromise: check.scoreReaderPromise,
+              scoreOverall: check.scoreOverall,
+              qualityGate: check.qualityGate,
+              rewriteBrief: check.rewriteBrief,
+            }) as import("@/shared/contracts/quality-check").QualityCheckDto)}
           styleName={novel.appliedStyle?.name}
         />
 
         <SmartWritingPanel
           novelId={novel.id}
           currentChapterId={currentChapter.id}
-          chapterStatus={currentChapter.status}
-          qualityChecks={currentChapter.qualityChecks.map((check) => ({
-            id: check.id,
-            chapterId: currentChapter.id,
-            type: check.type,
-            status: check.status,
-            title: check.title,
-            summary: check.summary,
-            result: check.result,
-            scoreHook: check.scoreHook,
-            scoreTension: check.scoreTension,
-            scorePayoff: check.scorePayoff,
-            scorePacing: check.scorePacing,
-            scoreEndingHook: check.scoreEndingHook,
-            scoreReaderPromise: check.scoreReaderPromise,
-            scoreOverall: check.scoreOverall,
-            qualityGate: check.qualityGate,
-            rewriteBrief: check.rewriteBrief,
-          }) as import("@/shared/contracts/quality-check").QualityCheckDto)}
         />
       </div>
     </main>

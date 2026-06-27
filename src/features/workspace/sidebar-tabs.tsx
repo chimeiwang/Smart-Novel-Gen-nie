@@ -477,7 +477,7 @@ export function SidebarTabs({
         </div>
       </Modal>
 
-      <Modal title="大纲" description="写下故事的主要脉络，AI 续写时会参考这里" open={modalKey === "outline"} onClose={() => setModalKey(null)}>
+      <Modal title="大纲" description="写下故事的主要脉络，智能写作时会参考这里" open={modalKey === "outline"} onClose={() => setModalKey(null)}>
         <OutlinePanel novelId={novelId} outline={outline} outlineNodes={outlineNodes} />
       </Modal>
 

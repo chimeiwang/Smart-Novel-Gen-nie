@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import {
   createOperationTraceMetadata,
   hasNextReviewer,
+  OPERATION_PATCH_ROUTES,
+  OPERATION_REVIEW_ROUTES,
   readEvaluationEvent,
+  routeAfterPatch,
+  routeAfterReview,
   runOperationAgentWithLifecycle,
   selectCurrentReviewer,
 } from "../operation-graph";
@@ -54,6 +58,7 @@ function createState(): GraphState {
     artifactMode: "review_loop",
     reviewerAgent: "编辑",
     reviserAgent: null,
+    pendingArtifactRevision: null,
     artifactIteration: 1,
     maxArtifactIterations: 5,
   };
@@ -127,6 +132,69 @@ describe("operation review routing helpers", () => {
     assert.equal(selectCurrentReviewer({ ...state, reviewerAgent: "编辑" }, [...reviewers]), null);
   });
 
+  it("maps the next-reviewer branch to a known LangGraph destination", () => {
+    const destination = routeAfterReview({
+      ...createState(),
+      reviewerAgent: "校验",
+      reviserAgent: null,
+      artifactIteration: 1,
+      currentOperation: {
+        ...createState().currentOperation!,
+        reviewers: ["校验", "编辑"],
+      },
+    });
+
+    assert.equal(destination, "reviewArtifact");
+    assert.equal(destination in OPERATION_REVIEW_ROUTES, true);
+  });
+
+  it("routes revise+patch to the artifact patch node", () => {
+    const destination = routeAfterReview({
+      ...createState(),
+      reviewerAgent: "校验",
+      reviserAgent: null,
+      pendingArtifactRevision: {
+        summary: "只需修正时间线措辞。",
+        revisionMode: "patch",
+        patches: [{ kind: "text_replace", find: "前天", replace: "今天" }],
+      },
+      currentOperation: {
+        ...createState().currentOperation!,
+        reviewers: ["校验", "编辑"],
+      },
+    });
+
+    assert.equal(destination, "applyArtifactPatch");
+    assert.equal(destination in OPERATION_REVIEW_ROUTES, true);
+  });
+
+  it("routes patch success to the next reviewer", () => {
+    const destination = routeAfterPatch({
+      ...createState(),
+      reviewerAgent: "校验",
+      reviserAgent: null,
+      currentOperation: {
+        ...createState().currentOperation!,
+        reviewers: ["校验", "编辑"],
+      },
+    });
+
+    assert.equal(destination, "reviewArtifact");
+    assert.equal(destination in OPERATION_PATCH_ROUTES, true);
+  });
+
+  it("routes patch failure fallback to rewrite", () => {
+    const destination = routeAfterPatch({
+      ...createState(),
+      reviewerAgent: "校验",
+      reviserAgent: "写作",
+      artifactIteration: 1,
+    });
+
+    assert.equal(destination, "reviseArtifact");
+    assert.equal(destination in OPERATION_PATCH_ROUTES, true);
+  });
+
   it("prefers structured submit_evaluation control events over prose inference", () => {
     const evaluation = readEvaluationEvent({
       controlEvents: [{
@@ -134,6 +202,8 @@ describe("operation review routing helpers", () => {
         verdict: "revise",
         summary: "节奏还需要压缩。",
         requiredChanges: "删除重复铺垫。",
+        revisionMode: "patch",
+        patches: [{ kind: "text_replace", find: "重复铺垫", replace: "关键线索" }],
         artifactKey: "artifact-key",
         artifactId: "artifact-1",
       }],
@@ -143,6 +213,8 @@ describe("operation review routing helpers", () => {
       verdict: "revise",
       summary: "节奏还需要压缩。",
       requiredChanges: "删除重复铺垫。",
+      revisionMode: "patch",
+      patches: [{ kind: "text_replace", find: "重复铺垫", replace: "关键线索" }],
     });
   });
 });

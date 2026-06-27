@@ -41,8 +41,10 @@ export * from "./nodes";
 // 执行器
 export {
   executeWritingWorkflow,
+  startWritingWorkflow,
   resumeWriting,
   createInitialState,
+  createWorkflowTask,
   persistUpdates,
   rollbackTaskUpdates,
   previewUpdates,

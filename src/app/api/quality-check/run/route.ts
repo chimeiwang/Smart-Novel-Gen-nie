@@ -13,15 +13,25 @@
 
 import { NextRequest } from "next/server";
 import { getSession } from "@/shared/lib/auth";
-import { authorizeWritingTask, authorizeNovel, authErrorResponse } from "@/agents/lib/task-auth";
-import { markCheckRunning } from "@/agents/lib/quality-check-service";
+import { authorizeWritingTask, authErrorResponse } from "@/agents/lib/task-auth";
+import { markCheckFailed, markCheckRunning, saveQualityCheckReport } from "@/agents/lib/quality-check-service";
 import { prisma } from "@/shared/db/prisma";
 import { logger } from "@/shared/lib/logger";
-import { executeWritingWorkflow, createInitialState } from "@/agents/graph";
+import { createWorkflowTask } from "@/agents/graph";
 import { QUALITY_CHECK_MESSAGE_MAP, RunQualityCheckSchema } from "@/shared/contracts/quality-check";
-import { createWorkflowRun } from "@/agents/lib/workflow-run-service";
+import { aggregateNovelContextLightweight } from "@/shared/lib/context-aggregator";
+import { validatorNode } from "@/agents/graph/nodes/validator-node";
+import type { WritingState } from "@/agents/graph/state";
 
 export const dynamic = "force-dynamic";
+
+async function markTaskError(taskId: string | null, error: string) {
+  if (!taskId) return;
+  await prisma.writingTask.update({
+    where: { id: taskId },
+    data: { phase: "error", agentOutputs: JSON.stringify({ error }) },
+  }).catch((e) => logger.warn("QUALITY_CHECK_API", "标记质量检查任务失败状态失败", { error: String(e), taskId }));
+}
 
 export async function POST(request: NextRequest) {
   const requestId = `qc-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -58,6 +68,10 @@ export async function POST(request: NextRequest) {
       return new Response(JSON.stringify({ error: "检查项不存在" }), { status: 404 });
     }
 
+    if (check.type !== "consistency") {
+      return new Response(JSON.stringify({ error: "当前只支持一致性终检；设定同步、商业性和技法评审请在写作草案流程中处理。" }), { status: 400 });
+    }
+
     // 3. P0：校验 check 归属 — 始终比对 novel.userId
     const novelUserId = check.chapter.novel.userId;
     if (novelUserId && novelUserId !== session.userId) {
@@ -91,28 +105,86 @@ export async function POST(request: NextRequest) {
     await markCheckRunning(checkId);
     logger.info("QUALITY_CHECK_API", "启动质量检查", { requestId, checkId, checkType: check.type });
 
-    // 7. 质量检查使用独立 workflow，qualityCheckId 作为正式 graph state 入参传递。
-    const initialState = await createInitialState({
-      novelId: check.chapter.novelId,
-      chapterId: check.chapterId,
-      targetWordCount: 0,
-      userMessage: message,
-      userId: session.userId,
-      qualityCheckId: checkId,
-    });
+    let taskIdForRun: string | null = null;
+    try {
+      taskIdForRun = await createWorkflowTask({
+        novelId: check.chapter.novelId,
+        chapterId: check.chapterId,
+        targetWordCount: 0,
+        userMessage: message,
+        userId: session.userId,
+        qualityCheckId: checkId,
+        selectedAgents: ["校验"],
+      });
 
-    // Phase 2：双写 WorkflowRun（新表）
-    createWorkflowRun({
-      novelId: check.chapter.novelId,
-      chapterId: check.chapterId,
-      userId: session.userId,
-      kind: "quality_check",
-      sourceType: "quality_check",
-      sourceId: checkId,
-      input: message,
-    }).catch((e) => { logger.warn("QUALITY_CHECK_API", "创建 WorkflowRun 失败", { error: String(e) }); });
+      const novelData = await aggregateNovelContextLightweight(check.chapter.novelId, check.chapterId);
+      const state: WritingState = {
+        taskId: taskIdForRun,
+        userId: session.userId,
+        novelId: check.chapter.novelId,
+        chapterId: check.chapterId,
+        targetWordCount: 0,
+        phase: "active",
+        userMessage: message,
+        pendingUserResponse: false,
+        conversationHistory: [],
+        activeAgent: "校验",
+        currentOperation: null,
+        operationMode: "operation_graph",
+        operationStage: null,
+        loreAdvisorOutput: null,
+        plotAdvisorOutput: null,
+        writerOutput: null,
+        validatorOutput: null,
+        editorOutput: null,
+        generatedContent: "",
+        pendingUpdates: null,
+        novelData: { ...novelData, novelId: check.chapter.novelId, chapterId: check.chapterId },
+        pendingAgentCall: null,
+        errorMessage: null,
+        streamCallbacks: {},
+        eventCallbacks: undefined,
+        qualityCheckId: checkId,
+        controlEvents: undefined,
+        activeArtifactId: null,
+        artifactMode: "none",
+        reviewerAgent: null,
+        reviserAgent: null,
+        pendingArtifactRevision: null,
+        artifactIteration: 0,
+        maxArtifactIterations: 5,
+      };
 
-    return await executeWritingWorkflow(initialState);
+      const result = await validatorNode(state);
+      const report = result.validatorOutput?.content.trim();
+      if (result.errorMessage || !report) {
+        throw new Error(result.errorMessage || "校验 Agent 未返回报告");
+      }
+
+      const saved = await saveQualityCheckReport({ checkId, result: report });
+      if (!saved.success) {
+        throw new Error(saved.error || "一致性终检报告保存失败");
+      }
+
+      await prisma.writingTask.update({
+        where: { id: taskIdForRun },
+        data: {
+          phase: "completed",
+          agentOutputs: JSON.stringify({ 校验: result.validatorOutput }),
+          conversationHistory: JSON.stringify([
+            { role: "user", content: message },
+            { role: "assistant", agentId: "校验", agentOutput: result.validatorOutput },
+          ]),
+        },
+      });
+
+      return Response.json({ ok: true, checkId, taskId: taskIdForRun });
+    } catch (error) {
+      const messageText = error instanceof Error ? error.message : String(error);
+      await markCheckFailed(checkId, messageText);
+      await markTaskError(taskIdForRun, messageText);
+      return new Response(JSON.stringify({ error: messageText }), { status: 500 });
+    }
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : "服务器内部错误";
     logger.error("QUALITY_CHECK_API", `质量检查请求错误: ${errorMsg}`, { requestId });
