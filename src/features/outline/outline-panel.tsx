@@ -101,11 +101,15 @@ function nodeToForm(node: OutlineNodeDto): NodeFormState {
 export function OutlinePanel({ novelId, outline, outlineNodes = [] }: OutlinePanelProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [content, setContent] = useState(outline?.content ?? "");
-  const [form, setForm] = useState<NodeFormState>(EMPTY_FORM);
+  const [contentDraft, setContentDraft] = useState<string | null>(null);
+  const [formDraft, setFormDraft] = useState<NodeFormState | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const content = contentDraft ?? outline?.content ?? "";
+  const selectedNode = selectedNodeId ? outlineNodes.find((node) => node.id === selectedNodeId) ?? null : null;
+  const selectedNodeMissing = Boolean(selectedNodeId && !selectedNode);
+  const form = selectedNodeMissing ? EMPTY_FORM : formDraft ?? (selectedNode ? nodeToForm(selectedNode) : EMPTY_FORM);
 
   const nodesByParent = useMemo(() => {
     const map = new Map<string, OutlineNodeDto[]>();
@@ -127,11 +131,9 @@ export function OutlinePanel({ novelId, outline, outlineNodes = [] }: OutlinePan
       .sort(byOrderThenTitle);
   }, [form.id, form.kind, outlineNodes]);
 
-  const selectedNode = selectedNodeId ? outlineNodes.find((node) => node.id === selectedNodeId) ?? null : null;
-
   const setField = <K extends keyof NodeFormState>(key: K, value: NodeFormState[K]) => {
-    setForm((current) => {
-      const next = { ...current, [key]: value };
+    setFormDraft((current) => {
+      const next = { ...(current ?? form), [key]: value };
       if (key === "kind") {
         next.parentId = "";
       }
@@ -141,14 +143,14 @@ export function OutlinePanel({ novelId, outline, outlineNodes = [] }: OutlinePan
 
   const handleSelectNode = (node: OutlineNodeDto) => {
     setSelectedNodeId(node.id);
-    setForm(nodeToForm(node));
+    setFormDraft(null);
     setMessage(null);
     setError(null);
   };
 
   const handleNewNode = (kind: OutlineNodeKind) => {
     setSelectedNodeId(null);
-    setForm({ ...EMPTY_FORM, kind });
+    setFormDraft({ ...EMPTY_FORM, kind });
     setMessage(null);
     setError(null);
   };
@@ -160,6 +162,8 @@ export function OutlinePanel({ novelId, outline, outlineNodes = [] }: OutlinePan
       try {
         await action();
         setMessage(successMessage);
+        setContentDraft(null);
+        setFormDraft(null);
         router.refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : "操作失败");
@@ -218,7 +222,7 @@ export function OutlinePanel({ novelId, outline, outlineNodes = [] }: OutlinePan
       async () => {
         await deleteOutlineNodeAction({ novelId, id: form.id as string });
         setSelectedNodeId(null);
-        setForm(EMPTY_FORM);
+        setFormDraft(null);
       },
       "大纲节点已删除",
     );
@@ -272,7 +276,9 @@ export function OutlinePanel({ novelId, outline, outlineNodes = [] }: OutlinePan
           <textarea
             className="textarea"
             value={content}
-            onChange={(event) => setContent(event.target.value)}
+            onChange={(event) => {
+              setContentDraft(event.target.value);
+            }}
             placeholder="例：主角从第一卷离开故乡，逐步揭开旧时代禁术真相，最终推翻旧秩序..."
             rows={6}
           />

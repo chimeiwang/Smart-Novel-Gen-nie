@@ -94,7 +94,9 @@ export async function executeCreativeOperation(
     const createTextArtifact = deps.createOrUpdateTextArtifact ?? createOrUpdateTextArtifact;
     const artifact = await createTextArtifact({
       novelId: state.novelId,
-      chapterId: state.chapterId,
+      chapterId: state.chapterDraftTarget?.mode === "existing_chapter"
+        ? state.chapterDraftTarget.chapterId
+        : state.chapterId,
       taskId: state.taskId,
       artifactKey: buildOperationArtifactKey(state.taskId, operation.kind),
       kind: def.textArtifactKind,
@@ -102,6 +104,7 @@ export async function executeCreativeOperation(
       content: output.content.trim(),
       agentId: activeAgent,
       reviewerAgent: def.reviewers[0] ?? null,
+      chapterDraftTarget: def.textArtifactKind === "chapter_draft" ? state.chapterDraftTarget ?? null : null,
     });
 
     return {
@@ -167,6 +170,7 @@ async function processOperationControlEvents(input: {
       state: {
         taskId: state.taskId,
         chapterId: state.chapterId,
+        chapterDraftTarget: state.chapterDraftTarget ?? null,
         qualityCheckId: state.qualityCheckId,
         novelData: state.novelData,
       },

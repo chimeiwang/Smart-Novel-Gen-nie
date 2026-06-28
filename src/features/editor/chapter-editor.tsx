@@ -52,6 +52,18 @@ export function ChapterEditor({
   });
 
   useEffect(() => {
+    setTitle(chapter.title);
+    setContent(chapter.content);
+    setChapterStatus(chapter.status);
+    setProgressContent(chapterProgress ?? "");
+    lastSavedRef.current = {
+      title: chapter.title,
+      content: chapter.content,
+    };
+    setSaveStatus("已同步");
+  }, [chapter.id, chapter.title, chapter.content, chapter.status, chapterProgress]);
+
+  useEffect(() => {
     if (
       title === lastSavedRef.current.title &&
       content === lastSavedRef.current.content

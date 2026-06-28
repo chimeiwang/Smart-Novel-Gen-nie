@@ -38,6 +38,20 @@ export function resolveReviewArtifactApplyTarget(
   return null;
 }
 
+export function resolveChapterDraftApplyMode(input: {
+  payload: ParsedReviewArtifactPayload;
+  artifactChapterId: string | null;
+}): { mode: "existing_chapter"; chapterId: string } | { mode: "new_next_chapter"; title?: string } | null {
+  if (input.payload.kind !== "chapter_draft" && input.payload.kind !== "chapter_content") return null;
+  if (input.payload.kind === "chapter_draft" && input.payload.target?.mode === "new_next_chapter") {
+    return { mode: "new_next_chapter", title: input.payload.target.title };
+  }
+  const chapterId = input.payload.kind === "chapter_draft" && input.payload.target?.mode === "existing_chapter"
+    ? input.payload.target.chapterId
+    : input.artifactChapterId;
+  return chapterId ? { mode: "existing_chapter", chapterId } : null;
+}
+
 export function filterAgentUpdatesBySelection(
   updates: AgentUpdates,
   selectedRefs: AgentUpdateSelectionRef[] | undefined
@@ -238,7 +252,52 @@ export async function applyReviewArtifact(input: {
   }
 
   if (payload.kind === "chapter_content" || payload.kind === "chapter_draft") {
-    if (!artifact.chapterId) {
+    const chapterApplyMode = resolveChapterDraftApplyMode({
+      payload,
+      artifactChapterId: artifact.chapterId,
+    });
+
+    if (chapterApplyMode?.mode === "new_next_chapter") {
+      const chapter = await prisma.$transaction(async (tx) => {
+        const maxChapter = await tx.chapter.findFirst({
+          where: { novelId: artifact.novelId },
+          orderBy: { order: "desc" },
+          select: { order: true },
+        });
+        const nextOrder = (maxChapter?.order ?? 0) + 1;
+        const created = await tx.chapter.create({
+          data: {
+            novelId: artifact.novelId,
+            title: chapterApplyMode.title?.trim() || `第 ${nextOrder} 章`,
+            order: nextOrder,
+            content: payload.content,
+            status: "review",
+          },
+        });
+        await tx.reviewArtifact.update({
+          where: { id: artifact.id },
+          data: {
+            chapterId: created.id,
+            status: "applied",
+            appliedAt: new Date(),
+          },
+        });
+        return created;
+      });
+      await ensureDefaultChapterQualityChecks(chapter.id);
+      const applied = await prisma.reviewArtifact.findUniqueOrThrow({
+        where: { id: artifact.id },
+        include: { evaluations: { orderBy: { createdAt: "desc" } } },
+      });
+      return {
+        success: true,
+        summary: `正文草案已应用到新章节「${chapter.title}」`,
+        savedCount: 1,
+        artifact: toReviewArtifactDto(applied),
+      };
+    }
+
+    if (!chapterApplyMode) {
       assertReviewArtifactStatusTransition("applying", "awaiting_user");
       await prisma.reviewArtifact.update({
         where: { id: artifact.id },
@@ -248,13 +307,13 @@ export async function applyReviewArtifact(input: {
     }
 
     await prisma.chapter.update({
-      where: { id: artifact.chapterId },
+      where: { id: chapterApplyMode.chapterId },
       data: {
         content: payload.content,
         status: "review",
       },
     });
-    await ensureDefaultChapterQualityChecks(artifact.chapterId);
+    await ensureDefaultChapterQualityChecks(chapterApplyMode.chapterId);
 
     assertReviewArtifactStatusTransition("applying", "applied");
     const applied = await prisma.reviewArtifact.update({

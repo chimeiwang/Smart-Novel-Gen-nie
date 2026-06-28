@@ -12,6 +12,7 @@ import type { CoreAgentId, NovelData } from "@/agents/graph/state";
 import type { BeatPlanDraft } from "@/shared/contracts/beat-plan";
 import type { EvaluationPatch } from "@/shared/contracts/agent-control";
 import type {
+  ChapterDraftTarget,
   ReviewArtifactDto,
   ReviewArtifactEvaluationVerdict,
   ReviewArtifactPayload,
@@ -692,10 +693,12 @@ export async function createOrUpdateTextArtifact(input: {
   content: string;
   agentId: CoreAgentId;
   reviewerAgent?: CoreAgentId | null;
+  chapterDraftTarget?: ChapterDraftTarget | null;
 }): Promise<ReviewArtifactDto> {
   const payload: ReviewArtifactPayload = {
     kind: input.kind,
     content: input.content,
+    ...(input.kind === "chapter_draft" && input.chapterDraftTarget ? { target: input.chapterDraftTarget } : {}),
   };
 
   const existing = input.artifactKey
@@ -719,6 +722,7 @@ export async function createOrUpdateTextArtifact(input: {
         where: { id: existing.id },
         data: {
           kind: input.kind,
+          chapterId: input.chapterId ?? null,
           status: input.reviewerAgent ? "under_review" : "draft",
           summary: input.summary,
           payloadJson: JSON.stringify(payload),

@@ -149,7 +149,7 @@ function buildCraftSystemPrompt(): string {
     "2. 能给具体修改示例时，给出改前/改后或可执行写法。",
     "3. 只有正式评审章节正文或质量检查任务时，才使用 submit_quality_report 提交评分。",
     "4. 严重问题需要其他 Agent 继续处理时，在评审正文中说明问题和建议主责方向，不要自行转交。",
-    "5. 当你在复审其他 Agent 的产物时，先调用 get_active_review_artifact 或 get_review_artifact 读取待审核草案；必须使用 submit_evaluation 提交 pass/revise/block 结论；需要返工时 verdict=revise，并在 requiredChanges 写清可执行修改要求。可精确定位的小修用 revisionMode=patch；方向性或结构性大改用 revisionMode=rewrite。",
+    "5. 当你在复审其他 Agent 的产物时，先调用 get_active_review_artifact 或 get_review_artifact 读取待审核草案；最终必须调用 submit_evaluation 提交 pass/revise/block 结论，不能只输出自然语言评审报告。需要返工时 verdict=revise，并在 requiredChanges 写清可执行修改要求。可精确定位的小修用 revisionMode=patch；方向性或结构性大改用 revisionMode=rewrite。没有调用 submit_evaluation 时，本轮复审视为未完成。",
     "6. 你可以评审大纲，但不能自己构建或改写大纲更新草案；需要重构大纲、创建大纲树或修改 outlineAdjustments 时，用 submit_evaluation(revise) 说明需要剧情 Agent 处理的修改要求。",
     "",
     "## 你的回复",
@@ -185,7 +185,7 @@ function buildSystemPrompt(): string {
     "2. 先给结论，再给证据和改法；指出大卖潜力时必须说明依赖条件和短板。",
     "3. 不要把所有任务套入章节评分表。只有正式评审章节正文或质量检查任务时，才使用 submit_quality_report。",
     "4. 严重问题需要其他 Agent 处理时，在评审正文中说明问题和建议主责方向，不要自行转交。",
-    "5. 复审其他 Agent 产物时，先调用 get_active_review_artifact 或 get_review_artifact 读取待审核草案；使用 submit_evaluation 表达通过/返工/阻塞；需要返工时 verdict=revise，requiredChanges 必须能直接执行。可精确定位的小修用 revisionMode=patch；方向性或结构性大改用 revisionMode=rewrite。",
+    "5. 复审其他 Agent 产物时，先调用 get_active_review_artifact 或 get_review_artifact 读取待审核草案；最终必须调用 submit_evaluation 表达通过/返工/阻塞，不能只输出自然语言评审报告。需要返工时 verdict=revise，requiredChanges 必须能直接执行。可精确定位的小修用 revisionMode=patch；方向性或结构性大改用 revisionMode=rewrite。没有调用 submit_evaluation 时，本轮复审视为未完成。",
     "6. 你可以评审大纲，但不能自己构建或改写大纲更新草案；需要重构大纲、创建大纲树或修改 outlineAdjustments 时，用 submit_evaluation(revise) 写清需要剧情 Agent 处理的修改要求。",
     "7. 轻微问题只给建议，不触发返工。",
   ].join("\n");

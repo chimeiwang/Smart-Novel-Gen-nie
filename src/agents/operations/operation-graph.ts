@@ -25,6 +25,8 @@ import { interrupt as langGraphInterrupt } from "@langchain/langgraph";
 import { prisma } from "@/shared/db/prisma";
 import { traceWorkflowExecution } from "@/agents/lib/langsmith-tracer";
 import { aggregateNovelContextForWriting } from "@/shared/lib/context-aggregator";
+import { resolveChapterDraftTarget } from "./chapter-target-resolver";
+import { logger } from "@/shared/lib/logger";
 
 type OperationAgentRunner<T> = (state: WritingState) => Promise<T>;
 
@@ -117,10 +119,27 @@ async function prepareOperationContextNode(state: GraphState) {
     message: `正在准备${label}所需的上下文。`,
   });
   if (operation && shouldUseWritingContext(operation.kind)) {
-    const novelData = await aggregateNovelContextForWriting(state.novelId, state.chapterId);
+    const target = operation.kind === "write_chapter" || operation.kind === "rewrite_scene" || operation.kind === "plan_chapter"
+      ? await resolveChapterDraftTarget({
+          novelId: state.novelId,
+          chapterId: state.chapterId,
+          userMessage: operation.userGoal || state.userMessage,
+          allowNewChapterTarget: operation.kind !== "plan_chapter",
+        })
+      : null;
+    const novelData = await aggregateNovelContextForWriting(state.novelId, target?.contextChapterId ?? state.chapterId);
+    const patchedNovelData = target
+      ? {
+          ...novelData,
+          chapterId: target.target.mode === "existing_chapter" ? target.target.chapterId : state.chapterId,
+          chapterTitle: target.targetTitle,
+          chapterContent: target.targetContent,
+        }
+      : novelData;
     return {
       operationStage: "准备操作上下文",
-      novelData: { ...novelData, novelId: state.novelId, chapterId: state.chapterId } as GraphState["novelData"],
+      chapterDraftTarget: target?.target ?? null,
+      novelData: { ...patchedNovelData, novelId: state.novelId } as GraphState["novelData"],
     };
   }
   return { operationStage: "准备操作上下文" };
@@ -251,8 +270,16 @@ async function reviewArtifactNode(state: GraphState) {
     (stateWithLifecycle) => runReviewer(reviewer, stateWithLifecycle as unknown as GraphState)
   );
   const structuredEvaluation = readEvaluationEvent(reviewPatch);
-  const verdict = structuredEvaluation?.verdict ?? inferReviewVerdict(reviewPatch, reviewer);
-  const summary = structuredEvaluation?.summary ?? inferReviewSummary(reviewPatch, reviewer);
+  const requiredEvaluation = requireStructuredEvaluation(structuredEvaluation, reviewPatch, reviewer, state);
+  const verdict = requiredEvaluation.verdict;
+  const summary = requiredEvaluation.summary;
+  if (!structuredEvaluation) {
+    emit(writer, "agent_status", {
+      agentId: reviewer,
+      status: "error",
+      message: summary,
+    });
+  }
   const requiredChanges = structuredEvaluation?.requiredChanges ?? (verdict === "pass" ? undefined : summary);
   const revisionMode = verdict === "revise" ? structuredEvaluation?.revisionMode ?? "rewrite" : "rewrite";
   const patches = verdict === "revise" ? structuredEvaluation?.patches : undefined;
@@ -537,6 +564,27 @@ export function readEvaluationEvent(
     requiredChanges: event.requiredChanges,
     revisionMode: event.revisionMode,
     patches: event.patches,
+  };
+}
+
+export function requireStructuredEvaluation(
+  evaluation: ReturnType<typeof readEvaluationEvent>,
+  patch: Partial<WritingState>,
+  reviewer: CoreAgentId,
+  state?: Pick<GraphState, "taskId" | "activeArtifactId" | "currentOperation" | "artifactIteration">
+): NonNullable<ReturnType<typeof readEvaluationEvent>> {
+  if (evaluation) return evaluation;
+  const proseSummary = inferReviewSummary(patch, reviewer);
+  logger.warn("OPERATION_WORKFLOW", "复审 Agent 未提交 submit_evaluation，停止正文推断", {
+    taskId: state?.taskId,
+    artifactId: state?.activeArtifactId,
+    reviewer,
+    operationKind: state?.currentOperation?.kind,
+    artifactIteration: state?.artifactIteration,
+  });
+  return {
+    verdict: "block",
+    summary: `复审未完成：${AGENT_NAMES[reviewer]}没有调用 submit_evaluation 提交结构化审核结论。请重新发起审核或让复审 Agent 补交 pass/revise/block 结论。${proseSummary ? `\n\n原始报告摘要：${proseSummary}` : ""}`,
   };
 }
 

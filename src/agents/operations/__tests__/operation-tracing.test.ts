@@ -6,6 +6,7 @@ import {
   OPERATION_PATCH_ROUTES,
   OPERATION_REVIEW_ROUTES,
   readEvaluationEvent,
+  requireStructuredEvaluation,
   routeAfterPatch,
   routeAfterReview,
   runOperationAgentWithLifecycle,
@@ -40,6 +41,7 @@ function createState(): GraphState {
     },
     operationMode: "operation_graph",
     operationStage: "执行创作操作",
+    chapterDraftTarget: null,
     loreAdvisorOutput: null,
     plotAdvisorOutput: null,
     writerOutput: null,
@@ -216,5 +218,21 @@ describe("operation review routing helpers", () => {
       revisionMode: "patch",
       patches: [{ kind: "text_replace", find: "重复铺垫", replace: "关键线索" }],
     });
+  });
+
+  it("blocks review routing when reviewer omits submit_evaluation", () => {
+    const evaluation = requireStructuredEvaluation(null, {
+      validatorOutput: {
+        agentId: "校验",
+        agentName: "校验员",
+        content: "校验报告：存在大纲偏差，建议返工。",
+        insights: [],
+        proactiveSuggestions: [],
+      },
+    }, "校验", createState());
+
+    assert.equal(evaluation.verdict, "block");
+    assert.match(evaluation.summary, /没有调用 submit_evaluation/);
+    assert.match(evaluation.summary, /原始报告摘要/);
   });
 });

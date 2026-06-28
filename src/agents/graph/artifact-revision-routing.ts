@@ -15,6 +15,24 @@ export type ArtifactRevisionResume = {
   userMessage: string;
 };
 
+export function resolvePendingArtifactRevisionFromChat(input: {
+  taskPhase?: string | null;
+  taskGeneratedContent?: string | null;
+  graphSnapshot?: { pendingUserResponse?: boolean; activeArtifactId?: string | null } | null;
+  userMessage?: string | null;
+}): { artifactId: string; userMessage: string } | null {
+  const userMessage = input.userMessage?.trim();
+  if (!userMessage || userMessage.startsWith("@")) return null;
+  const snapshotArtifactId = input.graphSnapshot?.pendingUserResponse
+    ? input.graphSnapshot.activeArtifactId?.trim()
+    : "";
+  const taskArtifactId = input.taskPhase === "awaiting_user_review"
+    ? input.taskGeneratedContent?.trim()
+    : "";
+  const artifactId = snapshotArtifactId || taskArtifactId;
+  return artifactId ? { artifactId, userMessage } : null;
+}
+
 function isCoreAgentId(value: CoreAgentId | null | undefined): value is CoreAgentId {
   return Boolean(value && CORE_AGENT_IDS.includes(value));
 }

@@ -32,7 +32,12 @@ import {
   upsertUpdateBuilderArtifact as defaultUpsertUpdateBuilderArtifact,
 } from "@/agents/artifacts/artifact-service";
 import { prisma } from "@/shared/db/prisma";
-import type { ReviewArtifactDto, ReviewArtifactEvaluationVerdict, TextReviewArtifactKind } from "@/shared/contracts/review-artifact";
+import type {
+  ChapterDraftTarget,
+  ReviewArtifactDto,
+  ReviewArtifactEvaluationVerdict,
+  TextReviewArtifactKind,
+} from "@/shared/contracts/review-artifact";
 import type { BeatPlanDraft } from "@/shared/contracts/beat-plan";
 import { markTaskAwaitingUserReview as defaultMarkTaskAwaitingUserReview } from "./task-state";
 import { createArtifactReviewInterrupt } from "@/shared/contracts/user-decision";
@@ -83,6 +88,7 @@ function countExistingOutlineTreeBatches(artifactKey: string, updates: AgentUpda
 export interface ControlEventProcessorState {
   taskId: string;
   chapterId: string;
+  chapterDraftTarget?: ChapterDraftTarget | null;
   qualityCheckId?: string | null;
   novelData?: NovelData;
 }
@@ -132,6 +138,7 @@ export interface ControlEventProcessorDeps {
     content: string;
     agentId: CoreAgentId;
     reviewerAgent?: CoreAgentId | null;
+    chapterDraftTarget?: ChapterDraftTarget | null;
   }) => Promise<ReviewArtifactDto>;
   createOrUpdateBeatPlanArtifact?: (input: {
     novelId: string;
@@ -615,7 +622,7 @@ export async function processControlEvents(
         const reviewerAgent = event.reviewerAgent ?? (event.submitForReview ? "编辑" : null);
         const artifact = await createOrUpdateTextArtifact({
           novelId: state.novelData?.novelId ?? "",
-          chapterId: state.chapterId,
+          chapterId: state.novelData?.chapterId ?? state.chapterId,
           taskId: state.taskId,
           artifactKey: event.artifactKey ?? null,
           kind: event.kind,
@@ -623,6 +630,7 @@ export async function processControlEvents(
           content,
           agentId: activeAgent,
           reviewerAgent,
+          chapterDraftTarget: event.kind === "chapter_draft" ? state.chapterDraftTarget ?? null : null,
         });
         activeArtifactId = artifact.id;
         emitEvent("artifact_submitted", {
@@ -746,7 +754,7 @@ export async function processControlEvents(
         const reviewerAgent = event.reviewerAgent ?? (event.submitForReview === false ? null : "编辑");
         const artifact = await createOrUpdateBeatPlanArtifact({
           novelId: state.novelData?.novelId ?? "",
-          chapterId: state.chapterId,
+          chapterId: state.novelData?.chapterId ?? state.chapterId,
           taskId: state.taskId,
           artifactKey: event.artifactKey ?? `${state.taskId}:plan_chapter`,
           summary: event.summary,

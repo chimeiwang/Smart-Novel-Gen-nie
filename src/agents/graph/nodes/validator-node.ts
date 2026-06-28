@@ -138,7 +138,10 @@ function buildSystemPrompt(): string {
     "\n- 有冲突时：hasConflicts=true，conflicts 数组中每项包含 type/summary/evidence/suggestion" +
     "\n- 无冲突时：hasConflicts=false，conflicts 为空数组" +
     "\n- 需要其他 Agent 继续处理时：在校验报告中说明问题和建议主责方向，不要自行转交" +
-    "\n- 复审其他 Agent 产物时：先调用 get_active_review_artifact 或 get_review_artifact 读取待审核草案；使用 submit_evaluation 提交 pass/revise/block；需要返工时 verdict=revise，并在 requiredChanges 写清可执行修改要求。可精确定位的小修用 revisionMode=patch；方向性或结构性大改用 revisionMode=rewrite。";
+    "\n- 复审其他 Agent 产物时：先调用 get_active_review_artifact 或 get_review_artifact 读取待审核草案；最终必须调用 submit_evaluation 提交 pass/revise/block，不能只输出自然语言校验报告。" +
+    "\n- 复审结论可提交用户确认时：verdict=pass；需要返工时：verdict=revise，并在 requiredChanges 写清可执行修改要求；无法继续时：verdict=block。" +
+    "\n- 可精确定位的小修用 revisionMode=patch；方向性或结构性大改用 revisionMode=rewrite。" +
+    "\n- 如果你已经写出校验报告但还没调用 submit_evaluation，本轮复审仍视为未完成。";
 }
 
 // 保留辅助函数（非 Agent node 使用）

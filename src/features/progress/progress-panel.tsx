@@ -18,10 +18,22 @@ type ProgressPanelProps = {
 export function ProgressPanel({ novelId, progress }: ProgressPanelProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [currentStage, setCurrentStage] = useState(progress?.currentStage ?? "开篇");
-  const [currentGoal, setCurrentGoal] = useState(progress?.currentGoal ?? "");
-  const [currentConflict, setCurrentConflict] = useState(progress?.currentConflict ?? "");
-  const [nextMilestone, setNextMilestone] = useState(progress?.nextMilestone ?? "");
+  const [draft, setDraft] = useState<ProgressPanelProps["progress"] | null>(null);
+  const currentStage = draft?.currentStage ?? progress?.currentStage ?? "开篇";
+  const currentGoal = draft?.currentGoal ?? progress?.currentGoal ?? "";
+  const currentConflict = draft?.currentConflict ?? progress?.currentConflict ?? "";
+  const nextMilestone = draft?.nextMilestone ?? progress?.nextMilestone ?? "";
+
+  const setField = (field: keyof NonNullable<ProgressPanelProps["progress"]>, value: string) => {
+    setDraft((current) => ({
+      currentStage,
+      currentGoal,
+      currentConflict,
+      nextMilestone,
+      ...current,
+      [field]: value,
+    }));
+  };
 
   const handleSave = () => {
     startTransition(async () => {
@@ -33,6 +45,7 @@ export function ProgressPanel({ novelId, progress }: ProgressPanelProps) {
         nextMilestone,
       });
 
+      setDraft(null);
       router.refresh();
     });
   };
@@ -49,25 +62,25 @@ export function ProgressPanel({ novelId, progress }: ProgressPanelProps) {
         <input
           className="input"
           value={currentStage}
-          onChange={(event) => setCurrentStage(event.target.value)}
+          onChange={(event) => setField("currentStage", event.target.value)}
           placeholder="当前阶段"
         />
         <input
           className="input"
           value={currentGoal}
-          onChange={(event) => setCurrentGoal(event.target.value)}
+          onChange={(event) => setField("currentGoal", event.target.value)}
           placeholder="当前目标"
         />
         <textarea
           className="textarea"
           value={currentConflict}
-          onChange={(event) => setCurrentConflict(event.target.value)}
+          onChange={(event) => setField("currentConflict", event.target.value)}
           placeholder="当前冲突"
         />
         <input
           className="input"
           value={nextMilestone}
-          onChange={(event) => setNextMilestone(event.target.value)}
+          onChange={(event) => setField("nextMilestone", event.target.value)}
           placeholder="下一里程碑"
         />
         <button className="button secondary" type="button" onClick={handleSave}>

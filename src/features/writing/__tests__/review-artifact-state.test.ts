@@ -12,6 +12,18 @@ import {
   shouldRefreshAwaitingReviewArtifact,
 } from "../review-artifact-state";
 
+type TestArtifact = {
+  id: string;
+  artifactKey?: string | null;
+  revision?: number;
+  status: string;
+};
+
+type TestMessage = {
+  id: string;
+  reviewArtifact: TestArtifact | null;
+};
+
 describe("review artifact state", () => {
   it("keeps an active review artifact visible even when no message could receive it", () => {
     const artifact = { id: "artifact-1", status: "awaiting_user" };
@@ -42,6 +54,42 @@ describe("review artifact state", () => {
     const messages = attachReviewArtifactToLastMessage([{}], artifact);
 
     assert.equal(resolveVisibleReviewArtifact(null, messages), artifact);
+  });
+
+  it("creates a new message for a new artifact instead of attaching to the last message", () => {
+    const artifact = { id: "artifact-2", artifactKey: "chapter-6", status: "awaiting_user" };
+    const messages = attachReviewArtifactToConversation<TestMessage, TestArtifact>([{ id: "message-1", reviewArtifact: null }], artifact, () => ({
+      id: "placeholder",
+      reviewArtifact: null,
+    }));
+
+    assert.equal(messages.length, 2);
+    assert.equal(messages[0].reviewArtifact, null);
+    assert.equal(messages[1].reviewArtifact, artifact);
+  });
+
+  it("updates an existing artifact message instead of duplicating it", () => {
+    const first = { id: "artifact-1", artifactKey: "chapter-5", revision: 1, status: "awaiting_user" };
+    const second = { id: "artifact-1", artifactKey: "chapter-5", revision: 2, status: "awaiting_user" };
+    const messages = attachReviewArtifactToConversation<TestMessage, TestArtifact>([{ id: "message-1", reviewArtifact: first }], second, () => ({
+      id: "placeholder",
+      reviewArtifact: null,
+    }));
+
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].reviewArtifact, second);
+  });
+
+  it("matches artifact messages by stable artifactKey when the id changes", () => {
+    const first = { id: "artifact-1", artifactKey: "chapter-5", revision: 1, status: "awaiting_user" };
+    const second = { id: "artifact-2", artifactKey: "chapter-5", revision: 2, status: "awaiting_user" };
+    const messages = attachReviewArtifactToConversation<TestMessage, TestArtifact>([{ id: "message-1", reviewArtifact: first }], second, () => ({
+      id: "placeholder",
+      reviewArtifact: null,
+    }));
+
+    assert.equal(messages.length, 1);
+    assert.equal(messages[0].reviewArtifact, second);
   });
 
   it("refreshes awaiting artifacts after a stream ends when none is visible", () => {

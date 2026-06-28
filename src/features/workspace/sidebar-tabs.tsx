@@ -187,6 +187,19 @@ const TAB_ITEMS: Array<{ key: SidebarTabKey; label: string }> = [
   { key: "reference", label: "资料" },
 ];
 
+function toWritingBibleForm(writingBible: SidebarTabsProps["writingBible"]) {
+  return {
+    genre: writingBible?.genre ?? "",
+    targetReaders: writingBible?.targetReaders ?? "",
+    coreSellingPoint: writingBible?.coreSellingPoint ?? "",
+    readerPromise: writingBible?.readerPromise ?? "",
+    appealModel: writingBible?.appealModel ?? "",
+    taboo: writingBible?.taboo ?? "",
+    comparableTitles: writingBible?.comparableTitles ?? "",
+    notes: writingBible?.notes ?? "",
+  };
+}
+
 export function SidebarTabs({
   novelId,
   activeChapterId,
@@ -215,23 +228,27 @@ export function SidebarTabs({
   const [modalKey, setModalKey] = useState<"progress" | "storyProgress" | "storyBackground" | "worldSetting" | "writingBible" | "outline" | null>(null);
 
   // 故事进展编辑状态
-  const [storyProgressContent, setStoryProgressContent] = useState(storyProgress ?? "");
+  const [storyProgressDraft, setStoryProgressDraft] = useState<string | null>(null);
 
   // 故事背景编辑状态
-  const [storyBackgroundContent, setStoryBackgroundContent] = useState(storyBackground ?? "");
+  const [storyBackgroundDraft, setStoryBackgroundDraft] = useState<string | null>(null);
 
   // 世界设定编辑状态
-  const [worldSettingContent, setWorldSettingContent] = useState(worldSetting ?? "");
-  const [writingBibleForm, setWritingBibleForm] = useState({
-    genre: writingBible?.genre ?? "",
-    targetReaders: writingBible?.targetReaders ?? "",
-    coreSellingPoint: writingBible?.coreSellingPoint ?? "",
-    readerPromise: writingBible?.readerPromise ?? "",
-    appealModel: writingBible?.appealModel ?? "",
-    taboo: writingBible?.taboo ?? "",
-    comparableTitles: writingBible?.comparableTitles ?? "",
-    notes: writingBible?.notes ?? "",
-  });
+  const [worldSettingDraft, setWorldSettingDraft] = useState<string | null>(null);
+  const [writingBibleDraft, setWritingBibleDraft] = useState<ReturnType<typeof toWritingBibleForm> | null>(null);
+
+  const storyProgressContent = storyProgressDraft ?? storyProgress ?? "";
+  const storyBackgroundContent = storyBackgroundDraft ?? storyBackground ?? "";
+  const worldSettingContent = worldSettingDraft ?? worldSetting ?? "";
+  const writingBibleForm = writingBibleDraft ?? toWritingBibleForm(writingBible);
+
+  const openModal = (key: NonNullable<typeof modalKey>) => {
+    if (key === "storyProgress") setStoryProgressDraft(null);
+    if (key === "storyBackground") setStoryBackgroundDraft(null);
+    if (key === "worldSetting") setWorldSettingDraft(null);
+    if (key === "writingBible") setWritingBibleDraft(null);
+    setModalKey(key);
+  };
 
   const handleSaveStoryProgress = () => {
     startTransition(async () => {
@@ -239,6 +256,7 @@ export function SidebarTabs({
         novelId,
         content: storyProgressContent,
       });
+      setStoryProgressDraft(null);
       router.refresh();
     });
   };
@@ -249,6 +267,7 @@ export function SidebarTabs({
         novelId,
         content: storyBackgroundContent,
       });
+      setStoryBackgroundDraft(null);
       router.refresh();
     });
   };
@@ -259,6 +278,7 @@ export function SidebarTabs({
         novelId,
         content: worldSettingContent,
       });
+      setWorldSettingDraft(null);
       router.refresh();
     });
   };
@@ -269,12 +289,13 @@ export function SidebarTabs({
         novelId,
         ...writingBibleForm,
       });
+      setWritingBibleDraft(null);
       router.refresh();
     });
   };
 
   const updateWritingBibleField = (field: keyof typeof writingBibleForm, value: string) => {
-    setWritingBibleForm((current) => ({ ...current, [field]: value }));
+    setWritingBibleDraft((current) => ({ ...(current ?? writingBibleForm), [field]: value }));
   };
 
   return (
@@ -329,12 +350,12 @@ export function SidebarTabs({
 
       <div className="panel-footer">
         <div className="edit-buttons">
-          <button type="button" className="edit-btn" onClick={() => setModalKey("progress")}>剧情进度</button>
-          <button type="button" className="edit-btn" onClick={() => setModalKey("storyProgress")}>故事进展</button>
-          <button type="button" className="edit-btn" onClick={() => setModalKey("storyBackground")}>故事背景</button>
-          <button type="button" className="edit-btn" onClick={() => setModalKey("worldSetting")}>世界设定</button>
-          <button type="button" className="edit-btn" onClick={() => setModalKey("writingBible")}>作品圣经</button>
-          <button type="button" className="edit-btn" onClick={() => setModalKey("outline")}>大纲</button>
+          <button type="button" className="edit-btn" onClick={() => openModal("progress")}>剧情进度</button>
+          <button type="button" className="edit-btn" onClick={() => openModal("storyProgress")}>故事进展</button>
+          <button type="button" className="edit-btn" onClick={() => openModal("storyBackground")}>故事背景</button>
+          <button type="button" className="edit-btn" onClick={() => openModal("worldSetting")}>世界设定</button>
+          <button type="button" className="edit-btn" onClick={() => openModal("writingBible")}>作品圣经</button>
+          <button type="button" className="edit-btn" onClick={() => openModal("outline")}>大纲</button>
         </div>
       </div>
 
@@ -347,7 +368,7 @@ export function SidebarTabs({
           <textarea
             className="textarea modal-textarea"
             value={storyProgressContent}
-            onChange={(e) => setStoryProgressContent(e.target.value)}
+            onChange={(e) => setStoryProgressDraft(e.target.value)}
             placeholder="记录故事的整体进展、关键转折、伏笔等..."
           />
           <div className="row row-between">
@@ -364,7 +385,7 @@ export function SidebarTabs({
           <textarea
             className="textarea modal-textarea"
             value={storyBackgroundContent}
-            onChange={(e) => setStoryBackgroundContent(e.target.value)}
+            onChange={(e) => setStoryBackgroundDraft(e.target.value)}
             placeholder="描述故事的基础背景，如时代背景、起始事件、核心冲突等..."
           />
           <div className="row row-end">
@@ -380,7 +401,7 @@ export function SidebarTabs({
           <textarea
             className="textarea modal-textarea"
             value={worldSettingContent}
-            onChange={(e) => setWorldSettingContent(e.target.value)}
+            onChange={(e) => setWorldSettingDraft(e.target.value)}
             placeholder="描述世界的设定，如世界类型、力量体系、世界规则、历史概述等..."
           />
           <div className="row row-end">

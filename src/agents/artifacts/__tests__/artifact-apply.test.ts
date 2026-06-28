@@ -1,7 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { filterAgentUpdatesBySelection, resolveReviewArtifactApplyTarget } from "../artifact-apply";
+import {
+  filterAgentUpdatesBySelection,
+  resolveChapterDraftApplyMode,
+  resolveReviewArtifactApplyTarget,
+} from "../artifact-apply";
 
 describe("artifact apply", () => {
   it("allows outline draft artifacts to update the formal outline text", () => {
@@ -38,6 +42,31 @@ describe("artifact apply", () => {
         content: "第一章正文草案",
       }),
       "chapter_content"
+    );
+  });
+
+  it("resolves chapter draft target before applying content", () => {
+    assert.deepEqual(
+      resolveChapterDraftApplyMode({
+        payload: {
+          kind: "chapter_draft",
+          content: "第二章正文草案",
+          target: { mode: "new_next_chapter", title: "第 2 章" },
+        },
+        artifactChapterId: "chapter-1",
+      }),
+      { mode: "new_next_chapter", title: "第 2 章" }
+    );
+    assert.deepEqual(
+      resolveChapterDraftApplyMode({
+        payload: {
+          kind: "chapter_draft",
+          content: "第一章重写稿",
+          target: { mode: "existing_chapter", chapterId: "chapter-1" },
+        },
+        artifactChapterId: null,
+      }),
+      { mode: "existing_chapter", chapterId: "chapter-1" }
     );
   });
 

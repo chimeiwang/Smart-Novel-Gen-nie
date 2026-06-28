@@ -22,6 +22,10 @@ export const UserDecisionSchema = z.discriminatedUnion("type", [
     type: z.literal("continue_chat"),
     userMessage: z.string().min(1),
   }),
+  z.object({
+    type: z.literal("chapter_target_confirmation"),
+    decision: z.enum(["current_chapter", "next_chapter"]),
+  }),
 ]);
 
 export type UserDecision = z.infer<typeof UserDecisionSchema>;
@@ -36,15 +40,24 @@ export const ResumeWritingRequestSchema = z.object({
 });
 export type ResumeWritingRequest = z.infer<typeof ResumeWritingRequestSchema>;
 
-export const UserDecisionInterruptSchema = z.object({
-  type: z.literal("user_input_required"),
-  decisionType: z.literal("artifact_review"),
-  artifactId: z.string().min(1),
-  summary: z.string().optional(),
-  content: z.string().optional(),
-  artifact: z.unknown().optional(),
-  allowedDecisions: z.array(ReviewArtifactDecisionSchema),
-});
+export const UserDecisionInterruptSchema = z.discriminatedUnion("decisionType", [
+  z.object({
+    type: z.literal("user_input_required"),
+    decisionType: z.literal("artifact_review"),
+    artifactId: z.string().min(1),
+    summary: z.string().optional(),
+    content: z.string().optional(),
+    artifact: z.unknown().optional(),
+    allowedDecisions: z.array(ReviewArtifactDecisionSchema),
+  }),
+  z.object({
+    type: z.literal("user_input_required"),
+    decisionType: z.literal("chapter_target_confirmation"),
+    summary: z.string().optional(),
+    content: z.string().optional(),
+    options: z.array(z.enum(["current_chapter", "next_chapter"])),
+  }),
+]);
 
 export type UserDecisionInterrupt = z.infer<typeof UserDecisionInterruptSchema>;
 
@@ -62,6 +75,19 @@ export function createArtifactReviewInterrupt(input: {
     content: input.content,
     artifact: input.artifact,
     allowedDecisions: ["approve", "discard", "revise"],
+  };
+}
+
+export function createChapterTargetInterrupt(input: {
+  currentTitle: string;
+  nextTitle: string;
+}) {
+  return {
+    type: "user_input_required",
+    decisionType: "chapter_target_confirmation",
+    summary: "请选择正文写入目标",
+    content: `当前章「${input.currentTitle}」已经不是草稿。要继续改当前章，还是写下一章「${input.nextTitle}」？`,
+    options: ["current_chapter", "next_chapter"],
   };
 }
 

@@ -28,20 +28,29 @@ export function attachReviewArtifactToLastMessage<TMessage extends MessageWithRe
 
 export function attachReviewArtifactToConversation<
   TMessage extends MessageWithReviewArtifact<TArtifact>,
-  TArtifact
+  TArtifact extends { id?: string; artifactKey?: string | null }
 >(
   messages: TMessage[],
   artifact: TArtifact | null | undefined,
   createPlaceholder: () => TMessage
 ): TMessage[] {
   if (!artifact) return messages;
+  const isSameArtifact = (message: TMessage) => {
+    const current = message.reviewArtifact;
+    if (!current) return false;
+    if (artifact.id && current.id === artifact.id) return true;
+    return Boolean(artifact.artifactKey && current.artifactKey === artifact.artifactKey);
+  };
+  const existingIndex = messages.findIndex(isSameArtifact);
+  if (existingIndex >= 0) {
+    return messages.map((message, index) =>
+      index === existingIndex ? ({ ...message, reviewArtifact: artifact } as TMessage) : message
+    );
+  }
   if (messages.length === 0) {
     return [{ ...createPlaceholder(), reviewArtifact: artifact } as TMessage];
   }
-  const lastIndex = messages.length - 1;
-  return messages.map((message, index) =>
-    index === lastIndex ? ({ ...message, reviewArtifact: artifact } as TMessage) : message
-  );
+  return [...messages, { ...createPlaceholder(), reviewArtifact: artifact } as TMessage];
 }
 
 export function clearReviewArtifactFromMessages<

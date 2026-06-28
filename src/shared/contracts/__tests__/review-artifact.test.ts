@@ -57,6 +57,21 @@ describe("ReviewArtifact contract", () => {
     );
   });
 
+  it("正文草案可以声明应用时创建下一章", () => {
+    assert.equal(
+      ReviewArtifactPayloadSchema.safeParse({
+        kind: "chapter_draft",
+        content: "第二章正文草案",
+        target: {
+          mode: "new_next_chapter",
+          afterChapterId: "chapter-1",
+          title: "第 2 章",
+        },
+      }).success,
+      true
+    );
+  });
+
   it("只允许明确的草案状态流转", () => {
     assert.equal(canTransitionReviewArtifactStatus("awaiting_user", "draft"), true);
     assert.equal(canTransitionReviewArtifactStatus("awaiting_user", "under_review"), true);

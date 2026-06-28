@@ -92,17 +92,27 @@ export function InspectorTabs({
   const router = useRouter();
 
   // 故事进展编辑状态
-  const [storyProgressContent, setStoryProgressContent] = useState(storyProgress ?? "");
+  const [storyProgressDraft, setStoryProgressDraft] = useState<string | null>(null);
 
   // 故事背景编辑状态
-  const [storyBackgroundContent, setStoryBackgroundContent] = useState(storyBackground ?? "");
+  const [storyBackgroundDraft, setStoryBackgroundDraft] = useState<string | null>(null);
 
   // 世界设定编辑状态
-  const [worldSettingContent, setWorldSettingContent] = useState(worldSetting ?? "");
+  const [worldSettingDraft, setWorldSettingDraft] = useState<string | null>(null);
 
   // 智能写作状态
   const [selectedAgents, setSelectedAgents] = useState<AgentId[]>(() => getDefaultSelectedAgents());
   const [targetWordCount, setTargetWordCount] = useState(defaultWordCount);
+  const storyProgressContent = storyProgressDraft ?? storyProgress ?? "";
+  const storyBackgroundContent = storyBackgroundDraft ?? storyBackground ?? "";
+  const worldSettingContent = worldSettingDraft ?? worldSetting ?? "";
+
+  const selectTab = (tab: InspectorTabKey) => {
+    if (tab === "storyProgress") setStoryProgressDraft(null);
+    if (tab === "storyBackground") setStoryBackgroundDraft(null);
+    if (tab === "worldSetting") setWorldSettingDraft(null);
+    setActiveTab(tab);
+  };
 
   const handleSaveStoryProgress = () => {
     startTransition(async () => {
@@ -110,6 +120,7 @@ export function InspectorTabs({
         novelId,
         content: storyProgressContent,
       });
+      setStoryProgressDraft(null);
       router.refresh();
     });
   };
@@ -120,6 +131,7 @@ export function InspectorTabs({
         novelId,
         content: storyBackgroundContent,
       });
+      setStoryBackgroundDraft(null);
       router.refresh();
     });
   };
@@ -130,6 +142,7 @@ export function InspectorTabs({
         novelId,
         content: worldSettingContent,
       });
+      setWorldSettingDraft(null);
       router.refresh();
     });
   };
@@ -147,7 +160,7 @@ export function InspectorTabs({
               key={tab.key}
               className={`tab-button ${activeTab === tab.key ? "active" : ""}`}
               type="button"
-              onClick={() => setActiveTab(tab.key)}
+              onClick={() => selectTab(tab.key)}
             >
               {tab.label}
             </button>
@@ -175,7 +188,7 @@ export function InspectorTabs({
             <textarea
               className="textarea"
               value={storyProgressContent}
-              onChange={(e) => setStoryProgressContent(e.target.value)}
+              onChange={(e) => setStoryProgressDraft(e.target.value)}
               placeholder="记录故事的整体进展、关键转折、伏笔等..."
               rows={15}
             />
@@ -196,7 +209,7 @@ export function InspectorTabs({
             <textarea
               className="textarea"
               value={storyBackgroundContent}
-              onChange={(e) => setStoryBackgroundContent(e.target.value)}
+              onChange={(e) => setStoryBackgroundDraft(e.target.value)}
               placeholder="描述故事的基础背景，如时代背景、起始事件、核心冲突等..."
               rows={15}
             />
@@ -216,7 +229,7 @@ export function InspectorTabs({
             <textarea
               className="textarea"
               value={worldSettingContent}
-              onChange={(e) => setWorldSettingContent(e.target.value)}
+              onChange={(e) => setWorldSettingDraft(e.target.value)}
               placeholder="描述世界的设定，如世界类型、力量体系、世界规则、历史概述等..."
               rows={15}
             />

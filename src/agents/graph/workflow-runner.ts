@@ -45,7 +45,10 @@ import type {
   WorkflowEventFileLogger,
   WorkflowEventLogContext,
 } from "./workflow-event-log";
-import { buildArtifactRevisionResume } from "./artifact-revision-routing";
+import {
+  buildArtifactRevisionResume,
+  resolvePendingArtifactRevisionFromChat,
+} from "./artifact-revision-routing";
 import type { UserDecision } from "@/shared/contracts/user-decision";
 import { getAgentObservabilityConfig } from "@/shared/env";
 import { enqueueDbWrite } from "@/shared/lib/db-write-queue";
@@ -183,6 +186,7 @@ export async function createInitialState(params: WorkflowInitialState): Promise<
     currentOperation: null,
     operationMode: "operation_graph",
     operationStage: null,
+    chapterDraftTarget: null,
     loreAdvisorOutput: null,
     plotAdvisorOutput: null,
     writerOutput: null,
@@ -235,6 +239,7 @@ async function createInitialStateForTask(
     currentOperation: null,
     operationMode: "operation_graph",
     operationStage: null,
+    chapterDraftTarget: null,
     loreAdvisorOutput: null,
     plotAdvisorOutput: null,
     writerOutput: null,
@@ -638,8 +643,10 @@ export async function resumeWriting(
         }
 
         let effectiveUserMessage = userMessage;
+        let visibleUserMessage = userMessage;
         if (userDecision?.type === "artifact_review" && userDecision.decision === "revise" && userId) {
           const artifactId = userDecision.artifactId;
+          visibleUserMessage = userDecision.userMessage ?? userMessage;
           const artifact = await prisma.reviewArtifact.findFirst({
             where: {
               id: artifactId,
@@ -712,6 +719,70 @@ export async function resumeWriting(
         const graphSnapshot = deserializeGraphStateSnapshot(taskForResume.graphStateJson);
         const hasPendingCheckpoint = Boolean(stateSnap && stateSnap.next.length > 0);
 
+        if (userDecision?.type === "continue_chat" && userId) {
+          const pendingRevision = resolvePendingArtifactRevisionFromChat({
+            taskPhase: taskForResume.phase,
+            taskGeneratedContent: taskForResume.generatedContent,
+            graphSnapshot,
+            userMessage,
+          });
+
+          if (pendingRevision) {
+            const failPendingRevision = (message: string) => {
+              sendEvent("error", { message });
+              auditLog.recordError("artifact_revision_from_chat_failed", message, {
+                artifactId: pendingRevision.artifactId,
+              });
+              close();
+            };
+            const artifact = await prisma.reviewArtifact.findFirst({
+              where: {
+                id: pendingRevision.artifactId,
+                taskId,
+                status: "awaiting_user",
+              },
+              select: {
+                id: true,
+                artifactKey: true,
+                revision: true,
+                createdByAgent: true,
+                updatedByAgent: true,
+                reviewerAgent: true,
+              },
+            });
+
+            if (!artifact) {
+              failPendingRevision("待审核草案不存在，或已不属于当前任务。");
+              return;
+            }
+
+            const revisionResume = buildArtifactRevisionResume({
+              artifactId: artifact.id,
+              artifactKey: artifact.artifactKey,
+              revision: artifact.revision,
+              createdByAgent: artifact.createdByAgent as CoreAgentId | null,
+              updatedByAgent: artifact.updatedByAgent as CoreAgentId | null,
+              reviewerAgent: artifact.reviewerAgent as CoreAgentId | null,
+              userMessage: pendingRevision.userMessage,
+            });
+
+            if (!revisionResume) {
+              failPendingRevision("无法确定应由哪个 Agent 继续修改该草案。");
+              return;
+            }
+
+            await clearTaskAwaitingUserReview({ taskId, nextPhase: "active" });
+            visibleUserMessage = pendingRevision.userMessage;
+            effectiveUserMessage = revisionResume.userMessage;
+            sendEvent("resume", {
+              taskId,
+              resumeType: "artifact_revision",
+              artifactId: artifact.id,
+              targetAgent: revisionResume.targetAgent,
+            });
+          }
+        }
+
         const resumeMode = getResumeMode({
           hasPendingCheckpoint,
           hasGraphStateSnapshot: Boolean(graphSnapshot),
@@ -726,13 +797,15 @@ export async function resumeWriting(
           sessionId: taskForResume.writingSessionId,
           taskId,
           role: "user",
-          content: effectiveUserMessage,
+          content: visibleUserMessage,
           eventType: "user",
         });
         let invokeFinalState: GraphState | null = null;
         if (resumeMode === "interrupt_resume") {
           // 有中断待恢复
-          const resumeValue = { confirmed: true, userMessage: effectiveUserMessage };
+          const resumeValue = userDecision?.type === "chapter_target_confirmation"
+            ? { decision: userDecision.decision }
+            : { confirmed: true, userMessage: effectiveUserMessage };
           sendEvent("resume", { taskId, resumeType: "interrupt_resume" });
 
           const sse = createSSEController(sendEvent, auditLog);
@@ -827,6 +900,7 @@ export async function resumeWriting(
             currentOperation: null,
             operationMode: "operation_graph",
             operationStage: null,
+            chapterDraftTarget: null,
             loreAdvisorOutput: null,
             plotAdvisorOutput: null,
             writerOutput: null,

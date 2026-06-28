@@ -31,6 +31,7 @@ function createState(): GraphState {
     },
     operationMode: "operation_graph",
     operationStage: "审核草案",
+    chapterDraftTarget: null,
     loreAdvisorOutput: null,
     plotAdvisorOutput: null,
     writerOutput: null,

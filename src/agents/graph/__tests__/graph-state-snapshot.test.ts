@@ -42,6 +42,7 @@ function createState(): GraphState {
     },
     operationMode: "operation_graph",
     operationStage: "等待用户决策",
+    chapterDraftTarget: null,
     loreAdvisorOutput: null,
     plotAdvisorOutput: null,
     writerOutput: null,

@@ -144,7 +144,7 @@ export const CommandParsedEventSchema = z.object({
 
 export const UserInputRequiredEventSchema = z.object({
   type: z.literal("user_input_required"),
-  decisionType: z.enum(["artifact_review"]).optional(),
+  decisionType: z.enum(["artifact_review", "chapter_target_confirmation"]).optional(),
   phase: z.string().optional(),
   content: z.string().optional(),
   generatedContent: z.string().optional(),

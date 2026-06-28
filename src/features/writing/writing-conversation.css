@@ -591,7 +591,18 @@
 }
 
 .writing-chat .artifact-tray-modal {
-  width: min(680px, calc(100vw - 48px));
+  width: min(640px, calc(100vw - 48px));
+  max-width: min(640px, calc(100vw - 48px));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-modal);
+}
+
+.writing-chat .artifact-tray-modal .modal-header {
+  min-height: 56px;
+  padding: 14px 18px;
+  font-size: 18px;
+  line-height: 24px;
 }
 
 .writing-chat .artifact-tray-body {
@@ -614,7 +625,8 @@
   justify-content: space-between;
   gap: 12px;
   width: 100%;
-  padding: 10px 12px;
+  min-height: 76px;
+  padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: #fff;
@@ -633,14 +645,16 @@
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .writing-chat .artifact-tray-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
+  line-height: 22px;
 }
 
 .writing-chat .artifact-tray-meta {
@@ -997,9 +1011,14 @@
 }
 
 .writing-chat .action-badge {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
   padding: 2px 8px;
   border-radius: 10px;
   font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
 }
 
 .writing-chat .action-badge.create { background: #e6f7ff; color: #1890ff; }

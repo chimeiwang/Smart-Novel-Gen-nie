@@ -55,13 +55,31 @@ export type ReviewArtifactDecision = z.infer<typeof ReviewArtifactDecisionSchema
 export const ReviewArtifactEvaluationVerdictSchema = z.enum(["pass", "revise", "block"]);
 export type ReviewArtifactEvaluationVerdict = z.infer<typeof ReviewArtifactEvaluationVerdictSchema>;
 
+export const ChapterDraftTargetSchema = z.discriminatedUnion("mode", [
+  z.object({
+    mode: z.literal("existing_chapter"),
+    chapterId: z.string().min(1),
+  }),
+  z.object({
+    mode: z.literal("new_next_chapter"),
+    afterChapterId: z.string().min(1).optional(),
+    title: z.string().min(1).optional(),
+  }),
+]);
+export type ChapterDraftTarget = z.infer<typeof ChapterDraftTargetSchema>;
+
 export const ReviewArtifactPayloadSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("agent_updates"),
     updates: AgentUpdatesSchema,
   }),
   z.object({
-    kind: TextReviewArtifactKindSchema,
+    kind: z.literal("chapter_draft"),
+    content: z.string().min(1),
+    target: ChapterDraftTargetSchema.optional(),
+  }),
+  z.object({
+    kind: TextReviewArtifactKindSchema.exclude(["chapter_draft"]),
     content: z.string().min(1),
   }),
   z.object({

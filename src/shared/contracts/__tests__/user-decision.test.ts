@@ -10,6 +10,7 @@ import {
   ResumeWritingRequestSchema,
   UserDecisionSchema,
   createArtifactReviewInterrupt,
+  createChapterTargetInterrupt,
   normalizeResumeDecision,
 } from "../user-decision";
 
@@ -109,6 +110,21 @@ describe("UserDecision contract", () => {
     );
   });
 
+  it("支持章节写作目标确认决策", () => {
+    assert.deepEqual(
+      normalizeResumeDecision({
+        userDecision: {
+          type: "chapter_target_confirmation",
+          decision: "next_chapter",
+        },
+      }),
+      {
+        type: "chapter_target_confirmation",
+        decision: "next_chapter",
+      }
+    );
+  });
+
   it("resume 请求可以携带当前写作会话 ID 用于绑定校验", () => {
     const result = ResumeWritingRequestSchema.safeParse({
       taskId: "task-1",
@@ -137,6 +153,22 @@ describe("UserDecision contract", () => {
         content: "可以应用。",
         artifact: undefined,
         allowedDecisions: ["approve", "discard", "revise"],
+      }
+    );
+  });
+
+  it("生成章节目标确认 interrupt payload", () => {
+    assert.deepEqual(
+      createChapterTargetInterrupt({
+        currentTitle: "第一章",
+        nextTitle: "第二章",
+      }),
+      {
+        type: "user_input_required",
+        decisionType: "chapter_target_confirmation",
+        summary: "请选择正文写入目标",
+        content: "当前章「第一章」已经不是草稿。要继续改当前章，还是写下一章「第二章」？",
+        options: ["current_chapter", "next_chapter"],
       }
     );
   });

@@ -93,6 +93,7 @@ async function main() {
     currentOperation: null,
     operationMode: "operation_graph",
     operationStage: null,
+    chapterDraftTarget: null,
     loreAdvisorOutput: null,
     plotAdvisorOutput: null,
     writerOutput: null,

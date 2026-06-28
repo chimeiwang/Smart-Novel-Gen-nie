@@ -14,6 +14,7 @@
 
 import type { AgentControlEvent, EvaluationPatch } from "@/shared/contracts/agent-control";
 import type { CreativeOperation } from "@/shared/contracts/creative-operation";
+import type { ChapterDraftTarget } from "@/shared/contracts/review-artifact";
 import {
   AGENT_META_MAP,
   ALL_CORE_AGENT_IDS,
@@ -609,6 +610,7 @@ export interface WritingState {
   currentOperation?: CreativeOperation | null;
   operationMode?: "legacy_agent_graph" | "operation_graph";
   operationStage?: string | null;
+  chapterDraftTarget?: ChapterDraftTarget | null;
 
   // === 各Agent输出 ===
   loreAdvisorOutput: AgentOutput | null;  // 设定顾问

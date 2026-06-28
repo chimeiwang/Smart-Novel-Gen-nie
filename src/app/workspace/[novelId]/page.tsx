@@ -250,7 +250,9 @@ export default async function WorkspacePage({
   }>;
 
   const currentChapter =
-    chapters.find((item) => item.id === chapterId) ?? chapters[0];
+    chapters.find((item) => item.id === chapterId) ??
+    [...chapters].reverse().find((item) => item.status === "drafting") ??
+    chapters[chapters.length - 1];
 
   if (!currentChapter) {
     return (

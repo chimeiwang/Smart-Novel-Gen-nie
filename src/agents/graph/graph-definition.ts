@@ -44,6 +44,7 @@ export const WritingStateAnnotation = Annotation.Root({
   currentOperation: Annotation<CreativeOperation | null>,
   operationMode: Annotation<WritingState["operationMode"]>,
   operationStage: Annotation<string | null>,
+  chapterDraftTarget: Annotation<WritingState["chapterDraftTarget"]>,
   loreAdvisorOutput: Annotation<AgentOutput | null>,
   plotAdvisorOutput: Annotation<AgentOutput | null>,
   writerOutput: Annotation<AgentOutput | null>,

@@ -25,6 +25,7 @@ export type SerializableGraphStateSnapshot = {
   currentOperation: CreativeOperation | null;
   operationMode: GraphState["operationMode"];
   operationStage: string | null;
+  chapterDraftTarget: GraphState["chapterDraftTarget"];
   loreAdvisorOutput: AgentOutput | null;
   plotAdvisorOutput: AgentOutput | null;
   writerOutput: AgentOutput | null;
@@ -60,6 +61,7 @@ export function serializeGraphStateSnapshot(state: GraphState): string {
     currentOperation: state.currentOperation ?? null,
     operationMode: state.operationMode,
     operationStage: state.operationStage ?? null,
+    chapterDraftTarget: state.chapterDraftTarget ?? null,
     loreAdvisorOutput: state.loreAdvisorOutput,
     plotAdvisorOutput: state.plotAdvisorOutput,
     writerOutput: state.writerOutput,
@@ -121,6 +123,7 @@ export function deserializeGraphStateSnapshot(
       currentOperation: operation as CreativeOperation | null,
       operationMode: parsed.operationMode ?? "operation_graph",
       operationStage: parsed.operationStage ?? null,
+      chapterDraftTarget: parsed.chapterDraftTarget ?? null,
       loreAdvisorOutput: parsed.loreAdvisorOutput ?? null,
       plotAdvisorOutput: parsed.plotAdvisorOutput ?? null,
       writerOutput: parsed.writerOutput ?? null,
