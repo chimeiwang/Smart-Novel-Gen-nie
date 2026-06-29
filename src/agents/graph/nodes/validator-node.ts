@@ -81,7 +81,8 @@ const validatorDefinition: AgentDefinition = {
           mode: "reviewer",
           activeArtifactId,
           artifactProducerAgentId: state.currentOperation?.primaryAgent ?? null,
-        } : undefined),
+        } : undefined) +
+          "\n\n只提取与本轮校验直接相关的历史结论，不要在报告中复述整段历史。",
       });
     }
 

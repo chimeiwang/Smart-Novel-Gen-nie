@@ -71,6 +71,38 @@ describe("chapter target resolver", () => {
     assert.deepEqual(result.target, { mode: "existing_chapter", chapterId: "c1" });
   });
 
+  it("checkpoint 过期后仍遵守已确认的当前章选择", async () => {
+    mockChapters([
+      { id: "c1", title: "第一章", order: 1, status: "completed", content: "第一章正文" },
+      { id: "c2", title: "第二章", order: 2, status: "drafting", content: "" },
+    ]);
+
+    const result = await resolveChapterDraftTarget({
+      novelId: "n1",
+      chapterId: "c1",
+      userMessage: "重写第一章",
+      confirmedDecision: "current_chapter",
+    });
+
+    assert.deepEqual(result.target, { mode: "existing_chapter", chapterId: "c1" });
+  });
+
+  it("checkpoint 过期后仍遵守已确认的下一章选择", async () => {
+    mockChapters([
+      { id: "c1", title: "第一章", order: 1, status: "completed", content: "第一章正文" },
+      { id: "c2", title: "第二章", order: 2, status: "drafting", content: "" },
+    ]);
+
+    const result = await resolveChapterDraftTarget({
+      novelId: "n1",
+      chapterId: "c1",
+      userMessage: "重写第一章",
+      confirmedDecision: "next_chapter",
+    });
+
+    assert.deepEqual(result.target, { mode: "existing_chapter", chapterId: "c2" });
+  });
+
   it("规划章节不会创建不存在的新章节目标", async () => {
     mockChapters([
       { id: "c1", title: "第一章", order: 1, status: "completed", content: "第一章正文" },

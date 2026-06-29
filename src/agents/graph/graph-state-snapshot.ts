@@ -1,7 +1,6 @@
 import type { CreativeOperation } from "@/shared/contracts/creative-operation";
 import { CreativeOperationSchema } from "@/shared/contracts/creative-operation";
 import type {
-  AgentControlEvent,
   AgentMessage,
   AgentOutput,
   AgentUpdates,
@@ -45,7 +44,6 @@ export type SerializableGraphStateSnapshot = {
   pendingAgentCall: PendingAgentCall | null;
   errorMessage: string | null;
   qualityCheckId: string | null;
-  controlEvents: AgentControlEvent[] | undefined;
   artifactReview: ArtifactReviewState;
   activeArtifactId: string | null;
   artifactMode: "none" | "review_loop";
@@ -84,7 +82,6 @@ export function serializeGraphStateSnapshot(state: GraphState): string {
     pendingAgentCall: state.pendingAgentCall,
     errorMessage: state.errorMessage,
     qualityCheckId: state.qualityCheckId ?? null,
-    controlEvents: state.controlEvents,
     artifactReview: normalizeArtifactReviewState(state),
     activeArtifactId: state.activeArtifactId ?? null,
     artifactMode: state.artifactMode ?? "none",
@@ -149,7 +146,6 @@ export function deserializeGraphStateSnapshot(
       pendingAgentCall: parsed.pendingAgentCall ?? null,
       errorMessage: parsed.errorMessage ?? null,
       qualityCheckId: parsed.qualityCheckId ?? null,
-      controlEvents: parsed.controlEvents,
       artifactReview: parsed.artifactReview ?? createDefaultArtifactReviewState({
         status: parsed.pendingUserResponse && parsed.activeArtifactId
           ? "awaiting_user"
@@ -186,6 +182,7 @@ export function rehydrateGraphStateFromSnapshot(
     novelData: GraphState["novelData"];
     streamCallbacks: GraphState["streamCallbacks"];
     eventCallbacks?: GraphState["eventCallbacks"];
+    chapterTargetDecision?: "current_chapter" | "next_chapter";
   }
 ): GraphState {
   return {
@@ -195,7 +192,9 @@ export function rehydrateGraphStateFromSnapshot(
     runtime: {
       streamCallbacks: runtime.streamCallbacks,
       eventCallbacks: runtime.eventCallbacks,
+      chapterTargetDecision: runtime.chapterTargetDecision,
     },
+    controlEvents: undefined,
     streamCallbacks: runtime.streamCallbacks,
     eventCallbacks: runtime.eventCallbacks,
   };

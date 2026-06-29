@@ -61,6 +61,7 @@ function createState(): GraphState {
       eventCallbacks: {
         写作: () => undefined,
       },
+      chapterTargetDecision: "next_chapter",
     },
     pendingAgentCall: {
       fromAgent: "编辑",
@@ -76,7 +77,7 @@ function createState(): GraphState {
       写作: () => undefined,
     },
     qualityCheckId: "check-1",
-    controlEvents: undefined,
+    controlEvents: [{ type: "show_review_artifact", artifactId: "artifact-1" }],
     artifactReview: createDefaultArtifactReviewState({
       status: "awaiting_user",
       activeArtifactId: "artifact-1",
@@ -106,6 +107,8 @@ describe("graph state snapshots", () => {
     assert.equal(parsed.streamCallbacks, undefined);
     assert.equal(parsed.eventCallbacks, undefined);
     assert.equal(parsed.novelData, undefined);
+    assert.equal(parsed.controlEvents, undefined);
+    assert.equal(parsed.runtime, undefined);
   });
 
   it("rehydrates snapshot with fresh novelData and runtime callbacks", () => {
@@ -117,6 +120,7 @@ describe("graph state snapshots", () => {
       novelData: { novelId: "novel-1", chapterId: "chapter-1", novelName: "新上下文" } as GraphState["novelData"],
       streamCallbacks: { 写作: () => undefined },
       eventCallbacks: { 写作: () => undefined },
+      chapterTargetDecision: "current_chapter",
     });
 
     assert.equal(rehydrated.userMessage, "审批通过");
@@ -125,6 +129,7 @@ describe("graph state snapshots", () => {
     assert.equal(rehydrated.novelData.novelName, "新上下文");
     assert.equal(typeof rehydrated.streamCallbacks["写作"], "function");
     assert.equal(typeof rehydrated.eventCallbacks?.["写作"], "function");
+    assert.equal(rehydrated.runtime?.chapterTargetDecision, "current_chapter");
   });
 
   it("returns null for malformed snapshots instead of throwing", () => {

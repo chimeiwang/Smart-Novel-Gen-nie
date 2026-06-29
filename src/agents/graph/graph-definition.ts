@@ -23,6 +23,8 @@ import { getCreativeOperationLabel } from "@/shared/contracts/creative-operation
 import { buildOperationGraph } from "@/agents/operations/operation-graph";
 import { routeCreativeOperation } from "@/agents/operations/operation-router";
 import { getAgentObservabilityConfig } from "@/shared/env";
+import { logger } from "@/shared/lib/logger";
+import { CheckpointCleanupScheduler } from "./checkpoint-lifecycle";
 
 // ============================================
 // 常量
@@ -33,24 +35,9 @@ import { getAgentObservabilityConfig } from "@/shared/env";
 // ============================================
 
 export const mergeAgentMessagesForState = (current: AgentMessage[], next: AgentMessage[] | undefined): AgentMessage[] => {
-  if (!next?.length) return current;
-  const merged = [...current];
-  const seen = new Set(current.map((item) => item.id));
-  for (const item of next) {
-    if (seen.has(item.id)) continue;
-    seen.add(item.id);
-    merged.push(item);
-  }
-  return merged;
-};
-
-export const mergeControlEventsForState = (
-  current: AgentControlEvent[] | undefined,
-  next: AgentControlEvent[] | undefined
-): AgentControlEvent[] | undefined => {
-  if (next === undefined) return current;
-  if (!current?.length) return next;
-  return [...current, ...next];
+  // 当前所有节点都提交经过截断/压缩后的完整历史；next 必须是权威值，
+  // 否则 reducer 会把已截断的旧消息重新保留下来，导致 checkpoint 无界增长。
+  return next ?? current;
 };
 const mergeAgentOutputs = (
   current: Partial<Record<CoreAgentId, AgentOutput>>,
@@ -113,13 +100,8 @@ export const WritingStateAnnotation = new StateSchema({
   eventCallbacks: new UntrackedValue<Record<string, (type: string, payload: Record<string, unknown>) => void> | undefined>(undefined, { guard: false }),
 
   qualityCheckId: z.string().nullable(),
-  controlEvents: new ReducedValue<AgentControlEvent[] | undefined, AgentControlEvent[] | undefined>(
-    z.custom<AgentControlEvent[] | undefined>(),
-    {
-      inputSchema: z.custom<AgentControlEvent[] | undefined>(),
-      reducer: mergeControlEventsForState,
-    }
-  ),
+  // control events 在当前执行节点内消费，不参与 checkpoint 或跨请求恢复。
+  controlEvents: new UntrackedValue<AgentControlEvent[] | undefined>(undefined, { guard: false }),
 
   artifactReview: z.custom<ArtifactReviewState>().default(() => createDefaultArtifactReviewState()),
 
@@ -144,6 +126,7 @@ export type WritingGraphOutput = Partial<GraphState>;
 
 let _compiledGraph: ReturnType<typeof buildGraph> | null = null;
 let _memorySaver: MemorySaver | null = null;
+const _checkpointCleanupScheduler = new CheckpointCleanupScheduler();
 
 export function getGraph() {
   if (!_compiledGraph) {
@@ -153,9 +136,37 @@ export function getGraph() {
 }
 
 export async function deleteGraphThreadCheckpoint(threadId: string): Promise<void> {
+  _checkpointCleanupScheduler.cancel(threadId);
   const config = getAgentObservabilityConfig();
-  if (!config.langGraphMemorySaverEnabled || !config.langGraphMemorySaverCleanupOnDone) return;
+  if (!config.langGraphMemorySaverCleanupOnDone) return;
   await _memorySaver?.deleteThread(threadId);
+}
+
+export function cancelGraphThreadCheckpointCleanup(threadId: string): void {
+  _checkpointCleanupScheduler.cancel(threadId);
+}
+
+export function scheduleGraphThreadCheckpointCleanup(threadId: string): void {
+  const config = getAgentObservabilityConfig();
+  if (config.langGraphMemorySaverTtlMs <= 0) return;
+
+  _checkpointCleanupScheduler.schedule({
+    threadId,
+    ttlMs: config.langGraphMemorySaverTtlMs,
+    cleanup: async (expiredThreadId) => {
+      await _memorySaver?.deleteThread(expiredThreadId);
+      logger.info("WORKFLOW", "LangGraph MemorySaver checkpoint TTL 已清理", {
+        taskId: expiredThreadId,
+        ttlMs: config.langGraphMemorySaverTtlMs,
+      });
+    },
+    onError: (error, expiredThreadId) => {
+      logger.warn("WORKFLOW", "LangGraph MemorySaver checkpoint TTL 清理失败", {
+        taskId: expiredThreadId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    },
+  });
 }
 
 /**
@@ -180,14 +191,8 @@ function buildGraph() {
     .addEdge("operationWorkflow", END)
     .addEdge("statusReport", END);
 
-  // MemorySaver 只用于当前进程内的 LangGraph interrupt/resume。
+  // MemorySaver 是 interrupt/resume 的运行依赖，不是可关闭的监控面。
   // 项目当前不承诺停机恢复或多实例恢复，持久业务状态仍以 WritingTask DB 记录为准。
-  const config = getAgentObservabilityConfig();
-  if (!config.langGraphMemorySaverEnabled) {
-    _memorySaver = null;
-    return graph.compile();
-  }
-
   _memorySaver = new MemorySaver();
   return graph.compile({ checkpointer: _memorySaver });
 }

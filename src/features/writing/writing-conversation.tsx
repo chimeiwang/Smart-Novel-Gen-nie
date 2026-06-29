@@ -1665,17 +1665,8 @@ export function WritingConversation({
     }
   };
 
-  const handlePlanChapter = async () => {
-    const message = "@剧情 请基于当前作品圣经、设定、大纲、故事进展、伏笔和当前章节目标，规划本章 Beat Plan。请提交结构化章节计划草案，场景节拍要包含目标、阻力/冲突、转折/代价、结果/余波、涉及角色、伏笔、预计字数和验收标准。";
-    if (taskId && phase !== "idle") {
-      await handleSendMessage(message);
-    } else {
-      await handleStartDiscussion(message);
-    }
-  };
-
-  const handleWriteFromPlan = async () => {
-    const message = "@写作 请基于已批准章节计划、作品圣经、设定、大纲、故事进展、伏笔、当前章节正文和文风画像，生成本章正文草案。正文必须先进入待审核草案，不要声称已经写入章节。";
+  const handleStartWriting = async () => {
+    const message = "开始生成正文";
     if (taskId && phase !== "idle") {
       await handleSendMessage(message);
     } else {
@@ -2587,19 +2578,11 @@ export function WritingConversation({
                   </button>
                   <button
                     className="agent-quick-btn"
-                    onClick={handlePlanChapter}
-                    disabled={isSending}
-                  >
-                    <span className="agent-icon tone-blue">规</span>
-                    <span className="agent-name">规划本章</span>
-                  </button>
-                  <button
-                    className="agent-quick-btn"
-                    onClick={handleWriteFromPlan}
+                    onClick={handleStartWriting}
                     disabled={isSending}
                   >
                     <span className="agent-icon tone-green">写</span>
-                    <span className="agent-name">按计划写正文</span>
+                    <span className="agent-name">开始写作</span>
                   </button>
                 </div>
               </div>
@@ -2805,8 +2788,6 @@ export function WritingConversation({
               </>
             ) : (
               <>
-                <button onClick={handlePlanChapter}>规划本章</button>
-                {hasWriter && <button onClick={handleWriteFromPlan}>按计划写正文</button>}
                 {hasWriter && <button onClick={() => handleSendMessage("开始生成正文")}>开始写作</button>}
                 <button onClick={() => handleSendMessage("保存讨论结果")}>保存设定</button>
                 <button onClick={handleSyncRecentLore}>同步设定</button>

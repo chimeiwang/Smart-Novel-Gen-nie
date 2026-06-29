@@ -132,7 +132,7 @@ describe("buildConversationHistoryText", () => {
     assert.match(text, /请重构前十章大纲/);
   });
 
-  it("omits the current artifact producer body in reviewer mode and truncates other Agent output", () => {
+  it("omits the current artifact producer body in reviewer mode and preserves other Agent output", () => {
     const longDraft = "正文".repeat(1000);
     const otherOutput = "编辑意见".repeat(300);
     const history: AgentMessage[] = [
@@ -193,7 +193,8 @@ describe("buildConversationHistoryText", () => {
     assert.match(text, /artifact-1/);
     assert.match(text, /get_active_review_artifact/);
     assert.doesNotMatch(text, new RegExp(longDraft.slice(0, 100)));
-    assert.match(text, /历史输出已截断/);
+    assert.equal(text.includes(otherOutput), true);
+    assert.doesNotMatch(text, /历史输出已截断/);
     assert.match(text, /请校验当前草案/);
   });
 });

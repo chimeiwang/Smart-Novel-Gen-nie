@@ -13,8 +13,8 @@ export type AgentObservabilityConfig = {
   langGraphStreamEventsEnabled: boolean;
   langGraphStudioEnabled: boolean;
   langSmithTracingEnabled: boolean;
-  langGraphMemorySaverEnabled: boolean;
   langGraphMemorySaverCleanupOnDone: boolean;
+  langGraphMemorySaverTtlMs: number;
 };
 
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
@@ -49,6 +49,13 @@ export function isEnvFlagEnabled(value: string | undefined, defaultValue: boolea
   return defaultValue;
 }
 
+export function getNonNegativeEnvInteger(value: string | undefined, defaultValue: number): number {
+  if (value === undefined || value.trim() === "") return defaultValue;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) return defaultValue;
+  return parsed;
+}
+
 export function getAgentObservabilityConfig(): AgentObservabilityConfig {
   return {
     workflowEventLogEnabled: isEnvFlagEnabled(process.env.WORKFLOW_EVENT_LOG_ENABLED, false),
@@ -56,8 +63,8 @@ export function getAgentObservabilityConfig(): AgentObservabilityConfig {
     langGraphStreamEventsEnabled: isEnvFlagEnabled(process.env.LANGGRAPH_STREAM_EVENTS_ENABLED, true),
     langGraphStudioEnabled: isEnvFlagEnabled(process.env.LANGGRAPH_STUDIO_ENABLED, false),
     langSmithTracingEnabled: isEnvFlagEnabled(process.env.LANGSMITH_TRACING_ENABLED, false),
-    langGraphMemorySaverEnabled: isEnvFlagEnabled(process.env.LANGGRAPH_MEMORY_SAVER_ENABLED, true),
     langGraphMemorySaverCleanupOnDone: isEnvFlagEnabled(process.env.LANGGRAPH_MEMORY_SAVER_CLEANUP_ON_DONE, true),
+    langGraphMemorySaverTtlMs: getNonNegativeEnvInteger(process.env.LANGGRAPH_MEMORY_SAVER_TTL_MS, 300_000),
   };
 }
 

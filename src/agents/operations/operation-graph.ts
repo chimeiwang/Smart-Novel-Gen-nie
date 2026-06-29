@@ -125,6 +125,7 @@ async function prepareOperationContextNode(state: GraphState) {
           chapterId: state.chapterId,
           userMessage: operation.userGoal || state.userMessage,
           allowNewChapterTarget: operation.kind !== "plan_chapter",
+          confirmedDecision: state.runtime?.chapterTargetDecision,
         })
       : null;
     const novelData = await aggregateNovelContextForWriting(state.novelId, target?.contextChapterId ?? state.chapterId);

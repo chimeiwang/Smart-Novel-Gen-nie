@@ -24,6 +24,7 @@ export async function resolveChapterDraftTarget(input: {
   chapterId: string;
   userMessage: string;
   allowNewChapterTarget?: boolean;
+  confirmedDecision?: "current_chapter" | "next_chapter";
 }): Promise<ResolvedChapterTarget> {
   const chapters = await prisma.chapter.findMany({
     where: { novelId: input.novelId },
@@ -49,6 +50,8 @@ export async function resolveChapterDraftTarget(input: {
   );
 
   if (wantsCurrent && currentLocked && nextDraft) {
+    if (input.confirmedDecision === "current_chapter") return existingTarget(current);
+    if (input.confirmedDecision === "next_chapter") return existingTarget(nextDraft, current.id);
     const decision = interrupt(createChapterTargetInterrupt({
       currentTitle: current.title,
       nextTitle: nextDraft.title,

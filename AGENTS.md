@@ -75,7 +75,7 @@ npm run studio:input # 生成 Studio 可运行的完整 GraphState 输入
 - `npm run studio:dev` 默认不会启动 LangGraph Agent Server；需要 Studio 调试时先在 `.env` 设置 `LANGGRAPH_STUDIO_ENABLED=true`，再运行该命令。
 - Studio 启动后运行的是 LangGraph Agent Server，不是 Next.js 应用；它适合看节点、状态、interrupt/resume 和 LangSmith trace。
 - Studio 运行会真实执行 Graph 节点，可能创建/更新 `ReviewArtifact` 和 `WritingTask`。正式章节正文仍必须经过待审核草案和用户确认应用后才写入。
-- 写作会话恢复以 `WritingSession -> WritingTask.writingSessionId -> WritingTask.graphStateJson` 为主链路；`WritingMessage` 只负责用户可见聊天记录，不用于反推 LangGraph 状态。`MemorySaver` 只作为当前进程内 interrupt/resume 优化，不是生产级恢复来源。
+- 写作会话恢复以 `WritingSession -> WritingTask.writingSessionId -> WritingTask.graphStateJson` 为主链路；`WritingMessage` 只负责用户可见聊天记录，不用于反推 LangGraph 状态。`MemorySaver` 只作为当前进程内 interrupt/resume 优化，不是生产级恢复来源；等待确认 checkpoint 默认 5 分钟 TTL，断连、异常和终态按 taskId 清理。
 
 ## 技术栈
 
@@ -183,7 +183,7 @@ START → initSession → operationWorkflow 创作操作图 → END
 
 - `initSession` 负责识别创作操作，并写入 `currentOperation`。
 - `operationWorkflow` 位于 `src/agents/operations/operation-graph.ts`，按“识别创作操作 → 准备操作上下文 → 执行创作操作 → 提交草案或直接回复 → 审核草案 → 返工草案 → 等待用户决策 → 建议下一步”推进。
-- 使用 `StateGraph`、`StateSchema`、conditional edges、`Command`、`interrupt()` 和 `MemorySaver`。`MemorySaver` 仅用于当前进程内短流程，不是生产级停机恢复承诺；runtime-only 数据必须用 `UntrackedValue` 或 runtime context，不能进入可恢复快照。
+- 使用 `StateGraph`、`StateSchema`、conditional edges、`Command`、`interrupt()` 和 `MemorySaver`。`MemorySaver` 仅用于当前进程内短流程，不是生产级停机恢复承诺；等待确认 checkpoint 的保留时长由 `LANGGRAPH_MEMORY_SAVER_TTL_MS` 控制。runtime-only 数据必须用 `UntrackedValue` 或 runtime context，不能进入可恢复快照。
 - 新增多 Agent 循环、人工确认、动态分派、并行子任务或长流程恢复时，必须优先使用 LangGraph 原生能力。
 
 ### 工具层与 ReviewArtifact

@@ -617,7 +617,6 @@ export interface ConversationHistoryTextOptions {
   mode?: "full" | "reviewer";
   activeArtifactId?: string | null;
   artifactProducerAgentId?: CoreAgentId | null;
-  reviewerAgentOutputMaxChars?: number;
 }
 
 export function buildConversationHistoryText(
@@ -628,7 +627,6 @@ export function buildConversationHistoryText(
 
   const lines: string[] = [];
   const reviewerMode = options.mode === "reviewer";
-  const maxAgentChars = options.reviewerAgentOutputMaxChars ?? 800;
   let artifactMarkerAdded = false;
   for (const msg of conversationHistory) {
     if (msg.userMessage) {
@@ -644,10 +642,7 @@ export function buildConversationHistoryText(
           artifactMarkerAdded = true;
         }
       } else {
-        const content = reviewerMode && msg.agentOutput.content.length > maxAgentChars
-          ? msg.agentOutput.content.slice(0, maxAgentChars) + `\n[历史输出已截断，原长度 ${msg.agentOutput.content.length} 字符]`
-          : msg.agentOutput.content;
-        lines.push("**" + msg.agentName + "**：" + content);
+        lines.push("**" + msg.agentName + "**：" + msg.agentOutput.content);
       }
     }
     lines.push("");

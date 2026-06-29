@@ -3,12 +3,11 @@ import assert from "node:assert/strict";
 
 import {
   mergeAgentMessagesForState,
-  mergeControlEventsForState,
 } from "../graph-definition";
-import type { AgentControlEvent, AgentMessage } from "../state";
+import type { AgentMessage } from "../state";
 
 describe("LangGraph state reducers", () => {
-  it("appends conversation messages without duplicating ids", () => {
+  it("uses the next complete conversation history as the authoritative value", () => {
     const first: AgentMessage = {
       id: "msg-1",
       agentId: "写作",
@@ -30,16 +29,25 @@ describe("LangGraph state reducers", () => {
     );
   });
 
-  it("appends control events and ignores undefined writes", () => {
-    const first = { type: "propose_updates", updates: {}, summary: "a" } as AgentControlEvent;
-    const second = {
-      type: "submit_quality_report",
-      scores: {},
-      qualityGate: "pass",
-      summary: "b",
-    } as AgentControlEvent;
+  it("allows a truncated history to remove old messages", () => {
+    const oldMessage: AgentMessage = {
+      id: "msg-old",
+      agentId: "写作",
+      agentName: "作家",
+      content: "应被截断",
+      timestamp: 1,
+    };
+    const retainedMessage: AgentMessage = {
+      id: "msg-new",
+      agentId: "编辑",
+      agentName: "编辑",
+      content: "保留",
+      timestamp: 2,
+    };
 
-    assert.deepEqual(mergeControlEventsForState([first], undefined), [first]);
-    assert.deepEqual(mergeControlEventsForState([first], [second]), [first, second]);
+    assert.deepEqual(
+      mergeAgentMessagesForState([oldMessage, retainedMessage], [retainedMessage]).map((item) => item.id),
+      ["msg-new"]
+    );
   });
 });

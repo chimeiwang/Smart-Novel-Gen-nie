@@ -279,6 +279,7 @@ export interface ArtifactReviewState {
 export interface WritingRuntimeContext {
   streamCallbacks: Record<string, (chunk: string) => void>;
   eventCallbacks?: Record<string, (type: string, payload: Record<string, unknown>) => void>;
+  chapterTargetDecision?: "current_chapter" | "next_chapter";
 }
 
 export type WritingGraphState = WritingState;

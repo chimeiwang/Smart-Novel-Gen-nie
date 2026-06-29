@@ -37,7 +37,7 @@
 - 2026-06-19: v8.5 operationWorkflow interrupt repair: LangGraph `__interrupt__` update chunks are converted to `user_input_required` SSE and stop terminal `done/workflow_completed`; `submit_evaluation(pass)` in `operationWorkflow` now routes from `executeOperation` to `awaitUserDecision` for a single user-approval interrupt; the writing UI keeps `awaiting_user` review state when terminal stream events arrive.
 - 2026-06-19: v8.6 AgentRuntime tool-call throttling: model tool calls returned in the same turn are executed sequentially instead of via `Promise.all`, reducing Prisma connection spikes during long multi-agent runs while preserving control-event ordering.
 - 2026-06-19: v8.7 ReviewArtifact editing and text-boundary repair: text artifacts submitted through `begin_artifact_output` are extracted from explicit `ARTIFACT_OUTPUT_START` / `ARTIFACT_OUTPUT_END` markers so explanatory prose does not enter persisted drafts; when a model omits markers, the server falls back to conservative heading-based extraction and removes review handoff/process notes before saving. The review modal allows local draft editing and sends edited content only when the user clicks approve/apply.
-- 2026-06-19: v8.8 Agent observability switches: root `.env` now controls workflow JSONL logging, LangGraph streamEvents, project-level LangSmith tracing, MemorySaver, and MemorySaver cleanup. Heavyweight workflow JSONL and LangSmith tracing default off; MemorySaver remains on for current-process interrupt/resume and is cleaned by task id after terminal completion.
+- 2026-06-19: v8.8 Agent observability switches: root `.env` controls workflow JSONL logging, LangGraph streamEvents, project-level LangSmith tracing, and MemorySaver cleanup. Heavyweight workflow JSONL and LangSmith tracing default off; MemorySaver remains on for current-process interrupt/resume and is cleaned by task id after terminal completion.
 - 2026-06-19: v8.9 WritingSession recovery: `WritingTask` can now bind to `WritingSession` via `writingSessionId`, and stores a serializable `graphStateJson` snapshot for future resume. Server-side workflow events persist user-visible `WritingMessage` rows with workflow metadata de-duplication. Session detail restores messages, bound task, operation state, stage, active artifact id, and awaiting-review artifact entry from the bound task instead of time-window guessing.
 - 2026-06-20: v8.10 结构化大纲层级：`OutlineNode.kind` 明确三层长篇结构（`stage` 阶段/卷、`plot_unit` 剧情单元、`chapter_group` 章节组）。剧情 Agent 的 `outlineAdjustments` 草案可携带 `kind`，大纲读取工具和上下文索引会展示节点类型。
 - 2026-06-20: v8.11 聊天流结构化大纲：`create_outline` 改为 `agent_updates` 草案，剧情 Agent 通过 `outlineContent` 更新总纲，通过 `outlineAdjustments[].clientKey/parentKey` 在同一待审核草案内创建三层节点树；聊天审核卡片展示结构化大纲树预览。
@@ -62,7 +62,8 @@
 - 2026-06-27: v8.30 写作目标章节自动推进：`write_chapter/rewrite_scene` 在准备上下文时解析正文草案目标；已送审/已完成且有正文的章节默认推进到后续空草稿章，若不存在则生成 `new_next_chapter` 草案并在用户应用时创建下一章。语义冲突时通过 LangGraph interrupt 让用户选择当前章或下一章。
 - 2026-06-28: v8.31 待审核草案聊天卡片化：`review_artifact_requested` / `artifact_awaiting_user_approval` 只刷新聊天流底部草案卡片，不自动打开审核弹窗；弹窗由用户点击“查看全文/编辑”主动打开。复审 Agent 未提交 `submit_evaluation` 时发出可见 `agent_status(error)`，避免用户只看到流程结束。
 - 2026-06-29: v8.33 正文工作流调用收敛：Artifact reviewer 对话历史不再重复携带完整草案；明确要求 approved Beat Plan 但计划缺失时作家 preGuard 直接阻断；`submit_evaluation` 在同轮输出报告后终止；Agent runtime 使用声明式 model profile/reasoning effort，不再注入或泄漏完整思考提示；LLM 日志改为 `LLM_LOG_MODE=off|summary|full` 的 JSONL，默认 summary 并记录完整请求/响应字符数、token、调用关联 ID。
-- 2026-06-29: v8.34 LangGraph State 分层收口：Graph state 改为 `StateSchema`，`novelData`、SSE callbacks 和 runtime context 使用 `UntrackedValue`；`conversationHistory` / `controlEvents` 使用 reducer；`artifactReview` 成为待审核草案流程权威状态，`agentOutputs` 成为 Agent 输出权威 map，旧固定输出字段和 `activeArtifactId` 等字段仅作兼容 facade；`WritingTask.generatedContent` 不再存待审核 artifactId。
+- 2026-06-29: v8.34 LangGraph State 分层收口：Graph state 改为 `StateSchema`，`novelData`、SSE callbacks 和 runtime context 使用 `UntrackedValue`；`conversationHistory` 使用完整值 reducer；`controlEvents` 作为节点内瞬时数据使用 `UntrackedValue`；`artifactReview` 成为待审核草案流程权威状态，`agentOutputs` 成为 Agent 输出权威 map，旧固定输出字段和 `activeArtifactId` 等字段仅作兼容 facade；`WritingTask.generatedContent` 不再存待审核 artifactId。
+- 2026-06-29: v8.35 MemorySaver 有界生命周期：等待用户确认的 checkpoint 默认保留 5 分钟，可通过 `LANGGRAPH_MEMORY_SAVER_TTL_MS` 调整；恢复任务会取消待执行 TTL，正常终态、应用/丢弃、SSE 断连和 runner 异常会清理 checkpoint。中断点会同步持久化可恢复 GraphState；TTL 到期后 `/resume` 使用 `WritingTask.graphStateJson` 的 snapshot fallback，章节目标确认通过 untracked runtime decision 继续，不依赖浏览器关闭事件。
 - 2026-06-28: v8.32 待审核草案继续修改收口：前端“继续修改”只关闭审核弹窗并聚焦聊天输入；当任务仍在 `awaiting_user_review` 或快照含 `artifactReview.activeArtifactId` 时，下一条普通聊天由 `/resume` 自动路由为同一草案的新 revision 返工请求。
 
 # 智能写作 Agent 流程图（v8.23 — CreativeOperation + operationWorkflow）
@@ -119,7 +120,7 @@ Agent 能力边界由 `src/shared/contracts/agent-capabilities.ts` 的 Capabilit
 
 优先使用的 LangGraph 能力：
 
-- `StateGraph` / `StateSchema`：承载可 checkpoint 的流程状态、Agent 输出、控制事件、用户确认状态和跨节点上下文。runtime-only 数据必须使用 `UntrackedValue` 或 runtime context，不得进入可恢复快照。
+- `StateGraph` / `StateSchema`：承载可 checkpoint 的流程状态、Agent 输出、用户确认状态和跨节点上下文。已消费的 control events、`novelData`、SSE callbacks 等 runtime-only 数据必须使用 `UntrackedValue` 或 runtime context，不得进入可恢复快照。
 - conditional edges：表达“根据当前状态选择下一个节点”，例如意图路由、返工/通过/结束分支。
 - `Command`：在节点返回时同时更新 state 并决定 `goto`；动态跳转不得通过额外中转字段实现。
 - `Send`：需要动态并行 worker 时使用，例如多个章节/多个设定对象并行评审后汇总。
@@ -263,7 +264,7 @@ AgentDefinition（声明式配置）→ AgentRunner（统一执行管道）
 - `createSSEController` 可独立测试 LangGraph event 处理
 - `streamCallbacks` 只传段落文本 chunk，`eventCallbacks` 只传结构化事件，禁止通过 JSON 字符串嗅探区分事件
 - Agent 输出类型分层：`AgentVisibleOutput` 是新协议主输出，`AgentQualityFields` 只服务质量报告；控制信息必须走 `AgentControlEvent`
-- `MemorySaver` 仅作为当前进程内 `interrupt/resume` 检查点，服务确认保存/确认路由；项目当前不做停机恢复或多实例恢复，不引入持久化 checkpointer。根 `.env` 中的 `LANGGRAPH_MEMORY_SAVER_ENABLED` 可关闭它；`LANGGRAPH_MEMORY_SAVER_CLEANUP_ON_DONE=true` 时，工作流正常完成、草案应用或丢弃后会按 taskId 清理进程内 checkpoint。可持久恢复状态以 `WritingTask.graphStateJson` 的序列化 Graph state 为准，但该快照不得包含 `novelData`、SSE callbacks 或其他 runtime-only 对象。
+- `MemorySaver` 仅作为当前进程内 `interrupt/resume` 检查点，服务确认保存/确认路由；项目当前不做停机恢复或多实例恢复，不引入持久化 checkpointer。它是 `interrupt()` 的运行依赖，不作为监控开关关闭；`LANGGRAPH_MEMORY_SAVER_CLEANUP_ON_DONE=true` 时，工作流正常完成、草案应用、丢弃、SSE 断连或 runner 异常会按 taskId 清理进程内 checkpoint。等待用户确认的 checkpoint 由 `LANGGRAPH_MEMORY_SAVER_TTL_MS` 限制保留时长，默认 300000 毫秒，设置为 0 可关闭 TTL。可持久恢复状态以 `WritingTask.graphStateJson` 的序列化 Graph state 为准，但该快照不得包含 `novelData`、control events、SSE callbacks 或其他 runtime-only 对象。
 - SSE 客户端断开后，后续 `sendEvent()` 会停止当前 runner；它是后台长流程止血，不是模型 HTTP 流级别的实时 abort。
 
 ### Phase 6 质量检查服务端化（2026-06-09）
@@ -570,7 +571,7 @@ Agent 调用 control tool → runtime 拦截 → parseControlEventArgs() → Age
 
 五个 Agent 都遵循“先理解用户目标，再按需查询”的策略。摘要索引用于判断相关性；只有事实核对、冲突校验、精确改写、正文承接或商业判断需要证据时才读取详情。当前章节正文不再被编辑/校验/写作默认视为任务对象，只作为可选参考材料。作品圣经用于约束题材定位、读者承诺、爽点模型和雷点。角色不变量会进入角色摘要和角色详情，用于 OOC 校验、角色商业性判断和正文写作约束。
 
-Artifact reviewer 使用专用历史模式：保留用户消息和 Agent 调用 brief，将当前草案生产者的完整正文替换为 artifactId 读取提示，其他 Agent 输出最多保留 800 字。待审核正文只通过 `get_active_review_artifact` 读取一次，避免对话历史和工具结果重复携带同一草案。
+Artifact reviewer 使用专用历史模式：保留完整用户消息、Agent 调用 brief 和其他 Agent 输出，将当前草案生产者的完整正文替换为 artifactId 读取提示。Reviewer 通过提示词只提取与本轮审核相关的历史结论、避免复述，而不对其他 Agent 历史做硬截断。待审核正文只通过 `get_active_review_artifact` 读取一次，避免对话历史和工具结果重复携带同一草案。
 
 ## 八、工具分组（v7.2）
 

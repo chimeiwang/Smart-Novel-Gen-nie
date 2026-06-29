@@ -11,7 +11,12 @@
 import { Command, isInterrupted } from "@langchain/langgraph";
 import type { WritingState, CoreAgentId, WritingPhase } from "./state";
 import { CORE_AGENT_IDS, createDefaultArtifactReviewState, getArtifactReviewState } from "./state";
-import { deleteGraphThreadCheckpoint, getGraph } from "./graph-definition";
+import {
+  cancelGraphThreadCheckpointCleanup,
+  deleteGraphThreadCheckpoint,
+  getGraph,
+  scheduleGraphThreadCheckpointCleanup,
+} from "./graph-definition";
 import type { GraphState } from "./graph-definition";
 import {
   SSE_HEADERS,
@@ -113,7 +118,12 @@ async function cleanupGraphCheckpoint(taskId: string, auditLog?: WorkflowEventFi
 
 function shouldUseLangGraphStreamEvents(): boolean {
   const config = getAgentObservabilityConfig();
-  return config.langGraphStreamEventsEnabled && config.langGraphMemorySaverEnabled;
+  return config.langGraphStreamEventsEnabled;
+}
+
+function isMissingCheckpointerError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /No checkpointer set|MISSING_CHECKPOINTER/.test(message);
 }
 
 function graphStateFromInvokeResult(result: unknown): GraphState | null {
@@ -144,9 +154,20 @@ async function getGraphStateAfterRun(
     const finalState = await graph.getState(config);
     return finalState ? finalState.values as GraphState : fallback ?? null;
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    if (!/No checkpointer set|MISSING_CHECKPOINTER/.test(message)) throw error;
+    if (!isMissingCheckpointerError(error)) throw error;
     return fallback ?? null;
+  }
+}
+
+async function getPendingCheckpointState(
+  graph: ReturnType<typeof getGraph>,
+  config: { configurable: { thread_id: string } }
+) {
+  try {
+    return await graph.getState(config);
+  } catch (error) {
+    if (!isMissingCheckpointerError(error)) throw error;
+    return null;
   }
 }
 
@@ -173,6 +194,7 @@ export function createBaseGraphState(input: {
   qualityCheckId?: string | null;
   streamCallbacks?: GraphState["streamCallbacks"];
   eventCallbacks?: GraphState["eventCallbacks"];
+  chapterTargetDecision?: "current_chapter" | "next_chapter";
 }): GraphState {
   const streamCallbacks = input.streamCallbacks ?? {};
   const eventCallbacks = input.eventCallbacks;
@@ -201,7 +223,11 @@ export function createBaseGraphState(input: {
     generatedContent: input.generatedContent ?? "",
     pendingUpdates: null,
     novelData: input.novelData,
-    runtime: { streamCallbacks, eventCallbacks },
+    runtime: {
+      streamCallbacks,
+      eventCallbacks,
+      chapterTargetDecision: input.chapterTargetDecision,
+    },
     pendingAgentCall: null,
     errorMessage: null,
     streamCallbacks,
@@ -414,15 +440,17 @@ function createSSEStream(
   auditLog.recordWorkflowEvent("sse_stream_created", { logPrefix });
 
   // 异步启动，完成或出错后关闭流
-  runner(sendEvent, sentAgentDoneKeys, config, closeStream, auditLog).catch((error) => {
+  runner(sendEvent, sentAgentDoneKeys, config, closeStream, auditLog).catch(async (error) => {
     if (error instanceof Error && error.message === SSE_CLIENT_CANCELLED_MESSAGE) {
       auditLog.recordWorkflowEvent("sse_client_cancelled", { logPrefix });
       logger.info("SSE", `客户端已断开，停止工作流${logPrefix}`, { taskId });
+      await cleanupGraphCheckpoint(taskId, auditLog);
       return;
     }
     const msg = error instanceof Error ? error.message : "未知错误";
     auditLog.recordError("workflow_runner_error", error);
     logger.error("WORKFLOW", `工作流${logPrefix}错误: ${msg}`, { taskId });
+    await cleanupGraphCheckpoint(taskId, auditLog);
     sendEvent("error", { message: msg });
     closeStream();
   });
@@ -443,6 +471,7 @@ async function runInitialStateWorkflow(
   auditLog: WorkflowEventFileLogger
 ): Promise<void> {
   const taskId = initialState.taskId;
+  cancelGraphThreadCheckpointCleanup(taskId);
   await traceWorkflowExecution(
     "writing-workflow",
     createTraceMetadata({ taskId, novelId: initialState.novelId, chapterId: initialState.chapterId, callType: "writing-workflow" }),
@@ -499,7 +528,20 @@ async function runInitialStateWorkflow(
 
       const fs = await getGraphStateAfterRun(graph, config, invokeFinalState);
       if (fs) {
-        if (!wasInterrupted) {
+        if (wasInterrupted) {
+          const task = await prisma.writingTask.findUnique({
+            where: { id: taskId },
+            select: { phase: true },
+          });
+          // artifact review interrupt 已在节点内写入更精确的 awaiting_user 快照，不能被 pre-interrupt state 覆盖。
+          if (task?.phase !== "awaiting_user_review") {
+            await updateTaskState(fs);
+            auditLog.recordPersistenceEvent("interrupted_task_state_updated", {
+              phase: fs.phase,
+              activeAgent: fs.activeAgent,
+            });
+          }
+        } else {
           await saveHistoryToDb(taskId, fs.conversationHistory);
           auditLog.recordPersistenceEvent("history_saved", {
             historyCount: fs.conversationHistory.length,
@@ -523,6 +565,10 @@ async function runInitialStateWorkflow(
           });
           await cleanupGraphCheckpoint(taskId, auditLog);
         }
+      }
+      if (wasInterrupted) {
+        scheduleGraphThreadCheckpointCleanup(taskId);
+        auditLog.recordPersistenceEvent("graph_checkpoint_cleanup_scheduled", { taskId });
       }
       close();
     }
@@ -598,6 +644,7 @@ export async function resumeWriting(
       "resume-writing-workflow",
       createTraceMetadata({ taskId, callType: "resume-writing-workflow" }),
       async () => {
+        cancelGraphThreadCheckpointCleanup(taskId);
         auditLog.recordWorkflowEvent("resume_started", {
           decisionType: userDecision?.type,
           decision: userDecision?.type === "artifact_review" ? userDecision.decision : undefined,
@@ -709,10 +756,7 @@ export async function resumeWriting(
         }
 
         const graph = getGraph();
-        const observability = getAgentObservabilityConfig();
-        const stateSnap = observability.langGraphMemorySaverEnabled
-          ? await graph.getState(config)
-          : null;
+        const stateSnap = await getPendingCheckpointState(graph, config);
         const taskForResume = await prisma.writingTask.findUnique({
           where: { id: taskId },
           include: { novel: { select: { userId: true } } },
@@ -800,6 +844,12 @@ export async function resumeWriting(
           hasPendingCheckpoint,
           hasGraphStateSnapshot: Boolean(graphSnapshot),
         });
+        const chapterTargetDecision = userDecision?.type === "chapter_target_confirmation"
+          ? userDecision.decision
+          : undefined;
+        if (chapterTargetDecision && resumeMode !== "interrupt_resume" && !effectiveUserMessage.trim()) {
+          effectiveUserMessage = graphSnapshot?.userMessage || "继续写作";
+        }
         await persistWorkflowMessage({
           sessionId: taskForResume.writingSessionId,
           taskId,
@@ -824,6 +874,7 @@ export async function resumeWriting(
               runtime: {
                 streamCallbacks: createDirectStreamCallbacks(sendEvent),
                 eventCallbacks: createDirectEventCallbacks(sendEvent),
+                chapterTargetDecision,
               },
             },
           }) as unknown as GraphState;
@@ -900,6 +951,7 @@ export async function resumeWriting(
           const runtimeCallbacks = {
             streamCallbacks: createDirectStreamCallbacks(sendEvent),
             eventCallbacks: createDirectEventCallbacks(sendEvent),
+            chapterTargetDecision,
           };
           const graphInput = createBaseGraphState({
             taskId,
@@ -964,7 +1016,10 @@ export async function resumeWriting(
             activeAgent: fs.activeAgent,
             phase: fs.phase,
           });
-          if (fs.phase !== "waiting_call" && getArtifactReviewState(fs).status !== "awaiting_user") {
+          if (fs.phase === "waiting_call" || getArtifactReviewState(fs).status === "awaiting_user") {
+            scheduleGraphThreadCheckpointCleanup(taskId);
+            auditLog.recordPersistenceEvent("graph_checkpoint_cleanup_scheduled", { taskId });
+          } else {
             await cleanupGraphCheckpoint(taskId, auditLog);
           }
         }

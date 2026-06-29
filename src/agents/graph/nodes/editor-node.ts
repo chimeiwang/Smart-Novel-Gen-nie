@@ -99,7 +99,11 @@ const editorDefinition: AgentDefinition = {
         artifactProducerAgentId: state.currentOperation?.primaryAgent ?? null,
       } : undefined);
       if (historySection && historySection.trim()) {
-        messages.push({ role: "system", content: "## 对话历史\n\n" + historySection });
+        messages.push({
+          role: "system",
+          content: "## 对话历史\n\n" + historySection +
+            "\n\n只提取与本轮评审直接相关的历史结论，不要在报告中复述整段历史。",
+        });
       }
     }
 
