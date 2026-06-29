@@ -15,6 +15,12 @@ export type {
   AgentMessage,
   ConflictDetail,
   PendingAgentCall,
+  ArtifactReviewState,
+  OperationStep,
+  WritingRuntimeContext,
+  WritingGraphState,
+  WritingGraphInput,
+  WritingGraphOutput,
 } from "./state";
 export {
   CORE_AGENT_IDS,
@@ -28,6 +34,9 @@ export {
   setAgentOutput,
   generateMessageId,
   createAgentOutput,
+  createDefaultArtifactReviewState,
+  getActiveArtifactId,
+  getArtifactReviewState,
   isValidAgentId,
   getAgentName,
 } from "./state";
@@ -44,6 +53,7 @@ export {
   startWritingWorkflow,
   resumeWriting,
   createInitialState,
+  createBaseGraphState,
   createWorkflowTask,
   persistUpdates,
   rollbackTaskUpdates,

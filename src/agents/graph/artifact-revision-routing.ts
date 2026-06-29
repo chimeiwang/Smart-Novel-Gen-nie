@@ -18,14 +18,21 @@ export type ArtifactRevisionResume = {
 export function resolvePendingArtifactRevisionFromChat(input: {
   taskPhase?: string | null;
   taskGeneratedContent?: string | null;
-  graphSnapshot?: { pendingUserResponse?: boolean; activeArtifactId?: string | null } | null;
+  graphSnapshot?: {
+    pendingUserResponse?: boolean;
+    activeArtifactId?: string | null;
+    artifactReview?: { status?: string | null; activeArtifactId?: string | null } | null;
+  } | null;
   userMessage?: string | null;
 }): { artifactId: string; userMessage: string } | null {
   const userMessage = input.userMessage?.trim();
   if (!userMessage || userMessage.startsWith("@")) return null;
-  const snapshotArtifactId = input.graphSnapshot?.pendingUserResponse
-    ? input.graphSnapshot.activeArtifactId?.trim()
-    : "";
+  const snapshotReview = input.graphSnapshot?.artifactReview;
+  const snapshotArtifactId = snapshotReview?.status === "awaiting_user"
+    ? snapshotReview.activeArtifactId?.trim()
+    : input.graphSnapshot?.pendingUserResponse
+      ? input.graphSnapshot.activeArtifactId?.trim()
+      : "";
   const taskArtifactId = input.taskPhase === "awaiting_user_review"
     ? input.taskGeneratedContent?.trim()
     : "";

@@ -901,6 +901,108 @@ describe("AgentRuntimeImpl", () => {
     assert.equal(JSON.stringify(calls[1].messages).includes("reasoning_content"), false);
   });
 
+  it("submit_evaluation 可在同一轮输出报告并终止，不再发起 ACK 后续请求", async () => {
+    const evaluationArgs = {
+      artifactId: "artifact-1",
+      artifactKey: "draft-1",
+      verdict: "pass",
+      summary: "草案可以提交用户确认。",
+    };
+    const client = createMockClient([
+      createToolCallStream("submit_evaluation", evaluationArgs, "完整审核报告：草案结构成立，可以提交用户确认。"),
+    ]);
+    const runtime = createTestRuntime(client);
+
+    const result = await runtime.runTurn({
+      ...createRuntimeOptions(),
+      tools: getOpenAITools(["submit_evaluation"]),
+      terminalControlTools: ["submit_evaluation"],
+    });
+
+    assert.equal(client.calls, 1);
+    assert.equal(result.finishReason, "terminal_control_event");
+    assert.match(result.visibleContent, /完整审核报告/);
+    assert.equal(result.controlEvents[0]?.type, "submit_evaluation");
+  });
+
+  it("submit_evaluation 纯工具调用终止时使用结构化结论生成兜底报告", async () => {
+    const client = createMockClient([
+      createToolCallStream("submit_evaluation", {
+        artifactId: "artifact-1",
+        artifactKey: "draft-1",
+        verdict: "revise",
+        summary: "当前草案需要修改。",
+        requiredChanges: "收紧中段节奏并增强章末钩子。",
+        revisionMode: "rewrite",
+      }),
+    ]);
+    const runtime = createTestRuntime(client);
+
+    const result = await runtime.runTurn({
+      ...createRuntimeOptions(),
+      tools: getOpenAITools(["submit_evaluation"]),
+      terminalControlTools: ["submit_evaluation"],
+    });
+
+    assert.equal(client.calls, 1);
+    assert.match(result.visibleContent, /当前草案需要修改/);
+    assert.match(result.visibleContent, /需要修改/);
+    assert.match(result.visibleContent, /增强章末钩子/);
+  });
+
+  it("submit_evaluation 成功后不再执行同轮排在其后的工具", async () => {
+    const client = createMockClient([
+      createMultiToolCallStream([
+        {
+          toolName: "submit_evaluation",
+          args: {
+            artifactId: "artifact-1",
+            artifactKey: "draft-1",
+            verdict: "pass",
+            summary: "审核通过。",
+          },
+        },
+        { toolName: "get_novel_info", args: {} },
+      ]),
+    ]);
+    const runtime = createTestRuntime(client);
+    let readCalls = 0;
+
+    const result = await runtime.runTurn({
+      ...createRuntimeOptions(),
+      tools: getOpenAITools(["submit_evaluation", "get_novel_info"]),
+      terminalControlTools: ["submit_evaluation"],
+      toolExecutor: async () => {
+        readCalls += 1;
+        return "read ok";
+      },
+    });
+
+    assert.equal(client.calls, 1);
+    assert.equal(readCalls, 0);
+    assert.deepEqual(result.toolCalls.map((call) => call.name), ["submit_evaluation"]);
+  });
+
+  it("模型只有 reasoning 且没有正文或工具时返回固定提示，不泄漏 reasoning", async () => {
+    const runtimePort: ModelRuntimePort = {
+      streamText: async () => ({ content: "" }),
+      completeText: async () => ({ content: "" }),
+      completeStructured: (async (schema) => ({ data: schema.parse({}) })) as ModelRuntimePort["completeStructured"],
+      runToolCallTurn: async () => ({
+        content: "",
+        reasoningContent: "内部秘密推理内容",
+        toolCalls: [],
+        finishReason: "stop",
+      }),
+    };
+    const runtime = new AgentRuntimeImpl({ runtime: runtimePort });
+
+    const result = await runtime.runTurn(createRuntimeOptions());
+
+    assert.match(result.visibleContent, /模型未生成可见回复/);
+    assert.doesNotMatch(result.visibleContent, /内部秘密推理内容/);
+  });
+
   it("executes safe read tool calls in parallel", async () => {
     const client = createMockClient([
       createMultiToolCallStream([

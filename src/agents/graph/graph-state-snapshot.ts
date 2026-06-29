@@ -5,9 +5,16 @@ import type {
   AgentMessage,
   AgentOutput,
   AgentUpdates,
+  ArtifactReviewState,
   CoreAgentId,
+  OperationStep,
   PendingAgentCall,
   WritingPhase,
+} from "./state";
+import {
+  collectAgentOutputs,
+  createDefaultArtifactReviewState,
+  normalizeArtifactReviewState,
 } from "./state";
 import type { GraphState } from "./graph-definition";
 
@@ -24,8 +31,10 @@ export type SerializableGraphStateSnapshot = {
   activeAgent: CoreAgentId | null;
   currentOperation: CreativeOperation | null;
   operationMode: GraphState["operationMode"];
+  operationStep: OperationStep;
   operationStage: string | null;
   chapterDraftTarget: GraphState["chapterDraftTarget"];
+  agentOutputs: Partial<Record<CoreAgentId, AgentOutput>>;
   loreAdvisorOutput: AgentOutput | null;
   plotAdvisorOutput: AgentOutput | null;
   writerOutput: AgentOutput | null;
@@ -37,6 +46,7 @@ export type SerializableGraphStateSnapshot = {
   errorMessage: string | null;
   qualityCheckId: string | null;
   controlEvents: AgentControlEvent[] | undefined;
+  artifactReview: ArtifactReviewState;
   activeArtifactId: string | null;
   artifactMode: "none" | "review_loop";
   reviewerAgent: CoreAgentId | null;
@@ -60,8 +70,10 @@ export function serializeGraphStateSnapshot(state: GraphState): string {
     activeAgent: state.activeAgent,
     currentOperation: state.currentOperation ?? null,
     operationMode: state.operationMode,
+    operationStep: state.operationStep ?? "init",
     operationStage: state.operationStage ?? null,
     chapterDraftTarget: state.chapterDraftTarget ?? null,
+    agentOutputs: collectAgentOutputs(state),
     loreAdvisorOutput: state.loreAdvisorOutput,
     plotAdvisorOutput: state.plotAdvisorOutput,
     writerOutput: state.writerOutput,
@@ -73,6 +85,7 @@ export function serializeGraphStateSnapshot(state: GraphState): string {
     errorMessage: state.errorMessage,
     qualityCheckId: state.qualityCheckId ?? null,
     controlEvents: state.controlEvents,
+    artifactReview: normalizeArtifactReviewState(state),
     activeArtifactId: state.activeArtifactId ?? null,
     artifactMode: state.artifactMode ?? "none",
     reviewerAgent: state.reviewerAgent ?? null,
@@ -109,7 +122,7 @@ export function deserializeGraphStateSnapshot(
       return null;
     }
 
-    return {
+    const legacyCompatible = {
       taskId: parsed.taskId,
       userId: parsed.userId,
       novelId: parsed.novelId,
@@ -122,8 +135,10 @@ export function deserializeGraphStateSnapshot(
       activeAgent: parsed.activeAgent ?? null,
       currentOperation: operation as CreativeOperation | null,
       operationMode: parsed.operationMode ?? "operation_graph",
+      operationStep: parsed.operationStep ?? "init",
       operationStage: parsed.operationStage ?? null,
       chapterDraftTarget: parsed.chapterDraftTarget ?? null,
+      agentOutputs: parsed.agentOutputs ?? {},
       loreAdvisorOutput: parsed.loreAdvisorOutput ?? null,
       plotAdvisorOutput: parsed.plotAdvisorOutput ?? null,
       writerOutput: parsed.writerOutput ?? null,
@@ -135,6 +150,21 @@ export function deserializeGraphStateSnapshot(
       errorMessage: parsed.errorMessage ?? null,
       qualityCheckId: parsed.qualityCheckId ?? null,
       controlEvents: parsed.controlEvents,
+      artifactReview: parsed.artifactReview ?? createDefaultArtifactReviewState({
+        status: parsed.pendingUserResponse && parsed.activeArtifactId
+          ? "awaiting_user"
+          : parsed.pendingArtifactRevision
+            ? "revision_requested"
+            : parsed.activeArtifactId
+              ? "draft_submitted"
+              : "none",
+        activeArtifactId: parsed.activeArtifactId ?? null,
+        reviewerAgent: parsed.reviewerAgent ?? null,
+        reviserAgent: parsed.reviserAgent ?? null,
+        pendingRevision: parsed.pendingArtifactRevision ?? null,
+        iteration: parsed.artifactIteration ?? 0,
+        maxIterations: parsed.maxArtifactIterations ?? 5,
+      }),
       activeArtifactId: parsed.activeArtifactId ?? null,
       artifactMode: parsed.artifactMode ?? "none",
       reviewerAgent: parsed.reviewerAgent ?? null,
@@ -143,6 +173,7 @@ export function deserializeGraphStateSnapshot(
       artifactIteration: parsed.artifactIteration ?? 0,
       maxArtifactIterations: parsed.maxArtifactIterations ?? 5,
     };
+    return legacyCompatible;
   } catch {
     return null;
   }
@@ -161,6 +192,10 @@ export function rehydrateGraphStateFromSnapshot(
     ...snapshot,
     userMessage: runtime.userMessage,
     novelData: runtime.novelData,
+    runtime: {
+      streamCallbacks: runtime.streamCallbacks,
+      eventCallbacks: runtime.eventCallbacks,
+    },
     streamCallbacks: runtime.streamCallbacks,
     eventCallbacks: runtime.eventCallbacks,
   };

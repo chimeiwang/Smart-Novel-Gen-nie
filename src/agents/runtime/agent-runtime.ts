@@ -17,7 +17,6 @@ import {
 } from "@/shared/contracts/agent-control";
 import {
   aggregateVisibleParts,
-  ensureReasoningEffortPrompt,
   getModelRuntime,
   LegacyOpenAIRuntime,
   type AgentRuntimeOptions,
@@ -83,7 +82,7 @@ export class AgentRuntimeImpl implements AgentRuntime {
   private async runToolLoop(options: AgentRuntimeOptions): Promise<AgentTurnResult> {
     const runtime = this.resolveRuntime();
     const requestId = logger.generateRequestId();
-    const messages = ensureReasoningEffortPrompt(options.messages);
+    const messages = [...options.messages];
     const maxIterations = options.maxIterations ?? 10;
 
     const controlEvents: AgentControlEvent[] = [];
@@ -94,7 +93,6 @@ export class AgentRuntimeImpl implements AgentRuntime {
 
     let finalUsage: TokenUsage | undefined;
     let lastAssistantText = "";
-    let lastReasoningContent = "";
     let finishReason: string | undefined = "stop";
 
     for (let iteration = 1; iteration <= maxIterations; iteration++) {
@@ -102,22 +100,30 @@ export class AgentRuntimeImpl implements AgentRuntime {
         messageCount: messages.length,
       });
 
+      const roundOptions: AgentRuntimeOptions = {
+        ...options,
+        metadata: {
+          ...(options.metadata ?? {}),
+          agentRunId: requestId,
+          modelTurn: iteration,
+        },
+      };
       const round = await runtime.runToolCallTurn({
         messages,
         tools: options.tools,
         onChunk: options.onChunk,
-        metadata: options.metadata,
-        reasoningEffort: "medium",
+        metadata: roundOptions.metadata,
+        reasoningEffort: options.reasoningEffort ?? "medium",
+        profile: options.profile ?? "normal",
       });
 
       finalUsage = round.usage ?? finalUsage;
       finishReason = round.finishReason;
       if (round.content) lastAssistantText = round.content;
-      if (round.reasoningContent) lastReasoningContent = round.reasoningContent;
 
       const result = await this.finishAgentRound({
         messages,
-        options,
+        options: roundOptions,
         requestId,
         controlEvents,
         toolCalls,
@@ -126,7 +132,6 @@ export class AgentRuntimeImpl implements AgentRuntime {
         invalidControlToolAttempts,
         modelToolCalls: round.toolCalls,
         fullTextContent: round.content,
-        reasoningContent: round.reasoningContent,
         finishReason,
         finalUsage,
       });
@@ -137,7 +142,7 @@ export class AgentRuntimeImpl implements AgentRuntime {
       requestId,
       visibleContentParts,
       lastAssistantText,
-      lastReasoningContent,
+      context: options.metadata,
       controlEvents,
       toolCalls,
       toolResults,
@@ -157,7 +162,6 @@ export class AgentRuntimeImpl implements AgentRuntime {
     invalidControlToolAttempts: Map<string, number>;
     modelToolCalls: ModelToolCall[];
     fullTextContent: string;
-    reasoningContent: string;
     finishReason: string | undefined;
     finalUsage: TokenUsage | undefined;
   }): Promise<{ done: true; result: AgentTurnResult } | { done: false }> {
@@ -172,7 +176,6 @@ export class AgentRuntimeImpl implements AgentRuntime {
       invalidControlToolAttempts,
       modelToolCalls,
       fullTextContent,
-      reasoningContent,
       finishReason,
       finalUsage,
     } = params;
@@ -180,11 +183,16 @@ export class AgentRuntimeImpl implements AgentRuntime {
     if (modelToolCalls.length === 0) {
       const lastText =
         fullTextContent ||
-        reasoningContent.slice(-500) ||
         "模型未生成可见回复，请重试或缩小请求范围。";
       const visibleContent = aggregateVisibleParts(visibleContentParts, lastText);
       messages.push({ role: "assistant", content: lastText });
-      logger.llmResponse(requestId, visibleContent);
+      logger.agentRunFinal(requestId, visibleContent, {
+        context: options.metadata,
+        usage: finalUsage,
+        finishReason,
+        toolCallCount: toolCalls.length,
+        controlEventTypes: controlEvents.map((event) => event.type),
+      });
       return {
         done: true,
         result: { visibleContent, controlEvents, toolCalls, toolResults, usage: finalUsage, finishReason },
@@ -212,7 +220,13 @@ export class AgentRuntimeImpl implements AgentRuntime {
     const parseErrorResult = results.find((result) => result.parseError);
     if (parseErrorResult) {
       const visibleContent = aggregateVisibleParts(visibleContentParts, parseErrorResult.content);
-      logger.llmResponse(requestId, visibleContent);
+      logger.agentRunFinal(requestId, visibleContent, {
+        context: options.metadata,
+        usage: finalUsage,
+        finishReason: "tool_parse_error",
+        toolCallCount: toolCalls.length,
+        controlEventTypes: controlEvents.map((event) => event.type),
+      });
       return {
         done: true,
         result: {
@@ -236,7 +250,13 @@ export class AgentRuntimeImpl implements AgentRuntime {
         requestId,
         result: fatalResult.content,
       });
-      logger.llmResponse(requestId, visibleContent);
+      logger.agentRunFinal(requestId, visibleContent, {
+        context: options.metadata,
+        usage: finalUsage,
+        finishReason: fatalFinishReason,
+        toolCallCount: toolCalls.length,
+        controlEventTypes: controlEvents.map((event) => event.type),
+      });
       return {
         done: true,
         result: {
@@ -251,12 +271,20 @@ export class AgentRuntimeImpl implements AgentRuntime {
     }
 
     if (results.some((result) => result.terminal)) {
-      const visibleContent = aggregateVisibleParts(visibleContentParts, "");
+      const visibleContent = fullTextContent.trim()
+        ? aggregateVisibleParts(visibleContentParts, "")
+        : buildTerminalControlFallback(controlEvents) || aggregateVisibleParts(visibleContentParts, "");
       logger.info("AGENT_RUNTIME", "terminal control tool 已触发，结束当前 Agent 回合", {
         requestId,
         controlEventTypes: controlEvents.map((event) => event.type),
       });
-      logger.llmResponse(requestId, visibleContent);
+      logger.agentRunFinal(requestId, visibleContent, {
+        context: options.metadata,
+        usage: finalUsage,
+        finishReason: "terminal_control_event",
+        toolCallCount: toolCalls.length,
+        controlEventTypes: controlEvents.map((event) => event.type),
+      });
       return {
         done: true,
         result: {
@@ -334,6 +362,9 @@ export class AgentRuntimeImpl implements AgentRuntime {
         toolResults,
         invalidControlToolAttempts,
       });
+      if (results[index].terminal) {
+        return results.slice(0, index + 1);
+      }
       index += 1;
     }
 
@@ -349,6 +380,7 @@ export class AgentRuntimeImpl implements AgentRuntime {
     toolResults: RuntimeToolResultRecord[];
     invalidControlToolAttempts: Map<string, number>;
   }): Promise<AgentRoundToolExecutionResult> {
+    const startedAt = Date.now();
     const {
       tc,
       options,
@@ -374,7 +406,10 @@ export class AgentRuntimeImpl implements AgentRuntime {
             toolName,
             exposedToolNames: getExposedToolNames(options.tools),
           });
-          logger.llmToolCall(requestId, toolName, args, result);
+          logger.llmToolCall(requestId, toolName, args, result, {
+            context: options.metadata,
+            durationMs: Date.now() - startedAt,
+          });
           return { id: tc.id, content: result, fatal: true, unauthorized: true };
         }
         const parsedArgs = parseToolCallArguments(tc.function.arguments || "");
@@ -397,7 +432,10 @@ export class AgentRuntimeImpl implements AgentRuntime {
             rawArgumentsPreview: parsedArgs.error.rawArgumentsPreview,
             parseError: parsedArgs.error.message,
           });
-          logger.llmToolCall(requestId, toolName, args, result);
+          logger.llmToolCall(requestId, toolName, args, result, {
+            context: options.metadata,
+            durationMs: Date.now() - startedAt,
+          });
           return { id: tc.id, content: result, fatal: true, parseError: true };
         }
         const args = parsedArgs.args;
@@ -411,7 +449,10 @@ export class AgentRuntimeImpl implements AgentRuntime {
           toolResults,
           invalidControlToolAttempts
         );
-        logger.llmToolCall(requestId, toolName, args, result.content);
+        logger.llmToolCall(requestId, toolName, args, result.content, {
+          context: options.metadata,
+          durationMs: Date.now() - startedAt,
+        });
         return { id: tc.id, content: result.content, fatal: result.fatal, terminal: result.terminal };
   }
 
@@ -473,7 +514,10 @@ export class AgentRuntimeImpl implements AgentRuntime {
       logger.info("AGENT_RUNTIME", `control tool "${toolName}" 已拦截`, {
         eventType: parsed.event.type,
       });
-      return { content: ack };
+      return {
+        content: ack,
+        terminal: options.terminalControlTools?.includes(toolName) ?? false,
+      };
     }
 
     try {
@@ -505,7 +549,7 @@ export class AgentRuntimeImpl implements AgentRuntime {
     requestId: string;
     visibleContentParts: string[];
     lastAssistantText: string;
-    lastReasoningContent: string;
+    context?: Record<string, unknown>;
     controlEvents: AgentControlEvent[];
     toolCalls: RuntimeToolCallRecord[];
     toolResults: RuntimeToolResultRecord[];
@@ -515,14 +559,19 @@ export class AgentRuntimeImpl implements AgentRuntime {
     const fallback = aggregateVisibleParts(
       params.visibleContentParts,
       params.lastAssistantText ||
-        params.lastReasoningContent.slice(-500) ||
         "模型在多轮工具查询后仍未产出最终回复，请重试或缩小请求范围。"
     );
     logger.warn("AGENT_RUNTIME", "达到最大工具调用轮次，返回兜底内容", {
       maxIterations: params.maxIterations,
       fallbackLength: fallback.length,
     });
-    logger.llmResponse(params.requestId, fallback);
+    logger.agentRunFinal(params.requestId, fallback, {
+      context: params.context,
+      usage: params.finalUsage,
+      finishReason: "length",
+      toolCallCount: params.toolCalls.length,
+      controlEventTypes: params.controlEvents.map((event) => event.type),
+    });
     return {
       visibleContent: fallback,
       controlEvents: params.controlEvents,
@@ -543,6 +592,17 @@ export class AgentRuntimeImpl implements AgentRuntime {
     }
     return getModelRuntime();
   }
+}
+
+function buildTerminalControlFallback(controlEvents: AgentControlEvent[]): string {
+  const evaluation = [...controlEvents].reverse().find((event) => event.type === "submit_evaluation");
+  if (!evaluation || evaluation.type !== "submit_evaluation") return "";
+  const lines = [evaluation.summary.trim()];
+  if (evaluation.requiredChanges?.trim()) {
+    lines.push(evaluation.verdict === "pass" ? "建议：" : "需要修改：");
+    lines.push(evaluation.requiredChanges.trim());
+  }
+  return lines.filter(Boolean).join("\n\n");
 }
 
 function formatUnauthorizedToolMessage(

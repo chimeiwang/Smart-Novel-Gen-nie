@@ -232,4 +232,34 @@ describe("ModelCallProfile", () => {
     assert.equal((client.requests[0] as { max_tokens?: number }).max_tokens, 3000);
     assert.equal("reasoning_effort" in (client.requests[0] as Record<string, unknown>), false);
   });
+
+  it("uses the fast budget and medium native reasoning for tool-call turns without prompt injection", async () => {
+    const stream = createStream([
+      {
+        choices: [{ delta: { content: "done" }, finish_reason: "stop" }],
+      },
+    ]);
+    const client = createMockClient([stream]);
+    const runtime = new LegacyOpenAIRuntime({
+      client: client as never,
+      isAiConfigured: () => true,
+      billing: createBillingStub(),
+    });
+
+    await runtime.runToolCallTurn({
+      profile: "fast",
+      reasoningEffort: "medium",
+      messages: [{ role: "system", content: "你是审核员" }, { role: "user", content: "审核草案" }],
+      tools: [],
+    });
+
+    const request = client.requests[0] as {
+      max_tokens?: number;
+      reasoning_effort?: string;
+      messages?: Array<{ content?: string }>;
+    };
+    assert.equal(request.max_tokens, 3000);
+    assert.equal(request.reasoning_effort, "medium");
+    assert.equal(JSON.stringify(request.messages).includes("Absolute maximum"), false);
+  });
 });

@@ -5,8 +5,8 @@
  */
 
 import { END, START, StateGraph, getWriter } from "@langchain/langgraph";
-import type { WritingState, AgentOutput, CoreAgentId } from "@/agents/graph/state";
-import { AGENT_NAMES } from "@/agents/graph/state";
+import type { WritingState, AgentOutput, CoreAgentId, OperationStep } from "@/agents/graph/state";
+import { AGENT_NAMES, getArtifactReviewState, patchArtifactReviewState } from "@/agents/graph/state";
 import type { GraphState, WritingStateAnnotation } from "@/agents/graph/graph-definition";
 import { emit } from "@/agents/graph/sse-adapter";
 import { addAgentMessage } from "@/agents/graph/context-manager";
@@ -92,8 +92,8 @@ export function createOperationTraceMetadata(
     operationStage,
     primaryAgent: state.currentOperation?.primaryAgent,
     activeAgent: state.activeAgent,
-    activeArtifactId: state.activeArtifactId,
-    artifactIteration: state.artifactIteration,
+    activeArtifactId: getArtifactReviewState(state).activeArtifactId,
+    artifactIteration: getArtifactReviewState(state).iteration,
     service: "inkforge",
   };
 }
@@ -138,11 +138,12 @@ async function prepareOperationContextNode(state: GraphState) {
       : novelData;
     return {
       operationStage: "准备操作上下文",
+      operationStep: "prepare_context" as OperationStep,
       chapterDraftTarget: target?.target ?? null,
       novelData: { ...patchedNovelData, novelId: state.novelId } as GraphState["novelData"],
     };
   }
-  return { operationStage: "准备操作上下文" };
+  return { operationStage: "准备操作上下文", operationStep: "prepare_context" as OperationStep };
 }
 
 function shouldUseWritingContext(kind: CreativeOperationKind): boolean {
@@ -180,7 +181,15 @@ async function executeOperationNode(state: GraphState) {
       ).conversationHistory
     : result.statePatch.conversationHistory ?? state.conversationHistory;
 
-  const artifactId = result.artifact?.id ?? result.statePatch.activeArtifactId ?? state.activeArtifactId;
+  const currentReview = getArtifactReviewState(state);
+  const artifactId = result.artifact?.id ?? result.statePatch.activeArtifactId ?? currentReview.activeArtifactId;
+  const artifactPatch = artifactId
+    ? patchArtifactReviewState(state, {
+        status: "draft_submitted",
+        activeArtifactId: artifactId,
+        reviewerAgent: result.statePatch.reviewerAgent ?? currentReview.reviewerAgent,
+      })
+    : {};
   if (result.artifact) {
     emit(writer, "artifact_submitted", {
       agentId: activeAgent,
@@ -193,22 +202,25 @@ async function executeOperationNode(state: GraphState) {
 
   return {
     ...result.statePatch,
+    ...artifactPatch,
     conversationHistory: history,
     activeAgent,
     activeArtifactId: artifactId,
+    operationStep: "execute_operation" as OperationStep,
     operationStage: "执行创作操作",
   };
 }
 
 function routeAfterExecute(state: GraphState): keyof typeof OPERATION_EXECUTE_ROUTES {
-  if (state.pendingUserResponse && state.activeArtifactId) return "awaitUserDecision";
+  const review = getArtifactReviewState(state);
+  if (review.status === "awaiting_user" && review.activeArtifactId) return "awaitUserDecision";
   return "submitArtifactOrRespond";
 }
 
 async function submitArtifactOrRespondNode(state: GraphState) {
   const writer = getWriter();
   const operation = state.currentOperation;
-  if (!operation) return { operationStage: "整理结果" };
+  if (!operation) return { operationStage: "整理结果", operationStep: "submit_artifact" as OperationStep };
 
   const def = getOperationDefinition(operation.kind);
   const label = getCreativeOperationLabel(operation.kind);
@@ -218,23 +230,23 @@ async function submitArtifactOrRespondNode(state: GraphState) {
       label,
       message: `${label}已完成。`,
     });
-    return { operationStage: "直接回复" };
+    return { operationStage: "直接回复", operationStep: "submit_artifact" as OperationStep };
   }
 
   emit(writer, "operation_stage", {
     stage: "提交待审核草案",
     label,
-    artifactId: state.activeArtifactId,
+    artifactId: getArtifactReviewState(state).activeArtifactId,
     message: `${label}已生成待审核草案。`,
   });
-  return { operationStage: "提交待审核草案" };
+  return { operationStage: "提交待审核草案", operationStep: "submit_artifact" as OperationStep };
 }
 
 function routeAfterSubmit(state: GraphState): keyof typeof OPERATION_SUBMIT_ROUTES {
   const operation = state.currentOperation;
   if (!operation) return "suggestNextAction";
   const def = getOperationDefinition(operation.kind);
-  if (def.requiresArtifact && state.activeArtifactId && def.reviewers.length > 0) {
+  if (def.requiresArtifact && getArtifactReviewState(state).activeArtifactId && def.reviewers.length > 0) {
     return "reviewArtifact";
   }
   return "suggestNextAction";
@@ -243,19 +255,27 @@ function routeAfterSubmit(state: GraphState): keyof typeof OPERATION_SUBMIT_ROUT
 async function reviewArtifactNode(state: GraphState) {
   const writer = getWriter();
   const operation = state.currentOperation;
-  if (!operation || !state.activeArtifactId) return { operationStage: "整理结果" };
+  const review = getArtifactReviewState(state);
+  const activeArtifactId = review.activeArtifactId;
+  if (!operation || !activeArtifactId) return { operationStage: "整理结果", operationStep: "review_artifact" as OperationStep };
 
   const def = getOperationDefinition(operation.kind);
   const reviewer = selectCurrentReviewer(state, def.reviewers);
-  if (!reviewer) return { operationStage: "整理结果", reviewerAgent: null };
+  if (!reviewer) {
+    return {
+      operationStage: "整理结果",
+      operationStep: "review_artifact" as OperationStep,
+      ...patchArtifactReviewState(state, { reviewerAgent: null }),
+    };
+  }
   const label = getCreativeOperationLabel(operation.kind);
   emit(writer, "artifact_review_started", {
     fromAgent: def.primaryAgent,
     toAgent: reviewer,
-    artifactId: state.activeArtifactId,
+    artifactId: activeArtifactId,
     artifactKey: `${state.taskId}:${operation.kind}`,
-    revision: state.artifactIteration + 1,
-    depth: state.artifactIteration + 1,
+    revision: review.iteration + 1,
+    depth: review.iteration + 1,
   });
   emit(writer, "operation_stage", {
     stage: "审核草案",
@@ -284,7 +304,7 @@ async function reviewArtifactNode(state: GraphState) {
   const revisionMode = verdict === "revise" ? structuredEvaluation?.revisionMode ?? "rewrite" : "rewrite";
   const patches = verdict === "revise" ? structuredEvaluation?.patches : undefined;
   const artifact = await submitArtifactEvaluation({
-    artifactId: state.activeArtifactId,
+    artifactId: activeArtifactId,
     evaluatorAgent: reviewer,
     verdict,
     summary,
@@ -301,24 +321,34 @@ async function reviewArtifactNode(state: GraphState) {
   return {
     ...reviewPatch,
     activeAgent: reviewer,
+    ...patchArtifactReviewState(state, {
+      status: verdict === "revise"
+        ? (revisionMode === "patch" ? "patching" : "revision_requested")
+        : verdict === "block"
+          ? "revision_requested"
+          : "reviewing",
+      activeArtifactId: artifact.id,
+      reviewerAgent: reviewer,
+      reviserAgent: verdict === "revise" && revisionMode === "rewrite" ? def.primaryAgent : null,
+      pendingRevision: verdict === "revise"
+        ? { summary, requiredChanges, revisionMode, patches }
+        : null,
+      iteration: review.iteration + 1,
+    }),
     activeArtifactId: artifact.id,
+    operationStep: "review_artifact" as OperationStep,
     operationStage: "审核草案",
-    artifactIteration: state.artifactIteration + 1,
     errorMessage: verdict === "block" ? summary : null,
-    reviewerAgent: reviewer,
-    reviserAgent: verdict === "revise" && revisionMode === "rewrite" ? def.primaryAgent : null,
-    pendingArtifactRevision: verdict === "revise"
-      ? { summary, requiredChanges, revisionMode, patches }
-      : null,
     controlEvents: undefined,
   };
 }
 
 export function routeAfterReview(state: GraphState): keyof typeof OPERATION_REVIEW_ROUTES {
   const operation = state.currentOperation;
+  const review = getArtifactReviewState(state);
   if (state.errorMessage) return "suggestNextAction";
-  if (state.pendingArtifactRevision?.revisionMode === "patch") return "applyArtifactPatch";
-  if (state.reviserAgent && state.artifactIteration < state.maxArtifactIterations) {
+  if (review.pendingRevision?.revisionMode === "patch") return "applyArtifactPatch";
+  if (review.reviserAgent && review.iteration < review.maxIterations) {
     return "reviseArtifact";
   }
   if (operation && hasNextReviewer(state, getOperationDefinition(operation.kind).reviewers)) {
@@ -331,8 +361,9 @@ export function selectCurrentReviewer(
   state: GraphState,
   reviewers: CoreAgentId[]
 ): CoreAgentId | null {
-  if (state.reviewerAgent) {
-    const currentIndex = reviewers.indexOf(state.reviewerAgent);
+  const review = getArtifactReviewState(state);
+  if (review.reviewerAgent) {
+    const currentIndex = reviewers.indexOf(review.reviewerAgent);
     const nextReviewer = reviewers[currentIndex + 1];
     if (nextReviewer) return nextReviewer;
     if (currentIndex >= 0) return null;
@@ -341,15 +372,17 @@ export function selectCurrentReviewer(
 }
 
 export function hasNextReviewer(state: GraphState, reviewers: CoreAgentId[]): boolean {
-  if (!state.reviewerAgent) return reviewers.length > 0;
-  const currentIndex = reviewers.indexOf(state.reviewerAgent);
+  const review = getArtifactReviewState(state);
+  if (!review.reviewerAgent) return reviewers.length > 0;
+  const currentIndex = reviewers.indexOf(review.reviewerAgent);
   return currentIndex >= 0 && currentIndex < reviewers.length - 1;
 }
 
 async function applyArtifactPatchNode(state: GraphState) {
   const writer = getWriter();
   const operation = state.currentOperation;
-  const pending = state.pendingArtifactRevision;
+  const review = getArtifactReviewState(state);
+  const pending = review.pendingRevision;
   const label = operation ? getCreativeOperationLabel(operation.kind) : "待审核草案";
   emit(writer, "operation_stage", {
     stage: "应用小修",
@@ -357,7 +390,7 @@ async function applyArtifactPatchNode(state: GraphState) {
     message: `正在应用${label}的小修补丁。`,
   });
 
-  if (!state.activeArtifactId || !pending?.patches?.length) {
+  if (!review.activeArtifactId || !pending?.patches?.length) {
     emit(writer, "operation_stage", {
       stage: "应用小修",
       label,
@@ -365,14 +398,18 @@ async function applyArtifactPatchNode(state: GraphState) {
     });
     return {
       operationStage: "应用小修",
-      pendingArtifactRevision: null,
-      reviserAgent: operation?.primaryAgent ?? state.reviserAgent,
+      operationStep: "apply_artifact_patch" as OperationStep,
+      ...patchArtifactReviewState(state, {
+        status: "revision_requested",
+        pendingRevision: null,
+        reviserAgent: operation?.primaryAgent ?? review.reviserAgent,
+      }),
     };
   }
 
   const result = await applyArtifactEvaluationPatch({
-    artifactId: state.activeArtifactId,
-    evaluatorAgent: state.activeAgent ?? state.reviewerAgent ?? "编辑",
+    artifactId: review.activeArtifactId,
+    evaluatorAgent: state.activeAgent ?? review.reviewerAgent ?? "编辑",
     summary: pending.summary,
     patches: pending.patches,
     novelData: state.novelData,
@@ -386,13 +423,17 @@ async function applyArtifactPatchNode(state: GraphState) {
     });
     return {
       operationStage: "应用小修",
-      pendingArtifactRevision: null,
-      reviserAgent: operation?.primaryAgent ?? state.reviserAgent,
+      operationStep: "apply_artifact_patch" as OperationStep,
+      ...patchArtifactReviewState(state, {
+        status: "revision_requested",
+        pendingRevision: null,
+        reviserAgent: operation?.primaryAgent ?? review.reviserAgent,
+      }),
     };
   }
 
   emit(writer, "artifact_submitted", {
-    agentId: state.activeAgent ?? state.reviewerAgent ?? operation?.primaryAgent ?? "编辑",
+    agentId: state.activeAgent ?? review.reviewerAgent ?? operation?.primaryAgent ?? "编辑",
     artifact: result.artifact,
     artifactId: result.artifact.id,
     status: result.artifact.status,
@@ -400,17 +441,23 @@ async function applyArtifactPatchNode(state: GraphState) {
   });
 
   return {
+    ...patchArtifactReviewState(state, {
+      status: "reviewing",
+      activeArtifactId: result.artifact.id,
+      pendingRevision: null,
+      reviserAgent: null,
+    }),
     activeArtifactId: result.artifact.id,
+    operationStep: "apply_artifact_patch" as OperationStep,
     operationStage: "应用小修",
-    pendingArtifactRevision: null,
-    reviserAgent: null,
   };
 }
 
 export function routeAfterPatch(state: GraphState): keyof typeof OPERATION_PATCH_ROUTES {
   const operation = state.currentOperation;
+  const review = getArtifactReviewState(state);
   if (state.errorMessage) return "suggestNextAction";
-  if (state.reviserAgent && state.artifactIteration < state.maxArtifactIterations) {
+  if (review.reviserAgent && review.iteration < review.maxIterations) {
     return "reviseArtifact";
   }
   if (operation && hasNextReviewer(state, getOperationDefinition(operation.kind).reviewers)) {
@@ -430,8 +477,12 @@ async function reviseArtifactNode(state: GraphState) {
   });
   return {
     operationStage: "返工草案",
-    reviserAgent: null,
-    pendingArtifactRevision: null,
+    operationStep: "revise_artifact" as OperationStep,
+    ...patchArtifactReviewState(state, {
+      status: "revision_requested",
+      reviserAgent: null,
+      pendingRevision: null,
+    }),
     pendingAgentCall: operation
       ? {
           fromAgent: state.activeAgent ?? "编辑",
@@ -447,38 +498,55 @@ async function reviseArtifactNode(state: GraphState) {
 
 async function awaitUserDecisionNode(state: GraphState) {
   const writer = getWriter();
-  if (!state.activeArtifactId || !state.currentOperation) return { operationStage: "整理结果" };
+  const review = getArtifactReviewState(state);
+  const activeArtifactId = review.activeArtifactId;
+  if (!activeArtifactId || !state.currentOperation) return { operationStage: "整理结果", operationStep: "await_user_decision" as OperationStep };
   const label = getCreativeOperationLabel(state.currentOperation.kind);
-  await markArtifactAwaitingUser({ artifactId: state.activeArtifactId });
+  await markArtifactAwaitingUser({ artifactId: activeArtifactId });
+  const awaitingState = {
+    ...state,
+    ...patchArtifactReviewState(state, {
+      status: "awaiting_user",
+      activeArtifactId,
+      pendingRevision: null,
+      reviserAgent: null,
+    }),
+    operationStep: "await_user_decision" as OperationStep,
+    operationStage: "等待用户决策",
+  } as GraphState;
   await markTaskAwaitingUserReview({
     taskId: state.taskId,
-    artifactId: state.activeArtifactId,
-    state,
+    artifactId: activeArtifactId,
+    state: awaitingState,
     operationStage: "等待用户决策",
   });
   const artifactRecord = await prisma.reviewArtifact.findUnique({
-    where: { id: state.activeArtifactId },
+    where: { id: activeArtifactId },
     include: { evaluations: { orderBy: { createdAt: "desc" } } },
   });
   const artifact = artifactRecord ? toReviewArtifactDto(artifactRecord) : undefined;
   emit(writer, "operation_stage", {
     stage: "等待用户决策",
     label,
-    artifactId: state.activeArtifactId,
+    artifactId: activeArtifactId,
     message: `${label}已通过审核，等待你确认。`,
   });
+  const dedupKey = artifactRecord
+    ? state.taskId + ":artifact_awaiting_user:" + artifactRecord.id + ":rev" + artifactRecord.revision
+    : state.taskId + ":artifact_awaiting_user:" + activeArtifactId;
   emit(writer, "artifact_awaiting_user_approval", {
     agentId: state.activeAgent ?? state.currentOperation.primaryAgent,
-    artifactId: state.activeArtifactId,
+    artifactId: activeArtifactId,
+    dedupKey,
     artifact,
   });
   langGraphInterrupt(createArtifactReviewInterrupt({
-    artifactId: state.activeArtifactId,
+    artifactId: activeArtifactId,
     artifact,
     summary: `${label}已通过审核，请决定是否应用到项目。`,
     content: `${label}已生成待审核草案。`,
   }));
-  return { operationStage: "等待用户决策" };
+  return awaitingState;
 }
 
 async function suggestNextActionNode(state: GraphState) {
@@ -489,7 +557,7 @@ async function suggestNextActionNode(state: GraphState) {
     label,
     message: `${label}流程已整理完成。`,
   });
-  return { operationStage: "建议下一步", phase: "completed" };
+  return { operationStage: "建议下一步", operationStep: "completed" as OperationStep, phase: "completed" };
 }
 
 async function runReviewer(reviewer: CoreAgentId, state: GraphState): Promise<Partial<WritingState>> {

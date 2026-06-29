@@ -46,7 +46,7 @@
 
 - 草案状态只保留 `draft | under_review | awaiting_user | applying | applied`，避免 `discarded/rejected/blocked/superseded` 等异常状态膨胀。
 - 用户丢弃草案时硬删除 Artifact、revision 和 evaluation。
-- Agent 读取草案必须通过 `get_active_review_artifact` / `get_review_artifact`，或当前 state 的 `activeArtifactId` 上下文；草案内容不得默认混入正式小说上下文。
+- Agent 读取草案必须通过 `get_active_review_artifact` / `get_review_artifact`，或当前 state 的 `artifactReview.activeArtifactId` 上下文（旧 `activeArtifactId` 仅兼容）；草案内容不得默认混入正式小说上下文。
 - 生产 Agent 负责提交/修订草案，评审 Agent 负责 `submit_evaluation`，用户负责最终应用或丢弃。
 - 正式落库只发生在用户确认应用后，由 `applyReviewArtifact()` 调用正式写入逻辑。
 

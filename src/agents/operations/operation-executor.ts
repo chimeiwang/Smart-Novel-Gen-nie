@@ -11,7 +11,7 @@ import type {
   CoreAgentId,
   WritingState,
 } from "@/agents/graph/state";
-import { AGENT_TO_OUTPUT_FIELD, createAgentOutput } from "@/agents/graph/state";
+import { AGENT_TO_OUTPUT_FIELD, createAgentOutput, patchArtifactReviewState } from "@/agents/graph/state";
 import type { CreativeOperation } from "@/shared/contracts/creative-operation";
 import { getCreativeOperationLabel } from "@/shared/contracts/creative-operation";
 import type { ReviewArtifactDto } from "@/shared/contracts/review-artifact";
@@ -59,6 +59,19 @@ export async function executeCreativeOperation(
   });
   const output = readAgentOutput(activeAgent, agentResult);
   const controlEvents = agentResult.controlEvents as AgentControlEvent[] | undefined;
+
+  if (agentResult.errorMessage) {
+    return {
+      statePatch: {
+        ...agentResult,
+        pendingAgentCall: null,
+        controlEvents: undefined,
+        generatedContent: state.generatedContent,
+      },
+      output,
+      directReply: output?.content ?? agentResult.errorMessage,
+    };
+  }
 
   const controlResult = output
     ? await processOperationControlEvents({
@@ -111,6 +124,11 @@ export async function executeCreativeOperation(
       statePatch: {
         ...agentResult,
         ...processedPatch,
+        ...patchArtifactReviewState(state, {
+          status: "draft_submitted",
+          activeArtifactId: artifact.id,
+          reviewerAgent: def.reviewers[0] ?? null,
+        }),
         activeArtifactId: artifact.id,
         pendingAgentCall: null,
         controlEvents: undefined,
@@ -174,6 +192,7 @@ async function processOperationControlEvents(input: {
         qualityCheckId: state.qualityCheckId,
         novelData: state.novelData,
       },
+      graphState: state as import("@/agents/graph/graph-definition").GraphState,
       activeAgent,
       output,
       updatedHistory,
@@ -196,6 +215,13 @@ async function processOperationControlEvents(input: {
     statePatch: {
       ...agentResult,
       ...processed,
+      ...(processed.activeArtifactId
+        ? patchArtifactReviewState(state, {
+            status: "draft_submitted",
+            activeArtifactId: processed.activeArtifactId,
+            reviewerAgent: processed.reviewerAgent ?? null,
+          })
+        : {}),
       generatedContent: state.generatedContent,
     },
     output,

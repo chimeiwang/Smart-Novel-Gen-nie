@@ -57,6 +57,46 @@ function createState(kind: CreativeOperationKind): WritingState {
 }
 
 describe("executeCreativeOperation control events", () => {
+  it("returns a precondition failure directly without creating a text artifact", async () => {
+    const state = createState("write_chapter");
+    state.currentOperation = {
+      ...state.currentOperation!,
+      kind: "write_chapter",
+      targetType: "chapter",
+      primaryAgent: "写作",
+      reviewers: ["校验", "编辑"],
+      outputKind: "chapter_text",
+      requiresArtifact: true,
+      requiresUserApproval: true,
+    };
+    const message = "请先规划并批准章节计划。";
+    const output: AgentOutput = {
+      agentId: "写作",
+      agentName: "作家",
+      content: message,
+      insights: [],
+      proactiveSuggestions: [],
+    };
+    let artifactCreated = false;
+
+    const result = await executeCreativeOperation(state, {
+      runInternalAgent: async () => ({
+        writerOutput: output,
+        activeAgent: "写作",
+        errorMessage: message,
+      }),
+      createOrUpdateTextArtifact: async () => {
+        artifactCreated = true;
+        throw new Error("precondition failure must not create an artifact");
+      },
+    });
+
+    assert.equal(artifactCreated, false);
+    assert.equal(result.artifact, undefined);
+    assert.equal(result.directReply, message);
+    assert.equal(result.statePatch.errorMessage, message);
+  });
+
   it("emits artifact review events for agent-update operations with reviewerAgent", async () => {
     const output: AgentOutput = {
       agentId: "设定",

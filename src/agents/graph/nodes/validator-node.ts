@@ -16,10 +16,9 @@
 
 import type { OpenAI } from "openai";
 import type { AgentOutput, CoreAgentId, WritingState } from "../state";
-import { AGENT_NAMES } from "../state";
-import { buildContextWithHistory } from "../context-manager";
+import { AGENT_NAMES, getActiveArtifactId } from "../state";
 import { SELF_CHECK_PROMPT } from "../self-check-prompt";
-import { buildActiveTaskContext, buildSummaryIndex } from "../context-builder";
+import { buildActiveTaskContext, buildConversationHistoryText, buildSummaryIndex } from "../context-builder";
 import type { AgentDefinition } from "@/agents/runtime/agent-definition";
 import { runAgent } from "@/agents/runtime/agent-runner";
 
@@ -45,6 +44,9 @@ const validatorDefinition: AgentDefinition = {
     "control.validation",
     "control.evaluation",
   ],
+  modelProfile: "fast",
+  reasoningEffort: "medium",
+  terminalControlTools: ["submit_evaluation"],
 
   statusMessages: {
     understanding: "正在理解校验对象...",
@@ -71,11 +73,15 @@ const validatorDefinition: AgentDefinition = {
     }
 
     if (conversationHistory.length > 0) {
+      const activeArtifactId = getActiveArtifactId(state);
+      const isArtifactReview = Boolean(activeArtifactId && state.pendingAgentCall?.toAgent === AGENT_ID);
       messages.push({
         role: "system",
-        content: "## 对话历史\n\n" + buildContextWithHistory({
-          conversationHistory, userMessage, novelData,
-        } as WritingState),
+        content: "## 对话历史\n\n" + buildConversationHistoryText(conversationHistory, isArtifactReview ? {
+          mode: "reviewer",
+          activeArtifactId,
+          artifactProducerAgentId: state.currentOperation?.primaryAgent ?? null,
+        } : undefined),
       });
     }
 
@@ -138,7 +144,7 @@ function buildSystemPrompt(): string {
     "\n- 有冲突时：hasConflicts=true，conflicts 数组中每项包含 type/summary/evidence/suggestion" +
     "\n- 无冲突时：hasConflicts=false，conflicts 为空数组" +
     "\n- 需要其他 Agent 继续处理时：在校验报告中说明问题和建议主责方向，不要自行转交" +
-    "\n- 复审其他 Agent 产物时：先调用 get_active_review_artifact 或 get_review_artifact 读取待审核草案；最终必须调用 submit_evaluation 提交 pass/revise/block，不能只输出自然语言校验报告。" +
+    "\n- 复审其他 Agent 产物时：先且只调用一次 get_active_review_artifact 读取待审核草案，Artifact 内容是唯一审核正文来源；最终必须在同一轮先输出完整自然语言校验报告，并调用 submit_evaluation 提交 pass/revise/block。submit_evaluation 成功后本轮立即结束，不会再有后续整理轮次。" +
     "\n- 复审结论可提交用户确认时：verdict=pass；需要返工时：verdict=revise，并在 requiredChanges 写清可执行修改要求；无法继续时：verdict=block。" +
     "\n- 可精确定位的小修用 revisionMode=patch；方向性或结构性大改用 revisionMode=rewrite。" +
     "\n- 如果你已经写出校验报告但还没调用 submit_evaluation，本轮复审仍视为未完成。";

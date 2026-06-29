@@ -7,6 +7,7 @@
 
 import fs from "fs";
 import path from "path";
+import { getLLMLogMode, type LLMLogMode } from "@/shared/env";
 
 /** 日志文件目录 */
 const LOG_DIR = path.join(process.cwd(), "logs");
@@ -35,6 +36,186 @@ export interface LogEntry {
     event?: string;
     duration?: number;
   };
+}
+
+export interface LLMLogContext {
+  agentRunId?: string;
+  modelTurn?: number;
+  callType?: string;
+  agentId?: string;
+  taskId?: string;
+  userId?: string;
+  novelId?: string;
+  [key: string]: unknown;
+}
+
+export interface LLMLogUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  cachedTokens?: number;
+}
+
+export interface LLMLogRecord extends LLMLogContext {
+  timestamp: string;
+  event: "REQUEST" | "RESPONSE" | "TOOL_CALL" | "AGENT_RUN_FINAL" | "ERROR";
+  requestId: string;
+  [key: string]: unknown;
+}
+
+const LLM_LOG_PREVIEW_CHARS = 300;
+
+function serializeForLength(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "[无法序列化的数据]";
+  }
+}
+
+function getMessageTextLength(message: unknown): number {
+  if (!message || typeof message !== "object") return 0;
+  const item = message as { content?: unknown };
+  const contentChars = typeof item.content === "string"
+    ? item.content.length
+    : item.content == null ? 0 : serializeForLength(item.content).length;
+  return contentChars;
+}
+
+function getMessagePreview(messages: unknown[]): string {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (!message || typeof message !== "object") continue;
+    const content = (message as { content?: unknown }).content;
+    if (typeof content === "string" && content.trim()) {
+      return content.replace(/\s+/g, " ").trim().slice(0, LLM_LOG_PREVIEW_CHARS);
+    }
+  }
+  return "";
+}
+
+export function buildLLMRequestLogRecord(input: {
+  requestId: string;
+  messages: unknown[];
+  tools?: unknown[];
+  context?: LLMLogContext;
+  mode: Exclude<LLMLogMode, "off">;
+  timestamp?: string;
+}): LLMLogRecord {
+  const serializedMessages = serializeForLength(input.messages);
+  const serializedTools = serializeForLength(input.tools ?? []);
+  const serializedRequest = serializeForLength({
+    messages: input.messages,
+    tools: input.tools ?? [],
+  });
+  const roleCounts: Record<string, number> = {};
+  for (const message of input.messages) {
+    const role = message && typeof message === "object" && typeof (message as { role?: unknown }).role === "string"
+      ? String((message as { role: string }).role)
+      : "unknown";
+    roleCounts[role] = (roleCounts[role] ?? 0) + 1;
+  }
+  const record: LLMLogRecord = {
+    ...(input.context ?? {}),
+    timestamp: input.timestamp ?? new Date().toISOString(),
+    event: "REQUEST",
+    requestId: input.requestId,
+    messageCount: input.messages.length,
+    roleCounts,
+    serializedChars: serializedRequest.length,
+    messageSerializedChars: serializedMessages.length,
+    toolSerializedChars: serializedTools.length,
+    textChars: input.messages.reduce<number>((total, message) => total + getMessageTextLength(message), 0),
+    toolDefinitionCount: input.tools?.length ?? 0,
+    preview: getMessagePreview(input.messages),
+  };
+  if (input.mode === "full") {
+    record.messages = input.messages;
+    record.tools = input.tools ?? [];
+  }
+  return record;
+}
+
+export function buildLLMResponseLogRecord(input: {
+  requestId: string;
+  content: string;
+  usage?: LLMLogUsage;
+  context?: LLMLogContext;
+  durationMs?: number;
+  finishReason?: string;
+  mode: Exclude<LLMLogMode, "off">;
+  timestamp?: string;
+}): LLMLogRecord {
+  const record: LLMLogRecord = {
+    ...(input.context ?? {}),
+    timestamp: input.timestamp ?? new Date().toISOString(),
+    event: "RESPONSE",
+    requestId: input.requestId,
+    contentChars: input.content.length,
+    preview: input.content.replace(/\s+/g, " ").trim().slice(0, LLM_LOG_PREVIEW_CHARS),
+    durationMs: input.durationMs,
+    finishReason: input.finishReason,
+    usage: input.usage,
+  };
+  if (input.mode === "full") record.content = input.content;
+  return record;
+}
+
+export function buildLLMToolCallLogRecord(input: {
+  requestId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  result: string;
+  context?: LLMLogContext;
+  durationMs?: number;
+  mode: Exclude<LLMLogMode, "off">;
+  timestamp?: string;
+}): LLMLogRecord {
+  const serializedArgs = serializeForLength(input.args);
+  const record: LLMLogRecord = {
+    ...(input.context ?? {}),
+    timestamp: input.timestamp ?? new Date().toISOString(),
+    event: "TOOL_CALL",
+    requestId: input.requestId,
+    toolName: input.toolName,
+    argsChars: serializedArgs.length,
+    resultChars: input.result.length,
+    resultPreview: input.result.replace(/\s+/g, " ").trim().slice(0, LLM_LOG_PREVIEW_CHARS),
+    durationMs: input.durationMs,
+  };
+  if (input.mode === "full") {
+    record.args = input.args;
+    record.result = input.result;
+  }
+  return record;
+}
+
+export function buildAgentRunFinalLogRecord(input: {
+  agentRunId: string;
+  content: string;
+  context?: LLMLogContext;
+  usage?: LLMLogUsage;
+  finishReason?: string;
+  toolCallCount?: number;
+  controlEventTypes?: string[];
+  mode: Exclude<LLMLogMode, "off">;
+  timestamp?: string;
+}): LLMLogRecord {
+  const record: LLMLogRecord = {
+    ...(input.context ?? {}),
+    timestamp: input.timestamp ?? new Date().toISOString(),
+    event: "AGENT_RUN_FINAL",
+    requestId: input.agentRunId,
+    agentRunId: input.agentRunId,
+    contentChars: input.content.length,
+    preview: input.content.replace(/\s+/g, " ").trim().slice(0, LLM_LOG_PREVIEW_CHARS),
+    usage: input.usage,
+    finishReason: input.finishReason,
+    toolCallCount: input.toolCallCount ?? 0,
+    controlEventTypes: input.controlEventTypes ?? [],
+  };
+  if (input.mode === "full") record.content = input.content;
+  return record;
 }
 
 /** 日志实例 */
@@ -73,16 +254,17 @@ class LocalLogger {
   private getLLMLogFilePath(): string {
     this.init();
     const date = new Date().toISOString().split("T")[0];
-    return path.join(LLM_LOG_DIR, `llm-${date}.log`);
+    return path.join(LLM_LOG_DIR, `llm-${date}.jsonl`);
   }
 
   /**
    * 写入 LLM 日志
    */
-  private writeLLMLog(content: string): void {
+  private writeLLMLogRecord(record: LLMLogRecord, force = false): void {
+    if (!force && getLLMLogMode() === "off") return;
     try {
       const logPath = this.getLLMLogFilePath();
-      fs.appendFileSync(logPath, content + "\n", "utf-8");
+      fs.appendFileSync(logPath, JSON.stringify(record) + "\n", "utf-8");
     } catch (e) {
       console.error("LLM 日志写入失败:", e);
     }
@@ -335,24 +517,18 @@ class LocalLogger {
    */
   llmRequest(
     requestId: string,
-    messages: unknown[]
+    messages: unknown[],
+    options: { tools?: unknown[]; context?: LLMLogContext } = {}
   ): void {
-    const timestamp = new Date().toISOString();
-    const separator = "=".repeat(80);
-
-    let logContent = `${separator}\n`;
-    logContent += `[${timestamp}] REQUEST #${requestId}\n`;
-    logContent += `${separator}\n\n`;
-
-    try {
-      logContent += JSON.stringify(messages, null, 2);
-    } catch {
-      logContent += "[无法序列化的消息]";
-    }
-
-    logContent += `\n\n${separator}\n\n`;
-
-    this.writeLLMLog(logContent);
+    const mode = getLLMLogMode();
+    if (mode === "off") return;
+    this.writeLLMLogRecord(buildLLMRequestLogRecord({
+      requestId,
+      messages,
+      tools: options.tools,
+      context: options.context,
+      mode,
+    }));
     console.log(`[LLM] 请求 #${requestId} 已记录`);
   }
 
@@ -362,23 +538,24 @@ class LocalLogger {
   llmResponse(
     requestId: string,
     content: string,
-    usage?: { promptTokens: number; completionTokens: number; totalTokens: number }
+    usage?: LLMLogUsage,
+    options: {
+      context?: LLMLogContext;
+      durationMs?: number;
+      finishReason?: string;
+    } = {}
   ): void {
-    const timestamp = new Date().toISOString();
-    const separator = "-".repeat(80);
-
-    let logContent = `${separator}\n`;
-    logContent += `[${timestamp}] RESPONSE #${requestId}\n`;
-    logContent += `${separator}\n\n`;
-
-    if (usage) {
-      logContent += `Tokens: prompt=${usage.promptTokens}, completion=${usage.completionTokens}, total=${usage.totalTokens}\n\n`;
-    }
-
-    logContent += `### Content:\n${content}\n\n`;
-    logContent += `${separator}\n\n`;
-
-    this.writeLLMLog(logContent);
+    const mode = getLLMLogMode();
+    if (mode === "off") return;
+    this.writeLLMLogRecord(buildLLMResponseLogRecord({
+      requestId,
+      content,
+      usage,
+      context: options.context,
+      durationMs: options.durationMs,
+      finishReason: options.finishReason,
+      mode,
+    }));
     console.log(`[LLM] 响应 #${requestId} 已记录 (${content.length} chars)`);
   }
 
@@ -389,17 +566,57 @@ class LocalLogger {
     requestId: string,
     toolName: string,
     args: Record<string, unknown>,
-    result: string
+    result: string,
+    options: { context?: LLMLogContext; durationMs?: number } = {}
   ): void {
-    const timestamp = new Date().toISOString();
-
-    let logContent = `[${timestamp}] TOOL CALL #${requestId}\n`;
-    logContent += `Tool: ${toolName}\n`;
-    logContent += `Arguments: ${JSON.stringify(args, null, 2)}\n`;
-    logContent += `Result: ${result.slice(0, 500)}${result.length > 500 ? "...(truncated)" : ""}\n\n`;
-
-    this.writeLLMLog(logContent);
+    const mode = getLLMLogMode();
+    if (mode === "off") return;
+    this.writeLLMLogRecord(buildLLMToolCallLogRecord({
+      requestId,
+      toolName,
+      args,
+      result,
+      context: options.context,
+      durationMs: options.durationMs,
+      mode,
+    }));
     console.log(`[LLM] 工具调用 ${toolName} #${requestId} 已记录`);
+  }
+
+  agentRunFinal(
+    agentRunId: string,
+    content: string,
+    options: {
+      context?: LLMLogContext;
+      usage?: LLMLogUsage;
+      finishReason?: string;
+      toolCallCount?: number;
+      controlEventTypes?: string[];
+    } = {}
+  ): void {
+    const mode = getLLMLogMode();
+    if (mode === "off") return;
+    this.writeLLMLogRecord(buildAgentRunFinalLogRecord({
+      agentRunId,
+      content,
+      context: options.context,
+      usage: options.usage,
+      finishReason: options.finishReason,
+      toolCallCount: options.toolCallCount,
+      controlEventTypes: options.controlEventTypes,
+      mode,
+    }));
+  }
+
+  llmError(requestId: string, error: unknown, context?: LLMLogContext): void {
+    const message = error instanceof Error ? error.message : String(error);
+    this.writeLLMLogRecord({
+      ...(context ?? {}),
+      timestamp: new Date().toISOString(),
+      event: "ERROR",
+      requestId,
+      message,
+    }, true);
   }
 
   /**

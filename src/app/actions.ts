@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { createPortraitAgent } from "@/agents";
+import { deserializeGraphStateSnapshot } from "@/agents/graph/graph-state-snapshot";
 import { prisma } from "@/shared/db/prisma";
 import { executeUpdates } from "@/agents/lib/db-operations";
 import { authorizeNovel, authorizeWritingTask } from "@/agents/lib/task-auth";
@@ -1800,6 +1801,11 @@ export async function acceptGeneratedContentAction(input: {
 
   if (!task?.generatedContent) {
     throw new Error("没有可用的生成内容");
+  }
+  const snapshot = deserializeGraphStateSnapshot(task.graphStateJson);
+  const activeArtifactId = snapshot?.artifactReview.activeArtifactId ?? snapshot?.activeArtifactId ?? null;
+  if (task.phase === "awaiting_user_review" || task.generatedContent === activeArtifactId) {
+    throw new Error("当前内容是待审核草案，请通过草案审核卡片确认应用。");
   }
 
   // P0：校验前端传入的 chapterId 必须与 task.chapterId 一致

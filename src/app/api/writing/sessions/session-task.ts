@@ -36,17 +36,19 @@ export function selectCurrentSessionTask(
     const match = tasks.find((task) => task.phase === phase);
     if (match) {
       const snapshot = deserializeGraphStateSnapshot(match.graphStateJson);
+      const activeArtifactId =
+        snapshot?.artifactReview.activeArtifactId ??
+        snapshot?.activeArtifactId ??
+        (match.phase === "awaiting_user_review" ? match.generatedContent : null);
       return {
         id: match.id,
         phase: match.phase,
         updatedAt: match.updatedAt.toISOString(),
         hasAwaitingReviewArtifact:
-          match.phase === "awaiting_user_review" && Boolean(match.generatedContent),
+          match.phase === "awaiting_user_review" && Boolean(activeArtifactId),
         currentOperation: snapshot?.currentOperation ?? null,
         operationStage: snapshot?.operationStage ?? null,
-        activeArtifactId:
-          snapshot?.activeArtifactId ??
-          (match.phase === "awaiting_user_review" ? match.generatedContent : null),
+        activeArtifactId,
       };
     }
   }

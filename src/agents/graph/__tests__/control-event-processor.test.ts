@@ -8,6 +8,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { extractArtifactOutputContent, processControlEvents } from "../control-event-processor";
 import type { AgentControlEvent, AgentMessage, AgentOutput, CoreAgentId, NovelData } from "../state";
+import type { GraphState } from "../graph-definition";
 import type { PutUpdateItemTextBlockEvent } from "@/shared/contracts/agent-control";
 
 function createOutput(): AgentOutput {
@@ -41,6 +42,58 @@ function createNovelData(overrides: Partial<NovelData> = {}): NovelData {
     references: [],
     styleProfile: "",
     ...overrides,
+  };
+}
+
+function createGraphState(): GraphState {
+  return {
+    taskId: "task-1",
+    userId: "user-1",
+    novelId: "novel-1",
+    chapterId: "chapter-1",
+    targetWordCount: 4000,
+    phase: "active",
+    userMessage: "审核草案",
+    pendingUserResponse: false,
+    conversationHistory: [],
+    activeAgent: "编辑",
+    currentOperation: null,
+    operationMode: "operation_graph",
+    operationStep: "review_artifact",
+    operationStage: "审核草案",
+    chapterDraftTarget: null,
+    agentOutputs: {},
+    loreAdvisorOutput: null,
+    plotAdvisorOutput: null,
+    writerOutput: null,
+    validatorOutput: null,
+    editorOutput: null,
+    generatedContent: "",
+    pendingUpdates: null,
+    novelData: createNovelData(),
+    runtime: { streamCallbacks: {}, eventCallbacks: {} },
+    pendingAgentCall: null,
+    errorMessage: null,
+    streamCallbacks: {},
+    eventCallbacks: {},
+    qualityCheckId: null,
+    controlEvents: undefined,
+    artifactReview: {
+      status: "reviewing",
+      activeArtifactId: "artifact-1",
+      reviewerAgent: "编辑",
+      reviserAgent: null,
+      pendingRevision: null,
+      iteration: 1,
+      maxIterations: 5,
+    },
+    activeArtifactId: "artifact-1",
+    artifactMode: "review_loop",
+    reviewerAgent: "编辑",
+    reviserAgent: null,
+    pendingArtifactRevision: null,
+    artifactIteration: 1,
+    maxArtifactIterations: 5,
   };
 }
 
@@ -488,6 +541,7 @@ describe("processControlEvents", () => {
           chapterId: "chapter-1",
           qualityCheckId: null,
         },
+        graphState: createGraphState(),
         activeAgent: "编辑",
         output: {
           agentId: "编辑",
@@ -551,6 +605,7 @@ describe("processControlEvents", () => {
             chapterId: "chapter-1",
             qualityCheckId: null,
           },
+          graphState: createGraphState(),
           activeAgent: "编辑",
           output: {
             agentId: "编辑",
@@ -613,6 +668,7 @@ describe("processControlEvents", () => {
           chapterId: "chapter-1",
           qualityCheckId: null,
         },
+        graphState: createGraphState(),
         activeAgent: "编辑",
         output: {
           agentId: "编辑",
@@ -651,7 +707,10 @@ describe("processControlEvents", () => {
       }
     );
 
-    assert.deepEqual(pendingActions, [{ taskId: "task-1", artifactId: "artifact-1" }]);
+    assert.deepEqual(
+      pendingActions.map(({ taskId, artifactId }) => ({ taskId, artifactId })),
+      [{ taskId: "task-1", artifactId: "artifact-1" }]
+    );
   });
 });
 

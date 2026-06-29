@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { deserializeGraphStateSnapshot } from "../graph-state-snapshot";
 import { buildAwaitingUserReviewTaskUpdate } from "../task-state";
 import type { GraphState } from "../graph-definition";
+import { createDefaultArtifactReviewState } from "../state";
 
 function createState(): GraphState {
   return {
@@ -30,8 +31,10 @@ function createState(): GraphState {
       reviewers: ["校验"],
     },
     operationMode: "operation_graph",
+    operationStep: "review_artifact",
     operationStage: "审核草案",
     chapterDraftTarget: null,
+    agentOutputs: {},
     loreAdvisorOutput: null,
     plotAdvisorOutput: null,
     writerOutput: null,
@@ -40,12 +43,19 @@ function createState(): GraphState {
     generatedContent: "",
     pendingUpdates: null,
     novelData: { novelId: "novel-1", chapterId: "chapter-1" } as GraphState["novelData"],
+    runtime: { streamCallbacks: {}, eventCallbacks: {} },
     pendingAgentCall: null,
     errorMessage: null,
     streamCallbacks: {},
     eventCallbacks: {},
     qualityCheckId: null,
     controlEvents: undefined,
+    artifactReview: createDefaultArtifactReviewState({
+      status: "reviewing",
+      activeArtifactId: "artifact-1",
+      reviewerAgent: "校验",
+      iteration: 1,
+    }),
     activeArtifactId: "artifact-1",
     artifactMode: "review_loop",
     reviewerAgent: "校验",
@@ -65,7 +75,7 @@ describe("task-state awaiting user review update", () => {
     });
 
     assert.equal(update.phase, "awaiting_user_review");
-    assert.equal(update.generatedContent, "artifact-1");
+    assert.equal("generatedContent" in update, false);
     assert.equal(typeof update.conversationHistory, "string");
     assert.equal(typeof update.graphStateJson, "string");
 
@@ -74,7 +84,8 @@ describe("task-state awaiting user review update", () => {
     assert.equal(snapshot.phase, "awaiting_user_review");
     assert.equal(snapshot.pendingUserResponse, true);
     assert.equal(snapshot.activeArtifactId, "artifact-1");
-    assert.equal(snapshot.generatedContent, "artifact-1");
+    assert.equal(snapshot.artifactReview.status, "awaiting_user");
+    assert.equal(snapshot.artifactReview.activeArtifactId, "artifact-1");
     assert.equal(snapshot.operationStage, "等待用户决策");
   });
 });

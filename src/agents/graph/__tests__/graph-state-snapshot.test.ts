@@ -7,6 +7,7 @@ import {
   serializeGraphStateSnapshot,
 } from "../graph-state-snapshot";
 import type { GraphState } from "../graph-definition";
+import { createDefaultArtifactReviewState } from "../state";
 
 function createState(): GraphState {
   return {
@@ -41,8 +42,10 @@ function createState(): GraphState {
       reviewers: ["校验", "编辑"],
     },
     operationMode: "operation_graph",
+    operationStep: "await_user_decision",
     operationStage: "等待用户决策",
     chapterDraftTarget: null,
+    agentOutputs: {},
     loreAdvisorOutput: null,
     plotAdvisorOutput: null,
     writerOutput: null,
@@ -51,6 +54,14 @@ function createState(): GraphState {
     generatedContent: "artifact-1",
     pendingUpdates: null,
     novelData: { novelId: "novel-1", chapterId: "chapter-1" } as GraphState["novelData"],
+    runtime: {
+      streamCallbacks: {
+        写作: () => undefined,
+      },
+      eventCallbacks: {
+        写作: () => undefined,
+      },
+    },
     pendingAgentCall: {
       fromAgent: "编辑",
       toAgent: "写作",
@@ -66,6 +77,12 @@ function createState(): GraphState {
     },
     qualityCheckId: "check-1",
     controlEvents: undefined,
+    artifactReview: createDefaultArtifactReviewState({
+      status: "awaiting_user",
+      activeArtifactId: "artifact-1",
+      reviewerAgent: "编辑",
+      iteration: 1,
+    }),
     activeArtifactId: "artifact-1",
     artifactMode: "review_loop",
     reviewerAgent: "编辑",
@@ -84,6 +101,7 @@ describe("graph state snapshots", () => {
     assert.equal(parsed.taskId, "task-1");
     assert.equal(parsed.phase, "awaiting_user_review");
     assert.equal(parsed.activeArtifactId, "artifact-1");
+    assert.equal(parsed.artifactReview.activeArtifactId, "artifact-1");
     assert.equal(parsed.operationStage, "等待用户决策");
     assert.equal(parsed.streamCallbacks, undefined);
     assert.equal(parsed.eventCallbacks, undefined);

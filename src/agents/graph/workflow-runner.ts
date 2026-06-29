@@ -10,7 +10,7 @@
 
 import { Command, isInterrupted } from "@langchain/langgraph";
 import type { WritingState, CoreAgentId, WritingPhase } from "./state";
-import { CORE_AGENT_IDS } from "./state";
+import { CORE_AGENT_IDS, createDefaultArtifactReviewState, getArtifactReviewState } from "./state";
 import { deleteGraphThreadCheckpoint, getGraph } from "./graph-definition";
 import type { GraphState } from "./graph-definition";
 import {
@@ -158,6 +158,67 @@ async function getWritingSessionIdForTask(taskId: string): Promise<string | null
   return task?.writingSessionId ?? null;
 }
 
+export function createBaseGraphState(input: {
+  taskId: string;
+  userId: string;
+  novelId: string;
+  chapterId: string;
+  targetWordCount: number;
+  userMessage: string;
+  novelData: WritingState["novelData"];
+  phase?: WritingPhase;
+  conversationHistory?: GraphState["conversationHistory"];
+  activeAgent?: CoreAgentId | null;
+  generatedContent?: string | null;
+  qualityCheckId?: string | null;
+  streamCallbacks?: GraphState["streamCallbacks"];
+  eventCallbacks?: GraphState["eventCallbacks"];
+}): GraphState {
+  const streamCallbacks = input.streamCallbacks ?? {};
+  const eventCallbacks = input.eventCallbacks;
+  return {
+    taskId: input.taskId,
+    userId: input.userId,
+    novelId: input.novelId,
+    chapterId: input.chapterId,
+    targetWordCount: input.targetWordCount,
+    phase: input.phase ?? "active",
+    userMessage: input.userMessage,
+    pendingUserResponse: false,
+    conversationHistory: input.conversationHistory ?? [],
+    activeAgent: input.activeAgent ?? null,
+    currentOperation: null,
+    operationMode: "operation_graph",
+    operationStep: "init",
+    operationStage: null,
+    chapterDraftTarget: null,
+    agentOutputs: {},
+    loreAdvisorOutput: null,
+    plotAdvisorOutput: null,
+    writerOutput: null,
+    validatorOutput: null,
+    editorOutput: null,
+    generatedContent: input.generatedContent ?? "",
+    pendingUpdates: null,
+    novelData: input.novelData,
+    runtime: { streamCallbacks, eventCallbacks },
+    pendingAgentCall: null,
+    errorMessage: null,
+    streamCallbacks,
+    eventCallbacks,
+    qualityCheckId: input.qualityCheckId ?? null,
+    controlEvents: undefined,
+    artifactReview: createDefaultArtifactReviewState(),
+    activeArtifactId: null,
+    artifactMode: "none",
+    reviewerAgent: null,
+    reviserAgent: null,
+    pendingArtifactRevision: null,
+    artifactIteration: 0,
+    maxArtifactIterations: 5,
+  };
+}
+
 // ============================================
 // createInitialState
 // ============================================
@@ -172,43 +233,16 @@ export async function createInitialState(params: WorkflowInitialState): Promise<
   const novelData = await aggregateNovelContextLightweight(novelId, chapterId);
   const taskId = await createWorkflowTask(params);
 
-  return {
+  return createBaseGraphState({
     taskId,
     userId,
     novelId,
     chapterId,
     targetWordCount,
-    phase: "active",
     userMessage,
-    pendingUserResponse: false,
-    conversationHistory: [],
-    activeAgent: null,
-    currentOperation: null,
-    operationMode: "operation_graph",
-    operationStage: null,
-    chapterDraftTarget: null,
-    loreAdvisorOutput: null,
-    plotAdvisorOutput: null,
-    writerOutput: null,
-    validatorOutput: null,
-    editorOutput: null,
-    generatedContent: "",
-    pendingUpdates: null,
     novelData: { ...novelData, novelId, chapterId } as WritingState["novelData"],
-    pendingAgentCall: null,
-    errorMessage: null,
-    streamCallbacks: {},
-    eventCallbacks: undefined,
-    qualityCheckId: qualityCheckId ?? null,
-    controlEvents: undefined,
-    activeArtifactId: null,
-    artifactMode: "none",
-    reviewerAgent: null,
-    reviserAgent: null,
-    pendingArtifactRevision: null,
-    artifactIteration: 0,
-    maxArtifactIterations: 5,
-  };
+    qualityCheckId,
+  });
 }
 
 async function createInitialStateForTask(
@@ -225,43 +259,16 @@ async function createInitialStateForTask(
   });
   const novelData = await aggregateNovelContextLightweight(novelId, chapterId);
 
-  return {
+  return createBaseGraphState({
     taskId,
     userId,
     novelId,
     chapterId,
     targetWordCount,
-    phase: "active",
     userMessage,
-    pendingUserResponse: false,
-    conversationHistory: [],
-    activeAgent: null,
-    currentOperation: null,
-    operationMode: "operation_graph",
-    operationStage: null,
-    chapterDraftTarget: null,
-    loreAdvisorOutput: null,
-    plotAdvisorOutput: null,
-    writerOutput: null,
-    validatorOutput: null,
-    editorOutput: null,
-    generatedContent: "",
-    pendingUpdates: null,
     novelData: { ...novelData, novelId, chapterId } as WritingState["novelData"],
-    pendingAgentCall: null,
-    errorMessage: null,
-    streamCallbacks: {},
-    eventCallbacks: undefined,
-    qualityCheckId: qualityCheckId ?? null,
-    controlEvents: undefined,
-    activeArtifactId: null,
-    artifactMode: "none",
-    reviewerAgent: null,
-    reviserAgent: null,
-    pendingArtifactRevision: null,
-    artifactIteration: 0,
-    maxArtifactIterations: 5,
-  };
+    qualityCheckId,
+  });
 }
 
 // ============================================
@@ -814,6 +821,10 @@ export async function resumeWriting(
             update: {
               streamCallbacks: createDirectStreamCallbacks(sendEvent),
               eventCallbacks: createDirectEventCallbacks(sendEvent),
+              runtime: {
+                streamCallbacks: createDirectStreamCallbacks(sendEvent),
+                eventCallbacks: createDirectEventCallbacks(sendEvent),
+              },
             },
           }) as unknown as GraphState;
           if (shouldUseLangGraphStreamEvents()) {
@@ -886,7 +897,11 @@ export async function resumeWriting(
             lastActiveAgent,
           });
 
-          const graphInput = {
+          const runtimeCallbacks = {
+            streamCallbacks: createDirectStreamCallbacks(sendEvent),
+            eventCallbacks: createDirectEventCallbacks(sendEvent),
+          };
+          const graphInput = createBaseGraphState({
             taskId,
             userId: task.novel?.userId ?? "",
             novelId: task.novelId,
@@ -894,39 +909,13 @@ export async function resumeWriting(
             targetWordCount: task.targetWordCount,
             phase: task.phase as WritingPhase,
             userMessage: effectiveUserMessage,
-            pendingUserResponse: false,
             conversationHistory: history,
             activeAgent: lastActiveAgent,
-            currentOperation: null,
-            operationMode: "operation_graph",
-            operationStage: null,
-            chapterDraftTarget: null,
-            loreAdvisorOutput: null,
-            plotAdvisorOutput: null,
-            writerOutput: null,
-            validatorOutput: null,
-            editorOutput: null,
             generatedContent: task.generatedContent ?? "",
-            pendingUpdates: null,
             novelData: { ...novelData, novelId: task.novelId, chapterId: task.chapterId } as WritingState["novelData"],
-            pendingAgentCall: null,
-            errorMessage: null,
-            streamCallbacks: createDirectStreamCallbacks(sendEvent),
-            eventCallbacks: createDirectEventCallbacks(sendEvent),
             qualityCheckId: null,
-            controlEvents: undefined,
-            activeArtifactId: null,
-            artifactMode: "none",
-            reviewerAgent: null,
-            reviserAgent: null,
-            pendingArtifactRevision: null,
-            artifactIteration: 0,
-            maxArtifactIterations: 5,
-          };
-          const runtimeCallbacks = {
-            streamCallbacks: createDirectStreamCallbacks(sendEvent),
-            eventCallbacks: createDirectEventCallbacks(sendEvent),
-          };
+            ...runtimeCallbacks,
+          });
           const effectiveGraphInput = resumeMode === "snapshot_resume" && graphSnapshot
             ? rehydrateGraphStateFromSnapshot(graphSnapshot, {
                 userMessage: effectiveUserMessage,
@@ -975,7 +964,7 @@ export async function resumeWriting(
             activeAgent: fs.activeAgent,
             phase: fs.phase,
           });
-          if (fs.phase !== "waiting_call" && !fs.pendingUserResponse) {
+          if (fs.phase !== "waiting_call" && getArtifactReviewState(fs).status !== "awaiting_user") {
             await cleanupGraphCheckpoint(taskId, auditLog);
           }
         }

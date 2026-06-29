@@ -17,7 +17,7 @@
  */
 
 import type { AgentOutput, CoreAgentId, WritingState, AgentControlEvent } from "../graph/state";
-import { createAgentOutput } from "../graph/state";
+import { createAgentOutput, patchAgentOutput } from "../graph/state";
 import { createToolExecutor, summarizeToolArgs, summarizeToolResult } from "@/agents/lib/tools";
 import { getToolsByCapabilities, getOpenAITools, type ToolDefinition } from "@/agents/tools/registry";
 import { logger } from "@/shared/lib/logger";
@@ -138,7 +138,7 @@ export async function runAgent(
           guard.skipMessage ?? "当前条件不满足，跳过执行。"
         );
         const skipResult: Partial<WritingState> = {
-          [definition.outputField]: output,
+          ...patchAgentOutput(agentId, output),
           activeAgent: agentId,
           ...guard.skipOutput,
         };
@@ -167,11 +167,12 @@ export async function runAgent(
       error: errorMsg,
     });
 
+    const output = createAgentOutput(
+      agentId,
+      `${definition.name}时发生错误：${errorMsg}`
+    );
     return {
-      [definition.outputField]: createAgentOutput(
-        agentId,
-        `${definition.name}时发生错误：${errorMsg}`
-      ),
+      ...patchAgentOutput(agentId, output),
       activeAgent: agentId,
       errorMessage: errorMsg,
     };
@@ -219,6 +220,9 @@ async function runAgentInNewMode(
       tools,
       toolExecutor,
       maxIterations: definition.maxIterations ?? 10,
+      profile: definition.modelProfile ?? "normal",
+      reasoningEffort: definition.reasoningEffort ?? "medium",
+      terminalControlTools: definition.terminalControlTools,
       onChunk: (chunk) => {
         if (!hasStartedResponding) {
           sendStatus("responding", { message: msgs.responding ?? "正在生成回复..." });
@@ -249,6 +253,7 @@ async function runAgentInNewMode(
       metadata: {
         callType: `${definition.name}(new)`,
         agentId,
+        taskId: state.taskId,
         userId: state.userId,
         novelId: state.novelId,
       },
@@ -278,7 +283,7 @@ async function runAgentInNewMode(
 
     // ---- 8. 返回状态（含 controlEvents） ----
     const baseResult: Partial<WritingState> = {
-      [definition.outputField]: output,
+      ...patchAgentOutput(agentId, output),
       activeAgent: agentId,
       controlEvents: turnResult.controlEvents as AgentControlEvent[],
     };

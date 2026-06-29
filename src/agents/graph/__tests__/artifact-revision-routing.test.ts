@@ -75,6 +75,20 @@ describe("artifact revision routing", () => {
     );
   });
 
+  it("uses canonical artifactReview state before legacy generatedContent", () => {
+    assert.deepEqual(
+      resolvePendingArtifactRevisionFromChat({
+        taskPhase: "awaiting_user_review",
+        taskGeneratedContent: null,
+        graphSnapshot: {
+          artifactReview: { status: "awaiting_user", activeArtifactId: "artifact-9" },
+        },
+        userMessage: "保留设定，但把冲突写强",
+      }),
+      { artifactId: "artifact-9", userMessage: "保留设定，但把冲突写强" }
+    );
+  });
+
   it("does not hijack explicit agent commands", () => {
     assert.equal(
       resolvePendingArtifactRevisionFromChat({

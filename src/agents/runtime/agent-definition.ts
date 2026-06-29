@@ -11,6 +11,7 @@
 import type { OpenAI } from "openai";
 import type { AgentOutput, CoreAgentId, WritingState } from "../graph/state";
 import type { AgentUpdateSection } from "@/shared/contracts/agent-updates";
+import type { ModelCallProfile, ModelReasoningEffort } from "./model-runtime";
 
 /**
  * Agent 输出模式。
@@ -52,6 +53,12 @@ export interface AgentDefinition {
   toolCapabilities: string[];
   /** 最大工具调用轮次（默认 10） */
   maxIterations?: number;
+  /** 模型调用预算档位。 */
+  modelProfile?: ModelCallProfile;
+  /** 供应商原生推理强度，不通过 system prompt 暴露思考过程。 */
+  reasoningEffort?: ModelReasoningEffort;
+  /** 成功调用后立即结束 Agent 回合的 control tools。 */
+  terminalControlTools?: string[];
 
   // ---- 上下文构建 ----
 

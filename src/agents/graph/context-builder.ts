@@ -9,7 +9,7 @@
  * - buildNovelContext() — ~5000 token 完整上下文，供生成型 Agent 使用
  */
 
-import type { WritingState } from "./state";
+import { getActiveArtifactId, type CoreAgentId, type WritingState } from "./state";
 
 /** 控制哪些上下文段需要构建 */
 export interface ContextBuildOptions {
@@ -551,7 +551,7 @@ export function buildActiveTaskContext(state: WritingState): string {
   const call = state.pendingAgentCall;
   const operation = state.currentOperation;
 
-  const activeArtifactId = state.activeArtifactId?.trim();
+  const activeArtifactId = getActiveArtifactId(state)?.trim();
 
   if (!rootRequest && !call && !operation && !activeArtifactId) return "";
 
@@ -613,12 +613,23 @@ export function buildActiveTaskContext(state: WritingState): string {
 /**
  * 构建对话历史文本
  */
+export interface ConversationHistoryTextOptions {
+  mode?: "full" | "reviewer";
+  activeArtifactId?: string | null;
+  artifactProducerAgentId?: CoreAgentId | null;
+  reviewerAgentOutputMaxChars?: number;
+}
+
 export function buildConversationHistoryText(
-  conversationHistory: WritingState["conversationHistory"]
+  conversationHistory: WritingState["conversationHistory"],
+  options: ConversationHistoryTextOptions = {}
 ): string {
   if (conversationHistory.length === 0) return "";
 
   const lines: string[] = [];
+  const reviewerMode = options.mode === "reviewer";
+  const maxAgentChars = options.reviewerAgentOutputMaxChars ?? 800;
+  let artifactMarkerAdded = false;
   for (const msg of conversationHistory) {
     if (msg.userMessage) {
       lines.push("**用户**：" + msg.userMessage);
@@ -626,7 +637,18 @@ export function buildConversationHistoryText(
       const target = msg.callTarget ? ` → ${msg.callTarget}` : "";
       lines.push("**" + msg.agentName + " 调用" + target + "**：" + msg.content);
     } else if (msg.agentOutput?.content) {
-      lines.push("**" + msg.agentName + "**：" + msg.agentOutput.content);
+      if (reviewerMode && msg.agentId === options.artifactProducerAgentId) {
+        if (!artifactMarkerAdded) {
+          const artifactLabel = options.activeArtifactId ? `（artifactId：${options.activeArtifactId}）` : "";
+          lines.push(`**${msg.agentName}**：已提交当前待审核草案${artifactLabel}，正文请通过 get_active_review_artifact 读取。`);
+          artifactMarkerAdded = true;
+        }
+      } else {
+        const content = reviewerMode && msg.agentOutput.content.length > maxAgentChars
+          ? msg.agentOutput.content.slice(0, maxAgentChars) + `\n[历史输出已截断，原长度 ${msg.agentOutput.content.length} 字符]`
+          : msg.agentOutput.content;
+        lines.push("**" + msg.agentName + "**：" + content);
+      }
     }
     lines.push("");
   }

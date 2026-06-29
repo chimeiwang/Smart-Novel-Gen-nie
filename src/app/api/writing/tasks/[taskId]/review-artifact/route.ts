@@ -12,6 +12,7 @@ import { authorizeWritingTask, authErrorResponse } from "@/agents/lib/task-auth"
 import { prisma } from "@/shared/db/prisma";
 import { getSession } from "@/shared/lib/auth";
 import { logger } from "@/shared/lib/logger";
+import { deserializeGraphStateSnapshot } from "@/agents/graph/graph-state-snapshot";
 
 export const dynamic = "force-dynamic";
 
@@ -33,16 +34,20 @@ export async function GET(
       select: {
         phase: true,
         generatedContent: true,
+        graphStateJson: true,
       },
     });
 
-    if (task?.phase !== "awaiting_user_review" || !task.generatedContent) {
+    const snapshot = deserializeGraphStateSnapshot(task?.graphStateJson);
+    const artifactId = snapshot?.artifactReview.activeArtifactId ?? snapshot?.activeArtifactId ?? task?.generatedContent ?? null;
+
+    if (task?.phase !== "awaiting_user_review" || !artifactId) {
       return Response.json({ artifact: null });
     }
 
     const artifact = await prisma.reviewArtifact.findFirst({
       where: {
-        id: task.generatedContent,
+        id: artifactId,
         taskId,
         status: "awaiting_user",
       },

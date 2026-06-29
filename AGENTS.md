@@ -44,8 +44,8 @@
 - 不要绕过 `ReviewArtifact` 让 Agent 直接写正式小说表。
 - 不要从 Agent 可见正文中解析控制指令、JSON 信封、路由字段或评分字段。
 - 不要新增与 `src/shared/contracts`、`src/agents/graph/state.ts` 重复的本地 schema / 类型。
-- 不要把待审核草案默认混入正式小说上下文；只有 `activeArtifactId` 或显式 artifact read tool 才能读取草案。
-- 不要把历史兼容规则扩散成新规则，例如 `novel.userId = null` 只用于兼容旧数据。
+- 不要把待审核草案默认混入正式小说上下文；只有 `artifactReview.activeArtifactId`（旧 `activeArtifactId` facade 仅兼容）或显式 artifact read tool 才能读取草案。
+- 不要把历史兼容规则扩散成新规则，例如 `novel.userId = null` 只用于兼容旧数据，`WritingTask.generatedContent` 只作为旧待审核 artifact 标记 fallback。
 
 ## 项目要点
 
@@ -183,7 +183,7 @@ START → initSession → operationWorkflow 创作操作图 → END
 
 - `initSession` 负责识别创作操作，并写入 `currentOperation`。
 - `operationWorkflow` 位于 `src/agents/operations/operation-graph.ts`，按“识别创作操作 → 准备操作上下文 → 执行创作操作 → 提交草案或直接回复 → 审核草案 → 返工草案 → 等待用户决策 → 建议下一步”推进。
-- 使用 `StateGraph`、`Annotation.Root`、conditional edges、`Command`、`interrupt()` 和 `MemorySaver`。`MemorySaver` 仅用于当前进程内短流程，不是生产级停机恢复承诺。
+- 使用 `StateGraph`、`StateSchema`、conditional edges、`Command`、`interrupt()` 和 `MemorySaver`。`MemorySaver` 仅用于当前进程内短流程，不是生产级停机恢复承诺；runtime-only 数据必须用 `UntrackedValue` 或 runtime context，不能进入可恢复快照。
 - 新增多 Agent 循环、人工确认、动态分派、并行子任务或长流程恢复时，必须优先使用 LangGraph 原生能力。
 
 ### 工具层与 ReviewArtifact

@@ -131,6 +131,71 @@ describe("buildConversationHistoryText", () => {
     assert.match(text, /剧情/);
     assert.match(text, /请重构前十章大纲/);
   });
+
+  it("omits the current artifact producer body in reviewer mode and truncates other Agent output", () => {
+    const longDraft = "正文".repeat(1000);
+    const otherOutput = "编辑意见".repeat(300);
+    const history: AgentMessage[] = [
+      {
+        id: "user-1",
+        agentId: "设定",
+        agentName: "用户",
+        content: "",
+        userMessage: "请审核这份正文草案",
+        timestamp: 1,
+      },
+      {
+        id: "writer-1",
+        agentId: "写作",
+        agentName: "作家",
+        content: longDraft,
+        agentOutput: {
+          agentId: "写作",
+          agentName: "作家",
+          content: longDraft,
+          insights: [],
+          proactiveSuggestions: [],
+        },
+        timestamp: 2,
+      },
+      {
+        id: "editor-1",
+        agentId: "编辑",
+        agentName: "网文编辑",
+        content: otherOutput,
+        agentOutput: {
+          agentId: "编辑",
+          agentName: "网文编辑",
+          content: otherOutput,
+          insights: [],
+          proactiveSuggestions: [],
+        },
+        timestamp: 3,
+      },
+      {
+        id: "call-2",
+        agentId: "写作",
+        agentName: "作家",
+        content: "请校验当前草案",
+        isCallMessage: true,
+        callTarget: "校验",
+        timestamp: 4,
+      },
+    ];
+
+    const text = buildConversationHistoryText(history, {
+      mode: "reviewer",
+      activeArtifactId: "artifact-1",
+      artifactProducerAgentId: "写作",
+    });
+
+    assert.match(text, /请审核这份正文草案/);
+    assert.match(text, /artifact-1/);
+    assert.match(text, /get_active_review_artifact/);
+    assert.doesNotMatch(text, new RegExp(longDraft.slice(0, 100)));
+    assert.match(text, /历史输出已截断/);
+    assert.match(text, /请校验当前草案/);
+  });
 });
 
 describe("buildSummaryIndex", () => {

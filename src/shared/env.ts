@@ -5,6 +5,7 @@ export type AiConfig = {
 };
 
 export type LLMRuntimeName = "langchain" | "legacy-openai";
+export type LLMLogMode = "off" | "summary" | "full";
 
 export type AgentObservabilityConfig = {
   workflowEventLogEnabled: boolean;
@@ -32,6 +33,12 @@ export function getLLMRuntimeName(): LLMRuntimeName {
   if (runtime === "langchain") return "langchain";
   if (runtime === "legacy-openai") return "legacy-openai";
   throw new Error(`未知 LLM_RUNTIME: ${runtime}`);
+}
+
+export function getLLMLogMode(): LLMLogMode {
+  const mode = process.env.LLM_LOG_MODE?.trim().toLowerCase() || "summary";
+  if (mode === "off" || mode === "summary" || mode === "full") return mode;
+  return "summary";
 }
 
 export function isEnvFlagEnabled(value: string | undefined, defaultValue: boolean): boolean {

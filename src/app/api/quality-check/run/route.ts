@@ -17,7 +17,7 @@ import { authorizeWritingTask, authErrorResponse } from "@/agents/lib/task-auth"
 import { markCheckFailed, markCheckRunning, saveQualityCheckReport } from "@/agents/lib/quality-check-service";
 import { prisma } from "@/shared/db/prisma";
 import { logger } from "@/shared/lib/logger";
-import { createWorkflowTask } from "@/agents/graph";
+import { createBaseGraphState, createWorkflowTask } from "@/agents/graph";
 import { QUALITY_CHECK_MESSAGE_MAP, RunQualityCheckSchema } from "@/shared/contracts/quality-check";
 import { aggregateNovelContextLightweight } from "@/shared/lib/context-aggregator";
 import { validatorNode } from "@/agents/graph/nodes/validator-node";
@@ -118,7 +118,7 @@ export async function POST(request: NextRequest) {
       });
 
       const novelData = await aggregateNovelContextLightweight(check.chapter.novelId, check.chapterId);
-      const state: WritingState = {
+      const state = createBaseGraphState({
         taskId: taskIdForRun,
         userId: session.userId,
         novelId: check.chapter.novelId,
@@ -126,34 +126,10 @@ export async function POST(request: NextRequest) {
         targetWordCount: 0,
         phase: "active",
         userMessage: message,
-        pendingUserResponse: false,
-        conversationHistory: [],
         activeAgent: "校验",
-        currentOperation: null,
-        operationMode: "operation_graph",
-        operationStage: null,
-        loreAdvisorOutput: null,
-        plotAdvisorOutput: null,
-        writerOutput: null,
-        validatorOutput: null,
-        editorOutput: null,
-        generatedContent: "",
-        pendingUpdates: null,
-        novelData: { ...novelData, novelId: check.chapter.novelId, chapterId: check.chapterId },
-        pendingAgentCall: null,
-        errorMessage: null,
-        streamCallbacks: {},
-        eventCallbacks: undefined,
+        novelData: { ...novelData, novelId: check.chapter.novelId, chapterId: check.chapterId } as WritingState["novelData"],
         qualityCheckId: checkId,
-        controlEvents: undefined,
-        activeArtifactId: null,
-        artifactMode: "none",
-        reviewerAgent: null,
-        reviserAgent: null,
-        pendingArtifactRevision: null,
-        artifactIteration: 0,
-        maxArtifactIterations: 5,
-      };
+      });
 
       const result = await validatorNode(state);
       const report = result.validatorOutput?.content.trim();

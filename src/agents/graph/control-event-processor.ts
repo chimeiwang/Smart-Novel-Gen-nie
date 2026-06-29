@@ -16,6 +16,7 @@ import type {
   CoreAgentId,
   NovelData,
 } from "./state";
+import type { GraphState } from "./graph-definition";
 import { trySaveQualityCheckResult as defaultSaveQualityCheckResult } from "@/agents/lib/quality-check-service";
 import { hasAgentUpdates } from "./lore-update-schema";
 import { sanitizeAgentUpdates } from "@/shared/contracts/agent-updates";
@@ -183,6 +184,8 @@ export interface ControlEventProcessorDeps {
   markTaskAwaitingUserReview?: (input: {
     taskId: string;
     artifactId: string;
+    state: GraphState;
+    operationStage?: string;
   }) => Promise<void>;
   saveQualityCheckResult?: (
     agentId: CoreAgentId,
@@ -197,6 +200,7 @@ export interface ControlEventProcessorDeps {
 export interface ProcessControlEventsInput {
   events: AgentControlEvent[];
   state: ControlEventProcessorState;
+  graphState?: GraphState;
   activeAgent: CoreAgentId;
   output: AgentVisibleOutput;
   updatedHistory: AgentMessage[];
@@ -712,9 +716,13 @@ export async function processControlEvents(
           patches: event.patches,
         });
         if (artifact && event.verdict === "pass") {
+          if (!input.graphState) {
+            throw new Error("markTaskAwaitingUserReview requires graphState to persist artifactReview.");
+          }
           await markTaskAwaitingUserReview({
             taskId: state.taskId,
             artifactId: artifact.id,
+            state: input.graphState,
           });
           awaitingUserReview = true;
           lastReviewerAgent = activeAgent;

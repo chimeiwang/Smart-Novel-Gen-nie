@@ -13,6 +13,7 @@ import {
   selectCurrentReviewer,
 } from "../operation-graph";
 import type { GraphState } from "@/agents/graph/graph-definition";
+import { createDefaultArtifactReviewState, patchArtifactReviewState } from "@/agents/graph/state";
 
 function createState(): GraphState {
   return {
@@ -40,8 +41,10 @@ function createState(): GraphState {
       reasoning: "测试创作操作追踪元数据",
     },
     operationMode: "operation_graph",
+    operationStep: "execute_operation",
     operationStage: "执行创作操作",
     chapterDraftTarget: null,
+    agentOutputs: {},
     loreAdvisorOutput: null,
     plotAdvisorOutput: null,
     writerOutput: null,
@@ -50,12 +53,19 @@ function createState(): GraphState {
     generatedContent: "",
     pendingUpdates: null,
     novelData: { novelId: "novel-1", chapterId: "chapter-1" } as GraphState["novelData"],
+    runtime: { streamCallbacks: {}, eventCallbacks: undefined },
     pendingAgentCall: null,
     errorMessage: null,
     streamCallbacks: {},
     eventCallbacks: undefined,
     qualityCheckId: null,
     controlEvents: undefined,
+    artifactReview: createDefaultArtifactReviewState({
+      status: "reviewing",
+      activeArtifactId: "artifact-1",
+      reviewerAgent: "编辑",
+      iteration: 1,
+    }),
     activeArtifactId: "artifact-1",
     artifactMode: "review_loop",
     reviewerAgent: "编辑",
@@ -127,19 +137,17 @@ describe("operation review routing helpers", () => {
     const state = createState();
     const reviewers = ["校验", "编辑"] as const;
 
-    assert.equal(selectCurrentReviewer({ ...state, reviewerAgent: null }, [...reviewers]), "校验");
-    assert.equal(hasNextReviewer({ ...state, reviewerAgent: "校验" }, [...reviewers]), true);
-    assert.equal(selectCurrentReviewer({ ...state, reviewerAgent: "校验" }, [...reviewers]), "编辑");
-    assert.equal(hasNextReviewer({ ...state, reviewerAgent: "编辑" }, [...reviewers]), false);
-    assert.equal(selectCurrentReviewer({ ...state, reviewerAgent: "编辑" }, [...reviewers]), null);
+    assert.equal(selectCurrentReviewer({ ...state, ...patchArtifactReviewState(state, { reviewerAgent: null }) }, [...reviewers]), "校验");
+    assert.equal(hasNextReviewer({ ...state, ...patchArtifactReviewState(state, { reviewerAgent: "校验" }) }, [...reviewers]), true);
+    assert.equal(selectCurrentReviewer({ ...state, ...patchArtifactReviewState(state, { reviewerAgent: "校验" }) }, [...reviewers]), "编辑");
+    assert.equal(hasNextReviewer({ ...state, ...patchArtifactReviewState(state, { reviewerAgent: "编辑" }) }, [...reviewers]), false);
+    assert.equal(selectCurrentReviewer({ ...state, ...patchArtifactReviewState(state, { reviewerAgent: "编辑" }) }, [...reviewers]), null);
   });
 
   it("maps the next-reviewer branch to a known LangGraph destination", () => {
     const destination = routeAfterReview({
       ...createState(),
-      reviewerAgent: "校验",
-      reviserAgent: null,
-      artifactIteration: 1,
+      ...patchArtifactReviewState(createState(), { reviewerAgent: "校验", reviserAgent: null, iteration: 1 }),
       currentOperation: {
         ...createState().currentOperation!,
         reviewers: ["校验", "编辑"],
@@ -153,13 +161,15 @@ describe("operation review routing helpers", () => {
   it("routes revise+patch to the artifact patch node", () => {
     const destination = routeAfterReview({
       ...createState(),
-      reviewerAgent: "校验",
-      reviserAgent: null,
-      pendingArtifactRevision: {
+      ...patchArtifactReviewState(createState(), {
+        reviewerAgent: "校验",
+        reviserAgent: null,
+        pendingRevision: {
         summary: "只需修正时间线措辞。",
         revisionMode: "patch",
         patches: [{ kind: "text_replace", find: "前天", replace: "今天" }],
-      },
+        },
+      }),
       currentOperation: {
         ...createState().currentOperation!,
         reviewers: ["校验", "编辑"],
@@ -173,8 +183,7 @@ describe("operation review routing helpers", () => {
   it("routes patch success to the next reviewer", () => {
     const destination = routeAfterPatch({
       ...createState(),
-      reviewerAgent: "校验",
-      reviserAgent: null,
+      ...patchArtifactReviewState(createState(), { reviewerAgent: "校验", reviserAgent: null }),
       currentOperation: {
         ...createState().currentOperation!,
         reviewers: ["校验", "编辑"],
@@ -188,9 +197,7 @@ describe("operation review routing helpers", () => {
   it("routes patch failure fallback to rewrite", () => {
     const destination = routeAfterPatch({
       ...createState(),
-      reviewerAgent: "校验",
-      reviserAgent: "写作",
-      artifactIteration: 1,
+      ...patchArtifactReviewState(createState(), { reviewerAgent: "校验", reviserAgent: "写作", iteration: 1 }),
     });
 
     assert.equal(destination, "reviseArtifact");

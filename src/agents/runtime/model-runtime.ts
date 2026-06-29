@@ -45,6 +45,9 @@ export interface AgentRuntimeOptions {
   tools: OpenAI.Chat.ChatCompletionTool[];
   toolExecutor: (toolName: string, args: Record<string, unknown>) => Promise<string>;
   maxIterations?: number;
+  profile?: ModelCallProfile;
+  reasoningEffort?: ModelReasoningEffort;
+  terminalControlTools?: string[];
   onChunk?: StreamCallback;
   onToolCall?: (toolName: string, args: Record<string, unknown>) => void;
   onToolResult?: (toolName: string, args: Record<string, unknown>, result: string) => void;
@@ -56,7 +59,8 @@ export interface ToolCallTurnOptions {
   tools: OpenAI.Chat.ChatCompletionTool[];
   onChunk?: StreamCallback;
   metadata?: LLMCallMetadata;
-  reasoningEffort?: "medium" | "high";
+  reasoningEffort?: ModelReasoningEffort;
+  profile?: ModelCallProfile;
 }
 
 export interface ModelToolCall {
@@ -111,42 +115,10 @@ interface RuntimeDeps {
 }
 
 export type ModelCallProfile = "normal" | "fast";
+export type ModelReasoningEffort = "medium" | "high";
 
 const MAX_OUTPUT_TOKENS = 384000;
 const FAST_OUTPUT_TOKENS = 3000;
-const REASONING_EFFORT_MARKER = "Reasoning Effort: Absolute maximum";
-const REASONING_EFFORT_PROMPT = `Reasoning Effort: Absolute maximum with no shortcuts permitted.
-You MUST be very thorough in your thinking and comprehensively decompose the problem to resolve the root cause, rigorously stress-testing your logic against all potential paths, edge cases, and adversarial scenarios.
-Explicitly write out your entire deliberation process, documenting every intermediate step, considered alternative, and rejected hypothesis to ensure absolutely no assumption is left unchecked.
-
-`;
-
-export function hasReasoningEffortPrompt(content: string | undefined): boolean {
-  return content?.includes(REASONING_EFFORT_MARKER) ?? false;
-}
-
-export function ensureReasoningEffortPrompt(
-  messages: OpenAI.Chat.ChatCompletionMessageParam[]
-): OpenAI.Chat.ChatCompletionMessageParam[] {
-  const next = [...messages];
-  const hasPrompt = next.some((msg) =>
-    msg.role === "system" &&
-    typeof msg.content === "string" &&
-    hasReasoningEffortPrompt(msg.content)
-  );
-  if (hasPrompt) return next;
-
-  if (next.length > 0 && next[0].role === "system") {
-    const first = next[0];
-    next[0] = {
-      ...first,
-      content: REASONING_EFFORT_PROMPT + (typeof first.content === "string" ? first.content : ""),
-    } as OpenAI.Chat.ChatCompletionMessageParam;
-  } else {
-    next.unshift({ role: "system", content: REASONING_EFFORT_PROMPT });
-  }
-  return next;
-}
 
 export function getModelCallBudget(profile: ModelCallProfile | undefined): number {
   return profile === "fast" ? FAST_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS;
@@ -154,9 +126,14 @@ export function getModelCallBudget(profile: ModelCallProfile | undefined): numbe
 
 function withReasoningConfig(
   config: Record<string, unknown>,
-  options: { profile?: ModelCallProfile; reasoningEffort?: "medium" | "high"; fallback: "medium" | "high" }
+  options: {
+    profile?: ModelCallProfile;
+    reasoningEffort?: "medium" | "high";
+    fallback: "medium" | "high";
+    includeReasoningForFast?: boolean;
+  }
 ): Record<string, unknown> {
-  if (options.profile === "fast") return config;
+  if (options.profile === "fast" && !options.includeReasoningForFast) return config;
   return {
     ...config,
     reasoning_effort: options.reasoningEffort ?? options.fallback,
@@ -695,102 +672,120 @@ export class LegacyOpenAIRuntime extends BaseRuntime {
   async runToolCallTurn(options: ToolCallTurnOptions): Promise<ModelToolCallTurnResult> {
     const config = getAiConfig();
     const requestId = logger.generateRequestId();
-    const messages = ensureReasoningEffortPrompt(options.messages);
+    const startedAt = Date.now();
+    const messages = [...options.messages];
     const client = this.getClient();
 
-    logger.llmRequest(requestId, messages);
+    logger.llmRequest(requestId, messages, { tools: options.tools, context: options.metadata });
 
-    if (!this.isConfigured()) {
-      const content = "（Mock 模式：需要配置 AI 才能使用工具调用功能）";
-      logger.warn("MODEL_RUNTIME", "AI 未配置，返回 Mock tool-call turn");
-      logger.llmResponse(requestId, content);
-      return {
-        content,
-        reasoningContent: "",
-        toolCalls: [],
-        usage: { promptTokens: 100, completionTokens: 100, totalTokens: 200 },
-        finishReason: "stop",
-      };
-    }
-
-    logger.info("MODEL_RUNTIME", "执行单轮 OpenAI tool-call turn", {
-      runtime: "legacy-openai",
-      messageCount: messages.length,
-    });
-
-    const { maxOutputTokens } = await this.ensureCanStartModelCall({
-      metadata: { ...options.metadata, model: config.model },
-      messages,
-      extraPromptText: JSON.stringify(options.tools),
-      maxOutputTokens: MAX_OUTPUT_TOKENS,
-    });
-
-    const stream = await client.chat.completions.create({
-      model: config.model,
-      messages,
-      tools: options.tools,
-      tool_choice: "auto",
-      stream: true,
-      max_tokens: maxOutputTokens,
-      reasoning_effort: options.reasoningEffort ?? "medium",
-    } as any);
-
-    let content = "";
-    let reasoningContent = "";
-    let finishReason: string | undefined = "stop";
-    let usage: TokenUsage | undefined;
-    const toolCallAccumulator = new Map<number, { id: string; name: string; arguments: string }>();
-
-    for await (const chunk of stream as any) {
-      const choice = chunk.choices?.[0];
-      const delta = choice?.delta;
-      if (!delta) continue;
-
-      if (delta.content) {
-        content += delta.content;
-        options.onChunk?.(delta.content);
-      }
-      if (delta.reasoning_content) reasoningContent += delta.reasoning_content;
-      if (delta.tool_calls) {
-        for (const tc of delta.tool_calls) {
-          const idx = tc.index ?? 0;
-          if (!toolCallAccumulator.has(idx)) {
-            toolCallAccumulator.set(idx, { id: "", name: "", arguments: "" });
-          }
-          const acc = toolCallAccumulator.get(idx)!;
-          if (tc.id) acc.id = tc.id;
-          if (tc.function?.name) acc.name += tc.function.name;
-          if (tc.function?.arguments) acc.arguments += tc.function.arguments;
-        }
-      }
-      if (choice?.finish_reason) {
-        finishReason = choice.finish_reason;
-      }
-      if (chunk.usage) {
-        usage = {
-          promptTokens: chunk.usage.prompt_tokens ?? 0,
-          completionTokens: chunk.usage.completion_tokens ?? 0,
-          cachedTokens: extractCachedTokens(chunk.usage),
-          totalTokens: chunk.usage.total_tokens ?? 0,
+    try {
+      if (!this.isConfigured()) {
+        const content = "（Mock 模式：需要配置 AI 才能使用工具调用功能）";
+        logger.warn("MODEL_RUNTIME", "AI 未配置，返回 Mock tool-call turn");
+        logger.llmResponse(requestId, content, { promptTokens: 100, completionTokens: 100, totalTokens: 200 }, {
+          context: options.metadata,
+          durationMs: Date.now() - startedAt,
+          finishReason: "stop",
+        });
+        return {
+          content,
+          reasoningContent: "",
+          toolCalls: [],
+          usage: { promptTokens: 100, completionTokens: 100, totalTokens: 200 },
+          finishReason: "stop",
         };
       }
+
+      logger.info("MODEL_RUNTIME", "执行单轮 OpenAI tool-call turn", {
+        runtime: "legacy-openai",
+        messageCount: messages.length,
+      });
+
+      const { maxOutputTokens } = await this.ensureCanStartModelCall({
+        metadata: { ...options.metadata, model: config.model },
+        messages,
+        extraPromptText: JSON.stringify(options.tools),
+        maxOutputTokens: getModelCallBudget(options.profile),
+      });
+
+      const stream = await client.chat.completions.create(withReasoningConfig({
+        model: config.model,
+        messages,
+        tools: options.tools,
+        tool_choice: "auto",
+        stream: true,
+        max_tokens: maxOutputTokens,
+      }, {
+        profile: options.profile,
+        reasoningEffort: options.reasoningEffort,
+        fallback: "medium",
+        includeReasoningForFast: true,
+      }) as any);
+
+      let content = "";
+      let reasoningContent = "";
+      let finishReason: string | undefined = "stop";
+      let usage: TokenUsage | undefined;
+      const toolCallAccumulator = new Map<number, { id: string; name: string; arguments: string }>();
+
+      for await (const chunk of stream as any) {
+        const choice = chunk.choices?.[0];
+        const delta = choice?.delta;
+        if (!delta) continue;
+
+        if (delta.content) {
+          content += delta.content;
+          options.onChunk?.(delta.content);
+        }
+        if (delta.reasoning_content) reasoningContent += delta.reasoning_content;
+        if (delta.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const idx = tc.index ?? 0;
+            if (!toolCallAccumulator.has(idx)) {
+              toolCallAccumulator.set(idx, { id: "", name: "", arguments: "" });
+            }
+            const acc = toolCallAccumulator.get(idx)!;
+            if (tc.id) acc.id = tc.id;
+            if (tc.function?.name) acc.name += tc.function.name;
+            if (tc.function?.arguments) acc.arguments += tc.function.arguments;
+          }
+        }
+        if (choice?.finish_reason) {
+          finishReason = choice.finish_reason;
+        }
+        if (chunk.usage) {
+          usage = {
+            promptTokens: chunk.usage.prompt_tokens ?? 0,
+            completionTokens: chunk.usage.completion_tokens ?? 0,
+            cachedTokens: extractCachedTokens(chunk.usage),
+            totalTokens: chunk.usage.total_tokens ?? 0,
+          };
+        }
+      }
+
+      const toolCalls = Array.from(toolCallAccumulator.values()).map((tc, idx) => ({
+        id: tc.id || `call_turn_${idx}`,
+        type: "function" as const,
+        function: { name: tc.name, arguments: tc.arguments },
+      }));
+
+      logger.llmResponse(requestId, content, usage, {
+        context: options.metadata,
+        durationMs: Date.now() - startedAt,
+        finishReason,
+      });
+      await this.recordUsage(options.metadata, usage);
+      return {
+        content,
+        reasoningContent,
+        toolCalls,
+        usage,
+        finishReason,
+      };
+    } catch (error) {
+      logger.llmError(requestId, error, options.metadata);
+      throw error;
     }
-
-    const toolCalls = Array.from(toolCallAccumulator.values()).map((tc, idx) => ({
-      id: tc.id || `call_turn_${idx}`,
-      type: "function" as const,
-      function: { name: tc.name, arguments: tc.arguments },
-    }));
-
-    logger.llmResponse(requestId, content || reasoningContent.slice(-500));
-    await this.recordUsage(options.metadata, usage);
-    return {
-      content,
-      reasoningContent,
-      toolCalls,
-      usage,
-      finishReason,
-    };
   }
 }
 
@@ -903,60 +898,70 @@ export class LangChainModelRuntime extends LegacyOpenAIRuntime {
   }
 
   async runToolCallTurn(options: ToolCallTurnOptions): Promise<ModelToolCallTurnResult> {
-    const requestId = logger.generateRequestId();
-    const messages = ensureReasoningEffortPrompt(options.messages);
-
-    logger.llmRequest(requestId, messages);
-
     if (!this.isConfigured()) {
       return super.runToolCallTurn(options);
     }
+    const requestId = logger.generateRequestId();
+    const startedAt = Date.now();
+    const messages = [...options.messages];
 
-    logger.info("MODEL_RUNTIME", "执行单轮 LangChain tool-call turn", {
-      runtime: "langchain",
-      messageCount: messages.length,
-    });
+    logger.llmRequest(requestId, messages, { tools: options.tools, context: options.metadata });
 
-    const { maxOutputTokens } = await this.ensureCanStartModelCall({
-      metadata: { ...options.metadata, model: getAiConfig().model },
-      messages,
-      extraPromptText: JSON.stringify(options.tools),
-      maxOutputTokens: MAX_OUTPUT_TOKENS,
-    });
+    try {
+      logger.info("MODEL_RUNTIME", "执行单轮 LangChain tool-call turn", {
+        runtime: "langchain",
+        messageCount: messages.length,
+      });
 
-    const model = createChatModel(maxOutputTokens);
-    const runnable = options.tools.length > 0
-      ? model.bindTools(options.tools as any, {
-          tool_choice: "auto",
-          reasoning_effort: options.reasoningEffort ?? "medium",
-          stream_options: { include_usage: true },
-        } as any)
-      : model.withConfig({
-          reasoning_effort: options.reasoningEffort ?? "medium",
-          stream_options: { include_usage: true },
-        } as any);
-    const stream = await runnable.stream(openAIMessagesToLangChain(messages));
-    const accumulator = createLangChainStreamAccumulator();
+      const { maxOutputTokens } = await this.ensureCanStartModelCall({
+        metadata: { ...options.metadata, model: getAiConfig().model },
+        messages,
+        extraPromptText: JSON.stringify(options.tools),
+        maxOutputTokens: getModelCallBudget(options.profile),
+      });
 
-    for await (const chunk of stream as AsyncIterable<AIMessageChunk>) {
-      applyLangChainStreamChunk(accumulator, chunk, options.onChunk);
+      const model = createChatModel(maxOutputTokens);
+      const runtimeConfig = withReasoningConfig({
+        stream_options: { include_usage: true },
+      }, {
+        profile: options.profile,
+        reasoningEffort: options.reasoningEffort,
+        fallback: "medium",
+        includeReasoningForFast: true,
+      }) as any;
+      const runnable = options.tools.length > 0
+        ? model.bindTools(options.tools as any, { tool_choice: "auto", ...runtimeConfig } as any)
+        : model.withConfig(runtimeConfig);
+      const stream = await runnable.stream(openAIMessagesToLangChain(messages));
+      const accumulator = createLangChainStreamAccumulator();
+
+      for await (const chunk of stream as AsyncIterable<AIMessageChunk>) {
+        applyLangChainStreamChunk(accumulator, chunk, options.onChunk);
+      }
+
+      const toolCalls = Array.from(accumulator.toolCallAccumulator.values()).map((tc, idx) => ({
+        id: tc.id || `call_turn_${idx}`,
+        type: "function" as const,
+        function: { name: tc.name, arguments: tc.arguments },
+      }));
+
+      logger.llmResponse(requestId, accumulator.content, accumulator.usage, {
+        context: options.metadata,
+        durationMs: Date.now() - startedAt,
+        finishReason: accumulator.finishReason,
+      });
+      await this.recordUsage(options.metadata, accumulator.usage);
+      return {
+        content: accumulator.content,
+        reasoningContent: accumulator.reasoningContent,
+        toolCalls,
+        usage: accumulator.usage,
+        finishReason: accumulator.finishReason,
+      };
+    } catch (error) {
+      logger.llmError(requestId, error, options.metadata);
+      throw error;
     }
-
-    const toolCalls = Array.from(accumulator.toolCallAccumulator.values()).map((tc, idx) => ({
-      id: tc.id || `call_turn_${idx}`,
-      type: "function" as const,
-      function: { name: tc.name, arguments: tc.arguments },
-    }));
-
-    logger.llmResponse(requestId, accumulator.content || accumulator.reasoningContent.slice(-500));
-    await this.recordUsage(options.metadata, accumulator.usage);
-    return {
-      content: accumulator.content,
-      reasoningContent: accumulator.reasoningContent,
-      toolCalls,
-      usage: accumulator.usage,
-      finishReason: accumulator.finishReason,
-    };
   }
 }
 

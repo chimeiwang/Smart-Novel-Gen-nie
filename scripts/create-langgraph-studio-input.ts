@@ -13,6 +13,7 @@
 
 import { prisma } from "@/shared/db/prisma";
 import { aggregateNovelContextLightweight } from "@/shared/lib/context-aggregator";
+import { createBaseGraphState } from "@/agents/graph";
 import { CORE_AGENT_IDS } from "@/agents/graph/state";
 import type { GraphState } from "@/agents/graph/graph-definition";
 
@@ -79,7 +80,7 @@ async function main() {
     },
   });
 
-  const state: GraphState = {
+  const state: GraphState = createBaseGraphState({
     taskId: task.id,
     userId,
     novelId,
@@ -87,35 +88,8 @@ async function main() {
     targetWordCount,
     phase: "active",
     userMessage,
-    pendingUserResponse: false,
-    conversationHistory: [],
-    activeAgent: null,
-    currentOperation: null,
-    operationMode: "operation_graph",
-    operationStage: null,
-    chapterDraftTarget: null,
-    loreAdvisorOutput: null,
-    plotAdvisorOutput: null,
-    writerOutput: null,
-    validatorOutput: null,
-    editorOutput: null,
-    generatedContent: "",
-    pendingUpdates: null,
     novelData,
-    pendingAgentCall: null,
-    errorMessage: null,
-    streamCallbacks: {},
-    eventCallbacks: undefined,
-    qualityCheckId: null,
-    controlEvents: undefined,
-    activeArtifactId: null,
-    artifactMode: "none",
-    reviewerAgent: null,
-    reviserAgent: null,
-    pendingArtifactRevision: null,
-    artifactIteration: 0,
-    maxArtifactIterations: 5,
-  };
+  });
 
   console.log(JSON.stringify(state, null, 2));
   console.error(`\n已创建 Studio 调试 WritingTask: ${task.id}`);

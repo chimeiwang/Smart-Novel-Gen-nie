@@ -25,6 +25,7 @@ import { runAgent } from "@/agents/runtime/agent-runner";
 
 const AGENT_ID: CoreAgentId = "写作";
 const VALIDATOR_ID: CoreAgentId = "校验";
+const MISSING_APPROVED_BEAT_PLAN_MESSAGE = "当前请求明确要求基于已批准章节计划生成正文，但本章尚无 approved Beat Plan。请先执行 @剧情 规划本章并批准章节计划草案，再重新发起正文生成。";
 
 /**
  * 作家 Agent 定义
@@ -39,6 +40,17 @@ const authorDefinition: AgentDefinition = {
   outputMode: "paragraph_text_with_control_tools",
 
   toolCapabilities: ["novel.read", "character.read", "lore.read", "plot.read", "chapter.read", "style.read", "control.artifact"],
+  modelProfile: "normal",
+  reasoningEffort: "medium",
+
+  preGuard: (state) => {
+    if (!shouldBlockForMissingApprovedBeatPlan(state)) return null;
+    return {
+      skip: true,
+      skipMessage: MISSING_APPROVED_BEAT_PLAN_MESSAGE,
+      skipOutput: { errorMessage: MISSING_APPROVED_BEAT_PLAN_MESSAGE },
+    };
+  },
 
   /** 作家后处理：正文只进入工作流草案，不直接写入正式章节正文 */
   postProcess: async (writerOutput, state) => {
@@ -146,6 +158,19 @@ export async function authorNode(
   state: WritingState
 ): Promise<Partial<WritingState>> {
   return runAgent(authorDefinition, state);
+}
+
+export function shouldBlockForMissingApprovedBeatPlan(state: Pick<WritingState, "currentOperation" | "novelData" | "userMessage">): boolean {
+  const kind = state.currentOperation?.kind;
+  if (kind !== "write_chapter" && kind !== "rewrite_scene") return false;
+  if (state.novelData.approvedBeatPlan) return false;
+  const message = state.userMessage ?? "";
+  const planTerm = "(?:已批准(?:的)?章节计划|批准的章节计划|approved\\s*beat\\s*plan|beat\\s*plan)";
+  const negation = "(?:不需要|无需|无须|不用|不必|不要|忽略|即使没有|没有[^，。；]{0,8}也)";
+  if (new RegExp(`${negation}[^，。；]{0,12}${planTerm}|${planTerm}[^，。；]{0,12}${negation}`, "i").test(message)) {
+    return false;
+  }
+  return new RegExp(planTerm, "i").test(message);
 }
 
 /**

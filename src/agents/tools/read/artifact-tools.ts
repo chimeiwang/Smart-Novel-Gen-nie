@@ -103,12 +103,13 @@ export const GET_ACTIVE_REVIEW_ARTIFACT_DEF: ToolDefinition = {
 };
 
 export const getActiveReviewArtifactExecutor: ToolExecutorFn = async (_, state) => {
-  if (!state.activeArtifactId) return "当前工作流没有 activeArtifactId。";
+  const activeArtifactId = state.artifactReview?.activeArtifactId ?? state.activeArtifactId ?? null;
+  if (!activeArtifactId) return "当前工作流没有 activeArtifactId。";
   const artifact = await prisma.reviewArtifact.findUnique({
-    where: { id: state.activeArtifactId },
+    where: { id: activeArtifactId },
     include: { evaluations: { orderBy: { createdAt: "desc" } } },
   });
-  if (!artifact) return `未找到当前待审核草案 "${state.activeArtifactId}"`;
+  if (!artifact) return `未找到当前待审核草案 "${activeArtifactId}"`;
   return serializeArtifact(artifact);
 };
 

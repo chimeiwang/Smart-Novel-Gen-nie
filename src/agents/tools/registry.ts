@@ -44,6 +44,7 @@ export type ToolExecutorFn = (
     novelId?: string;
     chapterId?: string;
     taskId?: string;
+    artifactReview?: { activeArtifactId?: string | null } | null;
     activeArtifactId?: string | null;
   }
 ) => string | Promise<string>;
@@ -121,6 +122,7 @@ export async function executeTool(
     novelId?: string;
     chapterId?: string;
     taskId?: string;
+    artifactReview?: { activeArtifactId?: string | null } | null;
     activeArtifactId?: string | null;
   }
 ): Promise<string> {

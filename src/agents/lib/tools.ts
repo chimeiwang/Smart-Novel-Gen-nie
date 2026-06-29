@@ -6,7 +6,7 @@
  *  本文件只保留 AgentRuntime 需要的执行器和状态栏摘要。
  */
 
-import type { WritingState } from "../graph/state";
+import { getArtifactReviewState, type WritingState } from "../graph/state";
 import { executeTool } from "@/agents/tools";
 
 // 触发工具注册副作用。
@@ -147,6 +147,7 @@ export function createToolExecutor(state: WritingState): ToolExecutor {
         novelId: state.novelId,
         chapterId: state.chapterId,
         taskId: state.taskId,
+        artifactReview: getArtifactReviewState(state),
         activeArtifactId: state.activeArtifactId ?? null,
       }
     );

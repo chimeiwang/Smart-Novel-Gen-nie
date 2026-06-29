@@ -78,6 +78,25 @@ export type WritingPhase =
   | "completed"
   | "error";
 
+/**
+ * LangGraph 内部操作步骤。
+ *
+ * 这是路由与恢复使用的稳定枚举；中文 operationStage 只作为展示/兼容字段。
+ */
+export type OperationStep =
+  | "init"
+  | "classify_operation"
+  | "prepare_context"
+  | "execute_operation"
+  | "submit_artifact"
+  | "review_artifact"
+  | "apply_artifact_patch"
+  | "revise_artifact"
+  | "await_user_decision"
+  | "suggest_next_action"
+  | "completed"
+  | "error";
+
 // ============================================
 // Agent输出结构
 // ============================================
@@ -228,6 +247,43 @@ export interface PendingAgentCall {
   contentToRewrite?: string;
   timestamp: number;
 }
+
+export type ArtifactReviewStatus =
+  | "none"
+  | "draft_submitted"
+  | "reviewing"
+  | "patching"
+  | "revision_requested"
+  | "awaiting_user"
+  | "applied"
+  | "discarded";
+
+export interface PendingArtifactRevision {
+  summary: string;
+  requiredChanges?: string;
+  revisionMode: "patch" | "rewrite";
+  patches?: EvaluationPatch[];
+}
+
+/** ReviewArtifact 审核循环的权威 Graph 状态。 */
+export interface ArtifactReviewState {
+  status: ArtifactReviewStatus;
+  activeArtifactId: string | null;
+  reviewerAgent: CoreAgentId | null;
+  reviserAgent: CoreAgentId | null;
+  pendingRevision: PendingArtifactRevision | null;
+  iteration: number;
+  maxIterations: number;
+}
+
+export interface WritingRuntimeContext {
+  streamCallbacks: Record<string, (chunk: string) => void>;
+  eventCallbacks?: Record<string, (type: string, payload: Record<string, unknown>) => void>;
+}
+
+export type WritingGraphState = WritingState;
+export type WritingGraphInput = WritingState;
+export type WritingGraphOutput = Partial<WritingState>;
 
 // ============================================
 // 完整状态定义
@@ -609,8 +665,14 @@ export interface WritingState {
   // === 当前创作操作 ===
   currentOperation?: CreativeOperation | null;
   operationMode?: "legacy_agent_graph" | "operation_graph";
+  operationStep?: OperationStep;
   operationStage?: string | null;
   chapterDraftTarget?: ChapterDraftTarget | null;
+
+  // === 新 State 分层权威字段 ===
+  agentOutputs?: Partial<Record<CoreAgentId, AgentOutput>>;
+  artifactReview?: ArtifactReviewState;
+  runtime?: WritingRuntimeContext;
 
   // === 各Agent输出 ===
   loreAdvisorOutput: AgentOutput | null;  // 设定顾问
@@ -682,6 +744,107 @@ export const OUTPUT_FIELD_TO_AGENT: Record<AgentOutputField, CoreAgentId> = {
   editorOutput: "编辑",
 };
 
+export function createDefaultArtifactReviewState(
+  overrides: Partial<ArtifactReviewState> = {}
+): ArtifactReviewState {
+  return {
+    status: "none",
+    activeArtifactId: null,
+    reviewerAgent: null,
+    reviserAgent: null,
+    pendingRevision: null,
+    iteration: 0,
+    maxIterations: 5,
+    ...overrides,
+  };
+}
+
+export function normalizeArtifactReviewState(
+  state: Partial<WritingState>
+): ArtifactReviewState {
+  if (state.artifactReview) {
+    return createDefaultArtifactReviewState(state.artifactReview);
+  }
+
+  const activeArtifactId = state.activeArtifactId ?? null;
+  const pendingRevision = state.pendingArtifactRevision ?? null;
+  const status: ArtifactReviewStatus = state.pendingUserResponse && activeArtifactId
+    ? "awaiting_user"
+    : pendingRevision
+      ? "revision_requested"
+      : activeArtifactId
+        ? "draft_submitted"
+        : "none";
+
+  return createDefaultArtifactReviewState({
+    status,
+    activeArtifactId,
+    reviewerAgent: state.reviewerAgent ?? null,
+    reviserAgent: state.reviserAgent ?? null,
+    pendingRevision,
+    iteration: state.artifactIteration ?? 0,
+    maxIterations: state.maxArtifactIterations ?? 5,
+  });
+}
+
+export function getArtifactReviewState(state: WritingState): ArtifactReviewState {
+  return normalizeArtifactReviewState(state);
+}
+
+export function getActiveArtifactId(state: Partial<WritingState>): string | null {
+  return normalizeArtifactReviewState(state).activeArtifactId;
+}
+
+export function patchArtifactReviewState(
+  state: WritingState,
+  patch: Partial<ArtifactReviewState>
+): Pick<WritingState,
+  "artifactReview" |
+  "activeArtifactId" |
+  "artifactMode" |
+  "reviewerAgent" |
+  "reviserAgent" |
+  "pendingArtifactRevision" |
+  "artifactIteration" |
+  "maxArtifactIterations" |
+  "pendingUserResponse"
+> {
+  const artifactReview = createDefaultArtifactReviewState({
+    ...normalizeArtifactReviewState(state),
+    ...patch,
+  });
+
+  return {
+    artifactReview,
+    activeArtifactId: artifactReview.activeArtifactId,
+    artifactMode: artifactReview.status === "none" ? "none" : "review_loop",
+    reviewerAgent: artifactReview.reviewerAgent,
+    reviserAgent: artifactReview.reviserAgent,
+    pendingArtifactRevision: artifactReview.pendingRevision,
+    artifactIteration: artifactReview.iteration,
+    maxArtifactIterations: artifactReview.maxIterations,
+    pendingUserResponse: artifactReview.status === "awaiting_user",
+  };
+}
+
+export function collectAgentOutputs(state: Partial<WritingState>): Partial<Record<CoreAgentId, AgentOutput>> {
+  const outputs: Partial<Record<CoreAgentId, AgentOutput>> = { ...(state.agentOutputs ?? {}) };
+  for (const agentId of CORE_AGENT_IDS) {
+    const field = AGENT_TO_OUTPUT_FIELD[agentId];
+    const output = state[field];
+    if (output) outputs[agentId] = output;
+  }
+  return outputs;
+}
+
+export function patchAgentOutput(agentId: CoreAgentId, output: AgentOutput): Partial<WritingState> {
+  const field = getAgentOutputField(agentId);
+  return {
+    [field]: output,
+    agentOutputs: { [agentId]: output },
+  } as Partial<WritingState>;
+}
+
 // ============================================
 // 辅助函数
 // ============================================
@@ -697,6 +860,8 @@ export function getAgentOutputField(agentId: CoreAgentId): AgentOutputField {
  * 根据AgentId获取对应的输出字段值
  */
 export function getAgentOutput(state: WritingState, agentId: CoreAgentId): AgentOutput | null {
+  const mapped = state.agentOutputs?.[agentId];
+  if (mapped) return mapped;
   const field = getAgentOutputField(agentId);
   return state[field];
 }
@@ -710,7 +875,14 @@ export function setAgentOutput(
   output: AgentOutput
 ): WritingState {
   const field = getAgentOutputField(agentId);
-  return { ...state, [field]: output };
+  return {
+    ...state,
+    [field]: output,
+    agentOutputs: {
+      ...state.agentOutputs,
+      [agentId]: output,
+    },
+  };
 }
 
 /**

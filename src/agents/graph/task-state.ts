@@ -8,7 +8,7 @@
  * @phase Phase 5 — 拆分 LangGraph 执行器
  */
 
-import { CORE_AGENT_IDS, AGENT_TO_OUTPUT_FIELD } from "./state";
+import { collectAgentOutputs, patchArtifactReviewState } from "./state";
 import type { AgentOutput } from "./state";
 import type { GraphState } from "./graph-definition";
 import { serializeHistory } from "./context-manager";
@@ -21,12 +21,7 @@ import { logger } from "@/shared/lib/logger";
  */
 export async function updateTaskState(state: GraphState): Promise<void> {
   try {
-    const agentOutputs: Record<string, unknown> = {};
-    for (const agentId of CORE_AGENT_IDS) {
-      const field = AGENT_TO_OUTPUT_FIELD[agentId];
-      const output = (state as Record<string, unknown>)[field] as AgentOutput | null;
-      if (output) agentOutputs[agentId] = output;
-    }
+    const agentOutputs = collectAgentOutputs(state) as Record<string, AgentOutput>;
 
     await prisma.writingTask.update({
       where: { id: state.taskId },
@@ -49,19 +44,14 @@ export async function updateTaskState(state: GraphState): Promise<void> {
 export async function markTaskAwaitingUserReview(input: {
   taskId: string;
   artifactId: string;
-  state?: GraphState;
+  state: GraphState;
   operationStage?: string;
 }): Promise<void> {
-  const data = input.state
-    ? buildAwaitingUserReviewTaskUpdate({
-        artifactId: input.artifactId,
-        state: input.state,
-        operationStage: input.operationStage,
-      })
-    : {
-        phase: "awaiting_user_review" as const,
-        generatedContent: input.artifactId,
-      };
+  const data = buildAwaitingUserReviewTaskUpdate({
+    artifactId: input.artifactId,
+    state: input.state,
+    operationStage: input.operationStage,
+  });
 
   await prisma.writingTask.update({
     where: { id: input.taskId },
@@ -76,16 +66,18 @@ export function buildAwaitingUserReviewTaskUpdate(input: {
 }) {
   const stateForSnapshot: GraphState = {
     ...input.state,
+    ...patchArtifactReviewState(input.state, {
+      status: "awaiting_user",
+      activeArtifactId: input.artifactId,
+      pendingRevision: null,
+      reviserAgent: null,
+    }),
     phase: "awaiting_user_review",
-    pendingUserResponse: true,
-    generatedContent: input.artifactId,
-    activeArtifactId: input.artifactId,
     operationStage: input.operationStage ?? input.state.operationStage ?? null,
   };
 
   return {
     phase: "awaiting_user_review" as const,
-    generatedContent: input.artifactId,
     conversationHistory: serializeHistory(stateForSnapshot.conversationHistory),
     graphStateJson: serializeGraphStateSnapshot(stateForSnapshot),
   };

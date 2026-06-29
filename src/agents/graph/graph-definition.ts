@@ -8,11 +8,13 @@
  * @phase Phase 5 — 拆分 LangGraph 执行器
  */
 
-import { StateGraph, Annotation, START, END, MemorySaver, getWriter } from "@langchain/langgraph";
-import type { WritingState, AgentOutput, CoreAgentId, AgentMessage, AgentUpdates, AgentControlEvent, WritingPhase } from "./state";
+import { StateGraph, StateSchema, ReducedValue, UntrackedValue, START, END, MemorySaver, getWriter } from "@langchain/langgraph";
+import { z } from "zod";
+import type { WritingState, AgentOutput, CoreAgentId, AgentMessage, AgentUpdates, AgentControlEvent, WritingPhase, ArtifactReviewState, OperationStep, WritingRuntimeContext } from "./state";
 import {
   CORE_AGENT_IDS,
   AGENT_NAMES,
+  createDefaultArtifactReviewState,
 } from "./state";
 import { addUserMessage } from "./context-manager";
 import { emit } from "./sse-adapter";
@@ -30,45 +32,111 @@ import { getAgentObservabilityConfig } from "@/shared/env";
 // 状态定义
 // ============================================
 
-export const WritingStateAnnotation = Annotation.Root({
-  taskId: Annotation<string>,
-  userId: Annotation<string>,
-  novelId: Annotation<string>,
-  chapterId: Annotation<string>,
-  targetWordCount: Annotation<number>,
-  phase: Annotation<WritingPhase>,
-  userMessage: Annotation<string>,
-  pendingUserResponse: Annotation<boolean>,
-  conversationHistory: Annotation<AgentMessage[]>,
-  activeAgent: Annotation<CoreAgentId | null>,
-  currentOperation: Annotation<CreativeOperation | null>,
-  operationMode: Annotation<WritingState["operationMode"]>,
-  operationStage: Annotation<string | null>,
-  chapterDraftTarget: Annotation<WritingState["chapterDraftTarget"]>,
-  loreAdvisorOutput: Annotation<AgentOutput | null>,
-  plotAdvisorOutput: Annotation<AgentOutput | null>,
-  writerOutput: Annotation<AgentOutput | null>,
-  validatorOutput: Annotation<AgentOutput | null>,
-  editorOutput: Annotation<AgentOutput | null>,
-  generatedContent: Annotation<string>,
-  pendingUpdates: Annotation<AgentUpdates | null>,
-  novelData: Annotation<WritingState["novelData"]>,
-  pendingAgentCall: Annotation<WritingState["pendingAgentCall"]>,
-  errorMessage: Annotation<string | null>,
-  streamCallbacks: Annotation<Record<string, (chunk: string) => void>>,
-  eventCallbacks: Annotation<Record<string, (type: string, payload: Record<string, unknown>) => void> | undefined>,
-  qualityCheckId: Annotation<string | null>,
-  controlEvents: Annotation<AgentControlEvent[] | undefined>,
-  activeArtifactId: Annotation<string | null>,
-  artifactMode: Annotation<"none" | "review_loop">,
-  reviewerAgent: Annotation<CoreAgentId | null>,
-  reviserAgent: Annotation<CoreAgentId | null>,
-  pendingArtifactRevision: Annotation<WritingState["pendingArtifactRevision"]>,
-  artifactIteration: Annotation<number>,
-  maxArtifactIterations: Annotation<number>,
+export const mergeAgentMessagesForState = (current: AgentMessage[], next: AgentMessage[] | undefined): AgentMessage[] => {
+  if (!next?.length) return current;
+  const merged = [...current];
+  const seen = new Set(current.map((item) => item.id));
+  for (const item of next) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    merged.push(item);
+  }
+  return merged;
+};
+
+export const mergeControlEventsForState = (
+  current: AgentControlEvent[] | undefined,
+  next: AgentControlEvent[] | undefined
+): AgentControlEvent[] | undefined => {
+  if (next === undefined) return current;
+  if (!current?.length) return next;
+  return [...current, ...next];
+};
+const mergeAgentOutputs = (
+  current: Partial<Record<CoreAgentId, AgentOutput>>,
+  next: Partial<Record<CoreAgentId, AgentOutput>> | undefined
+) => ({ ...current, ...(next ?? {}) });
+
+export const WritingStateAnnotation = new StateSchema({
+  taskId: z.string(),
+  userId: z.string(),
+  novelId: z.string(),
+  chapterId: z.string(),
+  targetWordCount: z.number(),
+  phase: z.custom<WritingPhase>(),
+  userMessage: z.string(),
+
+  // Legacy facade kept for existing routes/frontends. artifactReview.status is the authority.
+  pendingUserResponse: z.boolean().default(false),
+
+  conversationHistory: new ReducedValue<AgentMessage[], AgentMessage[]> (
+    z.custom<AgentMessage[]>().default(() => []),
+    {
+      inputSchema: z.custom<AgentMessage[]>(),
+      reducer: mergeAgentMessagesForState,
+    }
+  ),
+  activeAgent: z.custom<CoreAgentId | null>().nullable(),
+  currentOperation: z.custom<CreativeOperation | null>().nullable(),
+  operationMode: z.custom<WritingState["operationMode"]>(),
+  operationStep: z.custom<OperationStep>().default("init"),
+  operationStage: z.string().nullable().default(null),
+  chapterDraftTarget: z.custom<WritingState["chapterDraftTarget"]>().nullable().default(null),
+
+  agentOutputs: new ReducedValue<Partial<Record<CoreAgentId, AgentOutput>>, Partial<Record<CoreAgentId, AgentOutput>>>(
+    z.custom<Partial<Record<CoreAgentId, AgentOutput>>>().default(() => ({})),
+    {
+      inputSchema: z.custom<Partial<Record<CoreAgentId, AgentOutput>>>(),
+      reducer: mergeAgentOutputs,
+    }
+  ),
+
+  // Legacy fixed fields remain as facades while nodes migrate to agentOutputs.
+  loreAdvisorOutput: z.custom<AgentOutput | null>().nullable(),
+  plotAdvisorOutput: z.custom<AgentOutput | null>().nullable(),
+  writerOutput: z.custom<AgentOutput | null>().nullable(),
+  validatorOutput: z.custom<AgentOutput | null>().nullable(),
+  editorOutput: z.custom<AgentOutput | null>().nullable(),
+
+  generatedContent: z.string().default(""),
+  pendingUpdates: z.custom<AgentUpdates | null>().nullable(),
+
+  // Large request context: available during a run, excluded from checkpoint.
+  novelData: new UntrackedValue<WritingState["novelData"]>(undefined, { guard: false }),
+  runtime: new UntrackedValue<WritingRuntimeContext | undefined>(undefined, { guard: false }),
+
+  pendingAgentCall: z.custom<WritingState["pendingAgentCall"]>().nullable(),
+  errorMessage: z.string().nullable(),
+
+  // Legacy runtime callback facade. Kept untracked so checkpoints stay serializable.
+  streamCallbacks: new UntrackedValue<Record<string, (chunk: string) => void>>(undefined, { guard: false }),
+  eventCallbacks: new UntrackedValue<Record<string, (type: string, payload: Record<string, unknown>) => void> | undefined>(undefined, { guard: false }),
+
+  qualityCheckId: z.string().nullable(),
+  controlEvents: new ReducedValue<AgentControlEvent[] | undefined, AgentControlEvent[] | undefined>(
+    z.custom<AgentControlEvent[] | undefined>(),
+    {
+      inputSchema: z.custom<AgentControlEvent[] | undefined>(),
+      reducer: mergeControlEventsForState,
+    }
+  ),
+
+  artifactReview: z.custom<ArtifactReviewState>().default(() => createDefaultArtifactReviewState()),
+
+  // Legacy artifact review facade fields. artifactReview is the authority.
+  activeArtifactId: z.string().nullable().default(null),
+  artifactMode: z.custom<"none" | "review_loop">().default("none"),
+  reviewerAgent: z.custom<CoreAgentId | null>().nullable().default(null),
+  reviserAgent: z.custom<CoreAgentId | null>().nullable().default(null),
+  pendingArtifactRevision: z.custom<WritingState["pendingArtifactRevision"]>().nullable().default(null),
+  artifactIteration: z.number().default(0),
+  maxArtifactIterations: z.number().default(5),
 });
 
 export type GraphState = typeof WritingStateAnnotation.State;
+export type WritingGraphState = GraphState;
+export type WritingGraphInput = GraphState;
+export type WritingGraphOutput = Partial<GraphState>;
 
 // ============================================
 // 图编译（单例）
@@ -192,6 +260,7 @@ async function initSessionNode(state: GraphState) {
     activeAgent: resolvedAgent,
     currentOperation,
     operationMode: "operation_graph" as const,
+    operationStep: "classify_operation" as OperationStep,
     operationStage: "识别创作操作",
   };
 }

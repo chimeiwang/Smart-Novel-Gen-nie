@@ -18,12 +18,19 @@ export {
   startWritingWorkflow,
   resumeWriting,
   createInitialState,
+  createBaseGraphState,
   createWorkflowTask,
   type WorkflowInitialState,
 } from "./workflow-runner";
 
 // 图定义（测试/调试使用）
-export { getGraph, type GraphState } from "./graph-definition";
+export {
+  getGraph,
+  type GraphState,
+  type WritingGraphState,
+  type WritingGraphInput,
+  type WritingGraphOutput,
+} from "./graph-definition";
 
 // SSE 适配器（测试/调试使用）
 export {

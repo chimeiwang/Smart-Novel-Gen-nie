@@ -10,11 +10,9 @@ import type { ZodSchema } from "zod";
 import { logger } from "@/shared/lib/logger";
 import { traceLLMCall } from "@/agents/lib/langsmith-tracer";
 import {
-  ensureReasoningEffortPrompt,
   generateMockResponse,
   getModelCallBudget,
   getModelRuntime,
-  hasReasoningEffortPrompt,
   type LLMCallMetadata,
   type LLMResult,
   type ModelCallProfile,
@@ -34,7 +32,7 @@ function buildMessages(
 ): { messages: OpenAI.Chat.ChatCompletionMessageParam[]; mockPrompt: string } {
   if (typeof promptOrOptions !== "string") {
     return {
-      messages: ensureReasoningEffortPrompt(promptOrOptions.messages),
+      messages: [...promptOrOptions.messages],
       mockPrompt: "",
     };
   }
@@ -43,21 +41,11 @@ function buildMessages(
   if (systemPrompt) {
     messages.push({
       role: "system",
-      content: hasReasoningEffortPrompt(systemPrompt) ? systemPrompt : `${reasoningPrompt()}${systemPrompt}`,
+      content: systemPrompt,
     });
-  } else {
-    messages.push({ role: "system", content: reasoningPrompt() });
   }
   messages.push({ role: "user", content: promptOrOptions });
   return { messages, mockPrompt: promptOrOptions };
-}
-
-function reasoningPrompt(): string {
-  return `Reasoning Effort: Absolute maximum with no shortcuts permitted.
-You MUST be very thorough in your thinking and comprehensively decompose the problem to resolve the root cause, rigorously stress-testing your logic against all potential paths, edge cases, and adversarial scenarios.
-Explicitly write out your entire deliberation process, documenting every intermediate step, considered alternative, and rejected hypothesis to ensure absolutely no assumption is left unchecked.
-
-`;
 }
 
 export async function callLLM(
@@ -69,25 +57,34 @@ export async function callLLM(
   const startTime = Date.now();
   const requestId = logger.generateRequestId();
   const { messages, mockPrompt } = buildMessages(promptOrOptions, systemPrompt);
-  logger.llmRequest(requestId, messages);
+  logger.llmRequest(requestId, messages, { context: metadata });
 
   return traceLLMCall(
     metadata?.callType || "通用",
     metadata || {},
     async () => {
-      const result = await getModelRuntime().streamText({
-        messages,
-        onChunk,
-        metadata,
-        mockPrompt,
-        reasoningEffort: "high",
-      });
-      logger.llmResponse(requestId, result.content, result.usage);
-      logger.info("LLM", `LLM 调用完成，耗时 ${Date.now() - startTime}ms`, {
-        tokens: result.usage?.totalTokens,
-        length: result.content.length,
-      });
-      return result;
+      try {
+        const result = await getModelRuntime().streamText({
+          messages,
+          onChunk,
+          metadata,
+          mockPrompt,
+          reasoningEffort: "high",
+        });
+        logger.llmResponse(requestId, result.content, result.usage, {
+          context: metadata,
+          durationMs: Date.now() - startTime,
+          finishReason: result.finishReason,
+        });
+        logger.info("LLM", `LLM 调用完成，耗时 ${Date.now() - startTime}ms`, {
+          tokens: result.usage?.totalTokens,
+          length: result.content.length,
+        });
+        return result;
+      } catch (error) {
+        logger.llmError(requestId, error, metadata);
+        throw error;
+      }
     }
   );
 }
@@ -100,24 +97,33 @@ export async function callLLMSync(
   const startTime = Date.now();
   const requestId = logger.generateRequestId();
   const { messages } = buildMessages(prompt, systemPrompt);
-  logger.llmRequest(requestId, messages);
+  logger.llmRequest(requestId, messages, { context: metadata });
 
   return traceLLMCall(
     metadata?.callType || "通用",
     metadata || {},
     async () => {
-      const result = await getModelRuntime().completeText({
-        messages,
-        metadata,
-        mockPrompt: prompt,
-        reasoningEffort: "high",
-      });
-      logger.llmResponse(requestId, result.content, result.usage);
-      logger.info("LLM", `LLM 调用完成（非流式），耗时 ${Date.now() - startTime}ms`, {
-        tokens: result.usage?.totalTokens,
-        length: result.content.length,
-      });
-      return result;
+      try {
+        const result = await getModelRuntime().completeText({
+          messages,
+          metadata,
+          mockPrompt: prompt,
+          reasoningEffort: "high",
+        });
+        logger.llmResponse(requestId, result.content, result.usage, {
+          context: metadata,
+          durationMs: Date.now() - startTime,
+          finishReason: result.finishReason,
+        });
+        logger.info("LLM", `LLM 调用完成（非流式），耗时 ${Date.now() - startTime}ms`, {
+          tokens: result.usage?.totalTokens,
+          length: result.content.length,
+        });
+        return result;
+      } catch (error) {
+        logger.llmError(requestId, error, metadata);
+        throw error;
+      }
     }
   );
 }
@@ -135,33 +141,42 @@ export async function callLLMStructured<TSchema extends ZodSchema>(
   usage?: LLMResult["usage"];
 }> {
   const requestId = logger.generateRequestId();
+  const startTime = Date.now();
   let systemContent = options.systemPrompt ?? "";
   systemContent += "\n\n【重要】你必须只返回一个合法的 JSON 对象，不要包含任何其他文字、注释或 Markdown 标记。";
   const baseMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
     { role: "system", content: systemContent },
     { role: "user", content: options.prompt },
   ];
-  const messages = options.profile === "fast"
-    ? baseMessages
-    : ensureReasoningEffortPrompt(baseMessages);
-  logger.llmRequest(requestId, messages);
+  const messages = baseMessages;
+  logger.llmRequest(requestId, messages, { context: options.metadata });
 
   return traceLLMCall(
     options.metadata?.callType || "structured-output",
     options.metadata || {},
     async () => {
-      const result = await getModelRuntime().completeStructured(schema, {
-        messages,
-        metadata: options.metadata,
-        profile: options.profile,
-      });
-      logger.info("LLM", "结构化输出成功", {
-        requestId,
-        profile: options.profile ?? "normal",
-        maxOutputTokens: getModelCallBudget(options.profile),
-        tokens: result.usage?.totalTokens,
-      });
-      return result;
+      try {
+        const result = await getModelRuntime().completeStructured(schema, {
+          messages,
+          metadata: options.metadata,
+          profile: options.profile,
+        });
+        logger.llmResponse(requestId, JSON.stringify(result.data), result.usage, {
+          context: options.metadata,
+          durationMs: Date.now() - startTime,
+          finishReason: "structured_output",
+        });
+        logger.info("LLM", "结构化输出成功", {
+          requestId,
+          profile: options.profile ?? "normal",
+          maxOutputTokens: getModelCallBudget(options.profile),
+          tokens: result.usage?.totalTokens,
+        });
+        return result;
+      } catch (error) {
+        logger.llmError(requestId, error, options.metadata);
+        throw error;
+      }
     }
   );
 }
