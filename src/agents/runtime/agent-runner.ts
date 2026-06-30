@@ -90,12 +90,82 @@ function isToolAllowedForAgent(tool: ToolDefinition, agentId: CoreAgentId): bool
   return !tool.permission.agentIds || tool.permission.agentIds.includes(agentId);
 }
 
-export function getToolNamesForAgent(definition: Pick<AgentDefinition, "id" | "toolCapabilities">): string[] {
-  return Array.from(
+const HIDDEN_AGENT_TOOL_NAMES = new Set([
+  "get_character_list",
+  "propose_update_character",
+  "propose_update_character_status",
+  "propose_update_outline",
+  "propose_add_foreshadowing",
+  "propose_resolve_foreshadowing",
+]);
+
+const PLOT_READ_TOOL_NAMES = [
+  "get_novel_info",
+  "list_available_data",
+  "list_characters_summary",
+  "get_character_detail",
+  "list_outline_summary",
+  "get_outline_node",
+  "get_plot_progress",
+  "list_foreshadowings_summary",
+  "get_foreshadowing_detail",
+  "get_recent_chapters",
+];
+
+const PLOT_BUILDER_TOOL_NAMES = [
+  "start_update_builder",
+  "append_update_batch",
+  "append_outline_tree",
+  "put_update_text_block",
+  "put_update_item_text_block",
+  "put_update_item_text_blocks",
+  "finish_update_builder",
+];
+
+function filterToolNamesForOperation(
+  agentId: CoreAgentId,
+  toolNames: string[],
+  state?: Pick<WritingState, "currentOperation" | "activeArtifactId" | "artifactReview">
+): string[] {
+  const visible = toolNames.filter((name) => !HIDDEN_AGENT_TOOL_NAMES.has(name));
+  if (agentId !== "剧情" || !state?.currentOperation?.kind) return visible;
+
+  const allowed = new Set(PLOT_READ_TOOL_NAMES);
+  if (state.activeArtifactId || state.artifactReview?.activeArtifactId) {
+    allowed.add("get_review_artifact");
+    allowed.add("get_active_review_artifact");
+  }
+
+  switch (state.currentOperation.kind) {
+    case "plan_chapter":
+      allowed.add("submit_beat_plan");
+      allowed.add("show_review_artifact");
+      break;
+    case "create_outline":
+    case "revise_outline":
+      allowed.add("propose_updates");
+      allowed.add("show_review_artifact");
+      for (const name of PLOT_BUILDER_TOOL_NAMES) allowed.add(name);
+      break;
+    case "manage_foreshadowing":
+      allowed.add("propose_updates");
+      allowed.add("show_review_artifact");
+      break;
+  }
+
+  return visible.filter((name) => allowed.has(name));
+}
+
+export function getToolNamesForAgent(
+  definition: Pick<AgentDefinition, "id" | "toolCapabilities">,
+  state?: Pick<WritingState, "currentOperation" | "activeArtifactId" | "artifactReview">
+): string[] {
+  const toolNames = Array.from(
     getToolsByCapabilities(definition.toolCapabilities)
   )
     .filter((tool) => isToolAllowedForAgent(tool, definition.id))
     .map((tool) => tool.name);
+  return filterToolNamesForOperation(definition.id, toolNames, state);
 }
 
 // ============================================
@@ -207,7 +277,7 @@ async function runAgentInNewMode(
 
     // ---- 2. 工具链：按 Agent capability 暴露 read/proposal/control 工具 ----
     const toolExecutor = createToolExecutor(state);
-    const toolNames = getToolNamesForAgent(definition);
+    const toolNames = getToolNamesForAgent(definition, state);
     const tools = getOpenAITools(toolNames);
 
     const msgs = definition.statusMessages ?? {};

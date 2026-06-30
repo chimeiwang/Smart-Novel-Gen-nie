@@ -63,6 +63,101 @@ describe("AgentRunner tool selection", () => {
     assert.ok(toolNames.includes("finish_update_builder"));
   });
 
+  it("hides legacy duplicate tools from Agent exposure", () => {
+    const toolNames = getToolNamesForAgent({
+      id: "剧情",
+      toolCapabilities: ["character.read", "proposal.plot"],
+    });
+
+    assert.equal(toolNames.includes("get_character_list"), false);
+    assert.equal(toolNames.includes("propose_update_outline"), false);
+    assert.equal(toolNames.includes("propose_add_foreshadowing"), false);
+    assert.equal(toolNames.includes("propose_resolve_foreshadowing"), false);
+  });
+
+  it("hides legacy lore proposal tools from Agent exposure", () => {
+    const toolNames = getToolNamesForAgent({
+      id: "设定",
+      toolCapabilities: ["proposal.lore", "control.proposal"],
+    });
+
+    assert.ok(toolNames.includes("propose_updates"));
+    assert.equal(toolNames.includes("propose_update_character"), false);
+    assert.equal(toolNames.includes("propose_update_character_status"), false);
+  });
+
+  it("exposes only beat-plan control tools to the plot Agent during plan_chapter", () => {
+    const toolNames = getToolNamesForAgent({
+      id: "剧情",
+      toolCapabilities: [
+        "novel.read",
+        "character.read",
+        "plot.read",
+        "artifact.read",
+        "proposal.plot",
+        "control.proposal",
+        "control.builder",
+        "control.artifact",
+        "control.beat",
+      ],
+    }, {
+      currentOperation: {
+        kind: "plan_chapter",
+        targetType: "chapter",
+        userGoal: "规划第一章",
+        primaryAgent: "剧情",
+        reviewers: ["编辑"],
+        outputKind: "beat_plan",
+        requiresArtifact: true,
+        requiresUserApproval: true,
+        confidence: 0.9,
+        reasoning: "测试",
+      },
+    });
+
+    assert.ok(toolNames.includes("submit_beat_plan"));
+    assert.ok(toolNames.includes("show_review_artifact"));
+    assert.equal(toolNames.includes("start_update_builder"), false);
+    assert.equal(toolNames.includes("append_outline_tree"), false);
+    assert.equal(toolNames.includes("propose_updates"), false);
+  });
+
+  it("exposes builder tools to the plot Agent during outline operations", () => {
+    const toolNames = getToolNamesForAgent({
+      id: "剧情",
+      toolCapabilities: [
+        "novel.read",
+        "character.read",
+        "plot.read",
+        "proposal.plot",
+        "control.proposal",
+        "control.builder",
+        "control.artifact",
+        "control.beat",
+      ],
+    }, {
+      currentOperation: {
+        kind: "revise_outline",
+        targetType: "outline",
+        userGoal: "重构大纲",
+        primaryAgent: "剧情",
+        reviewers: ["编辑"],
+        outputKind: "outline_proposal",
+        requiresArtifact: true,
+        requiresUserApproval: true,
+        confidence: 0.9,
+        reasoning: "测试",
+      },
+    });
+
+    assert.ok(toolNames.includes("propose_updates"));
+    assert.ok(toolNames.includes("start_update_builder"));
+    assert.ok(toolNames.includes("append_outline_tree"));
+    assert.ok(toolNames.includes("finish_update_builder"));
+    assert.equal(toolNames.includes("submit_beat_plan"), false);
+    assert.equal(toolNames.includes("propose_update_outline"), false);
+  });
+
   it("only exposes append_outline_tree to the plot Agent", () => {
     const commonBuilderCapabilities = ["control.builder"];
     const cases: Array<{ id: "设定" | "写作" | "校验" | "编辑"; capabilities: string[] }> = [

@@ -211,7 +211,7 @@ src/agents/tools/
 - OpenAI tool schema 统一通过 `getOpenAITools()` 从 registry 生成
 - 写作工作流初始化只预载小说基本信息、世界设定、故事背景和大纲总纲；角色、章节正文、结构化大纲节点、伏笔、地点、物品、势力、术语、参考资料和文风画像必须通过只读工具按需查库，不再依赖 `state.novelData` 的全量缓存
 - 所有 AgentDefinition 必须声明 `toolCapabilities`，禁止恢复 `getTools` 回调
-- `AgentRunner` 使用 `getToolNamesForAgent()` 按 capability + `permission.agentIds` 生成本轮 OpenAI tools；新增 control tool 时必须同步考虑哪些 Agent 应声明对应 capability，并补充工具暴露测试。
+- `AgentRunner` 使用 `getToolNamesForAgent()` 按 capability + `permission.agentIds` 生成本轮 OpenAI tools，并可按当前 `CreativeOperation` 进一步裁剪剧情 Agent 的 builder / beat / proposal 类工具；新增 control tool 时必须同步考虑哪些 Agent、哪些 operation 应暴露，并补充工具暴露测试。
 
 ### Phase 4 AgentDefinition + AgentRunner（2026-06-09）
 
@@ -413,7 +413,7 @@ submit_evaluation(pass)
 - **上下文策略**: 摘要索引优先 — `buildSummaryIndex()` + 工具查询，避免默认读取完整大纲/伏笔
 - **身份**: 剧情结构顾问，可处理主线推进、章节职责、角色行动链、伏笔生命周期、节奏结构和 beat plan。
 
-**工具列表**：get_novel_info, list_outline_summary, get_outline_node, get_plot_progress, list_foreshadowings_summary, get_foreshadowing_detail, get_character_list, get_character_detail, search_lore, list_available_data + control tools（`propose_updates`、update builder、`append_outline_tree`）
+**工具列表**：基础剧情查询工具（get_novel_info, list_available_data, list_characters_summary, get_character_detail, list_outline_summary, get_outline_node, get_plot_progress, list_foreshadowings_summary, get_foreshadowing_detail, get_recent_chapters）+ 按当前 CreativeOperation 暴露的 control tools。规划章节只暴露 `submit_beat_plan` 等章节计划工具；创建/修改大纲才暴露 `propose_updates`、update builder、`append_outline_tree`；伏笔管理只暴露必要的伏笔草案工具。
 
 **剧情更新协议**：
 - 用户明确要求生成、修改、展开或重构大纲时，剧情顾问提交 `outlineContent` 和最终展开后的 `outlineAdjustments` 待审核草案；短小变更可用 `propose_updates`，批量节点树、长总纲、章节组长梗概或复杂重构必须使用 update builder；复杂节点树主路径必须用 `append_outline_tree` 提交嵌套树，不要再把结构化大纲主流程写成纯文本 `outline_draft`。

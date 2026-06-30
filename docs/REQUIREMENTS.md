@@ -2,6 +2,17 @@
 
 > 状态: ✅ 完成 | 🔧 开发中 | 📋 规划 | ❌ 废弃
 
+## 0. 代码反推需求文档
+
+| 编号 | 名称 | 文档 |
+|------|------|------|
+| 0.0 | 项目需求总览 | [00-overview.md](requirements/00-overview.md) |
+| 0.1 | 项目与章节 | [01-projects-and-chapters.md](requirements/01-projects-and-chapters.md) |
+| 0.2 | 创作资料库 | [02-creative-knowledge-base.md](requirements/02-creative-knowledge-base.md) |
+| 0.3 | AI 写作与 Agent | [03-ai-writing-and-agents.md](requirements/03-ai-writing-and-agents.md) |
+| 0.4 | 草案审核、质量检查与工作流 | [04-review-quality-and-workflow.md](requirements/04-review-quality-and-workflow.md) |
+| 0.5 | 认证、计费与运维 | [05-auth-billing-and-ops.md](requirements/05-auth-billing-and-ops.md) |
+
 ## 1. 小说项目管理
 
 | 编号 | 名称 | 状态 |

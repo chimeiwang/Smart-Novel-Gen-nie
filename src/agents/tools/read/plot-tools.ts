@@ -48,15 +48,18 @@ function getChapterId(state: Parameters<ToolExecutorFn>[1]): string {
 
 export const LIST_OUTLINE_SUMMARY_DEF: ToolDefinition = {
   name: "list_outline_summary",
-  description: "列出所有大纲节点摘要（标题、状态、排序、摘要），含大纲总体概述",
-  inputSchema: z.object({}),
+  description: "列出大纲节点短摘要（标题、状态、排序、短摘要）。默认不返回长总纲全文；确需全文时传 include_full_summary=true。",
+  inputSchema: z.object({
+    include_full_summary: z.boolean().optional(),
+  }),
   permission: readOnlyPermission("plot.read"),
   toolKind: "read",
 };
 
-export const listOutlineSummaryExecutor: ToolExecutorFn = async (_, state) => {
+export const listOutlineSummaryExecutor: ToolExecutorFn = async (args, state) => {
   const d = state.novelData as Record<string, unknown>;
   const novelId = getNovelId(state);
+  const includeFullSummary = args.include_full_summary === true;
   const [outline, nodes] = novelId
     ? await Promise.all([
         prisma.outline.findUnique({ where: { novelId } }),
@@ -68,7 +71,10 @@ export const listOutlineSummaryExecutor: ToolExecutorFn = async (_, state) => {
     : [null, (d.outlineNodes as Record<string, unknown>[]) || []];
 
   return JSON.stringify({
-    summary: outline?.content ?? d.outlineSummary,
+    summary: includeFullSummary
+      ? outline?.content ?? d.outlineSummary
+      : compactText((outline?.content ?? d.outlineSummary) as string, 500),
+    summaryTruncated: !includeFullSummary,
     nodes: nodes.map((node) => ({
       id: node.id,
       title: node.title,
@@ -76,7 +82,7 @@ export const listOutlineSummaryExecutor: ToolExecutorFn = async (_, state) => {
       status: node.status,
       order: node.order,
       parentId: node.parentId,
-      summary: compactText(node.content as string, 120),
+      summary: compactText(node.content as string, 80),
     })),
   }, null, 2);
 };
