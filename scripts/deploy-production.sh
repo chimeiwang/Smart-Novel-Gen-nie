@@ -27,7 +27,7 @@ if [ ! -d .git ]; then
 fi
 
 echo "Fetching $BRANCH from $REPO_URL"
-git fetch origin "$BRANCH"
+git -c http.version=HTTP/1.1 fetch --depth=1 origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
 git reset --hard "origin/$BRANCH"
 
 if [ ! -f .env.production ]; then
