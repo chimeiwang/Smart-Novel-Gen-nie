@@ -7,28 +7,33 @@ BRANCH="${BRANCH:-main}"
 IMAGE_NAME="${IMAGE_NAME:-inkforge:latest}"
 SKIP_DOCKER_BUILD="${SKIP_DOCKER_BUILD:-false}"
 
-if ! command -v git >/dev/null 2>&1; then
-  echo "git is required on the deployment server" >&2
+if ! command -v docker >/dev/null 2>&1; then
+  echo "docker is required on the deployment server" >&2
   exit 1
 fi
 
-if ! command -v docker >/dev/null 2>&1; then
-  echo "docker is required on the deployment server" >&2
+if [ "$SKIP_DOCKER_BUILD" != "true" ] && ! command -v git >/dev/null 2>&1; then
+  echo "git is required on the deployment server when SKIP_DOCKER_BUILD is not true" >&2
   exit 1
 fi
 
 mkdir -p "$APP_DIR"
 cd "$APP_DIR"
 
-if [ ! -d .git ]; then
-  echo "Initializing repository in $APP_DIR"
-  git init -b "$BRANCH"
-  git remote add origin "$REPO_URL"
-fi
+if [ "$SKIP_DOCKER_BUILD" != "true" ]; then
+  if [ ! -d .git ]; then
+    echo "Initializing repository in $APP_DIR"
+    git init -b "$BRANCH"
+    git remote add origin "$REPO_URL"
+  fi
 
-echo "Fetching $BRANCH from $REPO_URL"
-git -c http.version=HTTP/1.1 fetch --depth=1 origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
-git reset --hard "origin/$BRANCH"
+  echo "Fetching $BRANCH from $REPO_URL"
+  git -c http.version=HTTP/1.1 fetch --depth=1 origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+  git reset --hard "origin/$BRANCH"
+elif [ ! -f docker-compose.yml ]; then
+  echo "docker-compose.yml is missing in $APP_DIR" >&2
+  exit 1
+fi
 
 if [ ! -f .env.production ]; then
   echo ".env.production is missing in $APP_DIR" >&2
