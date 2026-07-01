@@ -206,10 +206,10 @@ export const getForeshadowingDetailExecutor: ToolExecutorFn = async (args, state
 
 export const GET_RECENT_CHAPTERS_DEF: ToolDefinition = {
   name: "get_recent_chapters",
-  description: "获取当前章节及前 N 章的内容摘要。参数：count（章数，默认 3，最大 5）、max_chars_per_chapter（每章最大字符数，默认 6000）",
+  description: "获取当前章节及前 N 章的内容摘要。参数：count（章数，默认 3，最大 5）、max_chars_per_chapter（每章最大字符数，默认 2000）",
   inputSchema: z.object({
     count: z.number().min(1).max(5).optional(),
-    max_chars_per_chapter: z.number().min(1000).max(12000).optional(),
+    max_chars_per_chapter: z.number().min(500).max(12000).optional(),
   }),
   permission: readOnlyPermission("plot.read"),
   toolKind: "read",
@@ -217,7 +217,7 @@ export const GET_RECENT_CHAPTERS_DEF: ToolDefinition = {
 
 export const getRecentChaptersExecutor: ToolExecutorFn = async (args, state) => {
   const count = Math.min(Math.max(Number(args.count ?? 3) || 3, 1), 5);
-  const maxCharsPerChapter = Math.min(Math.max(Number(args.max_chars_per_chapter ?? 6000) || 6000, 1000), 12000);
+  const maxCharsPerChapter = Math.min(Math.max(Number(args.max_chars_per_chapter ?? 2000) || 2000, 500), 12000);
   const d = state.novelData as Record<string, unknown>;
   const novelId = getNovelId(state);
   const chapterId = getChapterId(state);

@@ -35,15 +35,20 @@ function getNovelId(state: Parameters<ToolExecutorFn>[1]): string {
 /** get_novel_info — 获取小说基本信息 */
 export const GET_NOVEL_INFO_DEF: ToolDefinition = {
   name: "get_novel_info",
-  description: "获取当前小说的基本信息（名称、章节、大纲摘要、世界观、作品圣经、剧情进度）",
-  inputSchema: z.object({}),
+  description: "获取当前小说的基本信息。默认返回短摘要；确需完整大纲/世界观/背景时传 include_full_sections=true。",
+  inputSchema: z.object({
+    include_full_sections: z.boolean().optional(),
+  }),
   permission: readOnlyPermission("novel.read"),
   toolKind: "read",
 };
 
-export const getNovelInfoExecutor: ToolExecutorFn = async (_, state) => {
+export const getNovelInfoExecutor: ToolExecutorFn = async (args, state) => {
   const d = state.novelData as Record<string, unknown>;
   const novelId = getNovelId(state);
+  const includeFullSections = args.include_full_sections === true;
+  const sectionText = (value: string | null | undefined, maxLength: number) =>
+    includeFullSections ? value ?? "" : compactText(value, maxLength);
   if (novelId) {
     const novel = await prisma.novel.findUnique({
       where: { id: novelId },
@@ -77,11 +82,12 @@ export const getNovelInfoExecutor: ToolExecutorFn = async (_, state) => {
       return JSON.stringify({
         novelName: novel.name,
         chapterTitle: novel.chapters[0]?.title ?? d.chapterTitle,
-        outlineSummary: novel.outline?.content ?? "",
-        storyBackground: novel.storyBackground?.content ?? "",
-        worldSetting: novel.worldSetting?.content ?? "",
+        outlineSummary: sectionText(novel.outline?.content, 800),
+        storyBackground: sectionText(novel.storyBackground?.content, 500),
+        worldSetting: sectionText(novel.worldSetting?.content, 500),
         writingBible: novel.writingBible,
-        storyProgress: novel.storyProgress ?? "",
+        storyProgress: sectionText(novel.storyProgress, 500),
+        sectionsTruncated: !includeFullSections,
       }, null, 2);
     }
   }
@@ -89,11 +95,12 @@ export const getNovelInfoExecutor: ToolExecutorFn = async (_, state) => {
   return JSON.stringify({
     novelName: d.novelName,
     chapterTitle: d.chapterTitle,
-    outlineSummary: d.outlineSummary,
-    storyBackground: d.storyBackground,
-    worldSetting: d.worldSetting,
+    outlineSummary: sectionText(d.outlineSummary as string, 800),
+    storyBackground: sectionText(d.storyBackground as string, 500),
+    worldSetting: sectionText(d.worldSetting as string, 500),
     writingBible: d.writingBible,
-    storyProgress: d.storyProgress,
+    storyProgress: sectionText(d.storyProgress as string, 500),
+    sectionsTruncated: !includeFullSections,
   }, null, 2);
 };
 

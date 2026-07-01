@@ -36,6 +36,16 @@ export type { AgentRuntimeOptions } from "./model-runtime";
 
 const MAX_INVALID_CONTROL_TOOL_ATTEMPTS = 2;
 const MAX_PARALLEL_SAFE_TOOLS = 5;
+const DEFAULT_MODEL_TOOL_RESULT_CHAR_LIMIT = 6000;
+const HEAVY_MODEL_TOOL_RESULT_CHAR_LIMIT = 3000;
+const HEAVY_TOOL_RESULT_NAMES = new Set([
+  "get_active_review_artifact",
+  "get_review_artifact",
+  "get_recent_chapters",
+  "get_novel_info",
+  "list_outline_summary",
+  "list_characters_summary",
+]);
 
 interface ToolExecutionResult {
   content: string;
@@ -46,6 +56,7 @@ interface ToolExecutionResult {
 
 interface AgentRoundToolExecutionResult extends ToolExecutionResult {
   id: string;
+  toolName: string;
   parseError?: boolean;
 }
 
@@ -299,7 +310,11 @@ export class AgentRuntimeImpl implements AgentRuntime {
     }
 
     for (const result of results) {
-      messages.push({ role: "tool", tool_call_id: result.id, content: result.content });
+      messages.push({
+        role: "tool",
+        tool_call_id: result.id,
+        content: compactToolResultForModel(result.toolName, result.content),
+      });
     }
     return { done: false };
   }
@@ -410,7 +425,7 @@ export class AgentRuntimeImpl implements AgentRuntime {
             context: options.metadata,
             durationMs: Date.now() - startedAt,
           });
-          return { id: tc.id, content: result, fatal: true, unauthorized: true };
+          return { id: tc.id, toolName, content: result, fatal: true, unauthorized: true };
         }
         const parsedArgs = parseToolCallArguments(tc.function.arguments || "");
         if (!parsedArgs.success) {
@@ -436,7 +451,7 @@ export class AgentRuntimeImpl implements AgentRuntime {
             context: options.metadata,
             durationMs: Date.now() - startedAt,
           });
-          return { id: tc.id, content: result, fatal: true, parseError: true };
+          return { id: tc.id, toolName, content: result, fatal: true, parseError: true };
         }
         const args = parsedArgs.args;
         options.onToolCall?.(toolName, args);
@@ -453,7 +468,7 @@ export class AgentRuntimeImpl implements AgentRuntime {
           context: options.metadata,
           durationMs: Date.now() - startedAt,
         });
-        return { id: tc.id, content: result.content, fatal: result.fatal, terminal: result.terminal };
+        return { id: tc.id, toolName, content: result.content, fatal: result.fatal, terminal: result.terminal };
   }
 
   private canExecuteToolCallInParallel(
@@ -592,6 +607,19 @@ export class AgentRuntimeImpl implements AgentRuntime {
     }
     return getModelRuntime();
   }
+}
+
+function compactToolResultForModel(toolName: string, content: string): string {
+  const limit = HEAVY_TOOL_RESULT_NAMES.has(toolName)
+    ? HEAVY_MODEL_TOOL_RESULT_CHAR_LIMIT
+    : DEFAULT_MODEL_TOOL_RESULT_CHAR_LIMIT;
+  if (content.length <= limit) return content;
+
+  return [
+    content.slice(0, limit),
+    "",
+    `[工具结果已截断：${toolName} 原始长度 ${content.length} 字符，已回灌前 ${limit} 字符。需要更精确内容时，请用更具体的参数重新查询，不要要求系统一次性返回全文。]`,
+  ].join("\n");
 }
 
 function buildTerminalControlFallback(controlEvents: AgentControlEvent[]): string {

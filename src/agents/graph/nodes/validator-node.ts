@@ -18,7 +18,7 @@ import type { OpenAI } from "openai";
 import type { AgentOutput, CoreAgentId, WritingState } from "../state";
 import { AGENT_NAMES, getActiveArtifactId } from "../state";
 import { SELF_CHECK_PROMPT } from "../self-check-prompt";
-import { buildActiveTaskContext, buildConversationHistoryText, buildSummaryIndex } from "../context-builder";
+import { buildActiveTaskContext, buildConversationHistoryText, buildOperationSummaryIndex } from "../context-builder";
 import type { AgentDefinition } from "@/agents/runtime/agent-definition";
 import { runAgent } from "@/agents/runtime/agent-runner";
 
@@ -63,7 +63,7 @@ const validatorDefinition: AgentDefinition = {
     messages.push({ role: "system", content: buildSystemPrompt() });
     messages.push({ role: "system", content: SELF_CHECK_PROMPT });
 
-    const summaryIndex = buildSummaryIndex(novelData);
+    const summaryIndex = buildOperationSummaryIndex(state);
     if (summaryIndex) {
       messages.push({
         role: "system",

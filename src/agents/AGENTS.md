@@ -211,7 +211,7 @@ src/agents/tools/
 - OpenAI tool schema 统一通过 `getOpenAITools()` 从 registry 生成
 - 写作工作流初始化只预载小说基本信息、世界设定、故事背景和大纲总纲；角色、章节正文、结构化大纲节点、伏笔、地点、物品、势力、术语、参考资料和文风画像必须通过只读工具按需查库，不再依赖 `state.novelData` 的全量缓存
 - 所有 AgentDefinition 必须声明 `toolCapabilities`，禁止恢复 `getTools` 回调
-- `AgentRunner` 使用 `getToolNamesForAgent()` 按 capability + `permission.agentIds` 生成本轮 OpenAI tools，并可按当前 `CreativeOperation` 进一步裁剪剧情 Agent 的 builder / beat / proposal 类工具；新增 control tool 时必须同步考虑哪些 Agent、哪些 operation 应暴露，并补充工具暴露测试。
+- `AgentRunner` 使用 `getToolNamesForAgent()` 按 capability + `permission.agentIds` 生成基础工具集，再通过 `src/agents/runtime/tool-profile.ts` 按当前 `CreativeOperation` 裁剪本轮 OpenAI tools。Agent 身份负责职责边界，Operation Tool Profile 负责本轮任务可见工具；新增 control/read tool 时必须同步考虑哪些 Agent、哪些 operation 应暴露，并补充工具暴露测试。
 
 ### Phase 4 AgentDefinition + AgentRunner（2026-06-09）
 
@@ -225,7 +225,7 @@ AgentDefinition（声明式配置）→ AgentRunner（统一执行管道）
 4. createToolExecutor + registry 生成工具链 → 5. AgentRuntime 执行 OpenAI tool-call loop
 6. 生成段落文本 `AgentOutput` → 7. controlEvents 交给 Graph 处理 → 8. 日志 + 返回 state partial
 
-工具链生成不是“read/proposal + 全量 control tools”。它必须只使用当前 Agent 的 `toolCapabilities`，并过滤掉 `permission.agentIds` 不包含当前 Agent 的工具。这样职责边界会在模型可见工具层先被收口，而 `processControlEvents()` 的 allowed section 过滤继续作为服务端落库前防线。
+工具链生成不是“read/proposal + 全量 control tools”。它必须只使用当前 Agent 的 `toolCapabilities`，过滤掉 `permission.agentIds` 不包含当前 Agent 的工具，并按当前 `CreativeOperation` 的 Operation Tool Profile 做交集裁剪。这样职责边界会在模型可见工具层先被收口，而 `processControlEvents()` 的 allowed section 过滤继续作为服务端落库前防线。
 
 **迁移结果**：
 | Agent | 原行数 | 新行数 | 变化 |
@@ -388,7 +388,7 @@ submit_evaluation(pass)
 - **文件**: `src/agents/graph/nodes/lore-advisor-node.ts`
 - **Agent ID**: `设定`
 - **输出模式**: `paragraph_text_with_control_tools` — 自然段文本直接输出，control tools 处理草案、报告和评审
-- **上下文策略**: 摘要索引优先 — `buildSummaryIndex()`
+- **上下文策略**: 操作感知摘要索引优先 — `buildOperationSummaryIndex()`
 - **身份**: 作品设定体系架构师，可讨论、评价、创建、调整和维护设定；不把所有请求都套成设定更新。
 
 **工具列表**：read tools（novel/character/lore/plot 查询）+ control tools（`propose_updates`、update builder）
@@ -410,7 +410,7 @@ submit_evaluation(pass)
 - **文件**: `src/agents/graph/nodes/plot-advisor-node.ts`
 - **Agent ID**: `剧情`
 - **输出模式**: `paragraph_text_with_control_tools` — 自然段文本直接输出，AgentRuntime 执行 OpenAI tool-call loop
-- **上下文策略**: 摘要索引优先 — `buildSummaryIndex()` + 工具查询，避免默认读取完整大纲/伏笔
+- **上下文策略**: 操作感知摘要索引优先 — `buildOperationSummaryIndex()` + 工具查询，避免默认读取完整大纲/伏笔
 - **身份**: 剧情结构顾问，可处理主线推进、章节职责、角色行动链、伏笔生命周期、节奏结构和 beat plan。
 
 **工具列表**：基础剧情查询工具（get_novel_info, list_available_data, list_characters_summary, get_character_detail, list_outline_summary, get_outline_node, get_plot_progress, list_foreshadowings_summary, get_foreshadowing_detail, get_recent_chapters）+ 按当前 CreativeOperation 暴露的 control tools。规划章节只暴露 `submit_beat_plan` 等章节计划工具；创建/修改大纲才暴露 `propose_updates`、update builder、`append_outline_tree`；伏笔管理只暴露必要的伏笔草案工具。
@@ -563,15 +563,17 @@ Agent 调用 control tool → runtime 拦截 → parseControlEventArgs() → Age
 
 | Agent | 上下文策略 | Token 估算 |
 |-------|----------|-----------|
-| 设定顾问 | `buildSummaryIndex()` — 摘要索引 + 按需详情 | ~500-1200 |
-| 剧情顾问 | `buildSummaryIndex()` — 摘要索引 + 按需详情 | ~500-1200 |
-| 作家 | `buildSummaryIndex()` + 可选章节参考 + 按需详情 | ~800-4000 |
-| 校验员 | `buildSummaryIndex()` + 可选章节参考 + 高风险对象详情 | ~500-3000 |
-| 网文编辑 | `buildSummaryIndex()` + 作品圣经 + 可选章节参考 + 按需详情 | ~800-4000 |
+| 设定顾问 | `buildOperationSummaryIndex()` — 根据 `contextStrategy=lore/brief/...` 注入设定相关摘要 + 按需详情 | ~300-1200 |
+| 剧情顾问 | `buildOperationSummaryIndex()` — 大纲/伏笔/章节规划只注入剧情相关摘要 + 按需详情 | ~300-1200 |
+| 作家 | `buildOperationSummaryIndex()` + 可选章节参考 + 按需详情 | ~500-4000 |
+| 校验员 | `buildOperationSummaryIndex()` + 可选章节参考 + 高风险对象详情；复审时提示通过 artifact read tool 读取草案 | ~400-3000 |
+| 网文编辑 | `buildOperationSummaryIndex()` + 作品圣经 + 可选章节参考；复审时提示通过 artifact read tool 读取草案 | ~500-4000 |
 
-五个 Agent 都遵循“先理解用户目标，再按需查询”的策略。摘要索引用于判断相关性；只有事实核对、冲突校验、精确改写、正文承接或商业判断需要证据时才读取详情。当前章节正文不再被编辑/校验/写作默认视为任务对象，只作为可选参考材料。作品圣经用于约束题材定位、读者承诺、爽点模型和雷点。角色不变量会进入角色摘要和角色详情，用于 OOC 校验、角色商业性判断和正文写作约束。
+五个 Agent 都遵循“先理解用户目标，再按需查询”的策略。摘要索引用于判断相关性；只有事实核对、冲突校验、精确改写、正文承接或商业判断需要证据时才读取详情。`buildSummaryIndex()` 保留全量兼容入口，Agent 节点主路径使用 `buildOperationSummaryIndex()`，由 `OperationDefinition.contextStrategy` 决定本轮注入 brief/lore/outline/chapter/review 哪类摘要，避免每轮默认注入角色、设定、地点、物品、术语、大纲、伏笔和 Beat Plan 全量索引。当前章节正文不再被编辑/校验/写作默认视为任务对象，只作为可选参考材料。作品圣经用于约束题材定位、读者承诺、爽点模型和雷点。角色不变量会进入角色摘要和角色详情，用于 OOC 校验、角色商业性判断和正文写作约束。
 
 Artifact reviewer 使用专用历史模式：保留完整用户消息、Agent 调用 brief 和其他 Agent 输出，将当前草案生产者的完整正文替换为 artifactId 读取提示。Reviewer 通过提示词只提取与本轮审核相关的历史结论、避免复述，而不对其他 Agent 历史做硬截断。待审核正文只通过 `get_active_review_artifact` 读取一次，避免对话历史和工具结果重复携带同一草案。
+
+工具结果回灌给模型时也有预算边界。`AgentRuntimeImpl` 会保留完整 `toolResults` 供日志、调试和 `onToolResult` 摘要使用，但写回下一轮 LLM 的 tool message 会经过字符上限压缩；`get_active_review_artifact`、`get_review_artifact`、`get_recent_chapters`、`get_novel_info`、`list_outline_summary`、`list_characters_summary` 等重型读取工具使用更低回灌上限。需要完整内容时应让 Agent 用更具体参数重新查询，而不是默认把全文塞进后续模型轮次。
 
 ## 八、工具分组（v7.2）
 

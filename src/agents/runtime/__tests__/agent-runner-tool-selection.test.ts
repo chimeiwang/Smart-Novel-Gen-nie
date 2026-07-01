@@ -10,6 +10,23 @@ import assert from "node:assert/strict";
 import "@/agents/tools";
 import { getOpenAITools } from "@/agents/tools/registry";
 import { getToolNamesForAgent } from "../agent-runner";
+import { CREATIVE_OPERATION_KINDS, type CreativeOperationKind } from "@/shared/contracts/creative-operation";
+import type { WritingState } from "@/agents/graph/state";
+
+function operation(kind: CreativeOperationKind): NonNullable<WritingState["currentOperation"]> {
+  return {
+    kind,
+    targetType: "unknown",
+    userGoal: "测试",
+    primaryAgent: "剧情",
+    reviewers: [],
+    outputKind: "chat_answer",
+    requiresArtifact: false,
+    requiresUserApproval: false,
+    confidence: 0.9,
+    reasoning: "测试",
+  };
+}
 
 describe("AgentRunner tool selection", () => {
   it("does not expose update builder tools to the editor Agent", () => {
@@ -212,5 +229,111 @@ describe("AgentRunner tool selection", () => {
     });
 
     assert.ok(toolNames.includes("show_review_artifact"));
+  });
+
+  it("operation profiles cover every CreativeOperation and prevent all-tools exposure", () => {
+    const wideDefinition = {
+      id: "剧情" as const,
+      toolCapabilities: [
+        "novel.read",
+        "character.read",
+        "lore.read",
+        "plot.read",
+        "chapter.read",
+        "style.read",
+        "artifact.read",
+        "proposal.plot",
+        "control.proposal",
+        "control.builder",
+        "control.artifact",
+        "control.beat",
+      ],
+    };
+
+    const unrestrictedCount = getToolNamesForAgent(wideDefinition).length;
+
+    for (const kind of CREATIVE_OPERATION_KINDS) {
+      const toolNames = getToolNamesForAgent(wideDefinition, { currentOperation: operation(kind) });
+
+      assert.ok(toolNames.length > 0, kind);
+      assert.ok(toolNames.length < unrestrictedCount, kind);
+      assert.equal(toolNames.includes("get_character_list"), false, kind);
+    }
+  });
+
+  it("does not expose lore builder tools during answer_question", () => {
+    const toolNames = getToolNamesForAgent({
+      id: "设定",
+      toolCapabilities: [
+        "novel.read",
+        "character.read",
+        "lore.read",
+        "plot.read",
+        "artifact.read",
+        "proposal.lore",
+        "control.proposal",
+        "control.builder",
+        "control.artifact",
+      ],
+    }, { currentOperation: operation("answer_question") });
+
+    assert.ok(toolNames.includes("get_novel_info"));
+    assert.ok(toolNames.includes("search_lore"));
+    assert.equal(toolNames.includes("propose_updates"), false);
+    assert.equal(toolNames.includes("start_update_builder"), false);
+    assert.equal(toolNames.includes("show_review_artifact"), false);
+  });
+
+  it("exposes only review tools to reviewer when an active artifact exists", () => {
+    const toolNames = getToolNamesForAgent({
+      id: "编辑",
+      toolCapabilities: [
+        "novel.read",
+        "character.read",
+        "plot.read",
+        "chapter.read",
+        "style.read",
+        "artifact.read",
+        "control.artifact",
+        "control.quality",
+        "control.evaluation",
+      ],
+    }, {
+      currentOperation: operation("create_outline"),
+      activeArtifactId: "artifact-1",
+      pendingAgentCall: {
+        fromAgent: "剧情",
+        toAgent: "编辑",
+        reason: "审核大纲",
+        timestamp: 1,
+      },
+    });
+
+    assert.ok(toolNames.includes("get_active_review_artifact"));
+    assert.ok(toolNames.includes("submit_evaluation"));
+    assert.ok(toolNames.includes("get_outline_node"));
+    assert.equal(toolNames.includes("submit_quality_report"), false);
+    assert.equal(toolNames.includes("start_update_builder"), false);
+  });
+
+  it("keeps writer focused on text artifact output during write_chapter", () => {
+    const toolNames = getToolNamesForAgent({
+      id: "写作",
+      toolCapabilities: ["novel.read", "character.read", "lore.read", "plot.read", "chapter.read", "style.read", "control.artifact"],
+    }, { currentOperation: operation("write_chapter") });
+
+    assert.ok(toolNames.includes("begin_artifact_output"));
+    assert.ok(toolNames.includes("get_style_profile"));
+    assert.ok(toolNames.includes("get_character_detail"));
+    assert.equal(toolNames.includes("list_factions_summary"), false);
+    assert.equal(toolNames.includes("list_locations_summary"), false);
+    assert.equal(toolNames.includes("propose_updates"), false);
+  });
+
+  it("get_novel_info schema supports explicit full-section opt in", () => {
+    const tool = getOpenAITools(["get_novel_info"])[0];
+    const params = tool.function.parameters as { properties?: Record<string, unknown> };
+
+    assert.ok(params.properties?.include_full_sections);
   });
 });

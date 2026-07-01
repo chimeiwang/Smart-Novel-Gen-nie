@@ -6,7 +6,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildActiveTaskContext, buildConversationHistoryText, buildSummaryIndex } from "../context-builder";
+import { buildActiveTaskContext, buildConversationHistoryText, buildOperationSummaryIndex, buildSummaryIndex } from "../context-builder";
 import type { AgentMessage, WritingState } from "../state";
 
 function createState(overrides: Partial<WritingState> = {}): WritingState {
@@ -231,5 +231,88 @@ describe("buildSummaryIndex", () => {
     assert.match(text, /让主角发现第一条主线线索/);
     assert.match(text, /发现线索/);
     assert.match(text, /玉简残片/);
+  });
+});
+
+describe("buildOperationSummaryIndex", () => {
+  it("uses outline profile for plan_chapter without unrelated lore sections", () => {
+    const state = createState({
+      currentOperation: {
+        kind: "plan_chapter",
+        targetType: "chapter",
+        userGoal: "规划第一章",
+        primaryAgent: "剧情",
+        reviewers: ["编辑"],
+        outputKind: "beat_plan",
+        requiresArtifact: true,
+        requiresUserApproval: true,
+        confidence: 0.9,
+        reasoning: "测试",
+      },
+      novelData: {
+        ...createState().novelData,
+        characters: [{ id: "c1", name: "纪寻", aliases: "", identity: "遗产猎人" } as WritingState["novelData"]["characters"][number]],
+        factions: [{ id: "f1", name: "玄天宗", description: "宗门" } as WritingState["novelData"]["factions"][number]],
+        outlineNodes: [{ id: "o1", title: "开篇", kind: "stage", status: "planned", content: "主角接任务" } as WritingState["novelData"]["outlineNodes"][number]],
+        foreshadowings: [{ id: "fs1", name: "玉简残片", status: "active", plantedContent: "残片出现" } as WritingState["novelData"]["foreshadowings"][number]],
+      },
+    });
+
+    const text = buildOperationSummaryIndex(state);
+
+    assert.match(text, /角色索引/);
+    assert.match(text, /大纲索引/);
+    assert.match(text, /伏笔索引/);
+    assert.doesNotMatch(text, /势力索引/);
+  });
+
+  it("uses lore profile for create_lore without outline sections", () => {
+    const state = createState({
+      currentOperation: {
+        kind: "create_lore",
+        targetType: "lore",
+        userGoal: "补充门派设定",
+        primaryAgent: "设定",
+        reviewers: ["校验"],
+        outputKind: "lore_proposal",
+        requiresArtifact: true,
+        requiresUserApproval: true,
+        confidence: 0.9,
+        reasoning: "测试",
+      },
+      novelData: {
+        ...createState().novelData,
+        factions: [{ id: "f1", name: "玄天宗", description: "宗门" } as WritingState["novelData"]["factions"][number]],
+        outlineNodes: [{ id: "o1", title: "开篇", kind: "stage", status: "planned" } as WritingState["novelData"]["outlineNodes"][number]],
+      },
+    });
+
+    const text = buildOperationSummaryIndex(state);
+
+    assert.match(text, /势力索引/);
+    assert.doesNotMatch(text, /大纲索引/);
+  });
+
+  it("adds artifact read hint in reviewer mode", () => {
+    const state = createState({
+      activeArtifactId: "artifact-1",
+      currentOperation: {
+        kind: "create_outline",
+        targetType: "outline",
+        userGoal: "创建大纲",
+        primaryAgent: "剧情",
+        reviewers: ["编辑"],
+        outputKind: "outline_proposal",
+        requiresArtifact: true,
+        requiresUserApproval: true,
+        confidence: 0.9,
+        reasoning: "测试",
+      },
+    });
+
+    const text = buildOperationSummaryIndex(state);
+
+    assert.match(text, /待审核草案提示/);
+    assert.match(text, /get_active_review_artifact/);
   });
 });

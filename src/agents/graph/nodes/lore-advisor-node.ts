@@ -18,7 +18,7 @@ import type { OpenAI } from "openai";
 import type { CoreAgentId, WritingState } from "../state";
 import { AGENT_NAMES } from "../state";
 import { SELF_CHECK_PROMPT } from "../self-check-prompt";
-import { buildActiveTaskContext, buildSummaryIndex, buildConversationHistoryText } from "../context-builder";
+import { buildActiveTaskContext, buildOperationSummaryIndex, buildConversationHistoryText } from "../context-builder";
 import { LORE_UPDATE_SCHEMA_PROMPT } from "../lore-update-schema";
 import type { AgentDefinition } from "@/agents/runtime/agent-definition";
 import { runAgent } from "@/agents/runtime/agent-runner";
@@ -57,7 +57,7 @@ const loreAdvisorDefinition: AgentDefinition = {
     messages.push({ role: "system", content: SELF_CHECK_PROMPT });
 
     // 摘要索引（分层上下文）
-    const contextIndex = buildSummaryIndex(novelData);
+    const contextIndex = buildOperationSummaryIndex(state);
     if (contextIndex) {
       messages.push({
         role: "system",

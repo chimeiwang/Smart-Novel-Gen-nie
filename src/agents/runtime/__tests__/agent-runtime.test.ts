@@ -901,6 +901,58 @@ describe("AgentRuntimeImpl", () => {
     assert.equal(JSON.stringify(calls[1].messages).includes("reasoning_content"), false);
   });
 
+  it("回灌给下一轮模型的长工具结果会截断，但调试记录保留完整结果", async () => {
+    const calls: ToolCallTurnOptions[] = [];
+    const longResult = "大纲".repeat(4000);
+    const runtimePort: ModelRuntimePort = {
+      streamText: async () => ({ content: "" }),
+      completeText: async () => ({ content: "" }),
+      completeStructured: (async (schema) => ({ data: schema.parse({}) })) as ModelRuntimePort["completeStructured"],
+      runToolCallTurn: async (options) => {
+        calls.push(options);
+        if (calls.length === 1) {
+          return {
+            content: "先查大纲",
+            reasoningContent: "",
+            toolCalls: [
+              {
+                id: "call_list_outline_summary",
+                type: "function",
+                function: {
+                  name: "list_outline_summary",
+                  arguments: "{}",
+                },
+              },
+            ],
+            finishReason: "tool_calls",
+          };
+        }
+        return {
+          content: "done",
+          reasoningContent: "",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+    };
+    const runtime = new AgentRuntimeImpl({ runtime: runtimePort });
+
+    const result = await runtime.runTurn({
+      ...createRuntimeOptions(),
+      tools: getOpenAITools(["list_outline_summary"]),
+      toolExecutor: async () => longResult,
+    });
+
+    assert.equal(calls.length, 2);
+    assert.equal(result.toolResults[0].result, longResult);
+    const secondMessages = calls[1].messages as Array<{ role?: string; content?: unknown }>;
+    const toolMessage = secondMessages.find((message) => message.role === "tool");
+    assert.equal(typeof toolMessage?.content, "string");
+    assert.ok((toolMessage!.content as string).length < longResult.length);
+    assert.match(toolMessage!.content as string, /工具结果已截断/);
+    assert.match(toolMessage!.content as string, /list_outline_summary/);
+  });
+
   it("submit_evaluation 可在同一轮输出报告并终止，不再发起 ACK 后续请求", async () => {
     const evaluationArgs = {
       artifactId: "artifact-1",

@@ -10,6 +10,7 @@
  */
 
 import { getActiveArtifactId, type CoreAgentId, type WritingState } from "./state";
+import { getOperationDefinition } from "@/agents/operations/operation-definition";
 
 /** 控制哪些上下文段需要构建 */
 export interface ContextBuildOptions {
@@ -397,6 +398,49 @@ function appendHint(parts: string[], label: string, value: string | null | undef
 export function buildSummaryIndex(
   novelData: WritingState["novelData"],
 ): string {
+  return buildSummaryIndexWithOptions(novelData, {});
+}
+
+export function buildOperationSummaryIndex(state: Pick<WritingState, "novelData" | "currentOperation" | "pendingAgentCall" | "activeArtifactId" | "artifactReview">): string {
+  const kind = state.currentOperation?.kind;
+  if (!kind) return buildSummaryIndex(state.novelData);
+  const strategy = getOperationDefinition(kind).contextStrategy;
+  const isReview = Boolean(
+    state.pendingAgentCall?.toAgent ||
+    state.activeArtifactId ||
+    state.artifactReview?.activeArtifactId ||
+    strategy === "review"
+  );
+
+  return buildSummaryIndexWithOptions(state.novelData, {
+    characters: strategy !== "brief",
+    lore: strategy === "lore" || strategy === "chapter" || strategy === "review",
+    outline: strategy === "outline" || strategy === "chapter" || strategy === "review",
+    foreshadowings: strategy === "outline" || strategy === "chapter" || strategy === "review",
+    beatPlan: strategy === "chapter",
+    reviewMode: isReview,
+  });
+}
+
+function buildSummaryIndexWithOptions(
+  novelData: WritingState["novelData"],
+  options: {
+    characters?: boolean;
+    lore?: boolean;
+    outline?: boolean;
+    foreshadowings?: boolean;
+    beatPlan?: boolean;
+    reviewMode?: boolean;
+  }
+): string {
+  const opts = {
+    characters: options.characters ?? true,
+    lore: options.lore ?? true,
+    outline: options.outline ?? true,
+    foreshadowings: options.foreshadowings ?? true,
+    beatPlan: options.beatPlan ?? true,
+    reviewMode: options.reviewMode ?? false,
+  };
   const lines: string[] = [];
   lines.push("## 摘要索引（先读这里，再决定是否查详情）");
   lines.push("");
@@ -406,7 +450,13 @@ export function buildSummaryIndex(
   if (novelData.plotProgress.currentStage) lines.push(`- 剧情阶段：${novelData.plotProgress.currentStage}`);
   if (novelData.plotProgress.currentGoal) lines.push(`- 当前目标：${compactText(novelData.plotProgress.currentGoal, 90)}`);
 
-  if (novelData.characters.length > 0) {
+  if (opts.reviewMode) {
+    lines.push("");
+    lines.push("### 待审核草案提示");
+    lines.push("- 当前轮次如需审核或返工草案，应通过 get_active_review_artifact / get_review_artifact 读取；不要把历史对话中的草案正文当作唯一依据。");
+  }
+
+  if (opts.characters && novelData.characters.length > 0) {
     lines.push("");
     lines.push("### 角色索引");
     for (const c of novelData.characters) {
@@ -423,7 +473,7 @@ export function buildSummaryIndex(
     }
   }
 
-  if (novelData.factions.length > 0) {
+  if (opts.lore && novelData.factions.length > 0) {
     lines.push("");
     lines.push("### 势力索引");
     for (const f of novelData.factions) {
@@ -436,7 +486,7 @@ export function buildSummaryIndex(
     }
   }
 
-  if (novelData.locations.length > 0) {
+  if (opts.lore && novelData.locations.length > 0) {
     lines.push("");
     lines.push("### 地点索引");
     for (const l of novelData.locations) {
@@ -449,7 +499,7 @@ export function buildSummaryIndex(
     }
   }
 
-  if (novelData.items.length > 0) {
+  if (opts.lore && novelData.items.length > 0) {
     lines.push("");
     lines.push("### 物品索引");
     for (const i of novelData.items) {
@@ -463,7 +513,7 @@ export function buildSummaryIndex(
     }
   }
 
-  if (novelData.glossaries.length > 0) {
+  if (opts.lore && novelData.glossaries.length > 0) {
     lines.push("");
     lines.push("### 术语索引");
     for (const g of novelData.glossaries) {
@@ -472,7 +522,7 @@ export function buildSummaryIndex(
     }
   }
 
-  if (novelData.outlineNodes.length > 0) {
+  if (opts.outline && novelData.outlineNodes.length > 0) {
     lines.push("");
     lines.push("### 大纲索引");
     for (const node of novelData.outlineNodes) {
@@ -481,7 +531,7 @@ export function buildSummaryIndex(
     }
   }
 
-  if (novelData.foreshadowings.length > 0) {
+  if (opts.foreshadowings && novelData.foreshadowings.length > 0) {
     lines.push("");
     lines.push("### 伏笔索引");
     for (const f of novelData.foreshadowings) {
@@ -492,7 +542,7 @@ export function buildSummaryIndex(
     }
   }
 
-  if (novelData.approvedBeatPlan) {
+  if (opts.beatPlan && novelData.approvedBeatPlan) {
     lines.push("");
     lines.push("### 已批准章节计划");
     lines.push(`- 章节目标：${compactText(novelData.approvedBeatPlan.chapterGoal, 100)}`);

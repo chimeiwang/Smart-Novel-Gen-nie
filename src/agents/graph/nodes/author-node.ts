@@ -18,7 +18,7 @@
 import type { OpenAI } from "openai";
 import type { WritingState, AgentOutput, CoreAgentId } from "../state";
 import { AGENT_NAMES } from "../state";
-import { buildActiveTaskContext, buildSummaryIndex, buildConversationHistoryText } from "../context-builder";
+import { buildActiveTaskContext, buildOperationSummaryIndex, buildConversationHistoryText } from "../context-builder";
 import { SELF_CHECK_PROMPT, WRITING_SELF_CHECK_PROMPT } from "../self-check-prompt";
 import type { AgentDefinition } from "@/agents/runtime/agent-definition";
 import { runAgent } from "@/agents/runtime/agent-runner";
@@ -79,7 +79,7 @@ const authorDefinition: AgentDefinition = {
     messages.push({ role: "system", content: SELF_CHECK_PROMPT + "\n" + WRITING_SELF_CHECK_PROMPT });
 
     // 摘要索引
-    const summaryIndex = buildSummaryIndex(novelData);
+    const summaryIndex = buildOperationSummaryIndex(state);
     if (summaryIndex) {
       messages.push({
         role: "system",
