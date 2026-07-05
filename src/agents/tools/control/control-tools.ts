@@ -181,8 +181,9 @@ registerTool(
     name: "append_outline_tree",
     description:
       "向批量更新草稿箱追加一批嵌套结构化大纲树。用于大纲创建、展开、重构、迁移等复杂结构任务。" +
+      "mode=replace 表示用户确认后用本次完整树替换当前小说唯一大纲树；mode=patch 只追加不与现有同级范围冲突的局部结构。" +
       "输入只写 stage → plotUnits → chapterGroups 的自然树；不要提供 parentId、parentKey 或 clientKey，服务端会自动展开为合法 outlineAdjustments。" +
-      "每个节点只允许 title 和可选 estimatedWordCount；不要提供 content 字段，不要写整章梗概、正文、长段落或对白。" +
+      "每个节点必须提供 chapterStartOrder/chapterEndOrder，只允许 title、章节范围和可选 estimatedWordCount；不要提供 content 字段。" +
       `长总纲文本使用 put_update_text_block(section=outlineContent)；节点详细梗概在树追加后用 ${ITEM_TEXT_BLOCK_TOOLS_CN_TEXT} 写入。追加完成后调用 finish_update_builder。`,
     inputSchema: AppendOutlineTreeToolArgsSchema,
     permission: controlToolPermission("control.builder", ["剧情"]),

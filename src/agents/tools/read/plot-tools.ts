@@ -48,8 +48,9 @@ function getChapterId(state: Parameters<ToolExecutorFn>[1]): string {
 
 export const LIST_OUTLINE_SUMMARY_DEF: ToolDefinition = {
   name: "list_outline_summary",
-  description: "列出大纲节点短摘要（标题、状态、排序、短摘要）。默认不返回长总纲全文；确需全文时传 include_full_summary=true。",
+  description: "读取结构化大纲。写作/评审上下文固定返回当前章节路径与完整当前章节组；大纲编辑上下文返回整棵树的层级元数据，不截取节点正文。",
   inputSchema: z.object({
+    scope: z.enum(["current_chapter", "tree_index"]).optional(),
     include_full_summary: z.boolean().optional(),
   }),
   permission: readOnlyPermission("plot.read"),
@@ -59,6 +60,14 @@ export const LIST_OUTLINE_SUMMARY_DEF: ToolDefinition = {
 export const listOutlineSummaryExecutor: ToolExecutorFn = async (args, state) => {
   const d = state.novelData as Record<string, unknown>;
   const novelId = getNovelId(state);
+  const localizedContext = d.writingOutlineContext;
+  if (localizedContext && typeof localizedContext === "object") {
+    return JSON.stringify({
+      scope: "current_chapter",
+      outlineContext: localizedContext,
+      note: "写作与评审任务只返回当前章节相关大纲；未来章节详情未被选入，不是字符截断。",
+    }, null, 2);
+  }
   const includeFullSummary = args.include_full_summary === true;
   const [outline, nodes] = novelId
     ? await Promise.all([
@@ -71,10 +80,9 @@ export const listOutlineSummaryExecutor: ToolExecutorFn = async (args, state) =>
     : [null, (d.outlineNodes as Record<string, unknown>[]) || []];
 
   return JSON.stringify({
-    summary: includeFullSummary
-      ? outline?.content ?? d.outlineSummary
-      : compactText((outline?.content ?? d.outlineSummary) as string, 500),
-    summaryTruncated: !includeFullSummary,
+    scope: "tree_index",
+    ...(includeFullSummary ? { summary: outline?.content ?? d.outlineSummary } : {}),
+    summaryIncluded: includeFullSummary,
     nodes: nodes.map((node) => ({
       id: node.id,
       title: node.title,
@@ -82,43 +90,63 @@ export const listOutlineSummaryExecutor: ToolExecutorFn = async (args, state) =>
       status: node.status,
       order: node.order,
       parentId: node.parentId,
-      summary: compactText(node.content as string, 80),
+      chapterStartOrder: node.chapterStartOrder,
+      chapterEndOrder: node.chapterEndOrder,
     })),
   }, null, 2);
 };
 
 export const GET_OUTLINE_NODE_DEF: ToolDefinition = {
   name: "get_outline_node",
-  description: "获取指定大纲节点的完整内容。参数：node_title（节点标题）",
+  description: "获取指定大纲节点完整内容。优先传 node_id；兼容 node_title，但标题匹配多条时会返回候选而不随机选择。",
   inputSchema: z.object({
-    node_title: z.string().min(1, "节点标题不能为空"),
+    node_id: z.string().min(1).optional(),
+    node_title: z.string().min(1).optional(),
+  }).refine((value) => Boolean(value.node_id || value.node_title), {
+    message: "node_id 或 node_title 至少提供一个",
   }),
   permission: readOnlyPermission("plot.read"),
   toolKind: "read",
 };
 
 export const getOutlineNodeExecutor: ToolExecutorFn = async (args, state) => {
-  const nodeTitle = args.node_title as string;
+  const nodeId = args.node_id as string | undefined;
+  const nodeTitle = args.node_title as string | undefined;
   const d = state.novelData as Record<string, unknown>;
   const novelId = getNovelId(state);
-  const node = novelId
-    ? await prisma.outlineNode.findFirst({
-        where: {
-          novelId,
-          title: { contains: nodeTitle },
-        },
-        include: {
-          parent: { select: { id: true, title: true, kind: true } },
-          children: { orderBy: { order: "asc" } },
-        },
-      })
-    : ((d.outlineNodes as Record<string, unknown>[]) || []).find(
-        (n: Record<string, unknown>) =>
-          (n.title as string).includes(nodeTitle) || nodeTitle.includes(n.title as string)
-      );
+  const include = {
+    parent: { select: { id: true, title: true, kind: true, chapterStartOrder: true, chapterEndOrder: true } },
+    children: { orderBy: { order: "asc" as const } },
+  };
+  if (novelId && nodeId) {
+    const node = await prisma.outlineNode.findFirst({ where: { id: nodeId, novelId }, include });
+    return node ? JSON.stringify(node, null, 2) : `未找到大纲节点 "${nodeId}"`;
+  }
+  if (novelId && nodeTitle) {
+    const matches = await prisma.outlineNode.findMany({
+      where: { novelId, title: { contains: nodeTitle } },
+      include,
+      orderBy: [{ kind: "asc" }, { order: "asc" }],
+    });
+    if (matches.length > 1) {
+      return JSON.stringify({
+        error: "OUTLINE_NODE_AMBIGUOUS",
+        message: `标题“${nodeTitle}”匹配到多个大纲节点，请改用 node_id。`,
+        candidates: matches.map((node) => ({ id: node.id, title: node.title, kind: node.kind })),
+      }, null, 2);
+    }
+    return matches[0] ? JSON.stringify(matches[0], null, 2) : `未找到大纲节点 "${nodeTitle}"`;
+  }
+  const matches = ((d.outlineNodes as Record<string, unknown>[]) || []).filter((node) =>
+    nodeId ? node.id === nodeId : nodeTitle && String(node.title).includes(nodeTitle)
+  );
+  if (matches.length > 1) {
+    return JSON.stringify({ error: "OUTLINE_NODE_AMBIGUOUS", candidates: matches.map((node) => ({ id: node.id, title: node.title })) }, null, 2);
+  }
+  const node = matches[0];
   return node
     ? JSON.stringify(node, null, 2)
-    : `未找到大纲节点 "${nodeTitle}"`;
+    : `未找到大纲节点 "${nodeId ?? nodeTitle}"`;
 };
 
 // ============================================
@@ -206,10 +234,9 @@ export const getForeshadowingDetailExecutor: ToolExecutorFn = async (args, state
 
 export const GET_RECENT_CHAPTERS_DEF: ToolDefinition = {
   name: "get_recent_chapters",
-  description: "获取当前章节及前 N 章的内容摘要。参数：count（章数，默认 3，最大 5）、max_chars_per_chapter（每章最大字符数，默认 2000）",
+  description: "获取目标章节之前 N 章的完整正文。参数 count 默认 3、最大 5；通过减少章节数量控制上下文，不截断已选择正文。",
   inputSchema: z.object({
     count: z.number().min(1).max(5).optional(),
-    max_chars_per_chapter: z.number().min(500).max(12000).optional(),
   }),
   permission: readOnlyPermission("plot.read"),
   toolKind: "read",
@@ -217,21 +244,21 @@ export const GET_RECENT_CHAPTERS_DEF: ToolDefinition = {
 
 export const getRecentChaptersExecutor: ToolExecutorFn = async (args, state) => {
   const count = Math.min(Math.max(Number(args.count ?? 3) || 3, 1), 5);
-  const maxCharsPerChapter = Math.min(Math.max(Number(args.max_chars_per_chapter ?? 2000) || 2000, 500), 12000);
   const d = state.novelData as Record<string, unknown>;
   const novelId = getNovelId(state);
+  const targetChapterOrder = typeof d.targetChapterOrder === "number" ? d.targetChapterOrder : undefined;
   const chapterId = getChapterId(state);
   let selected: Array<{ id: string; title: string; order: number; content: string | null }> = [];
 
   if (novelId && chapterId) {
-    const current = await prisma.chapter.findFirst({
-      where: { id: chapterId, novelId },
-      select: { order: true },
-    });
+    const current = targetChapterOrder === undefined
+      ? await prisma.chapter.findFirst({ where: { id: chapterId, novelId }, select: { order: true } })
+      : null;
+    const boundaryOrder = targetChapterOrder ?? current?.order;
     selected = await prisma.chapter.findMany({
       where: {
         novelId,
-        ...(current ? { order: { lte: current.order } } : {}),
+        ...(boundaryOrder !== undefined ? { order: { lt: boundaryOrder } } : {}),
       },
       orderBy: { order: "desc" },
       take: count,
@@ -250,9 +277,13 @@ export const getRecentChaptersExecutor: ToolExecutorFn = async (args, state) => 
       .sort((a, b) => a.order - b.order);
 
     const currentIndex = chapters.findIndex((ch) => ch.id === d.chapterId);
-    const endIndex = currentIndex >= 0 ? currentIndex + 1 : chapters.length;
-    const startIndex = Math.max(0, endIndex - count);
-    selected = chapters.slice(startIndex, endIndex);
+    if (targetChapterOrder !== undefined) {
+      selected = chapters.filter((chapter) => chapter.order < targetChapterOrder).slice(-count);
+    } else {
+      const endIndex = currentIndex >= 0 ? currentIndex + 1 : chapters.length;
+      const startIndex = Math.max(0, endIndex - count);
+      selected = chapters.slice(startIndex, endIndex);
+    }
   }
 
   return JSON.stringify({
@@ -261,9 +292,9 @@ export const getRecentChaptersExecutor: ToolExecutorFn = async (args, state) => 
       id: ch.id,
       title: ch.title,
       order: ch.order,
-      content: compactText(ch.content, maxCharsPerChapter),
+      content: ch.content ?? "",
     })),
-    note: "只返回当前章节及其前若干章，用于阶段性设定维护；不要把短期描写直接覆盖长期设定。",
+    note: "只按目标章节位置选择最近章节；返回内容完整，未做字符裁剪。",
   }, null, 2);
 };
 

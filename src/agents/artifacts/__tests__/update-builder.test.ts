@@ -12,15 +12,22 @@ describe("update builder", () => {
     const update = buildOutlineTreeUpdate({
       artifactKey: "outline-builder-1",
       batchIndex: 0,
+      mode: "replace",
       stages: [
         {
           title: "第一阶段 鹿溪镇暗流",
+          chapterStartOrder: 1,
+          chapterEndOrder: 15,
           plotUnits: [
             {
               title: "鹿溪镇的暗流",
+              chapterStartOrder: 1,
+              chapterEndOrder: 8,
               chapterGroups: [
                 {
                   title: "裂痕",
+                  chapterStartOrder: 1,
+                  chapterEndOrder: 3,
                   estimatedWordCount: 30000,
                 },
               ],
@@ -35,12 +42,16 @@ describe("update builder", () => {
         action: "create",
         kind: "stage",
         title: "第一阶段 鹿溪镇暗流",
+        chapterStartOrder: 1,
+        chapterEndOrder: 15,
         clientKey: "outline-builder-1-b0-s1",
       },
       {
         action: "create",
         kind: "plot_unit",
         title: "鹿溪镇的暗流",
+        chapterStartOrder: 1,
+        chapterEndOrder: 8,
         clientKey: "outline-builder-1-b0-s1-u1",
         parentKey: "outline-builder-1-b0-s1",
       },
@@ -48,6 +59,8 @@ describe("update builder", () => {
         action: "create",
         kind: "chapter_group",
         title: "裂痕",
+        chapterStartOrder: 1,
+        chapterEndOrder: 3,
         estimatedWordCount: 30000,
         clientKey: "outline-builder-1-b0-s1-u1-g1",
         parentKey: "outline-builder-1-b0-s1-u1",
@@ -60,12 +73,14 @@ describe("update builder", () => {
     const first = buildOutlineTreeUpdate({
       artifactKey: "outline-builder-1",
       batchIndex: 0,
-      stages: [{ title: "第一阶段", plotUnits: [{ title: "遗产线索" }] }],
+      mode: "replace",
+      stages: [{ title: "第一阶段", chapterStartOrder: 1, chapterEndOrder: 15, plotUnits: [{ title: "遗产线索", chapterStartOrder: 1, chapterEndOrder: 15 }] }],
     });
     const second = buildOutlineTreeUpdate({
       artifactKey: "outline-builder-1",
       batchIndex: 1,
-      stages: [{ title: "第二阶段", plotUnits: [{ title: "宗门裂痕" }] }],
+      mode: "replace",
+      stages: [{ title: "第二阶段", chapterStartOrder: 16, chapterEndOrder: 30, plotUnits: [{ title: "宗门裂痕", chapterStartOrder: 16, chapterEndOrder: 30 }] }],
     });
 
     const merged = mergeAgentUpdates(first, second);

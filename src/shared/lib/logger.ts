@@ -66,6 +66,9 @@ export interface LLMLogRecord extends LLMLogContext {
   [key: string]: unknown;
 }
 
+/** Workflow 人工日志接收 LLM 原文记录的运行时回调。 */
+export type WorkflowLLMTraceSink = (record: LLMLogRecord) => void;
+
 const LLM_LOG_PREVIEW_CHARS = 300;
 
 function serializeForLength(value: unknown): string {
@@ -623,12 +626,23 @@ class LocalLogger {
   /**
    * 写入 LLM 日志
    */
-  private writeLLMLogRecord(record: LLMLogRecord, force = false): void {
+  private writeLLMLogRecord(
+    record: LLMLogRecord,
+    force = false,
+    workflowTraceSink?: WorkflowLLMTraceSink
+  ): void {
+    if (workflowTraceSink) {
+      try {
+        workflowTraceSink(record);
+      } catch (error) {
+        console.error("Workflow LLM 日志写入失败:", error);
+      }
+    }
     if (process.env.NODE_TEST_CONTEXT && process.env.LLM_LOG_WRITE_IN_TESTS !== "true") return;
     if (!force && getLLMLogMode() === "off") return;
     try {
       const belongsToWorkflow = typeof record.taskId === "string" && Boolean(record.taskId);
-      if (belongsToWorkflow) {
+      if (!workflowTraceSink && belongsToWorkflow) {
         const workflowBlock = formatLLMWorkflowBlock(record);
         if (workflowBlock) appendHumanWorkflowLog(String(record.taskId), record.timestamp, workflowBlock);
       }
@@ -897,7 +911,11 @@ class LocalLogger {
   llmRequest(
     requestId: string,
     messages: unknown[],
-    options: { tools?: unknown[]; context?: LLMLogContext } = {}
+    options: {
+      tools?: unknown[];
+      context?: LLMLogContext;
+      workflowTraceSink?: WorkflowLLMTraceSink;
+    } = {}
   ): void {
     const mode = getLLMLogMode();
     if (mode === "off") return;
@@ -907,7 +925,7 @@ class LocalLogger {
       tools: options.tools,
       context: options.context,
       mode,
-    }));
+    }), false, options.workflowTraceSink);
     console.log(`[LLM] 请求 #${requestId} 已记录`);
   }
 
@@ -924,6 +942,7 @@ class LocalLogger {
       finishReason?: string;
       reasoningContent?: string;
       toolCalls?: unknown[];
+      workflowTraceSink?: WorkflowLLMTraceSink;
     } = {}
   ): void {
     const mode = getLLMLogMode();
@@ -938,7 +957,7 @@ class LocalLogger {
       reasoningContent: options.reasoningContent,
       toolCalls: options.toolCalls,
       mode,
-    }));
+    }), false, options.workflowTraceSink);
     console.log(`[LLM] 响应 #${requestId} 已记录 (${content.length} chars)`);
   }
 
@@ -950,7 +969,11 @@ class LocalLogger {
     toolName: string,
     args: Record<string, unknown>,
     result: string,
-    options: { context?: LLMLogContext; durationMs?: number } = {}
+    options: {
+      context?: LLMLogContext;
+      durationMs?: number;
+      workflowTraceSink?: WorkflowLLMTraceSink;
+    } = {}
   ): void {
     const mode = getLLMLogMode();
     if (mode === "off") return;
@@ -962,7 +985,7 @@ class LocalLogger {
       context: options.context,
       durationMs: options.durationMs,
       mode,
-    }));
+    }), false, options.workflowTraceSink);
     console.log(`[LLM] 工具调用 ${toolName} #${requestId} 已记录`);
   }
 
@@ -975,6 +998,7 @@ class LocalLogger {
       finishReason?: string;
       toolCallCount?: number;
       controlEventTypes?: string[];
+      workflowTraceSink?: WorkflowLLMTraceSink;
     } = {}
   ): void {
     const mode = getLLMLogMode();
@@ -988,10 +1012,15 @@ class LocalLogger {
       toolCallCount: options.toolCallCount,
       controlEventTypes: options.controlEventTypes,
       mode,
-    }));
+    }), false, options.workflowTraceSink);
   }
 
-  llmError(requestId: string, error: unknown, context?: LLMLogContext): void {
+  llmError(
+    requestId: string,
+    error: unknown,
+    context?: LLMLogContext,
+    workflowTraceSink?: WorkflowLLMTraceSink
+  ): void {
     const message = error instanceof Error ? error.message : String(error);
     this.writeLLMLogRecord({
       ...(context ?? {}),
@@ -999,7 +1028,7 @@ class LocalLogger {
       event: "ERROR",
       requestId,
       message,
-    }, true);
+    }, true, workflowTraceSink);
   }
 
   /**

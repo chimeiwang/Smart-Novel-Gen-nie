@@ -103,6 +103,21 @@ describe("operation agent lifecycle events", () => {
     const events: Array<{ type: string; payload: Record<string, unknown> }> = [];
     const state = {
       ...createState(),
+      runtime: {
+        streamCallbacks: {},
+        workflowTrace: {
+          allocateAgentCallId: (agentId: string) => {
+            assert.equal(agentId, "写作");
+            return "A01";
+          },
+          captureState: (capturedState: unknown, label: string) => {
+            assert.equal(capturedState, state);
+            assert.equal(label, "A01 输入状态");
+            return "S004";
+          },
+          recordLLM: () => {},
+        },
+      } as GraphState["runtime"],
       eventCallbacks: {
         "写作": (type: string, payload: Record<string, unknown>) => {
           events.push({ type, payload });
@@ -114,21 +129,29 @@ describe("operation agent lifecycle events", () => {
       state,
       "写作",
       undefined,
-      async () => ({
+      async (agentState) => {
+        assert.equal(agentState.runtime?.workflowTrace?.agentCallId, "A01");
+        assert.equal(agentState.runtime?.workflowTrace?.stateRef, "S004");
+        return {
         writerOutput: {
           agentId: "写作",
           content: "第一段正文。",
           insights: [],
           proactiveSuggestions: [],
         },
-      })
+        };
+      }
     );
 
     assert.equal(result.writerOutput?.content, "第一段正文。");
     assert.deepEqual(events.map((event) => event.type), ["agent_start", "agent_done"]);
     assert.equal(events[0].payload.agentId, "写作");
     assert.equal(events[0].payload.agentName, "作家");
+    assert.equal(events[0].payload.agentCallId, "A01");
+    assert.equal(events[0].payload.stateRef, "S004");
     assert.equal(events[1].payload.agentId, "写作");
+    assert.equal(events[1].payload.agentCallId, "A01");
+    assert.equal(events[1].payload.stateRef, "S004");
     assert.equal(events[1].payload.content, "第一段正文。");
     assert.equal(events[1].payload.hasOutput, true);
     assert.equal(typeof events[1].payload.durationMs, "number");

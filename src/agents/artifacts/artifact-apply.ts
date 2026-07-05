@@ -98,6 +98,10 @@ export function filterAgentUpdatesBySelection(
     }
   }
 
+  if (output.outlineAdjustments?.length && updates.outlineTreeMode) {
+    output.outlineTreeMode = updates.outlineTreeMode;
+  }
+
   return output;
 }
 

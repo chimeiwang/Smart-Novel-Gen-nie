@@ -11,6 +11,9 @@ describe("session task state", () => {
         phase: "awaiting_user_review",
         updatedAt: "2026-06-19T00:00:00.000Z",
         hasAwaitingReviewArtifact: true,
+        currentOperation: null,
+        operationStage: null,
+        activeArtifactId: "artifact-1",
       }),
       {
         taskId: "task-1",
@@ -27,6 +30,9 @@ describe("session task state", () => {
         phase: "active",
         updatedAt: "2026-06-19T00:00:00.000Z",
         hasAwaitingReviewArtifact: false,
+        currentOperation: null,
+        operationStage: null,
+        activeArtifactId: null,
       }),
       {
         taskId: "task-2",
@@ -42,5 +48,24 @@ describe("session task state", () => {
       phase: "idle",
       shouldRefreshAwaitingReviewArtifact: false,
     });
+  });
+
+  it("does not expose completed tasks as resume handles", () => {
+    assert.deepEqual(
+      resolveLoadedSessionTaskState({
+        id: "task-completed",
+        phase: "completed",
+        updatedAt: "2026-06-19T00:00:00.000Z",
+        hasAwaitingReviewArtifact: false,
+        currentOperation: null,
+        operationStage: null,
+        activeArtifactId: null,
+      }),
+      {
+        taskId: null,
+        phase: "idle",
+        shouldRefreshAwaitingReviewArtifact: false,
+      }
+    );
   });
 });

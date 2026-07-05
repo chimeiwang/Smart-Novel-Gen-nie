@@ -264,6 +264,8 @@ async function runAgentInNewMode(
       metadata: {
         callType: `${definition.name}(new)`,
         agentId,
+        agentRunId: state.runtime?.workflowTrace?.agentCallId,
+        stateRef: state.runtime?.workflowTrace?.stateRef,
         taskId: state.taskId,
         userId: state.userId,
         novelId: state.novelId,
@@ -271,6 +273,7 @@ async function runAgentInNewMode(
         activeArtifactId: state.artifactReview?.activeArtifactId ?? state.activeArtifactId,
         artifactKey: state.currentOperation ? `${state.taskId}:${state.currentOperation.kind}` : undefined,
       },
+      workflowTraceSink: state.runtime?.workflowTrace?.recordLLM,
     });
 
     // ---- 4. 状态通知：整理中 ----

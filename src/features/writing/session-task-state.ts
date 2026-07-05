@@ -1,22 +1,7 @@
 import type { CreativeOperation } from "@/shared/contracts/creative-operation";
+import type { WritingSessionTaskSummary } from "@/shared/contracts/writing-session";
 
-export type LoadedSessionTaskPhase =
-  | "idle"
-  | "active"
-  | "waiting_call"
-  | "awaiting_user_review"
-  | "completed"
-  | "error";
-
-export type LoadedSessionTask = {
-  id: string;
-  phase: LoadedSessionTaskPhase;
-  updatedAt: string;
-  hasAwaitingReviewArtifact: boolean;
-  currentOperation?: CreativeOperation | null;
-  operationStage?: string | null;
-  activeArtifactId?: string | null;
-} | null;
+export type LoadedSessionTask = WritingSessionTaskSummary | null;
 
 export type LoadedSessionTaskState = {
   taskId: string | null;
@@ -58,7 +43,7 @@ export function resolveLoadedSessionTaskState(
   }
 
   return {
-    taskId: task.id,
+    taskId: null,
     phase: "idle",
     shouldRefreshAwaitingReviewArtifact: false,
   };
@@ -68,10 +53,11 @@ export function resolveLoadedSessionRecoveryState(
   task: LoadedSessionTask
 ): LoadedSessionRecoveryState {
   const taskState = resolveLoadedSessionTaskState(task);
+  const isResumable = Boolean(taskState.taskId);
   return {
     ...taskState,
-    currentOperation: task?.currentOperation ?? null,
-    operationStage: task?.operationStage ?? null,
-    activeArtifactId: task?.activeArtifactId ?? null,
+    currentOperation: isResumable ? task?.currentOperation ?? null : null,
+    operationStage: isResumable ? task?.operationStage ?? null : null,
+    activeArtifactId: isResumable ? task?.activeArtifactId ?? null : null,
   };
 }

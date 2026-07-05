@@ -84,7 +84,10 @@ export class AgentRuntimeImpl implements AgentRuntime {
 
   private async runToolLoop(options: AgentRuntimeOptions): Promise<AgentTurnResult> {
     const runtime = this.resolveRuntime();
-    const requestId = logger.generateRequestId();
+    const requestedAgentRunId = options.metadata?.agentRunId;
+    const requestId = typeof requestedAgentRunId === "string" && requestedAgentRunId
+      ? requestedAgentRunId
+      : logger.generateRequestId();
     const messages = [...options.messages];
     const maxIterations = options.maxIterations ?? 10;
 
@@ -119,6 +122,7 @@ export class AgentRuntimeImpl implements AgentRuntime {
         metadata: roundOptions.metadata,
         reasoningEffort: options.reasoningEffort ?? "medium",
         profile: options.profile ?? "normal",
+        workflowTraceSink: options.workflowTraceSink,
       });
 
       finalUsage = round.usage ?? finalUsage;
@@ -177,6 +181,7 @@ export class AgentRuntimeImpl implements AgentRuntime {
           finishReason: "terminal_control_event",
           toolCallCount: toolCalls.length,
           controlEventTypes: controlEvents.map((item) => item.type),
+          workflowTraceSink: options.workflowTraceSink,
         });
         return {
           visibleContent,
@@ -211,6 +216,7 @@ export class AgentRuntimeImpl implements AgentRuntime {
           finishReason: "terminal_control_event",
           toolCallCount: toolCalls.length,
           controlEventTypes: controlEvents.map((item) => item.type),
+          workflowTraceSink: options.workflowTraceSink,
         });
         return {
           visibleContent,
@@ -251,6 +257,7 @@ export class AgentRuntimeImpl implements AgentRuntime {
       toolResults,
       finalUsage,
       maxIterations,
+      workflowTraceSink: options.workflowTraceSink,
     });
   }
 
@@ -300,6 +307,7 @@ export class AgentRuntimeImpl implements AgentRuntime {
         finishReason,
         toolCallCount: toolCalls.length,
         controlEventTypes: controlEvents.map((event) => event.type),
+        workflowTraceSink: options.workflowTraceSink,
       });
       return {
         done: true,
@@ -363,6 +371,7 @@ export class AgentRuntimeImpl implements AgentRuntime {
         finishReason: "tool_parse_error",
         toolCallCount: toolCalls.length,
         controlEventTypes: controlEvents.map((event) => event.type),
+        workflowTraceSink: options.workflowTraceSink,
       });
       return {
         done: true,
@@ -393,6 +402,7 @@ export class AgentRuntimeImpl implements AgentRuntime {
         finishReason: fatalFinishReason,
         toolCallCount: toolCalls.length,
         controlEventTypes: controlEvents.map((event) => event.type),
+        workflowTraceSink: options.workflowTraceSink,
       });
       return {
         done: true,
@@ -421,6 +431,7 @@ export class AgentRuntimeImpl implements AgentRuntime {
         finishReason: "terminal_control_event",
         toolCallCount: toolCalls.length,
         controlEventTypes: controlEvents.map((event) => event.type),
+        workflowTraceSink: options.workflowTraceSink,
       });
       return {
         done: true,
@@ -528,6 +539,7 @@ export class AgentRuntimeImpl implements AgentRuntime {
         toolCallTotal: total,
       },
       durationMs: result.durationMs,
+      workflowTraceSink: options.workflowTraceSink,
     });
   }
 
@@ -727,6 +739,7 @@ export class AgentRuntimeImpl implements AgentRuntime {
     toolResults: RuntimeToolResultRecord[];
     finalUsage: TokenUsage | undefined;
     maxIterations: number;
+    workflowTraceSink?: AgentRuntimeOptions["workflowTraceSink"];
   }): AgentTurnResult {
     const fallback = aggregateVisibleParts(
       params.visibleContentParts,
@@ -743,6 +756,7 @@ export class AgentRuntimeImpl implements AgentRuntime {
       finishReason: "length",
       toolCallCount: params.toolCalls.length,
       controlEventTypes: params.controlEvents.map((event) => event.type),
+      workflowTraceSink: params.workflowTraceSink,
     });
     return {
       visibleContent: fallback,

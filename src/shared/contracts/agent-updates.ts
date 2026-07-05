@@ -26,6 +26,8 @@ const StatusEnum = z.enum(["active", "missing", "dead", "imprisoned", "unknown"]
 const OutlineStatusEnum = z.enum(["planned", "in_progress", "completed", "skipped"]);
 export const OutlineNodeKindSchema = z.enum(["stage", "plot_unit", "chapter_group"]);
 export type OutlineNodeKind = z.infer<typeof OutlineNodeKindSchema>;
+export const OutlineTreeModeSchema = z.enum(["replace", "patch"]);
+export type OutlineTreeMode = z.infer<typeof OutlineTreeModeSchema>;
 
 // ============================================
 // Section Schemas
@@ -142,6 +144,8 @@ const OutlineAdjustmentBaseSchema = z.object({
   status: OutlineStatusEnum.optional(),
   estimatedWordCount: z.number().optional(),
   actualWordCount: z.number().optional(),
+  chapterStartOrder: z.number().int().positive().optional(),
+  chapterEndOrder: z.number().int().positive().optional(),
 });
 
 export const OutlineAdjustmentSchema = OutlineAdjustmentBaseSchema;
@@ -149,6 +153,23 @@ export const OutlineAdjustmentSchema = OutlineAdjustmentBaseSchema;
 export const StrictOutlineAdjustmentSchema = OutlineAdjustmentBaseSchema.superRefine((adjustment, ctx) => {
   const hasParentId = hasText(adjustment.parentId);
   const hasParentKey = hasText(adjustment.parentKey);
+  const hasChapterStart = adjustment.chapterStartOrder !== undefined;
+  const hasChapterEnd = adjustment.chapterEndOrder !== undefined;
+
+  if (hasChapterStart !== hasChapterEnd) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: hasChapterStart ? ["chapterEndOrder"] : ["chapterStartOrder"],
+      message: "章节范围必须同时提供 chapterStartOrder 和 chapterEndOrder",
+    });
+  }
+  if (hasChapterStart && hasChapterEnd && adjustment.chapterStartOrder! > adjustment.chapterEndOrder!) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["chapterEndOrder"],
+      message: "chapterEndOrder 不能小于 chapterStartOrder",
+    });
+  }
 
   if (hasParentId && hasParentKey) {
     ctx.addIssue({
@@ -159,6 +180,13 @@ export const StrictOutlineAdjustmentSchema = OutlineAdjustmentBaseSchema.superRe
   }
 
   if (adjustment.action === "create") {
+    if (!hasChapterStart || !hasChapterEnd) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["chapterStartOrder"],
+        message: "创建大纲节点必须提供完整章节范围",
+      });
+    }
     if (!hasText(adjustment.title) && !hasText(adjustment.nodeTitle)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -317,6 +345,7 @@ export const ReferenceAdjustmentSchema = z.object({
 // ============================================
 
 export const AgentUpdatesSchema = z.object({
+  outlineTreeMode: OutlineTreeModeSchema.optional(),
   characters: z.array(CharacterAdjustmentSchema).optional(),
   locations: z.array(LocationAdjustmentSchema).optional(),
   items: z.array(ItemAdjustmentSchema).optional(),
@@ -395,6 +424,7 @@ const CHARACTER_EXPERIENCE_FIELDS = [
 
 const OUTLINE_FIELDS = [
   "title", "content", "kind", "parentId", "clientKey", "parentKey", "status", "estimatedWordCount", "actualWordCount",
+  "chapterStartOrder", "chapterEndOrder",
 ] as const;
 
 const FORESHADOWING_FIELDS = [
@@ -436,6 +466,13 @@ export function sanitizeAgentUpdates(
   const updates: Record<string, unknown> = {};
   const allowed = allowedSections ? new Set(allowedSections) : null;
 
+  if (
+    (input.outlineTreeMode === "replace" || input.outlineTreeMode === "patch") &&
+    (!allowed || allowed.has("outlineAdjustments"))
+  ) {
+    updates.outlineTreeMode = input.outlineTreeMode;
+  }
+
   // 数组型 sections（有白名单过滤）
   const arraySections: Array<{ key: string; idFields: string[] }> = [
     { key: "characters", idFields: ["characterId"] },
@@ -474,6 +511,7 @@ export function sanitizeAgentUpdates(
   // Phase 2：如果指定了 allowedSections，删除不允许的 section
   if (allowed) {
     for (const key of Object.keys(updates)) {
+      if (key === "outlineTreeMode" && allowed.has("outlineAdjustments")) continue;
       if (!allowed.has(key as AgentUpdateSection)) {
         delete updates[key];
       }

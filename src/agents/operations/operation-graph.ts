@@ -131,7 +131,16 @@ async function prepareOperationContextNode(state: GraphState) {
           confirmedDecision: state.runtime?.chapterTargetDecision,
         })
       : null;
-    const novelData = await aggregateNovelContextForWriting(state.novelId, target?.contextChapterId ?? state.chapterId);
+    const novelData = await aggregateNovelContextForWriting(
+      state.novelId,
+      target?.contextChapterId ?? state.chapterId,
+      target ? {
+        chapterId: target.target.mode === "existing_chapter" ? target.target.chapterId : null,
+        order: target.targetOrder,
+        title: target.targetTitle,
+        contextAnchorChapterId: target.contextAnchorChapterId,
+      } : undefined
+    );
     const patchedNovelData = target
       ? {
           ...novelData,
@@ -837,6 +846,9 @@ export async function runOperationAgentWithLifecycle<T>(
   const agentName = AGENT_NAMES[agentId];
   const directStreamCallback = state.streamCallbacks?.[agentId];
   const directEventCallback = state.eventCallbacks?.[agentId];
+  const workflowTrace = state.runtime?.workflowTrace;
+  const agentCallId = workflowTrace?.allocateAgentCallId(agentId);
+  const stateRef = workflowTrace?.captureState(state, `${agentCallId ?? agentId} 输入状态`);
 
   const sendEvent = (type: string, payload: Record<string, unknown>) => {
     if (directEventCallback) {
@@ -846,11 +858,19 @@ export async function runOperationAgentWithLifecycle<T>(
     emit(writer, type, { agentId, ...payload });
   };
 
-  sendEvent("agent_start", { agentId, agentName });
+  sendEvent("agent_start", { agentId, agentName, agentCallId, stateRef });
 
   const stateWithCallbacks = {
     ...state,
     activeAgent: agentId,
+    runtime: state.runtime ? {
+      ...state.runtime,
+      workflowTrace: workflowTrace ? {
+        ...workflowTrace,
+        agentCallId,
+        stateRef,
+      } : undefined,
+    } : undefined,
     streamCallbacks: {
       ...state.streamCallbacks,
       [agentId]: (chunk: string) => {
@@ -874,6 +894,8 @@ export async function runOperationAgentWithLifecycle<T>(
   sendEvent("agent_done", {
     agentId,
     agentName,
+    agentCallId,
+    stateRef,
     durationMs: Date.now() - startTime,
     hasOutput: !!output,
     content: output?.content ?? "",

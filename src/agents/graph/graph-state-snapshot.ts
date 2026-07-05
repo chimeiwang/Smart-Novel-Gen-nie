@@ -190,6 +190,7 @@ export function rehydrateGraphStateFromSnapshot(
     streamCallbacks: GraphState["streamCallbacks"];
     eventCallbacks?: GraphState["eventCallbacks"];
     chapterTargetDecision?: "current_chapter" | "next_chapter";
+    workflowTrace?: NonNullable<GraphState["runtime"]>["workflowTrace"];
   }
 ): GraphState {
   return {
@@ -200,6 +201,7 @@ export function rehydrateGraphStateFromSnapshot(
       streamCallbacks: runtime.streamCallbacks,
       eventCallbacks: runtime.eventCallbacks,
       chapterTargetDecision: runtime.chapterTargetDecision,
+      workflowTrace: runtime.workflowTrace,
     },
     controlEvents: undefined,
     streamCallbacks: runtime.streamCallbacks,

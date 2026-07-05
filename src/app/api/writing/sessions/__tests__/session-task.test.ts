@@ -5,6 +5,7 @@ import type { WritingTaskPhase } from "@prisma/client";
 import {
   selectCurrentSessionTask,
   selectCurrentSessionTaskFromSession,
+  selectLastSessionTask,
 } from "../session-task";
 
 function task(input: {
@@ -45,7 +46,7 @@ describe("selectCurrentSessionTask", () => {
     });
   });
 
-  it("falls back to active tasks when there is no pending review", () => {
+  it("selects active tasks when there is no pending review", () => {
     const selected = selectCurrentSessionTask([
       task({ id: "completed-task", phase: "completed", minutesAgo: 1 }),
       task({ id: "active-task", phase: "active", minutesAgo: 0 }),
@@ -59,14 +60,20 @@ describe("selectCurrentSessionTask", () => {
     assert.equal(selectCurrentSessionTask([]), null);
   });
 
-  it("selects from explicitly bound session tasks instead of unrelated candidates", () => {
+  it("does not treat completed tasks as resumable", () => {
+    assert.equal(
+      selectCurrentSessionTask([
+        task({ id: "completed-task", phase: "completed", minutesAgo: 0 }),
+      ]),
+      null
+    );
+  });
+
+  it("selects only from explicitly bound session tasks", () => {
     const selected = selectCurrentSessionTaskFromSession({
       tasks: [
-        task({ id: "bound-completed", phase: "completed", minutesAgo: 1 }),
-      ],
-      fallbackCandidates: [
         task({
-          id: "unrelated-review",
+          id: "bound-review",
           phase: "awaiting_user_review",
           minutesAgo: 0,
           generatedContent: "artifact-1",
@@ -74,6 +81,15 @@ describe("selectCurrentSessionTask", () => {
       ],
     });
 
-    assert.equal(selected?.id, "bound-completed");
+    assert.equal(selected?.id, "bound-review");
+  });
+
+  it("keeps the latest terminal task as read-only history", () => {
+    const selected = selectLastSessionTask([
+      task({ id: "completed-task", phase: "completed", minutesAgo: 0 }),
+      task({ id: "older-error", phase: "error", minutesAgo: 1 }),
+    ]);
+
+    assert.equal(selected?.id, "completed-task");
   });
 });

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { shouldBlockForMissingApprovedBeatPlan } from "../nodes/author-node";
+import { getInvalidWritingOutlineMessage, shouldBlockForMissingApprovedBeatPlan } from "../nodes/author-node";
 import type { WritingState } from "../state";
 
 function createInput(overrides: Partial<Pick<WritingState, "currentOperation" | "novelData" | "userMessage">> = {}) {
@@ -42,5 +42,27 @@ describe("approved Beat Plan preGuard", () => {
     assert.equal(shouldBlockForMissingApprovedBeatPlan(createInput({
       currentOperation: { kind: "review_chapter" } as WritingState["currentOperation"],
     })), false);
+  });
+});
+
+describe("作家局部大纲 preGuard", () => {
+  it("当前章无映射时在模型调用前阻断", () => {
+    const message = getInvalidWritingOutlineMessage(createInput({
+      novelData: {
+        approvedBeatPlan: null,
+        writingOutlineContext: { status: "unmapped" },
+      } as WritingState["novelData"],
+    }));
+    assert.match(message ?? "", /没有唯一可用的大纲章节组映射/);
+  });
+
+  it("当前章匹配多个章节组时在模型调用前阻断", () => {
+    const message = getInvalidWritingOutlineMessage(createInput({
+      novelData: {
+        approvedBeatPlan: null,
+        writingOutlineContext: { status: "ambiguous" },
+      } as WritingState["novelData"],
+    }));
+    assert.match(message ?? "", /系统不会随机选择/);
   });
 });

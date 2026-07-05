@@ -419,6 +419,7 @@ export function buildOperationSummaryIndex(state: Pick<WritingState, "novelData"
     foreshadowings: strategy === "outline" || strategy === "chapter" || strategy === "review",
     beatPlan: strategy === "chapter",
     reviewMode: isReview,
+    localizedOutline: strategy === "chapter" || strategy === "review",
   });
 }
 
@@ -431,6 +432,7 @@ function buildSummaryIndexWithOptions(
     foreshadowings?: boolean;
     beatPlan?: boolean;
     reviewMode?: boolean;
+    localizedOutline?: boolean;
   }
 ): string {
   const opts = {
@@ -440,6 +442,7 @@ function buildSummaryIndexWithOptions(
     foreshadowings: options.foreshadowings ?? true,
     beatPlan: options.beatPlan ?? true,
     reviewMode: options.reviewMode ?? false,
+    localizedOutline: options.localizedOutline ?? false,
   };
   const lines: string[] = [];
   lines.push("## 摘要索引（先读这里，再决定是否查详情）");
@@ -522,12 +525,35 @@ function buildSummaryIndexWithOptions(
     }
   }
 
-  if (opts.outline && novelData.outlineNodes.length > 0) {
+  if (opts.outline && opts.localizedOutline && novelData.writingOutlineContext) {
+    const outlineContext = novelData.writingOutlineContext;
     lines.push("");
-    lines.push("### 大纲索引");
+    lines.push("### 当前章节大纲上下文");
+    lines.push(`- 目标章节：第${outlineContext.targetChapter.order}章 ${outlineContext.targetChapter.title}`);
+    lines.push(`- 解析状态：${outlineContext.status}`);
+    if (outlineContext.source) lines.push(`- 约束来源：${outlineContext.source}`);
+    for (const node of outlineContext.path) {
+      const range = node.chapterStartOrder && node.chapterEndOrder
+        ? `第${node.chapterStartOrder}-${node.chapterEndOrder}章`
+        : "未设置章节范围";
+      lines.push(`- ${node.kind}：${node.title}（${range}，nodeId=${node.id}）`);
+      if (node.content) {
+        lines.push("  当前章节组完整内容：");
+        lines.push(node.content);
+      }
+    }
+    if (outlineContext.status !== "resolved") {
+      lines.push(`- 候选节点：${outlineContext.candidateIds.length ? outlineContext.candidateIds.join("、") : "无"}`);
+    }
+  } else if (opts.outline && novelData.outlineNodes.length > 0) {
+    lines.push("");
+    lines.push("### 大纲层级索引");
     for (const node of novelData.outlineNodes) {
       const icon = node.status === "completed" ? "✓" : node.status === "in_progress" ? "→" : "○";
-      lines.push(`- ${icon} ${node.title} (${node.kind ?? "stage"})${node.content ? "：" + compactText(node.content, 70) : ""}`);
+      const range = node.chapterStartOrder && node.chapterEndOrder
+        ? `，第${node.chapterStartOrder}-${node.chapterEndOrder}章`
+        : "";
+      lines.push(`- ${icon} ${node.title} (${node.kind ?? "stage"}${range}，nodeId=${node.id})`);
     }
   }
 
@@ -543,23 +569,34 @@ function buildSummaryIndexWithOptions(
   }
 
   if (opts.beatPlan && novelData.approvedBeatPlan) {
+    const plan = novelData.approvedBeatPlan;
     lines.push("");
-    lines.push("### 已批准章节计划");
-    lines.push(`- 章节目标：${compactText(novelData.approvedBeatPlan.chapterGoal, 100)}`);
-    if (novelData.approvedBeatPlan.mainPlotConnection) {
-      lines.push(`- 主线关联：${compactText(novelData.approvedBeatPlan.mainPlotConnection, 100)}`);
+    lines.push("### 写作结构约束：已批准章节计划");
+    lines.push(`- 章节目标：${plan.chapterGoal}`);
+    if (plan.mainPlotConnection) lines.push(`- 主线关联：${plan.mainPlotConnection}`);
+    if (plan.chapterAcceptanceCriteria) lines.push(`- 章节验收：${plan.chapterAcceptanceCriteria}`);
+    for (const beat of plan.sceneBeats) {
+      lines.push(`- 场景 ${beat.order}：${beat.goal}`);
+      if (beat.conflict) lines.push(`  阻力/冲突：${beat.conflict}`);
+      if (beat.characters.length) lines.push(`  角色：${beat.characters.join("、")}`);
+      if (beat.foreshadowingRefs?.length) lines.push(`  伏笔：${beat.foreshadowingRefs.join("、")}`);
+      if (beat.estimatedWords) lines.push(`  预计字数：${beat.estimatedWords}`);
+      if (beat.acceptanceCriteria) lines.push(`  验收：${beat.acceptanceCriteria}`);
     }
-    for (const beat of novelData.approvedBeatPlan.sceneBeats) {
-      const parts = [
-        compactText(beat.goal, 80),
-        beat.conflict ? `阻力：${compactText(beat.conflict, 60)}` : "",
-        beat.characters.length ? `角色：${beat.characters.join("、")}` : "",
-        beat.foreshadowingRefs?.length ? `伏笔：${beat.foreshadowingRefs.join("、")}` : "",
-        beat.estimatedWords ? `约${beat.estimatedWords}字` : "",
-        beat.acceptanceCriteria ? `验收：${compactText(beat.acceptanceCriteria, 50)}` : "",
-      ].filter(Boolean);
-      lines.push(`- ${beat.order}. ${parts.join("；")}`);
+  }
+
+  if (opts.beatPlan && novelData.chapterWritingGoal) {
+    const goal = novelData.chapterWritingGoal;
+    lines.push("");
+    lines.push("### 当前章节写作目标");
+    lines.push(`- 叙事目标：${goal.narrativeGoal}`);
+    if (goal.desiredEmotion) lines.push(`- 目标情绪：${goal.desiredEmotion}`);
+    if (goal.requiredCharacters.length) lines.push(`- 必需角色：${goal.requiredCharacters.join("、")}`);
+    if (goal.requiredForeshadowing.length) lines.push(`- 必需伏笔：${goal.requiredForeshadowing.join("、")}`);
+    if (goal.wordCountMin !== undefined || goal.wordCountMax !== undefined) {
+      lines.push(`- 字数范围：${goal.wordCountMin ?? "不限"}-${goal.wordCountMax ?? "不限"}`);
     }
+    if (goal.specialNotes) lines.push(`- 特别说明：${goal.specialNotes}`);
   }
 
   lines.push("");

@@ -12,6 +12,7 @@
     "db:generate:pg": "dotenv -e .env.production -- prisma generate --schema=prisma/schema.postgres.prisma && node scripts/sync-prisma-client.mjs",
     "db:push:pg": "dotenv -e .env.production -- prisma db push --schema=prisma/schema.postgres.prisma",
     "db:migrate": "prisma migrate dev",
+    "outline:cleanup": "tsx -r tsconfig-paths/register scripts/cleanup-outline-tree.ts",
     "migrate:to-pg": "dotenv -e .env.production -- node scripts/migrate-to-pg.js",
     "start:prod": "next start -p 43119",
     "studio:dev": "dotenv -e .env -- node scripts/start-langgraph-studio.mjs",

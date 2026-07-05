@@ -47,21 +47,21 @@ describe("AgentUpdates contract", () => {
   it("创建结构化大纲节点时要求 kind、标题和合法父子引用", () => {
     assert.equal(
       AgentUpdatesProposalSchema.safeParse({
-        outlineAdjustments: [{ action: "create", title: "缺类型节点" }],
+        outlineAdjustments: [{ action: "create", title: "缺类型节点", chapterStartOrder: 1, chapterEndOrder: 10 }],
       }).success,
       false
     );
 
     assert.equal(
       AgentUpdatesProposalSchema.safeParse({
-        outlineAdjustments: [{ action: "create", kind: "stage", title: "第一阶段", parentKey: "root" }],
+        outlineAdjustments: [{ action: "create", kind: "stage", title: "第一阶段", parentKey: "root", chapterStartOrder: 1, chapterEndOrder: 10 }],
       }).success,
       false
     );
 
     assert.equal(
       AgentUpdatesProposalSchema.safeParse({
-        outlineAdjustments: [{ action: "create", kind: "plot_unit", title: "缺父级剧情单元" }],
+        outlineAdjustments: [{ action: "create", kind: "plot_unit", title: "缺父级剧情单元", chapterStartOrder: 1, chapterEndOrder: 10 }],
       }).success,
       false
     );
@@ -69,9 +69,9 @@ describe("AgentUpdates contract", () => {
     assert.equal(
       AgentUpdatesProposalSchema.safeParse({
         outlineAdjustments: [
-          { action: "create", clientKey: "stage-1", title: "第一阶段", kind: "stage" },
-          { action: "create", clientKey: "unit-1", parentKey: "stage-1", title: "剧情单元", kind: "plot_unit" },
-          { action: "create", clientKey: "group-1", parentKey: "unit-1", title: "章节组", kind: "chapter_group" },
+          { action: "create", clientKey: "stage-1", title: "第一阶段", kind: "stage", chapterStartOrder: 1, chapterEndOrder: 10 },
+          { action: "create", clientKey: "unit-1", parentKey: "stage-1", title: "剧情单元", kind: "plot_unit", chapterStartOrder: 1, chapterEndOrder: 10 },
+          { action: "create", clientKey: "group-1", parentKey: "unit-1", title: "章节组", kind: "chapter_group", chapterStartOrder: 1, chapterEndOrder: 5 },
         ],
       }).success,
       true
@@ -82,9 +82,9 @@ describe("AgentUpdates contract", () => {
     assert.equal(
       AgentUpdatesProposalSchema.safeParse({
         outlineAdjustments: [
-          { action: "create", clientKey: "stage-1", title: "第一阶段", kind: "stage" },
-          { action: "create", clientKey: "unit-1", parentKey: "stage-1", title: "剧情单元", kind: "plot_unit" },
-          { action: "create", clientKey: "group-1", parentKey: "unit-1", title: "章节组", kind: "chapter_group" },
+          { action: "create", clientKey: "stage-1", title: "第一阶段", kind: "stage", chapterStartOrder: 1, chapterEndOrder: 10 },
+          { action: "create", clientKey: "unit-1", parentKey: "stage-1", title: "剧情单元", kind: "plot_unit", chapterStartOrder: 1, chapterEndOrder: 10 },
+          { action: "create", clientKey: "group-1", parentKey: "unit-1", title: "章节组", kind: "chapter_group", chapterStartOrder: 1, chapterEndOrder: 5 },
         ],
       }).success,
       true
@@ -95,7 +95,7 @@ describe("AgentUpdates contract", () => {
     assert.equal(
       AgentUpdatesProposalSchema.safeParse({
         outlineAdjustments: [
-          { action: "create", clientKey: "unit-1", parentKey: "missing-stage", title: "剧情单元", kind: "plot_unit" },
+          { action: "create", clientKey: "unit-1", parentKey: "missing-stage", title: "剧情单元", kind: "plot_unit", chapterStartOrder: 1, chapterEndOrder: 10 },
         ],
       }).success,
       false
@@ -104,8 +104,8 @@ describe("AgentUpdates contract", () => {
     assert.equal(
       AgentUpdatesProposalSchema.safeParse({
         outlineAdjustments: [
-          { action: "create", clientKey: "stage-1", title: "第一阶段", kind: "stage" },
-          { action: "create", clientKey: "stage-1", title: "重复阶段", kind: "stage" },
+          { action: "create", clientKey: "stage-1", title: "第一阶段", kind: "stage", chapterStartOrder: 1, chapterEndOrder: 10 },
+          { action: "create", clientKey: "stage-1", title: "重复阶段", kind: "stage", chapterStartOrder: 11, chapterEndOrder: 20 },
         ],
       }).success,
       false
@@ -116,8 +116,8 @@ describe("AgentUpdates contract", () => {
     assert.equal(
       AgentUpdatesProposalSchema.safeParse({
         outlineAdjustments: [
-          { action: "create", clientKey: "stage-1", title: "第一阶段", kind: "stage" },
-          { action: "create", clientKey: "group-1", parentKey: "stage-1", title: "章节组", kind: "chapter_group" },
+          { action: "create", clientKey: "stage-1", title: "第一阶段", kind: "stage", chapterStartOrder: 1, chapterEndOrder: 10 },
+          { action: "create", clientKey: "group-1", parentKey: "stage-1", title: "章节组", kind: "chapter_group", chapterStartOrder: 1, chapterEndOrder: 5 },
         ],
       }).success,
       false
@@ -126,9 +126,9 @@ describe("AgentUpdates contract", () => {
     assert.equal(
       AgentUpdatesProposalSchema.safeParse({
         outlineAdjustments: [
-          { action: "create", clientKey: "stage-1", title: "第一阶段", kind: "stage" },
-          { action: "create", clientKey: "unit-1", parentKey: "stage-1", title: "剧情单元", kind: "plot_unit" },
-          { action: "create", clientKey: "group-1", parentKey: "unit-1", title: "章节组", kind: "chapter_group" },
+          { action: "create", clientKey: "stage-1", title: "第一阶段", kind: "stage", chapterStartOrder: 1, chapterEndOrder: 10 },
+          { action: "create", clientKey: "unit-1", parentKey: "stage-1", title: "剧情单元", kind: "plot_unit", chapterStartOrder: 1, chapterEndOrder: 10 },
+          { action: "create", clientKey: "group-1", parentKey: "unit-1", title: "章节组", kind: "chapter_group", chapterStartOrder: 1, chapterEndOrder: 5 },
         ],
       }).success,
       true

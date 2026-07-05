@@ -420,9 +420,18 @@ export async function processControlEvents(
 
       case "append_outline_tree": {
         const builder = await getBuilderState(event.artifactKey);
+        if (builder.updates.outlineTreeMode && builder.updates.outlineTreeMode !== event.mode) {
+          emitEvent("update_builder_batch_ignored", {
+            agentId: activeAgent,
+            artifactKey: event.artifactKey,
+            reason: "outline_tree_mode_conflict",
+          });
+          break;
+        }
         const outlineTreeUpdate = buildOutlineTreeUpdate({
           artifactKey: event.artifactKey,
           batchIndex: builder.outlineTreeBatchCount,
+          mode: event.mode,
           stages: event.stages,
         });
         const sanitized = sanitizeUpdatesForAgent(outlineTreeUpdate, activeAgent);

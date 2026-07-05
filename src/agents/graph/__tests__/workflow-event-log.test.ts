@@ -4,6 +4,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import {
+  buildAgentRunFinalLogRecord,
+  buildLLMRequestLogRecord,
+  buildLLMResponseLogRecord,
+  buildLLMToolCallLogRecord,
+} from "@/shared/lib/logger";
+import {
   createWorkflowEventFileLogger,
   diffWorkflowState,
   projectWorkflowState,
@@ -74,7 +80,58 @@ describe("WorkflowEventFileLogger", () => {
     assert.deepEqual(changes.artifactStatus, { before: "draft", after: "reviewing" });
   });
 
-  it("writes a readable node/state/agent timeline into an isolated workflow trace", () => {
+  it("keeps initial execution and resume runs in the same task log", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "inkforge-workflow-resume-"));
+    tempDirs.push(root);
+    process.env.WORKFLOW_EVENT_LOG_ENABLED = "true";
+    process.env.WORKFLOW_EVENT_LOG_DIR = path.join(root, "events");
+    process.env.WORKFLOW_LOG_WRITE_IN_TESTS = "true";
+
+    const firstRun = createWorkflowEventFileLogger({
+      taskId: "task-resume-123456789",
+      runKind: "writing-workflow",
+    });
+    firstRun.recordWorkflowEvent("workflow_started");
+    firstRun.recordGraphInitialState({ phase: "active", operationStep: "init" });
+    firstRun.recordWorkflowEvent("workflow_completed");
+
+    const resumedRun = createWorkflowEventFileLogger({
+      taskId: "task-resume-123456789",
+      runKind: "resume-writing-workflow",
+    });
+    resumedRun.recordWorkflowEvent("resume_started");
+    resumedRun.recordGraphInitialState({ phase: "awaiting_user_review", operationStep: "await_user_decision" });
+    resumedRun.recordWorkflowEvent("resume_completed", { phase: "awaiting_user_review" });
+
+    const runDir = path.join(root, "events", "runs", new Date().toISOString().slice(0, 10));
+    const files = fs.readdirSync(runDir);
+    assert.equal(files.length, 1);
+    const trace = fs.readFileSync(path.join(runDir, files[0]), "utf-8");
+    assert.match(trace, /工作流运行 R01/);
+    assert.match(trace, /工作流运行 R02/);
+    assert.match(trace, /类型: resume-writing-workflow \| 状态: 等待用户输入/);
+  });
+
+  it("does not create an empty human log when no LLM or LangGraph state ran", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "inkforge-workflow-empty-"));
+    tempDirs.push(root);
+    process.env.WORKFLOW_EVENT_LOG_ENABLED = "true";
+    process.env.WORKFLOW_EVENT_LOG_DIR = path.join(root, "events");
+    process.env.WORKFLOW_LOG_WRITE_IN_TESTS = "true";
+
+    const logger = createWorkflowEventFileLogger({
+      taskId: "task-short-circuit-123456789",
+      runKind: "resume-writing-workflow",
+    });
+    logger.recordWorkflowEvent("resume_started", { decision: "approve" });
+    logger.recordPersistenceEvent("artifact_applied", { success: true });
+
+    const runDir = path.join(root, "events", "runs", new Date().toISOString().slice(0, 10));
+    assert.equal(fs.existsSync(runDir), true);
+    assert.deepEqual(fs.readdirSync(runDir), []);
+  });
+
+  it("writes only complete LLM records and Chinese LangGraph state transitions", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "inkforge-workflow-trace-"));
     tempDirs.push(root);
     process.env.WORKFLOW_EVENT_LOG_ENABLED = "true";
@@ -111,9 +168,77 @@ describe("WorkflowEventFileLogger", () => {
         },
       },
     });
-    logger.recordSSEEvent("agent_start", { agentId: "写作", agentName: "作家" });
+    logger.recordLangGraphEvent({
+      event: "on_chain_stream",
+      data: {
+        chunk: [["operationWorkflow:subgraph-1"], "updates", {
+          prepareOperationContext: {
+            operationStep: "execute_operation",
+            operationStage: "准备操作上下文",
+          },
+        }],
+      },
+    });
+    const runtimeTrace = logger.createRuntimeTrace();
+    const agentCallId = runtimeTrace.allocateAgentCallId("写作");
+    const stateRef = runtimeTrace.captureState({
+      phase: "active",
+      operationStep: "execute_operation",
+      activeAgent: "写作",
+    }, `${agentCallId} 输入状态`);
+    logger.recordSSEEvent("agent_start", { agentId: "写作", agentName: "作家", agentCallId, stateRef });
+    const reviewerCallId = runtimeTrace.allocateAgentCallId("编辑");
+    const reviewerStateRef = runtimeTrace.captureState({
+      phase: "active",
+      operationStep: "review_artifact",
+      activeAgent: "编辑",
+    }, `${reviewerCallId} 输入状态`);
+    logger.recordSSEEvent("agent_start", {
+      agentId: "编辑",
+      agentName: "网文商业编辑",
+      agentCallId: reviewerCallId,
+      stateRef: reviewerStateRef,
+    });
+    runtimeTrace.recordLLM(buildLLMRequestLogRecord({
+      requestId: "model-request-1",
+      messages: [{ role: "user", content: "完整用户请求" }],
+      tools: [{ type: "function", function: { name: "submit_evaluation" } }],
+      context: { taskId: "task-123456789", agentId: "写作", agentRunId: agentCallId, modelTurn: 1, stateRef },
+      mode: "full",
+    }));
+    runtimeTrace.recordLLM(buildLLMResponseLogRecord({
+      requestId: "model-request-1",
+      content: "完整模型输出",
+      reasoningContent: "完整供应商推理",
+      toolCalls: [{ type: "function", function: { name: "submit_evaluation", arguments: "{\"verdict\":\"pass\"}" } }],
+      usage: { promptTokens: 100, completionTokens: 20, cachedTokens: 60, totalTokens: 120 },
+      context: { taskId: "task-123456789", agentId: "写作", agentRunId: agentCallId, modelTurn: 1, stateRef },
+      mode: "full",
+    }));
+    runtimeTrace.recordLLM(buildLLMToolCallLogRecord({
+      requestId: agentCallId,
+      toolName: "submit_evaluation",
+      args: { verdict: "pass" },
+      result: "完整工具返回",
+      context: { taskId: "task-123456789", agentId: "写作", agentRunId: agentCallId, modelTurn: 1, stateRef, toolCallIndex: 1, toolCallTotal: 1 },
+      mode: "full",
+    }));
+    runtimeTrace.recordLLM(buildAgentRunFinalLogRecord({
+      agentRunId: agentCallId,
+      content: "不应重复展示的 Agent 汇总",
+      context: { taskId: "task-123456789", agentId: "写作", stateRef },
+      mode: "full",
+    }));
     logger.recordSSEEvent("agent_status", { agentId: "写作", message: "不进入人工日志" });
-    logger.recordSSEEvent("agent_done", { agentId: "写作", agentName: "作家", durationMs: 120, hasOutput: true });
+    logger.recordSSEEvent("agent_done", {
+      agentId: "编辑",
+      agentName: "网文商业编辑",
+      agentCallId: reviewerCallId,
+      stateRef: reviewerStateRef,
+      durationMs: 80,
+      hasOutput: true,
+    });
+    logger.recordSSEEvent("agent_done", { agentId: "写作", agentName: "作家", agentCallId, stateRef, durationMs: 120, hasOutput: true });
     for (let index = 0; index < 100; index += 1) {
       logger.recordLangGraphEvent({
         event: "on_chat_model_stream",
@@ -127,20 +252,34 @@ describe("WorkflowEventFileLogger", () => {
     const traceFile = fs.readdirSync(runDir).map((name) => path.join(runDir, name))[0];
     const trace = fs.readFileSync(traceFile, "utf-8");
 
-    assert.match(trace, /工作流运行/);
-    assert.match(trace, /LANGGRAPH 初始状态/);
-    assert.match(trace, /LANGGRAPH 节点 #1 完成：initSession/);
-    assert.match(trace, /operationStep: init → prepare_context/);
-    assert.match(trace, /activeAgent: null → 写作/);
-    assert.match(trace, /AGENT 调用 #1 开始：写作/);
-    assert.match(trace, /AGENT 调用 #1 完成：写作/);
-    assert.match(trace, /后续 LLM 输入、输出和工具调用将直接接在本文件中/);
-    assert.match(trace, /【完整 GraphState】/);
-    assert.match(trace, /完整历史内容/);
-    assert.match(trace, /untracked novel data omitted/);
-    assert.match(trace, /runtime-only omitted/);
-    assert.match(trace, /【节点返回的完整 state patch】/);
-    assert.match(trace, /完整节点输出内容/);
+    assert.match(trace, /工作流运行 R01/);
+    assert.match(trace, /操作: 生成章节正文/);
+    assert.match(trace, /# 一、LLM 完整请求与返回（含工具执行）/);
+    assert.match(trace, /# 二、LangGraph 状态切换（中文）/);
+    assert.match(trace, /## A01 写作｜调用前状态 S004/);
+    assert.match(trace, /第 1 轮 LLM 输入 >>>/);
+    assert.match(trace, /第 1 轮 LLM 输出 <<</);
+    assert.match(trace, /第 1 轮 工具 1\/1：submit_evaluation/);
+    assert.match(trace, /完整用户请求/);
+    assert.match(trace, /完整模型输出/);
+    assert.match(trace, /完整供应商推理/);
+    assert.match(trace, /完整工具返回/);
+    assert.match(trace, /## S001 LangGraph 初始状态/);
+    assert.match(trace, /## S002 初始化会话完成后的状态/);
+    assert.match(trace, /当前步骤：初始化 → 准备操作上下文/);
+    assert.match(trace, /当前 Agent：无 → 写作/);
+    assert.match(trace, /创作操作：无 → 生成章节正文/);
+    assert.match(trace, /## S003 准备操作上下文完成后的状态/);
+    assert.match(trace, /## S004 A01 Agent 调用前状态/);
+    assert.match(trace, /## S005 A02 Agent 调用前状态/);
+    assert.doesNotMatch(trace, /# 三、/);
+    assert.doesNotMatch(trace, /# 四、/);
+    assert.doesNotMatch(trace, /Workflow \/ LangGraph \/ SSE/);
+    assert.doesNotMatch(trace, /GraphState 与节点 patch 原文/);
+    assert.doesNotMatch(trace, /operationWorkflow:subgraph-1/);
+    assert.doesNotMatch(trace, /完整节点输出内容/);
+    assert.doesNotMatch(trace, /完整历史内容/);
+    assert.doesNotMatch(trace, /不应重复展示的 Agent 汇总/);
     assert.doesNotMatch(trace, /不进入人工日志/);
     assert.doesNotMatch(trace, /token-99/);
     assert.equal(fs.existsSync(path.join(root, "events", `workflow-events-${new Date().toISOString().slice(0, 10)}.jsonl`)), false);

@@ -2,14 +2,18 @@
  * Workflow event file logger
  *
  * @module agents/graph/workflow-event-log
- * @description 将 LangGraph 执行事件和项目业务事件以 JSONL 形式追加写入本地文件。
- *  该日志只用于审计和调试，写入失败不能影响工作流执行。
+ * @description 将 LangGraph、Agent、LLM 和工具事件整理为单个可直接阅读的任务日志。
+ *  可选机器 JSONL 仅作辅助；任何日志写入失败都不能影响工作流执行。
  */
 
 import fs from "fs";
 import path from "path";
 import { getAgentObservabilityConfig } from "@/shared/env";
-import { appendHumanWorkflowLog, getHumanWorkflowLogPath } from "@/shared/lib/logger";
+import {
+  formatLLMWorkflowBlock,
+  getHumanWorkflowLogPath,
+  type LLMLogRecord,
+} from "@/shared/lib/logger";
 
 const DEFAULT_LOG_DIR = path.join(process.cwd(), "logs", "workflow-events");
 const SCHEMA_VERSION = 2;
@@ -77,6 +81,22 @@ type WorkflowEventInput = Omit<
   "userId" | "novelId" | "chapterId" | "qualityCheckId"
 >;
 
+type WorkflowTraceItem =
+  | { seq: number; timestamp: string; kind: "workflow"; entry: WorkflowEventLogEntry }
+  | { seq: number; timestamp: string; kind: "llm"; record: LLMLogRecord };
+
+interface WorkflowStateRecord {
+  ref: string;
+  label: string;
+  projection: WorkflowStateProjection;
+  changes?: Record<string, WorkflowStateChange>;
+}
+
+interface UpdatesEnvelope {
+  namespace: string[];
+  updates: Record<string, unknown>;
+}
+
 function isLoggingEnabled(): boolean {
   return getAgentObservabilityConfig().workflowEventLogEnabled;
 }
@@ -106,7 +126,9 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function sanitizeGraphStateForAudit(value: unknown, seen = new WeakSet<object>(), key?: string): unknown {
-  if (key === "streamCallbacks" || key === "eventCallbacks") return "[runtime-only omitted]";
+  if (key === "streamCallbacks" || key === "eventCallbacks" || key === "workflowTrace") {
+    return "[runtime-only omitted]";
+  }
   if (key === "novelData") return "[untracked novel data omitted; inspect LLM input when needed]";
   if (value === null || value === undefined || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return value;
@@ -227,10 +249,26 @@ export function diffWorkflowState(
   return changes;
 }
 
-function extractUpdatesPayload(eventType: string, data: unknown): Record<string, unknown> | null {
-  if (eventType === "updates" && isRecord(data)) return data;
-  if (!isRecord(data) || !Array.isArray(data.chunk) || data.chunk[0] !== "updates") return null;
-  return isRecord(data.chunk[1]) ? data.chunk[1] : null;
+function extractUpdatesPayload(eventType: string, data: unknown): UpdatesEnvelope | null {
+  if (eventType === "updates" && isRecord(data)) {
+    return { namespace: [], updates: data };
+  }
+  if (!isRecord(data) || !Array.isArray(data.chunk)) return null;
+  const chunk = data.chunk;
+  if (chunk[0] === "updates" && isRecord(chunk[1])) {
+    return { namespace: [], updates: chunk[1] };
+  }
+  if (
+    Array.isArray(chunk[0]) &&
+    chunk[1] === "updates" &&
+    isRecord(chunk[2])
+  ) {
+    return {
+      namespace: chunk[0].filter((item): item is string => typeof item === "string"),
+      updates: chunk[2],
+    };
+  }
+  return null;
 }
 
 function getReadableSummary(entry: WorkflowEventLogEntry): string {
@@ -303,6 +341,166 @@ function formatTraceValue(value: unknown): string {
   if (value === null) return "null";
   if (typeof value === "string") return value || "（空）";
   return JSON.stringify(value);
+}
+
+const STATE_FIELD_LABELS: Record<string, string> = {
+  phase: "工作流状态",
+  operationStep: "当前步骤",
+  operationStage: "步骤说明",
+  activeAgent: "当前 Agent",
+  reviewWorkerAgent: "当前审核分支",
+  errorMessage: "错误信息",
+  operationKind: "创作操作",
+  primaryAgent: "主责 Agent",
+  reviewers: "审核 Agent",
+  outputKind: "输出类型",
+  requiresArtifact: "需要生成草案",
+  requiresUserApproval: "需要用户确认",
+  artifactStatus: "草案状态",
+  activeArtifact: "当前草案",
+  reviewerAgent: "作出返工决定的审核 Agent",
+  reviserAgent: "返工 Agent",
+  artifactIteration: "当前审核轮次",
+  maxArtifactIterations: "最大审核轮次",
+  pendingRevisionMode: "返工方式",
+  pendingAgentCall: "待执行 Agent 任务",
+  agentOutputs: "已有 Agent 输出",
+  artifactReviewResults: "审核结果",
+  conversationCount: "对话消息数",
+  controlEvents: "控制事件",
+};
+
+const STATE_VALUE_LABELS: Record<string, Record<string, string>> = {
+  phase: {
+    idle: "空闲",
+    active: "执行中",
+    waiting_call: "等待 Agent 调用确认",
+    awaiting_user_review: "等待用户审核",
+    completed: "已完成",
+    error: "失败",
+  },
+  operationStep: {
+    init: "初始化",
+    classify_operation: "识别创作操作",
+    prepare_context: "准备操作上下文",
+    execute_operation: "执行创作操作",
+    submit_artifact: "提交草案或回复",
+    review_artifact: "审核草案",
+    apply_artifact_patch: "应用局部修改",
+    revise_artifact: "返工草案",
+    await_user_decision: "等待用户决定",
+    suggest_next_action: "建议下一步",
+    completed: "完成",
+    error: "失败",
+  },
+  operationKind: {
+    answer_question: "回答问题",
+    create_lore: "创建设定",
+    revise_lore: "修改设定",
+    create_outline: "创建大纲",
+    revise_outline: "修改大纲",
+    plan_chapter: "规划章节",
+    write_chapter: "生成章节正文",
+    rewrite_scene: "重写场景",
+    review_chapter: "审核章节",
+    sync_lore: "同步设定",
+    manage_foreshadowing: "管理伏笔",
+  },
+  outputKind: {
+    chat_answer: "聊天回复",
+    lore_proposal: "设定草案",
+    outline_proposal: "大纲草案",
+    beat_plan: "章节节拍计划",
+    chapter_text: "章节正文",
+    review_report: "审核报告",
+    revision_brief: "返工说明",
+    sync_proposal: "同步草案",
+  },
+  artifactStatus: {
+    none: "无草案",
+    idle: "无草案",
+    draft: "草稿",
+    draft_submitted: "草案已提交",
+    under_review: "审核中",
+    reviewing: "审核中",
+    revision_requested: "已要求返工",
+    awaiting_user: "等待用户确认",
+    applying: "正在应用",
+    applied: "已应用",
+    discarded: "已丢弃",
+    deleted: "已删除",
+  },
+  pendingRevisionMode: {
+    patch: "局部修改",
+    rewrite: "整稿重写",
+  },
+};
+
+const REVIEW_VERDICT_LABELS: Record<string, string> = {
+  pass: "通过",
+  revise: "返工",
+  block: "阻断",
+};
+
+const NODE_LABELS: Record<string, string> = {
+  initSession: "初始化会话",
+  prepareOperationContext: "准备操作上下文",
+  executeOperation: "执行创作操作",
+  submitArtifactOrRespond: "提交草案或直接回复",
+  reviewArtifact: "分发草案审核",
+  reviewArtifactWorker: "审核分支完成（并行分支局部状态）",
+  mergeArtifactReviews: "汇总审核结果",
+  applyArtifactPatch: "应用草案局部修改",
+  reviseArtifact: "准备草案返工",
+  awaitUserDecision: "等待用户决定",
+  suggestNextStep: "建议下一步",
+  statusReport: "生成状态报告",
+};
+
+function formatChineseStateValue(key: string, value: unknown): string {
+  if (value === null || value === undefined) return "无";
+  if (typeof value === "boolean") return value ? "是" : "否";
+  if (Array.isArray(value)) {
+    if (value.length === 0) return "无";
+    if (key === "artifactReviewResults") {
+      return value.map((item) => {
+        const [agent, verdict] = String(item).split(":");
+        return verdict ? `${agent}：${REVIEW_VERDICT_LABELS[verdict] ?? `未翻译结论（${verdict}）`}` : agent;
+      }).join("、");
+    }
+    return value.map((item) => String(item)).join("、");
+  }
+  if (typeof value === "string") {
+    const vocabulary = STATE_VALUE_LABELS[key];
+    if (vocabulary) return vocabulary[value] ?? `未翻译值（${value}）`;
+    return value || "空";
+  }
+  return JSON.stringify(value);
+}
+
+function translateStateLabel(label: string): string {
+  if (label === "LangGraph 初始状态") return "LangGraph 初始状态";
+  const agentMatch = label.match(/^(A\d+) 输入状态$/);
+  if (agentMatch) return `${agentMatch[1]} Agent 调用前状态`;
+  const nodeName = label.replace(/ 完成后$/, "").split("/").at(-1) ?? label;
+  return `${NODE_LABELS[nodeName] ?? `未翻译节点（${nodeName}）`}完成后的状态`;
+}
+
+function renderChineseStateFields(projection: WorkflowStateProjection): string {
+  const entries = Object.entries(projection);
+  if (entries.length === 0) return "  - 无关键状态";
+  return entries.map(([key, value]) =>
+    `  - ${STATE_FIELD_LABELS[key] ?? `未翻译字段（${key}）`}：${formatChineseStateValue(key, value)}`
+  ).join("\n");
+}
+
+function renderChineseStateChanges(changes: Record<string, WorkflowStateChange>): string {
+  const entries = Object.entries(changes);
+  if (entries.length === 0) return "  - 无关键状态变化";
+  return entries.map(([key, change]) =>
+    `  - ${STATE_FIELD_LABELS[key] ?? `未翻译字段（${key}）`}：` +
+      `${formatChineseStateValue(key, change.before)} → ${formatChineseStateValue(key, change.after)}`
+  ).join("\n");
 }
 
 function payloadRecord(entry: WorkflowEventLogEntry): Record<string, unknown> {
@@ -403,6 +601,11 @@ export class WorkflowEventFileLogger {
   private agentOrder = 0;
   private readonly activeAgentOrders = new Map<string, number[]>();
   private traceRunPath: string | null = null;
+  private readonly traceItems: WorkflowTraceItem[] = [];
+  private readonly stateRecords: WorkflowStateRecord[] = [];
+  private stateVersion = 0;
+  private previousTraceContent = "";
+  private runNumber = 1;
 
   constructor(context: WorkflowEventLogContext) {
     this.context = context;
@@ -418,8 +621,49 @@ export class WorkflowEventFileLogger {
     this.context = { ...this.context, ...patch };
   }
 
+  createRuntimeTrace(): NonNullable<import("./state").WritingRuntimeContext["workflowTrace"]> {
+    return {
+      allocateAgentCallId: (agentId) => this.allocateAgentCallId(agentId),
+      captureState: (state, label) => this.captureState(state, label),
+      recordLLM: (record) => this.recordLLMRecord(record),
+    };
+  }
+
+  private allocateAgentCallId(_agentId: string): string {
+    return `A${String(++this.agentOrder).padStart(2, "0")}`;
+  }
+
+  private captureState(state: unknown, label: string): string {
+    const ref = `S${String(++this.stateVersion).padStart(3, "0")}`;
+    this.stateRecords.push({
+      ref,
+      label,
+      projection: projectWorkflowState(state),
+    });
+    return ref;
+  }
+
+  private recordLLMRecord(record: LLMLogRecord): void {
+    if (!this.enabled) return;
+    if (process.env.NODE_TEST_CONTEXT && process.env.WORKFLOW_LOG_WRITE_IN_TESTS !== "true") return;
+    try {
+      this.init();
+      const seq = ++this.seq;
+      this.traceItems.push({
+        seq,
+        timestamp: record.timestamp,
+        kind: "llm",
+        record,
+      });
+      this.writeHumanTrace();
+    } catch (error) {
+      console.warn("[WORKFLOW_EVENT_LOG] LLM 日志写入失败:", error);
+    }
+  }
+
   recordGraphInitialState(state: unknown): void {
     this.stateProjection = projectWorkflowState(state);
+    const stateRef = this.captureState(state, "LangGraph 初始状态");
     this.record({
       source: "langgraph",
       eventType: "graph_initial_state",
@@ -427,6 +671,7 @@ export class WorkflowEventFileLogger {
       payload: {
         state: this.stateProjection,
         fullState: sanitizeGraphStateForAudit(state),
+        stateRef,
       },
     });
   }
@@ -466,8 +711,11 @@ export class WorkflowEventFileLogger {
 
     const payload = { ...(data ?? {}) };
     if (type === "agent_start") {
-      const order = ++this.agentOrder;
+      const providedCallId = typeof data?.agentCallId === "string" ? data.agentCallId : null;
+      const providedOrder = providedCallId?.match(/^A(\d+)$/)?.[1];
+      const order = providedOrder ? Number(providedOrder) : ++this.agentOrder;
       payload.agentOrder = order;
+      payload.agentCallId = providedCallId ?? `A${String(order).padStart(2, "0")}`;
       const agentId = extractAgentId(data) ?? "unknown";
       const queue = this.activeAgentOrders.get(agentId) ?? [];
       queue.push(order);
@@ -475,7 +723,15 @@ export class WorkflowEventFileLogger {
     } else if (type === "agent_done") {
       const agentId = extractAgentId(data) ?? "unknown";
       const queue = this.activeAgentOrders.get(agentId) ?? [];
-      payload.agentOrder = queue.shift() ?? "?";
+      const providedCallId = typeof data?.agentCallId === "string" ? data.agentCallId : null;
+      const providedOrder = providedCallId?.match(/^A(\d+)$/)?.[1];
+      const queuedOrder = queue.shift();
+      payload.agentOrder = providedOrder ? Number(providedOrder) : queuedOrder ?? "?";
+      payload.agentCallId = providedCallId ?? (
+        typeof payload.agentOrder === "number"
+          ? `A${String(payload.agentOrder).padStart(2, "0")}`
+          : "?"
+      );
       if (queue.length === 0) this.activeAgentOrders.delete(agentId);
     }
 
@@ -493,15 +749,22 @@ export class WorkflowEventFileLogger {
     const event = isRecord(rawEvent) ? rawEvent : {};
     const eventType = typeof event.event === "string" ? event.event : "unknown";
     const data = event.data;
-    const updates = extractUpdatesPayload(eventType, data);
+    const updatesEnvelope = extractUpdatesPayload(eventType, data);
 
-    if (updates) {
-      for (const [node, update] of Object.entries(updates)) {
+    if (updatesEnvelope) {
+      for (const [node, update] of Object.entries(updatesEnvelope.updates)) {
         if (!isRecord(update)) continue;
         const patch = projectWorkflowState(update);
         const nextState = { ...this.stateProjection, ...patch };
         const stateChanges = diffWorkflowState(this.stateProjection, nextState);
         this.stateProjection = nextState;
+        const stateRef = `S${String(++this.stateVersion).padStart(3, "0")}`;
+        this.stateRecords.push({
+          ref: stateRef,
+          label: `${updatesEnvelope.namespace.length > 0 ? `${updatesEnvelope.namespace.join("/")}/` : ""}${node} 完成后`,
+          projection: nextState,
+          changes: stateChanges,
+        });
         this.record({
           source: "langgraph",
           eventType: "node_completed",
@@ -513,6 +776,8 @@ export class WorkflowEventFileLogger {
             stateChanges,
             stateAfter: this.stateProjection,
             rawUpdate: sanitizeGraphStateForAudit(update),
+            stateRef,
+            namespace: updatesEnvelope.namespace,
           },
         });
       }
@@ -532,27 +797,120 @@ export class WorkflowEventFileLogger {
     }
   }
 
+  private renderLLMRecords(): string {
+    const llmItems = this.traceItems.filter((item): item is Extract<WorkflowTraceItem, { kind: "llm" }> =>
+      item.kind === "llm" && item.record.event !== "AGENT_RUN_FINAL"
+    );
+    if (llmItems.length === 0) return "（尚无 LLM 请求或返回）";
+
+    const groups = new Map<string, Extract<WorkflowTraceItem, { kind: "llm" }>[]>();
+    for (const item of llmItems) {
+      const callId = typeof item.record.agentRunId === "string" && item.record.agentRunId
+        ? item.record.agentRunId
+        : "通用调用";
+      const records = groups.get(callId) ?? [];
+      records.push(item);
+      groups.set(callId, records);
+    }
+
+    return Array.from(groups.entries())
+      .sort(([, left], [, right]) => left[0].seq - right[0].seq)
+      .map(([callId, items]) => {
+        const agentId = items.find((item) => typeof item.record.agentId === "string")?.record.agentId ?? "通用";
+        const stateRef = items.find((item) => typeof item.record.stateRef === "string")?.record.stateRef;
+        const title = `## ${callId} ${String(agentId)}${stateRef ? `｜调用前状态 ${String(stateRef)}` : ""}`;
+        const blocks = items.map((item) => formatLLMWorkflowBlock(item.record)).filter(Boolean).join("\n");
+        return `${title}\n\n${blocks}`;
+      }).join("\n");
+  }
+
+  private renderLangGraphStates(): string {
+    if (this.stateRecords.length === 0) return "（尚无 LangGraph 状态）";
+    return this.stateRecords.map((state) => {
+      const lines = [`## ${state.ref} ${translateStateLabel(state.label)}`];
+      if (state.changes) {
+        lines.push("", "本次状态变化：", renderChineseStateChanges(state.changes));
+      }
+      lines.push("", "当前完整状态：", renderChineseStateFields(state.projection));
+      return lines.join("\n");
+    }).join("\n\n");
+  }
+
+  private renderHumanRun(): string {
+    const first = this.traceItems[0];
+    const last = this.traceItems.at(-1);
+    const terminalEntry = [...this.traceItems].reverse().find((item) =>
+      item.kind === "workflow" && [
+        "workflow_completed",
+        "workflow_failed",
+        "workflow_interrupted",
+        "resume_completed",
+        "resume_failed",
+      ].includes(item.entry.eventType)
+    );
+    const status = terminalEntry?.kind === "workflow"
+      ? terminalEntry.entry.eventType === "workflow_failed" || terminalEntry.entry.eventType === "resume_failed"
+          ? "失败"
+          : terminalEntry.entry.eventType === "workflow_interrupted" ||
+              ["waiting_call", "awaiting_user_review"].includes(String(payloadRecord(terminalEntry.entry).phase ?? ""))
+            ? "等待用户输入"
+            : "已完成"
+      : "运行中";
+    const startedAt = first?.timestamp ?? new Date().toISOString();
+    const endedAt = last?.timestamp ?? startedAt;
+    const durationMs = Math.max(0, Date.parse(endedAt) - Date.parse(startedAt));
+    const llmResponses = this.traceItems.filter((item) => item.kind === "llm" && item.record.event === "RESPONSE").length;
+    const toolCalls = this.traceItems.filter((item) => item.kind === "llm" && item.record.event === "TOOL_CALL").length;
+    const agents = this.traceItems.filter((item) => item.kind === "workflow" && item.entry.eventType === "agent_start").length;
+    const operationEntry = this.traceItems.find((item) => item.kind === "workflow" && item.entry.eventType === "operation_classified");
+    const operationPayload = operationEntry?.kind === "workflow" ? payloadRecord(operationEntry.entry) : {};
+    const operation = isRecord(operationPayload.operation) ? operationPayload.operation : operationPayload;
+
+    return [
+      "=".repeat(100),
+      `工作流运行 R${String(this.runNumber).padStart(2, "0")}`,
+      `任务: ${shortRef(this.context.taskId)} | 类型: ${this.context.runKind} | 状态: ${status}`,
+      `时间: ${startedAt} → ${endedAt} | 耗时: ${durationMs}ms`,
+      `操作: ${formatChineseStateValue("operationKind", operation.kind ?? this.stateProjection.operationKind ?? null)} | Agent 调用: ${agents} | LLM: ${llmResponses} | 工具: ${toolCalls}`,
+      "说明: 文件只包含 LLM 完整请求/返回（含工具执行）与 LangGraph 中文状态切换。",
+      "=".repeat(100),
+      "",
+      "# 一、LLM 完整请求与返回（含工具执行）",
+      "",
+      this.renderLLMRecords(),
+      "",
+      "# 二、LangGraph 状态切换（中文）",
+      "",
+      this.renderLangGraphStates(),
+      "",
+    ].join("\n");
+  }
+
   private init(): void {
     if (this.initialized || !this.enabled) return;
     fs.mkdirSync(getLogDir(), { recursive: true });
     this.traceRunPath = getHumanWorkflowLogPath(this.context.taskId, new Date().toISOString());
-    appendHumanWorkflowLog(this.context.taskId, new Date().toISOString(), [
-      "=".repeat(100),
-      "工作流运行",
-      `开始时间: ${new Date().toISOString()}`,
-      `任务: ${shortRef(this.context.taskId)} | 类型: ${this.context.runKind}`,
-      "阅读顺序: LangGraph 状态 → 节点 → Agent → LLM 输入/输出 → 工具输入/返回。",
-      "说明: 下文按实际发生顺序追加；LLM 与工具内容均为原文，不做摘要或截断。",
-      "=".repeat(100),
-      "",
-    ].join("\n"));
+    fs.mkdirSync(path.dirname(this.traceRunPath), { recursive: true });
+    if (fs.existsSync(this.traceRunPath)) {
+      this.previousTraceContent = fs.readFileSync(this.traceRunPath, "utf-8").trimEnd();
+      this.runNumber = (this.previousTraceContent.match(/^工作流运行 R\d+/gm)?.length ?? 0) + 1;
+    }
     this.initialized = true;
   }
 
-  private writeHumanTrace(entry: WorkflowEventLogEntry): void {
-    const block = formatWorkflowTraceBlock(entry);
-    if (!block || !this.traceRunPath) return;
-    appendHumanWorkflowLog(entry.taskId, entry.timestamp, block);
+  private writeHumanTrace(): void {
+    if (!this.traceRunPath) return;
+    const hasVisibleLLMRecord = this.traceItems.some((item) =>
+      item.kind === "llm" && item.record.event !== "AGENT_RUN_FINAL"
+    );
+    if (!hasVisibleLLMRecord && this.stateRecords.length === 0) return;
+    const current = this.renderHumanRun();
+    const content = this.previousTraceContent
+      ? `${this.previousTraceContent}\n\n${current}`
+      : current;
+    const tempPath = `${this.traceRunPath}.${shortRef(this.runId)}.tmp`;
+    fs.writeFileSync(tempPath, content, "utf-8");
+    fs.renameSync(tempPath, this.traceRunPath);
   }
 
   private record(input: WorkflowEventInput): void {
@@ -577,7 +935,13 @@ export class WorkflowEventFileLogger {
       if (process.env.WORKFLOW_MACHINE_EVENT_LOG_ENABLED === "true") {
         fs.appendFileSync(getDailyLogPath(), `${JSON.stringify(toReadableLogEntry(entry))}\n`, "utf-8");
       }
-      this.writeHumanTrace(entry);
+      this.traceItems.push({
+        seq: entry.seq,
+        timestamp: entry.timestamp,
+        kind: "workflow",
+        entry,
+      });
+      this.writeHumanTrace();
     } catch (error) {
       console.warn("[WORKFLOW_EVENT_LOG] 写入失败:", error);
     }

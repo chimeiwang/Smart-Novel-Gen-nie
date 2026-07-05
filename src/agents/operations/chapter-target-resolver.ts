@@ -14,6 +14,8 @@ type Chapter = {
 
 export type ResolvedChapterTarget = {
   contextChapterId: string;
+  contextAnchorChapterId: string;
+  targetOrder: number;
   target: ChapterDraftTarget;
   targetTitle: string;
   targetContent: string;
@@ -35,6 +37,8 @@ export async function resolveChapterDraftTarget(input: {
   if (!current) {
     return {
       contextChapterId: input.chapterId,
+      contextAnchorChapterId: input.chapterId,
+      targetOrder: 1,
       target: { mode: "existing_chapter", chapterId: input.chapterId },
       targetTitle: "",
       targetContent: "",
@@ -51,7 +55,7 @@ export async function resolveChapterDraftTarget(input: {
 
   if (wantsCurrent && currentLocked && nextDraft) {
     if (input.confirmedDecision === "current_chapter") return existingTarget(current);
-    if (input.confirmedDecision === "next_chapter") return existingTarget(nextDraft, current.id);
+    if (input.confirmedDecision === "next_chapter") return existingTarget(nextDraft, findContextAnchor(chapters, nextDraft.order).id);
     const decision = interrupt(createChapterTargetInterrupt({
       currentTitle: current.title,
       nextTitle: nextDraft.title,
@@ -59,30 +63,41 @@ export async function resolveChapterDraftTarget(input: {
     if (decision?.decision !== "next_chapter") {
       return existingTarget(current);
     }
-    return existingTarget(nextDraft, current.id);
+    return existingTarget(nextDraft, findContextAnchor(chapters, nextDraft.order).id);
   }
 
   if (wantsCurrent || !currentLocked) return existingTarget(current);
-  if (nextDraft) return existingTarget(nextDraft, current.id);
+  if (nextDraft) return existingTarget(nextDraft, findContextAnchor(chapters, nextDraft.order).id);
   if (input.allowNewChapterTarget === false) return existingTarget(current);
 
   const nextOrder = Math.max(...chapters.map((chapter) => chapter.order), 0) + 1;
+  const contextAnchor = findContextAnchor(chapters, nextOrder);
   const title = `第 ${nextOrder} 章`;
   return {
-    contextChapterId: current.id,
-    target: { mode: "new_next_chapter", afterChapterId: current.id, title },
+    contextChapterId: contextAnchor.id,
+    contextAnchorChapterId: contextAnchor.id,
+    targetOrder: nextOrder,
+    target: { mode: "new_next_chapter", afterChapterId: contextAnchor.id, title },
     targetTitle: title,
     targetContent: "",
   };
 }
 
-function existingTarget(chapter: Chapter, contextChapterId = chapter.id): ResolvedChapterTarget {
+function existingTarget(chapter: Chapter, contextAnchorChapterId = chapter.id): ResolvedChapterTarget {
   return {
-    contextChapterId,
+    contextChapterId: chapter.id,
+    contextAnchorChapterId,
+    targetOrder: chapter.order,
     target: { mode: "existing_chapter", chapterId: chapter.id },
     targetTitle: chapter.title,
     targetContent: chapter.content ?? "",
   };
+}
+
+function findContextAnchor(chapters: Chapter[], targetOrder: number): Chapter {
+  return [...chapters]
+    .reverse()
+    .find((chapter) => chapter.order < targetOrder && Boolean(chapter.content?.trim())) ?? chapters[0];
 }
 
 function isExplicitCurrentChapterRequest(message: string): boolean {

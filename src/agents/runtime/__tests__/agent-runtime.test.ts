@@ -26,6 +26,7 @@ import {
 import { getOpenAITools } from "@/agents/tools/registry";
 import type { AgentRuntimeOptions, AgentRuntime } from "../agent-runtime";
 import type { AgentTurnResult } from "../turn-result";
+import type { LLMLogRecord } from "@/shared/lib/logger";
 
 function createBillingStub() {
   return {
@@ -373,17 +374,24 @@ describe("parseControlEventArgs", () => {
   it("解析 append_outline_tree → AppendOutlineTreeEvent", () => {
     const event = parseControlEventArgs("append_outline_tree", {
       artifactKey: "outline-builder-1",
+      mode: "replace",
       summary: "追加第一阶段嵌套大纲树",
       stages: [
         {
           title: "第一阶段 鹿溪镇暗流",
+          chapterStartOrder: 1,
+          chapterEndOrder: 15,
           estimatedWordCount: 120000,
           plotUnits: [
             {
               title: "鹿溪镇的暗流",
+              chapterStartOrder: 1,
+              chapterEndOrder: 8,
               chapterGroups: [
                 {
                   title: "裂痕",
+                  chapterStartOrder: 1,
+                  chapterEndOrder: 3,
                   estimatedWordCount: 30000,
                 },
               ],
@@ -869,6 +877,29 @@ describe("AgentRuntimeImpl", () => {
     // 无工具调用时，controlEvents 应为空
     assert.equal(result.controlEvents.length, 0);
     assert.equal(result.toolCalls.length, 0);
+  });
+
+  it("使用外部 agentRunId 并把完整 LLM 链路交给 workflow trace", async () => {
+    const records: LLMLogRecord[] = [];
+    const client = createMockClient([createTextStream("完整回复")]);
+    const runtime = createTestRuntime(client);
+
+    await runtime.runTurn({
+      ...createRuntimeOptions(),
+      tools: [],
+      metadata: {
+        callType: "test",
+        taskId: "task-trace",
+        agentId: "写作",
+        agentRunId: "A07",
+        stateRef: "S004",
+      },
+      workflowTraceSink: (record) => records.push(record),
+    });
+
+    assert.deepEqual(records.map((record) => record.event), ["REQUEST", "RESPONSE", "AGENT_RUN_FINAL"]);
+    assert.ok(records.every((record) => record.agentRunId === "A07"));
+    assert.ok(records.every((record) => record.stateRef === "S004"));
   });
 
   it("不会把 reasoning_content 回灌到下一轮 messages", async () => {

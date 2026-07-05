@@ -18,12 +18,6 @@ import { prisma } from "@/shared/db/prisma";
 // 辅助函数（从 tools.ts 迁移）
 // ============================================
 
-function compactText(value: string | null | undefined, maxLength = 120): string {
-  if (!value) return "";
-  const text = value.replace(/\s+/g, " ").trim();
-  return text.length > maxLength ? text.slice(0, maxLength - 1) + "…" : text;
-}
-
 function getNovelId(state: Parameters<ToolExecutorFn>[1]): string {
   return state.novelId || String((state.novelData as Record<string, unknown>).novelId ?? "");
 }
@@ -35,7 +29,7 @@ function getNovelId(state: Parameters<ToolExecutorFn>[1]): string {
 /** get_novel_info — 获取小说基本信息 */
 export const GET_NOVEL_INFO_DEF: ToolDefinition = {
   name: "get_novel_info",
-  description: "获取当前小说的基本信息。默认返回短摘要；确需完整大纲/世界观/背景时传 include_full_sections=true。",
+  description: "获取当前小说基本信息。默认只返回元数据和可用 section；需要大纲总纲、世界观、背景全文时传 include_full_sections=true，全文不会被截断。",
   inputSchema: z.object({
     include_full_sections: z.boolean().optional(),
   }),
@@ -47,8 +41,21 @@ export const getNovelInfoExecutor: ToolExecutorFn = async (args, state) => {
   const d = state.novelData as Record<string, unknown>;
   const novelId = getNovelId(state);
   const includeFullSections = args.include_full_sections === true;
-  const sectionText = (value: string | null | undefined, maxLength: number) =>
-    includeFullSections ? value ?? "" : compactText(value, maxLength);
+  const sectionFields = (outline: string | null | undefined, background: string | null | undefined, world: string | null | undefined, progress: string | null | undefined) => includeFullSections
+    ? {
+        outlineSummary: outline ?? "",
+        storyBackground: background ?? "",
+        worldSetting: world ?? "",
+        storyProgress: progress ?? "",
+      }
+    : {
+        availableSections: {
+          outlineSummary: Boolean(outline),
+          storyBackground: Boolean(background),
+          worldSetting: Boolean(world),
+          storyProgress: Boolean(progress),
+        },
+      };
   if (novelId) {
     const novel = await prisma.novel.findUnique({
       where: { id: novelId },
@@ -82,12 +89,9 @@ export const getNovelInfoExecutor: ToolExecutorFn = async (args, state) => {
       return JSON.stringify({
         novelName: novel.name,
         chapterTitle: novel.chapters[0]?.title ?? d.chapterTitle,
-        outlineSummary: sectionText(novel.outline?.content, 800),
-        storyBackground: sectionText(novel.storyBackground?.content, 500),
-        worldSetting: sectionText(novel.worldSetting?.content, 500),
+        ...sectionFields(novel.outline?.content, novel.storyBackground?.content, novel.worldSetting?.content, novel.storyProgress),
         writingBible: novel.writingBible,
-        storyProgress: sectionText(novel.storyProgress, 500),
-        sectionsTruncated: !includeFullSections,
+        sectionsIncluded: includeFullSections,
       }, null, 2);
     }
   }
@@ -95,12 +99,9 @@ export const getNovelInfoExecutor: ToolExecutorFn = async (args, state) => {
   return JSON.stringify({
     novelName: d.novelName,
     chapterTitle: d.chapterTitle,
-    outlineSummary: sectionText(d.outlineSummary as string, 800),
-    storyBackground: sectionText(d.storyBackground as string, 500),
-    worldSetting: sectionText(d.worldSetting as string, 500),
+    ...sectionFields(d.outlineSummary as string, d.storyBackground as string, d.worldSetting as string, d.storyProgress as string),
     writingBible: d.writingBible,
-    storyProgress: sectionText(d.storyProgress as string, 500),
-    sectionsTruncated: !includeFullSections,
+    sectionsIncluded: includeFullSections,
   }, null, 2);
 };
 

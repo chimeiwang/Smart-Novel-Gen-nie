@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useOptimistic, useRef, useState, useTransition, useEffect } from "react";
+import { useCallback, useOptimistic, useReducer, useRef, useState, useTransition, useEffect } from "react";
 
 import { AGENT_REGISTRY, type AgentId, type OrchestrationEvent } from "@/agents/client";
 import { acceptGeneratedContentAction } from "@/app/actions";
@@ -13,6 +13,7 @@ import {
 } from "@/shared/contracts/creative-operation";
 import type { AgentUpdateSelectionRef } from "@/shared/contracts/agent-updates";
 import type { ReviewArtifactDecision } from "@/shared/contracts/review-artifact";
+import type { WritingSessionTaskSummary } from "@/shared/contracts/writing-session";
 import {
   EMPTY_AGENT_ACTIVITY_STATE,
   reduceAgentActivityState,
@@ -41,7 +42,6 @@ import {
 } from "./review-artifact-state";
 import {
   resolveLoadedSessionRecoveryState,
-  type LoadedSessionTask,
 } from "./session-task-state";
 import {
   getWritingNextActions,
@@ -51,6 +51,14 @@ import {
 } from "./product-actions";
 import { shouldPersistOptimisticWritingMessage } from "./message-persistence";
 import { createAsyncActionGuard } from "./send-guard";
+import {
+  createEmptySessionWorkspace,
+  isCurrentSessionStream,
+  reduceSessionWorkspace,
+  resolveArtifactInteractionScope,
+  type SessionWorkspaceState,
+  type WritingConversationPhase,
+} from "./session-workspace-state";
 import {
   countVisibleToolCalls,
   getToolActivityLabel,
@@ -105,7 +113,8 @@ type LoadedSessionResponse = Session & {
     intent: string | null;
     createdAt: string;
   }>;
-  currentTask?: LoadedSessionTask;
+  currentTask?: WritingSessionTaskSummary | null;
+  lastTask?: WritingSessionTaskSummary | null;
 };
 
 // 消息类型
@@ -262,7 +271,7 @@ type UpdateDiffField = {
   newValue?: string;
 };
 
-type WritingPhase = "idle" | "discussing" | "generating" | "reviewing" | "recording" | "completed" | "error";
+type WritingPhase = WritingConversationPhase;
 
 type OutlinePreviewNode = {
   key: string;
@@ -296,6 +305,10 @@ type FlowLogEntry = {
 
 /** SSE 事件类型从共享契约导入 + Agent 客户端事件 */
 type ExtendedEvent = WritingSseEvent | OrchestrationEvent;
+
+type StreamUiScope =
+  | { mode: "session"; sessionId: string }
+  | { mode: "artifact"; artifactId: string };
 
 function getReviewArtifactStatusLabel(status: string, optimisticStatus?: ReviewArtifactData["optimisticStatus"]) {
   if (optimisticStatus === "applying") return "应用中";
@@ -507,15 +520,59 @@ export function WritingConversation({
   targetWordCount,
   onComplete,
 }: WritingConversationProps) {
+  const [workspace, dispatchWorkspace] = useReducer(
+    reduceSessionWorkspace<ReviewArtifactData>,
+    createEmptySessionWorkspace<ReviewArtifactData>()
+  );
+  const {
+    sessionId: currentSessionId,
+    taskId,
+    phase,
+    currentOperation,
+    operationStage: currentOperationStage,
+    activeReviewArtifact,
+  } = workspace;
+  const currentSessionIdRef = useRef<string | null>(null);
+  const taskIdRef = useRef<string | null>(null);
+  const activeReviewArtifactRef = useRef<ReviewArtifactData | null>(null);
+  const sessionLoadVersionRef = useRef(0);
+
+  const replaceSessionWorkspace = useCallback((next: SessionWorkspaceState<ReviewArtifactData>) => {
+    currentSessionIdRef.current = next.sessionId;
+    taskIdRef.current = next.taskId;
+    activeReviewArtifactRef.current = next.activeReviewArtifact;
+    dispatchWorkspace({ type: "replace", state: next });
+  }, []);
+
+  const setTaskId = useCallback((nextTaskId: string | null) => {
+    taskIdRef.current = nextTaskId;
+    dispatchWorkspace({ type: "set_task", taskId: nextTaskId });
+  }, []);
+
+  const setPhase = useCallback((nextPhase: WritingPhase) => {
+    dispatchWorkspace({ type: "set_phase", phase: nextPhase });
+  }, []);
+
+  const setCurrentOperation = useCallback((operation: CreativeOperation | null) => {
+    dispatchWorkspace({ type: "set_operation", operation });
+  }, []);
+
+  const setCurrentOperationStage = useCallback((stage: string | null) => {
+    dispatchWorkspace({ type: "set_operation_stage", stage });
+  }, []);
+
+  const setActiveReviewArtifact = useCallback((artifact: ReviewArtifactData | null) => {
+    activeReviewArtifactRef.current = artifact;
+    dispatchWorkspace({ type: "set_active_artifact", artifact });
+  }, []);
+
   // 会话状态
   const [sessions, setSessions] = useState<Session[]>([]);
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [showArtifactTray, setShowArtifactTray] = useState(false);
 
   // 消息状态
   const [messages, setMessages] = useState<Message[]>([]);
-  const [activeReviewArtifact, setActiveReviewArtifact] = useState<ReviewArtifactData | null>(null);
   const [reviewDialogArtifact, setReviewDialogArtifact] = useState<ReviewArtifactData | null>(null);
   const [reviewArtifacts, setReviewArtifacts] = useState<ReviewArtifactData[]>([]);
   const [optimisticReviewArtifact, addOptimisticReviewArtifactDecision] = useOptimistic(
@@ -525,7 +582,6 @@ export function WritingConversation({
       action: { artifactId: string; decision: ReviewArtifactDecision }
     ) => applyOptimisticReviewArtifactDecision(current, action)
   );
-  const [taskId, setTaskId] = useState<string | null>(null);
   const [showReviewArtifactModal, setShowReviewArtifactModal] = useState(false);
   const [reviewDraftText, setReviewDraftText] = useState("");
   const [selectedUpdateRefKeys, setSelectedUpdateRefKeys] = useState<Set<string>>(new Set());
@@ -535,7 +591,6 @@ export function WritingConversation({
   const reviewUpdateSelectionSourceKeyRef = useRef<string | null>(null);
 
   // 其他状态
-  const [phase, setPhase] = useState<WritingPhase>("idle");
   const [generatedContent, setGeneratedContent] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -582,17 +637,12 @@ export function WritingConversation({
 
   const activityRounds = activityState.rounds;
 
-  const [currentOperation, setCurrentOperation] = useState<CreativeOperation | null>(null);
-  const [currentOperationStage, setCurrentOperationStage] = useState<string | null>(null);
-
   // 编辑相关
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
 
-  const activeReviewArtifactRef = useRef<ReviewArtifactData | null>(null);
   const reviewArtifactActionRef = useRef<ReviewArtifactActionState | null>(null);
   const reviewActionCloseTimerRef = useRef<number | null>(null);
-  const taskIdRef = useRef<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const chatRef = useRef<HTMLDivElement>(null);
@@ -602,6 +652,26 @@ export function WritingConversation({
     reviewArtifactActionRef.current = next;
     setReviewArtifactAction(next);
   }, []);
+
+  const resetSessionContext = useCallback((sessionId: string | null) => {
+    sessionLoadVersionRef.current += 1;
+    replaceSessionWorkspace(createEmptySessionWorkspace<ReviewArtifactData>(sessionId));
+    setMessages([]);
+    setGeneratedContent("");
+    setError(null);
+    setReviewDialogArtifact(null);
+    setShowReviewArtifactModal(false);
+    setChapterTargetPrompt(null);
+    setReviewDraftText("");
+    setSelectedUpdateRefKeys(new Set());
+    reviewDraftSourceKeyRef.current = null;
+    reviewUpdateSelectionSourceKeyRef.current = null;
+    pendingReviewArtifactRefreshRef.current = false;
+    updateReviewArtifactAction(null);
+    resetAgentActivity();
+    clearAgentLiveRuns();
+    setIsAssigningTask(false);
+  }, [clearAgentLiveRuns, replaceSessionWorkspace, resetAgentActivity, updateReviewArtifactAction]);
 
   const clearReviewActionCloseTimer = useCallback(() => {
     if (reviewActionCloseTimerRef.current === null) return;
@@ -644,7 +714,7 @@ export function WritingConversation({
     closeReviewArtifactModal({ force: true });
     setPhase("recording");
     window.setTimeout(() => inputRef.current?.focus(), 0);
-  }, [closeReviewArtifactModal]);
+  }, [closeReviewArtifactModal, setPhase]);
 
   const scheduleReviewArtifactModalClose = useCallback(() => {
     clearReviewActionCloseTimer();
@@ -665,22 +735,8 @@ export function WritingConversation({
   }, [clearReviewActionCloseTimer]);
 
   useEffect(() => {
-    setCurrentSessionId(null);
-    setTaskId(null);
-    taskIdRef.current = null;
-    setPhase("idle");
-    setGeneratedContent("");
-    setActiveReviewArtifact(null);
-    activeReviewArtifactRef.current = null;
-    setReviewDialogArtifact(null);
-    setReviewArtifacts([]);
-    setChapterTargetPrompt(null);
-    setCurrentOperation(null);
-    setCurrentOperationStage(null);
-    resetAgentActivity();
-    clearAgentLiveRuns();
-    updateReviewArtifactAction(null);
-  }, [chapterId, clearAgentLiveRuns, resetAgentActivity, updateReviewArtifactAction]);
+    resetSessionContext(null);
+  }, [chapterId, resetSessionContext]);
 
   const getLocalReviewDraftForApply = useCallback((artifact: ReviewArtifactData): string | undefined => {
     if (!getReviewArtifactContent(artifact)) return undefined;
@@ -741,10 +797,17 @@ export function WritingConversation({
 
   // 加载会话消息
   const loadSessionMessages = useCallback(async (sessionId: string) => {
+    const requestVersion = sessionLoadVersionRef.current;
     try {
       const res = await fetch(`/api/writing/sessions/${sessionId}`);
       if (res.ok) {
         const session = await res.json() as LoadedSessionResponse;
+        if (
+          currentSessionIdRef.current !== sessionId ||
+          sessionLoadVersionRef.current !== requestVersion
+        ) {
+          return;
+        }
         const loadedMessages: Message[] = session.messages.map((m) => ({
           id: m.id,
           role: m.role as "user" | "agent" | "system",
@@ -756,19 +819,20 @@ export function WritingConversation({
         }));
 
         const sessionTaskState = resolveLoadedSessionRecoveryState(session.currentTask ?? null);
-        activeReviewArtifactRef.current = null;
-        setActiveReviewArtifact(null);
         setReviewDialogArtifact(null);
         updateReviewArtifactAction(null);
         setShowReviewArtifactModal(false);
         reviewDraftSourceKeyRef.current = null;
         setReviewDraftText("");
         setMessages(loadedMessages);
-        setTaskId(sessionTaskState.taskId);
-        taskIdRef.current = sessionTaskState.taskId;
-        setPhase(sessionTaskState.phase);
-        setCurrentOperation(sessionTaskState.currentOperation);
-        setCurrentOperationStage(sessionTaskState.operationStage);
+        replaceSessionWorkspace({
+          sessionId,
+          taskId: sessionTaskState.taskId,
+          phase: sessionTaskState.phase,
+          currentOperation: sessionTaskState.currentOperation,
+          operationStage: sessionTaskState.operationStage,
+          activeReviewArtifact: null,
+        });
         resetAgentActivity();
         setIsAssigningTask(false);
         clearAgentLiveRuns();
@@ -778,7 +842,7 @@ export function WritingConversation({
     } catch (err) {
       console.error("加载会话消息失败", err);
     }
-  }, [clearAgentLiveRuns, resetAgentActivity, updateReviewArtifactAction]);
+  }, [clearAgentLiveRuns, replaceSessionWorkspace, resetAgentActivity, updateReviewArtifactAction]);
 
   // 创建新会话
   const createSession = useCallback(async (): Promise<string | null> => {
@@ -791,16 +855,7 @@ export function WritingConversation({
       if (res.ok) {
         const session = await res.json();
         await loadSessions();
-        setCurrentSessionId(session.id);
-        setMessages([]);
-        resetAgentActivity();
-        setIsAssigningTask(false);
-        clearAgentLiveRuns();
-        setPhase("idle");
-        setTaskId(null);
-        taskIdRef.current = null;
-        setReviewDialogArtifact(null);
-        updateReviewArtifactAction(null);
+        resetSessionContext(session.id);
         setShowSessionModal(false);
         return session.id;
       }
@@ -808,7 +863,7 @@ export function WritingConversation({
       console.error("创建会话失败", err);
     }
     return null;
-  }, [novelId, chapterId, clearAgentLiveRuns, loadSessions, resetAgentActivity, updateReviewArtifactAction]);
+  }, [novelId, chapterId, loadSessions, resetSessionContext]);
 
   // 删除会话
   const deleteSession = useCallback(async (sessionId: string, e: React.MouseEvent) => {
@@ -819,19 +874,13 @@ export function WritingConversation({
       if (res.ok) {
         await loadSessions();
       if (currentSessionId === sessionId) {
-        setCurrentSessionId(null);
-        setMessages([]);
-        setPhase("idle");
-        setTaskId(null);
-        taskIdRef.current = null;
-        setReviewDialogArtifact(null);
-        updateReviewArtifactAction(null);
+        resetSessionContext(null);
       }
       }
     } catch (err) {
       console.error("删除会话失败", err);
     }
-  }, [currentSessionId, loadSessions, updateReviewArtifactAction]);
+  }, [currentSessionId, loadSessions, resetSessionContext]);
 
   // 保存消息到服务器
   const saveMessageToServer = useCallback(async (
@@ -863,10 +912,10 @@ export function WritingConversation({
 
   // 选择会话
   const selectSession = useCallback(async (sessionId: string) => {
-    setCurrentSessionId(sessionId);
+    resetSessionContext(sessionId);
     await loadSessionMessages(sessionId);
     setShowSessionModal(false);
-  }, [loadSessionMessages]);
+  }, [loadSessionMessages, resetSessionContext]);
 
   // 初始加载
   useEffect(() => {
@@ -1061,10 +1110,8 @@ export function WritingConversation({
   const setWorkflowReviewArtifact = useCallback((artifact: ReviewArtifactData) => {
     const nextTaskId = resolveReviewArtifactTaskId(taskIdRef.current ?? taskId, artifact);
     if (nextTaskId && nextTaskId !== taskIdRef.current) {
-      taskIdRef.current = nextTaskId;
       setTaskId(nextTaskId);
     }
-    activeReviewArtifactRef.current = artifact;
     setActiveReviewArtifact(artifact);
     setReviewArtifacts((prev) => {
       const rest = prev.filter((item) => item.id !== artifact.id);
@@ -1077,7 +1124,7 @@ export function WritingConversation({
       content: "待确认变更已更新。请在下方卡片中查看、修改或应用。",
       timestamp: Date.now(),
     })));
-  }, [taskId]);
+  }, [setActiveReviewArtifact, setPhase, setTaskId, taskId]);
 
   const inspectReviewArtifactFromTray = useCallback((artifact: ReviewArtifactData) => {
     setReviewArtifacts((prev) => {
@@ -1087,6 +1134,14 @@ export function WritingConversation({
     setShowArtifactTray(false);
     openReviewArtifactModal(artifact);
   }, [openReviewArtifactModal]);
+
+  const updateDetachedReviewArtifact = useCallback((artifact: ReviewArtifactData) => {
+    setReviewArtifacts((prev) => {
+      const rest = prev.filter((item) => item.id !== artifact.id);
+      return isActionableReviewArtifact(artifact) ? [artifact, ...rest] : rest;
+    });
+    setReviewDialogArtifact((current) => current?.id === artifact.id ? artifact : current);
+  }, []);
 
   const refreshAwaitingReviewArtifact = useCallback(async (reason: string) => {
     const currentTaskId = taskIdRef.current ?? taskId;
@@ -1128,7 +1183,108 @@ export function WritingConversation({
     return () => window.clearTimeout(timer);
   }, [refreshAwaitingReviewArtifact]);
 
-  const handleEvent = useCallback((event: ExtendedEvent) => {
+  const handleDetachedArtifactEvent = useCallback((event: ExtendedEvent, artifactId: string) => {
+    switch (event.type) {
+      case "user_input_required":
+      case "artifact_submitted":
+      case "artifact_awaiting_user_approval":
+      case "review_artifact_requested":
+        if ("artifact" in event && event.artifact) {
+          updateDetachedReviewArtifact(event.artifact as ReviewArtifactData);
+        }
+        void loadReviewArtifacts();
+        break;
+
+      case "artifact_applied":
+        if (event.success) {
+          updateReviewArtifactAction({
+            artifactId: event.artifactId,
+            decision: "approve",
+            status: "succeeded",
+            message: getReviewArtifactActionMessage("approve", "succeeded", event.summary),
+          });
+          setReviewArtifacts((prev) => prev.filter((artifact) => artifact.id !== event.artifactId));
+          onComplete?.();
+          scheduleReviewArtifactModalClose();
+        } else {
+          updateReviewArtifactAction({
+            artifactId: event.artifactId,
+            decision: "approve",
+            status: "failed",
+            message: getReviewArtifactActionMessage("approve", "failed", event.errors?.join("\n") || event.summary),
+          });
+          if (event.artifact) updateDetachedReviewArtifact(event.artifact as ReviewArtifactData);
+          setError(event.errors?.join("\n") || event.summary || "应用待确认变更失败");
+        }
+        void loadSessions();
+        void loadReviewArtifacts();
+        break;
+
+      case "artifact_deleted":
+        updateReviewArtifactAction({
+          artifactId: event.artifactId,
+          decision: "discard",
+          status: "succeeded",
+          message: getReviewArtifactActionMessage("discard", "succeeded"),
+        });
+        setReviewArtifacts((prev) => prev.filter((artifact) => artifact.id !== event.artifactId));
+        onComplete?.();
+        void loadReviewArtifacts();
+        scheduleReviewArtifactModalClose();
+        break;
+
+      case "resume":
+        if (
+          event.resumeType === "artifact_revision" &&
+          reviewArtifactActionRef.current?.artifactId === artifactId &&
+          reviewArtifactActionRef.current.decision === "revise" &&
+          reviewArtifactActionRef.current.status === "pending"
+        ) {
+          updateReviewArtifactAction({
+            artifactId,
+            decision: "revise",
+            status: "succeeded",
+            message: getReviewArtifactActionMessage("revise", "succeeded"),
+          });
+          scheduleReviewArtifactModalClose();
+        }
+        break;
+
+      case "done":
+      case "completed":
+        void loadSessions();
+        void loadReviewArtifacts();
+        break;
+
+      case "error":
+        if (reviewArtifactActionRef.current?.artifactId === artifactId) {
+          updateReviewArtifactAction({
+            ...reviewArtifactActionRef.current,
+            status: "failed",
+            message: getReviewArtifactActionMessage(
+              reviewArtifactActionRef.current.decision,
+              "failed",
+              event.message ?? undefined
+            ),
+          });
+        }
+        setError(event.message ?? "处理待确认变更失败");
+        break;
+
+      default:
+        break;
+    }
+  }, [loadReviewArtifacts, loadSessions, onComplete, scheduleReviewArtifactModalClose, updateDetachedReviewArtifact, updateReviewArtifactAction]);
+
+  const handleEvent = useCallback((event: ExtendedEvent, scope: StreamUiScope) => {
+    if (scope.mode === "session" && !isCurrentSessionStream(currentSessionIdRef.current, scope.sessionId)) {
+      return;
+    }
+    if (scope.mode === "artifact") {
+      handleDetachedArtifactEvent(event, scope.artifactId);
+      return;
+    }
+
     if (
       event.type === "user_input_required" ||
       event.type === "artifact_submitted" ||
@@ -1154,7 +1310,6 @@ export function WritingConversation({
     switch (event.type) {
       case "start":
         setTaskId(event.taskId ?? null);
-        taskIdRef.current = event.taskId ?? null;
         setFlowLogs([]);
         setCurrentOperation(null);
         setCurrentOperationStage(null);
@@ -1445,7 +1600,6 @@ export function WritingConversation({
             status: "succeeded",
             message: getReviewArtifactActionMessage("approve", "succeeded", event.summary),
           });
-          activeReviewArtifactRef.current = null;
           setActiveReviewArtifact(null);
           setReviewArtifacts((prev) => prev.filter((artifact) => artifact.id !== event.artifactId));
           setMessages((prev) => clearReviewArtifactFromMessages(prev, event.artifactId));
@@ -1477,7 +1631,6 @@ export function WritingConversation({
           status: "succeeded",
           message: getReviewArtifactActionMessage("discard", "succeeded"),
         });
-        activeReviewArtifactRef.current = null;
         setActiveReviewArtifact(null);
         setReviewArtifacts((prev) => prev.filter((artifact) => artifact.id !== event.artifactId));
         setMessages((prev) => clearReviewArtifactFromMessages(prev, event.artifactId));
@@ -1551,7 +1704,7 @@ export function WritingConversation({
         console.debug("[SSE] 未处理的事件类型:", (event as ExtendedEvent).type, event);
         break;
     }
-  }, [messages.length, addActivityEntry, addMessage, addFlowLog, applyAgentLiveAction, attachActivityRoundToMessage, clearAgentLiveRuns, discardActivityRound, finishActivityRound, formatOperationLog, getAgentName, loadSessions, loadReviewArtifacts, onComplete, refreshAwaitingReviewArtifact, scheduleReviewArtifactModalClose, setWorkflowReviewArtifact, startActivityRound, updateReviewArtifactAction]);
+  }, [messages.length, addActivityEntry, addMessage, addFlowLog, applyAgentLiveAction, attachActivityRoundToMessage, clearAgentLiveRuns, discardActivityRound, finishActivityRound, formatOperationLog, getAgentName, handleDetachedArtifactEvent, loadSessions, loadReviewArtifacts, onComplete, refreshAwaitingReviewArtifact, scheduleReviewArtifactModalClose, setActiveReviewArtifact, setCurrentOperation, setCurrentOperationStage, setPhase, setTaskId, setWorkflowReviewArtifact, startActivityRound, updateReviewArtifactAction]);
 
   const runSendAction = useCallback(<T,>(action: () => Promise<T>) => {
     return sendGuardRef.current.run(action);
@@ -1593,7 +1746,7 @@ export function WritingConversation({
         throw new Error(data.error || "启动会话失败");
       }
 
-      await processStream(response);
+      await processStream(response, { mode: "session", sessionId: sessionIdForRequest });
     } catch (err) {
       setError(err instanceof Error ? err.message : "未知错误");
       setPhase("error");
@@ -1650,7 +1803,9 @@ export function WritingConversation({
           throw new Error(data.error || "继续会话失败");
         }
 
-        await processStream(response);
+        const sessionIdForRequest = currentSessionIdRef.current;
+        if (!sessionIdForRequest) throw new Error("当前写作会话不存在");
+        await processStream(response, { mode: "session", sessionId: sessionIdForRequest });
       } catch (err) {
         if ((err as Error).name === "AbortError") return;
         setError(err instanceof Error ? err.message : "发送失败");
@@ -1692,7 +1847,7 @@ export function WritingConversation({
     await runPromptAction(WRITING_ACTION_PROMPTS.sync_lore);
   };
 
-  const processStream = async (response: Response) => {
+  const processStream = async (response: Response, scope: StreamUiScope) => {
     const reader = response.body?.getReader();
     if (!reader) throw new Error("No response body");
 
@@ -1712,7 +1867,9 @@ export function WritingConversation({
       for (const line of lines) {
         if (line.startsWith("data: ")) {
           try {
-            const parsed = JSON.parse(line.slice(6)); const event = parseSseEvent(parsed) || (parsed as ExtendedEvent); handleEvent(event);
+            const parsed = JSON.parse(line.slice(6));
+            const event = parseSseEvent(parsed) || (parsed as ExtendedEvent);
+            handleEvent(event, scope);
           } catch { /* JSON 解析失败，静默跳过 */ }
         }
       }
@@ -1721,11 +1878,11 @@ export function WritingConversation({
     // 处理流结束后 buffer 中的最后一行
     if (buffer.startsWith("data: ")) {
       try {
-        handleEvent(JSON.parse(buffer.slice(6)) as ExtendedEvent);
+        handleEvent(JSON.parse(buffer.slice(6)) as ExtendedEvent, scope);
       } catch { /* ignore */ }
     }
 
-    if (shouldRefreshAwaitingReviewArtifact({
+    if (scope.mode === "session" && shouldRefreshAwaitingReviewArtifact({
       eventType: "done",
       hasTaskId: Boolean(taskIdRef.current ?? taskId),
       visibleArtifactStatus: activeReviewArtifactRef.current?.status ?? null,
@@ -1776,7 +1933,9 @@ export function WritingConversation({
         throw new Error(data.error || "恢复写作目标确认失败");
       }
 
-      await processStream(response);
+      const sessionIdForRequest = currentSessionIdRef.current;
+      if (!sessionIdForRequest) throw new Error("当前写作会话不存在");
+      await processStream(response, { mode: "session", sessionId: sessionIdForRequest });
     } catch (err) {
       setError(err instanceof Error ? err.message : "恢复写作目标确认失败");
       setPhase("error");
@@ -2229,6 +2388,10 @@ export function WritingConversation({
     const hasEmptyStructuredSelection = selectedUpdateRefsForApply !== undefined && selectedUpdateRefsForApply.length === 0;
     const action = getReviewArtifactAction(artifact.id);
     const actionLocked = isReviewArtifactActionLocked(action);
+    const isCurrentSessionArtifact =
+      activeReviewArtifactRef.current?.id === artifact.id &&
+      Boolean(taskIdRef.current) &&
+      taskIdRef.current === artifact.taskId;
 
     return (
       <div className={`review-dialog ${actionLocked ? "is-busy" : ""}`} aria-busy={actionLocked}>
@@ -2314,7 +2477,13 @@ export function WritingConversation({
                 className="button ghost"
                 type="button"
                 disabled={isSending || isActing || actionLocked}
-                onClick={focusChatForArtifactRevision}
+                onClick={() => {
+                  if (isCurrentSessionArtifact) {
+                    focusChatForArtifactRevision();
+                    return;
+                  }
+                  void handleArtifactDecision(artifact, "revise", "继续修改待确认变更");
+                }}
               >
                 {getReviewArtifactActionButtonLabel(action, "revise") ?? (artifact.optimisticStatus === "revising" ? "准备返工..." : "继续修改")}
               </button>
@@ -2346,8 +2515,9 @@ export function WritingConversation({
   ) => {
     const guarded = runSendAction(async () => {
       const currentUiTaskId = taskIdRef.current ?? taskId;
+      const isVisibleSessionArtifact = activeReviewArtifactRef.current?.id === artifact.id;
       const currentTaskId = resolveReviewArtifactActionTaskId(
-        taskIdRef.current ?? taskId,
+        isVisibleSessionArtifact ? currentUiTaskId : null,
         artifact
       );
       if (!currentTaskId) {
@@ -2361,11 +2531,13 @@ export function WritingConversation({
         setPhase("error");
         return;
       }
-      const shouldBindTaskToUi = activeReviewArtifactRef.current?.id === artifact.id || !currentUiTaskId;
-      if (shouldBindTaskToUi && currentTaskId !== taskIdRef.current) {
-        taskIdRef.current = currentTaskId;
-        setTaskId(currentTaskId);
-      }
+      const interactionScope = resolveArtifactInteractionScope({
+        activeArtifactId: isVisibleSessionArtifact ? artifact.id : null,
+        currentTaskId: currentUiTaskId,
+        artifactId: artifact.id,
+        artifactTaskId: artifact.taskId,
+      });
+      const isCurrentSessionArtifact = interactionScope === "session";
 
       clearReviewActionCloseTimer();
       updateReviewArtifactAction({
@@ -2401,7 +2573,10 @@ export function WritingConversation({
           throw new Error(data.error || "处理待确认变更失败");
         }
 
-        await processStream(response);
+        const streamScope: StreamUiScope = isCurrentSessionArtifact && currentSessionIdRef.current
+          ? { mode: "session", sessionId: currentSessionIdRef.current }
+          : { mode: "artifact", artifactId: artifact.id };
+        await processStream(response, streamScope);
       } catch (err) {
         const message = err instanceof Error ? err.message : "处理待确认变更失败";
         updateReviewArtifactAction({

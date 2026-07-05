@@ -8,11 +8,18 @@
  * @phase Phase 5 — 拆分 LangGraph 执行器
  */
 
-import { collectAgentOutputs, patchArtifactReviewState } from "./state";
-import type { AgentOutput } from "./state";
+import {
+  collectAgentOutputs,
+  createDefaultArtifactReviewState,
+  patchArtifactReviewState,
+} from "./state";
+import type { AgentOutput, CoreAgentId } from "./state";
 import type { GraphState } from "./graph-definition";
 import { serializeHistory } from "./context-manager";
-import { serializeGraphStateSnapshot } from "./graph-state-snapshot";
+import {
+  deserializeGraphStateSnapshot,
+  serializeGraphStateSnapshot,
+} from "./graph-state-snapshot";
 import { prisma } from "@/shared/db/prisma";
 import { logger } from "@/shared/lib/logger";
 
@@ -83,15 +90,102 @@ export function buildAwaitingUserReviewTaskUpdate(input: {
   };
 }
 
-export async function clearTaskAwaitingUserReview(input: {
+export function buildArtifactReviewTaskTransition(input: {
+  graphStateJson?: string | null;
+  transition:
+    | { type: "finalize"; outcome: "applied" | "discarded" }
+    | { type: "request_revision"; artifactId: string; reviserAgent: CoreAgentId };
+}) {
+  const snapshot = deserializeGraphStateSnapshot(input.graphStateJson);
+  const nextPhase = input.transition.type === "finalize" ? "completed" : "active";
+  const baseUpdate: {
+    phase: "active" | "completed";
+    generatedContent: null;
+    graphStateJson?: string;
+  } = {
+    phase: nextPhase,
+    generatedContent: null,
+  };
+  if (!snapshot) return baseUpdate;
+
+  const artifactReview = input.transition.type === "finalize"
+    ? createDefaultArtifactReviewState({
+        status: input.transition.outcome,
+        activeArtifactId: null,
+        reviewerAgent: null,
+        reviserAgent: null,
+        pendingRevision: null,
+        iteration: snapshot.artifactReview.iteration,
+        maxIterations: snapshot.artifactReview.maxIterations,
+      })
+    : createDefaultArtifactReviewState({
+        ...snapshot.artifactReview,
+        status: "revision_requested",
+        activeArtifactId: input.transition.artifactId,
+        reviserAgent: input.transition.reviserAgent,
+        pendingRevision: null,
+      });
+
+  baseUpdate.graphStateJson = JSON.stringify({
+    ...snapshot,
+    phase: nextPhase,
+    operationStep: input.transition.type === "finalize" ? "completed" : "revise_artifact",
+    operationStage: input.transition.type === "finalize" ? "已完成" : "返工草案",
+    pendingUserResponse: false,
+    artifactReview,
+    activeArtifactId: artifactReview.activeArtifactId,
+    artifactMode: input.transition.type === "finalize" ? "none" : "review_loop",
+    reviewerAgent: artifactReview.reviewerAgent,
+    reviserAgent: artifactReview.reviserAgent,
+    pendingArtifactRevision: artifactReview.pendingRevision,
+    artifactIteration: artifactReview.iteration,
+    maxArtifactIterations: artifactReview.maxIterations,
+  });
+  return baseUpdate;
+}
+
+async function updateTaskArtifactReviewTransition(input: {
   taskId: string;
-  nextPhase?: "active" | "completed";
+  transition:
+    | { type: "finalize"; outcome: "applied" | "discarded" }
+    | { type: "request_revision"; artifactId: string; reviserAgent: CoreAgentId };
 }): Promise<void> {
+  const task = await prisma.writingTask.findUnique({
+    where: { id: input.taskId },
+    select: { graphStateJson: true },
+  });
+  if (!task) throw new Error("写作任务不存在");
+
   await prisma.writingTask.update({
     where: { id: input.taskId },
-    data: {
-      phase: input.nextPhase ?? "completed",
-      generatedContent: null,
+    data: buildArtifactReviewTaskTransition({
+      graphStateJson: task.graphStateJson,
+      transition: input.transition,
+    }),
+  });
+}
+
+export async function finalizeTaskAfterArtifactDecision(input: {
+  taskId: string;
+  outcome: "applied" | "discarded";
+}): Promise<void> {
+  await updateTaskArtifactReviewTransition({
+    taskId: input.taskId,
+    transition: { type: "finalize", outcome: input.outcome },
+  });
+}
+
+export async function markTaskArtifactRevisionRequested(input: {
+  taskId: string;
+  artifactId: string;
+  reviserAgent: CoreAgentId;
+}): Promise<void> {
+  await updateTaskArtifactReviewTransition({
+    taskId: input.taskId,
+    transition: {
+      type: "request_revision",
+      artifactId: input.artifactId,
+      reviserAgent: input.reviserAgent,
     },
   });
 }

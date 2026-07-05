@@ -26,6 +26,17 @@ import { runAgent } from "@/agents/runtime/agent-runner";
 const AGENT_ID: CoreAgentId = "写作";
 const VALIDATOR_ID: CoreAgentId = "校验";
 const MISSING_APPROVED_BEAT_PLAN_MESSAGE = "当前请求明确要求基于已批准章节计划生成正文，但本章尚无 approved Beat Plan。请先执行 @剧情 规划本章并批准章节计划草案，再重新发起正文生成。";
+const UNMAPPED_OUTLINE_MESSAGE = "当前章节没有唯一可用的大纲章节组映射。请先修复结构化大纲的章节范围，或为本章创建并批准章节计划后再生成正文。";
+const AMBIGUOUS_OUTLINE_MESSAGE = "当前章节同时匹配多个大纲章节组，系统不会随机选择。请先清理重叠大纲范围后再生成正文。";
+
+export function getInvalidWritingOutlineMessage(
+  state: Pick<WritingState, "novelData">
+): string | null {
+  const outlineStatus = state.novelData.writingOutlineContext?.status;
+  if (outlineStatus === "ambiguous") return AMBIGUOUS_OUTLINE_MESSAGE;
+  if (outlineStatus === "unmapped") return UNMAPPED_OUTLINE_MESSAGE;
+  return null;
+}
 
 /**
  * 作家 Agent 定义
@@ -44,11 +55,19 @@ const authorDefinition: AgentDefinition = {
   reasoningEffort: "medium",
 
   preGuard: (state) => {
-    if (!shouldBlockForMissingApprovedBeatPlan(state)) return null;
+    if (shouldBlockForMissingApprovedBeatPlan(state)) {
+      return {
+        skip: true,
+        skipMessage: MISSING_APPROVED_BEAT_PLAN_MESSAGE,
+        skipOutput: { errorMessage: MISSING_APPROVED_BEAT_PLAN_MESSAGE },
+      };
+    }
+    const message = getInvalidWritingOutlineMessage(state);
+    if (!message) return null;
     return {
       skip: true,
-      skipMessage: MISSING_APPROVED_BEAT_PLAN_MESSAGE,
-      skipOutput: { errorMessage: MISSING_APPROVED_BEAT_PLAN_MESSAGE },
+      skipMessage: message,
+      skipOutput: { errorMessage: message },
     };
   },
 
@@ -101,14 +120,7 @@ const authorDefinition: AgentDefinition = {
       messages.push({ role: "system", content: activeTaskContext });
     }
 
-    if (novelData.approvedBeatPlan) {
-      messages.push({
-        role: "system",
-        content: "## 写作结构约束：已批准章节计划\n\n" +
-          "下面的 Beat Plan 是本章正文草案的结构约束，不是普通参考。写正文时必须按场景职责、冲突、验收标准组织内容；如需偏离，正文末尾必须说明原因。\n\n" +
-          JSON.stringify(novelData.approvedBeatPlan, null, 2),
-      });
-    } else {
+    if (!novelData.approvedBeatPlan) {
       messages.push({
         role: "system",
         content: "## 写作结构提示\n\n当前章节没有已批准 Beat Plan。你仍可生成正文草案，但必须在正文末尾用「---」分隔后简短标注：未基于已批准章节计划。",
@@ -140,7 +152,7 @@ const authorDefinition: AgentDefinition = {
         role: "system",
         content: "## 可选参考：已有章节内容\n\n" +
           "只有当用户要求续写、改写、补写、接续当前章节或需要保持上下文时，才使用这段内容。\n\n" +
-          content.slice(-4000),
+          content,
       });
     }
 

@@ -27,7 +27,11 @@ import {
   createSSEController,
   sendAgentDoneFallback,
 } from "./sse-adapter";
-import { clearTaskAwaitingUserReview, updateTaskState } from "./task-state";
+import {
+  finalizeTaskAfterArtifactDecision,
+  markTaskArtifactRevisionRequested,
+  updateTaskState,
+} from "./task-state";
 import {
   buildContextSummary,
   loadHistoryFromDb,
@@ -195,6 +199,7 @@ export function createBaseGraphState(input: {
   streamCallbacks?: GraphState["streamCallbacks"];
   eventCallbacks?: GraphState["eventCallbacks"];
   chapterTargetDecision?: "current_chapter" | "next_chapter";
+  workflowTrace?: NonNullable<WritingState["runtime"]>["workflowTrace"];
 }): GraphState {
   const streamCallbacks = input.streamCallbacks ?? {};
   const eventCallbacks = input.eventCallbacks;
@@ -227,6 +232,7 @@ export function createBaseGraphState(input: {
       streamCallbacks,
       eventCallbacks,
       chapterTargetDecision: input.chapterTargetDecision,
+      workflowTrace: input.workflowTrace,
     },
     pendingAgentCall: null,
     errorMessage: null,
@@ -501,6 +507,12 @@ async function runInitialStateWorkflow(
         conversationHistory: history,
         streamCallbacks: createDirectStreamCallbacks(sendEvent),
         eventCallbacks: createDirectEventCallbacks(sendEvent),
+        runtime: {
+          ...initialState.runtime,
+          streamCallbacks: createDirectStreamCallbacks(sendEvent),
+          eventCallbacks: createDirectEventCallbacks(sendEvent),
+          workflowTrace: auditLog.createRuntimeTrace(),
+        },
       };
       auditLog.recordGraphInitialState(graphInput);
 
@@ -512,6 +524,7 @@ async function runInitialStateWorkflow(
           ...config,
           version: "v2",
           streamMode: STREAM_MODES,
+          subgraphs: true,
         });
 
         for await (const event of eventStream) {
@@ -673,7 +686,7 @@ export async function resumeWriting(
             selectedUpdateRefs: userDecision.selectedUpdateRefs,
           });
           if (result.success) {
-            await clearTaskAwaitingUserReview({ taskId });
+            await finalizeTaskAfterArtifactDecision({ taskId, outcome: "applied" });
           }
           auditLog.recordPersistenceEvent("artifact_applied", {
             artifactId,
@@ -699,7 +712,7 @@ export async function resumeWriting(
           const artifactId = userDecision.artifactId;
           sendEvent("resume", { taskId, resumeType: "artifact_discard" });
           await discardArtifactHard({ artifactId, userId });
-          await clearTaskAwaitingUserReview({ taskId });
+          await finalizeTaskAfterArtifactDecision({ taskId, outcome: "discarded" });
           auditLog.recordPersistenceEvent("artifact_deleted", { artifactId });
           sendEvent("artifact_deleted", { artifactId });
           sendEvent("done", { taskId, finalContent: "已丢弃待审核草案。" });
@@ -757,7 +770,11 @@ export async function resumeWriting(
             return;
           }
 
-          await clearTaskAwaitingUserReview({ taskId, nextPhase: "active" });
+          await markTaskArtifactRevisionRequested({
+            taskId,
+            artifactId: artifact.id,
+            reviserAgent: revisionResume.targetAgent,
+          });
           effectiveUserMessage = revisionResume.userMessage;
           sendEvent("resume", {
             taskId,
@@ -834,7 +851,11 @@ export async function resumeWriting(
               return;
             }
 
-            await clearTaskAwaitingUserReview({ taskId, nextPhase: "active" });
+            await markTaskArtifactRevisionRequested({
+              taskId,
+              artifactId: artifact.id,
+              reviserAgent: revisionResume.targetAgent,
+            });
             visibleUserMessage = pendingRevision.userMessage;
             effectiveUserMessage = revisionResume.userMessage;
             sendEvent("resume", {
@@ -887,6 +908,7 @@ export async function resumeWriting(
                 streamCallbacks: createDirectStreamCallbacks(sendEvent),
                 eventCallbacks: createDirectEventCallbacks(sendEvent),
                 chapterTargetDecision,
+                workflowTrace: auditLog.createRuntimeTrace(),
               },
             },
           }) as unknown as GraphState;
@@ -897,7 +919,7 @@ export async function resumeWriting(
           if (shouldUseLangGraphStreamEvents()) {
             const eventStream = await graph.streamEvents(
               command,
-              { ...config, version: "v2", streamMode: STREAM_MODES }
+              { ...config, version: "v2", streamMode: STREAM_MODES, subgraphs: true }
             );
 
             for await (const event of eventStream) {
@@ -968,6 +990,7 @@ export async function resumeWriting(
             streamCallbacks: createDirectStreamCallbacks(sendEvent),
             eventCallbacks: createDirectEventCallbacks(sendEvent),
             chapterTargetDecision,
+            workflowTrace: auditLog.createRuntimeTrace(),
           };
           const graphInput = createBaseGraphState({
             taskId,
@@ -999,6 +1022,7 @@ export async function resumeWriting(
               ...config,
               version: "v2",
               streamMode: STREAM_MODES,
+              subgraphs: true,
             });
 
             for await (const event of eventStream) {

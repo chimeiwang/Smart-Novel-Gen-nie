@@ -149,6 +149,41 @@ export function createSSEController(sendEvent: SendEventFn, auditLog?: WorkflowE
 
       const event = rawEvent as Record<string, unknown>;
       const eventType = event.event as string;
+      const streamedChunk = extractStreamChunk(event);
+
+      if (streamedChunk?.mode === "custom") {
+        const data = streamedChunk.value;
+        const name = (data.event as string) || "custom";
+        logger.info("SSE", `子图自定义事件: ${name}`, {
+          name,
+          namespace: streamedChunk.namespace.join("/"),
+          dataKeys: Object.keys(data).join(","),
+        });
+        sendEvent(name, data);
+        return "continue";
+      }
+
+      if (streamedChunk?.mode === "updates") {
+        const interruptPayload = getInterruptValue(streamedChunk.value.__interrupt__);
+        if (interruptPayload) {
+          sendEvent("user_input_required", interruptPayload);
+          return "interrupt";
+        }
+
+        for (const [nodeName, update] of Object.entries(streamedChunk.value)) {
+          if (update && typeof update === "object" && !Array.isArray(update)) {
+            const updateRecord = update as Record<string, unknown>;
+            if (Object.keys(updateRecord).length > 0) {
+              sendEvent("state_update", {
+                node: nodeName,
+                namespace: streamedChunk.namespace,
+                ...sanitizeStateUpdate(updateRecord),
+              });
+            }
+          }
+        }
+        return "continue";
+      }
 
       if (eventType === "updates") {
         const data = event.data as Record<string, Record<string, unknown>>;
@@ -206,6 +241,51 @@ function extractInterruptPayload(event: Record<string, unknown>): Record<string,
   if (Array.isArray(chunk) && chunk.length >= 2 && chunk[0] === "updates") {
     const update = chunk[1] as Record<string, unknown> | undefined;
     return getInterruptValue(update?.__interrupt__);
+  }
+
+  return null;
+}
+
+interface StreamChunkEnvelope {
+  namespace: string[];
+  mode: "updates" | "custom";
+  value: Record<string, unknown>;
+}
+
+/**
+ * 解包 streamEvents 的多模式 chunk。
+ *
+ * - 未开启 subgraphs：`["updates" | "custom", payload]`
+ * - 开启 subgraphs：`[namespace, "updates" | "custom", payload]`
+ */
+function extractStreamChunk(event: Record<string, unknown>): StreamChunkEnvelope | null {
+  if (event.event !== "on_chain_stream") return null;
+  const data = event.data;
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  const chunk = (data as Record<string, unknown>).chunk;
+  if (!Array.isArray(chunk)) return null;
+
+  if (
+    (chunk[0] === "updates" || chunk[0] === "custom") &&
+    chunk[1] && typeof chunk[1] === "object" && !Array.isArray(chunk[1])
+  ) {
+    return {
+      namespace: [],
+      mode: chunk[0],
+      value: chunk[1] as Record<string, unknown>,
+    };
+  }
+
+  if (
+    Array.isArray(chunk[0]) &&
+    (chunk[1] === "updates" || chunk[1] === "custom") &&
+    chunk[2] && typeof chunk[2] === "object" && !Array.isArray(chunk[2])
+  ) {
+    return {
+      namespace: chunk[0].filter((item): item is string => typeof item === "string"),
+      mode: chunk[1],
+      value: chunk[2] as Record<string, unknown>,
+    };
   }
 
   return null;

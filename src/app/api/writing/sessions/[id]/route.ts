@@ -10,7 +10,11 @@ import { prisma } from "@/shared/db/prisma";
 import { logger } from "@/shared/lib/logger";
 import { getSession } from "@/shared/lib/auth";
 import { authorizeWritingSession, authErrorResponse } from "@/agents/lib/task-auth";
-import { selectCurrentSessionTaskFromSession } from "../session-task";
+import { WritingSessionRecoveryStateSchema } from "@/shared/contracts/writing-session";
+import {
+  selectCurrentSessionTaskFromSession,
+  selectLastSessionTask,
+} from "../session-task";
 
 // 获取会话详情（包括消息）
 export async function GET(
@@ -49,33 +53,17 @@ export async function GET(
       return new Response(JSON.stringify({ error: "会话不存在" }), { status: 404 });
     }
 
-    const taskCandidates = await prisma.writingTask.findMany({
-      where: {
-        novelId: session.novelId,
-        chapterId: session.chapterId,
-        createdAt: {
-          gte: new Date(session.createdAt.getTime() - 5 * 60 * 1000),
-          lte: new Date(session.createdAt.getTime() + 90 * 60 * 1000),
-        },
-      },
-      orderBy: { updatedAt: "desc" },
-      select: {
-        id: true,
-        phase: true,
-        updatedAt: true,
-        generatedContent: true,
-        graphStateJson: true,
-      },
-    });
-
     const { tasks: _tasks, ...sessionPayload } = session;
+    const recoveryState = WritingSessionRecoveryStateSchema.parse({
+      currentTask: selectCurrentSessionTaskFromSession({
+        tasks: session.tasks,
+      }),
+      lastTask: selectLastSessionTask(session.tasks),
+    });
 
     return Response.json({
       ...sessionPayload,
-      currentTask: selectCurrentSessionTaskFromSession({
-        tasks: session.tasks,
-        fallbackCandidates: taskCandidates,
-      }),
+      ...recoveryState,
     });
   } catch (error) {
     logger.error("API", "获取会话详情失败", { sessionId: id, error });

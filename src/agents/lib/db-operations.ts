@@ -8,6 +8,7 @@
 import { prisma } from "@/shared/db/prisma";
 import type { Prisma } from "@prisma/client";
 import type { AgentUpdates } from "../types";
+import { validateOutlineReplacement } from "./outline-tree-validation";
 
 /**
  * 操作结果
@@ -86,6 +87,44 @@ async function validateOutlineNodePlacement(
   return null;
 }
 
+async function validateOutlineRangePlacement(input: {
+  tx: Prisma.TransactionClient;
+  novelId: string;
+  parentId: string | null;
+  chapterStartOrder: number;
+  chapterEndOrder: number;
+  excludeNodeId?: string;
+}): Promise<string | null> {
+  const { tx, novelId, parentId, chapterStartOrder, chapterEndOrder, excludeNodeId } = input;
+  if (chapterStartOrder > chapterEndOrder) return "大纲节点结束章节不能小于起始章节";
+  if (parentId) {
+    const parent = await tx.outlineNode.findFirst({
+      where: { id: parentId, novelId },
+      select: { title: true, chapterStartOrder: true, chapterEndOrder: true },
+    });
+    if (!parent) return `大纲父节点 ${parentId} 不存在或不属于当前小说`;
+    if (parent.chapterStartOrder == null || parent.chapterEndOrder == null) {
+      return `父节点 ${parent.title} 尚未设置章节范围`;
+    }
+    if (chapterStartOrder < parent.chapterStartOrder || chapterEndOrder > parent.chapterEndOrder) {
+      return `章节范围第${chapterStartOrder}-${chapterEndOrder}章超出父节点 ${parent.title} 的范围`;
+    }
+  }
+  const overlap = await tx.outlineNode.findFirst({
+    where: {
+      novelId,
+      parentId,
+      ...(excludeNodeId ? { id: { not: excludeNodeId } } : {}),
+      chapterStartOrder: { lte: chapterEndOrder },
+      chapterEndOrder: { gte: chapterStartOrder },
+    },
+    select: { title: true, chapterStartOrder: true, chapterEndOrder: true },
+  });
+  return overlap
+    ? `章节范围与同级节点 ${overlap.title}（第${overlap.chapterStartOrder}-${overlap.chapterEndOrder}章）重叠`
+    : null;
+}
+
 function getAllowedOutlineChildKind(kind: OutlineNodeKind): OutlineNodeKind | null {
   if (kind === "stage") return "plot_unit";
   if (kind === "plot_unit") return "chapter_group";
@@ -110,12 +149,51 @@ async function validateOutlineChildrenPlacement(
   return invalidChild ? "存在不兼容子节点，请先移动或删除子节点" : null;
 }
 
+async function validateOutlineChildrenRange(
+  tx: Prisma.TransactionClient,
+  nodeId: string,
+  chapterStartOrder: number,
+  chapterEndOrder: number,
+): Promise<string | null> {
+  const children = await tx.outlineNode.findMany({
+    where: { parentId: nodeId },
+    select: { title: true, chapterStartOrder: true, chapterEndOrder: true },
+  });
+  const outside = children.find((child) =>
+    child.chapterStartOrder == null ||
+    child.chapterEndOrder == null ||
+    child.chapterStartOrder < chapterStartOrder ||
+    child.chapterEndOrder > chapterEndOrder
+  );
+  return outside ? `子节点 ${outside.title} 的章节范围不在更新后的父节点范围内` : null;
+}
+
 function getOutlineNodeTitle(adj: OutlineAdjustmentInput): string {
   return adj.title || adj.nodeTitle || "未命名节点";
 }
 
 function getOutlineAdjustmentLabel(adj: OutlineAdjustmentInput): string {
   return adj.title || adj.nodeTitle || adj.nodeId || adj.clientKey || "未命名节点";
+}
+
+async function findOutlineNodeByAdjustment(
+  tx: Prisma.TransactionClient,
+  novelId: string,
+  adj: OutlineAdjustmentInput,
+  errors: string[]
+) {
+  if (adj.nodeId) return tx.outlineNode.findFirst({ where: { id: adj.nodeId, novelId } });
+  const title = adj.nodeTitle || adj.title;
+  if (!title) return null;
+  const matches = await tx.outlineNode.findMany({
+    where: { novelId, title: { contains: title } },
+    take: 2,
+  });
+  if (matches.length > 1) {
+    errors.push(`大纲标题“${title}”匹配到多个节点，请使用 nodeId`);
+    return null;
+  }
+  return matches[0] ?? null;
 }
 
 async function resolveOutlineCreateParentId(input: {
@@ -170,6 +248,17 @@ async function createOutlineNodeFromAdjustment(input: {
   const kind = normalizeOutlineNodeKind(adj.kind) ?? await inferOutlineNodeKind(tx, novelId, parentId);
   const placementError = await validateOutlineNodePlacement(tx, novelId, kind, parentId);
   if (placementError) throw new Error(placementError);
+  if (adj.chapterStartOrder === undefined || adj.chapterEndOrder === undefined) {
+    throw new Error(`大纲节点 ${getOutlineAdjustmentLabel(adj)} 缺少完整章节范围`);
+  }
+  const rangeError = await validateOutlineRangePlacement({
+    tx,
+    novelId,
+    parentId,
+    chapterStartOrder: adj.chapterStartOrder,
+    chapterEndOrder: adj.chapterEndOrder,
+  });
+  if (rangeError) throw new Error(rangeError);
 
   const parentCount = parentId
     ? await tx.outlineNode.count({ where: { novelId, parentId } })
@@ -185,6 +274,8 @@ async function createOutlineNodeFromAdjustment(input: {
       status: (adj.status ?? "planned") as OutlineNodeStatus,
       estimatedWordCount: adj.estimatedWordCount ?? null,
       actualWordCount: adj.actualWordCount ?? null,
+      chapterStartOrder: adj.chapterStartOrder,
+      chapterEndOrder: adj.chapterEndOrder,
       order: parentCount,
     },
   });
@@ -297,6 +388,19 @@ export async function executeUpdates(
       summary: "任务不存在",
       errors: ["任务不存在"],
     };
+  }
+
+  const replacingOutlineTree = updates.outlineTreeMode === "replace";
+  if (replacingOutlineTree) {
+    const replacementErrors = validateOutlineReplacement(updates.outlineAdjustments);
+    if (replacementErrors.length > 0) {
+      return {
+        success: false,
+        savedCount: 0,
+        summary: "完整大纲树校验失败，未写入任何数据",
+        errors: replacementErrors,
+      };
+    }
   }
 
   try {
@@ -669,6 +773,16 @@ export async function executeUpdates(
 
       // 大纲节点增删改
       if (updates.outlineAdjustments) {
+        if (replacingOutlineTree) {
+          const deleted = await tx.outlineNode.deleteMany({ where: { novelId: task.novelId } });
+          records.push({
+            type: "outlineAdjustments",
+            action: "replace_delete_all",
+            entityId: task.novelId,
+            entityType: "outlineNode",
+            data: { deletedCount: deleted.count },
+          });
+        }
         const createdIdsByClientKey = new Map<string, string>();
         const createAdjustments = updates.outlineAdjustments
           .filter((adj) => adj.action === "create")
@@ -705,6 +819,7 @@ export async function executeUpdates(
               }
             }
           } catch (e) {
+            if (replacingOutlineTree) throw e;
             const msg = `大纲节点 ${getOutlineAdjustmentLabel(adj)} (create) 失败: ${e instanceof Error ? e.message : String(e)}`;
             errors.push(msg);
           }
@@ -713,15 +828,7 @@ export async function executeUpdates(
         for (const adj of updates.outlineAdjustments.filter((item) => item.action !== "create")) {
           try {
             if (adj.action === "update") {
-              // Phase 3: nodeId 优先，nodeTitle 回退
-              let existing = adj.nodeId
-                ? await tx.outlineNode.findFirst({ where: { id: adj.nodeId, novelId: task.novelId } })
-                : null;
-              if (!existing && (adj.nodeTitle || adj.title)) {
-                existing = await tx.outlineNode.findFirst({
-                  where: { novelId: task.novelId, title: { contains: adj.nodeTitle || adj.title || "" } },
-                });
-              }
+              const existing = await findOutlineNodeByAdjustment(tx, task.novelId, adj, errors);
               if (existing) {
                 const nextParentId = adj.parentId !== undefined ? adj.parentId || null : existing.parentId;
                 if (nextParentId === existing.id) {
@@ -741,6 +848,34 @@ export async function executeUpdates(
                   errors.push(placementError);
                   continue;
                 }
+                const nextChapterStartOrder = adj.chapterStartOrder ?? existing.chapterStartOrder;
+                const nextChapterEndOrder = adj.chapterEndOrder ?? existing.chapterEndOrder;
+                if (nextChapterStartOrder == null || nextChapterEndOrder == null) {
+                  errors.push(`大纲节点 ${existing.title} 缺少完整章节范围`);
+                  continue;
+                }
+                const childrenRangeError = await validateOutlineChildrenRange(
+                  tx,
+                  existing.id,
+                  nextChapterStartOrder,
+                  nextChapterEndOrder,
+                );
+                if (childrenRangeError) {
+                  errors.push(`大纲节点 ${existing.title} 更新失败：${childrenRangeError}`);
+                  continue;
+                }
+                const rangeError = await validateOutlineRangePlacement({
+                  tx,
+                  novelId: task.novelId,
+                  parentId: nextParentId,
+                  chapterStartOrder: nextChapterStartOrder,
+                  chapterEndOrder: nextChapterEndOrder,
+                  excludeNodeId: existing.id,
+                });
+                if (rangeError) {
+                  errors.push(`大纲节点 ${existing.title} 更新失败：${rangeError}`);
+                  continue;
+                }
                 const updated = await tx.outlineNode.update({
                   where: { id: existing.id },
                   data: {
@@ -751,6 +886,8 @@ export async function executeUpdates(
                     ...(adj.parentId !== undefined && { parentId: nextParentId }),
                     ...(adj.estimatedWordCount !== undefined && { estimatedWordCount: adj.estimatedWordCount }),
                     ...(adj.actualWordCount !== undefined && { actualWordCount: adj.actualWordCount }),
+                    chapterStartOrder: nextChapterStartOrder,
+                    chapterEndOrder: nextChapterEndOrder,
                   },
                 });
                 records.push({
@@ -763,19 +900,17 @@ export async function executeUpdates(
                 savedCount++;
               }
             } else if (adj.action === "delete") {
-              if (adj.nodeId) {
-                const existing = await tx.outlineNode.findFirst({ where: { id: adj.nodeId, novelId: task.novelId } });
-                if (existing) {
-                  await tx.outlineNode.delete({ where: { id: adj.nodeId, novelId: task.novelId } });
+              const existing = await findOutlineNodeByAdjustment(tx, task.novelId, adj, errors);
+              if (existing) {
+                  await tx.outlineNode.delete({ where: { id: existing.id, novelId: task.novelId } });
                   records.push({
                     type: "outlineAdjustments",
                     action: "delete",
-                    entityId: adj.nodeId,
+                    entityId: existing.id,
                     entityType: "outlineNode",
                     data: { deleted: existing },
                   });
                   savedCount++;
-                }
               }
             }
           } catch (e) {

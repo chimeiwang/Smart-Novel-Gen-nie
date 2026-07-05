@@ -8,6 +8,7 @@
 import { prisma } from "@/shared/db/prisma";
 import type { NovelWithContext } from "@/agents/types";
 import { DEFAULT_ENABLED_AGENTS, DEFAULT_ENABLED_AGENTS_STRING } from "@/shared/contracts/agent";
+import { resolveWritingOutlineContext } from "@/agents/lib/writing-outline-context";
 
 function parseStringArray(value: string | null | undefined): string[] {
   if (!value) return [];
@@ -42,6 +43,24 @@ async function getApprovedBeatPlanContext(chapterId: string): Promise<NovelWithC
       estimatedWords: beat.estimatedWords,
       acceptanceCriteria: beat.acceptanceCriteria,
     })),
+  };
+}
+
+async function getChapterWritingGoalContext(chapterId: string): Promise<NonNullable<NovelWithContext["chapterWritingGoal"]> | null> {
+  const goal = await prisma.chapterWritingGoal.findFirst({
+    where: { chapterId },
+    orderBy: { updatedAt: "desc" },
+  });
+  if (!goal) return null;
+  return {
+    id: goal.id,
+    narrativeGoal: goal.narrativeGoal,
+    desiredEmotion: goal.desiredEmotion ?? undefined,
+    requiredForeshadowing: parseStringArray(goal.requiredForeshadowing),
+    requiredCharacters: parseStringArray(goal.requiredCharacters),
+    wordCountMin: goal.wordCountMin ?? undefined,
+    wordCountMax: goal.wordCountMax ?? undefined,
+    specialNotes: goal.specialNotes ?? undefined,
   };
 }
 
@@ -147,6 +166,9 @@ export async function aggregateNovelContext(
         status: n.status,
         order: n.order,
         parentId: n.parentId ?? undefined,
+        linkedChapterId: n.linkedChapterId ?? undefined,
+        chapterStartOrder: n.chapterStartOrder ?? undefined,
+        chapterEndOrder: n.chapterEndOrder ?? undefined,
       })) ?? [],
     plotProgress: novel.plotProgress
       ? {
@@ -304,17 +326,42 @@ export async function aggregateNovelContext(
 
 export async function aggregateNovelContextForWriting(
   novelId: string,
-  chapterId: string
+  contextChapterId: string,
+  target?: {
+    chapterId?: string | null;
+    order?: number;
+    title?: string;
+    contextAnchorChapterId?: string | null;
+  }
 ): Promise<NovelWithContext> {
-  const [novelData, approvedBeatPlan] = await Promise.all([
-    aggregateNovelContext(novelId, chapterId),
-    getApprovedBeatPlanContext(chapterId),
+  const targetChapterId = target ? target.chapterId ?? null : contextChapterId;
+  const [novelData, approvedBeatPlan, chapterWritingGoal] = await Promise.all([
+    aggregateNovelContext(novelId, contextChapterId),
+    targetChapterId ? getApprovedBeatPlanContext(targetChapterId) : Promise.resolve(null),
+    targetChapterId ? getChapterWritingGoalContext(targetChapterId) : Promise.resolve(null),
   ]);
+  const targetChapter = novelData.chapters?.find((chapter) => chapter.id === targetChapterId);
+  const targetOrder = target?.order ?? targetChapter?.order;
+  if (targetOrder === undefined) {
+    throw new Error("无法确定写作目标章节序号");
+  }
+  const targetTitle = target?.title ?? targetChapter?.title ?? novelData.chapterTitle;
+  const writingOutlineContext = resolveWritingOutlineContext({
+    outlineNodes: novelData.outlineNodes,
+    targetChapter: { id: targetChapterId, order: targetOrder, title: targetTitle },
+    hasApprovedBeatPlan: Boolean(approvedBeatPlan),
+    hasChapterWritingGoal: Boolean(chapterWritingGoal),
+  });
   return {
     ...novelData,
     novelId,
-    chapterId,
+    chapterId: targetChapterId ?? contextChapterId,
+    chapterTitle: targetTitle,
+    targetChapterOrder: targetOrder,
+    contextAnchorChapterId: target?.contextAnchorChapterId ?? contextChapterId,
     approvedBeatPlan,
+    chapterWritingGoal,
+    writingOutlineContext,
   };
 }
 

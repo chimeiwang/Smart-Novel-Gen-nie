@@ -2,7 +2,10 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { deserializeGraphStateSnapshot } from "../graph-state-snapshot";
-import { buildAwaitingUserReviewTaskUpdate } from "../task-state";
+import {
+  buildArtifactReviewTaskTransition,
+  buildAwaitingUserReviewTaskUpdate,
+} from "../task-state";
 import type { GraphState } from "../graph-definition";
 import { createDefaultArtifactReviewState } from "../state";
 
@@ -89,5 +92,70 @@ describe("task-state awaiting user review update", () => {
     assert.equal(snapshot.artifactReview.status, "awaiting_user");
     assert.equal(snapshot.artifactReview.activeArtifactId, "artifact-1");
     assert.equal(snapshot.operationStage, "等待用户决策");
+  });
+
+  it("clears active artifact fields when the user applies the artifact", () => {
+    const awaitingUpdate = buildAwaitingUserReviewTaskUpdate({
+      artifactId: "artifact-1",
+      state: createState(),
+      operationStage: "等待用户决策",
+    });
+    const update = buildArtifactReviewTaskTransition({
+      graphStateJson: awaitingUpdate.graphStateJson,
+      transition: { type: "finalize", outcome: "applied" },
+    });
+
+    assert.equal(update.phase, "completed");
+    const snapshot = deserializeGraphStateSnapshot(update.graphStateJson);
+    assert.ok(snapshot);
+    assert.equal(snapshot.phase, "completed");
+    assert.equal(snapshot.pendingUserResponse, false);
+    assert.equal(snapshot.activeArtifactId, null);
+    assert.equal(snapshot.artifactReview.status, "applied");
+    assert.equal(snapshot.artifactReview.activeArtifactId, null);
+    assert.equal(snapshot.operationStep, "completed");
+  });
+
+  it("moves the snapshot to revision_requested without losing artifact ownership", () => {
+    const awaitingUpdate = buildAwaitingUserReviewTaskUpdate({
+      artifactId: "artifact-1",
+      state: createState(),
+      operationStage: "等待用户决策",
+    });
+    const update = buildArtifactReviewTaskTransition({
+      graphStateJson: awaitingUpdate.graphStateJson,
+      transition: {
+        type: "request_revision",
+        artifactId: "artifact-1",
+        reviserAgent: "写作",
+      },
+    });
+
+    assert.equal(update.phase, "active");
+    const snapshot = deserializeGraphStateSnapshot(update.graphStateJson);
+    assert.ok(snapshot);
+    assert.equal(snapshot.pendingUserResponse, false);
+    assert.equal(snapshot.activeArtifactId, "artifact-1");
+    assert.equal(snapshot.artifactReview.status, "revision_requested");
+    assert.equal(snapshot.artifactReview.reviserAgent, "写作");
+    assert.equal(snapshot.operationStep, "revise_artifact");
+  });
+
+  it("records discarded as a terminal snapshot without an active artifact", () => {
+    const awaitingUpdate = buildAwaitingUserReviewTaskUpdate({
+      artifactId: "artifact-1",
+      state: createState(),
+      operationStage: "等待用户决策",
+    });
+    const update = buildArtifactReviewTaskTransition({
+      graphStateJson: awaitingUpdate.graphStateJson,
+      transition: { type: "finalize", outcome: "discarded" },
+    });
+
+    const snapshot = deserializeGraphStateSnapshot(update.graphStateJson);
+    assert.ok(snapshot);
+    assert.equal(snapshot.artifactReview.status, "discarded");
+    assert.equal(snapshot.artifactReview.activeArtifactId, null);
+    assert.equal(snapshot.activeArtifactId, null);
   });
 });

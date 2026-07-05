@@ -510,6 +510,8 @@ model OutlineNode {
   estimatedWordCount Int? // 预估字数
   actualWordCount    Int? // 实际字数
   linkedChapterId    String? // 关联的章节
+  chapterStartOrder  Int? // 覆盖的起始章节序号（含）
+  chapterEndOrder    Int? // 覆盖的结束章节序号（含）
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -520,6 +522,7 @@ model OutlineNode {
 
   @@index([novelId])
   @@index([novelId, kind])
+  @@index([novelId, kind, chapterStartOrder, chapterEndOrder])
   @@index([parentId])
   @@index([status])
 }

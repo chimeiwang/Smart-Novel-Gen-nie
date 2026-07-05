@@ -15,7 +15,7 @@
 
 import { z } from "zod";
 import { CoreAgentIdSchema } from "./agent";
-import { AgentUpdatesProposalSchema, AgentUpdatesSchema, OutlineNodeKindSchema } from "./agent-updates";
+import { AgentUpdatesProposalSchema, AgentUpdatesSchema, OutlineNodeKindSchema, OutlineTreeModeSchema } from "./agent-updates";
 import { BeatPlanDraftSceneSchema } from "./beat-plan";
 import {
   AGENT_UPDATE_CHANNEL_RULES_PROMPT,
@@ -209,6 +209,8 @@ const ToolOutlineAdjustmentBaseSchema = z.object({
   status: ToolOutlineStatusEnum.optional(),
   estimatedWordCount: z.number().optional(),
   actualWordCount: z.number().optional(),
+  chapterStartOrder: z.number().int().positive().optional(),
+  chapterEndOrder: z.number().int().positive().optional(),
 }).strict();
 const ToolOutlineAdjustmentSchema = ToolOutlineAdjustmentBaseSchema.superRefine((adjustment, ctx) => {
   const hasTitle = Boolean(adjustment.title?.trim() || adjustment.nodeTitle?.trim());
@@ -277,17 +279,23 @@ export type ProposalUpdatesEvent = z.infer<typeof ProposalUpdatesEventSchema>;
 export const ProposalUpdatesToolArgsSchema = ProposalUpdatesEventSchema.omit({ type: true });
 const OutlineTreeChapterGroupSchema = z.object({
   title: z.string().trim().min(1),
+  chapterStartOrder: z.number().int().positive(),
+  chapterEndOrder: z.number().int().positive(),
   estimatedWordCount: z.number().int().positive().optional(),
   ...ForbiddenOutlineTreeToolFieldsShape,
 }).strict();
 const OutlineTreePlotUnitSchema = z.object({
   title: z.string().trim().min(1),
+  chapterStartOrder: z.number().int().positive(),
+  chapterEndOrder: z.number().int().positive(),
   estimatedWordCount: z.number().int().positive().optional(),
   chapterGroups: z.array(OutlineTreeChapterGroupSchema).optional(),
   ...ForbiddenOutlineTreeToolFieldsShape,
 }).strict();
 const OutlineTreeStageSchema = z.object({
   title: z.string().trim().min(1),
+  chapterStartOrder: z.number().int().positive(),
+  chapterEndOrder: z.number().int().positive(),
   estimatedWordCount: z.number().int().positive().optional(),
   plotUnits: z.array(OutlineTreePlotUnitSchema).optional(),
   ...ForbiddenOutlineTreeToolFieldsShape,
@@ -315,6 +323,7 @@ export const AppendUpdateBatchToolArgsSchema = AppendUpdateBatchEventSchema.omit
 export const AppendOutlineTreeEventSchema = z.object({
   type: z.literal("append_outline_tree"),
   artifactKey: z.string().min(1).max(200),
+  mode: OutlineTreeModeSchema,
   summary: z.string().min(1).max(1000).optional(),
   stages: z.array(OutlineTreeStageSchema).min(1),
 });
@@ -666,15 +675,22 @@ const CONTROL_TOOL_REPAIR_HINTS: Record<string, { expectedType: string; minimalE
     expectedType: [
       "type AppendOutlineTreeArgs = {",
       "  artifactKey: string; // required, same key as start_update_builder",
+      "  mode: \"replace\" | \"patch\"; // replace=完整重建唯一大纲树，patch=追加局部结构",
       "  summary?: string; // optional short note",
       "  stages: Array<{",
       "    title: string;",
+      "    chapterStartOrder: number;",
+      "    chapterEndOrder: number;",
       "    estimatedWordCount?: number;",
       "    plotUnits?: Array<{",
       "      title: string;",
+      "      chapterStartOrder: number;",
+      "      chapterEndOrder: number;",
       "      estimatedWordCount?: number;",
       "      chapterGroups?: Array<{",
       "        title: string;",
+      "        chapterStartOrder: number;",
+      "        chapterEndOrder: number;",
       "        estimatedWordCount?: number;",
       "      }>;",
       "    }>;",
@@ -688,16 +704,23 @@ const CONTROL_TOOL_REPAIR_HINTS: Record<string, { expectedType: string; minimalE
     ].join("\n"),
     minimalExample: JSON.stringify({
       artifactKey: "outline-restructure-v1",
+      mode: "replace",
       summary: "追加第一阶段大纲树",
       stages: [
         {
           title: "第一阶段 鹿溪镇暗流",
+          chapterStartOrder: 1,
+          chapterEndOrder: 15,
           plotUnits: [
             {
               title: "鹿溪镇的暗流",
+              chapterStartOrder: 1,
+              chapterEndOrder: 8,
               chapterGroups: [
                 {
                   title: "裂痕",
+                  chapterStartOrder: 1,
+                  chapterEndOrder: 3,
                 },
               ],
             },

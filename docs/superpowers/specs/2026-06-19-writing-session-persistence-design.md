@@ -88,14 +88,20 @@ model WritingSession {
 
 用户点击历史会话时，只应先恢复可见聊天记录，不应立即唤醒 LangGraph 或推进任务。只有用户继续输入、处理待审核草案或点击明确操作时，才进入 `/api/writing/resume`。
 
-`GET /api/writing/sessions/[id]` 返回会话详情时，应附带当前最适合继续的任务摘要 `currentTask`：
+`GET /api/writing/sessions/[id]` 返回会话详情时，应把可继续任务与只读历史任务分开：
 
 ```ts
 type CurrentSessionTask = {
   id: string;
-  phase: "idle" | "active" | "waiting_call" | "awaiting_user_review" | "completed" | "error";
+  phase: "active" | "waiting_call" | "awaiting_user_review";
   updatedAt: string;
   hasAwaitingReviewArtifact: boolean;
+} | null;
+
+type LastSessionTask = {
+  id: string;
+  phase: "completed" | "error";
+  updatedAt: string;
 } | null;
 ```
 
@@ -103,8 +109,8 @@ type CurrentSessionTask = {
 
 1. 优先选择同一 `writingSessionId` 下 `phase = "awaiting_user_review"` 的最近任务。
 2. 其次选择 `phase = "active"` 或 `phase = "waiting_call"` 的最近任务。
-3. 再其次返回最近的 `completed` 或 `error` 任务作为只读状态参考；前端不应默认把它当作可继续任务，除非用户发送新消息时明确要基于该任务继续。
-4. 如果没有关联任务，返回 `currentTask: null`。
+3. 最近的 `completed` 或 `error` 任务只放入 `lastTask`，不得进入 `currentTask` 或成为默认 resume 句柄。
+4. 如果没有显式 `writingSessionId` 关联的非终态任务，返回 `currentTask: null`；禁止按小说、章节或创建时间猜测未绑定任务。
 
 前端 `selectSession()` 加载会话后：
 

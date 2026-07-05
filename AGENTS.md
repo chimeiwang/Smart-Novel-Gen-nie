@@ -75,8 +75,8 @@ npm run studio:input # 生成 Studio 可运行的完整 GraphState 输入
 - `npm run studio:dev` 默认不会启动 LangGraph Agent Server；需要 Studio 调试时先在 `.env` 设置 `LANGGRAPH_STUDIO_ENABLED=true`，再运行该命令。
 - Studio 启动后运行的是 LangGraph Agent Server，不是 Next.js 应用；它适合看节点、状态、interrupt/resume 和 LangSmith trace。
 - Studio 运行会真实执行 Graph 节点，可能创建/更新 `ReviewArtifact` 和 `WritingTask`。正式章节正文仍必须经过待审核草案和用户确认应用后才写入。
-- 写作会话恢复以 `WritingSession -> WritingTask.writingSessionId -> WritingTask.graphStateJson` 为主链路；`WritingMessage` 只负责用户可见聊天记录，不用于反推 LangGraph 状态。`MemorySaver` 只作为当前进程内 interrupt/resume 优化，不是生产级恢复来源；等待确认 checkpoint 默认 5 分钟 TTL，断连、异常和终态按 taskId 清理。
-- 本地执行排查直接读 `logs/workflow-events/runs/YYYY-MM-DD/<task短号>.log`。同一文件按实际时间顺序记录 LangGraph 初始状态与节点 patch、关键 GraphState 差异、Agent 调用顺序、发送给 LLM 的完整消息/工具定义原文、LLM 输出原文，以及工具输入和返回原文；固定上下文只在运行头部出现一次。底层 token stream、Runnable 和 checkpoint metadata 不进入人工日志。机器 JSONL 默认关闭，仅在显式设置 `WORKFLOW_MACHINE_EVENT_LOG_ENABLED=true` 时生成。
+- 写作会话恢复以 `WritingSession -> WritingTask.writingSessionId -> WritingTask.graphStateJson` 为主链路；只认显式 `writingSessionId` 绑定，禁止按小说、章节或时间窗猜测任务归属。`currentTask` 只承载非终态可继续任务，completed/error 仅作为历史摘要。`WritingMessage` 只负责用户可见聊天记录，不用于反推 LangGraph 状态。`MemorySaver` 只作为当前进程内 interrupt/resume 优化，不是生产级恢复来源；等待确认 checkpoint 默认 5 分钟 TTL，断连、异常和终态按 taskId 清理。
+- 本地执行排查只读 `logs/workflow-events/runs/YYYY-MM-DD/<task短号>.log`。同一文件的每个 `Rxx` 运行区块只分成两类记录：一是按 `Axx` 分组的 LLM 完整请求、返回和工具执行原文；二是按 `Sxxx` 排列的 LangGraph 状态切换，节点名、字段名和枚举值必须输出为中文。初次运行与 resume 继续写入同一文件；如果一次短路操作既没有 LLM 调用也没有 LangGraph 状态，则不创建空壳人工日志。不得再加入 Workflow/SSE 事件 JSON、独立状态索引、Agent 最终汇总等重复阅读层。底层 token stream、Runnable 和 checkpoint metadata 不进入人工日志。机器 JSONL 默认关闭，仅在显式设置 `WORKFLOW_MACHINE_EVENT_LOG_ENABLED=true` 时生成。
 
 ## 技术栈
 
@@ -201,11 +201,13 @@ START → initSession → operationWorkflow 创作操作图 → END
 - `Outline.content` 是全书总纲文本；`OutlineNode` 是结构化大纲树；`PlotProgress` 是当前写作指针；`ChapterBeatPlan` 只服务当前章写前规划。
 - `OutlineNode.kind` 只允许三层：`stage`（阶段/卷）、`plot_unit`（剧情单元）、`chapter_group`（章节组）。
 - 层级约束：`stage` 只能顶层；`plot_unit` 只能挂在 `stage` 下；`chapter_group` 只能挂在 `plot_unit` 下。
+- `OutlineNode.chapterStartOrder/chapterEndOrder` 是章节映射的权威字段，必须成对存在且父范围包含子范围、同级范围不重叠；运行时禁止从标题猜章号。
 - 聊天流里生成、展开或重构结构化大纲时，剧情 Agent 应提交 `agent_updates` 草案：`outlineContent` 更新总纲，最终由 `outlineAdjustments` 更新节点树；短小变更可用 `propose_updates`，批量节点树、长总纲或复杂重构必须使用 update builder 工具链。
-- 复杂大纲树主路径必须使用 `append_outline_tree`，只提交 `stage → plotUnits → chapterGroups` 嵌套树，不得提供 `parentId`、`parentKey`、`clientKey`；服务端负责展开为合法 `outlineAdjustments`。
+- 复杂大纲树主路径必须使用 `append_outline_tree`，提交 `mode=replace|patch` 与带章节范围的 `stage → plotUnits → chapterGroups` 嵌套树，不得提供 `parentId`、`parentKey`、`clientKey`；服务端负责展开为合法 `outlineAdjustments`。整树生成或重构必须用 `replace` 在同一事务替换旧树，局部修改用 `patch`。
 - 只有短小修补、已有节点更新或兼容旧流程才直接提交 `outlineAdjustments`。手写创建大纲节点时，必须通过 `outlineAdjustments[].kind` 标明节点类型，并提供 `title` 或 `nodeTitle`；同一草案创建父子节点时用 `clientKey/parentKey` 临时引用，已有父节点才用 `parentId`，不得同时提供 `parentId` 和 `parentKey`。
 - `estimatedWordCount` / `actualWordCount` 是辅助规划字段，不作为结构化大纲通过的硬门槛；核心门槛是节点类型、父子关系、标题和必要内容是否清楚。
 - 所有结构化大纲变更继续走 `ReviewArtifact` 待审核草案链路，不能用纯文本 `outline_draft` 替代节点树。
+- 作家上下文按 approved Beat Plan、ChapterWritingGoal、唯一命中当前章的 `chapter_group` 依次选择；只注入当前 stage/plot unit 的标题与范围和当前章节组完整内容。无映射、范围重叠或重复匹配时必须在调用模型前阻断。
 
 ## SSE 与共享契约
 

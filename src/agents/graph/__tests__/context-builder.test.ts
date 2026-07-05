@@ -261,7 +261,7 @@ describe("buildOperationSummaryIndex", () => {
     const text = buildOperationSummaryIndex(state);
 
     assert.match(text, /角色索引/);
-    assert.match(text, /大纲索引/);
+    assert.match(text, /大纲.*索引/);
     assert.match(text, /伏笔索引/);
     assert.doesNotMatch(text, /势力索引/);
   });
@@ -314,5 +314,35 @@ describe("buildOperationSummaryIndex", () => {
 
     assert.match(text, /待审核草案提示/);
     assert.match(text, /get_active_review_artifact/);
+  });
+
+  it("写第20章只渲染当前章节组完整内容，不渲染未来节点", () => {
+    const base = createState();
+    const tail = "CURRENT_GROUP_TAIL_SENTINEL";
+    const state = createState({
+      currentOperation: { kind: "write_chapter" } as WritingState["currentOperation"],
+      novelData: {
+        ...base.novelData,
+        targetChapterOrder: 20,
+        outlineNodes: [
+          { id: "future", title: "第21-90章", content: "FUTURE_DETAIL", status: "planned", order: 99, kind: "chapter_group" },
+        ],
+        writingOutlineContext: {
+          status: "resolved",
+          source: "chapter_group",
+          targetChapter: { id: "c20", order: 20, title: "第20章" },
+          path: [
+            { id: "s2", title: "第二阶段", kind: "stage", chapterStartOrder: 16, chapterEndOrder: 40 },
+            { id: "u2", title: "追查", kind: "plot_unit", chapterStartOrder: 16, chapterEndOrder: 25 },
+            { id: "g20", title: "第20-25章", kind: "chapter_group", chapterStartOrder: 20, chapterEndOrder: 25, content: `当前组完整内容${"长".repeat(1000)}${tail}` },
+          ],
+          candidateIds: ["g20"],
+        },
+      },
+    });
+
+    const text = buildOperationSummaryIndex(state);
+    assert.match(text, new RegExp(tail));
+    assert.doesNotMatch(text, /FUTURE_DETAIL/);
   });
 });

@@ -19,7 +19,7 @@ import { wrapOpenAI } from "langsmith/wrappers";
 import type { ZodSchema } from "zod";
 import { getAiConfig, getLLMCallTimeoutMs, getLLMRuntimeName, isAiConfigured } from "@/shared/env";
 import { chargeAiUsage, ensureCanStartModelCall } from "@/shared/lib/billing";
-import { logger } from "@/shared/lib/logger";
+import { logger, type WorkflowLLMTraceSink } from "@/shared/lib/logger";
 import type { TokenUsage } from "./turn-result";
 
 export interface LLMResult {
@@ -52,6 +52,7 @@ export interface AgentRuntimeOptions {
   onToolCall?: (toolName: string, args: Record<string, unknown>) => void;
   onToolResult?: (toolName: string, args: Record<string, unknown>, result: string) => void;
   metadata?: LLMCallMetadata;
+  workflowTraceSink?: WorkflowLLMTraceSink;
 }
 
 export interface ToolCallTurnOptions {
@@ -61,6 +62,7 @@ export interface ToolCallTurnOptions {
   metadata?: LLMCallMetadata;
   reasoningEffort?: ModelReasoningEffort;
   profile?: ModelCallProfile;
+  workflowTraceSink?: WorkflowLLMTraceSink;
 }
 
 export interface ModelToolCall {
@@ -738,7 +740,11 @@ export class LegacyOpenAIRuntime extends BaseRuntime {
     const messages = [...options.messages];
     const client = this.getClient();
 
-    logger.llmRequest(requestId, messages, { tools: options.tools, context: options.metadata });
+    logger.llmRequest(requestId, messages, {
+      tools: options.tools,
+      context: options.metadata,
+      workflowTraceSink: options.workflowTraceSink,
+    });
 
     try {
       if (!this.isConfigured()) {
@@ -748,6 +754,7 @@ export class LegacyOpenAIRuntime extends BaseRuntime {
           context: options.metadata,
           durationMs: Date.now() - startedAt,
           finishReason: "stop",
+          workflowTraceSink: options.workflowTraceSink,
         });
         return {
           content,
@@ -840,6 +847,7 @@ export class LegacyOpenAIRuntime extends BaseRuntime {
           finishReason,
           reasoningContent,
           toolCalls,
+          workflowTraceSink: options.workflowTraceSink,
         });
         await this.recordUsage(options.metadata, usage);
         return {
@@ -851,7 +859,7 @@ export class LegacyOpenAIRuntime extends BaseRuntime {
         };
       });
     } catch (error) {
-      logger.llmError(requestId, error, options.metadata);
+      logger.llmError(requestId, error, options.metadata, options.workflowTraceSink);
       throw error;
     }
   }
@@ -984,7 +992,11 @@ export class LangChainModelRuntime extends LegacyOpenAIRuntime {
     const startedAt = Date.now();
     const messages = [...options.messages];
 
-    logger.llmRequest(requestId, messages, { tools: options.tools, context: options.metadata });
+    logger.llmRequest(requestId, messages, {
+      tools: options.tools,
+      context: options.metadata,
+      workflowTraceSink: options.workflowTraceSink,
+    });
 
     try {
       logger.info("MODEL_RUNTIME", "执行单轮 LangChain tool-call turn", {
@@ -1033,6 +1045,7 @@ export class LangChainModelRuntime extends LegacyOpenAIRuntime {
           finishReason: accumulator.finishReason,
           reasoningContent: accumulator.reasoningContent,
           toolCalls,
+          workflowTraceSink: options.workflowTraceSink,
         });
         await this.recordUsage(options.metadata, accumulator.usage);
         return {
@@ -1044,7 +1057,7 @@ export class LangChainModelRuntime extends LegacyOpenAIRuntime {
         };
       });
     } catch (error) {
-      logger.llmError(requestId, error, options.metadata);
+      logger.llmError(requestId, error, options.metadata, options.workflowTraceSink);
       throw error;
     }
   }

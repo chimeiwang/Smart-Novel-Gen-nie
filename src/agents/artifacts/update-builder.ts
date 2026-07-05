@@ -22,6 +22,8 @@ export function mergeAgentUpdates(base: AgentUpdates | undefined, patch: AgentUp
   const merged: AgentUpdates = { ...(base ?? {}) };
   if (!patch) return merged;
 
+  if (patch.outlineTreeMode) merged.outlineTreeMode = patch.outlineTreeMode;
+
   for (const section of ARRAY_UPDATE_SECTIONS) {
     const incoming = patch[section];
     if (Array.isArray(incoming) && incoming.length > 0) {
@@ -90,6 +92,7 @@ export function putItemTextBlock(updates: AgentUpdates, target: ItemTextBlockTar
 export function buildOutlineTreeUpdate(input: {
   artifactKey: string;
   batchIndex: number;
+  mode: "replace" | "patch";
   stages: OutlineTreeStage[];
 }): AgentUpdates {
   const outlineAdjustments: NonNullable<AgentUpdates["outlineAdjustments"]> = [];
@@ -101,6 +104,8 @@ export function buildOutlineTreeUpdate(input: {
       action: "create",
       kind: "stage",
       title: stage.title.trim(),
+      chapterStartOrder: stage.chapterStartOrder,
+      chapterEndOrder: stage.chapterEndOrder,
       estimatedWordCount: stage.estimatedWordCount,
       clientKey: stageKey,
     }));
@@ -111,6 +116,8 @@ export function buildOutlineTreeUpdate(input: {
         action: "create",
         kind: "plot_unit",
         title: unit.title.trim(),
+        chapterStartOrder: unit.chapterStartOrder,
+        chapterEndOrder: unit.chapterEndOrder,
         estimatedWordCount: unit.estimatedWordCount,
         clientKey: unitKey,
         parentKey: stageKey,
@@ -121,6 +128,8 @@ export function buildOutlineTreeUpdate(input: {
           action: "create",
           kind: "chapter_group",
           title: group.title.trim(),
+          chapterStartOrder: group.chapterStartOrder,
+          chapterEndOrder: group.chapterEndOrder,
           estimatedWordCount: group.estimatedWordCount,
           clientKey: `${unitKey}-g${groupIndex + 1}`,
           parentKey: unitKey,
@@ -129,7 +138,7 @@ export function buildOutlineTreeUpdate(input: {
     });
   });
 
-  return { outlineAdjustments };
+  return { outlineTreeMode: input.mode, outlineAdjustments };
 }
 
 function makeClientKeyPrefix(artifactKey: string, batchIndex: number): string {

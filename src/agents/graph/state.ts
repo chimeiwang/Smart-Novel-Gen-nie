@@ -14,6 +14,7 @@
 
 import type { AgentControlEvent, EvaluationPatch } from "@/shared/contracts/agent-control";
 import type { CreativeOperation } from "@/shared/contracts/creative-operation";
+import type { WorkflowLLMTraceSink } from "@/shared/lib/logger";
 import type { ChapterDraftTarget } from "@/shared/contracts/review-artifact";
 import {
   AGENT_META_MAP,
@@ -294,6 +295,13 @@ export interface WritingRuntimeContext {
   streamCallbacks: Record<string, (chunk: string) => void>;
   eventCallbacks?: Record<string, (type: string, payload: Record<string, unknown>) => void>;
   chapterTargetDecision?: "current_chapter" | "next_chapter";
+  workflowTrace?: {
+    allocateAgentCallId: (agentId: CoreAgentId) => string;
+    captureState: (state: unknown, label: string) => string;
+    recordLLM: WorkflowLLMTraceSink;
+    agentCallId?: string;
+    stateRef?: string;
+  };
 }
 
 export type WritingGraphState = WritingState;
@@ -314,6 +322,8 @@ export interface NovelData {
   novelName: string;
   chapterTitle: string;
   chapterContent: string;
+  targetChapterOrder?: number;
+  contextAnchorChapterId?: string | null;
   outlineSummary: string;
   outlineNodes: OutlineNodeData[];
   plotProgress: PlotProgressData;
@@ -330,6 +340,36 @@ export interface NovelData {
   references: ReferenceData[];
   styleProfile: string;
   approvedBeatPlan?: ApprovedBeatPlanContext | null;
+  chapterWritingGoal?: ChapterWritingGoalContext | null;
+  writingOutlineContext?: WritingOutlineContext | null;
+}
+
+export interface ChapterWritingGoalContext {
+  id: string;
+  narrativeGoal: string;
+  desiredEmotion?: string;
+  requiredForeshadowing: string[];
+  requiredCharacters: string[];
+  wordCountMin?: number;
+  wordCountMax?: number;
+  specialNotes?: string;
+}
+
+export interface WritingOutlineContextNode {
+  id: string;
+  kind: "stage" | "plot_unit" | "chapter_group";
+  title: string;
+  chapterStartOrder: number | null;
+  chapterEndOrder: number | null;
+  content?: string;
+}
+
+export interface WritingOutlineContext {
+  status: "resolved" | "unmapped" | "ambiguous";
+  targetChapter: { id: string | null; order: number; title: string };
+  source: "approved_beat_plan" | "chapter_goal" | "chapter_group" | null;
+  path: WritingOutlineContextNode[];
+  candidateIds: string[];
 }
 
 /** 已批准的章节写作计划上下文 */
@@ -362,6 +402,9 @@ export interface OutlineNodeData {
   status: "planned" | "in_progress" | "completed" | "skipped";
   order: number;
   parentId?: string;
+  linkedChapterId?: string;
+  chapterStartOrder?: number;
+  chapterEndOrder?: number;
 }
 
 /** 剧情进度数据 */

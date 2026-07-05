@@ -169,7 +169,7 @@ flowchart TD
 - taskId 必填。
 - 用户必须登录。
 - task 必须属于当前用户。
-- 如果传 writingSessionId，必须与任务绑定会话一致；未绑定时可绑定到同小说同章节会话。
+- 如果传 writingSessionId，必须与任务已绑定会话一致；未绑定历史任务不能在恢复时静默绑定到当前会话，只能在不携带 writingSessionId 的项目待办入口中单独处理。
 
 ## 会话恢复
 

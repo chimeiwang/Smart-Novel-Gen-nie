@@ -117,4 +117,29 @@ describe("chapter target resolver", () => {
 
     assert.deepEqual(result.target, { mode: "existing_chapter", chapterId: "c1" });
   });
+
+  it("从第2章发起新第6章时以前一篇真实正文第5章为上下文锚点", async () => {
+    mockChapters([
+      { id: "c1", title: "第一章", order: 1, status: "completed", content: "第一章正文" },
+      { id: "c2", title: "第二章", order: 2, status: "review", content: "第二章正文" },
+      { id: "c3", title: "第三章", order: 3, status: "review", content: "第三章正文" },
+      { id: "c4", title: "第四章", order: 4, status: "review", content: "第四章正文" },
+      { id: "c5", title: "第五章", order: 5, status: "review", content: "第五章正文" },
+    ]);
+
+    const result = await resolveChapterDraftTarget({
+      novelId: "n1",
+      chapterId: "c2",
+      userMessage: "按计划写下一章正文",
+    });
+
+    assert.deepEqual(result.target, {
+      mode: "new_next_chapter",
+      afterChapterId: "c5",
+      title: "第 6 章",
+    });
+    assert.equal(result.targetOrder, 6);
+    assert.equal(result.contextChapterId, "c5");
+    assert.equal(result.contextAnchorChapterId, "c5");
+  });
 });

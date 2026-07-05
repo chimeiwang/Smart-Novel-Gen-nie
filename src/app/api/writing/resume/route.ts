@@ -81,38 +81,15 @@ export async function POST(request: NextRequest) {
         where: { id: taskId },
         select: {
           writingSessionId: true,
-          novelId: true,
-          chapterId: true,
         },
       });
       if (!task) return authErrorResponse("任务不存在", 403);
 
-      if (!task.writingSessionId) {
-        const selectedWritingSession = await prisma.writingSession.findFirst({
-          where: {
-            id: writingSessionId,
-            novelId: task.novelId,
-            chapterId: task.chapterId,
-            novel: { userId: session.userId },
-          },
-          select: { id: true },
-        });
-
-        if (!selectedWritingSession) {
-          return authErrorResponse("当前任务不属于所选写作会话", 403);
-        }
-
-        await prisma.writingTask.update({
-          where: { id: taskId },
-          data: { writingSessionId },
-        });
-      } else {
-        const bindingError = validateResumeSessionBinding({
-          requestedWritingSessionId: writingSessionId,
-          taskWritingSessionId: task.writingSessionId,
-        });
-        if (bindingError) return authErrorResponse(bindingError, 403);
-      }
+      const bindingError = validateResumeSessionBinding({
+        requestedWritingSessionId: writingSessionId,
+        taskWritingSessionId: task.writingSessionId,
+      });
+      if (bindingError) return authErrorResponse(bindingError, 403);
     }
 
     return await resumeWriting(

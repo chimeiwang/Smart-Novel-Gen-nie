@@ -739,7 +739,7 @@ describe("ReviewArtifact lifecycle routing", () => {
         artifactKey: "outline-builder-1",
         updates: {
           outlineAdjustments: [
-            { action: "create", clientKey: "stage-1", title: "第一阶段", kind: "stage" },
+            { action: "create", clientKey: "stage-1", title: "第一阶段", kind: "stage", chapterStartOrder: 1, chapterEndOrder: 15 },
           ],
         },
       },
@@ -748,8 +748,8 @@ describe("ReviewArtifact lifecycle routing", () => {
         artifactKey: "outline-builder-1",
         updates: {
           outlineAdjustments: [
-            { action: "create", clientKey: "unit-1", parentKey: "stage-1", title: "遗产线索", kind: "plot_unit" },
-            { action: "create", clientKey: "group-1", parentKey: "unit-1", title: "前三章", kind: "chapter_group" },
+            { action: "create", clientKey: "unit-1", parentKey: "stage-1", title: "遗产线索", kind: "plot_unit", chapterStartOrder: 1, chapterEndOrder: 15 },
+            { action: "create", clientKey: "group-1", parentKey: "unit-1", title: "前三章", kind: "chapter_group", chapterStartOrder: 1, chapterEndOrder: 3 },
           ],
         },
       },
@@ -866,13 +866,15 @@ describe("ReviewArtifact lifecycle routing", () => {
     assert.deepEqual(persisted[0].updates, {
       outlineContent: "全书总纲：纪寻从遗产任务中追查灵力衰退真相。",
       outlineAdjustments: [
-        { action: "create", clientKey: "stage-1", title: "第一阶段", kind: "stage" },
+        { action: "create", clientKey: "stage-1", title: "第一阶段", kind: "stage", chapterStartOrder: 1, chapterEndOrder: 15 },
         {
           action: "create",
           clientKey: "unit-1",
           parentKey: "stage-1",
           title: "遗产线索",
           kind: "plot_unit",
+          chapterStartOrder: 1,
+          chapterEndOrder: 15,
           content: "剧情单元详细梗概：鹿溪镇暗流从职业困境、异常遗产、理事会遮掩三条线并进，把纪寻从底层任务推到主动追查。",
         },
         {
@@ -881,6 +883,8 @@ describe("ReviewArtifact lifecycle routing", () => {
           parentKey: "unit-1",
           title: "前三章",
           kind: "chapter_group",
+          chapterStartOrder: 1,
+          chapterEndOrder: 3,
           content: "前三章详细梗概：第一章建立纪寻的遗产清理职业和低位处境，第二章让异常玉简牵出旧案线索，第三章用第一次小胜利和更大的追杀压力完成开篇钩子。",
         },
       ],
@@ -909,16 +913,23 @@ describe("ReviewArtifact lifecycle routing", () => {
       {
         type: "append_outline_tree",
         artifactKey: "outline-tree-builder-1",
+        mode: "replace",
         summary: "第一阶段嵌套树",
         stages: [
           {
             title: "第一阶段 鹿溪镇暗流",
+            chapterStartOrder: 1,
+            chapterEndOrder: 15,
             plotUnits: [
               {
                 title: "鹿溪镇的暗流",
+                chapterStartOrder: 1,
+                chapterEndOrder: 8,
                 chapterGroups: [
                   {
                     title: "裂痕",
+                    chapterStartOrder: 1,
+                    chapterEndOrder: 3,
                   },
                 ],
               },
@@ -995,18 +1006,23 @@ describe("ReviewArtifact lifecycle routing", () => {
 
     assert.equal(persisted.length, 1);
     assert.deepEqual(persisted[0].updates, {
+      outlineTreeMode: "replace",
       outlineContent: "全书总纲：纪寻从遗产任务中追查灵力衰退真相。",
       outlineAdjustments: [
         {
           action: "create",
           kind: "stage",
           title: "第一阶段 鹿溪镇暗流",
+          chapterStartOrder: 1,
+          chapterEndOrder: 15,
           clientKey: "outline-tree-builder-1-b0-s1",
         },
         {
           action: "create",
           kind: "plot_unit",
           title: "鹿溪镇的暗流",
+          chapterStartOrder: 1,
+          chapterEndOrder: 8,
           clientKey: "outline-tree-builder-1-b0-s1-u1",
           parentKey: "outline-tree-builder-1-b0-s1",
         },
@@ -1014,6 +1030,8 @@ describe("ReviewArtifact lifecycle routing", () => {
           action: "create",
           kind: "chapter_group",
           title: "裂痕",
+          chapterStartOrder: 1,
+          chapterEndOrder: 3,
           clientKey: "outline-tree-builder-1-b0-s1-u1-g1",
           parentKey: "outline-tree-builder-1-b0-s1-u1",
         },
