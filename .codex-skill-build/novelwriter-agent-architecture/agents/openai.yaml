@@ -1,0 +1,8 @@
+interface:
+  display_name: "NovelWriter Agent Architecture"
+  short_description: "Guide LangGraph Agents, tools, SSE, and chat flow."
+  brand_color: "#27AE60"
+  default_prompt: "Use $novelwriter-agent-architecture to modify the writing Agent workflow safely."
+policy:
+  allow_implicit_invocation: true
+

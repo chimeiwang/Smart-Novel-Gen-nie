@@ -1,6 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { getInvalidWritingOutlineMessage, shouldBlockForMissingApprovedBeatPlan } from "../nodes/author-node";
+import {
+  buildAuthorChapterDraftInstruction,
+  buildAuthorSystemPrompt,
+  getInvalidWritingOutlineMessage,
+  shouldBlockForMissingApprovedBeatPlan,
+} from "../nodes/author-node";
 import type { WritingState } from "../state";
 
 function createInput(overrides: Partial<Pick<WritingState, "currentOperation" | "novelData" | "userMessage">> = {}) {
@@ -64,5 +69,31 @@ describe("作家局部大纲 preGuard", () => {
       } as WritingState["novelData"],
     }));
     assert.match(message ?? "", /系统不会随机选择/);
+  });
+});
+
+describe("作家提示词瘦身", () => {
+  it("主提示词保留核心写作目标但移除重复流程清单", () => {
+    const prompt = buildAuthorSystemPrompt();
+
+    assert.ok(prompt.length < 800);
+    assert.match(prompt, /目标、阻力、变化、代价或钩子/);
+    assert.doesNotMatch(prompt, /## 行动循环/);
+    assert.doesNotMatch(prompt, /## 工具使用策略/);
+    assert.doesNotMatch(prompt, /## 写作纪律/);
+    assert.doesNotMatch(prompt, /单轮最多查/);
+    assert.doesNotMatch(prompt, /如果没有已批准 Beat Plan/);
+  });
+
+  it("正文草案规则集中在短指令中且避免污染草案正文", () => {
+    const instruction = buildAuthorChapterDraftInstruction({ hasApprovedBeatPlan: false });
+
+    assert.ok(instruction.length < 360);
+    assert.match(instruction, /begin_artifact_output/);
+    assert.match(instruction, /ARTIFACT_OUTPUT_START\/END/);
+    assert.match(instruction, /不放章节标题/);
+    assert.match(instruction, /ARTIFACT_OUTPUT_END 之后/);
+    assert.doesNotMatch(instruction, /结构化大纲/);
+    assert.doesNotMatch(instruction, /outlineAdjustments/);
   });
 });

@@ -1,0 +1,8 @@
+interface:
+  display_name: "Next Prisma Local App"
+  short_description: "Work safely with Next.js, Prisma, and local data."
+  brand_color: "#F2994A"
+  default_prompt: "Use $next-prisma-local-app to update the local-first Next.js and Prisma data flow."
+policy:
+  allow_implicit_invocation: true
+

@@ -22,6 +22,7 @@ import { createToolExecutor, summarizeToolArgs, summarizeToolResult } from "@/ag
 import { getToolsByCapabilities, getOpenAITools, type ToolDefinition } from "@/agents/tools/registry";
 import { logger } from "@/shared/lib/logger";
 import { AGENT_UPDATE_CHANNEL_RULES_PROMPT } from "@/shared/contracts/agent-update-channels";
+import type { CreativeOperationKind } from "@/shared/contracts/creative-operation";
 import type { AgentDefinition } from "./agent-definition";
 import { AgentRuntimeImpl } from "./agent-runtime";
 import { filterToolNamesForOperation } from "./tool-profile";
@@ -34,32 +35,40 @@ import { filterToolNamesForOperation } from "./tool-profile";
  * 追加到新模式下 system prompt 的指令。
  * 替换原有的「输出 JSON 对象」要求。
  */
-const NEW_MODE_SYSTEM_APPENDIX = `
-## 输出规则（重要）
+const AGENT_UPDATE_OPERATION_KINDS = new Set<CreativeOperationKind>([
+  "create_lore",
+  "revise_lore",
+  "create_outline",
+  "revise_outline",
+  "sync_lore",
+  "manage_foreshadowing",
+]);
 
-你不是 JSON 输出机。你是专业创作助手。
+const OUTLINE_OPERATION_KINDS = new Set<CreativeOperationKind>([
+  "create_outline",
+  "revise_outline",
+]);
 
-- 你的正文回复必须是自然段文本，直接写给用户看。
-- 不要使用标题标记、表格、代码块、引用块、加粗标记或列表符号来组织格式。
-- 可以用普通自然段、短句分行、中文编号（例如“一、”“1.”）组织内容；这些符号只作为普通文本，不依赖前端格式转换。
-- 不要在正文外用 JSON 包裹，不要输出 \`{"content": "..."}\` 这种结构。
-- 如果你判断自己的能力不足以完成当前任务，直接用正文说明职责边界和缺口；不要自行转交给其他 Agent，工作流会负责分派。
-- 需要提交质量评分时，使用 submit_quality_report 工具。
-- 结构化大纲必须最终生成 outlineContent 和/或 outlineAdjustments；不要用 begin_artifact_output 替代结构化大纲节点树。
-${AGENT_UPDATE_CHANNEL_RULES_PROMPT}
-- 只有纯文本长文草稿才使用 begin_artifact_output，例如小说正文草案、纯文本大纲草稿、设定草案、返工稿、Beat Plan 正文。调用时提交短元数据，并把产物正文放在本轮 assistant 正文里；不要把长文本塞进工具 JSON 参数。
-- 长文本产物正文必须用独立行 ARTIFACT_OUTPUT_START 和 ARTIFACT_OUTPUT_END 包住。只有这两个标记之间的文本会进入待审核草案；标记外可以写给用户看的说明，但不会入库。标记内只能放需要入库的纯正文，不要写“以下是草案”“以上草稿已提交”等说明性头尾。
-- 需要提交 Beat Plan 时，使用 submit_beat_plan 工具。
-- 需要提交校验结果时，使用 submit_validation_report 工具。
-- 查询数据时，使用读工具。
+export function buildNewModeSystemAppendix(operationKind?: CreativeOperationKind | null): string {
+  const sections = [
+    [
+      "## 输出规则（重要）",
+      "- 直接用自然段回复，不要输出 JSON、代码块、表格或引用块。",
+      "- 控制信息只通过本轮已暴露的工具提交；职责外需求用正文说明边界。",
+      "- 查询数据时使用读工具；工具参数只放短结构化信息。",
+    ].join("\n"),
+  ];
 
-示例：如果你想告诉用户“第一章大纲建议增加一个冲突节点”，直接写正文文本：
+  if (operationKind && AGENT_UPDATE_OPERATION_KINDS.has(operationKind)) {
+    sections.push(AGENT_UPDATE_CHANNEL_RULES_PROMPT.trim());
+  }
 
-第一章大纲建议
+  if (operationKind && OUTLINE_OPERATION_KINDS.has(operationKind)) {
+    sections.push("结构化大纲必须通过 outlineContent 和/或 outlineAdjustments 提交；复杂大纲树优先使用 append_outline_tree，不要用纯文本草稿替代节点树。");
+  }
 
-建议在第一章中段增加一个冲突节点。
-
-不要用 JSON 包起来。`;
+  return sections.join("\n\n");
+}
 
 const FATAL_TOOL_FINISH_REASONS = new Set([
   "tool_authorization_error",
@@ -72,7 +81,10 @@ const FATAL_TOOL_FINISH_REASONS = new Set([
  * 删除「输出格式（必须严格遵守）」开始的 JSON 输出指令，
  * 替换为段落文本 + tool 使用指引。
  */
-function adaptSystemPromptForNewMode(messages: { role: string; content?: unknown }[]): void {
+function adaptSystemPromptForNewMode(
+  messages: { role: string; content?: unknown }[],
+  operationKind?: CreativeOperationKind | null
+): void {
   const msg = messages.find((m) => m.role === "system" && typeof m.content === "string");
   if (!msg || typeof msg.content !== "string") {
     return;
@@ -87,7 +99,7 @@ function adaptSystemPromptForNewMode(messages: { role: string; content?: unknown
   }
 
   if (!content.includes("## 输出规则（重要）")) {
-    content += "\n\n" + NEW_MODE_SYSTEM_APPENDIX;
+    content += "\n\n" + buildNewModeSystemAppendix(operationKind);
   }
 
   msg.content = content;
@@ -214,7 +226,7 @@ async function runAgentInNewMode(
 
   try {
     // ---- 1. 适配 system prompt：删除 JSON 输出要求，追加工具使用指引 ----
-    adaptSystemPromptForNewMode(messages as { role: string; content?: unknown }[]);
+    adaptSystemPromptForNewMode(messages as { role: string; content?: unknown }[], state.currentOperation?.kind);
 
     // ---- 2. 工具链：按 Agent capability 暴露 read/proposal/control 工具 ----
     const toolExecutor = createToolExecutor(state);

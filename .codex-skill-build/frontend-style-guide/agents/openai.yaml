@@ -1,0 +1,8 @@
+interface:
+  display_name: "Frontend Style Guide"
+  short_description: "Apply NovelWriter's clean, bright UI style rules."
+  brand_color: "#2F80ED"
+  default_prompt: "Use $frontend-style-guide to update this UI so it follows the NovelWriter frontend style guide."
+policy:
+  allow_implicit_invocation: true
+

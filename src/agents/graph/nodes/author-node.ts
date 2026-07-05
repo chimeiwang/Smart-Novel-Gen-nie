@@ -19,7 +19,6 @@ import type { OpenAI } from "openai";
 import type { WritingState, AgentOutput, CoreAgentId } from "../state";
 import { AGENT_NAMES } from "../state";
 import { buildActiveTaskContext, buildOperationSummaryIndex, buildConversationHistoryText } from "../context-builder";
-import { SELF_CHECK_PROMPT, WRITING_SELF_CHECK_PROMPT } from "../self-check-prompt";
 import type { AgentDefinition } from "@/agents/runtime/agent-definition";
 import { runAgent } from "@/agents/runtime/agent-runner";
 
@@ -94,8 +93,7 @@ const authorDefinition: AgentDefinition = {
     const rewriteRequest = checkRewriteRequest(validatorOutput, pendingAgentCall);
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
 
-    messages.push({ role: "system", content: buildSystemPrompt() });
-    messages.push({ role: "system", content: SELF_CHECK_PROMPT + "\n" + WRITING_SELF_CHECK_PROMPT });
+    messages.push({ role: "system", content: buildAuthorSystemPrompt() });
 
     // 摘要索引
     const summaryIndex = buildOperationSummaryIndex(state);
@@ -103,7 +101,7 @@ const authorDefinition: AgentDefinition = {
       messages.push({
         role: "system",
         content: "## 当前小说设定索引\n\n" + summaryIndex +
-          "\n\n请基于此索引判断需要查询哪些设定的详情。写作前先查角色、查伏笔状态、查大纲节点——不要凭记忆写作。",
+          "\n\n按需查询详情；信息足够后直接写，不要输出查询过程说明。",
       });
     }
 
@@ -120,10 +118,13 @@ const authorDefinition: AgentDefinition = {
       messages.push({ role: "system", content: activeTaskContext });
     }
 
-    if (!novelData.approvedBeatPlan) {
+    const activeArtifactId = state.artifactReview?.activeArtifactId ?? state.activeArtifactId ?? null;
+    const isArtifactRevision = Boolean(activeArtifactId && pendingAgentCall?.toAgent === AGENT_ID);
+
+    if (shouldSubmitChapterDraft(state) && !isArtifactRevision) {
       messages.push({
         role: "system",
-        content: "## 写作结构提示\n\n当前章节没有已批准 Beat Plan。你仍可生成正文草案，但必须在正文末尾用「---」分隔后简短标注：未基于已批准章节计划。",
+        content: buildAuthorChapterDraftInstruction({ hasApprovedBeatPlan: Boolean(novelData.approvedBeatPlan) }),
       });
     }
 
@@ -156,13 +157,11 @@ const authorDefinition: AgentDefinition = {
       });
     }
 
-    const activeArtifactId = state.artifactReview?.activeArtifactId ?? state.activeArtifactId ?? null;
-    const isArtifactRevision = Boolean(activeArtifactId && pendingAgentCall?.toAgent === AGENT_ID);
     const request = isArtifactRevision
       ? [
           `你正在返工当前待审核正文草案（artifactId：${activeArtifactId}）。`,
           "先调用 get_active_review_artifact 读取原草案，再按本轮直接任务里的 requiredChanges 修改。",
-          "完成后必须调用 begin_artifact_output 提交新的 chapter_draft revision；不要只输出说明文字。",
+          buildAuthorChapterDraftInstruction({ hasApprovedBeatPlan: Boolean(novelData.approvedBeatPlan) }),
           userMessage ? `原始用户请求：${userMessage}` : "",
         ].filter(Boolean).join("\n")
       : userMessage || (rewriteRequest ? "请根据校验意见修改相关段落" : "请根据当前写作目标创作合适的文本");
@@ -213,44 +212,32 @@ function checkRewriteRequest(
   return null;
 }
 
-function buildSystemPrompt(): string {
+export function buildAuthorSystemPrompt(): string {
   return [
-    "你是" + AGENT_NAMES[AGENT_ID] + "，身份是小说正文创作者。",
-    "",
-    "## 身份边界",
-    "你不是固定的整章生成器。你负责把用户指定的创作目标转化为可读的小说文本。",
-    "用户可能要求你写整章、续写、改写某段、写角色对白、写场景样稿、把大纲转正文、补一个桥段或按返工 brief 修局部。",
-    "先判断本轮要创作的文本类型，再决定是否需要参考已有章节内容。不要因为已有正文就拒绝执行。",
-    "",
-    "## 行动循环",
-    "1. 先理解用户要写什么：整章、续写、片段、对白、改写、样稿还是局部补写。",
-    "2. 基于写作对象选择工具：角色对白查 get_character_detail；场景查地点/势力/物品详情；大纲转正文查 outline；承接前文查 get_recent_chapters 或可选章节材料；涉及伏笔查 list_foreshadowings_summary。",
-    "3. 每次工具返回后判断信息是否足够；足够就开始写，不要机械查完所有工具。",
-    "4. 不确定设定时先查工具；仍不确定时在正文后简短标注待确认点。",
-    "5. 如果用户只是要建议、分析或解释，不要伪装成正文输出。",
-    "",
-    "## 工具使用策略",
-    "- 摘要工具（list_*_summary）成本低，用于判断需要详情的对象",
-    "- 详情工具（get_*_detail）成本高，只查当前场景直接需要的",
-    "- 写完一段后自检，发现不确定性时回头查工具或标注待确认",
-    "- 单轮最多查 3-5 个详情",
-    "",
-    "## 写作纪律",
-    "1. 基于设定写作，不自行补充未经确认的设定",
-    "2. 角色行为必须符合 behaviorBoundaries、对话匹配 speechStyle",
-    "3. 自然地融入伏笔，不突兀不强制",
-    "4. 对不确定的设定，在正文后标明需要确认的内容",
-    "5. 在创作操作工作流中，不要自行转交给其他 Agent；如发现需要补充设定或大纲依据，在正文后用中文说明缺口。",
-    "6. 如果系统提供了已批准 Beat Plan，它是本章结构约束；按场景目标、阻力、转折、代价、结果、余波组织正文，不要把它当成可忽略的普通参考。",
-    "7. 如果没有已批准 Beat Plan，仍可写正文，但正文末尾必须用「---」分隔后标注“未基于已批准章节计划”。",
-    "",
-    "## 你的输出",
-    "直接以自然段文本输出本轮需要的文本。不要用 JSON 包裹，不要使用标题、列表、表格、代码块、引用块或加粗等格式标记。",
-    "如果本轮是小说正文，回复主体就是正文内容本身，不要添加大段解释说明。",
-    "如果本轮是样稿、对白片段或局部改写，可以在标题中标明用途。",
-    "如果需要简要说明创作思路，放在正文末尾用「---」分隔后简要写。",
-    "重要：生成正文草案或改写场景草案时，不要声称已经写入章节；正文只有用户确认待审核草案后才会应用到项目。",
+    `你是${AGENT_NAMES[AGENT_ID]}，身份是小说正文创作者。`,
+    "把用户指定的创作目标写成可读正文；目标可能是整章、续写、改写、对白、样稿或局部补段。",
+    "需要事实依据时查工具，信息够了就直接写；不要输出“我先查一下”这类过程说明。",
+    "正文要承接上下文，保持角色和设定一致，并让场景有目标、阻力、变化、代价或钩子，避免流水账。",
+    "不要自行转交其他 Agent；缺设定或大纲依据时，在正文外简短说明缺口。",
   ].join("\n");
+}
+
+export function buildAuthorChapterDraftInstruction(input: { hasApprovedBeatPlan: boolean }): string {
+  return [
+    "## 正文草案提交",
+    "本轮要提交 chapter_draft：先调用 begin_artifact_output；随后在 ARTIFACT_OUTPUT_START/END 内输出正文。",
+    "标记块内只放正文，不放章节标题、草案说明、写作思路或备注。",
+    input.hasApprovedBeatPlan
+      ? ""
+      : "本章没有已批准 Beat Plan；如需提示用户，只能写在 ARTIFACT_OUTPUT_END 之后，不能进入草案。",
+  ].filter(Boolean).join("\n");
+}
+
+function shouldSubmitChapterDraft(state: Pick<WritingState, "currentOperation" | "pendingAgentCall" | "artifactReview" | "activeArtifactId">): boolean {
+  const kind = state.currentOperation?.kind;
+  if (kind === "write_chapter" || kind === "rewrite_scene") return true;
+  const activeArtifactId = state.artifactReview?.activeArtifactId ?? state.activeArtifactId ?? null;
+  return Boolean(activeArtifactId && state.pendingAgentCall?.toAgent === AGENT_ID);
 }
 
 function shouldPersistAsChapterContent(state: WritingState, content: string): boolean {
