@@ -78,7 +78,30 @@ function readLogFiles(): string[] {
 
 function parseEntry(line: string): WorkflowEventLogEntry | null {
   try {
-    const parsed = JSON.parse(line) as Partial<WorkflowEventLogEntry>;
+    const raw = JSON.parse(line) as Record<string, unknown>;
+    const context = raw.context && typeof raw.context === "object"
+      ? raw.context as Record<string, unknown>
+      : null;
+    const parsed = context
+      ? {
+          schemaVersion: raw.schemaVersion,
+          runId: context.runId,
+          seq: raw.seq,
+          timestamp: raw.time,
+          source: raw.source,
+          eventType: raw.eventType,
+          taskId: context.taskId,
+          runKind: context.runKind,
+          userId: context.userId,
+          novelId: context.novelId,
+          chapterId: context.chapterId,
+          qualityCheckId: context.qualityCheckId,
+          node: raw.node,
+          agentId: raw.agent,
+          changedKeys: raw.changedKeys,
+          payload: raw.payload,
+        } as Partial<WorkflowEventLogEntry>
+      : raw as Partial<WorkflowEventLogEntry>;
     if (!parsed.runId || !parsed.taskId || !parsed.eventType || !parsed.timestamp) {
       return null;
     }

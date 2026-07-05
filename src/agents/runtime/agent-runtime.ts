@@ -36,16 +36,6 @@ export type { AgentRuntimeOptions } from "./model-runtime";
 
 const MAX_INVALID_CONTROL_TOOL_ATTEMPTS = 2;
 const MAX_PARALLEL_SAFE_TOOLS = 5;
-const DEFAULT_MODEL_TOOL_RESULT_CHAR_LIMIT = 6000;
-const HEAVY_MODEL_TOOL_RESULT_CHAR_LIMIT = 3000;
-const HEAVY_TOOL_RESULT_NAMES = new Set([
-  "get_active_review_artifact",
-  "get_review_artifact",
-  "get_recent_chapters",
-  "get_novel_info",
-  "list_outline_summary",
-  "list_characters_summary",
-]);
 
 interface ToolExecutionResult {
   content: string;
@@ -57,6 +47,8 @@ interface ToolExecutionResult {
 interface AgentRoundToolExecutionResult extends ToolExecutionResult {
   id: string;
   toolName: string;
+  args: Record<string, unknown>;
+  durationMs: number;
   parseError?: boolean;
 }
 
@@ -105,6 +97,7 @@ export class AgentRuntimeImpl implements AgentRuntime {
     let finalUsage: TokenUsage | undefined;
     let lastAssistantText = "";
     let finishReason: string | undefined = "stop";
+    let terminalControlRepairUsed = false;
 
     for (let iteration = 1; iteration <= maxIterations; iteration++) {
       logger.info("AGENT_RUNTIME", `tool-call loop 第 ${iteration} 轮`, {
@@ -132,6 +125,103 @@ export class AgentRuntimeImpl implements AgentRuntime {
       finishReason = round.finishReason;
       if (round.content) lastAssistantText = round.content;
 
+      const missingTerminalEvaluation =
+        options.terminalControlTools?.includes("submit_evaluation") &&
+        !controlEvents.some((event) => event.type === "submit_evaluation");
+      if (
+        missingTerminalEvaluation &&
+        round.toolCalls.length === 0 &&
+        !terminalControlRepairUsed &&
+        iteration < maxIterations
+      ) {
+        terminalControlRepairUsed = true;
+        if (round.content.trim()) {
+          visibleContentParts.push(round.content.trim());
+          messages.push({ role: "assistant", content: round.content });
+        }
+        logger.warn("AGENT_RUNTIME", "复审 Agent 未提交 terminal control tool，追加修复回合", {
+          requiredTool: "submit_evaluation",
+          modelTurn: iteration,
+          finishReason: round.finishReason,
+          contentLength: round.content.length,
+        });
+        messages.push({
+          role: "user",
+          content:
+            "复审未完成。你必须现在调用 submit_evaluation 提交 pass/revise/block 结构化结论。" +
+            "不要继续读取工具，不要生成新草案；如果信息不足，使用 block 并在 summary/requiredChanges 说明缺口。",
+        });
+        continue;
+      }
+      if (
+        missingTerminalEvaluation &&
+        round.toolCalls.length === 0 &&
+        terminalControlRepairUsed
+      ) {
+        if (round.content.trim()) {
+          visibleContentParts.push(round.content.trim());
+          messages.push({ role: "assistant", content: round.content });
+        }
+        const event = buildMissingEvaluationFallback(options.metadata, round.content);
+        controlEvents.push(event);
+        const visibleContent = buildTerminalControlFallback(controlEvents) || aggregateVisibleParts(visibleContentParts, "");
+        logger.warn("AGENT_RUNTIME", "复审 Agent 修复回合仍未提交 submit_evaluation，自动提交 block 兜底", {
+          requestId,
+          requiredTool: "submit_evaluation",
+          modelTurn: iteration,
+          finishReason: round.finishReason,
+        });
+        logger.agentRunFinal(requestId, visibleContent, {
+          context: options.metadata,
+          usage: finalUsage,
+          finishReason: "terminal_control_event",
+          toolCallCount: toolCalls.length,
+          controlEventTypes: controlEvents.map((item) => item.type),
+        });
+        return {
+          visibleContent,
+          controlEvents,
+          toolCalls,
+          toolResults,
+          usage: finalUsage,
+          finishReason: "terminal_control_event",
+        };
+      }
+      if (
+        missingTerminalEvaluation &&
+        round.toolCalls.length > 0 &&
+        terminalControlRepairUsed &&
+        !round.toolCalls.some((toolCall) => toolCall.function.name === "submit_evaluation")
+      ) {
+        if (round.content.trim()) {
+          visibleContentParts.push(round.content.trim());
+          messages.push({ role: "assistant", content: round.content });
+        }
+        const event = buildMissingEvaluationFallback(options.metadata, round.content);
+        controlEvents.push(event);
+        const visibleContent = buildTerminalControlFallback(controlEvents) || aggregateVisibleParts(visibleContentParts, "");
+        logger.warn("AGENT_RUNTIME", "复审 Agent 修复回合未调用 submit_evaluation，自动提交 block 兜底", {
+          requestId,
+          modelTurn: iteration,
+          attemptedTools: round.toolCalls.map((toolCall) => toolCall.function.name),
+        });
+        logger.agentRunFinal(requestId, visibleContent, {
+          context: options.metadata,
+          usage: finalUsage,
+          finishReason: "terminal_control_event",
+          toolCallCount: toolCalls.length,
+          controlEventTypes: controlEvents.map((item) => item.type),
+        });
+        return {
+          visibleContent,
+          controlEvents,
+          toolCalls,
+          toolResults,
+          usage: finalUsage,
+          finishReason: "terminal_control_event",
+        };
+      }
+
       const result = await this.finishAgentRound({
         messages,
         options: roundOptions,
@@ -145,8 +235,10 @@ export class AgentRuntimeImpl implements AgentRuntime {
         fullTextContent: round.content,
         finishReason,
         finalUsage,
+        terminalControlRepairUsed,
       });
       if (result.done) return result.result;
+      if (result.terminalControlRepairUsed) terminalControlRepairUsed = true;
     }
 
     return this.maxIterationFallback({
@@ -175,7 +267,11 @@ export class AgentRuntimeImpl implements AgentRuntime {
     fullTextContent: string;
     finishReason: string | undefined;
     finalUsage: TokenUsage | undefined;
-  }): Promise<{ done: true; result: AgentTurnResult } | { done: false }> {
+    terminalControlRepairUsed: boolean;
+  }): Promise<
+    | { done: true; result: AgentTurnResult }
+    | { done: false; terminalControlRepairUsed?: boolean }
+  > {
     const {
       messages,
       options,
@@ -189,6 +285,7 @@ export class AgentRuntimeImpl implements AgentRuntime {
       fullTextContent,
       finishReason,
       finalUsage,
+      terminalControlRepairUsed,
     } = params;
 
     if (modelToolCalls.length === 0) {
@@ -230,6 +327,35 @@ export class AgentRuntimeImpl implements AgentRuntime {
 
     const parseErrorResult = results.find((result) => result.parseError);
     if (parseErrorResult) {
+      if (
+        parseErrorResult.toolName === "submit_evaluation" &&
+        options.terminalControlTools?.includes("submit_evaluation") &&
+        !terminalControlRepairUsed
+      ) {
+        for (const result of results) {
+          messages.push({
+            role: "tool",
+            tool_call_id: result.id,
+            content: result.content,
+          });
+        }
+        messages.push({
+          role: "user",
+          content:
+            "submit_evaluation 的参数 JSON 不完整或不合法，复审尚未提交成功。" +
+            "请立即重新调用 submit_evaluation，完整提交原本的 verdict、summary、requiredChanges、revisionMode 和 patches。" +
+            "不要缩短或省略原结论，不要继续输出评审正文，不要调用读取工具。",
+        });
+        logger.warn("AGENT_RUNTIME", "复审 Agent 的 submit_evaluation 参数解析失败，追加修复回合", {
+          requestId,
+          toolName: parseErrorResult.toolName,
+          finishReason,
+        });
+        return {
+          done: false,
+          terminalControlRepairUsed: true,
+        };
+      }
       const visibleContent = aggregateVisibleParts(visibleContentParts, parseErrorResult.content);
       logger.agentRunFinal(requestId, visibleContent, {
         context: options.metadata,
@@ -313,7 +439,7 @@ export class AgentRuntimeImpl implements AgentRuntime {
       messages.push({
         role: "tool",
         tool_call_id: result.id,
-        content: compactToolResultForModel(result.toolName, result.content),
+        content: result.content,
       });
     }
     return { done: false };
@@ -363,6 +489,7 @@ export class AgentRuntimeImpl implements AgentRuntime {
         );
         batchResults.forEach((result, offset) => {
           results[index + offset] = result;
+          this.logRoundToolResult(result, index + offset, modelToolCalls.length, options, requestId);
         });
         index += safeBatch.length;
         continue;
@@ -377,6 +504,7 @@ export class AgentRuntimeImpl implements AgentRuntime {
         toolResults,
         invalidControlToolAttempts,
       });
+      this.logRoundToolResult(results[index], index, modelToolCalls.length, options, requestId);
       if (results[index].terminal) {
         return results.slice(0, index + 1);
       }
@@ -384,6 +512,23 @@ export class AgentRuntimeImpl implements AgentRuntime {
     }
 
     return results;
+  }
+
+  private logRoundToolResult(
+    result: AgentRoundToolExecutionResult,
+    zeroBasedIndex: number,
+    total: number,
+    options: AgentRuntimeOptions,
+    requestId: string
+  ): void {
+    logger.llmToolCall(requestId, result.toolName, result.args, result.content, {
+      context: {
+        ...(options.metadata ?? {}),
+        toolCallIndex: zeroBasedIndex + 1,
+        toolCallTotal: total,
+      },
+      durationMs: result.durationMs,
+    });
   }
 
   private async executeOneRoundToolCall(params: {
@@ -421,11 +566,15 @@ export class AgentRuntimeImpl implements AgentRuntime {
             toolName,
             exposedToolNames: getExposedToolNames(options.tools),
           });
-          logger.llmToolCall(requestId, toolName, args, result, {
-            context: options.metadata,
+          return {
+            id: tc.id,
+            toolName,
+            args,
+            content: result,
             durationMs: Date.now() - startedAt,
-          });
-          return { id: tc.id, toolName, content: result, fatal: true, unauthorized: true };
+            fatal: true,
+            unauthorized: true,
+          };
         }
         const parsedArgs = parseToolCallArguments(tc.function.arguments || "");
         if (!parsedArgs.success) {
@@ -447,11 +596,15 @@ export class AgentRuntimeImpl implements AgentRuntime {
             rawArgumentsPreview: parsedArgs.error.rawArgumentsPreview,
             parseError: parsedArgs.error.message,
           });
-          logger.llmToolCall(requestId, toolName, args, result, {
-            context: options.metadata,
+          return {
+            id: tc.id,
+            toolName,
+            args,
+            content: result,
             durationMs: Date.now() - startedAt,
-          });
-          return { id: tc.id, toolName, content: result, fatal: true, parseError: true };
+            fatal: true,
+            parseError: true,
+          };
         }
         const args = parsedArgs.args;
         options.onToolCall?.(toolName, args);
@@ -464,11 +617,15 @@ export class AgentRuntimeImpl implements AgentRuntime {
           toolResults,
           invalidControlToolAttempts
         );
-        logger.llmToolCall(requestId, toolName, args, result.content, {
-          context: options.metadata,
+        return {
+          id: tc.id,
+          toolName,
+          args,
+          content: result.content,
           durationMs: Date.now() - startedAt,
-        });
-        return { id: tc.id, toolName, content: result.content, fatal: result.fatal, terminal: result.terminal };
+          fatal: result.fatal,
+          terminal: result.terminal,
+        };
   }
 
   private canExecuteToolCallInParallel(
@@ -609,19 +766,6 @@ export class AgentRuntimeImpl implements AgentRuntime {
   }
 }
 
-function compactToolResultForModel(toolName: string, content: string): string {
-  const limit = HEAVY_TOOL_RESULT_NAMES.has(toolName)
-    ? HEAVY_MODEL_TOOL_RESULT_CHAR_LIMIT
-    : DEFAULT_MODEL_TOOL_RESULT_CHAR_LIMIT;
-  if (content.length <= limit) return content;
-
-  return [
-    content.slice(0, limit),
-    "",
-    `[工具结果已截断：${toolName} 原始长度 ${content.length} 字符，已回灌前 ${limit} 字符。需要更精确内容时，请用更具体的参数重新查询，不要要求系统一次性返回全文。]`,
-  ].join("\n");
-}
-
 function buildTerminalControlFallback(controlEvents: AgentControlEvent[]): string {
   const evaluation = [...controlEvents].reverse().find((event) => event.type === "submit_evaluation");
   if (!evaluation || evaluation.type !== "submit_evaluation") return "";
@@ -631,6 +775,32 @@ function buildTerminalControlFallback(controlEvents: AgentControlEvent[]): strin
     lines.push(evaluation.requiredChanges.trim());
   }
   return lines.filter(Boolean).join("\n\n");
+}
+
+function buildMissingEvaluationFallback(
+  metadata: AgentRuntimeOptions["metadata"],
+  content: string
+): AgentControlEvent {
+  const taskId = typeof metadata?.taskId === "string" ? metadata.taskId : "unknown-task";
+  const operationKind = typeof metadata?.operationKind === "string" ? metadata.operationKind : "review";
+  const agentId = typeof metadata?.agentId === "string" ? metadata.agentId : "复审 Agent";
+  const artifactKey = typeof metadata?.artifactKey === "string"
+    ? metadata.artifactKey
+    : `${taskId}:${operationKind}`;
+  const artifactId = typeof metadata?.activeArtifactId === "string" ? metadata.activeArtifactId : undefined;
+  const raw = content.trim();
+  const summary = raw
+    ? `${agentId}未按要求调用 submit_evaluation；系统已转为 block，避免复审流程悬挂。原始回复：${raw}`
+    : `${agentId}未按要求调用 submit_evaluation；系统已转为 block，避免复审流程悬挂。`;
+
+  return {
+    type: "submit_evaluation",
+    ...(artifactId ? { artifactId } : {}),
+    artifactKey,
+    verdict: "block",
+    summary,
+    requiredChanges: "请重新发起审核，或调整复审提示后再审。",
+  };
 }
 
 function formatUnauthorizedToolMessage(

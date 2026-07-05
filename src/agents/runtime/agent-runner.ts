@@ -61,6 +61,12 @@ ${AGENT_UPDATE_CHANNEL_RULES_PROMPT}
 
 不要用 JSON 包起来。`;
 
+const FATAL_TOOL_FINISH_REASONS = new Set([
+  "tool_authorization_error",
+  "tool_validation_error",
+  "tool_parse_error",
+]);
+
 /**
  * 将旧模式 system prompt 转换为新模式兼容。
  * 删除「输出格式（必须严格遵守）」开始的 JSON 输出指令，
@@ -261,6 +267,9 @@ async function runAgentInNewMode(
         taskId: state.taskId,
         userId: state.userId,
         novelId: state.novelId,
+        operationKind: state.currentOperation?.kind,
+        activeArtifactId: state.artifactReview?.activeArtifactId ?? state.activeArtifactId,
+        artifactKey: state.currentOperation ? `${state.taskId}:${state.currentOperation.kind}` : undefined,
       },
     });
 
@@ -287,10 +296,14 @@ async function runAgentInNewMode(
     });
 
     // ---- 8. 返回状态（含 controlEvents） ----
+    const runtimeErrorMessage = FATAL_TOOL_FINISH_REASONS.has(turnResult.finishReason ?? "")
+      ? turnResult.visibleContent
+      : null;
     const baseResult: Partial<WritingState> = {
       ...patchAgentOutput(agentId, output),
       activeAgent: agentId,
       controlEvents: turnResult.controlEvents as AgentControlEvent[],
+      ...(runtimeErrorMessage ? { errorMessage: runtimeErrorMessage } : {}),
     };
 
     return { ...baseResult, ...postResult };

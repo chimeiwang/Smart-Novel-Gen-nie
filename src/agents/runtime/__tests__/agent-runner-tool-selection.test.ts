@@ -319,7 +319,7 @@ describe("AgentRunner tool selection", () => {
   it("keeps writer focused on text artifact output during write_chapter", () => {
     const toolNames = getToolNamesForAgent({
       id: "写作",
-      toolCapabilities: ["novel.read", "character.read", "lore.read", "plot.read", "chapter.read", "style.read", "control.artifact"],
+      toolCapabilities: ["novel.read", "character.read", "lore.read", "plot.read", "chapter.read", "style.read", "artifact.read", "control.artifact"],
     }, { currentOperation: operation("write_chapter") });
 
     assert.ok(toolNames.includes("begin_artifact_output"));
@@ -328,6 +328,27 @@ describe("AgentRunner tool selection", () => {
     assert.equal(toolNames.includes("list_factions_summary"), false);
     assert.equal(toolNames.includes("list_locations_summary"), false);
     assert.equal(toolNames.includes("propose_updates"), false);
+  });
+
+  it("lets writer read the active artifact while revising a chapter draft", () => {
+    const toolNames = getToolNamesForAgent({
+      id: "写作",
+      toolCapabilities: ["novel.read", "character.read", "lore.read", "plot.read", "chapter.read", "style.read", "artifact.read", "control.artifact"],
+    }, {
+      currentOperation: operation("write_chapter"),
+      activeArtifactId: "artifact-1",
+      pendingAgentCall: {
+        fromAgent: "编辑",
+        toAgent: "写作",
+        reason: "按复审意见返工正文草案",
+        timestamp: 1,
+      },
+    });
+
+    assert.ok(toolNames.includes("get_active_review_artifact"));
+    assert.ok(toolNames.includes("get_review_artifact"));
+    assert.ok(toolNames.includes("begin_artifact_output"));
+    assert.equal(toolNames.includes("submit_evaluation"), false);
   });
 
   it("get_novel_info schema supports explicit full-section opt in", () => {

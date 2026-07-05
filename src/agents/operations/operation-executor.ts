@@ -188,6 +188,7 @@ async function processOperationControlEvents(input: {
       state: {
         taskId: state.taskId,
         chapterId: state.chapterId,
+        currentOperation: state.currentOperation,
         chapterDraftTarget: state.chapterDraftTarget ?? null,
         qualityCheckId: state.qualityCheckId,
         novelData: state.novelData,

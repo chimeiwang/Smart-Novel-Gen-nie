@@ -4,6 +4,7 @@ import type {
   AgentMessage,
   AgentOutput,
   AgentUpdates,
+  ArtifactReviewResult,
   ArtifactReviewState,
   CoreAgentId,
   OperationStep,
@@ -48,6 +49,8 @@ export type SerializableGraphStateSnapshot = {
   activeArtifactId: string | null;
   artifactMode: "none" | "review_loop";
   reviewerAgent: CoreAgentId | null;
+  reviewWorkerAgent: CoreAgentId | null;
+  artifactReviewResults: ArtifactReviewResult[];
   reviserAgent: CoreAgentId | null;
   pendingArtifactRevision: GraphState["pendingArtifactRevision"];
   artifactIteration: number;
@@ -86,6 +89,8 @@ export function serializeGraphStateSnapshot(state: GraphState): string {
     activeArtifactId: state.activeArtifactId ?? null,
     artifactMode: state.artifactMode ?? "none",
     reviewerAgent: state.reviewerAgent ?? null,
+    reviewWorkerAgent: state.reviewWorkerAgent ?? null,
+    artifactReviewResults: state.artifactReviewResults ?? [],
     reviserAgent: state.reviserAgent ?? null,
     pendingArtifactRevision: state.pendingArtifactRevision ?? null,
     artifactIteration: state.artifactIteration ?? 0,
@@ -164,6 +169,8 @@ export function deserializeGraphStateSnapshot(
       activeArtifactId: parsed.activeArtifactId ?? null,
       artifactMode: parsed.artifactMode ?? "none",
       reviewerAgent: parsed.reviewerAgent ?? null,
+      reviewWorkerAgent: parsed.reviewWorkerAgent ?? null,
+      artifactReviewResults: parsed.artifactReviewResults ?? [],
       reviserAgent: parsed.reviserAgent ?? null,
       pendingArtifactRevision: parsed.pendingArtifactRevision ?? null,
       artifactIteration: parsed.artifactIteration ?? 0,

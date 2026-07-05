@@ -162,6 +162,70 @@ describe("executeCreativeOperation control events", () => {
     assert.ok(emitted.some((event) => event.type === "artifact_submitted"));
   });
 
+  it("uses operation artifactKey instead of model-provided text artifact key", async () => {
+    const state = createState("write_chapter");
+    state.currentOperation = {
+      ...state.currentOperation!,
+      kind: "write_chapter",
+      targetType: "chapter",
+      primaryAgent: "写作",
+      reviewers: ["校验", "编辑"],
+      outputKind: "chapter_text",
+      requiresArtifact: true,
+      requiresUserApproval: true,
+    };
+    const output: AgentOutput = {
+      agentId: "写作",
+      agentName: "作家",
+      content: "ARTIFACT_OUTPUT_START\n正文草案\nARTIFACT_OUTPUT_END",
+      insights: [],
+      proactiveSuggestions: [],
+    };
+    let capturedArtifactKey: string | null | undefined;
+
+    const result = await executeCreativeOperation(state, {
+      runInternalAgent: async () => ({
+        writerOutput: output,
+        activeAgent: "写作",
+        controlEvents: [{
+          type: "begin_artifact_output",
+          kind: "chapter_draft",
+          artifactKey: "chapter_6_draft_v1",
+          summary: "正文草案",
+          submitForReview: true,
+          reviewerAgent: "编辑",
+        }],
+      }),
+      createOrUpdateTextArtifact: async (input) => {
+        capturedArtifactKey = input.artifactKey;
+        return {
+          id: "artifact-1",
+          novelId: input.novelId,
+          chapterId: input.chapterId ?? null,
+          taskId: input.taskId ?? null,
+          workflowRunId: null,
+          artifactKey: input.artifactKey ?? null,
+          kind: input.kind,
+          status: "under_review",
+          title: null,
+          summary: input.summary,
+          payload: { kind: input.kind, content: input.content },
+          diff: null,
+          createdByAgent: input.agentId,
+          updatedByAgent: input.agentId,
+          reviewerAgent: input.reviewerAgent ?? null,
+          revision: 1,
+          evaluations: [],
+          createdAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString(),
+        };
+      },
+    });
+
+    assert.equal(capturedArtifactKey, "task-1:write_chapter");
+    assert.equal(result.statePatch.activeArtifactId, "artifact-1");
+  });
+
   it("create_outline uses agent_updates artifacts for structured outline drafts", async () => {
     const state = createState("create_outline");
     state.currentOperation = {

@@ -1,6 +1,24 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { createSSEController } from "../sse-adapter";
+import { createDirectStreamCallbacks, createSSEController } from "../sse-adapter";
+
+describe("createDirectStreamCallbacks", () => {
+  it("forwards each provider delta as one unicode-safe SSE chunk", () => {
+    const sent: Array<{ type: string; data?: Record<string, unknown> }> = [];
+    const callbacks = createDirectStreamCallbacks((type, data) => {
+      sent.push({ type, data });
+    });
+
+    callbacks["校验"]("校验通过🙂");
+
+    assert.deepEqual(sent, [
+      {
+        type: "agent_chunk",
+        data: { agentId: "校验", chunk: "校验通过🙂" },
+      },
+    ]);
+  });
+});
 
 describe("createSSEController", () => {
   it("treats LangGraph __interrupt__ updates as a user input interrupt", () => {

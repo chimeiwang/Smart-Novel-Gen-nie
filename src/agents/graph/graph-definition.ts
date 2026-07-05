@@ -10,7 +10,7 @@
 
 import { StateGraph, StateSchema, ReducedValue, UntrackedValue, START, END, MemorySaver, getWriter } from "@langchain/langgraph";
 import { z } from "zod";
-import type { WritingState, AgentOutput, CoreAgentId, AgentMessage, AgentUpdates, AgentControlEvent, WritingPhase, ArtifactReviewState, OperationStep, WritingRuntimeContext } from "./state";
+import type { WritingState, AgentOutput, CoreAgentId, AgentMessage, AgentUpdates, AgentControlEvent, WritingPhase, ArtifactReviewState, ArtifactReviewResult, OperationStep, WritingRuntimeContext } from "./state";
 import {
   CORE_AGENT_IDS,
   AGENT_NAMES,
@@ -43,6 +43,10 @@ const mergeAgentOutputs = (
   current: Partial<Record<CoreAgentId, AgentOutput>>,
   next: Partial<Record<CoreAgentId, AgentOutput>> | undefined
 ) => ({ ...current, ...(next ?? {}) });
+const mergeArtifactReviewResults = (
+  current: ArtifactReviewResult[],
+  next: ArtifactReviewResult[] | undefined
+) => current.concat(next ?? []);
 
 export const WritingStateAnnotation = new StateSchema({
   taskId: z.string(),
@@ -109,6 +113,14 @@ export const WritingStateAnnotation = new StateSchema({
   activeArtifactId: z.string().nullable().default(null),
   artifactMode: z.custom<"none" | "review_loop">().default("none"),
   reviewerAgent: z.custom<CoreAgentId | null>().nullable().default(null),
+  reviewWorkerAgent: z.custom<CoreAgentId | null>().nullable().default(null),
+  artifactReviewResults: new ReducedValue<ArtifactReviewResult[], ArtifactReviewResult[]>(
+    z.custom<ArtifactReviewResult[]>().default(() => []),
+    {
+      inputSchema: z.custom<ArtifactReviewResult[]>(),
+      reducer: mergeArtifactReviewResults,
+    }
+  ),
   reviserAgent: z.custom<CoreAgentId | null>().nullable().default(null),
   pendingArtifactRevision: z.custom<WritingState["pendingArtifactRevision"]>().nullable().default(null),
   artifactIteration: z.number().default(0),

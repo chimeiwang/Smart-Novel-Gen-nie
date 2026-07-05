@@ -33,3 +33,23 @@ export function isVisibleToolActivity(toolName: string): boolean {
 export function getToolActivityLabel(toolName: string): string {
   return TOOL_LABELS[toolName] ?? toolName;
 }
+
+export function countVisibleToolCalls(
+  entries: ReadonlyArray<{ toolName?: string; resultSummary?: string }>
+): number {
+  return entries.filter((entry) =>
+    entry.toolName &&
+    !entry.resultSummary &&
+    isVisibleToolActivity(entry.toolName)
+  ).length;
+}
+
+export function getToolActivitySummary(
+  completionStatus: "done" | "error",
+  toolCallCount: number
+): string {
+  const statusLabel = completionStatus === "error" ? "未完成" : "已完成";
+  return toolCallCount > 0
+    ? `${statusLabel} · 工具调用 ${toolCallCount} 次`
+    : `${statusLabel} · 未调用工具`;
+}

@@ -655,6 +655,21 @@ describe("parseControlEventArgs", () => {
     }
   });
 
+  it("submit_evaluation summary 保留超过 1000 字符的完整内容", () => {
+    const summary = "完整复审结论。".repeat(200);
+    const event = parseControlEventArgs("submit_evaluation", {
+      artifactKey: "long-evaluation-1",
+      verdict: "block",
+      summary,
+    });
+
+    assert.ok(event);
+    assert.equal(event!.type, "submit_evaluation");
+    if (event!.type === "submit_evaluation") {
+      assert.equal(event.summary, summary);
+    }
+  });
+
   it("解析旧 submit_evaluation revise 参数仍然有效", () => {
     const event = parseControlEventArgs("submit_evaluation", {
       artifactKey: "outline-revision-1",
@@ -901,7 +916,7 @@ describe("AgentRuntimeImpl", () => {
     assert.equal(JSON.stringify(calls[1].messages).includes("reasoning_content"), false);
   });
 
-  it("回灌给下一轮模型的长工具结果会截断，但调试记录保留完整结果", async () => {
+  it("回灌给下一轮模型的长工具结果保持完整", async () => {
     const calls: ToolCallTurnOptions[] = [];
     const longResult = "大纲".repeat(4000);
     const runtimePort: ModelRuntimePort = {
@@ -947,10 +962,49 @@ describe("AgentRuntimeImpl", () => {
     assert.equal(result.toolResults[0].result, longResult);
     const secondMessages = calls[1].messages as Array<{ role?: string; content?: unknown }>;
     const toolMessage = secondMessages.find((message) => message.role === "tool");
-    assert.equal(typeof toolMessage?.content, "string");
-    assert.ok((toolMessage!.content as string).length < longResult.length);
-    assert.match(toolMessage!.content as string, /工具结果已截断/);
-    assert.match(toolMessage!.content as string, /list_outline_summary/);
+    assert.equal(toolMessage?.content, longResult);
+  });
+
+  it("复审草案工具结果保留足够正文供 reviewer 审核", async () => {
+    const calls: ToolCallTurnOptions[] = [];
+    const longDraft = "正文".repeat(4000);
+    const runtimePort: ModelRuntimePort = {
+      streamText: async () => ({ content: "" }),
+      completeText: async () => ({ content: "" }),
+      completeStructured: (async (schema) => ({ data: schema.parse({}) })) as ModelRuntimePort["completeStructured"],
+      runToolCallTurn: async (options) => {
+        calls.push(options);
+        if (calls.length === 1) {
+          return {
+            content: "读取草案",
+            reasoningContent: "",
+            toolCalls: [{
+              id: "call_artifact",
+              type: "function",
+              function: { name: "get_active_review_artifact", arguments: "{}" },
+            }],
+            finishReason: "tool_calls",
+          };
+        }
+        return {
+          content: "done",
+          reasoningContent: "",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+    };
+    const runtime = new AgentRuntimeImpl({ runtime: runtimePort });
+
+    await runtime.runTurn({
+      ...createRuntimeOptions(),
+      tools: getOpenAITools(["get_active_review_artifact"]),
+      toolExecutor: async () => longDraft,
+    });
+
+    const secondMessages = calls[1].messages as Array<{ role?: string; content?: unknown }>;
+    const toolMessage = secondMessages.find((message) => message.role === "tool");
+    assert.equal(toolMessage?.content, longDraft);
   });
 
   it("submit_evaluation 可在同一轮输出报告并终止，不再发起 ACK 后续请求", async () => {
@@ -1000,6 +1054,268 @@ describe("AgentRuntimeImpl", () => {
     assert.match(result.visibleContent, /当前草案需要修改/);
     assert.match(result.visibleContent, /需要修改/);
     assert.match(result.visibleContent, /增强章末钩子/);
+  });
+
+  it("复审 Agent 空回复且未提交 submit_evaluation 时会追加一次修复回合", async () => {
+    const calls: ToolCallTurnOptions[] = [];
+    const evaluationArgs = {
+      artifactId: "artifact-1",
+      artifactKey: "draft-1",
+      verdict: "block",
+      summary: "信息不足，无法完成复审。",
+      requiredChanges: "请重新发起审核。",
+    };
+    const runtimePort: ModelRuntimePort = {
+      streamText: async () => ({ content: "" }),
+      completeText: async () => ({ content: "" }),
+      completeStructured: (async (schema) => ({ data: schema.parse({}) })) as ModelRuntimePort["completeStructured"],
+      runToolCallTurn: async (options) => {
+        calls.push(options);
+        if (calls.length === 1) {
+          return {
+            content: "",
+            reasoningContent: "",
+            toolCalls: [],
+            finishReason: "stop",
+          };
+        }
+        return {
+          content: "",
+          reasoningContent: "",
+          toolCalls: [{
+            id: "call_submit_evaluation",
+            type: "function",
+            function: {
+              name: "submit_evaluation",
+              arguments: JSON.stringify(evaluationArgs),
+            },
+          }],
+          finishReason: "tool_calls",
+        };
+      },
+    };
+    const runtime = new AgentRuntimeImpl({ runtime: runtimePort });
+
+    const result = await runtime.runTurn({
+      ...createRuntimeOptions(),
+      tools: getOpenAITools(["submit_evaluation"]),
+      toolExecutor: async () => "unused",
+      terminalControlTools: ["submit_evaluation"],
+    });
+
+    assert.equal(calls.length, 2);
+    assert.match(JSON.stringify(calls[1].messages), /复审未完成/);
+    assert.equal(result.controlEvents[0]?.type, "submit_evaluation");
+    assert.equal(result.finishReason, "terminal_control_event");
+    assert.match(result.visibleContent, /信息不足/);
+    assert.match(result.visibleContent, /请重新发起审核/);
+  });
+
+  it("复审 Agent 修复回合仍未提交 submit_evaluation 时自动 block", async () => {
+    const calls: ToolCallTurnOptions[] = [];
+    const runtimePort: ModelRuntimePort = {
+      streamText: async () => ({ content: "" }),
+      completeText: async () => ({ content: "" }),
+      completeStructured: (async (schema) => ({ data: schema.parse({}) })) as ModelRuntimePort["completeStructured"],
+      runToolCallTurn: async (options) => {
+        calls.push(options);
+        return {
+          content: "",
+          reasoningContent: "",
+          toolCalls: [],
+          finishReason: "stop",
+        };
+      },
+    };
+    const runtime = new AgentRuntimeImpl({ runtime: runtimePort });
+
+    const result = await runtime.runTurn({
+      ...createRuntimeOptions(),
+      tools: getOpenAITools(["submit_evaluation"]),
+      toolExecutor: async () => "unused",
+      terminalControlTools: ["submit_evaluation"],
+      metadata: {
+        agentId: "校验",
+        taskId: "task-1",
+        operationKind: "write_chapter",
+        activeArtifactId: "artifact-1",
+      },
+    });
+
+    assert.equal(calls.length, 2);
+    assert.equal(result.finishReason, "terminal_control_event");
+    const event = result.controlEvents[0];
+    assert.equal(event?.type, "submit_evaluation");
+    if (event?.type !== "submit_evaluation") throw new Error("missing evaluation event");
+    assert.equal(event.verdict, "block");
+    assert.equal(event.artifactId, "artifact-1");
+    assert.equal(event.artifactKey, "task-1:write_chapter");
+    assert.match(event.summary, /校验未按要求调用 submit_evaluation/);
+  });
+
+  it("复审 Agent submit_evaluation 参数解析失败时重试并保留 revise 结论", async () => {
+    const fullReview = `完整评审：需要返工。${"具体问题与修改依据。".repeat(120)}`;
+    const calls: ToolCallTurnOptions[] = [];
+    const runtimePort: ModelRuntimePort = {
+      streamText: async () => ({ content: "" }),
+      completeText: async () => ({ content: "" }),
+      completeStructured: (async (schema) => ({ data: schema.parse({}) })) as ModelRuntimePort["completeStructured"],
+      runToolCallTurn: async (options) => {
+        calls.push(options);
+        if (calls.length === 1) {
+          return {
+            content: fullReview,
+            reasoningContent: "",
+            toolCalls: [{
+              id: "call_submit_evaluation_broken",
+              type: "function",
+              function: {
+                name: "submit_evaluation",
+                arguments: "{\"artifactKey\":",
+              },
+            }],
+            finishReason: "length",
+          };
+        }
+        return {
+          content: "",
+          reasoningContent: "",
+          toolCalls: [{
+            id: "call_submit_evaluation_repaired",
+            type: "function",
+            function: {
+              name: "submit_evaluation",
+              arguments: JSON.stringify({
+                artifactKey: "task-1:write_chapter",
+                verdict: "revise",
+                summary: fullReview,
+                requiredChanges: "按完整评审返工。",
+                revisionMode: "rewrite",
+              }),
+            },
+          }],
+          finishReason: "tool_calls",
+        };
+      },
+    };
+    const runtime = new AgentRuntimeImpl({ runtime: runtimePort });
+
+    const result = await runtime.runTurn({
+      ...createRuntimeOptions(),
+      tools: getOpenAITools(["submit_evaluation"]),
+      toolExecutor: async () => "unused",
+      terminalControlTools: ["submit_evaluation"],
+      metadata: {
+        agentId: "编辑",
+        taskId: "task-1",
+        operationKind: "write_chapter",
+      },
+    });
+
+    assert.equal(calls.length, 2);
+    assert.match(JSON.stringify(calls[1].messages), /参数 JSON 不完整或不合法/);
+    assert.match(JSON.stringify(calls[1].messages), /完整评审：需要返工/);
+    assert.equal(result.finishReason, "terminal_control_event");
+    const event = result.controlEvents[0];
+    assert.equal(event?.type, "submit_evaluation");
+    if (event?.type !== "submit_evaluation") throw new Error("missing evaluation event");
+    assert.equal(event.verdict, "revise");
+    assert.equal(event.artifactKey, "task-1:write_chapter");
+    assert.equal(event.summary, fullReview);
+    assert.match(result.visibleContent, /完整评审：需要返工/);
+  });
+
+  it("复审 Agent submit_evaluation 修复仍解析失败时返回协议错误而不是 block", async () => {
+    let calls = 0;
+    const runtimePort: ModelRuntimePort = {
+      streamText: async () => ({ content: "" }),
+      completeText: async () => ({ content: "" }),
+      completeStructured: (async (schema) => ({ data: schema.parse({}) })) as ModelRuntimePort["completeStructured"],
+      runToolCallTurn: async () => {
+        calls += 1;
+        return {
+          content: calls === 1 ? "完整评审正文。" : "",
+          reasoningContent: "",
+          toolCalls: [{
+            id: `call_submit_evaluation_broken_${calls}`,
+            type: "function",
+            function: { name: "submit_evaluation", arguments: "{\"artifactKey\":" },
+          }],
+          finishReason: "length",
+        };
+      },
+    };
+    const runtime = new AgentRuntimeImpl({ runtime: runtimePort });
+
+    const result = await runtime.runTurn({
+      ...createRuntimeOptions(),
+      tools: getOpenAITools(["submit_evaluation"]),
+      toolExecutor: async () => "unused",
+      terminalControlTools: ["submit_evaluation"],
+      metadata: { agentId: "编辑", taskId: "task-1", operationKind: "write_chapter" },
+    });
+
+    assert.equal(calls, 2);
+    assert.equal(result.finishReason, "tool_parse_error");
+    assert.equal(result.controlEvents.length, 0);
+    assert.match(result.visibleContent, /完整评审正文/);
+    assert.doesNotMatch(result.visibleContent, /系统已转为 block/);
+  });
+
+  it("复审 Agent 修复回合继续调用读工具时自动 block", async () => {
+    const calls: ToolCallTurnOptions[] = [];
+    const runtimePort: ModelRuntimePort = {
+      streamText: async () => ({ content: "" }),
+      completeText: async () => ({ content: "" }),
+      completeStructured: (async (schema) => ({ data: schema.parse({}) })) as ModelRuntimePort["completeStructured"],
+      runToolCallTurn: async (options) => {
+        calls.push(options);
+        if (calls.length === 1) {
+          return {
+            content: "",
+            reasoningContent: "",
+            toolCalls: [],
+            finishReason: "length",
+          };
+        }
+        return {
+          content: "",
+          reasoningContent: "",
+          toolCalls: [{
+            id: "call_get_recent_chapters",
+            type: "function",
+            function: { name: "get_recent_chapters", arguments: "{}" },
+          }],
+          finishReason: "tool_calls",
+        };
+      },
+    };
+    const runtime = new AgentRuntimeImpl({ runtime: runtimePort });
+    let readCalls = 0;
+
+    const result = await runtime.runTurn({
+      ...createRuntimeOptions(),
+      tools: getOpenAITools(["submit_evaluation", "get_recent_chapters"]),
+      toolExecutor: async () => {
+        readCalls += 1;
+        return "recent chapters";
+      },
+      terminalControlTools: ["submit_evaluation"],
+      metadata: {
+        agentId: "校验",
+        taskId: "task-1",
+        operationKind: "write_chapter",
+      },
+    });
+
+    assert.equal(calls.length, 2);
+    assert.equal(readCalls, 0);
+    assert.equal(result.finishReason, "terminal_control_event");
+    const event = result.controlEvents[0];
+    assert.equal(event?.type, "submit_evaluation");
+    if (event?.type !== "submit_evaluation") throw new Error("missing evaluation event");
+    assert.equal(event.verdict, "block");
+    assert.equal(event.artifactKey, "task-1:write_chapter");
   });
 
   it("submit_evaluation 成功后不再执行同轮排在其后的工具", async () => {

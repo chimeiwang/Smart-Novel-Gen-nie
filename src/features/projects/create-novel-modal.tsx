@@ -15,6 +15,11 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
   const [pending, setPending] = useState(false);
   const [name, setName] = useState("");
   const [summary, setSummary] = useState("");
+  const [genre, setGenre] = useState("");
+  const [protagonist, setProtagonist] = useState("");
+  const [coreSellingPoint, setCoreSellingPoint] = useState("");
+  const [readerPromise, setReaderPromise] = useState("");
+  const [firstChapterGoal, setFirstChapterGoal] = useState("");
 
   const handleSubmit = async (formData: FormData) => {
     setPending(true);
@@ -42,7 +47,7 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
         </div>
         <div className="modal-body">
           <form action={handleSubmit} className="stack">
-            <p className="muted">创建小说后，系统会自动生成第一章、默认大纲和剧情进度。</p>
+            <p className="muted">先补齐几个写作锚点。创建后会自动生成第一章、默认大纲、剧情进度和作品圣经。</p>
             <label className="stack">
               <span>小说名称</span>
               <input
@@ -54,16 +59,70 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
                 onChange={(e) => setName(e.target.value)}
               />
             </label>
+            <div className="onboarding-grid">
+              <label className="stack">
+                <span>题材/频道</span>
+                <input
+                  className="input"
+                  name="genre"
+                  placeholder="东方玄幻、都市异能、古言..."
+                  value={genre}
+                  onChange={(e) => setGenre(e.target.value)}
+                />
+              </label>
+              <label className="stack">
+                <span>主角一句话</span>
+                <input
+                  className="input"
+                  name="protagonist"
+                  placeholder="谁，想要什么，缺什么"
+                  value={protagonist}
+                  onChange={(e) => setProtagonist(e.target.value)}
+                />
+              </label>
+            </div>
             <label className="stack">
               <span>作品简介</span>
               <textarea
                 className="textarea"
                 name="summary"
-                placeholder="写一句故事设定，方便后续大纲和智能写作统一方向"
+                placeholder="一句话讲清故事起点，后续大纲和智能写作会参考"
                 value={summary}
                 onChange={(e) => setSummary(e.target.value)}
               />
             </label>
+            <label className="stack">
+              <span>核心卖点</span>
+              <input
+                className="input"
+                name="coreSellingPoint"
+                placeholder="这本书最值得追下去的点"
+                value={coreSellingPoint}
+                onChange={(e) => setCoreSellingPoint(e.target.value)}
+              />
+            </label>
+            <div className="onboarding-grid">
+              <label className="stack">
+                <span>读者承诺</span>
+                <input
+                  className="input"
+                  name="readerPromise"
+                  placeholder="读者持续阅读会得到什么"
+                  value={readerPromise}
+                  onChange={(e) => setReaderPromise(e.target.value)}
+                />
+              </label>
+              <label className="stack">
+                <span>第一章目标</span>
+                <input
+                  className="input"
+                  name="firstChapterGoal"
+                  placeholder="本章必须完成的推进"
+                  value={firstChapterGoal}
+                  onChange={(e) => setFirstChapterGoal(e.target.value)}
+                />
+              </label>
+            </div>
             <div className="row">
               <button className="button" type="submit" disabled={pending || !name.trim()}>
                 {pending ? "创建中..." : "新建小说"}

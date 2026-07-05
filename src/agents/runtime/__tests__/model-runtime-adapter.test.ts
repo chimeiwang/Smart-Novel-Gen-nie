@@ -10,6 +10,7 @@ import {
   applyLangChainStreamChunk,
   createLangChainStreamAccumulator,
   LegacyOpenAIRuntime,
+  ModelCallTimeoutError,
   openAIMessagesToLangChain,
   usageFromLangChain,
 } from "../model-runtime";
@@ -104,6 +105,7 @@ describe("LangChain stream adapter", () => {
       promptTokens: 11,
       completionTokens: 7,
       totalTokens: 18,
+      cachedTokens: 0,
     });
     assert.deepEqual(accumulator.toolCallAccumulator.get(0), {
       id: "call_updates",
@@ -117,10 +119,12 @@ describe("LangChain stream adapter", () => {
       input_tokens: 3,
       output_tokens: 5,
       total_tokens: 8,
+      input_token_details: { cache_read: 2 },
     }), {
       promptTokens: 3,
       completionTokens: 5,
       totalTokens: 8,
+      cachedTokens: 2,
     });
   });
 });
@@ -204,6 +208,39 @@ describe("ModelRuntime tool-call turn boundary", () => {
     assert.equal(result.toolCalls[0].function.name, "submit_evaluation");
     assert.equal("controlEvents" in result, false);
   });
+
+  it("times out a hanging model call", async () => {
+    const previousTimeout = process.env.LLM_CALL_TIMEOUT_MS;
+    process.env.LLM_CALL_TIMEOUT_MS = "10";
+    const client = {
+      chat: {
+        completions: {
+          create: () => new Promise(() => {}),
+        },
+      },
+    };
+    const runtime = new LegacyOpenAIRuntime({
+      client: client as never,
+      isAiConfigured: () => true,
+      billing: createBillingStub(),
+    });
+
+    try {
+      await assert.rejects(
+        () => runtime.runToolCallTurn({
+          messages: [{ role: "user", content: "会超时" }],
+          tools: [],
+        }),
+        (error) => error instanceof ModelCallTimeoutError && /10ms/.test(error.message)
+      );
+    } finally {
+      if (previousTimeout === undefined) {
+        delete process.env.LLM_CALL_TIMEOUT_MS;
+      } else {
+        process.env.LLM_CALL_TIMEOUT_MS = previousTimeout;
+      }
+    }
+  });
 });
 
 describe("ModelCallProfile", () => {
@@ -229,11 +266,11 @@ describe("ModelCallProfile", () => {
 
     assert.deepEqual(result.data, { ok: true });
     assert.equal(client.calls, 1);
-    assert.equal((client.requests[0] as { max_tokens?: number }).max_tokens, 3000);
+    assert.equal((client.requests[0] as { max_tokens?: number }).max_tokens, 384000);
     assert.equal("reasoning_effort" in (client.requests[0] as Record<string, unknown>), false);
   });
 
-  it("uses the fast budget and medium native reasoning for tool-call turns without prompt injection", async () => {
+  it("uses the full output budget and medium native reasoning for fast tool-call turns", async () => {
     const stream = createStream([
       {
         choices: [{ delta: { content: "done" }, finish_reason: "stop" }],
@@ -258,7 +295,7 @@ describe("ModelCallProfile", () => {
       reasoning_effort?: string;
       messages?: Array<{ content?: string }>;
     };
-    assert.equal(request.max_tokens, 3000);
+    assert.equal(request.max_tokens, 384000);
     assert.equal(request.reasoning_effort, "medium");
     assert.equal(JSON.stringify(request.messages).includes("Absolute maximum"), false);
   });

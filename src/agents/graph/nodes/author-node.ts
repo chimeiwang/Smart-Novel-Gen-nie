@@ -39,7 +39,7 @@ const authorDefinition: AgentDefinition = {
   // Phase 7：新协议模式
   outputMode: "paragraph_text_with_control_tools",
 
-  toolCapabilities: ["novel.read", "character.read", "lore.read", "plot.read", "chapter.read", "style.read", "control.artifact"],
+  toolCapabilities: ["novel.read", "character.read", "lore.read", "plot.read", "chapter.read", "style.read", "artifact.read", "control.artifact"],
   modelProfile: "normal",
   reasoningEffort: "medium",
 
@@ -144,7 +144,16 @@ const authorDefinition: AgentDefinition = {
       });
     }
 
-    const request = userMessage || (rewriteRequest ? "请根据校验意见修改相关段落" : "请根据当前写作目标创作合适的文本");
+    const activeArtifactId = state.artifactReview?.activeArtifactId ?? state.activeArtifactId ?? null;
+    const isArtifactRevision = Boolean(activeArtifactId && pendingAgentCall?.toAgent === AGENT_ID);
+    const request = isArtifactRevision
+      ? [
+          `你正在返工当前待审核正文草案（artifactId：${activeArtifactId}）。`,
+          "先调用 get_active_review_artifact 读取原草案，再按本轮直接任务里的 requiredChanges 修改。",
+          "完成后必须调用 begin_artifact_output 提交新的 chapter_draft revision；不要只输出说明文字。",
+          userMessage ? `原始用户请求：${userMessage}` : "",
+        ].filter(Boolean).join("\n")
+      : userMessage || (rewriteRequest ? "请根据校验意见修改相关段落" : "请根据当前写作目标创作合适的文本");
     messages.push({ role: "user", content: request });
 
     return messages;

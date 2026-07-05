@@ -59,6 +59,8 @@ function createState(): GraphState {
     activeArtifactId: "artifact-1",
     artifactMode: "review_loop",
     reviewerAgent: "校验",
+    reviewWorkerAgent: null,
+    artifactReviewResults: [],
     reviserAgent: null,
     pendingArtifactRevision: null,
     artifactIteration: 1,

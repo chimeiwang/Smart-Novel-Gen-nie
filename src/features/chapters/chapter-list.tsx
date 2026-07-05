@@ -15,6 +15,11 @@ type ChapterListProps = {
     order: number;
     updatedAt: string;
     status?: string;
+    wordCount?: number;
+    approvedBeatPlan?: {
+      sceneCount: number;
+      totalEstimatedWords: number;
+    } | null;
   }>;
 };
 
@@ -56,8 +61,10 @@ export function ChapterList({
             className={`chapter-link ${activeChapterId === chapter.id ? "active" : ""}`}
           >
             <div className="title-md">{chapter.title}</div>
-            <div className="row row-between">
-              <span className="muted">排序 #{chapter.order}</span>
+            <div className="chapter-link-meta">
+              <span>排序 #{chapter.order}</span>
+              <span>{chapter.wordCount ?? 0} 字</span>
+              <span>{formatBeatPlanMeta(chapter.approvedBeatPlan)}</span>
               <span className="badge">{getStatusLabel(chapter.status)}</span>
             </div>
           </Link>
@@ -71,4 +78,9 @@ function getStatusLabel(status?: string) {
   if (status === "review") return "待审";
   if (status === "completed") return "完成";
   return "草稿";
+}
+
+function formatBeatPlanMeta(plan?: { sceneCount: number; totalEstimatedWords: number } | null) {
+  if (!plan) return "未确认章节计划";
+  return `章节计划 ${plan.sceneCount} 场 · ${plan.totalEstimatedWords} 字`;
 }

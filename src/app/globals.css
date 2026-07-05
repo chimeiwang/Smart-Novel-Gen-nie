@@ -478,6 +478,17 @@ button {
   border: 1px solid transparent;
 }
 
+.chapter-link-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
 .chapter-link.active {
   background: var(--accent-soft);
   border-color: var(--border-strong);
@@ -662,6 +673,12 @@ button {
 
 .modal-body {
   padding: 14px;
+}
+
+.onboarding-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
 }
 
 /* 编辑器布局 */

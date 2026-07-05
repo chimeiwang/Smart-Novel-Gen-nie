@@ -238,6 +238,8 @@ export function createBaseGraphState(input: {
     activeArtifactId: null,
     artifactMode: "none",
     reviewerAgent: null,
+    reviewWorkerAgent: null,
+    artifactReviewResults: [],
     reviserAgent: null,
     pendingArtifactRevision: null,
     artifactIteration: 0,
@@ -500,6 +502,7 @@ async function runInitialStateWorkflow(
         streamCallbacks: createDirectStreamCallbacks(sendEvent),
         eventCallbacks: createDirectEventCallbacks(sendEvent),
       };
+      auditLog.recordGraphInitialState(graphInput);
 
       let wasInterrupted = false;
       let invokeFinalState: GraphState | null = null;
@@ -554,15 +557,24 @@ async function runInitialStateWorkflow(
         }
         sendAgentDoneFallback(fs, sendEvent, sentKeys);
         if (!wasInterrupted) {
-          sendEvent("done", {
-            taskId,
-            conversationSummary: buildContextSummary(fs as unknown as WritingState),
-            activeAgent: fs.activeAgent,
-          });
-          auditLog.recordWorkflowEvent("workflow_completed", {
-            activeAgent: fs.activeAgent,
-            phase: fs.phase,
-          });
+          if (fs.errorMessage) {
+            sendEvent("error", { message: fs.errorMessage });
+            auditLog.recordWorkflowEvent("workflow_failed", {
+              activeAgent: fs.activeAgent,
+              phase: fs.phase,
+              errorMessage: fs.errorMessage,
+            });
+          } else {
+            sendEvent("done", {
+              taskId,
+              conversationSummary: buildContextSummary(fs as unknown as WritingState),
+              activeAgent: fs.activeAgent,
+            });
+            auditLog.recordWorkflowEvent("workflow_completed", {
+              activeAgent: fs.activeAgent,
+              phase: fs.phase,
+            });
+          }
           await cleanupGraphCheckpoint(taskId, auditLog);
         }
       }
@@ -878,6 +890,10 @@ export async function resumeWriting(
               },
             },
           }) as unknown as GraphState;
+          auditLog.recordGraphInitialState(graphSnapshot ?? {
+            phase: taskForResume.phase,
+            operationStep: "await_user_decision",
+          });
           if (shouldUseLangGraphStreamEvents()) {
             const eventStream = await graph.streamEvents(
               command,
@@ -975,6 +991,7 @@ export async function resumeWriting(
                 ...runtimeCallbacks,
               })
             : graphInput;
+          auditLog.recordGraphInitialState(effectiveGraphInput);
 
           if (shouldUseLangGraphStreamEvents()) {
             const sse = createSSEController(sendEvent, auditLog);
@@ -1008,14 +1025,23 @@ export async function resumeWriting(
             activeAgent: fs.activeAgent,
           });
           sendAgentDoneFallback(fs, sendEvent, sentKeys);
-          sendEvent("done", {
-            conversationSummary: buildContextSummary(fs as unknown as WritingState),
-            activeAgent: fs.activeAgent,
-          });
-          auditLog.recordWorkflowEvent("resume_completed", {
-            activeAgent: fs.activeAgent,
-            phase: fs.phase,
-          });
+          if (fs.errorMessage) {
+            sendEvent("error", { message: fs.errorMessage });
+            auditLog.recordWorkflowEvent("resume_failed", {
+              activeAgent: fs.activeAgent,
+              phase: fs.phase,
+              errorMessage: fs.errorMessage,
+            });
+          } else {
+            sendEvent("done", {
+              conversationSummary: buildContextSummary(fs as unknown as WritingState),
+              activeAgent: fs.activeAgent,
+            });
+            auditLog.recordWorkflowEvent("resume_completed", {
+              activeAgent: fs.activeAgent,
+              phase: fs.phase,
+            });
+          }
           if (fs.phase === "waiting_call" || getArtifactReviewState(fs).status === "awaiting_user") {
             scheduleGraphThreadCheckpointCleanup(taskId);
             auditLog.recordPersistenceEvent("graph_checkpoint_cleanup_scheduled", { taskId });

@@ -4,9 +4,9 @@
  * LangGraph 在这里表达业务步骤，而不是围绕 Agent 身份编排。
  */
 
-import { END, START, StateGraph, getWriter } from "@langchain/langgraph";
-import type { WritingState, AgentOutput, CoreAgentId, OperationStep } from "@/agents/graph/state";
-import { AGENT_NAMES, getArtifactReviewState, patchArtifactReviewState } from "@/agents/graph/state";
+import { END, START, Send, StateGraph, getWriter } from "@langchain/langgraph";
+import type { WritingState, AgentOutput, CoreAgentId, ArtifactReviewResult, OperationStep } from "@/agents/graph/state";
+import { AGENT_NAMES, AGENT_TO_OUTPUT_FIELD, getArtifactReviewState, patchArtifactReviewState } from "@/agents/graph/state";
 import type { GraphState, WritingStateAnnotation } from "@/agents/graph/graph-definition";
 import { emit } from "@/agents/graph/sse-adapter";
 import { addAgentMessage } from "@/agents/graph/context-manager";
@@ -36,6 +36,8 @@ export function buildOperationGraph(annotation: typeof WritingStateAnnotation) {
     .addNode("executeOperation", withOperationTrace("execute_operation", executeOperationNode))
     .addNode("submitArtifactOrRespond", withOperationTrace("submit_or_respond", submitArtifactOrRespondNode))
     .addNode("reviewArtifact", withOperationTrace("review_artifact", reviewArtifactNode))
+    .addNode("reviewArtifactWorker", withOperationTrace("review_artifact_worker", reviewArtifactWorkerNode))
+    .addNode("mergeArtifactReviews", withOperationTrace("merge_artifact_reviews", mergeArtifactReviewsNode))
     .addNode("applyArtifactPatch", withOperationTrace("apply_artifact_patch", applyArtifactPatchNode))
     .addNode("reviseArtifact", withOperationTrace("revise_artifact", reviseArtifactNode))
     .addNode("awaitUserDecision", withOperationTrace("await_user_decision", awaitUserDecisionNode))
@@ -44,7 +46,9 @@ export function buildOperationGraph(annotation: typeof WritingStateAnnotation) {
     .addEdge("prepareOperationContext", "executeOperation")
     .addConditionalEdges("executeOperation", routeAfterExecute, OPERATION_EXECUTE_ROUTES)
     .addConditionalEdges("submitArtifactOrRespond", routeAfterSubmit, OPERATION_SUBMIT_ROUTES)
-    .addConditionalEdges("reviewArtifact", routeAfterReview, OPERATION_REVIEW_ROUTES)
+    .addConditionalEdges("reviewArtifact", routeReviewWorkers)
+    .addEdge("reviewArtifactWorker", "mergeArtifactReviews")
+    .addConditionalEdges("mergeArtifactReviews", routeAfterReview, OPERATION_REVIEW_ROUTES)
     .addConditionalEdges("applyArtifactPatch", routeAfterPatch, OPERATION_PATCH_ROUTES)
     .addEdge("reviseArtifact", "executeOperation")
     .addEdge("awaitUserDecision", "suggestNextAction")
@@ -65,7 +69,6 @@ export const OPERATION_SUBMIT_ROUTES = {
 
 export const OPERATION_REVIEW_ROUTES = {
   applyArtifactPatch: "applyArtifactPatch",
-  reviewArtifact: "reviewArtifact",
   reviseArtifact: "reviseArtifact",
   awaitUserDecision: "awaitUserDecision",
   suggestNextAction: "suggestNextAction",
@@ -261,8 +264,7 @@ async function reviewArtifactNode(state: GraphState) {
   if (!operation || !activeArtifactId) return { operationStage: "整理结果", operationStep: "review_artifact" as OperationStep };
 
   const def = getOperationDefinition(operation.kind);
-  const reviewer = selectCurrentReviewer(state, def.reviewers);
-  if (!reviewer) {
+  if (def.reviewers.length === 0) {
     return {
       operationStage: "整理结果",
       operationStep: "review_artifact" as OperationStep,
@@ -270,19 +272,60 @@ async function reviewArtifactNode(state: GraphState) {
     };
   }
   const label = getCreativeOperationLabel(operation.kind);
-  emit(writer, "artifact_review_started", {
-    fromAgent: def.primaryAgent,
-    toAgent: reviewer,
-    artifactId: activeArtifactId,
-    artifactKey: `${state.taskId}:${operation.kind}`,
-    revision: review.iteration + 1,
-    depth: review.iteration + 1,
-  });
+  for (const reviewer of def.reviewers) {
+    emit(writer, "artifact_review_started", {
+      fromAgent: def.primaryAgent,
+      toAgent: reviewer,
+      artifactId: activeArtifactId,
+      artifactKey: `${state.taskId}:${operation.kind}`,
+      revision: review.iteration + 1,
+      depth: review.iteration + 1,
+    });
+  }
   emit(writer, "operation_stage", {
     stage: "审核草案",
     label,
-    message: `${AGENT_NAMES[reviewer]}正在审核${label}。`,
+    message: `${def.reviewers.map((reviewer) => AGENT_NAMES[reviewer]).join("、")}正在并行审核${label}。`,
   });
+
+  return {
+    operationStage: "审核草案",
+    operationStep: "review_artifact" as OperationStep,
+    reviewWorkerAgent: null,
+    ...patchArtifactReviewState(state, {
+      status: "reviewing",
+      reviewerAgent: null,
+      reviserAgent: null,
+      pendingRevision: null,
+    }),
+  };
+}
+
+export function routeReviewWorkers(
+  state: GraphState
+): Array<Send<"reviewArtifactWorker", Partial<GraphState>>> | "suggestNextAction" | "awaitUserDecision" {
+  const operation = state.currentOperation;
+  const review = getArtifactReviewState(state);
+  if (!operation || !review.activeArtifactId) return "suggestNextAction";
+
+  const reviewers = getOperationDefinition(operation.kind).reviewers;
+  if (reviewers.length === 0) return "awaitUserDecision";
+
+  return reviewers.map((reviewer) => new Send("reviewArtifactWorker", {
+    ...state,
+    reviewWorkerAgent: reviewer,
+  }));
+}
+
+async function reviewArtifactWorkerNode(state: GraphState) {
+  const writer = getWriter();
+  const reviewer = state.reviewWorkerAgent;
+  const operation = state.currentOperation;
+  const review = getArtifactReviewState(state);
+  const activeArtifactId = review.activeArtifactId;
+  if (!reviewer || !operation || !activeArtifactId) {
+    return { artifactReviewResults: [] as ArtifactReviewResult[] };
+  }
 
   const reviewPatch = await runOperationAgentWithLifecycle(
     state,
@@ -304,44 +347,189 @@ async function reviewArtifactNode(state: GraphState) {
   const requiredChanges = structuredEvaluation?.requiredChanges ?? (verdict === "pass" ? undefined : summary);
   const revisionMode = verdict === "revise" ? structuredEvaluation?.revisionMode ?? "rewrite" : "rewrite";
   const patches = verdict === "revise" ? structuredEvaluation?.patches : undefined;
-  const artifact = await submitArtifactEvaluation({
-    artifactId: activeArtifactId,
-    evaluatorAgent: reviewer,
-    verdict,
-    summary,
-    requiredChanges,
-  });
-
-  emit(writer, "workflow_evaluation_submitted", {
-    agentId: reviewer,
-    artifactId: artifact.id,
-    verdict,
-    summary,
-  });
 
   return {
-    ...reviewPatch,
-    activeAgent: reviewer,
+    artifactReviewResults: [{
+      artifactId: activeArtifactId,
+      operationKind: operation.kind,
+      iteration: review.iteration,
+      reviewer,
+      output: readReviewerOutput(reviewPatch, reviewer),
+      verdict,
+      summary,
+      requiredChanges,
+      revisionMode,
+      patches,
+      structured: Boolean(structuredEvaluation),
+    } satisfies ArtifactReviewResult],
+  };
+}
+
+async function mergeArtifactReviewsNode(state: GraphState) {
+  const writer = getWriter();
+  const operation = state.currentOperation;
+  const review = getArtifactReviewState(state);
+  const activeArtifactId = review.activeArtifactId;
+  if (!operation || !activeArtifactId) return { operationStage: "整理结果", operationStep: "review_artifact" as OperationStep };
+
+  const def = getOperationDefinition(operation.kind);
+  const results = collectCurrentReviewResults(state, def.reviewers);
+  const decision = decideReviewOutcome(results);
+  const outputPatch = buildReviewerOutputPatch(results);
+  const nextIteration = review.iteration + 1;
+  const reachedMaxRevision = decision.verdict === "revise" && nextIteration >= review.maxIterations;
+  const finalSummary = reachedMaxRevision
+    ? decision.summary + `\n已达到最大复审轮次（${review.maxIterations}），流程停止，避免把未通过草案提交给用户确认。`
+    : decision.summary;
+
+  const lastPassIndex = decision.verdict === "pass"
+    ? results.map((result) => result.verdict).lastIndexOf("pass")
+    : -1;
+  let artifactId = activeArtifactId;
+  for (const [index, result] of results.entries()) {
+    const artifact = await submitArtifactEvaluation({
+      artifactId,
+      evaluatorAgent: result.reviewer,
+      verdict: result.verdict,
+      summary: result.summary,
+      requiredChanges: result.requiredChanges,
+      deferPassStatus: result.verdict === "pass" && index !== lastPassIndex,
+    });
+    artifactId = artifact.id;
+    emit(writer, "workflow_evaluation_submitted", {
+      agentId: result.reviewer,
+      artifactId: artifact.id,
+      verdict: result.verdict,
+      summary: result.summary,
+    });
+  }
+
+  return {
+    ...outputPatch,
+    activeAgent: decision.reviewer,
     ...patchArtifactReviewState(state, {
-      status: verdict === "revise"
-        ? (revisionMode === "patch" ? "patching" : "revision_requested")
-        : verdict === "block"
+      status: decision.verdict === "revise" && !reachedMaxRevision
+        ? (decision.revisionMode === "patch" ? "patching" : "revision_requested")
+        : decision.verdict === "block" || reachedMaxRevision
           ? "revision_requested"
           : "reviewing",
-      activeArtifactId: artifact.id,
-      reviewerAgent: reviewer,
-      reviserAgent: verdict === "revise" && revisionMode === "rewrite" ? def.primaryAgent : null,
-      pendingRevision: verdict === "revise"
-        ? { summary, requiredChanges, revisionMode, patches }
+      activeArtifactId: artifactId,
+      reviewerAgent: decision.reviewer,
+      reviserAgent: decision.verdict === "revise" && decision.revisionMode === "rewrite" && !reachedMaxRevision
+        ? def.primaryAgent
         : null,
-      iteration: review.iteration + 1,
+      pendingRevision: decision.verdict === "revise" && !reachedMaxRevision
+        ? {
+            summary: finalSummary,
+            requiredChanges: decision.requiredChanges,
+            revisionMode: decision.revisionMode,
+            patches: decision.patches,
+          }
+        : null,
+      iteration: nextIteration,
     }),
-    activeArtifactId: artifact.id,
+    activeArtifactId: artifactId,
+    reviewWorkerAgent: null,
     operationStep: "review_artifact" as OperationStep,
     operationStage: "审核草案",
-    errorMessage: verdict === "block" ? summary : null,
+    errorMessage: decision.verdict === "block" || reachedMaxRevision ? finalSummary : null,
     controlEvents: undefined,
   };
+}
+
+function collectCurrentReviewResults(
+  state: GraphState,
+  reviewers: CoreAgentId[]
+): ArtifactReviewResult[] {
+  const operation = state.currentOperation;
+  const review = getArtifactReviewState(state);
+  const byReviewer = new Map<CoreAgentId, ArtifactReviewResult>();
+  for (const result of state.artifactReviewResults ?? []) {
+    if (
+      operation &&
+      result.artifactId === review.activeArtifactId &&
+      result.operationKind === operation.kind &&
+      result.iteration === review.iteration &&
+      reviewers.includes(result.reviewer)
+    ) {
+      byReviewer.set(result.reviewer, result);
+    }
+  }
+
+  return reviewers.map((reviewer) => byReviewer.get(reviewer) ?? {
+    artifactId: review.activeArtifactId ?? "",
+    operationKind: operation?.kind ?? "answer_question",
+    iteration: review.iteration,
+    reviewer,
+    output: null,
+    verdict: "block",
+    summary: `${AGENT_NAMES[reviewer]}没有返回复审结果，流程停止。`,
+    requiredChanges: `${AGENT_NAMES[reviewer]}没有返回复审结果，需重新发起审核。`,
+    revisionMode: "rewrite",
+    structured: false,
+  });
+}
+
+type ReviewOutcome = {
+  verdict: "pass" | "revise" | "block";
+  reviewer: CoreAgentId;
+  summary: string;
+  requiredChanges?: string;
+  revisionMode: "patch" | "rewrite";
+  patches?: ArtifactReviewResult["patches"];
+};
+
+export function decideReviewOutcome(results: ArtifactReviewResult[]): ReviewOutcome {
+  const blockers = results.filter((result) => result.verdict === "block");
+  if (blockers.length > 0) {
+    return {
+      verdict: "block",
+      reviewer: blockers[0].reviewer,
+      summary: formatReviewSummaries(blockers),
+      requiredChanges: formatRequiredChanges(blockers),
+      revisionMode: "rewrite",
+    };
+  }
+
+  const revisers = results.filter((result) => result.verdict === "revise");
+  if (revisers.length > 0) {
+    const patchCandidates = revisers.filter((result) => result.revisionMode === "patch" && result.patches?.length);
+    const canPatch = patchCandidates.length === revisers.length;
+    return {
+      verdict: "revise",
+      reviewer: revisers[0].reviewer,
+      summary: formatReviewSummaries(revisers),
+      requiredChanges: formatRequiredChanges(revisers),
+      revisionMode: canPatch ? "patch" : "rewrite",
+      patches: canPatch ? patchCandidates.flatMap((result) => result.patches ?? []) : undefined,
+    };
+  }
+
+  const last = results[results.length - 1];
+  return {
+    verdict: "pass",
+    reviewer: last?.reviewer ?? "编辑",
+    summary: formatReviewSummaries(results) || "所有复审 Agent 均已通过。",
+    revisionMode: "rewrite",
+  };
+}
+
+function formatReviewSummaries(results: ArtifactReviewResult[]): string {
+  return results.map((result) => `${AGENT_NAMES[result.reviewer]}：${result.summary}`).join("\n");
+}
+
+function formatRequiredChanges(results: ArtifactReviewResult[]): string {
+  return results.map((result) => `${AGENT_NAMES[result.reviewer]}：${result.requiredChanges ?? result.summary}`).join("\n");
+}
+
+function buildReviewerOutputPatch(results: ArtifactReviewResult[]): Partial<WritingState> {
+  const patch: Partial<WritingState> = { agentOutputs: {} };
+  for (const result of results) {
+    if (!result.output) continue;
+    patch[AGENT_TO_OUTPUT_FIELD[result.reviewer]] = result.output;
+    patch.agentOutputs = { ...(patch.agentOutputs ?? {}), [result.reviewer]: result.output };
+  }
+  return patch;
 }
 
 export function routeAfterReview(state: GraphState): keyof typeof OPERATION_REVIEW_ROUTES {
@@ -352,31 +540,8 @@ export function routeAfterReview(state: GraphState): keyof typeof OPERATION_REVI
   if (review.reviserAgent && review.iteration < review.maxIterations) {
     return "reviseArtifact";
   }
-  if (operation && hasNextReviewer(state, getOperationDefinition(operation.kind).reviewers)) {
-    return "reviewArtifact";
-  }
+  if (!operation) return "suggestNextAction";
   return "awaitUserDecision";
-}
-
-export function selectCurrentReviewer(
-  state: GraphState,
-  reviewers: CoreAgentId[]
-): CoreAgentId | null {
-  const review = getArtifactReviewState(state);
-  if (review.reviewerAgent) {
-    const currentIndex = reviewers.indexOf(review.reviewerAgent);
-    const nextReviewer = reviewers[currentIndex + 1];
-    if (nextReviewer) return nextReviewer;
-    if (currentIndex >= 0) return null;
-  }
-  return reviewers[0] ?? null;
-}
-
-export function hasNextReviewer(state: GraphState, reviewers: CoreAgentId[]): boolean {
-  const review = getArtifactReviewState(state);
-  if (!review.reviewerAgent) return reviewers.length > 0;
-  const currentIndex = reviewers.indexOf(review.reviewerAgent);
-  return currentIndex >= 0 && currentIndex < reviewers.length - 1;
 }
 
 async function applyArtifactPatchNode(state: GraphState) {
@@ -461,7 +626,7 @@ export function routeAfterPatch(state: GraphState): keyof typeof OPERATION_PATCH
   if (review.reviserAgent && review.iteration < review.maxIterations) {
     return "reviseArtifact";
   }
-  if (operation && hasNextReviewer(state, getOperationDefinition(operation.kind).reviewers)) {
+  if (operation && review.activeArtifactId && getOperationDefinition(operation.kind).reviewers.length > 0) {
     return "reviewArtifact";
   }
   return "awaitUserDecision";
@@ -470,6 +635,7 @@ export function routeAfterPatch(state: GraphState): keyof typeof OPERATION_PATCH
 async function reviseArtifactNode(state: GraphState) {
   const writer = getWriter();
   const operation = state.currentOperation;
+  const review = getArtifactReviewState(state);
   const label = operation ? getCreativeOperationLabel(operation.kind) : "待审核草案";
   emit(writer, "operation_stage", {
     stage: "返工草案",
@@ -489,7 +655,11 @@ async function reviseArtifactNode(state: GraphState) {
           fromAgent: state.activeAgent ?? "编辑",
           toAgent: operation.primaryAgent,
           reason: `${label}需要继续修改`,
-          specificQuestion: state.editorOutput?.content ?? state.validatorOutput?.content ?? "请根据审核意见继续修改草案。",
+          specificQuestion: review.pendingRevision?.requiredChanges ??
+            review.pendingRevision?.summary ??
+            state.editorOutput?.content ??
+            state.validatorOutput?.content ??
+            "请根据审核意见继续修改草案。",
           timestamp: Date.now(),
         }
       : state.pendingAgentCall,

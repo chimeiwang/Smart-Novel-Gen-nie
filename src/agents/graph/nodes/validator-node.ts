@@ -58,6 +58,17 @@ const validatorDefinition: AgentDefinition = {
   buildMessages: (state) => {
     const { userMessage, novelData, conversationHistory } = state;
     const availableContent = state.generatedContent || novelData.chapterContent;
+    const activeArtifactId = getActiveArtifactId(state);
+    const isArtifactReview = Boolean(activeArtifactId && state.pendingAgentCall?.toAgent === AGENT_ID);
+    const reviewerUserMessage = isArtifactReview
+      ? [
+          `你正在以一致性审计员身份复审当前待审核草案（artifactId：${activeArtifactId}）。这不是写作、续写或改写任务。`,
+          "先且只调用一次 get_active_review_artifact 读取草案；然后从角色一致性、设定一致性、大纲目标、伏笔和逻辑因果角度给出自然语言校验报告。",
+          "最后必须调用 submit_evaluation 提交 pass/revise/block 结构化结论。需要修改时用 verdict=revise，并在 requiredChanges 写清交给主责 Agent 执行的改法。",
+          "禁止调用 begin_artifact_output，禁止生成新的正文草案，禁止把自己当作写作 Agent。原始用户请求只作为背景，不是本轮直接任务。",
+          userMessage ? `原始用户请求：${userMessage}` : "",
+        ].filter(Boolean).join("\n")
+      : userMessage || "请从一致性审计角度指出当前作品最需要校验的风险点";
     const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
 
     messages.push({ role: "system", content: buildSystemPrompt() });
@@ -73,8 +84,6 @@ const validatorDefinition: AgentDefinition = {
     }
 
     if (conversationHistory.length > 0) {
-      const activeArtifactId = getActiveArtifactId(state);
-      const isArtifactReview = Boolean(activeArtifactId && state.pendingAgentCall?.toAgent === AGENT_ID);
       messages.push({
         role: "system",
         content: "## 对话历史\n\n" + buildConversationHistoryText(conversationHistory, isArtifactReview ? {
@@ -100,7 +109,7 @@ const validatorDefinition: AgentDefinition = {
       });
     }
 
-    messages.push({ role: "user", content: userMessage || "请从一致性审计角度指出当前作品最需要校验的风险点" });
+    messages.push({ role: "user", content: reviewerUserMessage });
 
     return messages;
   },

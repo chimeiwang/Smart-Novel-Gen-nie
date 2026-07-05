@@ -41,9 +41,7 @@ export function createDirectStreamCallbacks(sendEvent: SendEventFn): Record<stri
 
   for (const agentId of CORE_AGENT_IDS) {
     callbacks[agentId] = (chunk: string) => {
-      for (const char of Array.from(chunk)) {
-        sendEvent("agent_chunk", { agentId, chunk: char });
-      }
+      sendEvent("agent_chunk", { agentId, chunk });
     };
   }
 

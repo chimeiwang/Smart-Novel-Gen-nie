@@ -1,187 +1,87 @@
-# Workflow Event 本地日志格式
+# 人工工作流日志格式
 
-本文档定义 LangGraph 写作工作流的本地审计日志格式。日志采用 JSON Lines，每行是一条独立事件，便于后续按 `runId`、`taskId`、`node`、`agentId` 或 `eventType` 过滤和回放。
+本日志用于直接阅读一次 LangGraph 写作任务的真实执行过程，不以机器审计为主要目标。
 
-## 文件位置
-
-默认目录：
+## 人工入口
 
 ```text
-logs/workflow-events/
+logs/workflow-events/runs/YYYY-MM-DD/<task短号>.log
 ```
 
-默认文件名：
+同一 `WritingTask` 的首次执行和后续 resume 按实际发生时间连续追加。每次运行只写一次任务类型等固定上下文，后续事件不重复长 ID 和固定 metadata。
 
-```text
-workflow-events-YYYY-MM-DD.jsonl
-```
+文件按发生顺序包含：
 
-`logs/` 已在 `.gitignore` 中忽略，本地审计日志不会进入版本库。
+1. 工作流开始、完成、中断或失败。
+2. 完整可序列化 LangGraph 初始状态。
+3. LangGraph 节点完成顺序、关键状态前后差异和节点返回的完整 state patch。
+4. Agent 开始、完成和调用顺序。
+5. 实际发送给 LLM 的完整 messages 和 tools。
+6. LLM 返回的正文、供应商实际返回的 reasoning 和 tool calls。
+7. 每次 LLM 响应的输入、输出、缓存命中和总 token 数。
+8. 每个工具的完整解析参数和完整返回结果。
 
-可视化回放页面：
+人工日志不记录 token chunk、`on_chain_*`、Runnable、checkpoint namespace 等底层包装事件。callback、函数、循环引用和 `UntrackedValue` 的 `novelData` 属于 runtime-only 数据，会显式标记后排除；普通 tracked state、正文、LLM 内容和工具结果不得静默截断。
 
-```text
-/debug/workflow-events
-```
-
-页面默认关闭并返回 404，避免误触发本地日志扫描。需要查看本地 JSONL 回放时，在 `.env` 中设置 `WORKFLOW_EVENT_DEBUG_ENABLED=true` 后重启 Next.js 开发服务器。页面会读取本地 JSONL 日志，展示运行列表、LangGraph 固定节点图、实际执行路径高亮、事件时间线和单步状态 payload。
-
-可选环境变量：
+## 配置
 
 ```bash
-WORKFLOW_EVENT_LOG_ENABLED=false
-WORKFLOW_EVENT_DEBUG_ENABLED=false
+WORKFLOW_EVENT_LOG_ENABLED=true
+LLM_LOG_MODE=full
 WORKFLOW_EVENT_LOG_DIR=/absolute/path/to/workflow-events
-WORKFLOW_EVENT_LOG_DETAIL=verbose
 ```
 
-- `WORKFLOW_EVENT_LOG_ENABLED=false`：关闭本地 workflow event 日志。
-- `WORKFLOW_EVENT_DEBUG_ENABLED=false`：关闭 `/debug/workflow-events` 调试入口，关闭时返回 404；需要查看日志回放时设为 `true`。
-- `WORKFLOW_EVENT_LOG_DIR`：覆盖默认日志目录。
-- `WORKFLOW_EVENT_LOG_DETAIL=verbose`：记录更深层的状态 patch 内容，字符串 preview 提高到 4000 字符，数组 sample 提高到 20 项；适合本地深查，但日志会明显变大。
+- `WORKFLOW_EVENT_LOG_ENABLED=true`：生成统一人工工作流日志。
+- `LLM_LOG_MODE=full`：保证日志包含 LLM 输入、输出和工具内容原文。`summary` 不能满足人工还原调用过程的要求。
+- `WORKFLOW_EVENT_LOG_DIR`：覆盖默认目录。
+- `LLM_SPLIT_LOG_ENABLED=false`：有 `taskId` 的 Agent LLM 只写统一工作流日志，不再重复生成 `logs/llm/runs`、`logs/llm/tasks` 和每日索引。设为 `true` 才恢复旧分片。
 
-## 写入原则
+`logs/app-YYYY-MM-DD.log` 只记录应用运行、错误和 SSE 等普通程序日志。没有 `taskId` 的独立 LLM 调用无法归入某个工作流，仍会写入 `logs/llm` 作为兜底。
 
-- append-only：只追加，不在运行中修改历史行。
-- best-effort：写入失败不能影响 LangGraph 执行、SSE 输出或数据库写入。
-- 默认不保存完整正文、完整 `novelData`、完整 prompt、完整对话历史。
-- 大字段会被摘要化，保留类型、长度、键名和有限 preview。
-- `agent_chunk` 不落盘，避免流式正文逐字写爆日志。
-- 如需查看更完整的每步状态内容，打开 `WORKFLOW_EVENT_LOG_DETAIL=verbose` 后重新执行工作流；历史日志不会自动补全。
+## 可选机器审计
 
-## 顶层字段
+机器 JSONL 与人工日志分离，默认关闭：
 
-```ts
-interface WorkflowEventLogEntry {
-  schemaVersion: number;
-  runId: string;
-  seq: number;
-  timestamp: string;
-  source: "workflow" | "langgraph" | "sse" | "persistence" | "error";
-  eventType: string;
-  taskId: string;
-  runKind: "writing-workflow" | "resume-writing-workflow";
-  userId?: string | null;
-  novelId?: string | null;
-  chapterId?: string | null;
-  qualityCheckId?: string | null;
-  node?: string | null;
-  agentId?: string | null;
-  langGraphEvent?: string | null;
-  changedKeys?: Record<string, string[]> | string[];
-  payload?: unknown;
-}
+```bash
+WORKFLOW_MACHINE_EVENT_LOG_ENABLED=false
+WORKFLOW_EVENT_DEBUG_ENABLED=false
 ```
 
-字段说明：
-
-| 字段 | 说明 |
-|---|---|
-| `schemaVersion` | 当前为 `1`。后续格式变化时递增。 |
-| `runId` | 单次 SSE 工作流运行 ID。同一个 `taskId` 可以有多次 `runId`。 |
-| `seq` | 单次 `runId` 内从 `1` 开始递增的事件序号。 |
-| `timestamp` | ISO 时间。 |
-| `source` | 事件来源。 |
-| `eventType` | 事件类型，例如 `workflow_started`、`updates`、`agent_done`。 |
-| `taskId` | `WritingTask.id`，用于关联一次写作任务。 |
-| `runKind` | 新会话执行或 resume 执行。 |
-| `userId` / `novelId` / `chapterId` | 业务上下文。resume 早期事件可能缺少 `novelId` / `chapterId`，加载任务后补齐。 |
-| `qualityCheckId` | 如果本次工作流来自章节质量检查，则记录检查项 ID。 |
-| `node` | LangGraph 节点名或 SSE state update 节点名。 |
-| `agentId` | 业务 Agent ID，例如 `写作`、`校验`、`编辑`。 |
-| `langGraphEvent` | 原始 LangGraph event 名称。 |
-| `changedKeys` | 状态变更字段。`updates` 事件按节点分组。 |
-| `payload` | 摘要化 payload。 |
-
-## source 类型
-
-| source | 含义 |
-|---|---|
-| `workflow` | 工作流生命周期事件，例如开始、完成、中断、resume 模式选择。 |
-| `langgraph` | `graph.streamEvents()` 返回的原始事件摘要。 |
-| `sse` | 后端向前端发送的 SSE 业务事件摘要。 |
-| `persistence` | 显式记录的本地持久化或数据库副作用摘要。 |
-| `error` | 工作流运行器捕获的错误或鉴权失败等异常路径。 |
-
-## 当前会记录的事件
-
-`workflow`：
-
-- `sse_stream_created`
-- `workflow_started`
-- `workflow_interrupted`
-- `workflow_completed`
-- `resume_started`
-- `resume_mode_selected`
-- `resume_completed`
-
-`langgraph`：
-
-- `updates`
-- `custom`
-- `on_custom_event`
-- `interrupt`
-- 其他 LangGraph 事件会以原始 `event` 名称记录。
-
-`sse`：
-
-- `start`
-- `state_update`
-- `agent_start`
-- `agent_done`
-- `intent_classified`
-- `command_parsed`
-- `artifact_submitted`
-- `quality_report_submitted`
-- `validation_report_submitted`
-- `done`
-- `error`
-- 其他通过 SSE 发给前端的业务事件。
-
-`persistence`：
-
-- `history_loaded`
-- `history_saved`
-- `task_state_updated`
-- `artifact_applied`
-- `artifact_deleted`
-
-`error`：
-
-- `workflow_runner_error`
-- `task_not_found`
-- `task_auth_failed`
+只有显式设置 `WORKFLOW_MACHINE_EVENT_LOG_ENABLED=true` 才会继续写入 `workflow-events-YYYY-MM-DD.jsonl`。`/debug/workflow-events` 依赖这些 JSONL，不是人工排查入口。
 
 ## 示例
 
-```json
-{"schemaVersion":1,"runId":"task_123-1780000000000-ab12cd","seq":1,"timestamp":"2026-06-17T10:00:00.000Z","source":"workflow","eventType":"workflow_started","taskId":"task_123","runKind":"writing-workflow","userId":"user_1","novelId":"novel_1","chapterId":"chapter_1","qualityCheckId":null,"payload":{"novelId":"novel_1","chapterId":"chapter_1","targetWordCount":1200}}
-{"schemaVersion":1,"runId":"task_123-1780000000000-ab12cd","seq":6,"timestamp":"2026-06-17T10:00:01.000Z","source":"langgraph","eventType":"updates","taskId":"task_123","runKind":"writing-workflow","userId":"user_1","novelId":"novel_1","chapterId":"chapter_1","qualityCheckId":null,"langGraphEvent":"updates","changedKeys":{"initSession":["conversationHistory","activeAgent","currentOperation"]},"payload":{"data":{"initSession":{"conversationHistory":{"type":"array","length":1,"sample":[{"type":"object","keys":["id","role","content","timestamp"]}]},"activeAgent":"写作","currentOperation":{"type":"object","keys":["kind","primaryAgent","requiresArtifact"]}}}}}
-{"schemaVersion":1,"runId":"task_123-1780000000000-ab12cd","seq":9,"timestamp":"2026-06-17T10:00:02.000Z","source":"sse","eventType":"agent_done","taskId":"task_123","runKind":"writing-workflow","userId":"user_1","novelId":"novel_1","chapterId":"chapter_1","qualityCheckId":null,"agentId":"写作","payload":{"agentId":"写作","agentName":"作家","durationMs":3220,"hasOutput":true,"content":{"type":"string","length":1800,"preview":"正文已自动保存到章节...","truncated":true},"insights":{"type":"array","length":0,"sample":[]}}}
-```
+```text
+====================================================================================================
+工作流运行
+开始时间: 2026-07-03T01:02:03.004Z
+任务: p9j1s | 类型: writing-workflow
+阅读顺序: LangGraph 状态 → 节点 → Agent → LLM 输入/输出 → 工具输入/返回。
+====================================================================================================
 
-## 查询建议
+#0002 ... LANGGRAPH 初始状态
+  【完整 GraphState】
+  { ... }
 
-按一次请求回放：
+#0003 ... LANGGRAPH 节点 #1 完成：initSession
+  状态变化：...
+  【节点返回的完整 state patch】
+  { ... }
 
-```bash
-rg '"runId":"task_123-1780000000000-ab12cd"' logs/workflow-events
-```
+#0004 ... AGENT 调用 #1 开始：写作
 
-按任务查看所有运行：
+[01:02:04.123] 第 1 轮 LLM 输入 >>>
+【发送给模型的消息原文】
+...
 
-```bash
-rg '"taskId":"task_123"' logs/workflow-events
-```
+[01:02:06.456] 第 1 轮 LLM 输出 <<<
+Token 消耗: 输入 1200 | 输出 300 | 缓存 800 | 合计 1500
+【模型正文原文】
+...
 
-只看状态变更：
-
-```bash
-rg '"source":"langgraph".*"eventType":"updates"' logs/workflow-events
-```
-
-只看持久化副作用：
-
-```bash
-rg '"source":"persistence"' logs/workflow-events
+[01:02:06.789] 第 1 轮 工具 1/1：get_outline
+【工具输入原文 >>>】
+...
+【工具返回原文 <<<】
+...
 ```

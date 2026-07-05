@@ -876,14 +876,16 @@ export async function submitArtifactEvaluation(input: {
   verdict: ReviewArtifactEvaluationVerdict;
   summary: string;
   requiredChanges?: string;
+  deferPassStatus?: boolean;
 }): Promise<ReviewArtifactDto> {
   const artifact = await prisma.reviewArtifact.findUnique({
     where: { id: input.artifactId },
   });
   if (!artifact) throw new Error("待审核草案不存在");
 
-  const nextStatus = input.verdict === "pass" ? "awaiting_user" : artifact.status;
-  if (input.verdict === "pass") {
+  const shouldMarkAwaitingUser = input.verdict === "pass" && !input.deferPassStatus;
+  const nextStatus = shouldMarkAwaitingUser ? "awaiting_user" : artifact.status;
+  if (shouldMarkAwaitingUser) {
     assertReviewArtifactStatusTransition(parseArtifactStatus(artifact.status), "awaiting_user");
   }
   const updated = await prisma.$transaction(async (tx) => {

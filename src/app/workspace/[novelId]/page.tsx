@@ -38,6 +38,16 @@ export default async function WorkspacePage({
           qualityChecks: {
             orderBy: { createdAt: "asc" },
           },
+          beatPlans: {
+            where: { status: "approved" },
+            orderBy: { updatedAt: "desc" },
+            take: 1,
+            include: {
+              sceneBeats: {
+                orderBy: { order: "asc" },
+              },
+            },
+          },
         },
       },
       characters: {
@@ -117,6 +127,13 @@ export default async function WorkspacePage({
       scoreHook: number | null; scoreTension: number | null; scorePayoff: number | null;
       scorePacing: number | null; scoreEndingHook: number | null; scoreReaderPromise: number | null;
       scoreOverall: number | null; qualityGate: string | null; rewriteBrief: string | null;
+    }>;
+    beatPlans: Array<{
+      id: string;
+      status: string;
+      chapterGoal: string;
+      totalEstimatedWords: number;
+      sceneBeats: Array<{ id: string }>;
     }>;
   }>;
   const writingBible = novel.writingBible as {
@@ -296,6 +313,13 @@ export default async function WorkspacePage({
             order: item.order,
             updatedAt: item.updatedAt.toISOString(),
             status: item.status,
+            wordCount: countTextLength(item.content),
+            approvedBeatPlan: item.beatPlans[0]
+              ? {
+                  sceneCount: item.beatPlans[0].sceneBeats.length,
+                  totalEstimatedWords: item.beatPlans[0].totalEstimatedWords,
+                }
+              : null,
           }))}
           characters={characters.map((c) => ({
             id: c.id,
@@ -444,7 +468,23 @@ export default async function WorkspacePage({
 
         <SmartWritingPanel
           novelId={novel.id}
-          currentChapterId={currentChapter.id}
+          currentChapter={{
+            id: currentChapter.id,
+            title: currentChapter.title,
+            status: currentChapter.status,
+            wordCount: countTextLength(currentChapter.content),
+            openConsistencyCheckCount: currentChapter.qualityChecks.filter(
+              (check) => check.type === "consistency" && (check.status === "pending" || check.status === "failed")
+            ).length,
+            approvedBeatPlan: currentChapter.beatPlans[0]
+              ? {
+                  id: currentChapter.beatPlans[0].id,
+                  chapterGoal: currentChapter.beatPlans[0].chapterGoal,
+                  sceneCount: currentChapter.beatPlans[0].sceneBeats.length,
+                  totalEstimatedWords: currentChapter.beatPlans[0].totalEstimatedWords,
+                }
+              : null,
+          }}
         />
       </div>
     </main>

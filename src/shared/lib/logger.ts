@@ -14,6 +14,7 @@ const LOG_DIR = path.join(process.cwd(), "logs");
 
 /** LLM 日志文件目录 */
 const LLM_LOG_DIR = path.join(process.cwd(), "logs", "llm");
+const HUMAN_WORKFLOW_LOG_DIR = path.join(process.cwd(), "logs", "workflow-events");
 
 /** 日志级别 */
 export type LogLevel = "ERROR" | "WARN" | "INFO" | "DEBUG";
@@ -41,6 +42,8 @@ export interface LogEntry {
 export interface LLMLogContext {
   agentRunId?: string;
   modelTurn?: number;
+  toolCallIndex?: number;
+  toolCallTotal?: number;
   callType?: string;
   agentId?: string;
   taskId?: string;
@@ -139,6 +142,8 @@ export function buildLLMRequestLogRecord(input: {
 export function buildLLMResponseLogRecord(input: {
   requestId: string;
   content: string;
+  reasoningContent?: string;
+  toolCalls?: unknown[];
   usage?: LLMLogUsage;
   context?: LLMLogContext;
   durationMs?: number;
@@ -152,12 +157,18 @@ export function buildLLMResponseLogRecord(input: {
     event: "RESPONSE",
     requestId: input.requestId,
     contentChars: input.content.length,
+    reasoningChars: input.reasoningContent?.length ?? 0,
+    toolCallCount: input.toolCalls?.length ?? 0,
     preview: input.content.replace(/\s+/g, " ").trim().slice(0, LLM_LOG_PREVIEW_CHARS),
     durationMs: input.durationMs,
     finishReason: input.finishReason,
     usage: input.usage,
   };
-  if (input.mode === "full") record.content = input.content;
+  if (input.mode === "full") {
+    record.content = input.content;
+    record.reasoningContent = input.reasoningContent ?? "";
+    record.toolCalls = input.toolCalls ?? [];
+  }
   return record;
 }
 
@@ -218,6 +229,338 @@ export function buildAgentRunFinalLogRecord(input: {
   return record;
 }
 
+const LLM_LOG_SEPARATOR = "=".repeat(88);
+
+function prettyPrint(value: unknown): string {
+  if (typeof value === "string") return value || "（空）";
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function prettyPrintContent(value: unknown): string {
+  if (typeof value !== "string") return prettyPrint(value);
+  if (!value) return "（空）";
+  const trimmed = value.trim();
+  if ((trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+      (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+    try {
+      return prettyPrint(JSON.parse(trimmed));
+    } catch {
+      return value;
+    }
+  }
+  return value;
+}
+
+function shortRequestRef(requestId: string): string {
+  const parts = requestId.split("-");
+  if (parts.length > 1) return parts.at(-1) || requestId.slice(-8);
+  return requestId.length > 8 ? requestId.slice(-8) : requestId;
+}
+
+export function getHumanWorkflowLogPath(taskId: string, timestamp = new Date().toISOString()): string {
+  const date = timestamp.slice(0, 10);
+  const root = process.env.WORKFLOW_EVENT_LOG_DIR || HUMAN_WORKFLOW_LOG_DIR;
+  return path.join(root, "runs", date, `${shortRequestRef(taskId)}.log`);
+}
+
+export function appendHumanWorkflowLog(taskId: string, timestamp: string, content: string): void {
+  const filePath = getHumanWorkflowLogPath(taskId, timestamp);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.appendFileSync(filePath, content, "utf-8");
+}
+
+function getChainRef(record: LLMLogRecord): string {
+  return shortRequestRef(
+    typeof record.agentRunId === "string" && record.agentRunId
+      ? record.agentRunId
+      : record.requestId
+  );
+}
+
+function getRoundLabel(record: LLMLogRecord): string {
+  return typeof record.modelTurn === "number" ? `第 ${record.modelTurn} 轮` : "单轮调用";
+}
+
+function getStepLabel(record: LLMLogRecord): string {
+  if (record.event === "REQUEST") return "步骤 01";
+  if (record.event === "RESPONSE") return "步骤 02";
+  if (record.event === "TOOL_CALL") {
+    const index = typeof record.toolCallIndex === "number" ? record.toolCallIndex : 1;
+    return `步骤 ${String(index + 2).padStart(2, "0")}`;
+  }
+  return record.event === "AGENT_RUN_FINAL" ? "流程结束" : "异常";
+}
+
+function formatContext(record: LLMLogRecord): string {
+  const parts: string[] = [];
+  if (typeof record.agentId === "string" && record.agentId) parts.push(`Agent: ${record.agentId}`);
+  if (typeof record.callType === "string" && record.callType) parts.push(`调用类型: ${record.callType}`);
+  if (typeof record.operationKind === "string" && record.operationKind) parts.push(`操作: ${record.operationKind}`);
+  return parts.length > 0 ? parts.join(" | ") : "Agent: 通用调用";
+}
+
+function formatUsage(usage: unknown): string | null {
+  if (!usage || typeof usage !== "object") return null;
+  const item = usage as Partial<LLMLogUsage>;
+  const fields = [
+    `输入 ${item.promptTokens ?? 0}`,
+    `输出 ${item.completionTokens ?? 0}`,
+    `合计 ${item.totalTokens ?? 0}`,
+  ];
+  if (item.cachedTokens !== undefined) fields.push(`缓存 ${item.cachedTokens}`);
+  return `Token: ${fields.join(" / ")}`;
+}
+
+function formatWorkflowUsage(usage: unknown): string {
+  if (!usage || typeof usage !== "object") return "Token 消耗: 供应商未返回 usage";
+  const item = usage as Partial<LLMLogUsage>;
+  return [
+    `输入 ${item.promptTokens ?? 0}`,
+    `输出 ${item.completionTokens ?? 0}`,
+    `缓存 ${item.cachedTokens ?? 0}`,
+    `合计 ${item.totalTokens ?? (item.promptTokens ?? 0) + (item.completionTokens ?? 0)}`,
+  ].join(" | ").replace(/^/, "Token 消耗: ");
+}
+
+function formatMessages(messages: unknown[]): string {
+  return messages.map((message, index) => {
+    if (!message || typeof message !== "object") {
+      return `--- 消息 ${index + 1} [unknown] ---\n${prettyPrint(message)}`;
+    }
+    const item = message as Record<string, unknown>;
+    const role = typeof item.role === "string" ? item.role : "unknown";
+    const content = item.content;
+    const extra = Object.fromEntries(Object.entries(item)
+      .filter(([key]) => key !== "role" && key !== "content" && key !== "tool_call_id")
+      .map(([key, value]) => {
+        if (key !== "tool_calls" || !Array.isArray(value)) return [key, value];
+        return [key, value.map((toolCall) => {
+          if (!toolCall || typeof toolCall !== "object") return toolCall;
+          const sanitized = { ...toolCall as Record<string, unknown> };
+          delete sanitized.id;
+          return sanitized;
+        })];
+      }));
+    const lines = [`--- 消息 ${index + 1} [${role}] ---`, prettyPrintContent(content)];
+    if (Object.keys(extra).length > 0) {
+      lines.push("附加字段：", prettyPrint(extra));
+    }
+    return lines.join("\n");
+  }).join("\n\n");
+}
+
+function formatMessagesVerbatim(messages: unknown[]): string {
+  return messages.map((message, index) => {
+    if (!message || typeof message !== "object") {
+      return `--- 消息 ${index + 1} [unknown] ---\n${prettyPrint(message)}`;
+    }
+    const item = message as Record<string, unknown>;
+    const role = typeof item.role === "string" ? item.role : "unknown";
+    const lines = [
+      `--- 消息 ${index + 1} [${role}] ---`,
+      prettyPrintContent(item.content),
+    ];
+    const extra = Object.fromEntries(Object.entries(item).filter(([key]) => key !== "role" && key !== "content"));
+    if (Object.keys(extra).length > 0) lines.push("附加字段原文：", prettyPrint(extra));
+    return lines.join("\n");
+  }).join("\n\n");
+}
+
+function formatToolDefinitions(tools: unknown[]): string {
+  if (tools.length === 0) return "（无）";
+  return tools.map((tool, index) => {
+    const item = tool && typeof tool === "object" ? tool as Record<string, unknown> : null;
+    const fn = item?.function && typeof item.function === "object"
+      ? item.function as Record<string, unknown>
+      : null;
+    const name = typeof fn?.name === "string" ? fn.name : `工具 ${index + 1}`;
+    return `--- ${name} ---\n${prettyPrint(tool)}`;
+  }).join("\n\n");
+}
+
+function formatModelToolCalls(toolCalls: unknown[]): string {
+  if (toolCalls.length === 0) return "（无）";
+  return toolCalls.map((toolCall, index) => {
+    const item = toolCall && typeof toolCall === "object" ? toolCall as Record<string, unknown> : null;
+    const fn = item?.function && typeof item.function === "object"
+      ? item.function as Record<string, unknown>
+      : null;
+    const name = typeof fn?.name === "string" ? fn.name : `工具 ${index + 1}`;
+    const rawArgs = fn?.arguments;
+    let args: unknown = rawArgs;
+    if (typeof rawArgs === "string") {
+      try {
+        args = JSON.parse(rawArgs);
+      } catch {
+        args = rawArgs;
+      }
+    }
+    return `--- 工具 ${index + 1}/${toolCalls.length}：${name} ---\n${prettyPrint(args)}`;
+  }).join("\n\n");
+}
+
+function getEventDirectionTitle(record: LLMLogRecord): string {
+  if (record.event === "REQUEST") return ">>> LLM 输入（发送给模型）";
+  if (record.event === "RESPONSE") return "<<< LLM 输出（模型返回）";
+  if (record.event === "TOOL_CALL") {
+    const index = typeof record.toolCallIndex === "number" ? record.toolCallIndex : 1;
+    const total = typeof record.toolCallTotal === "number" ? record.toolCallTotal : "?";
+    return `工具 ${index}/${total}：${String(record.toolName || "unknown")}（输入 >>> / 输出 <<<）`;
+  }
+  if (record.event === "AGENT_RUN_FINAL") return "=== Agent 调用链最终汇总 ===";
+  return "!!! 调用失败 !!!";
+}
+
+export function formatLLMIndexLine(record: LLMLogRecord, detailPath: string): string {
+  const time = record.timestamp.slice(11, 23);
+  const agent = typeof record.agentId === "string" && record.agentId ? record.agentId : "通用";
+  let detail = "";
+  if (record.event === "REQUEST") {
+    detail = `${record.messageCount ?? 0} 条消息，${record.toolDefinitionCount ?? 0} 个工具`;
+  } else if (record.event === "RESPONSE") {
+    detail = `结束=${String(record.finishReason || "unknown")}，工具请求=${record.toolCallCount ?? 0}`;
+  } else if (record.event === "TOOL_CALL") {
+    detail = `${String(record.toolName || "unknown")}，耗时=${record.durationMs ?? "?"}ms`;
+  } else if (record.event === "AGENT_RUN_FINAL") {
+    detail = `结束=${String(record.finishReason || "unknown")}，工具总数=${record.toolCallCount ?? 0}`;
+  } else {
+    detail = String(record.message || "未知错误");
+  }
+  return [
+    time,
+    `链路 ${getChainRef(record)}`,
+    agent,
+    getRoundLabel(record),
+    getStepLabel(record),
+    getEventDirectionTitle(record),
+    detail,
+    `详情=${detailPath}`,
+  ].join(" | ") + "\n";
+}
+
+/** 将 LLM 记录排版为适合人工逐轮阅读的多行文本块。 */
+export function formatLLMLogRecord(record: LLMLogRecord): string {
+  const lines = [
+    LLM_LOG_SEPARATOR,
+    `[${getChainRef(record)}] [${getRoundLabel(record)}] [${getStepLabel(record)}] ${getEventDirectionTitle(record)}`,
+    `时间: ${record.timestamp}`,
+    formatContext(record),
+  ];
+
+  if (record.event === "REQUEST") {
+    lines.push(`消息数: ${record.messageCount ?? 0} | 可用工具数: ${record.toolDefinitionCount ?? 0}`);
+    if (Array.isArray(record.messages)) {
+      lines.push("", "【请求消息】", formatMessages(record.messages));
+      lines.push("", "【可用工具定义】", formatToolDefinitions(Array.isArray(record.tools) ? record.tools : []));
+    } else {
+      lines.push("", "【请求摘要】", String(record.preview || "（空）"), "（LLM_LOG_MODE=summary，完整内容未写入）");
+    }
+  } else if (record.event === "RESPONSE") {
+    const stats = [
+      typeof record.durationMs === "number" ? `耗时: ${record.durationMs}ms` : null,
+      record.finishReason ? `结束原因: ${String(record.finishReason)}` : null,
+      formatUsage(record.usage),
+    ].filter(Boolean);
+    if (stats.length > 0) lines.push(stats.join(" | "));
+    lines.push("", "【模型正文】", typeof record.content === "string" ? record.content || "（空）" : String(record.preview || "（空）"));
+    if (typeof record.content !== "string") lines.push("（LLM_LOG_MODE=summary，完整内容未写入）");
+    if (typeof record.reasoningContent === "string" && record.reasoningContent) {
+      lines.push("", "【供应商返回的推理内容】", record.reasoningContent);
+    }
+    if (Array.isArray(record.toolCalls) && record.toolCalls.length > 0) {
+      lines.push("", `【模型声明的工具调用顺序：共 ${record.toolCalls.length} 个】`, formatModelToolCalls(record.toolCalls));
+    }
+  } else if (record.event === "TOOL_CALL") {
+    const index = typeof record.toolCallIndex === "number" ? record.toolCallIndex : 1;
+    const total = typeof record.toolCallTotal === "number" ? record.toolCallTotal : "?";
+    lines.push(`顺序: 模型声明的第 ${index}/${total} 个工具 | 耗时: ${record.durationMs ?? "?"}ms`);
+    lines.push("", `【工具 ${index}/${total} 输入参数 >>>】`, "args" in record ? prettyPrint(record.args) : "（summary 模式未写入完整参数）");
+    lines.push("", `【工具 ${index}/${total} 输出结果 <<<】`, typeof record.result === "string" ? prettyPrintContent(record.result) : String(record.resultPreview || "（空）"));
+    if (typeof record.result !== "string") lines.push("（LLM_LOG_MODE=summary，完整结果未写入）");
+  } else if (record.event === "AGENT_RUN_FINAL") {
+    const stats = [
+      record.finishReason ? `结束原因: ${String(record.finishReason)}` : null,
+      typeof record.toolCallCount === "number" ? `工具调用: ${record.toolCallCount}` : null,
+      formatUsage(record.usage),
+    ].filter(Boolean);
+    if (stats.length > 0) lines.push(stats.join(" | "));
+    if (Array.isArray(record.controlEventTypes) && record.controlEventTypes.length > 0) {
+      lines.push(`控制事件: ${record.controlEventTypes.join(", ")}`);
+    }
+    lines.push("", "【Agent 可见输出汇总】", typeof record.content === "string" ? record.content || "（空）" : String(record.preview || "（空）"));
+    if (typeof record.content !== "string") lines.push("（LLM_LOG_MODE=summary，完整内容未写入）");
+  } else {
+    lines.push("", "【错误】", String(record.message || "未知错误"));
+  }
+
+  return `${lines.join("\n")}\n\n`;
+}
+
+/** 写入统一工作流时间线的 LLM 原文块；上下文由工作流文件头统一说明。 */
+export function formatLLMWorkflowBlock(record: LLMLogRecord): string {
+  const time = record.timestamp.slice(11, 23);
+  const round = getRoundLabel(record);
+  if (record.event === "REQUEST") {
+    const messages = Array.isArray(record.messages)
+      ? formatMessagesVerbatim(record.messages)
+      : "（当前不是 full 模式，未取得请求原文）";
+    const tools = Array.isArray(record.tools)
+      ? formatToolDefinitions(record.tools)
+      : "（当前不是 full 模式，未取得工具定义原文）";
+    return [
+      `[${time}] ${round} LLM 输入 >>>`,
+      "【发送给模型的消息原文】",
+      messages,
+      "",
+      "【发送给模型的工具定义原文】",
+      tools,
+      "",
+    ].join("\n") + "\n";
+  }
+  if (record.event === "RESPONSE") {
+    const lines = [
+      `[${time}] ${round} LLM 输出 <<<`,
+      formatWorkflowUsage(record.usage),
+      "【模型正文原文】",
+      typeof record.content === "string" ? record.content || "（空）" : "（当前不是 full 模式，未取得输出原文）",
+    ];
+    if (typeof record.reasoningContent === "string" && record.reasoningContent) {
+      lines.push("", "【供应商返回的推理内容原文】", record.reasoningContent);
+    }
+    if (Array.isArray(record.toolCalls) && record.toolCalls.length > 0) {
+      lines.push("", "【模型声明的工具调用原文】", prettyPrint(record.toolCalls));
+    }
+    lines.push("");
+    return `${lines.join("\n")}\n`;
+  }
+  if (record.event === "TOOL_CALL") {
+    const index = typeof record.toolCallIndex === "number" ? record.toolCallIndex : 1;
+    const total = typeof record.toolCallTotal === "number" ? record.toolCallTotal : "?";
+    return [
+      `[${time}] ${round} 工具 ${index}/${total}：${String(record.toolName || "unknown")}`,
+      "【工具输入原文 >>>】",
+      "args" in record ? prettyPrint(record.args) : "（当前不是 full 模式，未取得输入原文）",
+      "",
+      "【工具返回原文 <<<】",
+      typeof record.result === "string" ? record.result || "（空）" : "（当前不是 full 模式，未取得返回原文）",
+      "",
+    ].join("\n") + "\n";
+  }
+  if (record.event === "ERROR") {
+    return `[${time}] LLM 调用失败\n${String(record.message || "未知错误")}\n\n`;
+  }
+  return "";
+}
+
+export function shouldWriteSplitLLMLog(record: LLMLogRecord, splitLogEnabled: boolean): boolean {
+  const belongsToWorkflow = typeof record.taskId === "string" && Boolean(record.taskId);
+  return !belongsToWorkflow || splitLogEnabled;
+}
+
 /** 日志实例 */
 class LocalLogger {
   private initialized = false;
@@ -251,20 +594,56 @@ class LocalLogger {
   /**
    * 获取 LLM 日志文件路径
    */
-  private getLLMLogFilePath(): string {
+  private getLLMIndexFilePath(record: LLMLogRecord): string {
     this.init();
-    const date = new Date().toISOString().split("T")[0];
-    return path.join(LLM_LOG_DIR, `llm-${date}.jsonl`);
+    const date = record.timestamp.slice(0, 10);
+    return path.join(LLM_LOG_DIR, `llm-${date}.index.log`);
+  }
+
+  private getLLMRunFilePath(record: LLMLogRecord): { absolutePath: string; relativePath: string } {
+    this.init();
+    const date = record.timestamp.slice(0, 10);
+    const agent = String(record.agentId || "通用").replace(/[^\p{L}\p{N}_-]+/gu, "-");
+    const fileName = `${agent}-${getChainRef(record)}.log`;
+    const relativePath = path.join("runs", date, fileName);
+    const absolutePath = path.join(LLM_LOG_DIR, relativePath);
+    fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
+    return { absolutePath, relativePath };
+  }
+
+  private getLLMTaskIndexFilePath(record: LLMLogRecord): string | null {
+    if (typeof record.taskId !== "string" || !record.taskId) return null;
+    const date = record.timestamp.slice(0, 10);
+    const taskRef = shortRequestRef(record.taskId);
+    const taskDir = path.join(LLM_LOG_DIR, "tasks", date);
+    fs.mkdirSync(taskDir, { recursive: true });
+    return path.join(taskDir, `${taskRef}.index.log`);
   }
 
   /**
    * 写入 LLM 日志
    */
   private writeLLMLogRecord(record: LLMLogRecord, force = false): void {
+    if (process.env.NODE_TEST_CONTEXT && process.env.LLM_LOG_WRITE_IN_TESTS !== "true") return;
     if (!force && getLLMLogMode() === "off") return;
     try {
-      const logPath = this.getLLMLogFilePath();
-      fs.appendFileSync(logPath, JSON.stringify(record) + "\n", "utf-8");
+      const belongsToWorkflow = typeof record.taskId === "string" && Boolean(record.taskId);
+      if (belongsToWorkflow) {
+        const workflowBlock = formatLLMWorkflowBlock(record);
+        if (workflowBlock) appendHumanWorkflowLog(String(record.taskId), record.timestamp, workflowBlock);
+      }
+
+      // 有 taskId 的 Agent 调用已经进入统一工作流日志，默认不再重复生成
+      // llm/runs、llm/tasks 和每日 index。无 taskId 的独立 LLM 调用仍保留旧目录作为兜底。
+      const splitLogEnabled = process.env.LLM_SPLIT_LOG_ENABLED === "true";
+      if (!shouldWriteSplitLLMLog(record, splitLogEnabled)) return;
+
+      const runFile = this.getLLMRunFilePath(record);
+      const indexLine = formatLLMIndexLine(record, runFile.relativePath);
+      fs.appendFileSync(runFile.absolutePath, formatLLMLogRecord(record), "utf-8");
+      fs.appendFileSync(this.getLLMIndexFilePath(record), indexLine, "utf-8");
+      const taskIndexPath = this.getLLMTaskIndexFilePath(record);
+      if (taskIndexPath) fs.appendFileSync(taskIndexPath, indexLine, "utf-8");
     } catch (e) {
       console.error("LLM 日志写入失败:", e);
     }
@@ -543,6 +922,8 @@ class LocalLogger {
       context?: LLMLogContext;
       durationMs?: number;
       finishReason?: string;
+      reasoningContent?: string;
+      toolCalls?: unknown[];
     } = {}
   ): void {
     const mode = getLLMLogMode();
@@ -554,6 +935,8 @@ class LocalLogger {
       context: options.context,
       durationMs: options.durationMs,
       finishReason: options.finishReason,
+      reasoningContent: options.reasoningContent,
+      toolCalls: options.toolCalls,
       mode,
     }));
     console.log(`[LLM] 响应 #${requestId} 已记录 (${content.length} chars)`);

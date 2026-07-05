@@ -2,17 +2,18 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   createOperationTraceMetadata,
-  hasNextReviewer,
+  decideReviewOutcome,
   OPERATION_PATCH_ROUTES,
   OPERATION_REVIEW_ROUTES,
   readEvaluationEvent,
   requireStructuredEvaluation,
   routeAfterPatch,
   routeAfterReview,
+  routeReviewWorkers,
   runOperationAgentWithLifecycle,
-  selectCurrentReviewer,
 } from "../operation-graph";
 import type { GraphState } from "@/agents/graph/graph-definition";
+import type { ArtifactReviewResult } from "@/agents/graph/state";
 import { createDefaultArtifactReviewState, patchArtifactReviewState } from "@/agents/graph/state";
 
 function createState(): GraphState {
@@ -69,6 +70,8 @@ function createState(): GraphState {
     activeArtifactId: "artifact-1",
     artifactMode: "review_loop",
     reviewerAgent: "编辑",
+    reviewWorkerAgent: null,
+    artifactReviewResults: [],
     reviserAgent: null,
     pendingArtifactRevision: null,
     artifactIteration: 1,
@@ -133,28 +136,34 @@ describe("operation agent lifecycle events", () => {
 });
 
 describe("operation review routing helpers", () => {
-  it("selects reviewers in configured order instead of stopping after the first reviewer", () => {
+  it("dispatches configured reviewers through LangGraph Send", () => {
     const state = createState();
-    const reviewers = ["校验", "编辑"] as const;
+    const destinations = routeReviewWorkers({
+      ...state,
+      currentOperation: {
+        ...state.currentOperation!,
+        reviewers: ["校验", "编辑"],
+      },
+      ...patchArtifactReviewState(state, { reviewerAgent: null }),
+    });
 
-    assert.equal(selectCurrentReviewer({ ...state, ...patchArtifactReviewState(state, { reviewerAgent: null }) }, [...reviewers]), "校验");
-    assert.equal(hasNextReviewer({ ...state, ...patchArtifactReviewState(state, { reviewerAgent: "校验" }) }, [...reviewers]), true);
-    assert.equal(selectCurrentReviewer({ ...state, ...patchArtifactReviewState(state, { reviewerAgent: "校验" }) }, [...reviewers]), "编辑");
-    assert.equal(hasNextReviewer({ ...state, ...patchArtifactReviewState(state, { reviewerAgent: "编辑" }) }, [...reviewers]), false);
-    assert.equal(selectCurrentReviewer({ ...state, ...patchArtifactReviewState(state, { reviewerAgent: "编辑" }) }, [...reviewers]), null);
+    assert.equal(Array.isArray(destinations), true);
+    if (!Array.isArray(destinations)) throw new Error("expected Send destinations");
+    assert.deepEqual(destinations.map((send) => send.node), ["reviewArtifactWorker", "reviewArtifactWorker"]);
+    assert.deepEqual(destinations.map((send) => send.args.reviewWorkerAgent), ["校验", "编辑"]);
   });
 
-  it("maps the next-reviewer branch to a known LangGraph destination", () => {
+  it("maps successful review merge to the user decision branch", () => {
     const destination = routeAfterReview({
       ...createState(),
-      ...patchArtifactReviewState(createState(), { reviewerAgent: "校验", reviserAgent: null, iteration: 1 }),
+      ...patchArtifactReviewState(createState(), { reviewerAgent: "编辑", reviserAgent: null, iteration: 1 }),
       currentOperation: {
         ...createState().currentOperation!,
         reviewers: ["校验", "编辑"],
       },
     });
 
-    assert.equal(destination, "reviewArtifact");
+    assert.equal(destination, "awaitUserDecision");
     assert.equal(destination in OPERATION_REVIEW_ROUTES, true);
   });
 
@@ -202,6 +211,37 @@ describe("operation review routing helpers", () => {
 
     assert.equal(destination, "reviseArtifact");
     assert.equal(destination in OPERATION_PATCH_ROUTES, true);
+  });
+
+  it("does not let a pass result override another reviewer revision", () => {
+    const base = {
+      artifactId: "artifact-1",
+      operationKind: "write_chapter",
+      iteration: 1,
+      output: null,
+      structured: true,
+    } satisfies Partial<ArtifactReviewResult>;
+
+    const outcome = decideReviewOutcome([
+      {
+        ...base,
+        reviewer: "校验",
+        verdict: "pass",
+        summary: "一致性通过。",
+      },
+      {
+        ...base,
+        reviewer: "编辑",
+        verdict: "revise",
+        summary: "章末钩子不足。",
+        requiredChanges: "重写章末追读钩子。",
+        revisionMode: "rewrite",
+      },
+    ] as ArtifactReviewResult[]);
+
+    assert.equal(outcome.verdict, "revise");
+    assert.equal(outcome.revisionMode, "rewrite");
+    assert.match(outcome.requiredChanges ?? "", /章末追读钩子/);
   });
 
   it("prefers structured submit_evaluation control events over prose inference", () => {

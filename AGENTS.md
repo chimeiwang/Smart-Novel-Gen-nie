@@ -76,6 +76,7 @@ npm run studio:input # 生成 Studio 可运行的完整 GraphState 输入
 - Studio 启动后运行的是 LangGraph Agent Server，不是 Next.js 应用；它适合看节点、状态、interrupt/resume 和 LangSmith trace。
 - Studio 运行会真实执行 Graph 节点，可能创建/更新 `ReviewArtifact` 和 `WritingTask`。正式章节正文仍必须经过待审核草案和用户确认应用后才写入。
 - 写作会话恢复以 `WritingSession -> WritingTask.writingSessionId -> WritingTask.graphStateJson` 为主链路；`WritingMessage` 只负责用户可见聊天记录，不用于反推 LangGraph 状态。`MemorySaver` 只作为当前进程内 interrupt/resume 优化，不是生产级恢复来源；等待确认 checkpoint 默认 5 分钟 TTL，断连、异常和终态按 taskId 清理。
+- 本地执行排查直接读 `logs/workflow-events/runs/YYYY-MM-DD/<task短号>.log`。同一文件按实际时间顺序记录 LangGraph 初始状态与节点 patch、关键 GraphState 差异、Agent 调用顺序、发送给 LLM 的完整消息/工具定义原文、LLM 输出原文，以及工具输入和返回原文；固定上下文只在运行头部出现一次。底层 token stream、Runnable 和 checkpoint metadata 不进入人工日志。机器 JSONL 默认关闭，仅在显式设置 `WORKFLOW_MACHINE_EVENT_LOG_ENABLED=true` 时生成。
 
 ## 技术栈
 
@@ -100,6 +101,7 @@ src/
 
 ## 通用开发规则
 
+- **禁止截断性优化**：除非用户明确允许，不得对正文、草案、工具结果、Agent 回复、控制事件、日志内容或持久化数据进行静默截断、摘要裁剪、仅保留开头/结尾、限制条数等会丢失信息的优化。遇到上下文、存储、传输或 UI 容量问题时，应保留完整数据并显式报错或说明限制；任何分页、摘要、裁剪方案必须先取得用户明确许可。
 - **服务端变更**：普通数据变更优先使用 `src/app/actions.ts` Server Actions；流式写作、会话消息、质量检查走 `src/app/api/*` 路由。
 - **鉴权**：涉及小说、写作任务、会话、质量检查的接口必须校验 `userId` 归属；历史 `novel.userId = null` 只做兼容访问。
 - **路径别名**：`@/*` 映射到 `./src/*`。

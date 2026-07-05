@@ -42,6 +42,12 @@ type SidebarTabsProps = {
     title: string;
     order: number;
     updatedAt: string;
+    status?: string;
+    wordCount?: number;
+    approvedBeatPlan?: {
+      sceneCount: number;
+      totalEstimatedWords: number;
+    } | null;
   }>;
   characters: Array<{
     id: string;

@@ -1105,9 +1105,9 @@
 .writing-chat .flow-error .flow-text { color: #ff4d4f; }
 
 .writing-chat .activity-round {
-  margin: 0 0 12px;
-  padding: 0 0 10px;
-  border-bottom: 1px solid var(--divider, #ebe5d9);
+  margin: 12px 0 0;
+  padding: 10px 0 0;
+  border-top: 1px solid var(--divider, #ebe5d9);
   color: var(--text-muted, #767d86);
   font-size: 13px;
 }
@@ -1138,6 +1138,26 @@
   color: var(--muted, #767d86);
   font-size: 13px;
   line-height: 18px;
+}
+
+.writing-chat .agent-live-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 20px;
+  margin-bottom: 8px;
+  color: var(--text-muted, #767d86);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.writing-chat .agent-live-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.72;
+  flex: 0 0 auto;
 }
 
 .writing-chat .activity-caret {
@@ -2091,6 +2111,82 @@
 .writing-chat .operation-status-card {
   background: #f8fbff;
   border-color: #cfe7ff;
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
+}
+
+.writing-chat .next-action-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--divider);
+  background: var(--panel);
+}
+
+.writing-chat .next-action-kicker {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.writing-chat .review-artifact-impact {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.writing-chat .next-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.writing-chat .next-action-button {
+  display: grid;
+  gap: 1px;
+  min-width: 118px;
+  min-height: 44px;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: #fff;
+  color: var(--text);
+  text-align: left;
+}
+
+.writing-chat .next-action-button:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--panel-soft);
+}
+
+.writing-chat .next-action-button.urgent {
+  border-color: var(--warning);
+  background: var(--warning-soft);
+}
+
+.writing-chat .next-action-button span {
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 18px;
+}
+
+.writing-chat .next-action-button small,
+.writing-chat .agent-quick-btn small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.writing-chat .agent-quick-btn {
+  align-items: flex-start;
+  flex-direction: column;
+  min-width: 128px;
+  text-align: left;
+}
+
+.writing-chat .review-artifact-impact {
+  margin-top: 3px;
 }

@@ -86,7 +86,14 @@ LangGraph Studio 适合调试：
 - interrupt/resume。
 - LangSmith trace。
 
-`/debug/workflow-events` 和 `logs/workflow-events/*.jsonl` 继续用于调试：
+人工排查直接读 `logs/workflow-events/runs/YYYY-MM-DD/<task短号>.log`：
+
+- LangGraph 节点实际完成顺序。
+- 每个节点前后的关键 GraphState 差异。
+- Operation 阶段和 Agent 调用开始/完成顺序。
+- 同一 task 实际发送给 LLM 的消息/工具定义原文、LLM 输出原文和工具输入/返回原文。
+
+机器 JSONL 默认关闭。只有显式设置 `WORKFLOW_MACHINE_EVENT_LOG_ENABLED=true` 后，`/debug/workflow-events` 才有新的审计数据可用于回放：
 
 - Next API/SSE 端到端事件。
 - 前端实际收到的事件。
@@ -127,4 +134,3 @@ LANGCHAIN_TRACING_V2="true"
 - `tool:<toolName>`，来自 Agent 读取工具、proposal 工具等非 control tool 调用。
 
 如果缺少 API key 或 tracing 变量不是 `true`，系统会继续本地运行，但不会上报 LangSmith trace。
-

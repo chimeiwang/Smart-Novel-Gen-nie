@@ -22,6 +22,7 @@ import { hasAgentUpdates } from "./lore-update-schema";
 import { sanitizeAgentUpdates } from "@/shared/contracts/agent-updates";
 import { logger } from "@/shared/lib/logger";
 import type { AgentUpdateSection } from "@/shared/contracts/agent-updates";
+import type { CreativeOperation } from "@/shared/contracts/creative-operation";
 import type { ShowReviewArtifactEvent } from "@/shared/contracts/agent-control";
 import {
   createOrUpdateAgentUpdatesArtifact as defaultCreateOrUpdateAgentUpdatesArtifact,
@@ -89,6 +90,7 @@ function countExistingOutlineTreeBatches(artifactKey: string, updates: AgentUpda
 export interface ControlEventProcessorState {
   taskId: string;
   chapterId: string;
+  currentOperation?: CreativeOperation | null;
   chapterDraftTarget?: ChapterDraftTarget | null;
   qualityCheckId?: string | null;
   novelData?: NovelData;
@@ -175,6 +177,7 @@ export interface ControlEventProcessorDeps {
     verdict: ReviewArtifactEvaluationVerdict;
     summary: string;
     requiredChanges?: string;
+    deferPassStatus?: boolean;
   }) => Promise<ReviewArtifactDto>;
   findOpenReviewArtifact?: (input: {
     artifactId?: string;
@@ -624,11 +627,14 @@ export async function processControlEvents(
         }
 
         const reviewerAgent = event.reviewerAgent ?? (event.submitForReview ? "编辑" : null);
+        const artifactKey = state.currentOperation
+          ? `${state.taskId}:${state.currentOperation.kind}`
+          : event.artifactKey ?? null;
         const artifact = await createOrUpdateTextArtifact({
           novelId: state.novelData?.novelId ?? "",
           chapterId: state.novelData?.chapterId ?? state.chapterId,
           taskId: state.taskId,
-          artifactKey: event.artifactKey ?? null,
+          artifactKey,
           kind: event.kind,
           summary: event.summary,
           content,

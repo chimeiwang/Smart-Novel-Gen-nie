@@ -17,7 +17,7 @@ import {
 } from "@langchain/core/messages";
 import { wrapOpenAI } from "langsmith/wrappers";
 import type { ZodSchema } from "zod";
-import { getAiConfig, getLLMRuntimeName, isAiConfigured } from "@/shared/env";
+import { getAiConfig, getLLMCallTimeoutMs, getLLMRuntimeName, isAiConfigured } from "@/shared/env";
 import { chargeAiUsage, ensureCanStartModelCall } from "@/shared/lib/billing";
 import { logger } from "@/shared/lib/logger";
 import type { TokenUsage } from "./turn-result";
@@ -118,10 +118,50 @@ export type ModelCallProfile = "normal" | "fast";
 export type ModelReasoningEffort = "medium" | "high";
 
 const MAX_OUTPUT_TOKENS = 384000;
-const FAST_OUTPUT_TOKENS = 3000;
+const FAST_OUTPUT_TOKENS = MAX_OUTPUT_TOKENS;
 
 export function getModelCallBudget(profile: ModelCallProfile | undefined): number {
   return profile === "fast" ? FAST_OUTPUT_TOKENS : MAX_OUTPUT_TOKENS;
+}
+
+export class ModelCallTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`LLM 调用超时（${timeoutMs}ms）`);
+    this.name = "ModelCallTimeoutError";
+  }
+}
+
+function throwIfModelCallTimedOut(signal: AbortSignal | undefined, timeoutMs: number): void {
+  if (signal?.aborted) throw new ModelCallTimeoutError(timeoutMs);
+}
+
+async function withModelCallTimeout<T>(
+  run: (signal: AbortSignal | undefined, timeoutMs: number) => Promise<T>
+): Promise<T> {
+  const timeoutMs = getLLMCallTimeoutMs();
+  if (timeoutMs === 0) return run(undefined, timeoutMs);
+
+  const controller = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => {
+      controller.abort();
+      reject(new ModelCallTimeoutError(timeoutMs));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([run(controller.signal, timeoutMs), timeoutPromise]);
+  } catch (error) {
+    if (controller.signal.aborted) throw new ModelCallTimeoutError(timeoutMs);
+    throw error;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+function openAIRequestOptions(signal: AbortSignal | undefined) {
+  return signal ? { signal } : undefined;
 }
 
 function withReasoningConfig(
@@ -181,11 +221,22 @@ export function usageFromLangChain(value: unknown): TokenUsage | undefined {
   const promptTokens = Number(usage.input_tokens ?? usage.prompt_tokens ?? 0);
   const completionTokens = Number(usage.output_tokens ?? usage.completion_tokens ?? 0);
   const totalTokens = Number(usage.total_tokens ?? promptTokens + completionTokens);
+  const inputDetails = usage.input_token_details && typeof usage.input_token_details === "object"
+    ? usage.input_token_details as Record<string, unknown>
+    : {};
+  const cachedTokens = Number(
+    inputDetails.cache_read ??
+    inputDetails.cached_tokens ??
+    usage.prompt_cache_hit_tokens ??
+    usage.cached_tokens ??
+    0
+  );
   if (promptTokens === 0 && completionTokens === 0 && totalTokens === 0) return undefined;
   return {
     promptTokens,
     completionTokens,
     totalTokens,
+    cachedTokens: Number.isFinite(cachedTokens) ? Math.max(0, cachedTokens) : 0,
   };
 }
 
@@ -540,33 +591,37 @@ export class LegacyOpenAIRuntime extends BaseRuntime {
     let fullContent = "";
     let usage: TokenUsage | undefined;
     let finishReason = "stop";
-    const response = await client.chat.completions.create(withReasoningConfig({
-      model: config.model,
-      messages: options.messages,
-      stream: true,
-      max_tokens: maxOutputTokens,
-    }, { profile: options.profile, reasoningEffort: options.reasoningEffort, fallback: "high" }) as any);
+    return withModelCallTimeout(async (signal, timeoutMs) => {
+      const response = await client.chat.completions.create(withReasoningConfig({
+        model: config.model,
+        messages: options.messages,
+        stream: true,
+        max_tokens: maxOutputTokens,
+      }, { profile: options.profile, reasoningEffort: options.reasoningEffort, fallback: "high" }) as any, openAIRequestOptions(signal) as any);
 
-    for await (const chunk of response as any) {
-      const choice = chunk.choices?.[0];
-      const delta = choice?.delta?.content ?? "";
-      if (delta) {
-        fullContent += delta;
-        options.onChunk?.(delta);
+      for await (const chunk of response as any) {
+        throwIfModelCallTimedOut(signal, timeoutMs);
+        const choice = chunk.choices?.[0];
+        const delta = choice?.delta?.content ?? "";
+        if (delta) {
+          fullContent += delta;
+          options.onChunk?.(delta);
+        }
+        if (choice?.finish_reason) finishReason = choice.finish_reason;
+        if (chunk.usage) {
+          usage = {
+            promptTokens: chunk.usage.prompt_tokens ?? 0,
+            completionTokens: chunk.usage.completion_tokens ?? 0,
+            cachedTokens: extractCachedTokens(chunk.usage),
+            totalTokens: chunk.usage.total_tokens ?? 0,
+          };
+        }
       }
-      if (choice?.finish_reason) finishReason = choice.finish_reason;
-      if (chunk.usage) {
-        usage = {
-          promptTokens: chunk.usage.prompt_tokens ?? 0,
-          completionTokens: chunk.usage.completion_tokens ?? 0,
-          cachedTokens: extractCachedTokens(chunk.usage),
-          totalTokens: chunk.usage.total_tokens ?? 0,
-        };
-      }
-    }
 
-    await this.recordUsage(options.metadata, usage);
-    return { content: fullContent, usage, finishReason };
+      throwIfModelCallTimedOut(signal, timeoutMs);
+      await this.recordUsage(options.metadata, usage);
+      return { content: fullContent, usage, finishReason };
+    });
   }
 
   async completeText(options: TextRuntimeOptions): Promise<LLMResult> {
@@ -581,25 +636,28 @@ export class LegacyOpenAIRuntime extends BaseRuntime {
       maxOutputTokens: getModelCallBudget(options.profile),
     });
 
-    const response = await this.getClient().chat.completions.create(withReasoningConfig({
-      model: config.model,
-      messages: options.messages,
-      stream: false,
-      max_tokens: maxOutputTokens,
-    }, { profile: options.profile, reasoningEffort: options.reasoningEffort, fallback: "high" }) as any);
+    return withModelCallTimeout(async (signal, timeoutMs) => {
+      const response = await this.getClient().chat.completions.create(withReasoningConfig({
+        model: config.model,
+        messages: options.messages,
+        stream: false,
+        max_tokens: maxOutputTokens,
+      }, { profile: options.profile, reasoningEffort: options.reasoningEffort, fallback: "high" }) as any, openAIRequestOptions(signal) as any);
 
-    const content = response.choices[0]?.message?.content ?? "";
-    const usage = response.usage
-      ? {
-          promptTokens: response.usage.prompt_tokens,
-          completionTokens: response.usage.completion_tokens,
-          cachedTokens: extractCachedTokens(response.usage),
-          totalTokens: response.usage.total_tokens,
-        }
-      : undefined;
+      const content = response.choices[0]?.message?.content ?? "";
+      const usage = response.usage
+        ? {
+            promptTokens: response.usage.prompt_tokens,
+            completionTokens: response.usage.completion_tokens,
+            cachedTokens: extractCachedTokens(response.usage),
+            totalTokens: response.usage.total_tokens,
+          }
+        : undefined;
 
-    await this.recordUsage(options.metadata, usage);
-    return { content, usage, finishReason: response.choices[0]?.finish_reason };
+      throwIfModelCallTimedOut(signal, timeoutMs);
+      await this.recordUsage(options.metadata, usage);
+      return { content, usage, finishReason: response.choices[0]?.finish_reason };
+    });
   }
 
   async completeStructured<TSchema extends ZodSchema>(
@@ -622,33 +680,37 @@ export class LegacyOpenAIRuntime extends BaseRuntime {
           maxOutputTokens: getModelCallBudget(options.profile),
         });
 
-        const response = await this.getClient().chat.completions.create(withReasoningConfig({
-          model: config.model,
-          messages,
-          stream: false,
-          max_tokens: maxOutputTokens,
-          response_format: { type: "json_object" },
-        }, { profile: options.profile, fallback: "medium" }) as any);
+        return await withModelCallTimeout(async (signal, timeoutMs) => {
+          const response = await this.getClient().chat.completions.create(withReasoningConfig({
+            model: config.model,
+            messages,
+            stream: false,
+            max_tokens: maxOutputTokens,
+            response_format: { type: "json_object" },
+          }, { profile: options.profile, fallback: "medium" }) as any, openAIRequestOptions(signal) as any);
 
-        const content = response.choices[0]?.message?.content ?? "";
-        const usage = response.usage
-          ? {
-              promptTokens: response.usage.prompt_tokens,
-              completionTokens: response.usage.completion_tokens,
-              cachedTokens: extractCachedTokens(response.usage),
-              totalTokens: response.usage.total_tokens,
-            }
-          : undefined;
-        let json: unknown;
-        try {
-          json = JSON.parse(content.trim());
-        } catch {
-          throw new Error(`LLM 返回的不是合法 JSON: ${content.slice(0, 200)}`);
-        }
-        const data = schema.parse(json) as ReturnType<TSchema["parse"]>;
-        await this.recordUsage(options.metadata, usage);
-        return { data, usage };
+          const content = response.choices[0]?.message?.content ?? "";
+          const usage = response.usage
+            ? {
+                promptTokens: response.usage.prompt_tokens,
+                completionTokens: response.usage.completion_tokens,
+                cachedTokens: extractCachedTokens(response.usage),
+                totalTokens: response.usage.total_tokens,
+              }
+            : undefined;
+          let json: unknown;
+          try {
+            json = JSON.parse(content.trim());
+          } catch {
+            throw new Error(`LLM 返回的不是合法 JSON: ${content.slice(0, 200)}`);
+          }
+          const data = schema.parse(json) as ReturnType<TSchema["parse"]>;
+          throwIfModelCallTimedOut(signal, timeoutMs);
+          await this.recordUsage(options.metadata, usage);
+          return { data, usage };
+        });
       } catch (error) {
+        if (error instanceof ModelCallTimeoutError) throw error;
         lastError = error instanceof Error ? error : new Error(String(error));
         logger.warn("LLM", `结构化输出 attempt ${attempt + 1} 失败: ${lastError.message}`, {
           profile: options.profile ?? "normal",
@@ -708,80 +770,86 @@ export class LegacyOpenAIRuntime extends BaseRuntime {
         maxOutputTokens: getModelCallBudget(options.profile),
       });
 
-      const stream = await client.chat.completions.create(withReasoningConfig({
-        model: config.model,
-        messages,
-        tools: options.tools,
-        tool_choice: "auto",
-        stream: true,
-        max_tokens: maxOutputTokens,
-      }, {
-        profile: options.profile,
-        reasoningEffort: options.reasoningEffort,
-        fallback: "medium",
-        includeReasoningForFast: true,
-      }) as any);
+      return await withModelCallTimeout(async (signal, timeoutMs) => {
+        const stream = await client.chat.completions.create(withReasoningConfig({
+          model: config.model,
+          messages,
+          tools: options.tools,
+          tool_choice: "auto",
+          stream: true,
+          max_tokens: maxOutputTokens,
+        }, {
+          profile: options.profile,
+          reasoningEffort: options.reasoningEffort,
+          fallback: "medium",
+          includeReasoningForFast: true,
+        }) as any, openAIRequestOptions(signal) as any);
 
-      let content = "";
-      let reasoningContent = "";
-      let finishReason: string | undefined = "stop";
-      let usage: TokenUsage | undefined;
-      const toolCallAccumulator = new Map<number, { id: string; name: string; arguments: string }>();
+        let content = "";
+        let reasoningContent = "";
+        let finishReason: string | undefined = "stop";
+        let usage: TokenUsage | undefined;
+        const toolCallAccumulator = new Map<number, { id: string; name: string; arguments: string }>();
 
-      for await (const chunk of stream as any) {
-        const choice = chunk.choices?.[0];
-        const delta = choice?.delta;
-        if (!delta) continue;
+        for await (const chunk of stream as any) {
+          throwIfModelCallTimedOut(signal, timeoutMs);
+          const choice = chunk.choices?.[0];
+          const delta = choice?.delta;
+          if (!delta) continue;
 
-        if (delta.content) {
-          content += delta.content;
-          options.onChunk?.(delta.content);
-        }
-        if (delta.reasoning_content) reasoningContent += delta.reasoning_content;
-        if (delta.tool_calls) {
-          for (const tc of delta.tool_calls) {
-            const idx = tc.index ?? 0;
-            if (!toolCallAccumulator.has(idx)) {
-              toolCallAccumulator.set(idx, { id: "", name: "", arguments: "" });
+          if (delta.content) {
+            content += delta.content;
+            options.onChunk?.(delta.content);
+          }
+          if (delta.reasoning_content) reasoningContent += delta.reasoning_content;
+          if (delta.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              const idx = tc.index ?? 0;
+              if (!toolCallAccumulator.has(idx)) {
+                toolCallAccumulator.set(idx, { id: "", name: "", arguments: "" });
+              }
+              const acc = toolCallAccumulator.get(idx)!;
+              if (tc.id) acc.id = tc.id;
+              if (tc.function?.name) acc.name += tc.function.name;
+              if (tc.function?.arguments) acc.arguments += tc.function.arguments;
             }
-            const acc = toolCallAccumulator.get(idx)!;
-            if (tc.id) acc.id = tc.id;
-            if (tc.function?.name) acc.name += tc.function.name;
-            if (tc.function?.arguments) acc.arguments += tc.function.arguments;
+          }
+          if (choice?.finish_reason) {
+            finishReason = choice.finish_reason;
+          }
+          if (chunk.usage) {
+            usage = {
+              promptTokens: chunk.usage.prompt_tokens ?? 0,
+              completionTokens: chunk.usage.completion_tokens ?? 0,
+              cachedTokens: extractCachedTokens(chunk.usage),
+              totalTokens: chunk.usage.total_tokens ?? 0,
+            };
           }
         }
-        if (choice?.finish_reason) {
-          finishReason = choice.finish_reason;
-        }
-        if (chunk.usage) {
-          usage = {
-            promptTokens: chunk.usage.prompt_tokens ?? 0,
-            completionTokens: chunk.usage.completion_tokens ?? 0,
-            cachedTokens: extractCachedTokens(chunk.usage),
-            totalTokens: chunk.usage.total_tokens ?? 0,
-          };
-        }
-      }
 
-      const toolCalls = Array.from(toolCallAccumulator.values()).map((tc, idx) => ({
-        id: tc.id || `call_turn_${idx}`,
-        type: "function" as const,
-        function: { name: tc.name, arguments: tc.arguments },
-      }));
+        const toolCalls = Array.from(toolCallAccumulator.values()).map((tc, idx) => ({
+          id: tc.id || `call_turn_${idx}`,
+          type: "function" as const,
+          function: { name: tc.name, arguments: tc.arguments },
+        }));
 
-      logger.llmResponse(requestId, content, usage, {
-        context: options.metadata,
-        durationMs: Date.now() - startedAt,
-        finishReason,
+        throwIfModelCallTimedOut(signal, timeoutMs);
+        logger.llmResponse(requestId, content, usage, {
+          context: options.metadata,
+          durationMs: Date.now() - startedAt,
+          finishReason,
+          reasoningContent,
+          toolCalls,
+        });
+        await this.recordUsage(options.metadata, usage);
+        return {
+          content,
+          reasoningContent,
+          toolCalls,
+          usage,
+          finishReason,
+        };
       });
-      await this.recordUsage(options.metadata, usage);
-      return {
-        content,
-        reasoningContent,
-        toolCalls,
-        usage,
-        finishReason,
-      };
     } catch (error) {
       logger.llmError(requestId, error, options.metadata);
       throw error;
@@ -804,19 +872,23 @@ export class LangChainModelRuntime extends LegacyOpenAIRuntime {
     const model = createChatModel(maxOutputTokens).withConfig(withReasoningConfig({
       stream_options: { include_usage: true },
     }, { profile: options.profile, reasoningEffort: options.reasoningEffort, fallback: "high" }) as any);
-    const stream = await model.stream(openAIMessagesToLangChain(options.messages));
-    const accumulator = createLangChainStreamAccumulator();
+    return withModelCallTimeout(async (signal, timeoutMs) => {
+      const stream = await model.stream(openAIMessagesToLangChain(options.messages), signal ? { signal } as any : undefined);
+      const accumulator = createLangChainStreamAccumulator();
 
-    for await (const chunk of stream as AsyncIterable<AIMessageChunk>) {
-      applyLangChainStreamChunk(accumulator, chunk, options.onChunk);
-    }
+      for await (const chunk of stream as AsyncIterable<AIMessageChunk>) {
+        throwIfModelCallTimedOut(signal, timeoutMs);
+        applyLangChainStreamChunk(accumulator, chunk, options.onChunk);
+      }
 
-    await this.recordUsage(options.metadata, accumulator.usage);
-    return {
-      content: accumulator.content,
-      usage: accumulator.usage,
-      finishReason: accumulator.finishReason,
-    };
+      throwIfModelCallTimedOut(signal, timeoutMs);
+      await this.recordUsage(options.metadata, accumulator.usage);
+      return {
+        content: accumulator.content,
+        usage: accumulator.usage,
+        finishReason: accumulator.finishReason,
+      };
+    });
   }
 
   async completeText(options: TextRuntimeOptions): Promise<LLMResult> {
@@ -833,13 +905,16 @@ export class LangChainModelRuntime extends LegacyOpenAIRuntime {
     const model = createChatModel(maxOutputTokens).withConfig(
       withReasoningConfig({}, { profile: options.profile, reasoningEffort: options.reasoningEffort, fallback: "high" }) as any
     );
-    const message = await model.invoke(openAIMessagesToLangChain(options.messages));
-    const content = textFromAIContent(message.content);
-    const usage = usageFromLangChain(message.usage_metadata);
-    const metadata = message.response_metadata as Record<string, unknown> | undefined;
-    const finishReason = typeof metadata?.finish_reason === "string" ? metadata.finish_reason : "stop";
-    await this.recordUsage(options.metadata, usage);
-    return { content, usage, finishReason };
+    return withModelCallTimeout(async (signal, timeoutMs) => {
+      const message = await model.invoke(openAIMessagesToLangChain(options.messages), signal ? { signal } as any : undefined);
+      const content = textFromAIContent(message.content);
+      const usage = usageFromLangChain(message.usage_metadata);
+      const metadata = message.response_metadata as Record<string, unknown> | undefined;
+      const finishReason = typeof metadata?.finish_reason === "string" ? metadata.finish_reason : "stop";
+      throwIfModelCallTimedOut(signal, timeoutMs);
+      await this.recordUsage(options.metadata, usage);
+      return { content, usage, finishReason };
+    });
   }
 
   async completeStructured<TSchema extends ZodSchema>(
@@ -861,22 +936,26 @@ export class LangChainModelRuntime extends LegacyOpenAIRuntime {
           maxOutputTokens: getModelCallBudget(options.profile),
         });
 
-        const model = createChatModel(maxOutputTokens).withConfig(withReasoningConfig({
-          response_format: { type: "json_object" },
-        }, { profile: options.profile, fallback: "medium" }) as any);
-        const message = await model.invoke(openAIMessagesToLangChain(messages));
-        const content = textFromAIContent(message.content);
-        const usage = usageFromLangChain(message.usage_metadata);
-        let json: unknown;
-        try {
-          json = JSON.parse(content.trim());
-        } catch {
-          throw new Error(`LLM 返回的不是合法 JSON: ${content.slice(0, 200)}`);
-        }
-        const data = schema.parse(json) as ReturnType<TSchema["parse"]>;
-        await this.recordUsage(options.metadata, usage);
-        return { data, usage };
+        return await withModelCallTimeout(async (signal, timeoutMs) => {
+          const model = createChatModel(maxOutputTokens).withConfig(withReasoningConfig({
+            response_format: { type: "json_object" },
+          }, { profile: options.profile, fallback: "medium" }) as any);
+          const message = await model.invoke(openAIMessagesToLangChain(messages), signal ? { signal } as any : undefined);
+          const content = textFromAIContent(message.content);
+          const usage = usageFromLangChain(message.usage_metadata);
+          let json: unknown;
+          try {
+            json = JSON.parse(content.trim());
+          } catch {
+            throw new Error(`LLM 返回的不是合法 JSON: ${content.slice(0, 200)}`);
+          }
+          const data = schema.parse(json) as ReturnType<TSchema["parse"]>;
+          throwIfModelCallTimedOut(signal, timeoutMs);
+          await this.recordUsage(options.metadata, usage);
+          return { data, usage };
+        });
       } catch (error) {
+        if (error instanceof ModelCallTimeoutError) throw error;
         lastError = error instanceof Error ? error : new Error(String(error));
         logger.warn("LLM", `结构化输出 attempt ${attempt + 1} 失败: ${lastError.message}`, {
           profile: options.profile ?? "normal",
@@ -932,32 +1011,38 @@ export class LangChainModelRuntime extends LegacyOpenAIRuntime {
       const runnable = options.tools.length > 0
         ? model.bindTools(options.tools as any, { tool_choice: "auto", ...runtimeConfig } as any)
         : model.withConfig(runtimeConfig);
-      const stream = await runnable.stream(openAIMessagesToLangChain(messages));
-      const accumulator = createLangChainStreamAccumulator();
+      return await withModelCallTimeout(async (signal, timeoutMs) => {
+        const stream = await runnable.stream(openAIMessagesToLangChain(messages), signal ? { signal } as any : undefined);
+        const accumulator = createLangChainStreamAccumulator();
 
-      for await (const chunk of stream as AsyncIterable<AIMessageChunk>) {
-        applyLangChainStreamChunk(accumulator, chunk, options.onChunk);
-      }
+        for await (const chunk of stream as AsyncIterable<AIMessageChunk>) {
+          throwIfModelCallTimedOut(signal, timeoutMs);
+          applyLangChainStreamChunk(accumulator, chunk, options.onChunk);
+        }
 
-      const toolCalls = Array.from(accumulator.toolCallAccumulator.values()).map((tc, idx) => ({
-        id: tc.id || `call_turn_${idx}`,
-        type: "function" as const,
-        function: { name: tc.name, arguments: tc.arguments },
-      }));
+        const toolCalls = Array.from(accumulator.toolCallAccumulator.values()).map((tc, idx) => ({
+          id: tc.id || `call_turn_${idx}`,
+          type: "function" as const,
+          function: { name: tc.name, arguments: tc.arguments },
+        }));
 
-      logger.llmResponse(requestId, accumulator.content, accumulator.usage, {
-        context: options.metadata,
-        durationMs: Date.now() - startedAt,
-        finishReason: accumulator.finishReason,
+        throwIfModelCallTimedOut(signal, timeoutMs);
+        logger.llmResponse(requestId, accumulator.content, accumulator.usage, {
+          context: options.metadata,
+          durationMs: Date.now() - startedAt,
+          finishReason: accumulator.finishReason,
+          reasoningContent: accumulator.reasoningContent,
+          toolCalls,
+        });
+        await this.recordUsage(options.metadata, accumulator.usage);
+        return {
+          content: accumulator.content,
+          reasoningContent: accumulator.reasoningContent,
+          toolCalls,
+          usage: accumulator.usage,
+          finishReason: accumulator.finishReason,
+        };
       });
-      await this.recordUsage(options.metadata, accumulator.usage);
-      return {
-        content: accumulator.content,
-        reasoningContent: accumulator.reasoningContent,
-        toolCalls,
-        usage: accumulator.usage,
-        finishReason: accumulator.finishReason,
-      };
     } catch (error) {
       logger.llmError(requestId, error, options.metadata);
       throw error;

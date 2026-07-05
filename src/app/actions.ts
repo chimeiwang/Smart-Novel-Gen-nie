@@ -177,16 +177,28 @@ async function assertOutlineChildrenAllowed(input: {
 export async function createNovelAction(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const summary = String(formData.get("summary") ?? "").trim();
+  const genre = String(formData.get("genre") ?? "").trim();
+  const protagonist = String(formData.get("protagonist") ?? "").trim();
+  const coreSellingPoint = String(formData.get("coreSellingPoint") ?? "").trim();
+  const readerPromise = String(formData.get("readerPromise") ?? "").trim();
+  const firstChapterGoal = String(formData.get("firstChapterGoal") ?? "").trim();
   const session = await requireCurrentSession();
 
   if (!name) {
     return { novelId: null };
   }
 
+  const writingBibleNotes = [
+    protagonist ? "主角起点：" + protagonist : "",
+    firstChapterGoal ? "第一章目标：" + firstChapterGoal : "",
+  ].filter(Boolean).join("\n");
+  const hasWritingBible = Boolean(genre || coreSellingPoint || readerPromise || writingBibleNotes);
+
   const novel = await prisma.novel.create({
     data: {
       name,
       summary: summary || null,
+      storyProgress: firstChapterGoal ? "第一章目标：" + firstChapterGoal : null,
       userId: session.userId,
       chapters: {
         create: {
@@ -202,8 +214,21 @@ export async function createNovelAction(formData: FormData) {
       plotProgress: {
         create: {
           currentStage: "开篇",
+          currentGoal: firstChapterGoal || null,
         },
       },
+      ...(hasWritingBible
+        ? {
+            writingBible: {
+              create: {
+                genre: genre || null,
+                coreSellingPoint: coreSellingPoint || null,
+                readerPromise: readerPromise || null,
+                notes: writingBibleNotes || null,
+              },
+            },
+          }
+        : {}),
     },
     include: {
       chapters: {

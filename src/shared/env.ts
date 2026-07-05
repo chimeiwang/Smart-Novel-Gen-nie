@@ -36,9 +36,13 @@ export function getLLMRuntimeName(): LLMRuntimeName {
 }
 
 export function getLLMLogMode(): LLMLogMode {
-  const mode = process.env.LLM_LOG_MODE?.trim().toLowerCase() || "summary";
+  const mode = process.env.LLM_LOG_MODE?.trim().toLowerCase() || "full";
   if (mode === "off" || mode === "summary" || mode === "full") return mode;
-  return "summary";
+  return "full";
+}
+
+export function getLLMCallTimeoutMs(): number {
+  return getNonNegativeEnvInteger(process.env.LLM_CALL_TIMEOUT_MS, 120_000);
 }
 
 export function isEnvFlagEnabled(value: string | undefined, defaultValue: boolean): boolean {

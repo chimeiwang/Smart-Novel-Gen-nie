@@ -265,6 +265,20 @@ export interface PendingArtifactRevision {
   patches?: EvaluationPatch[];
 }
 
+export interface ArtifactReviewResult {
+  artifactId: string;
+  operationKind: CreativeOperation["kind"];
+  iteration: number;
+  reviewer: CoreAgentId;
+  output: AgentOutput | null;
+  verdict: "pass" | "revise" | "block";
+  summary: string;
+  requiredChanges?: string;
+  revisionMode?: "patch" | "rewrite";
+  patches?: EvaluationPatch[];
+  structured: boolean;
+}
+
 /** ReviewArtifact 审核循环的权威 Graph 状态。 */
 export interface ArtifactReviewState {
   status: ArtifactReviewStatus;
@@ -709,6 +723,8 @@ export interface WritingState {
   activeArtifactId?: string | null;
   artifactMode?: "none" | "review_loop";
   reviewerAgent?: CoreAgentId | null;
+  reviewWorkerAgent?: CoreAgentId | null;
+  artifactReviewResults?: ArtifactReviewResult[];
   reviserAgent?: CoreAgentId | null;
   pendingArtifactRevision?: {
     summary: string;
