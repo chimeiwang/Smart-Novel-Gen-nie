@@ -76,7 +76,7 @@ npm run studio:input # 生成 Studio 可运行的完整 GraphState 输入
 - Studio 启动后运行的是 LangGraph Agent Server，不是 Next.js 应用；它适合看节点、状态、interrupt/resume 和 LangSmith trace。
 - Studio 运行会真实执行 Graph 节点，可能创建/更新 `ReviewArtifact` 和 `WritingTask`。正式章节正文仍必须经过待审核草案和用户确认应用后才写入。
 - 写作会话恢复以 `WritingSession -> WritingTask.writingSessionId -> WritingTask.graphStateJson` 为主链路；只认显式 `writingSessionId` 绑定，禁止按小说、章节或时间窗猜测任务归属。`currentTask` 只承载非终态可继续任务，completed/error 仅作为历史摘要。`WritingMessage` 只负责用户可见聊天记录，不用于反推 LangGraph 状态。`MemorySaver` 只作为当前进程内 interrupt/resume 优化，不是生产级恢复来源；等待确认 checkpoint 默认 5 分钟 TTL，断连、异常和终态按 taskId 清理。
-- 本地执行排查只读 `logs/workflow-events/runs/YYYY-MM-DD/<task短号>.log`。同一文件的每个 `Rxx` 运行区块只分成两类记录：一是按 `Axx` 分组的 LLM 完整请求、返回和工具执行原文；二是按 `Sxxx` 排列的 LangGraph 状态切换，节点名、字段名和枚举值必须输出为中文。初次运行与 resume 继续写入同一文件；如果一次短路操作既没有 LLM 调用也没有 LangGraph 状态，则不创建空壳人工日志。不得再加入 Workflow/SSE 事件 JSON、独立状态索引、Agent 最终汇总等重复阅读层。底层 token stream、Runnable 和 checkpoint metadata 不进入人工日志。机器 JSONL 默认关闭，仅在显式设置 `WORKFLOW_MACHINE_EVENT_LOG_ENABLED=true` 时生成。
+- 本地执行排查只读 `logs/workflow-events/runs/YYYY-MM-DD/<task短号>.log`。同一文件的每个 `Rxx` 运行区块只分成两类记录：一是按 `Axx` 分组的 LLM 输入 messages 原文与模型输出正文原文；二是按 `Sxxx` 排列的 LangGraph 状态切换，节点名、字段名和枚举值必须输出为中文。人工日志不展开 tools schema、供应商 reasoning、模型 tool_calls、工具参数或工具返回；需要底层审计时显式开启机器 JSONL。初次运行与 resume 继续写入同一文件；如果一次短路操作既没有 LLM 调用也没有 LangGraph 状态，则不创建空壳人工日志。不得再加入 Workflow/SSE 事件 JSON、独立状态索引、Agent 最终汇总等重复阅读层。底层 token stream、Runnable 和 checkpoint metadata 不进入人工日志。机器 JSONL 默认关闭，仅在显式设置 `WORKFLOW_MACHINE_EVENT_LOG_ENABLED=true` 时生成。
 
 ## 技术栈
 

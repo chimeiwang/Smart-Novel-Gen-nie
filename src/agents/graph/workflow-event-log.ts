@@ -799,7 +799,7 @@ export class WorkflowEventFileLogger {
 
   private renderLLMRecords(): string {
     const llmItems = this.traceItems.filter((item): item is Extract<WorkflowTraceItem, { kind: "llm" }> =>
-      item.kind === "llm" && item.record.event !== "AGENT_RUN_FINAL"
+      item.kind === "llm" && (item.record.event === "REQUEST" || item.record.event === "RESPONSE")
     );
     if (llmItems.length === 0) return "（尚无 LLM 请求或返回）";
 
@@ -860,7 +860,6 @@ export class WorkflowEventFileLogger {
     const endedAt = last?.timestamp ?? startedAt;
     const durationMs = Math.max(0, Date.parse(endedAt) - Date.parse(startedAt));
     const llmResponses = this.traceItems.filter((item) => item.kind === "llm" && item.record.event === "RESPONSE").length;
-    const toolCalls = this.traceItems.filter((item) => item.kind === "llm" && item.record.event === "TOOL_CALL").length;
     const agents = this.traceItems.filter((item) => item.kind === "workflow" && item.entry.eventType === "agent_start").length;
     const operationEntry = this.traceItems.find((item) => item.kind === "workflow" && item.entry.eventType === "operation_classified");
     const operationPayload = operationEntry?.kind === "workflow" ? payloadRecord(operationEntry.entry) : {};
@@ -871,11 +870,11 @@ export class WorkflowEventFileLogger {
       `工作流运行 R${String(this.runNumber).padStart(2, "0")}`,
       `任务: ${shortRef(this.context.taskId)} | 类型: ${this.context.runKind} | 状态: ${status}`,
       `时间: ${startedAt} → ${endedAt} | 耗时: ${durationMs}ms`,
-      `操作: ${formatChineseStateValue("operationKind", operation.kind ?? this.stateProjection.operationKind ?? null)} | Agent 调用: ${agents} | LLM: ${llmResponses} | 工具: ${toolCalls}`,
-      "说明: 文件只包含 LLM 完整请求/返回（含工具执行）与 LangGraph 中文状态切换。",
+      `操作: ${formatChineseStateValue("operationKind", operation.kind ?? this.stateProjection.operationKind ?? null)} | Agent 调用: ${agents} | LLM 响应: ${llmResponses}`,
+      "说明: 文件只包含 LLM 输入 messages 原文、模型输出正文原文与 LangGraph 中文状态切换。",
       "=".repeat(100),
       "",
-      "# 一、LLM 完整请求与返回（含工具执行）",
+      "# 一、LLM 输入与输出原文",
       "",
       this.renderLLMRecords(),
       "",
@@ -901,7 +900,7 @@ export class WorkflowEventFileLogger {
   private writeHumanTrace(): void {
     if (!this.traceRunPath) return;
     const hasVisibleLLMRecord = this.traceItems.some((item) =>
-      item.kind === "llm" && item.record.event !== "AGENT_RUN_FINAL"
+      item.kind === "llm" && (item.record.event === "REQUEST" || item.record.event === "RESPONSE")
     );
     if (!hasVisibleLLMRecord && this.stateRecords.length === 0) return;
     const current = this.renderHumanRun();

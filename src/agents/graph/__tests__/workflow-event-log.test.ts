@@ -254,16 +254,17 @@ describe("WorkflowEventFileLogger", () => {
 
     assert.match(trace, /工作流运行 R01/);
     assert.match(trace, /操作: 生成章节正文/);
-    assert.match(trace, /# 一、LLM 完整请求与返回（含工具执行）/);
+    assert.match(trace, /# 一、LLM 输入与输出原文/);
     assert.match(trace, /# 二、LangGraph 状态切换（中文）/);
     assert.match(trace, /## A01 写作｜调用前状态 S004/);
     assert.match(trace, /第 1 轮 LLM 输入 >>>/);
     assert.match(trace, /第 1 轮 LLM 输出 <<</);
-    assert.match(trace, /第 1 轮 工具 1\/1：submit_evaluation/);
     assert.match(trace, /完整用户请求/);
     assert.match(trace, /完整模型输出/);
-    assert.match(trace, /完整供应商推理/);
-    assert.match(trace, /完整工具返回/);
+    assert.doesNotMatch(trace, /第 1 轮 工具 1\/1：submit_evaluation/);
+    assert.doesNotMatch(trace, /完整供应商推理/);
+    assert.doesNotMatch(trace, /完整工具返回/);
+    assert.doesNotMatch(trace, /【发送给模型的工具定义原文】/);
     assert.match(trace, /## S001 LangGraph 初始状态/);
     assert.match(trace, /## S002 初始化会话完成后的状态/);
     assert.match(trace, /当前步骤：初始化 → 准备操作上下文/);

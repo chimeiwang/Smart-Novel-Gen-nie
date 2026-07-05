@@ -511,16 +511,10 @@ export function formatLLMWorkflowBlock(record: LLMLogRecord): string {
     const messages = Array.isArray(record.messages)
       ? formatMessagesVerbatim(record.messages)
       : "（当前不是 full 模式，未取得请求原文）";
-    const tools = Array.isArray(record.tools)
-      ? formatToolDefinitions(record.tools)
-      : "（当前不是 full 模式，未取得工具定义原文）";
     return [
       `[${time}] ${round} LLM 输入 >>>`,
       "【发送给模型的消息原文】",
       messages,
-      "",
-      "【发送给模型的工具定义原文】",
-      tools,
       "",
     ].join("\n") + "\n";
   }
@@ -531,27 +525,11 @@ export function formatLLMWorkflowBlock(record: LLMLogRecord): string {
       "【模型正文原文】",
       typeof record.content === "string" ? record.content || "（空）" : "（当前不是 full 模式，未取得输出原文）",
     ];
-    if (typeof record.reasoningContent === "string" && record.reasoningContent) {
-      lines.push("", "【供应商返回的推理内容原文】", record.reasoningContent);
-    }
-    if (Array.isArray(record.toolCalls) && record.toolCalls.length > 0) {
-      lines.push("", "【模型声明的工具调用原文】", prettyPrint(record.toolCalls));
-    }
     lines.push("");
     return `${lines.join("\n")}\n`;
   }
   if (record.event === "TOOL_CALL") {
-    const index = typeof record.toolCallIndex === "number" ? record.toolCallIndex : 1;
-    const total = typeof record.toolCallTotal === "number" ? record.toolCallTotal : "?";
-    return [
-      `[${time}] ${round} 工具 ${index}/${total}：${String(record.toolName || "unknown")}`,
-      "【工具输入原文 >>>】",
-      "args" in record ? prettyPrint(record.args) : "（当前不是 full 模式，未取得输入原文）",
-      "",
-      "【工具返回原文 <<<】",
-      typeof record.result === "string" ? record.result || "（空）" : "（当前不是 full 模式，未取得返回原文）",
-      "",
-    ].join("\n") + "\n";
+    return "";
   }
   if (record.event === "ERROR") {
     return `[${time}] LLM 调用失败\n${String(record.message || "未知错误")}\n\n`;

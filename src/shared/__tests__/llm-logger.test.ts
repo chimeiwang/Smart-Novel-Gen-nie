@@ -246,7 +246,7 @@ describe("LLM log mode", () => {
     assert.match(line, /详情=runs\/2026-07-02\/写作-chain77\.log/);
   });
 
-  it("formats verbatim LLM input, output and tool content for the human workflow timeline", () => {
+  it("formats only verbatim LLM messages and model content for the human workflow timeline", () => {
     const request = buildLLMRequestLogRecord({
       requestId: "request-raw",
       messages: [{
@@ -264,7 +264,7 @@ describe("LLM log mode", () => {
       content: "模型输出第一行\n模型输出第二行",
       reasoningContent: "供应商推理原文",
       usage: { promptTokens: 120, completionTokens: 30, cachedTokens: 80, totalTokens: 150 },
-      toolCalls: [{ id: "call-original", function: { name: "read", arguments: "{\"id\":\"raw-1\"}" } }],
+      toolCalls: [{ id: "call-response-only", function: { name: "read", arguments: "{\"id\":\"raw-1\"}" } }],
       context: { taskId: "task-raw", modelTurn: 1 },
       mode: "full",
       timestamp: "2026-07-03T01:02:04.004Z",
@@ -282,12 +282,15 @@ describe("LLM log mode", () => {
     const output = [request, response, tool].map(formatLLMWorkflowBlock).join("");
     assert.match(output, /第 1 轮 LLM 输入 >>>/);
     assert.match(output, /不要压缩  空格与\n换行/);
-    assert.match(output, /call-original/);
-    assert.match(output, /原始工具定义/);
     assert.match(output, /模型输出第一行\n模型输出第二行/);
     assert.match(output, /Token 消耗: 输入 120 \| 输出 30 \| 缓存 80 \| 合计 150/);
-    assert.match(output, /供应商推理原文/);
-    assert.match(output, /工具返回第一行\n工具返回第二行/);
+    assert.doesNotMatch(output, /【发送给模型的工具定义原文】/);
+    assert.doesNotMatch(output, /原始工具定义/);
+    assert.doesNotMatch(output, /供应商推理原文/);
+    assert.match(output, /call-original/);
+    assert.doesNotMatch(output, /call-response-only/);
+    assert.doesNotMatch(output, /第 1 轮 工具 1\/1：read/);
+    assert.doesNotMatch(output, /工具返回第一行\n工具返回第二行/);
   });
 
   it("writes workflow LLM records to split files only when explicitly enabled", () => {
