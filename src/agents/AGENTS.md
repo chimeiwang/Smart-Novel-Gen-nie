@@ -85,6 +85,7 @@
 - 2026-07-05: v8.53 单文件工作流日志：`<task短号>.log` 改为运行概览、Agent 调用顺序、状态时间线、状态索引和按 Agent 分组的完整原文五个阅读层次；用稳定 `Axx/Mxx/Txx/Exxxx/Sxxx` 贯通子图节点、Agent、LLM、工具和状态，保留完整原始数据且不再要求人工跨文件关联。`streamEvents(subgraphs=true)` 同时捕获 operation 子图节点，并由 SSE 适配层解包带 namespace 的 custom/update/interrupt chunk。
 - 2026-07-05: v8.54 双记录工作流日志：保留单个 `<task短号>.log`，但每次运行只输出“LLM 完整请求/返回（含工具执行）”和“LangGraph 中文状态切换”两个部分。停止在人读文件中重复输出 Workflow/SSE JSON、完整 GraphState/raw patch、Agent final 和 agent_done 正文；审批/丢弃等既不调用 LLM 也不运行 Graph 的短路操作不创建空壳人工日志；机器 JSONL 开关继续承担底层事件审计。
 - 2026-07-05: v8.55 作家局部大纲上下文：`OutlineNode` 使用结构化章节范围；完整大纲重建声明 `replace` 并在同一事务中替换旧树，局部修补声明 `patch`。写作上下文按 approved Beat Plan、ChapterWritingGoal、唯一命中 chapter_group 的优先级解析，只注入当前路径和当前组完整内容；无映射或范围重叠会在模型调用前阻断。大纲和最近章节只读工具不再返回字符裁剪片段。
+- 2026-07-08: v8.57 参考资料 RAG 只读召回：新增 `RagDocument` / `RagChunk` pgvector 派生索引和 `semantic_search_references` 工具。第一版只索引 `ReferenceMaterial`；未配置 `RAG_EMBEDDING_*` 时资料照常上传，索引状态为 disabled，Agent 工具返回未启用提示。
 - 2026-06-28: v8.32 待审核草案继续修改收口：前端“继续修改”只关闭审核弹窗并聚焦聊天输入；当任务仍在 `awaiting_user_review` 或快照含 `artifactReview.activeArtifactId` 时，下一条普通聊天由 `/resume` 自动路由为同一草案的新 revision 返工请求。
 
 # 智能写作 Agent 流程图（v8.23 — CreativeOperation + operationWorkflow）
@@ -221,6 +222,7 @@ src/agents/tools/
     character-tools.ts  # list_characters_summary, get_character_detail, get_character_list（3 个）
     lore-tools.ts       # 势力/地点/物品/术语/搜索/相似召回/文风（11 个）
     plot-tools.ts       # 大纲/进度/伏笔/章节（6 个）
+    reference-tools.ts  # 参考资料 RAG 语义召回（1 个）
   proposals/            # 写入 proposal 工具（待 Phase 4）
 ```
 
@@ -230,7 +232,7 @@ src/agents/tools/
 - 工具注册表统一管理权限元信息（readOnly/concurrencySafe/requiresConfirmation/capability）
 - `createToolExecutor()` 委托给 `executeTool()` 注册表执行
 - OpenAI tool schema 统一通过 `getOpenAITools()` 从 registry 生成
-- 写作工作流初始化只预载小说基本信息、世界设定、故事背景和大纲总纲；角色、章节正文、结构化大纲节点、伏笔、地点、物品、势力、术语、参考资料和文风画像必须通过只读工具按需查库，不再依赖 `state.novelData` 的全量缓存
+- 写作工作流初始化只预载小说基本信息、世界设定、故事背景和大纲总纲；角色、章节正文、结构化大纲节点、伏笔、地点、物品、势力、术语、参考资料和文风画像必须通过只读工具按需查库，不再依赖 `state.novelData` 的全量缓存。上传参考资料可通过 `semantic_search_references` 按语义召回，RAG 索引是 `ReferenceMaterial` 的可重建派生数据，不是事实主库。
 - 所有 AgentDefinition 必须声明 `toolCapabilities`，禁止恢复 `getTools` 回调
 - `AgentRunner` 使用 `getToolNamesForAgent()` 按 capability + `permission.agentIds` 生成基础工具集，再通过 `src/agents/runtime/tool-profile.ts` 按当前 `CreativeOperation` 裁剪本轮 OpenAI tools。Agent 身份负责职责边界，Operation Tool Profile 负责本轮任务可见工具；新增 control/read tool 时必须同步考虑哪些 Agent、哪些 operation 应暴露，并补充工具暴露测试。
 

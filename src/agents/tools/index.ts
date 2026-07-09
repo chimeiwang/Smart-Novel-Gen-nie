@@ -37,6 +37,7 @@ import "./read/character-tools";
 import "./read/lore-tools";
 import "./read/plot-tools";
 import "./read/artifact-tools";
+import "./read/reference-tools";
 
 // Proposal 工具（Phase 7）
 import "./proposals/update-proposal-tools";

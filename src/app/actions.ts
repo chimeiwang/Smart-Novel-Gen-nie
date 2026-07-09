@@ -26,6 +26,7 @@ import {
   SIGNUP_BONUS_CREDITS,
   formatCreditMicros,
 } from "@/shared/lib/billing";
+import { upsertReferenceMaterialRagIndex } from "@/shared/lib/rag-service";
 
 type ReferenceMaterialType = "note" | "web" | "book" | "image" | "custom";
 type StyleSourceType = "manual" | "agent";
@@ -1305,7 +1306,7 @@ export async function createReferenceMaterialAction(input: {
   }
   await requireNovelAccess(input.novelId);
 
-  await prisma.referenceMaterial.create({
+  const reference = await prisma.referenceMaterial.create({
     data: {
       novelId: input.novelId,
       title: input.title.trim(),
@@ -1314,6 +1315,12 @@ export async function createReferenceMaterialAction(input: {
       sourceUrl: input.sourceUrl?.trim() || null,
     },
   });
+
+  try {
+    await upsertReferenceMaterialRagIndex(reference.id);
+  } catch (error) {
+    console.error("upsertReferenceMaterialRagIndex error:", error);
+  }
 
   revalidatePath(`/workspace/${input.novelId}`);
 }

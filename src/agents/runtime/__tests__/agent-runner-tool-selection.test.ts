@@ -279,6 +279,7 @@ describe("AgentRunner tool selection", () => {
 
     assert.ok(toolNames.includes("get_novel_info"));
     assert.ok(toolNames.includes("search_lore"));
+    assert.ok(toolNames.includes("semantic_search_references"));
     assert.equal(toolNames.includes("propose_updates"), false);
     assert.equal(toolNames.includes("start_update_builder"), false);
     assert.equal(toolNames.includes("show_review_artifact"), false);
@@ -325,6 +326,7 @@ describe("AgentRunner tool selection", () => {
     assert.ok(toolNames.includes("begin_artifact_output"));
     assert.ok(toolNames.includes("get_style_profile"));
     assert.ok(toolNames.includes("get_character_detail"));
+    assert.ok(toolNames.includes("semantic_search_references"));
     assert.equal(toolNames.includes("list_factions_summary"), false);
     assert.equal(toolNames.includes("list_locations_summary"), false);
     assert.equal(toolNames.includes("propose_updates"), false);

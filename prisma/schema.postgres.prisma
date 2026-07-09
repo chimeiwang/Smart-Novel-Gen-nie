@@ -43,6 +43,8 @@ model Novel {
   outline        Outline?
   plotProgress   PlotProgress?
   references     ReferenceMaterial[]
+  ragDocuments   RagDocument[]
+  ragChunks      RagChunk[]
   // 智能写作相关
   foreshadowings Foreshadowing[]
   outlineNodes   OutlineNode[]
@@ -364,6 +366,51 @@ model ReferenceMaterial {
   novel      Novel                 @relation(fields: [novelId], references: [id], onDelete: Cascade)
 
   @@index([novelId, type])
+}
+
+model RagDocument {
+  id           String            @id @default(cuid())
+  novelId      String
+  sourceType   RagSourceType
+  sourceId     String
+  title        String
+  contentHash  String
+  status       RagDocumentStatus @default(disabled)
+  errorMessage String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+  novel        Novel             @relation(fields: [novelId], references: [id], onDelete: Cascade)
+  chunks       RagChunk[]
+
+  @@unique([sourceType, sourceId])
+  @@index([novelId, sourceType])
+}
+
+model RagChunk {
+  id                 String   @id @default(cuid())
+  documentId         String
+  novelId            String
+  chunkIndex         Int
+  text               String
+  charCount          Int
+  embeddingDimension Int
+  embedding          Unsupported("vector")
+  createdAt          DateTime @default(now())
+  document           RagDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  novel              Novel    @relation(fields: [novelId], references: [id], onDelete: Cascade)
+
+  @@unique([documentId, chunkIndex])
+  @@index([novelId])
+}
+
+enum RagSourceType {
+  reference_material
+}
+
+enum RagDocumentStatus {
+  disabled
+  ready
+  failed
 }
 
 // 文风主表
