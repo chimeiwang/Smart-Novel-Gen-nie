@@ -14,7 +14,7 @@
 
 ## 产品定位
 
-InkForge（墨铸）是面向中文小说作者的本地创作工作台。系统围绕长篇小说创作，提供项目/章节管理、设定资料库、文风画像、AI 续写与多 Agent 协作、草案审核、质量终检、写作会话恢复和基础计费能力。
+InkForge（墨铸）是面向中文小说作者的本地创作工作台。系统围绕中文小说创作，提供项目/章节管理、设定资料库、篇幅 Profile、文风画像、AI 续写与多 Agent 协作、草案审核、质量终检、写作会话恢复、参考资料 RAG 只读召回和基础计费能力。
 
 核心原则：
 
@@ -43,7 +43,7 @@ InkForge（墨铸）是面向中文小说作者的本地创作工作台。系统
 | 功能域 | 主要能力 | 主要入口 |
 | --- | --- | --- |
 | 项目与章节 | 小说创建、章节列表、章节编辑、自动保存、送审、完成、字数统计 | 首页、工作台、Server Actions |
-| 创作资料库 | 角色、关系、经历、物品、地点、势力、术语、故事背景、世界设定、作品圣经、参考资料 | 工作台左侧/右侧面板 |
+| 创作资料库 | 角色、关系、经历、物品、地点、势力、术语、故事背景、世界设定、作品圣经、篇幅 Profile、参考资料、RAG 派生索引 | 工作台左侧/右侧面板 |
 | 大纲与进度 | 文本总纲、三层结构化大纲、剧情进度、章节进展、伏笔数据模型 | 大纲面板、进度面板、Agent 草案 |
 | 文风画像 | 文风创建、TXT 参考资料上传、异步画像生成、分节重生成、应用到小说 | 文风库、工作台文风面板 |
 | AI 写作会话 | 会话 CRUD、消息持久化、流式 Agent 输出、恢复、继续修改草案 | 写作面板、写作 API |
@@ -92,6 +92,8 @@ erDiagram
     Novel ||--o{ OutlineNode : structures
     Novel ||--|| PlotProgress : tracks
     Novel ||--o{ ReferenceMaterial : stores
+    Novel ||--o{ RagDocument : indexes
+    RagDocument ||--o{ RagChunk : chunks
     Novel ||--o{ WritingSession : discusses
     Novel ||--o{ WritingTask : runs
     Novel ||--o{ ReviewArtifact : reviews
@@ -107,12 +109,14 @@ erDiagram
 ## 关键业务规则
 
 - 新建小说时默认创建第一章、空文本总纲和默认剧情进度。
+- 新建小说必须确定作品圣经中的篇幅 Profile：中短篇 `short_medium` 或长篇连载 `long_serial`，并记录目标总字数。
 - 章节正文保存为正式章节内容；Agent 生成正文默认保存为草案，用户应用后才写入章节。
 - 章节状态包括草稿中、待审核、已完成；完成前必须处理一致性终检。
 - 结构化大纲只有三层：阶段/卷、剧情单元、章节组。
 - Agent 修改设定、大纲、伏笔、正文或 Beat Plan 必须进入 ReviewArtifact。
 - 用户可对结构化 agent_updates 草案选择部分应用。
 - 写作会话恢复以 WritingSession 绑定 WritingTask 和 WritingTask.graphStateJson 为主。
+- 参考资料 RAG 索引是 ReferenceMaterial 的可重建派生数据；未配置 embedding 时上传资料仍可用，只是语义召回 disabled。
 - TokenUsage 和 CreditLedger 是计费审计数据；扣费属于关键写入，不能异步丢弃。
 
 ## 当前边界

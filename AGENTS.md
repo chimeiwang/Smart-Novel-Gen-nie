@@ -4,14 +4,24 @@
 
 **重要：后续所有对话必须使用简体中文。回答要清晰、诚实、明确；不要为了迎合用户而忽略事实。**
 
+## 文档权威
+
+根目录 `DOCS.md` 是本仓库的文档治理权威，定义文档类型、权威层级、归档规则和项目事实优先级。修改任何文档前必须遵守 `DOCS.md`。
+
+铁律：**项目事实高于文档历史**。如果文档与当前代码、`prisma/schema.prisma`、`package.json`、共享契约或测试冲突，必须以当前项目事实为准，并修正文档；不能为了保留旧文档说法而改歪实现。
+
+禁止维护第二套开发规范。`CLAUDE.md`、旧需求追溯说明、历史方案和执行计划如果与 `DOCS.md` / 本文件冲突，都不是当前依据。
+
 ## Codex 开发流程
 
 在本仓库中，Codex 的首要目标不是“尽快手写一个能跑的局部方案”，而是**顺着现有架构扩展项目**。开始实现前必须先判断变更类型，并查找已有能力。
 
 ### 动手前必须做
 
+- 改任何文档前：先阅读根目录 `DOCS.md`，确认该文档属于 authority / current-requirement / architecture / spec / plan / audit / archive / prompt 中的哪一类。
+- 接到任何后续需求后：先在 `docs/specs/` 新增或更新 spec，基于当前项目事实写清目标、非目标、设计、影响范围和验收标准；没有 spec 不得直接执行实现修改。
 - 改 UI / CSS / 交互状态前：先阅读根目录 `DESIGN.md`；它是以 Linear 为主参考、Vercel 为辅助参考的前端设计主规范。
-- 改 Agent、写作流程、质量评审、商业性评估、设定同步、伏笔管理前：先阅读 `docs/AGENT_NOVEL_WRITING_ROADMAP.md` 和 `src/agents/AGENTS.md`。
+- 改 Agent、写作流程、质量评审、商业性评估、设定同步、伏笔管理前：先阅读 `src/agents/AGENTS.md`、`docs/requirements/03-ai-writing-and-agents.md`、`docs/requirements/04-review-quality-and-workflow.md`。旧路线图只能作为历史背景，不能替代当前架构事实。
 - 改数据库模型或持久化逻辑前：先确认 `prisma/schema.prisma` 当前 PostgreSQL schema，不要被旧 SQLite 迁移或 `dev.db` 误导。
 - 改共享协议、SSE、Agent control tool、ReviewArtifact 状态机或 LangGraph 路由后：必须同步更新 `src/agents/AGENTS.md`；如果影响仓库级准则，也更新本文件。
 - 实现前优先用 `rg` 搜索已有入口、同名能力、测试和契约，确认是否可以扩展现有模块。

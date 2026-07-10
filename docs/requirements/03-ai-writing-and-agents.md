@@ -83,7 +83,8 @@ flowchart TD
 - 阶段；
 - 创建时间；
 - 更新时间；
-- 当前绑定任务摘要。
+- currentTask：显式绑定且非终态的可继续任务；
+- lastTask：completed/error 终态任务的只读历史摘要。
 
 ### 创建会话
 
@@ -102,7 +103,8 @@ flowchart TD
 
 - 会话基础信息；
 - 消息列表；
-- 当前任务；
+- currentTask；
+- lastTask；
 - 当前 Operation；
 - 当前阶段；
 - activeArtifactId；
@@ -151,6 +153,7 @@ flowchart TD
 - 如果传 writingSessionId，会话必须属于同一小说、同一章节和当前用户。
 - 默认 targetWordCount 为 4000。
 - selectedAgents 为空时使用默认 Agent 列表。
+- selectedAgents 会持久化到 WritingTask，但入口仍以 CreativeOperation 决定主责 Agent，不允许退回“只按用户选择 Agent 编排流程”的旧模式。
 
 ### 继续写作 workflow
 
@@ -189,6 +192,9 @@ flowchart TD
 
 - WritingMessage 用于用户可见聊天记录。
 - WritingTask.graphStateJson 用于恢复 LangGraph 状态。
+- currentTask 只来自 WritingSession 显式绑定的非终态 task。
+- completed/error 任务只能作为 lastTask 历史摘要，不得成为默认 `/api/writing/resume` 句柄。
+- 未绑定历史 task 不能在恢复时静默绑定到当前 session。
 - MemorySaver 只提供当前进程内短时优化，不是唯一恢复来源。
 
 ## SSE 事件

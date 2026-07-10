@@ -19,6 +19,7 @@
 - 结构化大纲节点；
 - 剧情进度；
 - 参考资料；
+- 参考资料 RAG 派生索引状态；
 - 已应用文风。
 
 这些数据既服务前端展示，也服务 Agent 上下文聚合。
@@ -176,6 +177,8 @@
 
 字段：
 
+- 篇幅模式：short_medium 中短篇，long_serial 长篇连载；
+- 目标总字数；
 - 题材/频道；
 - 目标读者画像；
 - 核心卖点；
@@ -190,6 +193,7 @@
 - 给编辑 Agent 提供商业判断依据；
 - 给校验 Agent 提供读者承诺和禁忌边界；
 - 给写作 Agent 提供风格和方向约束。
+- 给剧情 Agent 提供策划粒度约束：中短篇避免默认展开成百万字长篇，长篇连载强调长期冲突源和阶段升级。
 
 ## 大纲管理
 
@@ -240,7 +244,14 @@ flowchart TD
 - 状态：planned、in_progress、completed、skipped；
 - 预估字数；
 - 实际字数；
-- 可关联章节。
+- chapterStartOrder / chapterEndOrder 章节范围。
+
+运行规则：
+
+- chapterStartOrder 和 chapterEndOrder 是章节映射权威字段，必须成对存在。
+- 父节点范围必须包含子节点范围。
+- 同级节点范围不能重叠。
+- 写作上下文禁止从标题猜章号。
 
 ## 剧情进度
 
@@ -289,6 +300,23 @@ flowchart TD
 
 - 保存世界观草稿、素材、外部资料摘要；
 - 供 Agent 上下文参考。
+
+## 参考资料 RAG 索引
+
+RAG 索引是 ReferenceMaterial 的可重建派生数据。
+
+模型：
+
+- RagDocument：记录被索引的资料来源、contentHash、状态和错误信息。
+- RagChunk：记录资料分块、字符数、embedding 维度和向量。
+
+当前范围：
+
+- sourceType 只支持 reference_material。
+- status 包含 disabled、ready、failed。
+- 未配置 RAG_EMBEDDING_API_KEY / RAG_EMBEDDING_BASE_URL / RAG_EMBEDDING_MODEL 时，资料上传照常保存，索引状态为 disabled。
+- Agent 通过 semantic_search_references 只读召回参考资料片段。
+- RAG 召回结果不能直接写正式库；任何正式设定、大纲或正文变更仍必须走 ReviewArtifact。
 
 ## 文风画像
 
