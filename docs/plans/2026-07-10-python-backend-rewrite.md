@@ -6,7 +6,7 @@
 
 **架构：**在开发期间让 Python 服务与当前 TypeScript 实现并存，并把旧实现作为行为依据；只有证明 Python 契约行为一致后才迁移前端，并在发布前删除旧后端。核心接口服务独占 PostgreSQL、浏览器认证、业务规则、草案、计费和 SSE；智能体服务负责 LangGraph 及模型和工具执行，并通过签名的版本化 HTTP 契约与核心接口服务通信。
 
-**技术栈：**Python 3.12、uv、FastAPI、Pydantic v2、SQLAlchemy 2 异步接口、asyncpg、pgvector、Redis 异步接口、PyJWT 和 Ed25519、bcrypt、LangGraph Python、httpx、pytest、Next.js 16、React 19、OpenAPI 生成的 TypeScript、Nginx、Docker Compose。
+**技术栈：**Python 3.12、uv、FastAPI、Pydantic v2、SQLAlchemy 2 异步接口、asyncpg、pgvector、Redis 异步接口、PyJWT 和 Ed25519、独立 `inkforge-service-auth` 共享认证库、bcrypt、LangGraph Python、httpx、pytest、Next.js 16、React 19、OpenAPI 生成的 TypeScript、Nginx、Docker Compose。
 
 **权威规格：**`docs/specs/2026-07-10-python-backend-rewrite.md`
 
@@ -394,8 +394,14 @@ git commit -m "功能：映射并守卫不可变 PostgreSQL 数据库结构"
 - 新建：`apps/core-api/src/inkforge_core/service_auth.py`
 - 新建：`apps/agent-service/src/inkforge_agents/service_auth.py`
 - 新建：`packages/service-contracts/src/inkforge_contracts/jwt_claims.py`
+- 新建：`packages/service-auth/pyproject.toml`
+- 新建：`packages/service-auth/src/inkforge_service_auth/__init__.py`
+- 新建：`packages/service-auth/src/inkforge_service_auth/service_auth.py`
+- 新建：`packages/service-auth/src/inkforge_service_auth/py.typed`
+- 新建：`packages/service-auth/tests/test_service_auth_security.py`
+- 新建：`packages/service-auth/tests/test_package_wheel.py`
 - 新建：`apps/core-api/tests/test_service_auth.py`
-- 新建：`apps/agent-service/tests/test_service_auth.py`
+- 新建：`apps/agent-service/tests/test_agent_service_auth.py`
 - 新建：`scripts/generate_service_keys.py`
 
 - [ ] **步骤 1：编写失败的信任边界测试**
@@ -415,24 +421,24 @@ def test_agent_token_cannot_call_another_novel(verifier, signed_token) -> None:
 
 - [ ] **步骤 2：运行并确认失败**
 
-运行：`uv run pytest apps/core-api/tests/test_service_auth.py apps/agent-service/tests/test_service_auth.py -v`
+运行：`uv run pytest packages/service-auth/tests/test_service_auth_security.py apps/core-api/tests/test_service_auth.py apps/agent-service/tests/test_agent_service_auth.py -v`
 
 预期：测试失败，因为服务认证尚未实现。
 
 - [ ] **步骤 3：实现密钥加载、签名和验证**
 
-私钥只能从配置文件加载。声明在 120 秒后过期。内部写入权限范围必须使用 Redis 重放保护，幂等读取可以选择使用。请求模型进入业务服务前，必须验证 `Idempotency-Key`、`X-InkForge-Timestamp` 和 `X-InkForge-Body-SHA256`。
+私钥只能从配置文件加载。声明在 120 秒后过期。内部写入权限范围必须使用 Redis 重放保护，幂等读取可以选择使用。请求模型进入业务服务前，必须验证 `Idempotency-Key`、`X-InkForge-Timestamp` 和 `X-InkForge-Body-SHA256`。密码学、请求绑定和重放保护的通用实现集中在 `inkforge-service-auth` 工作区库；该库不监听端口、不增加部署进程，两个运行服务只通过各自模块暴露固定方向的构造函数。
 
 - [ ] **步骤 4：确认通过**
 
-运行：`uv run pytest apps/core-api/tests/test_service_auth.py apps/agent-service/tests/test_service_auth.py -v`
+运行：`uv run pytest packages/service-auth/tests/test_service_auth_security.py apps/core-api/tests/test_service_auth.py apps/agent-service/tests/test_agent_service_auth.py -v`
 
 预期：通过。
 
 - [ ] **步骤 5：提交**
 
 ```bash
-git add apps/core-api/src/inkforge_core/service_auth.py apps/core-api/tests/test_service_auth.py apps/agent-service/src/inkforge_agents/service_auth.py apps/agent-service/tests/test_service_auth.py packages/service-contracts scripts/generate_service_keys.py
+git add apps/core-api/src/inkforge_core/service_auth.py apps/core-api/tests/test_service_auth.py apps/agent-service/src/inkforge_agents/service_auth.py apps/agent-service/tests/test_agent_service_auth.py packages/service-contracts packages/service-auth scripts/generate_service_keys.py
 git commit -m "功能：保护核心服务与智能体服务调用"
 ```
 
@@ -1192,7 +1198,7 @@ git commit -m "运维：添加生产 Docker Compose 部署"
 
 运行：`uv run ruff check .`
 
-运行：`uv run mypy apps/core-api/src apps/agent-service/src packages/service-contracts/src`
+运行：`uv run mypy apps/core-api/src apps/agent-service/src packages/service-contracts/src packages/service-auth/src`
 
 运行：`uv run pytest`
 
@@ -1239,9 +1245,9 @@ git commit -m "重构：移除旧 Next.js 后端"
 
 运行：`uv run ruff check .`
 
-运行：`uv run mypy apps/core-api/src apps/agent-service/src packages/service-contracts/src`
+运行：`uv run mypy apps/core-api/src apps/agent-service/src packages/service-contracts/src packages/service-auth/src`
 
-运行：`uv run pytest --cov=inkforge_core --cov=inkforge_agents --cov=inkforge_contracts --cov-report=term-missing`
+运行：`uv run pytest --cov=inkforge_core --cov=inkforge_agents --cov=inkforge_contracts --cov=inkforge_service_auth --cov-report=term-missing`
 
 预期：全部通过；变更的 Python 业务模块具有有意义的分支覆盖率，并且不存在未测试的关键授权或写入路径。
 

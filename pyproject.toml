@@ -6,6 +6,7 @@ dependencies = []
 
 [dependency-groups]
 dev = [
+    "hatchling>=1.27,<2",
     "mypy>=1.14,<2",
     "pytest>=8.3,<9",
     "pytest-asyncio>=0.25,<1",
@@ -18,6 +19,7 @@ members = [
     "apps/core-api",
     "apps/agent-service",
     "packages/service-contracts",
+    "packages/service-auth",
 ]
 
 [tool.pytest.ini_options]
@@ -28,6 +30,7 @@ testpaths = [
     "apps/core-api/tests",
     "apps/agent-service/tests",
     "packages/service-contracts/tests",
+    "packages/service-auth/tests",
 ]
 
 [tool.ruff]

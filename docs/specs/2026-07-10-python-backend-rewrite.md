@@ -74,6 +74,7 @@ inkForge/
 │       └── tests/
 ├── packages/
 │   ├── service-contracts/         # 两个 Python 服务共享的 Pydantic 协议
+│   ├── service-auth/              # 两个 Python 服务共享的签名认证与重放保护库
 │   └── api-client/                # OpenAPI 生成的 TypeScript 客户端
 ├── infra/
 │   ├── compose.yaml
@@ -87,7 +88,7 @@ inkForge/
 └── package.json                   # npm 工作区根命令
 ```
 
-`packages/service-contracts` 只允许放跨服务请求、响应、事件、身份 claims 和版本常量。不得把 Core repository、ORM model、Agent prompt 或业务 service 放进共享包，避免重新形成跨服务源码耦合。
+`packages/service-contracts` 只允许放跨服务请求、响应、事件、身份 claims 和版本常量。`packages/service-auth` 只允许放 Ed25519 服务令牌、请求绑定、本地 JWKS 和 Redis 重放保护的无业务通用实现；它是被 Core API 和 Agent Service 共同依赖的 Python 库，不是运行服务，不增加 Docker Compose 进程。不得把 Core repository、ORM model、Agent prompt 或业务 service 放进任一共享包，避免重新形成跨服务源码耦合。
 
 ### 2. 运行架构
 
@@ -134,6 +135,7 @@ data_net:   core-api, postgres
 - httpx 作为服务间和模型外围 HTTP 客户端。
 - redis-py 异步接口作为检查点、短期队列、SSE 事件缓冲区、限流和防重放存储。
 - PyJWT + cryptography 处理浏览器 HS256 会话与服务 Ed25519 JWT。
+- `inkforge-service-auth` 工作区库集中实现服务签名和验证，两个运行服务只保留固定通信方向的装配入口。
 - bcrypt 验证现有 bcryptjs 哈希并生成兼容的新哈希。
 - structlog 和 orjson 输出结构化 JSON 日志。
 - pytest、pytest-asyncio、httpx、respx 和 Playwright 负责测试。
@@ -406,6 +408,7 @@ POST /internal/v1/agent-runs/{runId}/fail
 - `apps/core-api/**`
 - `apps/agent-service/**`
 - `packages/service-contracts/**`
+- `packages/service-auth/**`
 - `packages/api-client/**`
 - `infra/**`
 - `scripts/schema_guard.py` 及部署验收脚本

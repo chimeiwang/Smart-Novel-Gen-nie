@@ -10,6 +10,7 @@ WORKSPACE_MEMBERS = (
     ("apps/core-api", "src/inkforge_core"),
     ("apps/agent-service", "src/inkforge_agents"),
     ("packages/service-contracts", "src/inkforge_contracts"),
+    ("packages/service-auth", "src/inkforge_service_auth"),
 )
 EXPECTED_WORKSPACE_MEMBER_PATHS = tuple(member for member, _ in WORKSPACE_MEMBERS)
 
