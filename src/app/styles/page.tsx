@@ -56,8 +56,8 @@ export default async function StylesPage() {
       <div className="panel">
         <div className="panel-header">
           <div className="stack">
-            <Link href="/" className="muted">
-              ← 返回首页
+            <Link href="/dashboard" className="muted">
+              ← 返回工作台
             </Link>
             <h1 className="title-lg">文风库</h1>
             <p className="muted">

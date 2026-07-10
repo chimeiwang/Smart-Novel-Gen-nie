@@ -4,11 +4,15 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { loginAction, registerAction } from "@/app/actions";
 
-export function LoginForm() {
+interface LoginFormProps {
+  initialMode?: "login" | "register";
+}
+
+export function LoginForm({ initialMode = "login" }: LoginFormProps) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [mode, setMode] = useState<"login" | "register">("login");
+  const [mode, setMode] = useState<"login" | "register">(initialMode);
 
   const handleSubmit = async (formData: FormData) => {
     setPending(true);
@@ -18,7 +22,7 @@ export function LoginForm() {
         ? await loginAction(formData)
         : await registerAction(formData);
       if (result.success) {
-        router.push("/");
+        router.push("/dashboard");
       } else {
         setError(result.error ?? (mode === "login" ? "登录失败" : "注册失败"));
       }

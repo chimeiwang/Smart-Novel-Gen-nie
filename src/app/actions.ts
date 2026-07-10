@@ -255,6 +255,7 @@ export async function createNovelAction(formData: FormData) {
   });
 
   revalidatePath("/");
+  revalidatePath("/dashboard");
 
   return { novelId: novel.id, chapterId: novel.chapters[0]?.id ?? null };
 }
