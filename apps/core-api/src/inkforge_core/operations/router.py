@@ -7,8 +7,6 @@ from fastapi import APIRouter, FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
 
-from ..errors import PUBLIC_ERROR_RESPONSES
-
 
 class LiveHealthResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -29,11 +27,7 @@ ReadinessCheck = Callable[[], bool | Awaitable[bool]]
 ReadinessChecks = dict[str, ReadinessCheck]
 
 
-router = APIRouter(
-    prefix="/health",
-    tags=["health"],
-    responses=PUBLIC_ERROR_RESPONSES,
-)
+router = APIRouter(prefix="/health", tags=["health"])
 
 
 @router.get("/live", response_model=LiveHealthResponse)

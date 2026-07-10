@@ -9,6 +9,8 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, JsonValue
 from starlette.exceptions import HTTPException
+from starlette.requests import Request as StarletteRequest
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from .http.request_id import get_request_id
 
@@ -57,11 +59,38 @@ class ApiError(Exception):
         self.details = details
 
 
+class SafeUnhandledExceptionMiddleware:
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        response_started = False
+
+        async def track_response_start(message: Message) -> None:
+            nonlocal response_started
+            if message["type"] == "http.response.start":
+                response_started = True
+            await send(message)
+
+        try:
+            await self.app(scope, receive, track_response_start)
+        except Exception as exc:
+            request = StarletteRequest(scope)
+            if response_started:
+                log_unexpected_error(request, exc)
+                raise
+            response = await handle_unexpected_error(request, exc)
+            await response(scope, receive, send)
+
+
 def install_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(ApiError, handle_api_error)
     app.add_exception_handler(RequestValidationError, handle_request_validation_error)
     app.add_exception_handler(HTTPException, handle_http_exception)
-    app.add_exception_handler(Exception, handle_unexpected_error)
 
 
 async def handle_api_error(request: Request, exc: Exception) -> JSONResponse:
@@ -116,6 +145,11 @@ async def handle_http_exception(request: Request, exc: Exception) -> JSONRespons
 
 
 async def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
+    log_unexpected_error(request, exc)
+    return _error_response(request, 500, "INTERNAL_SERVER_ERROR", "服务器内部错误")
+
+
+def log_unexpected_error(request: Request, exc: Exception) -> None:
     request_id = get_request_id(request)
     logger.error(
         "接口发生未处理异常",
@@ -125,7 +159,6 @@ async def handle_unexpected_error(request: Request, exc: Exception) -> JSONRespo
             "exceptionType": type(exc).__name__,
         },
     )
-    return _error_response(request, 500, "INTERNAL_SERVER_ERROR", "服务器内部错误")
 
 
 def _error_response(

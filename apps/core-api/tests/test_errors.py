@@ -20,10 +20,16 @@ def assert_stable_error_envelope(response_body: dict[str, object]) -> None:
 
 
 def test_public_routes_document_the_stable_error_response() -> None:
-    client = TestClient(create_app(testing=True))
+    app = create_app(testing=True)
+
+    @app.get("/api/v1/example")
+    async def example() -> dict[str, bool]:
+        return {"ok": True}
+
+    client = TestClient(app)
 
     document = client.get("/api/v1/openapi.json").json()
-    for path in ("/api/v1/health/live", "/api/v1/health/ready"):
+    for path in ("/api/v1/health/live", "/api/v1/health/ready", "/api/v1/example"):
         responses = document["paths"][path]["get"]["responses"]
         for status_code in ("400", "401", "403", "404", "409", "422", "500", "default"):
             schema = responses[status_code]["content"]["application/json"]["schema"]
@@ -146,7 +152,7 @@ def test_unhandled_exception_hides_internal_text_and_logs_safe_fields(
         raise RuntimeError(internal_message)
 
     with caplog.at_level(logging.ERROR, logger="inkforge_core.errors"):
-        response = TestClient(app, raise_server_exceptions=False).get(
+        response = TestClient(app).get(
             "/api/v1/testing/crash",
             headers={"X-Request-ID": "request-crash"},
         )
