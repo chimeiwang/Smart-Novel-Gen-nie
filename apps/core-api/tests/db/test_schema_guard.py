@@ -24,7 +24,6 @@ from inkforge_core.db.schema_guard import (
     load_schema_contract,
     verify_live_schema,
 )
-from sqlalchemy.exc import SQLAlchemyError
 
 
 def sample_contract() -> dict[str, Any]:
@@ -50,7 +49,13 @@ def sample_contract() -> dict[str, Any]:
                         "default": None,
                     },
                 ],
-                "primaryKey": {"name": "Novel_pkey", "columns": ["id"]},
+                "primaryKey": {
+                    "name": "Novel_pkey",
+                    "columns": ["id"],
+                    "deferrable": False,
+                    "initiallyDeferred": False,
+                    "validated": True,
+                },
                 "foreignKeys": [
                     {
                         "name": "Novel_userId_fkey",
@@ -60,9 +65,21 @@ def sample_contract() -> dict[str, Any]:
                         "targetColumns": ["id"],
                         "onUpdate": "CASCADE",
                         "onDelete": "SET NULL",
+                        "matchType": "SIMPLE",
+                        "deferrable": False,
+                        "initiallyDeferred": False,
+                        "validated": True,
                     }
                 ],
-                "uniqueConstraints": [],
+                "uniqueConstraints": [
+                    {
+                        "name": "Novel_userId_key",
+                        "columns": ["userId"],
+                        "deferrable": False,
+                        "initiallyDeferred": False,
+                        "validated": True,
+                    }
+                ],
                 "indexes": [
                     {
                         "name": "Novel_userId_idx",
@@ -87,6 +104,8 @@ def sample_contract() -> dict[str, Any]:
                         "valid": True,
                         "ready": True,
                         "nullsNotDistinct": False,
+                        "options": [],
+                        "tablespace": None,
                     }
                 ],
             },
@@ -116,11 +135,12 @@ def sample_contract() -> dict[str, Any]:
             "product": "PostgreSQL",
             "serverVersion": "17.5",
             "serverVersionNum": 170005,
+            "sourceId": "a" * 64,
         },
     }
 
 
-def test_canonical_fingerprint_is_stable_and_excludes_fingerprint() -> None:
+def test_canonical_fingerprint_excludes_fingerprint_and_source_metadata() -> None:
     contract = sample_contract()
     reordered = {
         "tables": contract["tables"],
@@ -134,8 +154,17 @@ def test_canonical_fingerprint_is_stable_and_excludes_fingerprint() -> None:
 
     first = canonical_fingerprint(contract)
     second = canonical_fingerprint(reordered)
+    changed_source = copy.deepcopy(contract)
+    changed_source["source"] = {
+        "product": "PostgreSQL",
+        "serverVersion": "17.6",
+        "serverVersionNum": 170006,
+        "sourceId": "b" * 64,
+    }
 
     assert first == second
+    assert canonical_fingerprint(changed_source) == first
+    assert compare_schema_contract(contract, changed_source) == []
     assert len(first) == 64
     assert all(character in "0123456789abcdef" for character in first)
 
@@ -238,6 +267,26 @@ def test_compare_reports_index_opclass_as_single_field_drift() -> None:
     ]
 
 
+def test_compare_reports_constraint_and_index_metadata_as_field_level_drift() -> None:
+    expected = sample_contract()
+    actual = copy.deepcopy(expected)
+    actual["tables"][0]["primaryKey"]["deferrable"] = True
+    actual["tables"][0]["foreignKeys"][0]["matchType"] = "FULL"
+    actual["tables"][0]["uniqueConstraints"][0]["validated"] = False
+    actual["tables"][0]["indexes"][0]["options"] = ["fillfactor=80"]
+    actual["tables"][0]["indexes"][0]["tablespace"] = "fastspace"
+
+    diffs = compare_schema_contract(expected, actual)
+
+    assert [diff.path for diff in diffs] == [
+        "tables.Novel.foreignKeys.Novel_userId_fkey.matchType",
+        "tables.Novel.indexes.Novel_userId_idx.options",
+        "tables.Novel.indexes.Novel_userId_idx.tablespace",
+        "tables.Novel.primaryKey.deferrable",
+        "tables.Novel.uniqueConstraints.Novel_userId_key.validated",
+    ]
+
+
 def test_checked_in_contract_preserves_all_live_public_tables_without_secrets() -> None:
     root = Path(__file__).resolve().parents[4]
     contract_path = (
@@ -303,6 +352,13 @@ def test_checked_in_contract_preserves_all_live_public_tables_without_secrets() 
         "fingerprint",
         "source",
     }
+    assert set(contract["source"]) == {
+        "product",
+        "serverVersion",
+        "serverVersionNum",
+        "sourceId",
+    }
+    assert re.fullmatch(r"[0-9a-f]{64}", contract["source"]["sourceId"])
 
     forbidden_keys = {"databaseurl", "host", "port", "user", "password", "databasename", "path"}
 
@@ -353,13 +409,21 @@ class RecordingConnection:
 
 
 def catalog_result_sets(
-    *, server_version: str = "17.5", server_version_num: int = 170005
+    *,
+    server_version: str = "17.5",
+    server_version_num: int = 170005,
+    database_name: str = "private_database",
+    server_address: str = "192.0.2.10",
+    server_port: int = 5432,
 ) -> list[list[Mapping[str, object]]]:
     return [
         [
             {
                 "server_version": server_version,
                 "server_version_num": server_version_num,
+                "database_name": database_name,
+                "server_address": server_address,
+                "server_port": server_port,
             }
         ],
         [{"table_name": "RagChunk"}],
@@ -373,9 +437,45 @@ def catalog_result_sets(
                 "column_default": None,
             }
         ],
-        [],
-        [],
-        [],
+        [
+            {
+                "table_name": "RagChunk",
+                "constraint_name": "RagChunk_pkey",
+                "position": 1,
+                "column_name": "embedding",
+                "is_deferrable": False,
+                "is_deferred": False,
+                "is_validated": True,
+            }
+        ],
+        [
+            {
+                "table_name": "RagChunk",
+                "constraint_name": "RagChunk_documentId_fkey",
+                "position": 1,
+                "column_name": "documentId",
+                "target_schema": "public",
+                "target_table": "RagDocument",
+                "target_column": "id",
+                "on_update": "CASCADE",
+                "on_delete": "CASCADE",
+                "match_type": "SIMPLE",
+                "is_deferrable": False,
+                "is_deferred": False,
+                "is_validated": True,
+            }
+        ],
+        [
+            {
+                "table_name": "RagChunk",
+                "constraint_name": "RagChunk_embedding_key",
+                "position": 1,
+                "column_name": "embedding",
+                "is_deferrable": False,
+                "is_deferred": False,
+                "is_validated": True,
+            }
+        ],
         [
             {
                 "table_name": "RagChunk",
@@ -396,6 +496,8 @@ def catalog_result_sets(
                 "is_valid": True,
                 "is_ready": True,
                 "nulls_not_distinct": False,
+                "rel_options": ["fillfactor=90"],
+                "tablespace_name": "fastspace",
             },
             {
                 "table_name": "RagChunk",
@@ -416,6 +518,8 @@ def catalog_result_sets(
                 "is_valid": True,
                 "is_ready": True,
                 "nulls_not_distinct": False,
+                "rel_options": ["fillfactor=90"],
+                "tablespace_name": "fastspace",
             },
             {
                 "table_name": "RagChunk",
@@ -436,6 +540,8 @@ def catalog_result_sets(
                 "is_valid": True,
                 "is_ready": True,
                 "nulls_not_distinct": False,
+                "rel_options": ["fillfactor=90"],
+                "tablespace_name": "fastspace",
             },
         ],
         [{"enum_name": "ChapterStatus", "enum_value": "drafting", "sort_order": 1.0}],
@@ -460,11 +566,12 @@ async def test_inspection_uses_only_catalog_selects_and_preserves_vector_dimensi
     contract = await inspect_schema(connection)
 
     assert contract["tables"][0]["columns"][0]["formatType"] == "vector(1536)"
-    assert contract["source"] == {
-        "product": "PostgreSQL",
-        "serverVersion": "17.5",
-        "serverVersionNum": 170005,
-    }
+    assert contract["source"]["product"] == "PostgreSQL"
+    assert contract["source"]["serverVersion"] == "17.5"
+    assert contract["source"]["serverVersionNum"] == 170005
+    assert re.fullmatch(r"[0-9a-f]{64}", contract["source"]["sourceId"])
+    assert "private_database" not in json.dumps(contract)
+    assert "192.0.2.10" not in json.dumps(contract)
     assert contract["extensions"] == [
         {"name": "plpgsql", "installed": True, "version": "1.0"},
         {"name": "vector", "installed": True, "version": "0.8.1"},
@@ -485,6 +592,17 @@ async def test_inspection_uses_only_catalog_selects_and_preserves_vector_dimensi
     assert mixed_index["valid"] is True
     assert mixed_index["ready"] is True
     assert mixed_index["nullsNotDistinct"] is False
+    assert mixed_index["options"] == ["fillfactor=90"]
+    assert mixed_index["tablespace"] == "fastspace"
+    assert contract["tables"][0]["primaryKey"] == {
+        "name": "RagChunk_pkey",
+        "columns": ["embedding"],
+        "deferrable": False,
+        "initiallyDeferred": False,
+        "validated": True,
+    }
+    assert contract["tables"][0]["foreignKeys"][0]["matchType"] == "SIMPLE"
+    assert contract["tables"][0]["uniqueConstraints"][0]["validated"] is True
     assert len(connection.statements) == 9
     for sql in connection.statements:
         normalized = sql.lstrip().upper()
@@ -501,6 +619,22 @@ async def test_inspection_uses_only_catalog_selects_and_preserves_vector_dimensi
                 "TRUNCATE ",
             )
         )
+
+
+async def test_source_id_distinguishes_database_identity_without_affecting_fingerprint() -> None:
+    first = await inspect_schema(RecordingConnection(catalog_result_sets()))
+    second = await inspect_schema(
+        RecordingConnection(
+            catalog_result_sets(
+                database_name="another_private_database",
+                server_address="198.51.100.20",
+            )
+        )
+    )
+
+    assert first["source"]["sourceId"] != second["source"]["sourceId"]
+    assert canonical_fingerprint(first) == canonical_fingerprint(second)
+    assert compare_schema_contract(first, second) == []
 
 
 async def test_pg14_index_query_does_not_reference_new_catalog_column() -> None:
@@ -595,7 +729,7 @@ async def test_connection_error_is_sanitized_and_not_reported_as_drift(
     contract_path.write_text(
         json.dumps(add_contract_fingerprint(sample_contract())), encoding="utf-8"
     )
-    engine = FailingEngine(SQLAlchemyError(f"无法连接 {secret_url}"))
+    engine = FailingEngine(RuntimeError(f"无法连接 {secret_url}"))
     monkeypatch.setattr(schema_guard, "create_async_engine", lambda *args, **kwargs: engine)
 
     with pytest.raises(SchemaConnectionError) as caught:
@@ -606,6 +740,7 @@ async def test_connection_error_is_sanitized_and_not_reported_as_drift(
     assert caught.value.__cause__ is None
     assert caught.value.__suppress_context__ is True
     assert caught.value.diagnostic == "connection_failed"
+    assert caught.value.exception_type == "RuntimeError"
     for secret in (secret_url, "secret-user", "secret-password", "secret-host", "private-db"):
         assert secret not in rendered
 
@@ -620,7 +755,7 @@ async def test_engine_creation_error_is_inside_sanitized_boundary(
     )
 
     def fail_engine_creation(*args: object, **kwargs: object) -> None:
-        raise SQLAlchemyError(f"引擎创建失败：{secret_url}")
+        raise RuntimeError(f"引擎创建失败：{secret_url}")
 
     monkeypatch.setattr(schema_guard, "create_async_engine", fail_engine_creation)
 
@@ -628,8 +763,83 @@ async def test_engine_creation_error_is_inside_sanitized_boundary(
         await verify_live_schema(secret_url, contract_path)
 
     assert caught.value.diagnostic == "engine_creation_failed"
+    assert caught.value.exception_type == "RuntimeError"
     assert secret_url not in str(caught.value)
     assert caught.value.__cause__ is None
+
+
+async def test_inspection_and_dispose_errors_are_sanitized_but_internal_errors_are_not(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    secret = "SECRET-INTERNAL-DIAGNOSTIC"  # noqa: S105
+    contract_path = tmp_path / "schema-contract.json"
+    contract_path.write_text(
+        json.dumps(add_contract_fingerprint(sample_contract())), encoding="utf-8"
+    )
+    engine = FakeEngine(RecordingConnection(catalog_result_sets()))
+    monkeypatch.setattr(schema_guard, "create_async_engine", lambda *args, **kwargs: engine)
+
+    async def fail_inspection(*args: object, **kwargs: object) -> dict[str, Any]:
+        raise KeyError(secret)
+
+    monkeypatch.setattr(schema_guard, "inspect_schema", fail_inspection)
+    with pytest.raises(SchemaConnectionError) as inspection_error:
+        await verify_live_schema("postgresql+asyncpg://unused", contract_path)
+
+    assert inspection_error.value.diagnostic == "inspection_failed"
+    assert inspection_error.value.exception_type == "KeyError"
+    assert secret not in str(inspection_error.value)
+
+    class DisposeFailingEngine(FakeEngine):
+        async def dispose(self) -> None:
+            raise RuntimeError(secret)
+
+    async def successful_inspection(*args: object, **kwargs: object) -> dict[str, Any]:
+        return copy.deepcopy(sample_contract())
+
+    monkeypatch.setattr(schema_guard, "inspect_schema", successful_inspection)
+    monkeypatch.setattr(
+        schema_guard,
+        "create_async_engine",
+        lambda *args, **kwargs: DisposeFailingEngine(
+            RecordingConnection(catalog_result_sets())
+        ),
+    )
+    with pytest.raises(SchemaConnectionError) as dispose_error:
+        await verify_live_schema("postgresql+asyncpg://unused", contract_path)
+
+    assert dispose_error.value.diagnostic == "dispose_failed"
+    assert dispose_error.value.exception_type == "RuntimeError"
+    assert secret not in str(dispose_error.value)
+
+    monkeypatch.undo()
+    with pytest.raises(KeyError):
+        await inspect_schema(RecordingConnection([[{}]]))
+
+
+async def test_missing_inspection_result_is_sanitized(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    contract_path = tmp_path / "schema-contract.json"
+    contract_path.write_text(
+        json.dumps(add_contract_fingerprint(sample_contract())), encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        schema_guard,
+        "create_async_engine",
+        lambda *args, **kwargs: FakeEngine(RecordingConnection(catalog_result_sets())),
+    )
+
+    async def missing_inspection(*args: object, **kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(schema_guard, "inspect_schema", missing_inspection)
+
+    with pytest.raises(SchemaConnectionError) as caught:
+        await verify_live_schema("postgresql+asyncpg://unused", contract_path)
+
+    assert caught.value.diagnostic == "inspection_failed"
+    assert caught.value.exception_type == "MissingInspectionResult"
 
 
 async def test_verify_live_schema_returns_exact_ready_and_single_drift(
@@ -642,7 +852,14 @@ async def test_verify_live_schema_returns_exact_ready_and_single_drift(
     )
 
     async def inspect_exact(database_url: str, schema: str) -> dict[str, Any]:
-        return copy.deepcopy(expected)
+        actual = copy.deepcopy(expected)
+        actual["source"] = {
+            "product": "PostgreSQL",
+            "serverVersion": "14.24",
+            "serverVersionNum": 140024,
+            "sourceId": "b" * 64,
+        }
+        return actual
 
     monkeypatch.setattr(schema_guard, "_inspect_live", inspect_exact)
     ready_result = await verify_live_schema("postgresql+asyncpg://unused", contract_path)
@@ -704,7 +921,7 @@ async def test_cli_success_prints_safe_source_identifier(
     output = capsys.readouterr().out
 
     assert result == 0
-    assert "来源 PostgreSQL 17.5" in output
+    assert "来源 aaaaaaaaaaaa" in output
     assert secret_url not in output
 
 

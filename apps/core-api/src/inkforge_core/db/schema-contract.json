@@ -222,12 +222,13 @@
       "version": "0.8.0"
     }
   ],
-  "fingerprint": "e84c45488a0dce5f696ca7e7a401290f17446770d4cfa066fd322a6435f30175",
+  "fingerprint": "ced767c021554043f41130281bad10f994d4abd01d947c49247b45d1f0f3889e",
   "schema": "public",
   "source": {
     "product": "PostgreSQL",
     "serverVersion": "14.23 (Ubuntu 14.23-0ubuntu0.22.04.1)",
-    "serverVersionNum": 140023
+    "serverVersionNum": 140023,
+    "sourceId": "d33459248991cfb51af4d8800bb9b9dfaa61d5f8d084ce7afab22ac81a3a36ab"
   },
   "tables": [
     {
@@ -301,6 +302,9 @@
           "columns": [
             "novelId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "Chapter_novelId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -308,7 +312,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Novel"
+          "targetTable": "Novel",
+          "validated": true
         }
       ],
       "indexes": [
@@ -343,8 +348,10 @@
           "method": "btree",
           "name": "Chapter_novelId_order_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -367,8 +374,10 @@
           "method": "btree",
           "name": "Chapter_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -391,8 +400,10 @@
           "method": "btree",
           "name": "Chapter_status_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         }
@@ -402,7 +413,10 @@
         "columns": [
           "id"
         ],
-        "name": "Chapter_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "Chapter_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -491,6 +505,9 @@
           "columns": [
             "chapterId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "ChapterBeatPlan_chapterId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -498,12 +515,16 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Chapter"
+          "targetTable": "Chapter",
+          "validated": true
         },
         {
           "columns": [
             "goalId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "ChapterBeatPlan_goalId_fkey",
           "onDelete": "SET NULL",
           "onUpdate": "CASCADE",
@@ -511,7 +532,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "ChapterWritingGoal"
+          "targetTable": "ChapterWritingGoal",
+          "validated": true
         }
       ],
       "indexes": [
@@ -534,8 +556,10 @@
           "method": "btree",
           "name": "ChapterBeatPlan_chapterId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -558,8 +582,10 @@
           "method": "btree",
           "name": "ChapterBeatPlan_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -582,8 +608,10 @@
           "method": "btree",
           "name": "ChapterBeatPlan_status_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         }
@@ -593,7 +621,10 @@
         "columns": [
           "id"
         ],
-        "name": "ChapterBeatPlan_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "ChapterBeatPlan_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -640,6 +671,9 @@
           "columns": [
             "chapterId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "ChapterProgress_chapterId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -647,7 +681,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Chapter"
+          "targetTable": "Chapter",
+          "validated": true
         }
       ],
       "indexes": [
@@ -670,8 +705,10 @@
           "method": "btree",
           "name": "ChapterProgress_chapterId_key",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -694,8 +731,10 @@
           "method": "btree",
           "name": "ChapterProgress_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -705,7 +744,10 @@
         "columns": [
           "id"
         ],
-        "name": "ChapterProgress_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "ChapterProgress_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -843,6 +885,9 @@
           "columns": [
             "chapterId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "ChapterQualityCheck_chapterId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -850,7 +895,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Chapter"
+          "targetTable": "Chapter",
+          "validated": true
         }
       ],
       "indexes": [
@@ -873,8 +919,10 @@
           "method": "btree",
           "name": "ChapterQualityCheck_chapterId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -909,8 +957,10 @@
           "method": "btree",
           "name": "ChapterQualityCheck_chapterId_type_key",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -933,8 +983,10 @@
           "method": "btree",
           "name": "ChapterQualityCheck_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -957,8 +1009,10 @@
           "method": "btree",
           "name": "ChapterQualityCheck_status_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         }
@@ -968,7 +1022,10 @@
         "columns": [
           "id"
         ],
-        "name": "ChapterQualityCheck_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "ChapterQualityCheck_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -1064,6 +1121,9 @@
           "columns": [
             "chapterId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "ChapterWritingGoal_chapterId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -1071,12 +1131,16 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Chapter"
+          "targetTable": "Chapter",
+          "validated": true
         },
         {
           "columns": [
             "novelId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "ChapterWritingGoal_novelId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -1084,7 +1148,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Novel"
+          "targetTable": "Novel",
+          "validated": true
         }
       ],
       "indexes": [
@@ -1107,8 +1172,10 @@
           "method": "btree",
           "name": "ChapterWritingGoal_chapterId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -1143,8 +1210,10 @@
           "method": "btree",
           "name": "ChapterWritingGoal_novelId_chapterId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -1167,8 +1236,10 @@
           "method": "btree",
           "name": "ChapterWritingGoal_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -1178,7 +1249,10 @@
         "columns": [
           "id"
         ],
-        "name": "ChapterWritingGoal_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "ChapterWritingGoal_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -1351,6 +1425,9 @@
           "columns": [
             "factionId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "Character_factionId_fkey",
           "onDelete": "SET NULL",
           "onUpdate": "CASCADE",
@@ -1358,12 +1435,16 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Faction"
+          "targetTable": "Faction",
+          "validated": true
         },
         {
           "columns": [
             "novelId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "Character_novelId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -1371,7 +1452,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Novel"
+          "targetTable": "Novel",
+          "validated": true
         }
       ],
       "indexes": [
@@ -1394,8 +1476,10 @@
           "method": "btree",
           "name": "Character_currentStatus_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -1418,8 +1502,10 @@
           "method": "btree",
           "name": "Character_factionId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -1442,8 +1528,10 @@
           "method": "btree",
           "name": "Character_novelId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -1466,8 +1554,10 @@
           "method": "btree",
           "name": "Character_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -1477,7 +1567,10 @@
         "columns": [
           "id"
         ],
-        "name": "Character_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "Character_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -1538,6 +1631,9 @@
           "columns": [
             "characterId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "CharacterExperience_characterId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -1545,7 +1641,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Character"
+          "targetTable": "Character",
+          "validated": true
         }
       ],
       "indexes": [
@@ -1568,8 +1665,10 @@
           "method": "btree",
           "name": "CharacterExperience_chapterId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -1592,8 +1691,10 @@
           "method": "btree",
           "name": "CharacterExperience_characterId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -1616,8 +1717,10 @@
           "method": "btree",
           "name": "CharacterExperience_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -1627,7 +1730,10 @@
         "columns": [
           "id"
         ],
-        "name": "CharacterExperience_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "CharacterExperience_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -1709,6 +1815,9 @@
           "columns": [
             "characterId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "CharacterRelation_characterId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -1716,12 +1825,16 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Character"
+          "targetTable": "Character",
+          "validated": true
         },
         {
           "columns": [
             "targetId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "CharacterRelation_targetId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -1729,7 +1842,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Character"
+          "targetTable": "Character",
+          "validated": true
         }
       ],
       "indexes": [
@@ -1752,8 +1866,10 @@
           "method": "btree",
           "name": "CharacterRelation_characterId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -1776,8 +1892,10 @@
           "method": "btree",
           "name": "CharacterRelation_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -1800,8 +1918,10 @@
           "method": "btree",
           "name": "CharacterRelation_relationType_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -1824,8 +1944,10 @@
           "method": "btree",
           "name": "CharacterRelation_targetId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         }
@@ -1835,7 +1957,10 @@
         "columns": [
           "id"
         ],
-        "name": "CharacterRelation_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "CharacterRelation_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -1903,6 +2028,9 @@
           "columns": [
             "characterId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "CharacterStateChange_characterId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -1910,7 +2038,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Character"
+          "targetTable": "Character",
+          "validated": true
         }
       ],
       "indexes": [
@@ -1933,8 +2062,10 @@
           "method": "btree",
           "name": "CharacterStateChange_chapterId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -1957,8 +2088,10 @@
           "method": "btree",
           "name": "CharacterStateChange_characterId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -1981,8 +2114,10 @@
           "method": "btree",
           "name": "CharacterStateChange_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -1992,7 +2127,10 @@
         "columns": [
           "id"
         ],
-        "name": "CharacterStateChange_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "CharacterStateChange_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -2109,6 +2247,9 @@
           "columns": [
             "userId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "CreditLedger_userId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -2116,7 +2257,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "User"
+          "targetTable": "User",
+          "validated": true
         }
       ],
       "indexes": [
@@ -2139,8 +2281,10 @@
           "method": "btree",
           "name": "CreditLedger_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -2163,8 +2307,10 @@
           "method": "btree",
           "name": "CreditLedger_requestId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -2187,8 +2333,10 @@
           "method": "btree",
           "name": "CreditLedger_type_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -2223,8 +2371,10 @@
           "method": "btree",
           "name": "CreditLedger_userId_createdAt_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -2247,8 +2397,10 @@
           "method": "btree",
           "name": "CreditLedger_userId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         }
@@ -2258,7 +2410,10 @@
         "columns": [
           "id"
         ],
-        "name": "CreditLedger_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "CreditLedger_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -2333,6 +2488,9 @@
           "columns": [
             "baseId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "Faction_baseId_fkey",
           "onDelete": "SET NULL",
           "onUpdate": "CASCADE",
@@ -2340,12 +2498,16 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Location"
+          "targetTable": "Location",
+          "validated": true
         },
         {
           "columns": [
             "novelId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "Faction_novelId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -2353,7 +2515,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Novel"
+          "targetTable": "Novel",
+          "validated": true
         }
       ],
       "indexes": [
@@ -2376,8 +2539,10 @@
           "method": "btree",
           "name": "Faction_baseId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -2400,8 +2565,10 @@
           "method": "btree",
           "name": "Faction_novelId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -2424,8 +2591,10 @@
           "method": "btree",
           "name": "Faction_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -2435,7 +2604,10 @@
         "columns": [
           "id"
         ],
-        "name": "Faction_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "Faction_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -2517,6 +2689,9 @@
           "columns": [
             "novelId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "Foreshadowing_novelId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -2524,7 +2699,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Novel"
+          "targetTable": "Novel",
+          "validated": true
         }
       ],
       "indexes": [
@@ -2547,8 +2723,10 @@
           "method": "btree",
           "name": "Foreshadowing_novelId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -2571,8 +2749,10 @@
           "method": "btree",
           "name": "Foreshadowing_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -2595,8 +2775,10 @@
           "method": "btree",
           "name": "Foreshadowing_status_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         }
@@ -2606,7 +2788,10 @@
         "columns": [
           "id"
         ],
-        "name": "Foreshadowing_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "Foreshadowing_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -2667,6 +2852,9 @@
           "columns": [
             "novelId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "Glossary_novelId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -2674,7 +2862,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Novel"
+          "targetTable": "Novel",
+          "validated": true
         }
       ],
       "indexes": [
@@ -2697,8 +2886,10 @@
           "method": "btree",
           "name": "Glossary_novelId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -2721,8 +2912,10 @@
           "method": "btree",
           "name": "Glossary_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -2732,7 +2925,10 @@
         "columns": [
           "id"
         ],
-        "name": "Glossary_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "Glossary_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -2828,6 +3024,9 @@
           "columns": [
             "novelId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "Item_novelId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -2835,12 +3034,16 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Novel"
+          "targetTable": "Novel",
+          "validated": true
         },
         {
           "columns": [
             "ownerId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "Item_ownerId_fkey",
           "onDelete": "SET NULL",
           "onUpdate": "CASCADE",
@@ -2848,7 +3051,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Character"
+          "targetTable": "Character",
+          "validated": true
         }
       ],
       "indexes": [
@@ -2871,8 +3075,10 @@
           "method": "btree",
           "name": "Item_novelId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -2895,8 +3101,10 @@
           "method": "btree",
           "name": "Item_ownerId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -2919,8 +3127,10 @@
           "method": "btree",
           "name": "Item_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -2930,7 +3140,10 @@
         "columns": [
           "id"
         ],
-        "name": "Item_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "Item_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -3019,6 +3232,9 @@
           "columns": [
             "novelId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "Location_novelId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -3026,12 +3242,16 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Novel"
+          "targetTable": "Novel",
+          "validated": true
         },
         {
           "columns": [
             "parentId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "Location_parentId_fkey",
           "onDelete": "SET NULL",
           "onUpdate": "CASCADE",
@@ -3039,7 +3259,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Location"
+          "targetTable": "Location",
+          "validated": true
         }
       ],
       "indexes": [
@@ -3062,8 +3283,10 @@
           "method": "btree",
           "name": "Location_novelId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -3086,8 +3309,10 @@
           "method": "btree",
           "name": "Location_parentId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -3110,8 +3335,10 @@
           "method": "btree",
           "name": "Location_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -3121,7 +3348,10 @@
         "columns": [
           "id"
         ],
-        "name": "Location_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "Location_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -3189,6 +3419,9 @@
           "columns": [
             "appliedStyleId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "Novel_appliedStyleId_fkey",
           "onDelete": "SET NULL",
           "onUpdate": "CASCADE",
@@ -3196,12 +3429,16 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "WritingStyle"
+          "targetTable": "WritingStyle",
+          "validated": true
         },
         {
           "columns": [
             "userId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "Novel_userId_fkey",
           "onDelete": "SET NULL",
           "onUpdate": "CASCADE",
@@ -3209,7 +3446,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "User"
+          "targetTable": "User",
+          "validated": true
         }
       ],
       "indexes": [
@@ -3232,8 +3470,10 @@
           "method": "btree",
           "name": "Novel_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -3256,8 +3496,10 @@
           "method": "btree",
           "name": "Novel_userId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         }
@@ -3267,7 +3509,10 @@
         "columns": [
           "id"
         ],
-        "name": "Novel_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "Novel_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -3314,6 +3559,9 @@
           "columns": [
             "novelId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "Outline_novelId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -3321,7 +3569,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Novel"
+          "targetTable": "Novel",
+          "validated": true
         }
       ],
       "indexes": [
@@ -3344,8 +3593,10 @@
           "method": "btree",
           "name": "Outline_novelId_key",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -3368,8 +3619,10 @@
           "method": "btree",
           "name": "Outline_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -3379,7 +3632,10 @@
         "columns": [
           "id"
         ],
-        "name": "Outline_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "Outline_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -3496,6 +3752,9 @@
           "columns": [
             "novelId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "OutlineNode_novelId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -3503,12 +3762,16 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Novel"
+          "targetTable": "Novel",
+          "validated": true
         },
         {
           "columns": [
             "parentId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "OutlineNode_parentId_fkey",
           "onDelete": "SET NULL",
           "onUpdate": "CASCADE",
@@ -3516,7 +3779,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "OutlineNode"
+          "targetTable": "OutlineNode",
+          "validated": true
         }
       ],
       "indexes": [
@@ -3539,8 +3803,10 @@
           "method": "btree",
           "name": "OutlineNode_novelId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -3599,8 +3865,10 @@
           "method": "btree",
           "name": "OutlineNode_novelId_kind_chapterStartOrder_chapterEndOrder_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -3635,8 +3903,10 @@
           "method": "btree",
           "name": "OutlineNode_novelId_kind_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -3659,8 +3929,10 @@
           "method": "btree",
           "name": "OutlineNode_parentId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -3683,8 +3955,10 @@
           "method": "btree",
           "name": "OutlineNode_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -3707,8 +3981,10 @@
           "method": "btree",
           "name": "OutlineNode_status_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         }
@@ -3718,7 +3994,10 @@
         "columns": [
           "id"
         ],
-        "name": "OutlineNode_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "OutlineNode_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -3779,6 +4058,9 @@
           "columns": [
             "novelId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "PlotProgress_novelId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -3786,7 +4068,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Novel"
+          "targetTable": "Novel",
+          "validated": true
         }
       ],
       "indexes": [
@@ -3809,8 +4092,10 @@
           "method": "btree",
           "name": "PlotProgress_novelId_key",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -3833,8 +4118,10 @@
           "method": "btree",
           "name": "PlotProgress_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -3844,7 +4131,10 @@
         "columns": [
           "id"
         ],
-        "name": "PlotProgress_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "PlotProgress_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -3919,6 +4209,9 @@
           "columns": [
             "documentId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "RagChunk_documentId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -3926,12 +4219,16 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "RagDocument"
+          "targetTable": "RagDocument",
+          "validated": true
         },
         {
           "columns": [
             "novelId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "RagChunk_novelId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -3939,7 +4236,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Novel"
+          "targetTable": "Novel",
+          "validated": true
         }
       ],
       "indexes": [
@@ -3974,8 +4272,10 @@
           "method": "btree",
           "name": "RagChunk_documentId_chunkIndex_key",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -3998,8 +4298,10 @@
           "method": "btree",
           "name": "RagChunk_novelId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -4022,8 +4324,10 @@
           "method": "btree",
           "name": "RagChunk_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -4033,7 +4337,10 @@
         "columns": [
           "id"
         ],
-        "name": "RagChunk_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "RagChunk_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -4115,6 +4422,9 @@
           "columns": [
             "novelId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "RagDocument_novelId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -4122,7 +4432,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Novel"
+          "targetTable": "Novel",
+          "validated": true
         }
       ],
       "indexes": [
@@ -4157,8 +4468,10 @@
           "method": "btree",
           "name": "RagDocument_novelId_sourceType_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -4181,8 +4494,10 @@
           "method": "btree",
           "name": "RagDocument_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -4217,8 +4532,10 @@
           "method": "btree",
           "name": "RagDocument_sourceType_sourceId_key",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -4228,7 +4545,10 @@
         "columns": [
           "id"
         ],
-        "name": "RagDocument_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "RagDocument_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -4296,6 +4616,9 @@
           "columns": [
             "novelId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "ReferenceMaterial_novelId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -4303,7 +4626,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Novel"
+          "targetTable": "Novel",
+          "validated": true
         }
       ],
       "indexes": [
@@ -4338,8 +4662,10 @@
           "method": "btree",
           "name": "ReferenceMaterial_novelId_type_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -4362,8 +4688,10 @@
           "method": "btree",
           "name": "ReferenceMaterial_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -4373,7 +4701,10 @@
         "columns": [
           "id"
         ],
-        "name": "ReferenceMaterial_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "ReferenceMaterial_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -4518,6 +4849,9 @@
           "columns": [
             "chapterId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "ReviewArtifact_chapterId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -4525,12 +4859,16 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Chapter"
+          "targetTable": "Chapter",
+          "validated": true
         },
         {
           "columns": [
             "novelId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "ReviewArtifact_novelId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -4538,12 +4876,16 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Novel"
+          "targetTable": "Novel",
+          "validated": true
         },
         {
           "columns": [
             "taskId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "ReviewArtifact_taskId_fkey",
           "onDelete": "SET NULL",
           "onUpdate": "CASCADE",
@@ -4551,12 +4893,16 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "WritingTask"
+          "targetTable": "WritingTask",
+          "validated": true
         },
         {
           "columns": [
             "workflowRunId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "ReviewArtifact_workflowRunId_fkey",
           "onDelete": "SET NULL",
           "onUpdate": "CASCADE",
@@ -4564,7 +4910,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "WorkflowRun"
+          "targetTable": "WorkflowRun",
+          "validated": true
         }
       ],
       "indexes": [
@@ -4587,8 +4934,10 @@
           "method": "btree",
           "name": "ReviewArtifact_artifactKey_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -4623,8 +4972,10 @@
           "method": "btree",
           "name": "ReviewArtifact_chapterId_status_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -4659,8 +5010,10 @@
           "method": "btree",
           "name": "ReviewArtifact_novelId_status_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -4683,8 +5036,10 @@
           "method": "btree",
           "name": "ReviewArtifact_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -4707,8 +5062,10 @@
           "method": "btree",
           "name": "ReviewArtifact_taskId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -4731,8 +5088,10 @@
           "method": "btree",
           "name": "ReviewArtifact_workflowRunId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         }
@@ -4742,7 +5101,10 @@
         "columns": [
           "id"
         ],
-        "name": "ReviewArtifact_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "ReviewArtifact_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -4810,6 +5172,9 @@
           "columns": [
             "artifactId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "ReviewArtifactEvaluation_artifactId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -4817,7 +5182,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "ReviewArtifact"
+          "targetTable": "ReviewArtifact",
+          "validated": true
         }
       ],
       "indexes": [
@@ -4852,8 +5218,10 @@
           "method": "btree",
           "name": "ReviewArtifactEvaluation_artifactId_revision_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -4876,8 +5244,10 @@
           "method": "btree",
           "name": "ReviewArtifactEvaluation_evaluatorAgent_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -4900,8 +5270,10 @@
           "method": "btree",
           "name": "ReviewArtifactEvaluation_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -4911,7 +5283,10 @@
         "columns": [
           "id"
         ],
-        "name": "ReviewArtifactEvaluation_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "ReviewArtifactEvaluation_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -4979,6 +5354,9 @@
           "columns": [
             "artifactId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "ReviewArtifactRevision_artifactId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -4986,7 +5364,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "ReviewArtifact"
+          "targetTable": "ReviewArtifact",
+          "validated": true
         }
       ],
       "indexes": [
@@ -5009,8 +5388,10 @@
           "method": "btree",
           "name": "ReviewArtifactRevision_artifactId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -5045,8 +5426,10 @@
           "method": "btree",
           "name": "ReviewArtifactRevision_artifactId_revision_key",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -5069,8 +5452,10 @@
           "method": "btree",
           "name": "ReviewArtifactRevision_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -5080,7 +5465,10 @@
         "columns": [
           "id"
         ],
-        "name": "ReviewArtifactRevision_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "ReviewArtifactRevision_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -5155,6 +5543,9 @@
           "columns": [
             "beatPlanId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "SceneBeat_beatPlanId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -5162,7 +5553,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "ChapterBeatPlan"
+          "targetTable": "ChapterBeatPlan",
+          "validated": true
         }
       ],
       "indexes": [
@@ -5185,8 +5577,10 @@
           "method": "btree",
           "name": "SceneBeat_beatPlanId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -5209,8 +5603,10 @@
           "method": "btree",
           "name": "SceneBeat_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -5220,7 +5616,10 @@
         "columns": [
           "id"
         ],
-        "name": "SceneBeat_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "SceneBeat_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -5267,6 +5666,9 @@
           "columns": [
             "novelId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "StoryBackground_novelId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -5274,7 +5676,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Novel"
+          "targetTable": "Novel",
+          "validated": true
         }
       ],
       "indexes": [
@@ -5297,8 +5700,10 @@
           "method": "btree",
           "name": "StoryBackground_novelId_key",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -5321,8 +5726,10 @@
           "method": "btree",
           "name": "StoryBackground_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -5332,7 +5739,10 @@
         "columns": [
           "id"
         ],
-        "name": "StoryBackground_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "StoryBackground_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -5386,6 +5796,9 @@
           "columns": [
             "styleId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "StylePortraitTask_styleId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -5393,7 +5806,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "WritingStyle"
+          "targetTable": "WritingStyle",
+          "validated": true
         }
       ],
       "indexes": [
@@ -5416,8 +5830,10 @@
           "method": "btree",
           "name": "StylePortraitTask_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -5440,8 +5856,10 @@
           "method": "btree",
           "name": "StylePortraitTask_styleId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         }
@@ -5451,7 +5869,10 @@
         "columns": [
           "id"
         ],
-        "name": "StylePortraitTask_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "StylePortraitTask_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -5519,6 +5940,9 @@
           "columns": [
             "styleId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "StyleReference_styleId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -5526,7 +5950,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "WritingStyle"
+          "targetTable": "WritingStyle",
+          "validated": true
         }
       ],
       "indexes": [
@@ -5549,8 +5974,10 @@
           "method": "btree",
           "name": "StyleReference_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -5573,8 +6000,10 @@
           "method": "btree",
           "name": "StyleReference_styleId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         }
@@ -5584,7 +6013,10 @@
         "columns": [
           "id"
         ],
-        "name": "StyleReference_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "StyleReference_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -5666,6 +6098,9 @@
           "columns": [
             "userId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "TokenUsage_userId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -5673,7 +6108,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "User"
+          "targetTable": "User",
+          "validated": true
         }
       ],
       "indexes": [
@@ -5696,8 +6132,10 @@
           "method": "btree",
           "name": "TokenUsage_agentId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -5720,8 +6158,10 @@
           "method": "btree",
           "name": "TokenUsage_novelId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -5744,8 +6184,10 @@
           "method": "btree",
           "name": "TokenUsage_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -5780,8 +6222,10 @@
           "method": "btree",
           "name": "TokenUsage_userId_createdAt_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -5804,8 +6248,10 @@
           "method": "btree",
           "name": "TokenUsage_userId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         }
@@ -5815,7 +6261,10 @@
         "columns": [
           "id"
         ],
-        "name": "TokenUsage_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "TokenUsage_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -5885,8 +6334,10 @@
           "method": "btree",
           "name": "User_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -5909,8 +6360,10 @@
           "method": "btree",
           "name": "User_username_key",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -5920,7 +6373,10 @@
         "columns": [
           "id"
         ],
-        "name": "User_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "User_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -6030,6 +6486,9 @@
           "columns": [
             "novelId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "WorkflowRun_novelId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -6037,7 +6496,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Novel"
+          "targetTable": "Novel",
+          "validated": true
         }
       ],
       "indexes": [
@@ -6060,8 +6520,10 @@
           "method": "btree",
           "name": "WorkflowRun_chapterId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -6084,8 +6546,10 @@
           "method": "btree",
           "name": "WorkflowRun_kind_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -6108,8 +6572,10 @@
           "method": "btree",
           "name": "WorkflowRun_novelId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -6132,8 +6598,10 @@
           "method": "btree",
           "name": "WorkflowRun_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -6156,8 +6624,10 @@
           "method": "btree",
           "name": "WorkflowRun_status_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -6180,8 +6650,10 @@
           "method": "btree",
           "name": "WorkflowRun_userId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         }
@@ -6191,7 +6663,10 @@
         "columns": [
           "id"
         ],
-        "name": "WorkflowRun_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "WorkflowRun_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -6266,6 +6741,9 @@
           "columns": [
             "runId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "WorkflowStep_runId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -6273,7 +6751,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "WorkflowRun"
+          "targetTable": "WorkflowRun",
+          "validated": true
         }
       ],
       "indexes": [
@@ -6296,8 +6775,10 @@
           "method": "btree",
           "name": "WorkflowStep_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -6320,8 +6801,10 @@
           "method": "btree",
           "name": "WorkflowStep_runId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         }
@@ -6331,7 +6814,10 @@
         "columns": [
           "id"
         ],
-        "name": "WorkflowStep_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "WorkflowStep_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -6378,6 +6864,9 @@
           "columns": [
             "novelId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "WorldSetting_novelId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -6385,7 +6874,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Novel"
+          "targetTable": "Novel",
+          "validated": true
         }
       ],
       "indexes": [
@@ -6408,8 +6898,10 @@
           "method": "btree",
           "name": "WorldSetting_novelId_key",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -6432,8 +6924,10 @@
           "method": "btree",
           "name": "WorldSetting_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -6443,7 +6937,10 @@
         "columns": [
           "id"
         ],
-        "name": "WorldSetting_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "WorldSetting_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -6553,6 +7050,9 @@
           "columns": [
             "novelId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "WritingBible_novelId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -6560,7 +7060,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Novel"
+          "targetTable": "Novel",
+          "validated": true
         }
       ],
       "indexes": [
@@ -6583,8 +7084,10 @@
           "method": "btree",
           "name": "WritingBible_novelId_key",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -6607,8 +7110,10 @@
           "method": "btree",
           "name": "WritingBible_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -6618,7 +7123,10 @@
         "columns": [
           "id"
         ],
-        "name": "WritingBible_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "WritingBible_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -6672,6 +7180,9 @@
           "columns": [
             "novelId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "WritingConfig_novelId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -6679,7 +7190,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Novel"
+          "targetTable": "Novel",
+          "validated": true
         }
       ],
       "indexes": [
@@ -6702,8 +7214,10 @@
           "method": "btree",
           "name": "WritingConfig_novelId_key",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -6726,8 +7240,10 @@
           "method": "btree",
           "name": "WritingConfig_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -6737,7 +7253,10 @@
         "columns": [
           "id"
         ],
-        "name": "WritingConfig_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "WritingConfig_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -6812,6 +7331,9 @@
           "columns": [
             "sessionId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "WritingMessage_sessionId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -6819,7 +7341,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "WritingSession"
+          "targetTable": "WritingSession",
+          "validated": true
         }
       ],
       "indexes": [
@@ -6842,8 +7365,10 @@
           "method": "btree",
           "name": "WritingMessage_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -6878,8 +7403,10 @@
           "method": "btree",
           "name": "WritingMessage_sessionId_createdAt_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         }
@@ -6889,7 +7416,10 @@
         "columns": [
           "id"
         ],
-        "name": "WritingMessage_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "WritingMessage_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -6950,6 +7480,9 @@
           "columns": [
             "chapterId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "WritingSession_chapterId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -6957,12 +7490,16 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Chapter"
+          "targetTable": "Chapter",
+          "validated": true
         },
         {
           "columns": [
             "novelId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "WritingSession_novelId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -6970,7 +7507,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Novel"
+          "targetTable": "Novel",
+          "validated": true
         }
       ],
       "indexes": [
@@ -6993,8 +7531,10 @@
           "method": "btree",
           "name": "WritingSession_chapterId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -7017,8 +7557,10 @@
           "method": "btree",
           "name": "WritingSession_novelId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -7041,8 +7583,10 @@
           "method": "btree",
           "name": "WritingSession_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -7052,7 +7596,10 @@
         "columns": [
           "id"
         ],
-        "name": "WritingSession_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "WritingSession_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -7185,8 +7732,10 @@
           "method": "btree",
           "name": "WritingStyle_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -7196,7 +7745,10 @@
         "columns": [
           "id"
         ],
-        "name": "WritingStyle_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "WritingStyle_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -7327,6 +7879,9 @@
           "columns": [
             "chapterId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "WritingTask_chapterId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -7334,12 +7889,16 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Chapter"
+          "targetTable": "Chapter",
+          "validated": true
         },
         {
           "columns": [
             "novelId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "WritingTask_novelId_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -7347,12 +7906,16 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Novel"
+          "targetTable": "Novel",
+          "validated": true
         },
         {
           "columns": [
             "writingSessionId"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "WritingTask_writingSessionId_fkey",
           "onDelete": "SET NULL",
           "onUpdate": "CASCADE",
@@ -7360,7 +7923,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "WritingSession"
+          "targetTable": "WritingSession",
+          "validated": true
         }
       ],
       "indexes": [
@@ -7383,8 +7947,10 @@
           "method": "btree",
           "name": "WritingTask_chapterId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -7407,8 +7973,10 @@
           "method": "btree",
           "name": "WritingTask_novelId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         },
@@ -7431,8 +7999,10 @@
           "method": "btree",
           "name": "WritingTask_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -7455,8 +8025,10 @@
           "method": "btree",
           "name": "WritingTask_writingSessionId_idx",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         }
@@ -7466,7 +8038,10 @@
         "columns": [
           "id"
         ],
-        "name": "WritingTask_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "WritingTask_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -7492,6 +8067,9 @@
           "columns": [
             "A"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "_FactionTerritories_A_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -7499,12 +8077,16 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Faction"
+          "targetTable": "Faction",
+          "validated": true
         },
         {
           "columns": [
             "B"
           ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
           "name": "_FactionTerritories_B_fkey",
           "onDelete": "CASCADE",
           "onUpdate": "CASCADE",
@@ -7512,7 +8094,8 @@
             "id"
           ],
           "targetSchema": "public",
-          "targetTable": "Location"
+          "targetTable": "Location",
+          "validated": true
         }
       ],
       "indexes": [
@@ -7547,8 +8130,10 @@
           "method": "btree",
           "name": "_FactionTerritories_AB_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         },
@@ -7571,8 +8156,10 @@
           "method": "btree",
           "name": "_FactionTerritories_B_index",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": false,
           "valid": true
         }
@@ -7583,7 +8170,10 @@
           "A",
           "B"
         ],
-        "name": "_FactionTerritories_AB_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "_FactionTerritories_AB_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     },
@@ -7667,8 +8257,10 @@
           "method": "btree",
           "name": "_prisma_migrations_pkey",
           "nullsNotDistinct": false,
+          "options": [],
           "predicate": null,
           "ready": true,
+          "tablespace": null,
           "unique": true,
           "valid": true
         }
@@ -7678,7 +8270,10 @@
         "columns": [
           "id"
         ],
-        "name": "_prisma_migrations_pkey"
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "_prisma_migrations_pkey",
+        "validated": true
       },
       "uniqueConstraints": []
     }

@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 
 from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 Contract = dict[str, Any]
@@ -26,9 +25,10 @@ class ContractIntegrityError(ValueError):
 class SchemaConnectionError(RuntimeError):
     """无法安全读取实时数据库结构。"""
 
-    def __init__(self, message: str, *, diagnostic: str) -> None:
+    def __init__(self, message: str, *, diagnostic: str, exception_type: str) -> None:
         super().__init__(message)
         self.diagnostic = diagnostic
+        self.exception_type = exception_type
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,7 +104,10 @@ SELECT
   table_class.relname AS table_name,
   constraint_info.conname AS constraint_name,
   key_position.ordinality AS position,
-  attribute.attname AS column_name
+  attribute.attname AS column_name,
+  constraint_info.condeferrable AS is_deferrable,
+  constraint_info.condeferred AS is_deferred,
+  constraint_info.convalidated AS is_validated
 FROM pg_catalog.pg_constraint AS constraint_info
 JOIN pg_catalog.pg_class AS table_class
   ON table_class.oid = constraint_info.conrelid
@@ -136,7 +139,13 @@ SELECT
   CASE constraint_info.confdeltype
     WHEN 'a' THEN 'NO ACTION' WHEN 'r' THEN 'RESTRICT' WHEN 'c' THEN 'CASCADE'
     WHEN 'n' THEN 'SET NULL' WHEN 'd' THEN 'SET DEFAULT'
-  END AS on_delete
+  END AS on_delete,
+  CASE constraint_info.confmatchtype
+    WHEN 'f' THEN 'FULL' WHEN 'p' THEN 'PARTIAL' WHEN 's' THEN 'SIMPLE'
+  END AS match_type,
+  constraint_info.condeferrable AS is_deferrable,
+  constraint_info.condeferred AS is_deferred,
+  constraint_info.convalidated AS is_validated
 FROM pg_catalog.pg_constraint AS constraint_info
 JOIN pg_catalog.pg_class AS source_table
   ON source_table.oid = constraint_info.conrelid
@@ -165,7 +174,10 @@ SELECT
   table_class.relname AS table_name,
   constraint_info.conname AS constraint_name,
   key_position.ordinality AS position,
-  attribute.attname AS column_name
+  attribute.attname AS column_name,
+  constraint_info.condeferrable AS is_deferrable,
+  constraint_info.condeferred AS is_deferred,
+  constraint_info.convalidated AS is_validated
 FROM pg_catalog.pg_constraint AS constraint_info
 JOIN pg_catalog.pg_class AS table_class
   ON table_class.oid = constraint_info.conrelid
@@ -184,7 +196,10 @@ ORDER BY table_class.relname, constraint_info.conname, key_position.ordinality
 _SOURCE_QUERY = """
 SELECT
   current_setting('server_version') AS server_version,
-  current_setting('server_version_num')::integer AS server_version_num
+  current_setting('server_version_num')::integer AS server_version_num,
+  pg_catalog.current_database() AS database_name,
+  pg_catalog.inet_server_addr()::text AS server_address,
+  pg_catalog.inet_server_port() AS server_port
 FROM information_schema.sql_implementation_info
 LIMIT 1
 """
@@ -217,6 +232,8 @@ SELECT
   pg_catalog.pg_get_expr(index_info.indpred, index_info.indrelid) AS predicate,
   index_info.indisvalid AS is_valid,
   index_info.indisready AS is_ready,
+  index_class.reloptions AS rel_options,
+  tablespace.spcname AS tablespace_name,
   COALESCE(
     (pg_catalog.to_jsonb(index_info) ->> 'indnullsnotdistinct')::boolean,
     false
@@ -245,6 +262,8 @@ LEFT JOIN pg_catalog.pg_collation AS collation_info
  AND key_position.position <= index_info.indnkeyatts
 LEFT JOIN pg_catalog.pg_namespace AS collation_namespace
   ON collation_namespace.oid = collation_info.collnamespace
+LEFT JOIN pg_catalog.pg_tablespace AS tablespace
+  ON tablespace.oid = index_class.reltablespace
 WHERE namespace.nspname = :schema
   AND table_class.relkind = 'r'
 ORDER BY table_class.relname, index_class.relname, key_position.position
@@ -272,9 +291,11 @@ ORDER BY extension_info.extname
 
 
 def canonical_fingerprint(contract: Mapping[str, object]) -> str:
-    """计算忽略顶层指纹字段的稳定 SHA-256。"""
+    """计算忽略指纹与来源元数据的稳定结构 SHA-256。"""
 
-    payload = {key: value for key, value in contract.items() if key != "fingerprint"}
+    payload = {
+        key: value for key, value in contract.items() if key not in {"fingerprint", "source"}
+    }
     canonical = json.dumps(
         payload,
         ensure_ascii=False,
@@ -315,6 +336,27 @@ def _normalize_default(value: object) -> str | None:
     return re.sub(r"\s+", " ", str(value)).strip()
 
 
+def _source_id(source_row: Mapping[str, object]) -> str:
+    identity = json.dumps(
+        [
+            source_row.get("database_name"),
+            source_row.get("server_address"),
+            source_row.get("server_port"),
+        ],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(identity).hexdigest()
+
+
+def _string_list(value: object) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, Sequence) or isinstance(value, str):
+        raise TypeError("PostgreSQL 数组字段必须是序列。")
+    return sorted(str(item) for item in value)
+
+
 async def _rows(
     connection: CatalogConnection, query: str, parameters: Mapping[str, object]
 ) -> list[Mapping[str, object]]:
@@ -322,23 +364,10 @@ async def _rows(
     return list(result.mappings().all())
 
 
-def _group_constraint_columns(
-    rows: Sequence[Mapping[str, object]], tables: Mapping[str, Contract]
-) -> None:
-    grouped: dict[tuple[str, str], list[str]] = {}
-    for row in rows:
-        key = (str(row["table_name"]), str(row["constraint_name"]))
-        grouped.setdefault(key, []).append(str(row["column_name"]))
-    for (table_name, constraint_name), columns in grouped.items():
-        tables[table_name]["uniqueConstraints"].append(
-            {"name": constraint_name, "columns": columns}
-        )
-
-
 async def inspect_schema(
     connection: CatalogConnection, schema: str = "public"
 ) -> Contract:
-    """仅通过 PostgreSQL catalog 查询采集指定 schema 的结构。"""
+    """通过只读信息架构与系统目录查询采集指定 schema 的结构。"""
 
     parameters: Mapping[str, object] = {"schema": schema}
     source_rows = await _rows(connection, _SOURCE_QUERY, {})
@@ -382,12 +411,22 @@ async def inspect_schema(
             }
         )
 
-    primary_keys: dict[tuple[str, str], list[str]] = {}
+    primary_keys: dict[tuple[str, str], Contract] = {}
     for row in primary_key_rows:
         key = (str(row["table_name"]), str(row["constraint_name"]))
-        primary_keys.setdefault(key, []).append(str(row["column_name"]))
-    for (table_name, constraint_name), columns in primary_keys.items():
-        tables[table_name]["primaryKey"] = {"name": constraint_name, "columns": columns}
+        primary_key = primary_keys.setdefault(
+            key,
+            {
+                "name": str(row["constraint_name"]),
+                "columns": [],
+                "deferrable": bool(row["is_deferrable"]),
+                "initiallyDeferred": bool(row["is_deferred"]),
+                "validated": bool(row["is_validated"]),
+            },
+        )
+        primary_key["columns"].append(str(row["column_name"]))
+    for (table_name, _), primary_key in primary_keys.items():
+        tables[table_name]["primaryKey"] = primary_key
 
     foreign_keys: dict[tuple[str, str], Contract] = {}
     for row in foreign_key_rows:
@@ -404,6 +443,10 @@ async def inspect_schema(
                 "targetColumns": [],
                 "onUpdate": str(row["on_update"]),
                 "onDelete": str(row["on_delete"]),
+                "matchType": str(row["match_type"]),
+                "deferrable": bool(row["is_deferrable"]),
+                "initiallyDeferred": bool(row["is_deferred"]),
+                "validated": bool(row["is_validated"]),
             },
         )
         foreign_key["columns"].append(str(row["column_name"]))
@@ -411,7 +454,22 @@ async def inspect_schema(
     for (table_name, _), foreign_key in foreign_keys.items():
         tables[table_name]["foreignKeys"].append(foreign_key)
 
-    _group_constraint_columns(unique_rows, tables)
+    unique_constraints: dict[tuple[str, str], Contract] = {}
+    for row in unique_rows:
+        key = (str(row["table_name"]), str(row["constraint_name"]))
+        unique_constraint = unique_constraints.setdefault(
+            key,
+            {
+                "name": str(row["constraint_name"]),
+                "columns": [],
+                "deferrable": bool(row["is_deferrable"]),
+                "initiallyDeferred": bool(row["is_deferred"]),
+                "validated": bool(row["is_validated"]),
+            },
+        )
+        unique_constraint["columns"].append(str(row["column_name"]))
+    for (table_name, _), unique_constraint in unique_constraints.items():
+        tables[table_name]["uniqueConstraints"].append(unique_constraint)
 
     indexes: dict[tuple[str, str], Contract] = {}
     for row in index_rows:
@@ -429,6 +487,12 @@ async def inspect_schema(
                 "valid": bool(row["is_valid"]),
                 "ready": bool(row["is_ready"]),
                 "nullsNotDistinct": bool(row["nulls_not_distinct"]),
+                "options": _string_list(row["rel_options"]),
+                "tablespace": (
+                    str(row["tablespace_name"])
+                    if row["tablespace_name"] is not None
+                    else None
+                ),
             },
         )
         if bool(row["is_key"]):
@@ -497,6 +561,7 @@ async def inspect_schema(
             "product": "PostgreSQL",
             "serverVersion": str(source_row["server_version"]),
             "serverVersionNum": server_version_num,
+            "sourceId": _source_id(source_row),
         },
     }
 
@@ -605,19 +670,13 @@ def _compare_index_key_items(
 def compare_schema_contract(
     expected: Mapping[str, object], actual: Mapping[str, object]
 ) -> list[SchemaDiff]:
-    """返回稳定排序的字段级结构差异，补丁扩展版本不视为漂移。"""
+    """返回稳定排序的字段级结构差异，来源元数据不参与比较。"""
 
     diffs: list[SchemaDiff] = []
     _append_value_diff(
         diffs, "contractVersion", expected.get("contractVersion"), actual.get("contractVersion")
     )
     _append_value_diff(diffs, "schema", expected.get("schema"), actual.get("schema"))
-    expected_source = expected.get("source")
-    actual_source = actual.get("source")
-    if isinstance(expected_source, dict) and isinstance(actual_source, dict):
-        _compare_mapping(diffs, "source", expected_source, actual_source)
-    else:
-        _append_value_diff(diffs, "source", expected_source, actual_source)
 
     expected_tables, actual_tables = _compare_named_collection(
         diffs, "tables", expected.get("tables"), actual.get("tables")
@@ -727,38 +786,61 @@ async def _inspect_live(database_url: str, schema: str) -> Contract:
         engine: AsyncEngine = create_async_engine(
             _async_database_url(database_url), pool_pre_ping=True
         )
-    except (SQLAlchemyError, ValueError):
+    except Exception as error:
         raise SchemaConnectionError(
             "无法初始化 PostgreSQL 只读结构检查连接。",
             diagnostic="engine_creation_failed",
+            exception_type=type(error).__name__,
         ) from None
 
     inspection_error: SchemaConnectionError | None = None
     contract: Contract | None = None
     try:
         async with engine.begin() as connection:
-            await connection.execute(text("SET TRANSACTION READ ONLY"))
-            await connection.execute(text("SET LOCAL search_path = pg_catalog, public"))
-            contract = await inspect_schema(cast(CatalogConnection, connection), schema)
-    except (SQLAlchemyError, OSError, ConnectionError):
-        inspection_error = SchemaConnectionError(
-            "无法以只读方式连接并检查 PostgreSQL 数据库结构。",
-            diagnostic="connection_failed",
-        )
+            try:
+                await connection.execute(text("SET TRANSACTION READ ONLY"))
+                await connection.execute(text("SET LOCAL search_path = pg_catalog, public"))
+            except Exception as error:
+                inspection_error = SchemaConnectionError(
+                    "无法建立 PostgreSQL 只读结构检查事务。",
+                    diagnostic="connection_failed",
+                    exception_type=type(error).__name__,
+                )
+            if inspection_error is None:
+                try:
+                    contract = await inspect_schema(cast(CatalogConnection, connection), schema)
+                except Exception as error:
+                    inspection_error = SchemaConnectionError(
+                        "无法采集 PostgreSQL 数据库结构。",
+                        diagnostic="inspection_failed",
+                        exception_type=type(error).__name__,
+                    )
+    except Exception as error:
+        if inspection_error is None:
+            inspection_error = SchemaConnectionError(
+                "无法建立 PostgreSQL 只读结构检查事务。",
+                diagnostic="connection_failed",
+                exception_type=type(error).__name__,
+            )
     finally:
         try:
             await engine.dispose()
-        except SQLAlchemyError:
+        except Exception as error:
             if inspection_error is None:
                 inspection_error = SchemaConnectionError(
                     "数据库结构检查连接无法安全关闭。",
                     diagnostic="dispose_failed",
+                    exception_type=type(error).__name__,
                 )
 
     if inspection_error is not None:
         raise inspection_error from None
     if contract is None:
-        raise RuntimeError("数据库结构检查未返回契约。")
+        raise SchemaConnectionError(
+            "数据库结构检查未返回契约。",
+            diagnostic="inspection_failed",
+            exception_type="MissingInspectionResult",
+        ) from None
     return contract
 
 
