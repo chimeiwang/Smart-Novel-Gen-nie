@@ -6,6 +6,7 @@ from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Environment = Literal["dev", "test", "production"]
+OLD_DEFAULT_JWT_SECRET = "inkforge-default-" + "secret-change-me"
 
 _PRODUCTION_REQUIRED_FIELDS = (
     "database_url",
@@ -53,6 +54,11 @@ class Settings(BaseSettings):
         if missing_fields:
             joined_fields = "、".join(missing_fields)
             raise ValueError(f"生产环境缺少必需配置：{joined_fields}")
+        if (
+            self.jwt_secret is not None
+            and self.jwt_secret.get_secret_value() == OLD_DEFAULT_JWT_SECRET
+        ):
+            raise ValueError("生产环境禁止使用旧默认会话签名密钥")
         return self
 
 

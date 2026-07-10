@@ -39,7 +39,7 @@ class ErrorResponse(BaseModel):
 
 PUBLIC_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     status_code: {"model": ErrorResponse, "description": "统一错误响应"}
-    for status_code in (400, 401, 403, 404, 409, 422, 500, "default")
+    for status_code in (400, 401, 403, 404, 409, 422, 429, 500, 503, "default")
 }
 
 
@@ -51,12 +51,14 @@ class ApiError(Exception):
         code: str,
         message: str,
         details: JsonValue | None = None,
+        headers: Mapping[str, str] | None = None,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.code = code
         self.message = message
         self.details = details
+        self.headers = headers
 
 
 class SafeUnhandledExceptionMiddleware:
@@ -102,6 +104,7 @@ async def handle_api_error(request: Request, exc: Exception) -> JSONResponse:
         exc.code,
         exc.message,
         exc.details,
+        headers=exc.headers,
     )
 
 
