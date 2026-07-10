@@ -1,0 +1,5759 @@
+{
+  "contractVersion": 1,
+  "enums": [
+    {
+      "name": "BeatPlanStatus",
+      "values": [
+        "draft",
+        "reviewing",
+        "approved",
+        "rejected",
+        "superseded"
+      ]
+    },
+    {
+      "name": "ChapterStatus",
+      "values": [
+        "drafting",
+        "review",
+        "completed"
+      ]
+    },
+    {
+      "name": "CharacterStatus",
+      "values": [
+        "active",
+        "missing",
+        "dead",
+        "imprisoned",
+        "unknown"
+      ]
+    },
+    {
+      "name": "ForeshadowingStatus",
+      "values": [
+        "active",
+        "paid_off",
+        "abandoned"
+      ]
+    },
+    {
+      "name": "OutlineNodeKind",
+      "values": [
+        "stage",
+        "plot_unit",
+        "chapter_group"
+      ]
+    },
+    {
+      "name": "OutlineNodeStatus",
+      "values": [
+        "planned",
+        "in_progress",
+        "completed",
+        "skipped"
+      ]
+    },
+    {
+      "name": "QualityCheckStatus",
+      "values": [
+        "pending",
+        "running",
+        "completed",
+        "skipped",
+        "failed"
+      ]
+    },
+    {
+      "name": "QualityCheckType",
+      "values": [
+        "consistency",
+        "lore_sync",
+        "editorial",
+        "craft"
+      ]
+    },
+    {
+      "name": "RagDocumentStatus",
+      "values": [
+        "disabled",
+        "ready",
+        "failed"
+      ]
+    },
+    {
+      "name": "RagSourceType",
+      "values": [
+        "reference_material"
+      ]
+    },
+    {
+      "name": "ReferenceMaterialType",
+      "values": [
+        "note",
+        "web",
+        "book",
+        "image",
+        "custom"
+      ]
+    },
+    {
+      "name": "RelationType",
+      "values": [
+        "family",
+        "master_student",
+        "friend",
+        "enemy",
+        "ally",
+        "lover",
+        "rival",
+        "subordinate",
+        "acquaintance",
+        "other"
+      ]
+    },
+    {
+      "name": "ReviewArtifactEvaluationVerdict",
+      "values": [
+        "pass",
+        "revise",
+        "block"
+      ]
+    },
+    {
+      "name": "ReviewArtifactKind",
+      "values": [
+        "agent_updates",
+        "outline_draft",
+        "chapter_draft",
+        "lore_draft",
+        "revision_brief",
+        "beat_plan_draft",
+        "chapter_content",
+        "beat_plan",
+        "freeform_markdown"
+      ]
+    },
+    {
+      "name": "ReviewArtifactStatus",
+      "values": [
+        "draft",
+        "under_review",
+        "awaiting_user",
+        "applying",
+        "applied"
+      ]
+    },
+    {
+      "name": "StoryLengthProfile",
+      "values": [
+        "short_medium",
+        "long_serial"
+      ]
+    },
+    {
+      "name": "StyleSourceType",
+      "values": [
+        "manual",
+        "agent"
+      ]
+    },
+    {
+      "name": "WorkflowRunKind",
+      "values": [
+        "chat",
+        "chapter_generation",
+        "quality_check",
+        "lore_sync",
+        "beat_plan"
+      ]
+    },
+    {
+      "name": "WorkflowRunStatus",
+      "values": [
+        "pending",
+        "running",
+        "waiting_user",
+        "completed",
+        "failed",
+        "cancelled"
+      ]
+    },
+    {
+      "name": "WorkflowStepStatus",
+      "values": [
+        "pending",
+        "running",
+        "completed",
+        "failed",
+        "skipped"
+      ]
+    },
+    {
+      "name": "WorkflowStepType",
+      "values": [
+        "agent",
+        "tool",
+        "user_confirmation",
+        "persistence"
+      ]
+    },
+    {
+      "name": "WritingTaskPhase",
+      "values": [
+        "idle",
+        "active",
+        "waiting_call",
+        "awaiting_user_review",
+        "completed",
+        "error"
+      ]
+    }
+  ],
+  "extensions": [
+    {
+      "installed": true,
+      "name": "vector",
+      "version": "0.8.0"
+    }
+  ],
+  "fingerprint": "a72d53163effe842369418b1a2bbba2b36535c4cf2e594792b14f7abc28de883",
+  "schema": "public",
+  "tables": [
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "completedAt",
+          "nullable": true,
+          "udtName": "timestamp"
+        },
+        {
+          "default": "''::text",
+          "formatType": "text",
+          "name": "content",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "order",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": "'drafting'::\"ChapterStatus\"",
+          "formatType": "\"ChapterStatus\"",
+          "name": "status",
+          "nullable": false,
+          "udtName": "ChapterStatus"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "title",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "name": "Chapter_novelId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "novelId",
+            "order"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Chapter_novelId_order_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Chapter_pkey",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "status"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Chapter_status_idx",
+          "predicate": null,
+          "unique": false
+        }
+      ],
+      "name": "Chapter",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "Chapter_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "chapterAcceptanceCriteria",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "chapterGoal",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "chapterId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "generatedBy",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "goalId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "mainPlotConnection",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "'draft'::\"BeatPlanStatus\"",
+          "formatType": "\"BeatPlanStatus\"",
+          "name": "status",
+          "nullable": false,
+          "udtName": "BeatPlanStatus"
+        },
+        {
+          "default": "0",
+          "formatType": "integer",
+          "name": "totalEstimatedWords",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "chapterId"
+          ],
+          "name": "ChapterBeatPlan_chapterId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Chapter"
+        },
+        {
+          "columns": [
+            "goalId"
+          ],
+          "name": "ChapterBeatPlan_goalId_fkey",
+          "onDelete": "SET NULL",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "ChapterWritingGoal"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "chapterId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ChapterBeatPlan_chapterId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ChapterBeatPlan_pkey",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "status"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ChapterBeatPlan_status_idx",
+          "predicate": null,
+          "unique": false
+        }
+      ],
+      "name": "ChapterBeatPlan",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "ChapterBeatPlan_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "chapterId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "''::text",
+          "formatType": "text",
+          "name": "content",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "chapterId"
+          ],
+          "name": "ChapterProgress_chapterId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Chapter"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "chapterId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ChapterProgress_chapterId_key",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ChapterProgress_pkey",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "ChapterProgress",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "ChapterProgress_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "chapterId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "qualityGate",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "result",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "rewriteBrief",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "scoreEndingHook",
+          "nullable": true,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "scoreHook",
+          "nullable": true,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "scoreOverall",
+          "nullable": true,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "scorePacing",
+          "nullable": true,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "scorePayoff",
+          "nullable": true,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "scoreReaderPromise",
+          "nullable": true,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "scoreTension",
+          "nullable": true,
+          "udtName": "int4"
+        },
+        {
+          "default": "'pending'::\"QualityCheckStatus\"",
+          "formatType": "\"QualityCheckStatus\"",
+          "name": "status",
+          "nullable": false,
+          "udtName": "QualityCheckStatus"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "summary",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "title",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "\"QualityCheckType\"",
+          "name": "type",
+          "nullable": false,
+          "udtName": "QualityCheckType"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "chapterId"
+          ],
+          "name": "ChapterQualityCheck_chapterId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Chapter"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "chapterId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ChapterQualityCheck_chapterId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "chapterId",
+            "type"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ChapterQualityCheck_chapterId_type_key",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ChapterQualityCheck_pkey",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "status"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ChapterQualityCheck_status_idx",
+          "predicate": null,
+          "unique": false
+        }
+      ],
+      "name": "ChapterQualityCheck",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "ChapterQualityCheck_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "chapterId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "desiredEmotion",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "narrativeGoal",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "requiredCharacters",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "requiredForeshadowing",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "specialNotes",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "wordCountMax",
+          "nullable": true,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "wordCountMin",
+          "nullable": true,
+          "udtName": "int4"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "chapterId"
+          ],
+          "name": "ChapterWritingGoal_chapterId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Chapter"
+        },
+        {
+          "columns": [
+            "novelId"
+          ],
+          "name": "ChapterWritingGoal_novelId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "chapterId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ChapterWritingGoal_chapterId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "novelId",
+            "chapterId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ChapterWritingGoal_novelId_chapterId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ChapterWritingGoal_pkey",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "ChapterWritingGoal",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "ChapterWritingGoal_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "age",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "aliases",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "appearance",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "background",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "behaviorBoundaries",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "combatAbility",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "coreDesire",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": "'active'::\"CharacterStatus\"",
+          "formatType": "\"CharacterStatus\"",
+          "name": "currentStatus",
+          "nullable": false,
+          "udtName": "CharacterStatus"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "factionId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "gender",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "identity",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "name",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "personality",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "powerLevel",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "relationshipPrinciples",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "shortTermGoal",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "specialSkills",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "speechStyle",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "statusNote",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "factionId"
+          ],
+          "name": "Character_factionId_fkey",
+          "onDelete": "SET NULL",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Faction"
+        },
+        {
+          "columns": [
+            "novelId"
+          ],
+          "name": "Character_novelId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "currentStatus"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Character_currentStatus_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "factionId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Character_factionId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "novelId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Character_novelId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Character_pkey",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "Character",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "Character_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "chapterId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "characterId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "content",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "0",
+          "formatType": "integer",
+          "name": "order",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "characterId"
+          ],
+          "name": "CharacterExperience_characterId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Character"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "chapterId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "CharacterExperience_chapterId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "characterId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "CharacterExperience_characterId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "CharacterExperience_pkey",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "CharacterExperience",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "CharacterExperience_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "characterId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "description",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "endDate",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "0",
+          "formatType": "integer",
+          "name": "intimacy",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "\"RelationType\"",
+          "name": "relationType",
+          "nullable": false,
+          "udtName": "RelationType"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "startDate",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "targetId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "characterId"
+          ],
+          "name": "CharacterRelation_characterId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Character"
+        },
+        {
+          "columns": [
+            "targetId"
+          ],
+          "name": "CharacterRelation_targetId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Character"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "characterId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "CharacterRelation_characterId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "CharacterRelation_pkey",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "relationType"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "CharacterRelation_relationType_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "targetId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "CharacterRelation_targetId_idx",
+          "predicate": null,
+          "unique": false
+        }
+      ],
+      "name": "CharacterRelation",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "CharacterRelation_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "afterState",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "beforeState",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "changeType",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "chapterId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "characterId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "description",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "characterId"
+          ],
+          "name": "CharacterStateChange_characterId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Character"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "chapterId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "CharacterStateChange_chapterId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "characterId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "CharacterStateChange_characterId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "CharacterStateChange_pkey",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "CharacterStateChange",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "CharacterStateChange_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "agentId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "bigint",
+          "name": "amountMicros",
+          "nullable": false,
+          "udtName": "int8"
+        },
+        {
+          "default": null,
+          "formatType": "bigint",
+          "name": "balanceAfterMicros",
+          "nullable": false,
+          "udtName": "int8"
+        },
+        {
+          "default": "0",
+          "formatType": "integer",
+          "name": "cachedTokens",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": "0",
+          "formatType": "integer",
+          "name": "completionTokens",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "model",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "note",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "0",
+          "formatType": "integer",
+          "name": "promptTokens",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "requestId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "0",
+          "formatType": "integer",
+          "name": "totalTokens",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "type",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "userId",
+          "nullable": false,
+          "udtName": "text"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "userId"
+          ],
+          "name": "CreditLedger_userId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "User"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "CreditLedger_pkey",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "requestId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "CreditLedger_requestId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "type"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "CreditLedger_type_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "userId",
+            "createdAt"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "CreditLedger_userId_createdAt_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "userId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "CreditLedger_userId_idx",
+          "predicate": null,
+          "unique": false
+        }
+      ],
+      "name": "CreditLedger",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "CreditLedger_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "aliases",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "baseId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "description",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "name",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "type",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "baseId"
+          ],
+          "name": "Faction_baseId_fkey",
+          "onDelete": "SET NULL",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Location"
+        },
+        {
+          "columns": [
+            "novelId"
+          ],
+          "name": "Faction_novelId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "baseId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Faction_baseId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "novelId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Faction_novelId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Faction_pkey",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "Faction",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "Faction_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "expectedPayoff",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "name",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "payoffAt",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "plantedAt",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "plantedContent",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "'active'::\"ForeshadowingStatus\"",
+          "formatType": "\"ForeshadowingStatus\"",
+          "name": "status",
+          "nullable": false,
+          "udtName": "ForeshadowingStatus"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "name": "Foreshadowing_novelId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Foreshadowing_novelId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Foreshadowing_pkey",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "status"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Foreshadowing_status_idx",
+          "predicate": null,
+          "unique": false
+        }
+      ],
+      "name": "Foreshadowing",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "Foreshadowing_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "category",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "definition",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "term",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "name": "Glossary_novelId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Glossary_novelId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Glossary_pkey",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "Glossary",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "Glossary_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "aliases",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "description",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "effect",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "name",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "origin",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "ownerId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "rarity",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "type",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "name": "Item_novelId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel"
+        },
+        {
+          "columns": [
+            "ownerId"
+          ],
+          "name": "Item_ownerId_fkey",
+          "onDelete": "SET NULL",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Character"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Item_novelId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "ownerId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Item_ownerId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Item_pkey",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "Item",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "Item_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "aliases",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "climate",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "culture",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "description",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "name",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "parentId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "type",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "name": "Location_novelId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel"
+        },
+        {
+          "columns": [
+            "parentId"
+          ],
+          "name": "Location_parentId_fkey",
+          "onDelete": "SET NULL",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Location"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Location_novelId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "parentId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Location_parentId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Location_pkey",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "Location",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "Location_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "appliedStyleId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "name",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "storyProgress",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "summary",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "userId",
+          "nullable": true,
+          "udtName": "text"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "appliedStyleId"
+          ],
+          "name": "Novel_appliedStyleId_fkey",
+          "onDelete": "SET NULL",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "WritingStyle"
+        },
+        {
+          "columns": [
+            "userId"
+          ],
+          "name": "Novel_userId_fkey",
+          "onDelete": "SET NULL",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "User"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Novel_pkey",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "userId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Novel_userId_idx",
+          "predicate": null,
+          "unique": false
+        }
+      ],
+      "name": "Novel",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "Novel_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": "''::text",
+          "formatType": "text",
+          "name": "content",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "name": "Outline_novelId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Outline_novelId_key",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "Outline_pkey",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "Outline",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "Outline_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "actualWordCount",
+          "nullable": true,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "chapterEndOrder",
+          "nullable": true,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "chapterStartOrder",
+          "nullable": true,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "content",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "estimatedWordCount",
+          "nullable": true,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "'stage'::\"OutlineNodeKind\"",
+          "formatType": "\"OutlineNodeKind\"",
+          "name": "kind",
+          "nullable": false,
+          "udtName": "OutlineNodeKind"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "linkedChapterId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "0",
+          "formatType": "integer",
+          "name": "order",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "parentId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "'planned'::\"OutlineNodeStatus\"",
+          "formatType": "\"OutlineNodeStatus\"",
+          "name": "status",
+          "nullable": false,
+          "udtName": "OutlineNodeStatus"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "title",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "name": "OutlineNode_novelId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel"
+        },
+        {
+          "columns": [
+            "parentId"
+          ],
+          "name": "OutlineNode_parentId_fkey",
+          "onDelete": "SET NULL",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "OutlineNode"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "OutlineNode_novelId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "novelId",
+            "kind",
+            "chapterStartOrder",
+            "chapterEndOrder"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "OutlineNode_novelId_kind_chapterStartOrder_chapterEndOrder_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "novelId",
+            "kind"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "OutlineNode_novelId_kind_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "parentId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "OutlineNode_parentId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "OutlineNode_pkey",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "status"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "OutlineNode_status_idx",
+          "predicate": null,
+          "unique": false
+        }
+      ],
+      "name": "OutlineNode",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "OutlineNode_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "currentConflict",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "currentGoal",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "currentStage",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "nextMilestone",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "name": "PlotProgress_novelId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "PlotProgress_novelId_key",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "PlotProgress_pkey",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "PlotProgress",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "PlotProgress_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "charCount",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "chunkIndex",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "documentId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "vector",
+          "name": "embedding",
+          "nullable": false,
+          "udtName": "vector"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "embeddingDimension",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "text",
+          "nullable": false,
+          "udtName": "text"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "documentId"
+          ],
+          "name": "RagChunk_documentId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "RagDocument"
+        },
+        {
+          "columns": [
+            "novelId"
+          ],
+          "name": "RagChunk_novelId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "documentId",
+            "chunkIndex"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "RagChunk_documentId_chunkIndex_key",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "novelId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "RagChunk_novelId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "RagChunk_pkey",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "RagChunk",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "RagChunk_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "contentHash",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "errorMessage",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "sourceId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "\"RagSourceType\"",
+          "name": "sourceType",
+          "nullable": false,
+          "udtName": "RagSourceType"
+        },
+        {
+          "default": "'disabled'::\"RagDocumentStatus\"",
+          "formatType": "\"RagDocumentStatus\"",
+          "name": "status",
+          "nullable": false,
+          "udtName": "RagDocumentStatus"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "title",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "name": "RagDocument_novelId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "novelId",
+            "sourceType"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "RagDocument_novelId_sourceType_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "RagDocument_pkey",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "sourceType",
+            "sourceId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "RagDocument_sourceType_sourceId_key",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "RagDocument",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "RagDocument_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "content",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "sourceUrl",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "title",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "\"ReferenceMaterialType\"",
+          "name": "type",
+          "nullable": false,
+          "udtName": "ReferenceMaterialType"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "name": "ReferenceMaterial_novelId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "novelId",
+            "type"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ReferenceMaterial_novelId_type_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ReferenceMaterial_pkey",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "ReferenceMaterial",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "ReferenceMaterial_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "appliedAt",
+          "nullable": true,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "artifactKey",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "chapterId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "createdByAgent",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "diffJson",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "\"ReviewArtifactKind\"",
+          "name": "kind",
+          "nullable": false,
+          "udtName": "ReviewArtifactKind"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "payloadJson",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "reviewerAgent",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "1",
+          "formatType": "integer",
+          "name": "revision",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": "'draft'::\"ReviewArtifactStatus\"",
+          "formatType": "\"ReviewArtifactStatus\"",
+          "name": "status",
+          "nullable": false,
+          "udtName": "ReviewArtifactStatus"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "summary",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "taskId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "title",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "updatedByAgent",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "workflowRunId",
+          "nullable": true,
+          "udtName": "text"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "chapterId"
+          ],
+          "name": "ReviewArtifact_chapterId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Chapter"
+        },
+        {
+          "columns": [
+            "novelId"
+          ],
+          "name": "ReviewArtifact_novelId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel"
+        },
+        {
+          "columns": [
+            "taskId"
+          ],
+          "name": "ReviewArtifact_taskId_fkey",
+          "onDelete": "SET NULL",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "WritingTask"
+        },
+        {
+          "columns": [
+            "workflowRunId"
+          ],
+          "name": "ReviewArtifact_workflowRunId_fkey",
+          "onDelete": "SET NULL",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "WorkflowRun"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "artifactKey"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ReviewArtifact_artifactKey_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "chapterId",
+            "status"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ReviewArtifact_chapterId_status_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "novelId",
+            "status"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ReviewArtifact_novelId_status_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ReviewArtifact_pkey",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "taskId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ReviewArtifact_taskId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "workflowRunId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ReviewArtifact_workflowRunId_idx",
+          "predicate": null,
+          "unique": false
+        }
+      ],
+      "name": "ReviewArtifact",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "ReviewArtifact_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "artifactId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "evaluatorAgent",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "requiredChanges",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "revision",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "summary",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "\"ReviewArtifactEvaluationVerdict\"",
+          "name": "verdict",
+          "nullable": false,
+          "udtName": "ReviewArtifactEvaluationVerdict"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "artifactId"
+          ],
+          "name": "ReviewArtifactEvaluation_artifactId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "ReviewArtifact"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "artifactId",
+            "revision"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ReviewArtifactEvaluation_artifactId_revision_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "evaluatorAgent"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ReviewArtifactEvaluation_evaluatorAgent_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ReviewArtifactEvaluation_pkey",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "ReviewArtifactEvaluation",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "ReviewArtifactEvaluation_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "artifactId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "createdByAgent",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "diffJson",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "payloadJson",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "revision",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "summary",
+          "nullable": true,
+          "udtName": "text"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "artifactId"
+          ],
+          "name": "ReviewArtifactRevision_artifactId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "ReviewArtifact"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "artifactId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ReviewArtifactRevision_artifactId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "artifactId",
+            "revision"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ReviewArtifactRevision_artifactId_revision_key",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "ReviewArtifactRevision_pkey",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "ReviewArtifactRevision",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "ReviewArtifactRevision_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "acceptanceCriteria",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "beatPlanId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "characters",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "conflict",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "0",
+          "formatType": "integer",
+          "name": "estimatedWords",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "foreshadowingRefs",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "goal",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "order",
+          "nullable": false,
+          "udtName": "int4"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "beatPlanId"
+          ],
+          "name": "SceneBeat_beatPlanId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "ChapterBeatPlan"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "beatPlanId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "SceneBeat_beatPlanId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "SceneBeat_pkey",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "SceneBeat",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "SceneBeat_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": "''::text",
+          "formatType": "text",
+          "name": "content",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "name": "StoryBackground_novelId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "StoryBackground_novelId_key",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "StoryBackground_pkey",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "StoryBackground",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "StoryBackground_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "errorMessage",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "'pending'::text",
+          "formatType": "text",
+          "name": "status",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "styleId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "styleId"
+          ],
+          "name": "StylePortraitTask_styleId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "WritingStyle"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "StylePortraitTask_pkey",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "styleId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "StylePortraitTask_styleId_idx",
+          "predicate": null,
+          "unique": false
+        }
+      ],
+      "name": "StylePortraitTask",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "StylePortraitTask_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": "0",
+          "formatType": "integer",
+          "name": "charCount",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "errorMessage",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "filename",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "filepath",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "'ready'::text",
+          "formatType": "text",
+          "name": "status",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "styleId",
+          "nullable": false,
+          "udtName": "text"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "styleId"
+          ],
+          "name": "StyleReference_styleId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "WritingStyle"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "StyleReference_pkey",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "styleId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "StyleReference_styleId_idx",
+          "predicate": null,
+          "unique": false
+        }
+      ],
+      "name": "StyleReference",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "StyleReference_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "agentId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "0",
+          "formatType": "integer",
+          "name": "cachedTokens",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": "0",
+          "formatType": "integer",
+          "name": "completionTokens",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "''::text",
+          "formatType": "text",
+          "name": "model",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "0",
+          "formatType": "integer",
+          "name": "promptTokens",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": "0",
+          "formatType": "integer",
+          "name": "totalTokens",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "userId",
+          "nullable": false,
+          "udtName": "text"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "userId"
+          ],
+          "name": "TokenUsage_userId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "User"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "agentId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "TokenUsage_agentId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "novelId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "TokenUsage_novelId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "TokenUsage_pkey",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "userId",
+            "createdAt"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "TokenUsage_userId_createdAt_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "userId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "TokenUsage_userId_idx",
+          "predicate": null,
+          "unique": false
+        }
+      ],
+      "name": "TokenUsage",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "TokenUsage_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": "0",
+          "formatType": "bigint",
+          "name": "creditBalanceMicros",
+          "nullable": false,
+          "udtName": "int8"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "passwordHash",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "username",
+          "nullable": false,
+          "udtName": "text"
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "User_pkey",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "username"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "User_username_key",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "User",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "User_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "chapterId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "currentAgentId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "errorMessage",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "input",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "\"WorkflowRunKind\"",
+          "name": "kind",
+          "nullable": false,
+          "udtName": "WorkflowRunKind"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "output",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "sourceId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "sourceType",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "'pending'::\"WorkflowRunStatus\"",
+          "formatType": "\"WorkflowRunStatus\"",
+          "name": "status",
+          "nullable": false,
+          "udtName": "WorkflowRunStatus"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "userId",
+          "nullable": true,
+          "udtName": "text"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "name": "WorkflowRun_novelId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "chapterId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WorkflowRun_chapterId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "kind"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WorkflowRun_kind_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "novelId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WorkflowRun_novelId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WorkflowRun_pkey",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "status"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WorkflowRun_status_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "userId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WorkflowRun_userId_idx",
+          "predicate": null,
+          "unique": false
+        }
+      ],
+      "name": "WorkflowRun",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "WorkflowRun_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "agentId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "durationMs",
+          "nullable": true,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "input",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "output",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "runId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "'pending'::\"WorkflowStepStatus\"",
+          "formatType": "\"WorkflowStepStatus\"",
+          "name": "status",
+          "nullable": false,
+          "udtName": "WorkflowStepStatus"
+        },
+        {
+          "default": null,
+          "formatType": "\"WorkflowStepType\"",
+          "name": "stepType",
+          "nullable": false,
+          "udtName": "WorkflowStepType"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "runId"
+          ],
+          "name": "WorkflowStep_runId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "WorkflowRun"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WorkflowStep_pkey",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "runId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WorkflowStep_runId_idx",
+          "predicate": null,
+          "unique": false
+        }
+      ],
+      "name": "WorkflowStep",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "WorkflowStep_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": "''::text",
+          "formatType": "text",
+          "name": "content",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "name": "WorldSetting_novelId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WorldSetting_novelId_key",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WorldSetting_pkey",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "WorldSetting",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "WorldSetting_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "appealModel",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "comparableTitles",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "coreSellingPoint",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "genre",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "notes",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "readerPromise",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "'long_serial'::\"StoryLengthProfile\"",
+          "formatType": "\"StoryLengthProfile\"",
+          "name": "storyLengthProfile",
+          "nullable": false,
+          "udtName": "StoryLengthProfile"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "taboo",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "targetReaders",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "targetTotalWordCount",
+          "nullable": true,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "name": "WritingBible_novelId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WritingBible_novelId_key",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WritingBible_pkey",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "WritingBible",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "WritingBible_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": "4000",
+          "formatType": "integer",
+          "name": "defaultWordCount",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": "'设定,剧情,写作,校验,编辑'::text",
+          "formatType": "text",
+          "name": "enabledAgents",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "name": "WritingConfig_novelId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WritingConfig_novelId_key",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WritingConfig_pkey",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "WritingConfig",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "WritingConfig_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "agentId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "content",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "intent",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "metadata",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "parentId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "role",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "sessionId",
+          "nullable": false,
+          "udtName": "text"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "sessionId"
+          ],
+          "name": "WritingMessage_sessionId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "WritingSession"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WritingMessage_pkey",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "sessionId",
+            "createdAt"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WritingMessage_sessionId_createdAt_idx",
+          "predicate": null,
+          "unique": false
+        }
+      ],
+      "name": "WritingMessage",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "WritingMessage_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "chapterId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "'idle'::text",
+          "formatType": "text",
+          "name": "phase",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "title",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "chapterId"
+          ],
+          "name": "WritingSession_chapterId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Chapter"
+        },
+        {
+          "columns": [
+            "novelId"
+          ],
+          "name": "WritingSession_novelId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "chapterId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WritingSession_chapterId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "novelId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WritingSession_novelId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WritingSession_pkey",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "WritingSession",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "WritingSession_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "creativeMethodology",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "errorMessage",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "expressionFeatures",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "generationStyle",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "name",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "0",
+          "formatType": "integer",
+          "name": "originalCharCount",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "portraitMarkdown",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "'manual'::\"StyleSourceType\"",
+          "formatType": "\"StyleSourceType\"",
+          "name": "sourceType",
+          "nullable": false,
+          "udtName": "StyleSourceType"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "styleTraits",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "false",
+          "formatType": "boolean",
+          "name": "truncated",
+          "nullable": false,
+          "udtName": "bool"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "uniqueMarkers",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": "0",
+          "formatType": "integer",
+          "name": "usedCharCount",
+          "nullable": false,
+          "udtName": "int4"
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WritingStyle_pkey",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "WritingStyle",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "WritingStyle_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "agentOutputs",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "chapterId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "characterChanges",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "conversationHistory",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "finalContent",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "foreshadowingUpdates",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "generatedContent",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "graphStateJson",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "outlineUpdates",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "'idle'::\"WritingTaskPhase\"",
+          "formatType": "\"WritingTaskPhase\"",
+          "name": "phase",
+          "nullable": false,
+          "udtName": "WritingTaskPhase"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "selectedAgents",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "targetWordCount",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "writingSessionId",
+          "nullable": true,
+          "udtName": "text"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "chapterId"
+          ],
+          "name": "WritingTask_chapterId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Chapter"
+        },
+        {
+          "columns": [
+            "novelId"
+          ],
+          "name": "WritingTask_novelId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel"
+        },
+        {
+          "columns": [
+            "writingSessionId"
+          ],
+          "name": "WritingTask_writingSessionId_fkey",
+          "onDelete": "SET NULL",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "WritingSession"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "chapterId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WritingTask_chapterId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "novelId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WritingTask_novelId_idx",
+          "predicate": null,
+          "unique": false
+        },
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WritingTask_pkey",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "writingSessionId"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "WritingTask_writingSessionId_idx",
+          "predicate": null,
+          "unique": false
+        }
+      ],
+      "name": "WritingTask",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "WritingTask_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "A",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "B",
+          "nullable": false,
+          "udtName": "text"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "A"
+          ],
+          "name": "_FactionTerritories_A_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Faction"
+        },
+        {
+          "columns": [
+            "B"
+          ],
+          "name": "_FactionTerritories_B_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Location"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "A",
+            "B"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "_FactionTerritories_AB_pkey",
+          "predicate": null,
+          "unique": true
+        },
+        {
+          "columns": [
+            "B"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "_FactionTerritories_B_index",
+          "predicate": null,
+          "unique": false
+        }
+      ],
+      "name": "_FactionTerritories",
+      "primaryKey": {
+        "columns": [
+          "A",
+          "B"
+        ],
+        "name": "_FactionTerritories_AB_pkey"
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": "0",
+          "formatType": "integer",
+          "name": "applied_steps_count",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "character varying(64)",
+          "name": "checksum",
+          "nullable": false,
+          "udtName": "varchar"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp with time zone",
+          "name": "finished_at",
+          "nullable": true,
+          "udtName": "timestamptz"
+        },
+        {
+          "default": null,
+          "formatType": "character varying(36)",
+          "name": "id",
+          "nullable": false,
+          "udtName": "varchar"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "logs",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "character varying(255)",
+          "name": "migration_name",
+          "nullable": false,
+          "udtName": "varchar"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp with time zone",
+          "name": "rolled_back_at",
+          "nullable": true,
+          "udtName": "timestamptz"
+        },
+        {
+          "default": "now()",
+          "formatType": "timestamp with time zone",
+          "name": "started_at",
+          "nullable": false,
+          "udtName": "timestamptz"
+        }
+      ],
+      "foreignKeys": [],
+      "indexes": [
+        {
+          "columns": [
+            "id"
+          ],
+          "expressions": [],
+          "method": "btree",
+          "name": "_prisma_migrations_pkey",
+          "predicate": null,
+          "unique": true
+        }
+      ],
+      "name": "_prisma_migrations",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "_prisma_migrations_pkey"
+      },
+      "uniqueConstraints": []
+    }
+  ]
+}
