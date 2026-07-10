@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Literal, Self
 
-from pydantic import field_validator, model_validator
+from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Environment = Literal["dev", "test", "production"]
@@ -26,9 +26,9 @@ class Settings(BaseSettings):
     )
 
     environment: Environment = "dev"
-    database_url: str | None = None
-    redis_url: str | None = None
-    jwt_secret: str | None = None
+    database_url: SecretStr | None = None
+    redis_url: SecretStr | None = None
+    jwt_secret: SecretStr | None = None
     core_service_private_key_path: str | None = None
     agent_service_public_key_path: str | None = None
     agent_service_url: str | None = None
@@ -70,5 +70,8 @@ def create_testing_settings() -> Settings:
     )
 
 
-def _has_non_blank_value(value: str | None) -> bool:
-    return value is not None and bool(value.strip())
+def _has_non_blank_value(value: SecretStr | str | None) -> bool:
+    if value is None:
+        return False
+    raw_value = value.get_secret_value() if isinstance(value, SecretStr) else value
+    return bool(raw_value.strip())

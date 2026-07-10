@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 from typing import cast
 from uuid import UUID
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 from inkforge_core.app import create_app
+from inkforge_core.http import get_request_id
 
 
 @pytest.fixture
@@ -32,6 +35,38 @@ def test_ready_reports_loaded_test_configuration(client: TestClient) -> None:
     }
 
 
+def test_ready_aggregates_sync_and_async_checks_and_returns_503_on_failure() -> None:
+    app = create_app(testing=True)
+
+    async def schema_check() -> bool:
+        await asyncio.sleep(0)
+        return True
+
+    app.state.readiness_checks = {
+        "configuration": lambda: True,
+        "database": lambda: False,
+        "schema": schema_check,
+    }
+
+    response = TestClient(app).get("/api/v1/health/ready")
+
+    assert response.status_code == 503
+    assert response.json() == {
+        "status": "not_ready",
+        "service": "core-api",
+        "checks": {
+            "configuration": "ok",
+            "database": "failed",
+            "schema": "ok",
+        },
+    }
+    document = app.openapi()
+    schema = document["paths"]["/api/v1/health/ready"]["get"]["responses"]["503"][
+        "content"
+    ]["application/json"]["schema"]
+    assert schema == {"$ref": "#/components/schemas/ReadyHealthResponse"}
+
+
 def test_missing_request_id_generates_uuid(client: TestClient) -> None:
     response = client.get("/api/v1/health/live")
 
@@ -46,6 +81,41 @@ def test_valid_request_id_is_trimmed_and_preserved(client: TestClient) -> None:
     )
 
     assert response.headers["X-Request-ID"] == "upstream-request-42"
+
+
+async def test_request_id_context_is_isolated_between_concurrent_asgi_requests() -> None:
+    app = create_app(testing=True)
+    barrier = asyncio.Barrier(2)
+
+    @app.get("/api/v1/testing/request-id-context")
+    async def read_request_id_after_wait() -> dict[str, str]:
+        await barrier.wait()
+        await asyncio.sleep(0)
+        return {"requestId": get_request_id()}
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://testserver",
+    ) as client:
+        first_response, second_response = await asyncio.gather(
+            client.get(
+                "/api/v1/testing/request-id-context",
+                headers={"X-Request-ID": "concurrent-first"},
+            ),
+            client.get(
+                "/api/v1/testing/request-id-context",
+                headers={"X-Request-ID": "concurrent-second"},
+            ),
+        )
+
+    assert first_response.json() == {"requestId": "concurrent-first"}
+    assert second_response.json() == {"requestId": "concurrent-second"}
+    assert first_response.headers["X-Request-ID"] == "concurrent-first"
+    assert second_response.headers["X-Request-ID"] == "concurrent-second"
+
+    request_id_after_completion = get_request_id()
+    assert request_id_after_completion not in {"concurrent-first", "concurrent-second"}
+    assert str(UUID(request_id_after_completion)) == request_id_after_completion
 
 
 @pytest.mark.parametrize(

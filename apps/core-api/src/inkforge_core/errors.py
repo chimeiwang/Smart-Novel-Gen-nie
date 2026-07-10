@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -11,6 +12,19 @@ from starlette.exceptions import HTTPException
 
 from .http.request_id import get_request_id
 
+logger = logging.getLogger(__name__)
+
+_HTTP_ERROR_MESSAGES = {
+    400: "请求格式错误",
+    401: "身份认证失败",
+    403: "没有访问权限",
+    404: "请求的资源不存在",
+    405: "请求方法不被允许",
+    409: "请求状态冲突",
+    422: "请求参数校验失败",
+    500: "服务器内部错误",
+}
+
 
 class ErrorResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -19,6 +33,12 @@ class ErrorResponse(BaseModel):
     message: str
     details: JsonValue | None
     requestId: str
+
+
+PUBLIC_ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
+    status_code: {"model": ErrorResponse, "description": "统一错误响应"}
+    for status_code in (400, 401, 403, 404, 409, 422, 500, "default")
+}
 
 
 class ApiError(Exception):
@@ -86,24 +106,25 @@ async def handle_http_exception(request: Request, exc: Exception) -> JSONRespons
     if exc.status_code == 404:
         return _error_response(request, 404, "NOT_FOUND", "请求的资源不存在", headers=exc.headers)
 
-    if isinstance(exc.detail, str):
-        message = exc.detail
-        details: JsonValue | None = None
-    else:
-        message = "请求处理失败"
-        details = exc.detail
     return _error_response(
         request,
         exc.status_code,
         "HTTP_ERROR",
-        message,
-        details,
+        _HTTP_ERROR_MESSAGES.get(exc.status_code, "请求处理失败"),
         headers=exc.headers,
     )
 
 
 async def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
-    del exc
+    request_id = get_request_id(request)
+    logger.error(
+        "接口发生未处理异常",
+        extra={
+            "requestId": request_id,
+            "code": "INTERNAL_SERVER_ERROR",
+            "exceptionType": type(exc).__name__,
+        },
+    )
     return _error_response(request, 500, "INTERNAL_SERVER_ERROR", "服务器内部错误")
 
 

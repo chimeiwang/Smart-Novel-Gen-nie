@@ -3,12 +3,12 @@ from __future__ import annotations
 import pytest
 from inkforge_core.app import create_app
 from inkforge_core.config import Settings
-from pydantic import ValidationError
+from pydantic import SecretStr, ValidationError
 
 PRODUCTION_VALUES = {
     "environment": "production",
     "database_url": "postgresql://user:password@database:5432/inkforge",
-    "redis_url": "redis://redis:6379/0",
+    "redis_url": "redis://:redis-secret@redis:6379/0",
     "jwt_secret": "production-only-secret",
     "core_service_private_key_path": "/run/secrets/core-private.pem",
     "agent_service_public_key_path": "/run/secrets/agent-public.pem",
@@ -44,7 +44,33 @@ def test_production_accepts_complete_explicit_configuration() -> None:
     settings = production_settings()
 
     assert settings.environment == "production"
-    assert settings.jwt_secret == PRODUCTION_VALUES["jwt_secret"]
+    assert isinstance(settings.database_url, SecretStr)
+    assert isinstance(settings.redis_url, SecretStr)
+    assert isinstance(settings.jwt_secret, SecretStr)
+    assert settings.jwt_secret.get_secret_value() == PRODUCTION_VALUES["jwt_secret"]
+
+
+def test_sensitive_settings_are_masked_in_repr_dump_and_validation_error() -> None:
+    settings = production_settings()
+    secret_values = (
+        PRODUCTION_VALUES["database_url"],
+        PRODUCTION_VALUES["redis_url"],
+        PRODUCTION_VALUES["jwt_secret"],
+    )
+
+    rendered_settings = repr(settings)
+    rendered_dump = repr(settings.model_dump())
+    for secret in secret_values:
+        assert secret not in rendered_settings
+        assert secret not in rendered_dump
+
+    invalid_values: dict[str, object] = dict(PRODUCTION_VALUES)
+    invalid_values["agent_service_url"] = " "
+    with pytest.raises(ValidationError) as caught:
+        Settings.model_validate(invalid_values)
+    rendered_error = str(caught.value)
+    for secret in secret_values:
+        assert secret not in rendered_error
 
 
 def test_dev_and_test_do_not_have_default_jwt_secret(monkeypatch: pytest.MonkeyPatch) -> None:
