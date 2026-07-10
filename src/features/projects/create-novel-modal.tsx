@@ -4,6 +4,10 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { createNovelAction } from "@/app/actions";
+import {
+  STORY_LENGTH_PROFILE_CONFIG,
+  type StoryLengthProfile,
+} from "@/shared/contracts/story-length-profile";
 
 interface CreateNovelModalProps {
   isOpen: boolean;
@@ -15,6 +19,8 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
   const [pending, setPending] = useState(false);
   const [name, setName] = useState("");
   const [summary, setSummary] = useState("");
+  const [storyLengthProfile, setStoryLengthProfile] = useState<StoryLengthProfile>("long_serial");
+  const [targetTotalWordCount, setTargetTotalWordCount] = useState("1000000");
   const [genre, setGenre] = useState("");
   const [protagonist, setProtagonist] = useState("");
   const [coreSellingPoint, setCoreSellingPoint] = useState("");
@@ -34,6 +40,11 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
     }
   };
 
+  const selectStoryLengthProfile = (profile: StoryLengthProfile) => {
+    setStoryLengthProfile(profile);
+    setTargetTotalWordCount(profile === "short_medium" ? "80000" : "1000000");
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -48,6 +59,7 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
         <div className="modal-body">
           <form action={handleSubmit} className="stack">
             <p className="muted">先补齐几个写作锚点。创建后会自动生成第一章、默认大纲、剧情进度和作品圣经。</p>
+            <input type="hidden" name="storyLengthProfile" value={storyLengthProfile} />
             <label className="stack">
               <span>小说名称</span>
               <input
@@ -57,6 +69,39 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
                 required
                 value={name}
                 onChange={(e) => setName(e.target.value)}
+              />
+            </label>
+            <div className="stack">
+              <span className="label">创作模式</span>
+              <div className="story-profile-grid">
+                {(["short_medium", "long_serial"] as const).map((profile) => {
+                  const config = STORY_LENGTH_PROFILE_CONFIG[profile];
+                  const active = storyLengthProfile === profile;
+                  return (
+                    <button
+                      key={profile}
+                      className={`story-profile-option ${active ? "active" : ""}`}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => selectStoryLengthProfile(profile)}
+                    >
+                      <span>{config.label}</span>
+                      <small>
+                        {config.targetWords[0]}-{config.targetWords[1]} 字 · {config.chapterCount[0]}-{config.chapterCount[1]} 章
+                      </small>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <label className="stack">
+              <span>目标总字数</span>
+              <input
+                className="input"
+                name="targetTotalWordCount"
+                inputMode="numeric"
+                value={targetTotalWordCount}
+                onChange={(e) => setTargetTotalWordCount(e.target.value)}
               />
             </label>
             <div className="onboarding-grid">

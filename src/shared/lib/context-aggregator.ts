@@ -184,6 +184,8 @@ export async function aggregateNovelContext(
     worldSetting: novel.worldSetting?.content ?? "",
     writingBible: novel.writingBible
       ? {
+          storyLengthProfile: novel.writingBible.storyLengthProfile,
+          targetTotalWordCount: novel.writingBible.targetTotalWordCount ?? undefined,
           genre: novel.writingBible.genre ?? undefined,
           targetReaders: novel.writingBible.targetReaders ?? undefined,
           coreSellingPoint: novel.writingBible.coreSellingPoint ?? undefined,

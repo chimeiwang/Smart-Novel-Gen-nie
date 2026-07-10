@@ -6,7 +6,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { buildActiveTaskContext, buildConversationHistoryText, buildOperationSummaryIndex, buildSummaryIndex } from "../context-builder";
+import { buildActiveTaskContext, buildConversationHistoryText, buildNovelContext, buildOperationSummaryIndex, buildSummaryIndex } from "../context-builder";
 import type { AgentMessage, WritingState } from "../state";
 
 function createState(overrides: Partial<WritingState> = {}): WritingState {
@@ -200,6 +200,39 @@ describe("buildConversationHistoryText", () => {
 });
 
 describe("buildSummaryIndex", () => {
+  it("renders story length profile in writing bible context", () => {
+    const state = createState({
+      currentOperation: {
+        kind: "create_outline",
+        targetType: "outline",
+        userGoal: "从一句灵感生成中篇大纲",
+        primaryAgent: "剧情",
+        reviewers: ["编辑"],
+        outputKind: "outline_proposal",
+        requiresArtifact: true,
+        requiresUserApproval: true,
+        confidence: 0.9,
+        reasoning: "测试",
+      },
+      novelData: {
+        ...createState().novelData,
+        writingBible: {
+          storyLengthProfile: "short_medium",
+          targetTotalWordCount: 80_000,
+          coreSellingPoint: "一句灵感扩成完整悬疑中篇",
+        },
+      },
+    });
+
+    const full = buildNovelContext(state.novelData);
+    const brief = buildOperationSummaryIndex(state);
+
+    assert.match(full, /篇幅模式: 中短篇/);
+    assert.match(full, /先从一句灵感孵化故事核心/);
+    assert.match(brief, /篇幅模式：中短篇/);
+    assert.match(brief, /80000/);
+  });
+
   it("renders approved beat plan as writing constraints", () => {
     const state = createState({
       novelData: {

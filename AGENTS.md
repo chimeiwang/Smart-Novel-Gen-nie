@@ -53,6 +53,8 @@ InkForge（墨铸）是面向中文小说作者的本地创作工具，包含项
 
 当前主数据库是 PostgreSQL；Prisma datasource 以 `prisma/schema.prisma` 为准。仓库中保留的早期 SQLite 迁移和 `dev.db` 只是历史遗留。
 
+新建项目必须确定作品圣经里的篇幅 Profile：`short_medium` 表示 3-10 万字中短篇，适合从一句灵感多轮孵化故事核心后收束大纲；`long_serial` 表示长篇连载，默认面向几十万到百万字，需要验证长期冲突源、多阶段主线、伏笔池和角色长期状态。该 Profile 只改变策划粒度和默认约束，不新增平行 Agent 流程。
+
 ## 常用命令
 
 ```bash

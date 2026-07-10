@@ -137,6 +137,8 @@ export default async function WorkspacePage({
     }>;
   }>;
   const writingBible = novel.writingBible as {
+    storyLengthProfile: string;
+    targetTotalWordCount: number | null;
     genre: string | null;
     targetReaders: string | null;
     coreSellingPoint: string | null;

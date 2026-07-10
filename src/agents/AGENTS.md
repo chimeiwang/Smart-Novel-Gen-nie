@@ -85,6 +85,7 @@
 - 2026-07-05: v8.53 单文件工作流日志：`<task短号>.log` 改为运行概览、Agent 调用顺序、状态时间线、状态索引和按 Agent 分组的完整原文五个阅读层次；用稳定 `Axx/Mxx/Txx/Exxxx/Sxxx` 贯通子图节点、Agent、LLM、工具和状态，保留完整原始数据且不再要求人工跨文件关联。`streamEvents(subgraphs=true)` 同时捕获 operation 子图节点，并由 SSE 适配层解包带 namespace 的 custom/update/interrupt chunk。
 - 2026-07-05: v8.54 双记录工作流日志：保留单个 `<task短号>.log`，但每次运行只输出“LLM 完整请求/返回（含工具执行）”和“LangGraph 中文状态切换”两个部分。停止在人读文件中重复输出 Workflow/SSE JSON、完整 GraphState/raw patch、Agent final 和 agent_done 正文；审批/丢弃等既不调用 LLM 也不运行 Graph 的短路操作不创建空壳人工日志；机器 JSONL 开关继续承担底层事件审计。
 - 2026-07-05: v8.55 作家局部大纲上下文：`OutlineNode` 使用结构化章节范围；完整大纲重建声明 `replace` 并在同一事务中替换旧树，局部修补声明 `patch`。写作上下文按 approved Beat Plan、ChapterWritingGoal、唯一命中 chapter_group 的优先级解析，只注入当前路径和当前组完整内容；无映射或范围重叠会在模型调用前阻断。大纲和最近章节只读工具不再返回字符裁剪片段。
+- 2026-07-08: v8.56 篇幅 Profile：`WritingBible.storyLengthProfile` 区分 `short_medium` 中短篇与 `long_serial` 长篇连载，`targetTotalWordCount` 记录作品目标总字数。新建项目必须选择创作模式；Agent 上下文会注入篇幅模式、目标字数和策划重点。中短篇从一句灵感先孵化故事核心，再收束为 3-10 万字、8-25 章、3-5 个剧情单元；长篇连载才展开长期冲突源、多阶段主线、伏笔池和角色长期状态。
 - 2026-07-08: v8.57 参考资料 RAG 只读召回：新增 `RagDocument` / `RagChunk` pgvector 派生索引和 `semantic_search_references` 工具。第一版只索引 `ReferenceMaterial`；未配置 `RAG_EMBEDDING_*` 时资料照常上传，索引状态为 disabled，Agent 工具返回未启用提示。
 - 2026-06-28: v8.32 待审核草案继续修改收口：前端“继续修改”只关闭审核弹窗并聚焦聊天输入；当任务仍在 `awaiting_user_review` 或快照含 `artifactReview.activeArtifactId` 时，下一条普通聊天由 `/resume` 自动路由为同一草案的新 revision 返工请求。
 
@@ -599,7 +600,7 @@ Agent 调用 control tool → runtime 拦截 → parseControlEventArgs() → Age
 | 校验员 | `buildOperationSummaryIndex()` + 可选章节参考 + 高风险对象详情；复审时提示通过 artifact read tool 读取草案 | ~400-3000 |
 | 网文编辑 | `buildOperationSummaryIndex()` + 作品圣经 + 可选章节参考；复审时提示通过 artifact read tool 读取草案 | ~500-4000 |
 
-五个 Agent 都遵循“先理解用户目标，再按需查询”的策略。摘要索引用于判断相关性；只有事实核对、冲突校验、精确改写、正文承接或商业判断需要证据时才读取详情。`buildSummaryIndex()` 保留全量兼容入口，Agent 节点主路径使用 `buildOperationSummaryIndex()`，由 `OperationDefinition.contextStrategy` 决定本轮注入 brief/lore/outline/chapter/review 哪类摘要，避免每轮默认注入角色、设定、地点、物品、术语、大纲、伏笔和 Beat Plan 全量索引。当前章节正文不再被编辑/校验/写作默认视为任务对象，只作为可选参考材料。作品圣经用于约束题材定位、读者承诺、爽点模型和雷点。角色不变量会进入角色摘要和角色详情，用于 OOC 校验、角色商业性判断和正文写作约束。
+五个 Agent 都遵循“先理解用户目标，再按需查询”的策略。摘要索引用于判断相关性；只有事实核对、冲突校验、精确改写、正文承接或商业判断需要证据时才读取详情。`buildSummaryIndex()` 保留全量兼容入口，Agent 节点主路径使用 `buildOperationSummaryIndex()`，由 `OperationDefinition.contextStrategy` 决定本轮注入 brief/lore/outline/chapter/review 哪类摘要，避免每轮默认注入角色、设定、地点、物品、术语、大纲、伏笔和 Beat Plan 全量索引。当前章节正文不再被编辑/校验/写作默认视为任务对象，只作为可选参考材料。作品圣经用于约束题材定位、读者承诺、爽点模型、雷点、篇幅模式和目标总字数。角色不变量会进入角色摘要和角色详情，用于 OOC 校验、角色商业性判断和正文写作约束。
 
 Artifact reviewer 使用专用历史模式：保留完整用户消息、Agent 调用 brief 和其他 Agent 输出，将当前草案生产者的完整正文替换为 artifactId 读取提示。Reviewer 通过提示词只提取与本轮审核相关的历史结论、避免复述，而不对其他 Agent 历史做硬截断。待审核正文只通过 `get_active_review_artifact` 读取一次，避免对话历史和工具结果重复携带同一草案。
 

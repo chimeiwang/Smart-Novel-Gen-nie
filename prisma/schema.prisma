@@ -344,6 +344,8 @@ model WorldSetting {
 model WritingBible {
   id               String   @id @default(cuid())
   novelId          String   @unique
+  storyLengthProfile StoryLengthProfile @default(long_serial) // 篇幅模式：中短篇或长篇连载
+  targetTotalWordCount Int? // 作品目标总字数
   genre            String? // 题材/频道，如玄幻、都市、女频古言
   targetReaders    String? // 目标读者画像
   coreSellingPoint String? // 核心卖点
@@ -355,6 +357,11 @@ model WritingBible {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
   novel            Novel    @relation(fields: [novelId], references: [id], onDelete: Cascade)
+}
+
+enum StoryLengthProfile {
+  short_medium // 中短篇：约 3-10 万字
+  long_serial // 长篇连载：几十万到百万字
 }
 
 model Outline {
