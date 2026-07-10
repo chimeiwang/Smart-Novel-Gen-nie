@@ -1,6 +1,8 @@
 # 人工工作流日志格式
 
-本日志用于直接阅读一次 LangGraph 写作任务的真实执行过程，不以机器审计为主要目标。
+本文件描述当前人工可读工作流日志。机器审计日志、调试 API 和旧分片 LLM 日志不属于人工主入口。
+
+铁律：日志文档必须服从当前 `src/agents/graph/workflow-event-log.ts` 和运行输出事实；若实现变化，先核对代码再修正文档。
 
 ## 人工入口
 
@@ -8,72 +10,52 @@
 logs/workflow-events/runs/YYYY-MM-DD/<task短号>.log
 ```
 
-同一 `WritingTask` 的首次执行和后续 resume 按实际发生时间连续追加。每次运行只写一次任务类型等固定上下文，后续事件不重复长 ID 和固定 metadata。
+同一 `WritingTask` 的首次执行和后续 resume 追加到同一文件。审批、丢弃等既没有 LLM 调用也没有 LangGraph 状态变化的短路操作，不创建空壳人工日志。
 
-文件按发生顺序包含：
+## 当前结构
 
-1. 工作流开始、完成、中断或失败。
-2. 按 `Axx` 分组的 LLM 输入 messages 原文。
-3. 模型返回的正文原文。
-4. 每次 LLM 响应的输入、输出、缓存命中和总 token 数。
-5. LangGraph 中文状态切换和关键状态投影。
+每个运行区块只保留两类记录：
 
-人工日志不记录 tools schema、供应商 reasoning、模型 tool calls、工具解析参数、工具返回、token chunk、`on_chain_*`、Runnable、checkpoint namespace 等底层审计内容。callback、函数、循环引用和 `UntrackedValue` 的 `novelData` 属于 runtime-only 数据，会显式标记后排除；LLM messages、模型正文和状态投影不得静默截断。
+1. **LLM 输入与输出原文**
+   - 按 Agent 调用编号分组，例如 `A01`。
+   - 只渲染实际发送给模型的 messages 原文、模型返回的 content 原文和 token 消耗。
+   - 只包含 `REQUEST` / `RESPONSE`；不展开 tools schema、供应商 reasoning、模型 tool calls、工具参数或工具返回。
+   - 供应商没有返回 usage 时必须明确标记未知，不能伪造统计。
+
+2. **LangGraph 中文状态切换**
+   - 按状态编号排列，例如 `S001`。
+   - 记录节点名、阶段、关键字段和枚举值的中文含义。
+   - 用于确认 operationWorkflow 的真实推进顺序。
+
+人工日志不再写入：
+
+- Workflow/SSE 事件 JSON；
+- 完整 GraphState/raw patch；
+- 独立状态索引；
+- Agent 最终汇总重复层；
+- tools schema、供应商 reasoning、模型 tool calls、工具参数或工具返回；
+- token stream；
+- Runnable / callback / checkpoint metadata；
+- 需要跨文件关联的 task index 或 LLM index。
 
 ## 配置
 
 ```bash
 WORKFLOW_EVENT_LOG_ENABLED=true
-LLM_LOG_MODE=full
 WORKFLOW_EVENT_LOG_DIR=/absolute/path/to/workflow-events
-```
-
-- `WORKFLOW_EVENT_LOG_ENABLED=true`：生成统一人工工作流日志。
-- `LLM_LOG_MODE=full`：保证日志包含 LLM messages 和模型正文原文。`summary` 不能满足人工还原调用过程的要求。
-- `WORKFLOW_EVENT_LOG_DIR`：覆盖默认目录。
-- `LLM_SPLIT_LOG_ENABLED=false`：有 `taskId` 的 Agent LLM 只写统一工作流日志，不再重复生成 `logs/llm/runs`、`logs/llm/tasks` 和每日索引。设为 `true` 才恢复旧分片。
-
-`logs/app-YYYY-MM-DD.log` 只记录应用运行、错误和 SSE 等普通程序日志。没有 `taskId` 的独立 LLM 调用无法归入某个工作流，仍会写入 `logs/llm` 作为兜底。
-
-## 可选机器审计
-
-机器 JSONL 与人工日志分离，默认关闭。需要审计 tools schema、供应商 reasoning、模型 tool calls、工具参数或工具返回时，显式开启机器 JSONL：
-
-```bash
 WORKFLOW_MACHINE_EVENT_LOG_ENABLED=false
-WORKFLOW_EVENT_DEBUG_ENABLED=false
 ```
 
-只有显式设置 `WORKFLOW_MACHINE_EVENT_LOG_ENABLED=true` 才会继续写入 `workflow-events-YYYY-MM-DD.jsonl`。`/debug/workflow-events` 依赖这些 JSONL，不是人工排查入口。
+- `WORKFLOW_EVENT_LOG_ENABLED=true`：生成人工日志。
+- `WORKFLOW_EVENT_LOG_DIR`：覆盖默认日志目录。
+- `WORKFLOW_MACHINE_EVENT_LOG_ENABLED=true`：额外生成机器 JSONL，默认关闭。
 
-## 示例
+`logs/app-YYYY-MM-DD.log` 只记录应用运行、错误和普通程序日志。没有 `taskId` 的独立 LLM 调用不能归入某个工作流时，才使用 `logs/llm` 兜底。
 
-```text
-====================================================================================================
-工作流运行
-开始时间: 2026-07-03T01:02:03.004Z
-任务: p9j1s | 类型: writing-workflow
-阅读顺序: LLM 输入/输出 → LangGraph 状态。
-====================================================================================================
+## 阅读顺序
 
-#0002 ... LANGGRAPH 初始状态
-  【完整 GraphState】
-  { ... }
+1. 先看运行区块标题，确认 task 短号和时间。
+2. 再看 `Sxxx` 状态切换，确认 Graph 走到哪个阶段。
+3. 最后看对应 `Axx` Agent 调用里的 LLM 输入 messages、模型输出正文和 token 消耗。
 
-#0003 ... LANGGRAPH 节点 #1 完成：initSession
-  状态变化：...
-  【节点返回的完整 state patch】
-  { ... }
-
-#0004 ... AGENT 调用 #1 开始：写作
-
-[01:02:04.123] 第 1 轮 LLM 输入 >>>
-【发送给模型的消息原文】
-...
-
-[01:02:06.456] 第 1 轮 LLM 输出 <<<
-Token 消耗: 输入 1200 | 输出 300 | 缓存 800 | 合计 1500
-【模型正文原文】
-...
-
-```
+如果日志和代码行为冲突，以代码和实际日志文件为准，更新本文。

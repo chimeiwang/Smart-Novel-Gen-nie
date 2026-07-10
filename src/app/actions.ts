@@ -26,6 +26,13 @@ import {
   SIGNUP_BONUS_CREDITS,
   formatCreditMicros,
 } from "@/shared/lib/billing";
+import {
+  DEFAULT_STORY_LENGTH_PROFILE,
+  STORY_LENGTH_PROFILE_CONFIG,
+  normalizeStoryLengthProfile,
+  type StoryLengthProfile,
+} from "@/shared/contracts/story-length-profile";
+import { upsertReferenceMaterialRagIndex } from "@/shared/lib/rag-service";
 
 type ReferenceMaterialType = "note" | "web" | "book" | "image" | "custom";
 type StyleSourceType = "manual" | "agent";
@@ -34,6 +41,15 @@ type OutlineNodeStatus = "planned" | "in_progress" | "completed" | "skipped";
 
 const OUTLINE_NODE_KINDS: OutlineNodeKind[] = ["stage", "plot_unit", "chapter_group"];
 const OUTLINE_NODE_STATUSES: OutlineNodeStatus[] = ["planned", "in_progress", "completed", "skipped"];
+
+function parsePositiveInt(value: FormDataEntryValue | string | number | null | undefined): number | null {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function defaultTargetTotalWordCount(profile: StoryLengthProfile): number {
+  return profile === "short_medium" ? 80_000 : 1_000_000;
+}
 
 async function requireCurrentSession() {
   const session = await getSession();
@@ -177,6 +193,8 @@ async function assertOutlineChildrenAllowed(input: {
 export async function createNovelAction(formData: FormData) {
   const name = String(formData.get("name") ?? "").trim();
   const summary = String(formData.get("summary") ?? "").trim();
+  const storyLengthProfile = normalizeStoryLengthProfile(formData.get("storyLengthProfile"));
+  const targetTotalWordCount = parsePositiveInt(formData.get("targetTotalWordCount")) ?? defaultTargetTotalWordCount(storyLengthProfile);
   const genre = String(formData.get("genre") ?? "").trim();
   const protagonist = String(formData.get("protagonist") ?? "").trim();
   const coreSellingPoint = String(formData.get("coreSellingPoint") ?? "").trim();
@@ -192,7 +210,6 @@ export async function createNovelAction(formData: FormData) {
     protagonist ? "主角起点：" + protagonist : "",
     firstChapterGoal ? "第一章目标：" + firstChapterGoal : "",
   ].filter(Boolean).join("\n");
-  const hasWritingBible = Boolean(genre || coreSellingPoint || readerPromise || writingBibleNotes);
 
   const novel = await prisma.novel.create({
     data: {
@@ -217,18 +234,16 @@ export async function createNovelAction(formData: FormData) {
           currentGoal: firstChapterGoal || null,
         },
       },
-      ...(hasWritingBible
-        ? {
-            writingBible: {
-              create: {
-                genre: genre || null,
-                coreSellingPoint: coreSellingPoint || null,
-                readerPromise: readerPromise || null,
-                notes: writingBibleNotes || null,
-              },
-            },
-          }
-        : {}),
+      writingBible: {
+        create: {
+          storyLengthProfile,
+          targetTotalWordCount,
+          genre: genre || null,
+          coreSellingPoint: coreSellingPoint || null,
+          readerPromise: readerPromise || null,
+          notes: writingBibleNotes || null,
+        },
+      },
     },
     include: {
       chapters: {
@@ -240,6 +255,7 @@ export async function createNovelAction(formData: FormData) {
   });
 
   revalidatePath("/");
+  revalidatePath("/dashboard");
 
   return { novelId: novel.id, chapterId: novel.chapters[0]?.id ?? null };
 }
@@ -1035,6 +1051,8 @@ export async function updateWorldSettingAction(input: {
 
 export async function updateWritingBibleAction(input: {
   novelId: string;
+  storyLengthProfile?: string;
+  targetTotalWordCount?: string | number | null;
   genre?: string;
   targetReaders?: string;
   coreSellingPoint?: string;
@@ -1045,10 +1063,14 @@ export async function updateWritingBibleAction(input: {
   notes?: string;
 }) {
   await requireNovelAccess(input.novelId);
+  const storyLengthProfile = normalizeStoryLengthProfile(input.storyLengthProfile ?? DEFAULT_STORY_LENGTH_PROFILE);
+  const targetTotalWordCount = parsePositiveInt(input.targetTotalWordCount);
 
   await prisma.writingBible.upsert({
     where: { novelId: input.novelId },
     update: {
+      storyLengthProfile,
+      targetTotalWordCount,
       genre: input.genre?.trim() || null,
       targetReaders: input.targetReaders?.trim() || null,
       coreSellingPoint: input.coreSellingPoint?.trim() || null,
@@ -1060,6 +1082,8 @@ export async function updateWritingBibleAction(input: {
     },
     create: {
       novelId: input.novelId,
+      storyLengthProfile,
+      targetTotalWordCount: targetTotalWordCount ?? STORY_LENGTH_PROFILE_CONFIG[storyLengthProfile].targetWords[1],
       genre: input.genre?.trim() || null,
       targetReaders: input.targetReaders?.trim() || null,
       coreSellingPoint: input.coreSellingPoint?.trim() || null,
@@ -1305,7 +1329,7 @@ export async function createReferenceMaterialAction(input: {
   }
   await requireNovelAccess(input.novelId);
 
-  await prisma.referenceMaterial.create({
+  const reference = await prisma.referenceMaterial.create({
     data: {
       novelId: input.novelId,
       title: input.title.trim(),
@@ -1314,6 +1338,12 @@ export async function createReferenceMaterialAction(input: {
       sourceUrl: input.sourceUrl?.trim() || null,
     },
   });
+
+  try {
+    await upsertReferenceMaterialRagIndex(reference.id);
+  } catch (error) {
+    console.error("upsertReferenceMaterialRagIndex error:", error);
+  }
 
   revalidatePath(`/workspace/${input.novelId}`);
 }

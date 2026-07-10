@@ -11,6 +11,7 @@
 
 import { getActiveArtifactId, type CoreAgentId, type WritingState } from "./state";
 import { getOperationDefinition } from "@/agents/operations/operation-definition";
+import { formatStoryLengthProfile, getStoryLengthProfileConfig } from "@/shared/contracts/story-length-profile";
 
 /** 控制哪些上下文段需要构建 */
 export interface ContextBuildOptions {
@@ -92,6 +93,8 @@ export function buildNovelContext(
   if (opts.writingBible && novelData.writingBible) {
     const bible = novelData.writingBible;
     lines.push("## 作品圣经");
+    lines.push("- 篇幅模式: " + formatStoryLengthProfile(bible.storyLengthProfile, bible.targetTotalWordCount));
+    lines.push("- 策划重点: " + getStoryLengthProfileConfig(bible.storyLengthProfile).planningFocus);
     if (bible.genre) lines.push("- 题材/频道: " + bible.genre);
     if (bible.targetReaders) lines.push("- 目标读者: " + bible.targetReaders);
     if (bible.coreSellingPoint) lines.push("- 核心卖点: " + bible.coreSellingPoint);
@@ -327,6 +330,12 @@ export function buildContextIndex(
   if (novelData.writingBible?.readerPromise) {
     lines.push(`- 读者承诺：${novelData.writingBible.readerPromise}`);
   }
+  if (novelData.writingBible) {
+    lines.push(`- 篇幅模式：${formatStoryLengthProfile(
+      novelData.writingBible.storyLengthProfile,
+      novelData.writingBible.targetTotalWordCount
+    )}`);
+  }
 
   // 各数据类型的数量统计
   lines.push("");
@@ -452,6 +461,12 @@ function buildSummaryIndexWithOptions(
   if (novelData.chapterTitle) lines.push(`- 当前章节：${novelData.chapterTitle}`);
   if (novelData.plotProgress.currentStage) lines.push(`- 剧情阶段：${novelData.plotProgress.currentStage}`);
   if (novelData.plotProgress.currentGoal) lines.push(`- 当前目标：${compactText(novelData.plotProgress.currentGoal, 90)}`);
+  if (novelData.writingBible) {
+    lines.push(`- 篇幅模式：${formatStoryLengthProfile(
+      novelData.writingBible.storyLengthProfile,
+      novelData.writingBible.targetTotalWordCount
+    )}`);
+  }
 
   if (opts.reviewMode) {
     lines.push("");

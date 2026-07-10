@@ -6,9 +6,11 @@
 
 ## 用户认证
 
+根路由 `/` 是公开官网首页。除 `/`、`/login`、`/_next/*`、`/api/*` 和静态资源外，普通页面路由需要有效会话；无效或缺失会话会重定向到 `/login`。
+
 ### 注册
 
-用户可以注册账号。
+用户可以从官网首页进入注册入口，并注册账号。
 
 输入：
 
@@ -44,7 +46,7 @@
 
 - 用户名统一转小写。
 - 用户名或密码错误时返回统一错误。
-- 登录成功后写入 JWT Cookie。
+- 登录成功后写入 JWT Cookie，并进入工作台首页。
 - 登录时会把历史 userId 为空的孤儿小说分配给当前用户。
 
 ### 登出
@@ -192,6 +194,9 @@ CreditLedger：
 | LANGGRAPH_STUDIO_ENABLED | 是否启用 LangGraph Studio 本地调试 |
 | LANGGRAPH_MEMORY_SAVER_TTL_MS | 等待确认 checkpoint TTL |
 | ALLOW_LEGACY_NULL_USERID | 本地兼容历史无归属小说 |
+| RAG_EMBEDDING_API_KEY | 参考资料 RAG embedding API Key |
+| RAG_EMBEDDING_BASE_URL | 参考资料 RAG embedding 服务地址 |
+| RAG_EMBEDDING_MODEL | 参考资料 RAG embedding 模型 |
 
 ## 常用命令
 
@@ -210,14 +215,14 @@ CreditLedger：
 
 ### Workflow event debug
 
-调试 API 和页面用于查看工作流事件。
+调试 API 和页面用于查看机器 JSONL 工作流事件。机器 JSONL 默认关闭。
 
 能力：
 
 - 按 runId 查询；
 - 按 taskId 查询；
 - 查看近期 workflow runs；
-- 读取 workflow event JSONL 日志。
+- 在 WORKFLOW_MACHINE_EVENT_LOG_ENABLED=true 时读取 workflow event JSONL 日志。
 
 访问规则：
 
@@ -249,7 +254,8 @@ LangSmith 可选启用。
 系统包含：
 
 - logger；
-- workflow JSONL logging；
+- 人工工作流日志；
+- 可选 workflow JSONL logging；
 - MemorySaver checkpoint；
 - MemorySaver TTL 清理；
 - SSE 断连和异常路径清理。
@@ -259,6 +265,7 @@ LangSmith 可选启用。
 - ReviewArtifact、WritingTask 状态和计费是关键写入，必须同步。
 - TokenUsage 和 workflow 派生 WritingMessage 可进入有界非关键写入队列。
 - MemorySaver 只做当前进程内 interrupt/resume 优化，持久恢复依赖数据库快照。
+- 人工排查优先读取 `logs/workflow-events/runs/YYYY-MM-DD/<task短号>.log`。
 
 ## 安全与非功能需求
 

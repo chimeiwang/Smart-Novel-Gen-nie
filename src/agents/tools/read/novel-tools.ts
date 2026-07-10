@@ -67,6 +67,8 @@ export const getNovelInfoExecutor: ToolExecutorFn = async (args, state) => {
         outline: { select: { content: true } },
         writingBible: {
           select: {
+            storyLengthProfile: true,
+            targetTotalWordCount: true,
             genre: true,
             targetReaders: true,
             coreSellingPoint: true,

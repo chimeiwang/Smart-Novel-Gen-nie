@@ -88,10 +88,8 @@ LangGraph Studio 适合调试：
 
 人工排查直接读 `logs/workflow-events/runs/YYYY-MM-DD/<task短号>.log`：
 
-- LangGraph 节点实际完成顺序。
-- 每个节点前后的关键 GraphState 差异。
-- Operation 阶段和 Agent 调用开始/完成顺序。
-- 同一 task 实际发送给 LLM 的消息/工具定义原文、LLM 输出原文和工具输入/返回原文。
+- LLM 完整请求、返回和工具执行原文。
+- LangGraph 中文状态切换，包括节点名、阶段、关键字段和枚举值。
 
 机器 JSONL 默认关闭。只有显式设置 `WORKFLOW_MACHINE_EVENT_LOG_ENABLED=true` 后，`/debug/workflow-events` 才有新的审计数据可用于回放：
 

@@ -4,6 +4,13 @@ export type AiConfig = {
   model: string;
 };
 
+export type RagEmbeddingConfig = {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  enabled: boolean;
+};
+
 export type LLMRuntimeName = "langchain" | "legacy-openai";
 export type LLMLogMode = "off" | "summary" | "full";
 
@@ -25,6 +32,18 @@ export function getAiConfig(): AiConfig {
     apiKey: process.env.OPENAI_API_KEY ?? "",
     baseUrl: process.env.OPENAI_BASE_URL ?? "https://api.deepseek.com/v1",
     model: process.env.OPENAI_MODEL ?? "deepseek-v4-flash",
+  };
+}
+
+export function getRagEmbeddingConfig(): RagEmbeddingConfig {
+  const apiKey = process.env.RAG_EMBEDDING_API_KEY?.trim() ?? "";
+  const baseUrl = process.env.RAG_EMBEDDING_BASE_URL?.trim() ?? "";
+  const model = process.env.RAG_EMBEDDING_MODEL?.trim() ?? "";
+  return {
+    apiKey,
+    baseUrl,
+    model,
+    enabled: Boolean(apiKey && baseUrl && model),
   };
 }
 

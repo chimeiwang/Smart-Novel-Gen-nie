@@ -14,6 +14,7 @@
 
 import type { AgentControlEvent, EvaluationPatch } from "@/shared/contracts/agent-control";
 import type { CreativeOperation } from "@/shared/contracts/creative-operation";
+import type { StoryLengthProfile } from "@/shared/contracts/story-length-profile";
 import type { WorkflowLLMTraceSink } from "@/shared/lib/logger";
 import type { ChapterDraftTarget } from "@/shared/contracts/review-artifact";
 import {
@@ -417,6 +418,8 @@ export interface PlotProgressData {
 
 /** 作品圣经数据 */
 export interface WritingBibleData {
+  storyLengthProfile?: StoryLengthProfile;
+  targetTotalWordCount?: number;
   genre?: string;
   targetReaders?: string;
   coreSellingPoint?: string;

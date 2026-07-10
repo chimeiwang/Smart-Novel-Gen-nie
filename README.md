@@ -50,7 +50,10 @@ npm run db:migrate
 
 Agent、写作流程、质量评审、草案审核和 LangGraph 编排的详细说明见：
 
+- `DOCS.md`
 - `AGENTS.md`
 - `src/agents/AGENTS.md`
-- `docs/AGENT_NOVEL_WRITING_ROADMAP.md`
-
+- `docs/README.md`
+- `docs/requirements/00-overview.md`
+- `docs/requirements/03-ai-writing-and-agents.md`
+- `docs/requirements/04-review-quality-and-workflow.md`

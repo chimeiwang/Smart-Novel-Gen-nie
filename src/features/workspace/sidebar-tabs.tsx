@@ -16,6 +16,11 @@ import { ProgressPanel } from "@/features/progress/progress-panel";
 import { ReferencePanel } from "@/features/references/reference-panel";
 import { StylePanel } from "@/features/styles/style-panel";
 import { Modal } from "@/components/modal";
+import {
+  STORY_LENGTH_PROFILE_CONFIG,
+  normalizeStoryLengthProfile,
+  type StoryLengthProfile,
+} from "@/shared/contracts/story-length-profile";
 
 type SidebarTabKey =
   | "chapters"
@@ -154,6 +159,8 @@ type SidebarTabsProps = {
   storyBackground: string | null;
   worldSetting: string | null;
   writingBible: {
+    storyLengthProfile: string;
+    targetTotalWordCount: number | null;
     genre: string | null;
     targetReaders: string | null;
     coreSellingPoint: string | null;
@@ -195,6 +202,8 @@ const TAB_ITEMS: Array<{ key: SidebarTabKey; label: string }> = [
 
 function toWritingBibleForm(writingBible: SidebarTabsProps["writingBible"]) {
   return {
+    storyLengthProfile: normalizeStoryLengthProfile(writingBible?.storyLengthProfile),
+    targetTotalWordCount: writingBible?.targetTotalWordCount ? String(writingBible.targetTotalWordCount) : "",
     genre: writingBible?.genre ?? "",
     targetReaders: writingBible?.targetReaders ?? "",
     coreSellingPoint: writingBible?.coreSellingPoint ?? "",
@@ -302,6 +311,17 @@ export function SidebarTabs({
 
   const updateWritingBibleField = (field: keyof typeof writingBibleForm, value: string) => {
     setWritingBibleDraft((current) => ({ ...(current ?? writingBibleForm), [field]: value }));
+  };
+
+  const selectWritingBibleProfile = (profile: StoryLengthProfile) => {
+    setWritingBibleDraft((current) => {
+      const base = current ?? writingBibleForm;
+      return {
+        ...base,
+        storyLengthProfile: profile,
+        targetTotalWordCount: base.targetTotalWordCount || (profile === "short_medium" ? "80000" : "1000000"),
+      };
+    });
   };
 
   return (
@@ -420,6 +440,39 @@ export function SidebarTabs({
 
       <Modal title="作品圣经" description="记录商业定位、读者承诺和写作禁忌" open={modalKey === "writingBible"} onClose={() => setModalKey(null)}>
         <div className="stack">
+          <div className="stack">
+            <span className="label">创作模式</span>
+            <div className="story-profile-grid">
+              {(["short_medium", "long_serial"] as const).map((profile) => {
+                const config = STORY_LENGTH_PROFILE_CONFIG[profile];
+                const active = writingBibleForm.storyLengthProfile === profile;
+                return (
+                  <button
+                    key={profile}
+                    className={`story-profile-option ${active ? "active" : ""}`}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => selectWritingBibleProfile(profile)}
+                  >
+                    <span>{config.label}</span>
+                    <small>
+                      {config.targetWords[0]}-{config.targetWords[1]} 字 · {config.chapterCount[0]}-{config.chapterCount[1]} 章
+                    </small>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <label className="stack">
+            <span className="label">目标总字数</span>
+            <input
+              className="input"
+              inputMode="numeric"
+              value={writingBibleForm.targetTotalWordCount}
+              onChange={(e) => updateWritingBibleField("targetTotalWordCount", e.target.value)}
+              placeholder="例如：80000"
+            />
+          </label>
           <div className="grid-two">
             <label className="stack">
               <span className="label">题材/频道</span>

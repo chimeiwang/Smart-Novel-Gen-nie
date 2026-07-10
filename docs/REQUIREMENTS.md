@@ -1,66 +1,51 @@
-# 需求索引
+# 需求文档索引
 
-> 状态: ✅ 完成 | 🔧 开发中 | 📋 规划 | ❌ 废弃
+本文只做入口索引，不再维护旧 `@X.X` 追溯体系。文档治理规则见根目录 `DOCS.md`。
 
-## 0. 代码反推需求文档
+铁律：需求文档必须描述当前项目事实。若与代码、`prisma/schema.prisma`、共享契约或测试冲突，以项目事实为准并修正文档。
 
-| 编号 | 名称 | 文档 |
-|------|------|------|
-| 0.0 | 项目需求总览 | [00-overview.md](requirements/00-overview.md) |
-| 0.1 | 项目与章节 | [01-projects-and-chapters.md](requirements/01-projects-and-chapters.md) |
-| 0.2 | 创作资料库 | [02-creative-knowledge-base.md](requirements/02-creative-knowledge-base.md) |
-| 0.3 | AI 写作与 Agent | [03-ai-writing-and-agents.md](requirements/03-ai-writing-and-agents.md) |
-| 0.4 | 草案审核、质量检查与工作流 | [04-review-quality-and-workflow.md](requirements/04-review-quality-and-workflow.md) |
-| 0.5 | 认证、计费与运维 | [05-auth-billing-and-ops.md](requirements/05-auth-billing-and-ops.md) |
+## 当前权威需求
 
-## 1. 小说项目管理
+| 领域 | 文档 | 状态 |
+| --- | --- | --- |
+| 总览 | `docs/requirements/00-overview.md` | 当前事实 |
+| 项目与章节 | `docs/requirements/01-projects-and-chapters.md` | 当前事实 |
+| 创作资料库 | `docs/requirements/02-creative-knowledge-base.md` | 当前事实 |
+| AI 写作与 Agent | `docs/requirements/03-ai-writing-and-agents.md` | 当前事实 |
+| 草案审核、质量检查与工作流 | `docs/requirements/04-review-quality-and-workflow.md` | 当前事实 |
+| 认证、计费与运维 | `docs/requirements/05-auth-billing-and-ops.md` | 当前事实 |
 
-| 编号 | 名称 | 状态 |
-|------|------|------|
-| 1.1 | 小说项目CRUD | ✅ |
+## 历史需求碎片
 
-## 2. 章节编辑
+以下文件是早期需求追溯碎片，只能作为历史线索，不能作为当前权威：
 
-| 编号 | 名称 | 状态 |
-|------|------|------|
-| 2.1 | Markdown编辑器 | ✅ |
-| 2.2 | 自动保存 | ✅ |
-| 2.3 | 字数统计 | ✅ |
+- `docs/archive/legacy-requirements/2.2-autosave.md`
+- `docs/archive/legacy-requirements/2.3-word-count.md`
+- `docs/archive/legacy-requirements/3.1-ai-continuation.md`
+- `docs/archive/legacy-requirements/5.1-agent-core.md`
+- `docs/archive/legacy-requirements/5.2-agent-tools.md`
+- `docs/archive/legacy-requirements/5.3-agent-routing.md`
+- `docs/archive/legacy-requirements/5.4-agent-context.md`
+- `docs/archive/legacy-requirements/6.2-langsmith-tracing.md`
 
-## 3. AI能力
+如果这些碎片里仍有有效规则，迁入上方 `00-05` 文档；不要继续扩展旧编号体系。
 
-| 编号 | 名称 | 状态 |
-|------|------|------|
-| 3.1 | AI续写 | ✅ |
-| 3.2 | 文风提取 | ✅ |
+## 新需求写法
 
-## 4. 创作设定
+新功能不要新增 `X.X-slug.md` 编号碎片。所有后续需求都必须先写 spec，再执行修改：
 
-| 编号 | 名称 | 状态 |
-|------|------|------|
-| 4.1 | 设定管理（角色/地点/物品/技能） | ✅ |
-| 4.2 | 大纲管理 | ✅ |
-| 4.3 | 剧情进度 | ✅ |
-| 4.4 | 参考资料 | ✅ |
-| 4.5 | 文风管理（独立页面） | ✅ |
+```text
+docs/specs/YYYY-MM-DD-short-name.md
+```
 
-## 5. Agent智能写作
+spec 必须包含：
 
-| 编号 | 名称 | 状态 |
-|------|------|------|
-| 5.1 | 核心编排（StateGraph） | ✅ |
-| 5.2 | 工具调用 | ✅ |
-| 5.3 | 智能路由 | ✅ |
-| 5.4 | 分层上下文 | ✅ |
-| 5.5 | 设定顾问 | ✅ |
-| 5.6 | 剧情顾问 | ✅ |
-| 5.7 | 作家 | ✅ |
-| 5.8 | 校验员 | ✅ |
-| 5.9 | 编辑 | ✅ |
+- 背景；
+- 当前项目事实；
+- 目标；
+- 非目标；
+- 设计与契约变更；
+- 影响范围；
+- 验收标准。
 
-## 6. 基础设施
-
-| 编号 | 名称 | 状态 |
-|------|------|------|
-| 6.1 | 用户认证 | ✅ |
-| 6.2 | LangSmith追踪 | ✅ |
+需求落地后，再把已经成为当前事实的内容迁入对应 `00-05` 需求文档。

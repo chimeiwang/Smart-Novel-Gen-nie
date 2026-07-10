@@ -1,7 +1,7 @@
 /**
  * Middleware — 路由保护
  *
- * 公开路由 /login 放行（已登录则重定向 /）。
+ * 公开路由 / 放行；/login 放行（已登录则重定向 /dashboard）。
  * /_next/*、/api/*、静态资源放行。
  * 其他路由检查 session cookie，无效则重定向 /login。
  *
@@ -17,18 +17,21 @@ const JWT_SECRET = new TextEncoder().encode(
 );
 const COOKIE_NAME = "inkforge-token";
 
-const PUBLIC_PATHS = ["/login"];
-
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  // 公开路径：已登录 → 重定向到首页，未登录 → 放行
-  if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
+  // 官网首页公开放行。
+  if (pathname === "/") {
+    return NextResponse.next();
+  }
+
+  // 登录页：已登录 → 重定向到工作台首页，未登录 → 放行
+  if (pathname.startsWith("/login")) {
     const token = request.cookies.get(COOKIE_NAME)?.value;
     if (token) {
       try {
         await jwtVerify(token, JWT_SECRET, { algorithms: ["HS256"] });
-        return NextResponse.redirect(new URL("/", request.url));
+        return NextResponse.redirect(new URL("/dashboard", request.url));
       } catch {
         // token 无效，放行到登录页
       }
