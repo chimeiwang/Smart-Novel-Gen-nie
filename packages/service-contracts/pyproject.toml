@@ -6,7 +6,9 @@ build-backend = "hatchling.build"
 name = "inkforge-service-contracts"
 version = "0.1.0"
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+    "pydantic>=2.10,<3",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/inkforge_contracts"]

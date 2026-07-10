@@ -432,6 +432,12 @@ requires-dist = [
 name = "inkforge-service-contracts"
 version = "0.1.0"
 source = { editable = "packages/service-contracts" }
+dependencies = [
+    { name = "pydantic" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pydantic", specifier = ">=2.10,<3" }]
 
 [[package]]
 name = "inkforge-workspace"
