@@ -47,6 +47,46 @@ async def test_register_source_bucket_cannot_be_bypassed_with_new_usernames() ->
 
 
 @pytest.mark.asyncio
+async def test_exceeded_source_bucket_does_not_create_rotated_account_keys() -> None:
+    redis = fakeredis.aioredis.FakeRedis()
+    limiter = RedisRateLimiter(redis, key_prefix="测试:来源上界:")
+
+    initial_results = [
+        await run_limit_attempt(limiter, "register", "198.51.100.10", f"initial-{index}")
+        for index in range(4)
+    ]
+    assert initial_results == ["ok", "ok", "ok", "RATE_LIMITED"]
+    source_keys = await redis.keys("测试:来源上界:register:source:*")
+    assert len(source_keys) == 1
+    ttl_before_rotation = await redis.pttl(source_keys[0])
+
+    rotated_results = [
+        await run_limit_attempt(limiter, "register", "198.51.100.10", f"rotated-{index}")
+        for index in range(100)
+    ]
+
+    assert set(rotated_results) == {"RATE_LIMITED"}
+    account_keys = await redis.keys("测试:来源上界:register:account:*")
+    all_keys = await redis.keys("测试:来源上界:*")
+    ttl_after_rotation = await redis.pttl(source_keys[0])
+    assert len(account_keys) == 3
+    assert len(all_keys) == 4
+    assert 0 < ttl_after_rotation <= ttl_before_rotation <= 3_600_000
+
+    with pytest.raises(ApiError) as caught:
+        await limiter.check(
+            "register",
+            client_identity="198.51.100.10",
+            username="final-rotation",
+        )
+    assert caught.value.code == "RATE_LIMITED"
+    assert caught.value.headers is not None
+    retry_after = int(caught.value.headers["Retry-After"])
+    assert 1 <= retry_after <= 3_600
+    await redis.aclose()
+
+
+@pytest.mark.asyncio
 async def test_login_account_bucket_is_atomic_under_concurrency() -> None:
     redis = fakeredis.aioredis.FakeRedis()
     limiter = RedisRateLimiter(redis, key_prefix="测试:登录账号:")

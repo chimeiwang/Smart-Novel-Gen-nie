@@ -24,18 +24,17 @@ local source_count = redis.call('INCR', KEYS[1])
 if source_count == 1 then
   redis.call('PEXPIRE', KEYS[1], ARGV[2])
 end
+local source_ttl = redis.call('PTTL', KEYS[1])
+if source_count > tonumber(ARGV[1]) then
+  return {1, source_ttl, source_count, -1}
+end
 local account_count = redis.call('INCR', KEYS[2])
 if account_count == 1 then
   redis.call('PEXPIRE', KEYS[2], ARGV[4])
 end
-local source_ttl = redis.call('PTTL', KEYS[1])
 local account_ttl = redis.call('PTTL', KEYS[2])
 local blocked = 0
 local retry_ms = 0
-if source_count > tonumber(ARGV[1]) then
-  blocked = 1
-  retry_ms = math.max(retry_ms, source_ttl)
-end
 if account_count > tonumber(ARGV[3]) then
   blocked = 1
   retry_ms = math.max(retry_ms, account_ttl)
