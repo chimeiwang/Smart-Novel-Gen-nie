@@ -1,1 +1,1 @@
-"""InkForge agent service package."""
+"""InkForge 智能体服务包。"""

@@ -14,7 +14,7 @@ WORKSPACE_MEMBERS = (
 def test_workspace_member_manifest_exists(member_path: str) -> None:
     manifest = REPOSITORY_ROOT / member_path / "pyproject.toml"
 
-    assert manifest.is_file(), f"Missing workspace member manifest: {manifest}"
+    assert manifest.is_file(), f"缺少工作区成员清单：{manifest}"
 
 
 @pytest.mark.parametrize(
@@ -27,4 +27,4 @@ def test_workspace_member_uses_src_package_layout(
 ) -> None:
     package_directory = REPOSITORY_ROOT / member_path / package_path
 
-    assert package_directory.is_dir(), f"Missing src package directory: {package_directory}"
+    assert package_directory.is_dir(), f"缺少 src 包目录：{package_directory}"

@@ -1,1 +1,1 @@
-"""InkForge core API package."""
+"""InkForge 核心接口包。"""

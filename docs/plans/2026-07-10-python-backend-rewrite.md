@@ -1,54 +1,54 @@
-# Python Backend Rewrite Implementation Plan
+# Python 后端重构实施计划
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **供执行智能体使用：**必须使用 `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，逐项实施本计划。步骤使用勾选框（`- [ ]`）跟踪进度。
 
-**Goal:** Replace every Next.js backend capability with a production FastAPI Core API and a database-isolated Python Agent Service while preserving the existing PostgreSQL schema, user workflows, SEO frontend, and one-command Docker Compose deployment.
+**目标：**在保留现有 PostgreSQL 数据库结构、用户工作流、搜索引擎优化前端和单命令 Docker Compose 部署的前提下，用生产级 FastAPI 核心接口服务和数据库隔离的 Python 智能体服务替换全部 Next.js 后端能力。
 
-**Architecture:** Build the Python services alongside the current TypeScript implementation as a behavior oracle, migrate the frontend only after Python contract parity is proven, then delete the old backend before release. Core API exclusively owns PostgreSQL, browser auth, business rules, artifacts, billing, and SSE; Agent Service owns LangGraph and model/tool execution and communicates with Core through signed versioned HTTP contracts.
+**架构：**在开发期间让 Python 服务与当前 TypeScript 实现并存，并把旧实现作为行为依据；只有证明 Python 契约行为一致后才迁移前端，并在发布前删除旧后端。核心接口服务独占 PostgreSQL、浏览器认证、业务规则、草案、计费和 SSE；智能体服务负责 LangGraph 及模型和工具执行，并通过签名的版本化 HTTP 契约与核心接口服务通信。
 
-**Tech Stack:** Python 3.12, uv, FastAPI, Pydantic v2, SQLAlchemy 2 async, asyncpg, pgvector, Redis asyncio, PyJWT/Ed25519, bcrypt, LangGraph Python, httpx, pytest, Next.js 16, React 19, OpenAPI-generated TypeScript, Nginx, Docker Compose.
+**技术栈：**Python 3.12、uv、FastAPI、Pydantic v2、SQLAlchemy 2 异步接口、asyncpg、pgvector、Redis 异步接口、PyJWT 和 Ed25519、bcrypt、LangGraph Python、httpx、pytest、Next.js 16、React 19、OpenAPI 生成的 TypeScript、Nginx、Docker Compose。
 
-**Authoritative spec:** `docs/specs/2026-07-10-python-backend-rewrite.md`
+**权威规格：**`docs/specs/2026-07-10-python-backend-rewrite.md`
 
-**Lifecycle:** This plan is current until every task and final acceptance gate is complete. After delivery it moves to `docs/archive/implementation-plans/` and the implemented facts move into repository authority and requirements documents.
+**生命周期：**在所有任务和最终验收门槛完成前，本计划保持当前有效。交付后，本计划移入 `docs/archive/implementation-plans/`，已经实现的事实迁入仓库权威文档和需求文档。
 
 ---
 
-## Delivery Order
+## 交付顺序
 
-1. Foundation and immutable database contract.
-2. Core API domains and all former Server Action/API behavior.
-3. Agent Service, Core tool gateway, state recovery, and billing grant flow.
-4. Next.js move and generated-client migration.
-5. Docker production topology, old backend deletion, and cutover proof.
+1. 基础设施和不可变数据库契约。
+2. 核心接口服务各领域及全部原服务器操作和接口行为。
+3. 智能体服务、核心工具网关、状态恢复和计费授权流程。
+4. Next.js 移动和生成客户端迁移。
+5. Docker 生产拓扑、旧后端删除和切换证明。
 
-No phase is a releasable partial product. The branch is releasable only after Task 20.
+任何阶段都不是可发布的局部产品。只有完成任务 20 后，该分支才可发布。
 
-### Task 1: Establish the Python and JavaScript workspaces
+### 任务 1：建立 Python 和 JavaScript 工作区
 
-**Files:**
-- Create: `.python-version`
-- Create: `pyproject.toml`
-- Create: `tests/architecture/test_repository_layout.py`
-- Create: `apps/core-api/pyproject.toml`
-- Create: `apps/core-api/src/inkforge_core/__init__.py`
-- Create: `apps/agent-service/pyproject.toml`
-- Create: `apps/agent-service/src/inkforge_agents/__init__.py`
-- Create: `packages/service-contracts/pyproject.toml`
-- Create: `packages/service-contracts/src/inkforge_contracts/__init__.py`
-- Modify: `.gitignore`
+**文件：**
+- 新建：`.python-version`
+- 新建：`pyproject.toml`
+- 新建：`tests/architecture/test_repository_layout.py`
+- 新建：`apps/core-api/pyproject.toml`
+- 新建：`apps/core-api/src/inkforge_core/__init__.py`
+- 新建：`apps/agent-service/pyproject.toml`
+- 新建：`apps/agent-service/src/inkforge_agents/__init__.py`
+- 新建：`packages/service-contracts/pyproject.toml`
+- 新建：`packages/service-contracts/src/inkforge_contracts/__init__.py`
+- 修改：`.gitignore`
 
-- [ ] **Step 1: Install and pin the local Python toolchain**
+- [ ] **步骤 1：安装并锁定本地 Python 工具链**
 
-Run: `python -m pip install --user "uv>=0.8,<1"`
+运行：`python -m pip install --user "uv>=0.8,<1"`
 
-Run: `uv python install 3.12`
+运行：`uv python install 3.12`
 
-Run: `uv run --python 3.12 python --version`
+运行：`uv run --python 3.12 python --version`
 
-Expected: Python 3.12.x. Do not use the machine's Python 3.13 for the lock or application environment.
+预期：输出 Python 3.12.x。锁文件或应用环境不得使用机器上的 Python 3.13。
 
-- [ ] **Step 2: Write the failing repository-layout test**
+- [ ] **步骤 2：编写失败的仓库布局测试**
 
 ```python
 from pathlib import Path
@@ -70,15 +70,15 @@ def test_python_services_are_separate_packages() -> None:
     assert (ROOT / "apps/agent-service/src/inkforge_agents").is_dir()
 ```
 
-- [ ] **Step 3: Run the test and verify RED**
+- [ ] **步骤 3：运行测试并确认失败**
 
-Run: `uv run --python 3.12 --with pytest pytest tests/architecture/test_repository_layout.py -v`
+运行：`uv run --python 3.12 --with pytest pytest tests/architecture/test_repository_layout.py -v`
 
-Expected: FAIL because the workspace members do not exist.
+预期：测试失败，因为工作区成员尚不存在。
 
-- [ ] **Step 4: Add the uv workspace and package manifests**
+- [ ] **步骤 4：添加 uv 工作区和包清单**
 
-Root `pyproject.toml`:
+根目录 `pyproject.toml`：
 
 ```toml
 [project]
@@ -119,41 +119,41 @@ python_version = "3.12"
 strict = true
 ```
 
-Each service manifest must use a `src` package and the contracts workspace dependency. Core dependencies include FastAPI, SQLAlchemy, asyncpg, pgvector, Redis, PyJWT, cryptography, bcrypt, httpx, structlog, orjson, python-multipart and pydantic-settings. Agent dependencies include FastAPI, Redis, PyJWT, cryptography, httpx, structlog, orjson, LangGraph, LangChain Core and LangChain OpenAI.
+每个服务清单都必须使用 `src` 包布局并依赖契约工作区。核心接口服务的依赖包括 FastAPI、SQLAlchemy、asyncpg、pgvector、Redis、PyJWT、cryptography、bcrypt、httpx、structlog、orjson、python-multipart 和 pydantic-settings。智能体服务的依赖包括 FastAPI、Redis、PyJWT、cryptography、httpx、structlog、orjson、LangGraph、LangChain Core 和 LangChain OpenAI。
 
-- [ ] **Step 5: Lock dependencies and verify GREEN**
+- [ ] **步骤 5：锁定依赖并确认通过**
 
-Run: `uv lock`
+运行：`uv lock`
 
-Expected: `uv.lock` is created with Python 3.12-compatible packages.
+预期：生成 `uv.lock`，其中包均兼容 Python 3.12。
 
-Run: `uv sync --all-packages --group dev`
+运行：`uv sync --all-packages --group dev`
 
-Expected: all workspace packages install successfully.
+预期：所有工作区包均成功安装。
 
-Run: `uv run pytest tests/architecture/test_repository_layout.py -v`
+运行：`uv run pytest tests/architecture/test_repository_layout.py -v`
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 6: Commit**
+- [ ] **步骤 6：提交**
 
 ```bash
 git add .python-version pyproject.toml uv.lock .gitignore tests/architecture apps/core-api/pyproject.toml apps/core-api/src apps/agent-service/pyproject.toml apps/agent-service/src packages/service-contracts/pyproject.toml packages/service-contracts/src
-git commit -m "build: establish Python service workspace"
+git commit -m "构建：建立 Python 服务工作区"
 ```
 
-### Task 2: Define versioned Core-Agent service contracts
+### 任务 2：定义版本化核心服务与智能体服务契约
 
-**Files:**
-- Create: `packages/service-contracts/src/inkforge_contracts/version.py`
-- Create: `packages/service-contracts/src/inkforge_contracts/identity.py`
-- Create: `packages/service-contracts/src/inkforge_contracts/runs.py`
-- Create: `packages/service-contracts/src/inkforge_contracts/events.py`
-- Create: `packages/service-contracts/src/inkforge_contracts/tools.py`
-- Create: `packages/service-contracts/tests/test_run_contracts.py`
-- Create: `packages/service-contracts/tests/test_event_contracts.py`
+**文件：**
+- 新建：`packages/service-contracts/src/inkforge_contracts/version.py`
+- 新建：`packages/service-contracts/src/inkforge_contracts/identity.py`
+- 新建：`packages/service-contracts/src/inkforge_contracts/runs.py`
+- 新建：`packages/service-contracts/src/inkforge_contracts/events.py`
+- 新建：`packages/service-contracts/src/inkforge_contracts/tools.py`
+- 新建：`packages/service-contracts/tests/test_run_contracts.py`
+- 新建：`packages/service-contracts/tests/test_event_contracts.py`
 
-- [ ] **Step 1: Write failing strict-contract tests**
+- [ ] **步骤 1：编写失败的严格契约测试**
 
 ```python
 from datetime import UTC, datetime
@@ -192,15 +192,15 @@ def test_agent_event_carries_ordering_identity() -> None:
     assert event.sequence == 1
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [ ] **步骤 2：运行并确认失败**
 
-Run: `uv run pytest packages/service-contracts/tests -v`
+运行：`uv run pytest packages/service-contracts/tests -v`
 
-Expected: collection FAIL because contract modules do not exist.
+预期：测试收集失败，因为契约模块尚不存在。
 
-- [ ] **Step 3: Implement strict Pydantic contracts**
+- [ ] **步骤 3：实现严格的 Pydantic 契约**
 
-All request models use `ConfigDict(extra="forbid", populate_by_name=True)`. Define:
+所有请求模型都使用 `ConfigDict(extra="forbid", populate_by_name=True)`。定义：
 
 ```python
 PROTOCOL_VERSION = "1.0"
@@ -227,37 +227,37 @@ class AgentEvent(BaseModel):
     occurredAt: datetime
 ```
 
-Define exact `CreativeOperationKind`, five Agent IDs, tool request/result envelopes, checkpoint callback, completion callback and failure callback from the current TypeScript contracts. Do not include ORM models or repositories.
+根据当前 TypeScript 契约精确定义 `CreativeOperationKind`、五个智能体标识、工具请求与结果信封、检查点回调、完成回调和失败回调。不得包含对象关系映射模型或仓储。
 
-- [ ] **Step 4: Verify contracts and type quality**
+- [ ] **步骤 4：验证契约和类型质量**
 
-Run: `uv run pytest packages/service-contracts/tests -v`
+运行：`uv run pytest packages/service-contracts/tests -v`
 
-Expected: PASS.
+预期：通过。
 
-Run: `uv run mypy packages/service-contracts/src`
+运行：`uv run mypy packages/service-contracts/src`
 
-Expected: no errors.
+预期：没有错误。
 
-- [ ] **Step 5: Commit**
+- [ ] **步骤 5：提交**
 
 ```bash
 git add packages/service-contracts
-git commit -m "feat: define Core Agent service protocol"
+git commit -m "功能：定义核心服务与智能体服务协议"
 ```
 
-### Task 3: Bootstrap Core API with stable errors and health endpoints
+### 任务 3：搭建具有稳定错误格式和健康接口的核心接口服务
 
-**Files:**
-- Create: `apps/core-api/src/inkforge_core/config.py`
-- Create: `apps/core-api/src/inkforge_core/app.py`
-- Create: `apps/core-api/src/inkforge_core/errors.py`
-- Create: `apps/core-api/src/inkforge_core/http/request_id.py`
-- Create: `apps/core-api/src/inkforge_core/operations/router.py`
-- Create: `apps/core-api/tests/test_health.py`
-- Create: `apps/core-api/tests/test_errors.py`
+**文件：**
+- 新建：`apps/core-api/src/inkforge_core/config.py`
+- 新建：`apps/core-api/src/inkforge_core/app.py`
+- 新建：`apps/core-api/src/inkforge_core/errors.py`
+- 新建：`apps/core-api/src/inkforge_core/http/request_id.py`
+- 新建：`apps/core-api/src/inkforge_core/operations/router.py`
+- 新建：`apps/core-api/tests/test_health.py`
+- 新建：`apps/core-api/tests/test_errors.py`
 
-- [ ] **Step 1: Write failing API tests**
+- [ ] **步骤 1：编写失败的接口测试**
 
 ```python
 from fastapi.testclient import TestClient
@@ -278,46 +278,46 @@ def test_unknown_route_uses_stable_error_envelope() -> None:
     assert set(body) == {"code", "message", "details", "requestId"}
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [ ] **步骤 2：运行并确认失败**
 
-Run: `uv run pytest apps/core-api/tests/test_health.py apps/core-api/tests/test_errors.py -v`
+运行：`uv run pytest apps/core-api/tests/test_health.py apps/core-api/tests/test_errors.py -v`
 
-Expected: FAIL because the Core app does not exist.
+预期：测试失败，因为核心应用尚不存在。
 
-- [ ] **Step 3: Implement the application factory**
+- [ ] **步骤 3：实现应用工厂**
 
-`create_app(testing=False)` must register request IDs, stable exception handlers and `/api/v1/health/live`. Settings must reject production startup when `JWT_SECRET`, service-key paths or database URL are missing. Testing mode accepts explicit dependency overrides and never reads developer secrets.
+`create_app(testing=False)` 必须注册请求标识、稳定异常处理器和 `/api/v1/health/live`。缺少 `JWT_SECRET`、服务密钥路径或数据库地址时，配置必须拒绝生产启动。测试模式接受显式依赖覆盖，并且绝不读取开发者密钥。
 
-- [ ] **Step 4: Verify GREEN and formatting**
+- [ ] **步骤 4：确认通过并检查格式**
 
-Run: `uv run pytest apps/core-api/tests/test_health.py apps/core-api/tests/test_errors.py -v`
+运行：`uv run pytest apps/core-api/tests/test_health.py apps/core-api/tests/test_errors.py -v`
 
-Expected: PASS.
+预期：通过。
 
-Run: `uv run ruff check apps/core-api/src apps/core-api/tests`
+运行：`uv run ruff check apps/core-api/src apps/core-api/tests`
 
-Expected: no errors.
+预期：没有错误。
 
-- [ ] **Step 5: Commit**
+- [ ] **步骤 5：提交**
 
 ```bash
 git add apps/core-api
-git commit -m "feat: bootstrap Core API"
+git commit -m "功能：搭建核心接口服务"
 ```
 
-### Task 4: Freeze and verify the existing PostgreSQL schema
+### 任务 4：冻结并验证现有 PostgreSQL 数据库结构
 
-**Files:**
-- Create: `apps/core-api/src/inkforge_core/db/base.py`
-- Create: `apps/core-api/src/inkforge_core/db/models.py`
-- Create: `apps/core-api/src/inkforge_core/db/session.py`
-- Create: `apps/core-api/src/inkforge_core/db/schema_guard.py`
-- Create: `apps/core-api/src/inkforge_core/db/schema-contract.json`
-- Create: `apps/core-api/tests/db/test_model_metadata.py`
-- Create: `apps/core-api/tests/db/test_schema_guard.py`
-- Create: `scripts/export_schema_contract.py`
+**文件：**
+- 新建：`apps/core-api/src/inkforge_core/db/base.py`
+- 新建：`apps/core-api/src/inkforge_core/db/models.py`
+- 新建：`apps/core-api/src/inkforge_core/db/session.py`
+- 新建：`apps/core-api/src/inkforge_core/db/schema_guard.py`
+- 新建：`apps/core-api/src/inkforge_core/db/schema-contract.json`
+- 新建：`apps/core-api/tests/db/test_model_metadata.py`
+- 新建：`apps/core-api/tests/db/test_schema_guard.py`
+- 新建：`scripts/export_schema_contract.py`
 
-- [ ] **Step 1: Write failing metadata tests for the immutable schema**
+- [ ] **步骤 1：为不可变数据库结构编写失败的元数据测试**
 
 ```python
 from pathlib import Path
@@ -349,58 +349,58 @@ def test_runtime_never_calls_schema_creation() -> None:
     assert ".drop_all(" not in source
 ```
 
-Prisma currently contains 40 concrete tables. The test uses current `schema.prisma` as authority and prevents the plan from preserving a stale count.
+Prisma 当前包含 40 个实体表。测试以当前 `schema.prisma` 为权威，防止计划固化过时的数量。
 
-- [ ] **Step 2: Run and verify RED**
+- [ ] **步骤 2：运行并确认失败**
 
-Run: `uv run pytest apps/core-api/tests/db/test_model_metadata.py -v`
+运行：`uv run pytest apps/core-api/tests/db/test_model_metadata.py -v`
 
-Expected: FAIL because ORM mappings do not exist.
+预期：测试失败，因为对象关系映射尚不存在。
 
-- [ ] **Step 3: Implement exact SQLAlchemy mappings**
+- [ ] **步骤 3：实现精确的 SQLAlchemy 映射**
 
-Map every table, quoted column, relationship, PostgreSQL enum, BigInt and vector field from `prisma/schema.prisma`. Use application-generated string IDs and timezone-aware UTC datetimes. Do not call `create_all`, import Alembic or add DDL event listeners.
+映射 `prisma/schema.prisma` 中的每个表、带引号列、关系、PostgreSQL 枚举、大整数和向量字段。使用应用生成的字符串标识和带时区的协调世界时日期。不得调用 `create_all`、导入 Alembic 或添加数据定义语句事件监听器。
 
-- [ ] **Step 4: Export the read-only schema contract**
+- [ ] **步骤 4：导出只读数据库结构契约**
 
-`scripts/export_schema_contract.py` must require `--database-url`, query `information_schema` and `pg_catalog`, print the source server identity, and write only when `--output` is explicit. It must never execute DDL.
+`scripts/export_schema_contract.py` 必须要求提供 `--database-url`，查询 `information_schema` 和 `pg_catalog`，打印来源服务器标识，并且只在显式提供 `--output` 时写入。它绝不能执行数据定义语句。
 
-Run against the current database in read-only mode:
+以只读模式对当前数据库运行：
 
 ```bash
 uv run python scripts/export_schema_contract.py --database-url "$DATABASE_URL" --output apps/core-api/src/inkforge_core/db/schema-contract.json
 ```
 
-Expected: contract includes tables, columns, types, nullability, defaults, keys, indexes, enums and vector dimensions.
+预期：契约包含表、列、类型、可空性、默认值、键、索引、枚举和向量维度。
 
-- [ ] **Step 5: Verify guard success and drift rejection**
+- [ ] **步骤 5：验证守卫成功路径和漂移拒绝路径**
 
-Tests use a fake inspector snapshot for exact match and one changed nullable/type/index value. Exact match returns ready; any drift returns a field-level diff and readiness false.
+测试使用模拟检查器快照覆盖精确匹配，以及可空性、类型或索引值发生一处变化的情况。精确匹配返回就绪；任何漂移都返回字段级差异，并将就绪状态设为否。
 
-Run: `uv run pytest apps/core-api/tests/db -v`
+运行：`uv run pytest apps/core-api/tests/db -v`
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 6: Commit**
+- [ ] **步骤 6：提交**
 
 ```bash
 git add apps/core-api/src/inkforge_core/db apps/core-api/tests/db scripts/export_schema_contract.py
-git commit -m "feat: map and guard immutable PostgreSQL schema"
+git commit -m "功能：映射并守卫不可变 PostgreSQL 数据库结构"
 ```
 
-### Task 5: Implement signed service identity and replay protection
+### 任务 5：实现签名服务身份和重放保护
 
-**Files:**
-- Create: `apps/core-api/src/inkforge_core/service_auth.py`
-- Create: `apps/agent-service/src/inkforge_agents/service_auth.py`
-- Create: `packages/service-contracts/src/inkforge_contracts/jwt_claims.py`
-- Create: `apps/core-api/tests/test_service_auth.py`
-- Create: `apps/agent-service/tests/test_service_auth.py`
-- Create: `scripts/generate_service_keys.py`
+**文件：**
+- 新建：`apps/core-api/src/inkforge_core/service_auth.py`
+- 新建：`apps/agent-service/src/inkforge_agents/service_auth.py`
+- 新建：`packages/service-contracts/src/inkforge_contracts/jwt_claims.py`
+- 新建：`apps/core-api/tests/test_service_auth.py`
+- 新建：`apps/agent-service/tests/test_service_auth.py`
+- 新建：`scripts/generate_service_keys.py`
 
-- [ ] **Step 1: Write failing trust-boundary tests**
+- [ ] **步骤 1：编写失败的信任边界测试**
 
-Test that a valid Ed25519 token succeeds only for the expected `aud`, scope, task, run and novel. Test expired tokens, wrong issuer, wrong audience, missing scope, reused `jti`, mismatched body digest and tokens older than the allowed clock skew.
+测试有效的 Ed25519 令牌只能用于预期的 `aud`、权限范围、任务、运行和小说。测试过期令牌、错误签发者、错误受众、缺少权限范围、重复使用的 `jti`、不匹配的请求体摘要，以及超出允许时钟偏差的令牌。
 
 ```python
 def test_agent_token_cannot_call_another_novel(verifier, signed_token) -> None:
@@ -413,881 +413,881 @@ def test_agent_token_cannot_call_another_novel(verifier, signed_token) -> None:
         )
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [ ] **步骤 2：运行并确认失败**
 
-Run: `uv run pytest apps/core-api/tests/test_service_auth.py apps/agent-service/tests/test_service_auth.py -v`
+运行：`uv run pytest apps/core-api/tests/test_service_auth.py apps/agent-service/tests/test_service_auth.py -v`
 
-Expected: FAIL because service auth is missing.
+预期：测试失败，因为服务认证尚未实现。
 
-- [ ] **Step 3: Implement key loading, signing and verification**
+- [ ] **步骤 3：实现密钥加载、签名和验证**
 
-Private keys load only from configured files. Claims expire after 120 seconds. Redis replay protection is required for internal write scopes and optional for idempotent reads. `Idempotency-Key`, `X-InkForge-Timestamp` and `X-InkForge-Body-SHA256` are validated before request models reach business services.
+私钥只能从配置文件加载。声明在 120 秒后过期。内部写入权限范围必须使用 Redis 重放保护，幂等读取可以选择使用。请求模型进入业务服务前，必须验证 `Idempotency-Key`、`X-InkForge-Timestamp` 和 `X-InkForge-Body-SHA256`。
 
-- [ ] **Step 4: Verify GREEN**
+- [ ] **步骤 4：确认通过**
 
-Run: `uv run pytest apps/core-api/tests/test_service_auth.py apps/agent-service/tests/test_service_auth.py -v`
+运行：`uv run pytest apps/core-api/tests/test_service_auth.py apps/agent-service/tests/test_service_auth.py -v`
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 5: Commit**
+- [ ] **步骤 5：提交**
 
 ```bash
 git add apps/core-api/src/inkforge_core/service_auth.py apps/core-api/tests/test_service_auth.py apps/agent-service/src/inkforge_agents/service_auth.py apps/agent-service/tests/test_service_auth.py packages/service-contracts scripts/generate_service_keys.py
-git commit -m "feat: secure Core Agent service calls"
+git commit -m "功能：保护核心服务与智能体服务调用"
 ```
 
-### Task 6: Migrate browser authentication and signup billing
+### 任务 6：迁移浏览器认证和注册计费
 
-**Files:**
-- Create: `apps/core-api/src/inkforge_core/auth/router.py`
-- Create: `apps/core-api/src/inkforge_core/auth/schemas.py`
-- Create: `apps/core-api/src/inkforge_core/auth/service.py`
-- Create: `apps/core-api/src/inkforge_core/auth/repository.py`
-- Create: `apps/core-api/src/inkforge_core/auth/dependencies.py`
-- Create: `apps/core-api/tests/auth/test_auth_api.py`
-- Create: `apps/core-api/tests/auth/test_legacy_cookie.py`
+**文件：**
+- 新建：`apps/core-api/src/inkforge_core/auth/router.py`
+- 新建：`apps/core-api/src/inkforge_core/auth/schemas.py`
+- 新建：`apps/core-api/src/inkforge_core/auth/service.py`
+- 新建：`apps/core-api/src/inkforge_core/auth/repository.py`
+- 新建：`apps/core-api/src/inkforge_core/auth/dependencies.py`
+- 新建：`apps/core-api/tests/auth/test_auth_api.py`
+- 新建：`apps/core-api/tests/auth/test_legacy_cookie.py`
 
-- [ ] **Step 1: Write failing parity tests**
+- [ ] **步骤 1：编写失败的行为一致性测试**
 
-Cover username normalization and regex, password minimum length, duplicate username, bcryptjs hash verification, HS256 cookie compatibility, 30-day expiry, secure production cookie, uniform invalid-login errors, signup bonus balance and CreditLedger transaction.
+覆盖用户名规范化和正则表达式、密码最短长度、重复用户名、bcryptjs 哈希验证、HS256 Cookie 兼容、30 天有效期、安全生产 Cookie、统一无效登录错误、注册赠送余额和 CreditLedger 事务。
 
-- [ ] **Step 2: Verify RED**
+- [ ] **步骤 2：确认失败**
 
-Run: `uv run pytest apps/core-api/tests/auth -v`
+运行：`uv run pytest apps/core-api/tests/auth -v`
 
-Expected: FAIL because auth routes do not exist.
+预期：测试失败，因为认证路由尚不存在。
 
-- [ ] **Step 3: Implement auth endpoints**
+- [ ] **步骤 3：实现认证接口**
 
-Implement `/api/v1/auth/register`, `/login`, `/logout`, `/me`. Preserve `inkforge-token`, HS256 and `sub=userId`. Production refuses the old default secret. Register creates User, increments `creditBalanceMicros` by `1_000_000_000`, writes `signup_bonus`, and sets the Cookie in one successful request.
+实现 `/api/v1/auth/register`、`/login`、`/logout` 和 `/me`。保留 `inkforge-token`、HS256 和 `sub=userId`。生产环境拒绝旧默认密钥。注册在同一个成功请求中创建 User、把 `creditBalanceMicros` 增加 `1_000_000_000`、写入 `signup_bonus` 并设置 Cookie。
 
-- [ ] **Step 4: Verify GREEN and unauthorized resource behavior**
+- [ ] **步骤 4：确认通过并验证未授权资源行为**
 
-Run: `uv run pytest apps/core-api/tests/auth -v`
+运行：`uv run pytest apps/core-api/tests/auth -v`
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 5: Commit**
+- [ ] **步骤 5：提交**
 
 ```bash
 git add apps/core-api/src/inkforge_core/auth apps/core-api/tests/auth
-git commit -m "feat: migrate authentication to Core API"
+git commit -m "功能：把认证迁移到核心接口服务"
 ```
 
-### Task 7: Migrate projects, chapters, workspace aggregation and quality state
+### 任务 7：迁移项目、章节、工作区聚合和质量状态
 
-**Files:**
-- Create: `apps/core-api/src/inkforge_core/novels/router.py`
-- Create: `apps/core-api/src/inkforge_core/novels/schemas.py`
-- Create: `apps/core-api/src/inkforge_core/novels/service.py`
-- Create: `apps/core-api/src/inkforge_core/novels/repository.py`
-- Create: `apps/core-api/src/inkforge_core/chapters/router.py`
-- Create: `apps/core-api/src/inkforge_core/chapters/schemas.py`
-- Create: `apps/core-api/src/inkforge_core/chapters/service.py`
-- Create: `apps/core-api/src/inkforge_core/chapters/repository.py`
-- Create: `apps/core-api/src/inkforge_core/quality/router.py`
-- Create: `apps/core-api/src/inkforge_core/quality/schemas.py`
-- Create: `apps/core-api/src/inkforge_core/quality/service.py`
-- Create: `apps/core-api/src/inkforge_core/quality/repository.py`
-- Create: `apps/core-api/tests/novels/test_novel_api.py`
-- Create: `apps/core-api/tests/chapters/test_chapter_api.py`
-- Create: `apps/core-api/tests/quality/test_quality_state.py`
+**文件：**
+- 新建：`apps/core-api/src/inkforge_core/novels/router.py`
+- 新建：`apps/core-api/src/inkforge_core/novels/schemas.py`
+- 新建：`apps/core-api/src/inkforge_core/novels/service.py`
+- 新建：`apps/core-api/src/inkforge_core/novels/repository.py`
+- 新建：`apps/core-api/src/inkforge_core/chapters/router.py`
+- 新建：`apps/core-api/src/inkforge_core/chapters/schemas.py`
+- 新建：`apps/core-api/src/inkforge_core/chapters/service.py`
+- 新建：`apps/core-api/src/inkforge_core/chapters/repository.py`
+- 新建：`apps/core-api/src/inkforge_core/quality/router.py`
+- 新建：`apps/core-api/src/inkforge_core/quality/schemas.py`
+- 新建：`apps/core-api/src/inkforge_core/quality/service.py`
+- 新建：`apps/core-api/src/inkforge_core/quality/repository.py`
+- 新建：`apps/core-api/tests/novels/test_novel_api.py`
+- 新建：`apps/core-api/tests/chapters/test_chapter_api.py`
+- 新建：`apps/core-api/tests/quality/test_quality_state.py`
 
-- [ ] **Step 1: Write failing business-rule tests**
+- [ ] **步骤 1：编写失败的业务规则测试**
 
-Cover novel creation with first chapter, empty outline, plot progress and WritingBible profile; dashboard order; chapter numbering; title fallback; exact content saving; 1.2-second autosave remains a frontend rule; chapter status transitions; default consistency check; completion blocked until completed/skipped; and cross-user denial.
+覆盖创建小说时同时创建第一章、空大纲、剧情进度和 WritingBible 篇幅类型；仪表盘顺序；章节编号；标题回退；正文原样保存；1.2 秒自动保存仍由前端负责；章节状态切换；默认一致性检查；完成或跳过前阻止完成；以及跨用户拒绝。
 
-- [ ] **Step 2: Verify RED**
+- [ ] **步骤 2：确认失败**
 
-Run: `uv run pytest apps/core-api/tests/novels apps/core-api/tests/chapters apps/core-api/tests/quality -v`
+运行：`uv run pytest apps/core-api/tests/novels apps/core-api/tests/chapters apps/core-api/tests/quality -v`
 
-Expected: FAIL because routes are missing.
+预期：测试失败，因为路由尚不存在。
 
-- [ ] **Step 3: Implement transactional services and aggregate endpoints**
+- [ ] **步骤 3：实现事务服务和聚合接口**
 
-Implement `/api/v1/dashboard`, `/api/v1/novels`, `/api/v1/novels/{id}/workspace`, chapter create/update/status, chapter progress, quality status and quality run submission. Workspace response must contain every field currently loaded by `src/app/workspace/[novelId]/page.tsx` without silent list limits.
+实现 `/api/v1/dashboard`、`/api/v1/novels`、`/api/v1/novels/{id}/workspace`、章节创建、更新和状态接口、章节进度、质量状态和质量运行提交。工作区响应必须包含 `src/app/workspace/[novelId]/page.tsx` 当前加载的每个字段，不得静默限制列表数量。
 
-- [ ] **Step 4: Verify GREEN**
+- [ ] **步骤 4：确认通过**
 
-Run: `uv run pytest apps/core-api/tests/novels apps/core-api/tests/chapters apps/core-api/tests/quality -v`
+运行：`uv run pytest apps/core-api/tests/novels apps/core-api/tests/chapters apps/core-api/tests/quality -v`
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 5: Commit**
+- [ ] **步骤 5：提交**
 
 ```bash
 git add apps/core-api/src/inkforge_core/novels apps/core-api/src/inkforge_core/chapters apps/core-api/src/inkforge_core/quality apps/core-api/tests/novels apps/core-api/tests/chapters apps/core-api/tests/quality
-git commit -m "feat: migrate project and chapter domains"
+git commit -m "功能：迁移项目和章节领域"
 ```
 
-### Task 8: Migrate lore, outline, progress and reference domains
+### 任务 8：迁移设定、大纲、进度和参考资料领域
 
-**Files:**
-- Create: `apps/core-api/src/inkforge_core/lore/router.py`
-- Create: `apps/core-api/src/inkforge_core/lore/schemas.py`
-- Create: `apps/core-api/src/inkforge_core/lore/service.py`
-- Create: `apps/core-api/src/inkforge_core/lore/repository.py`
-- Create: `apps/core-api/src/inkforge_core/outlines/router.py`
-- Create: `apps/core-api/src/inkforge_core/outlines/schemas.py`
-- Create: `apps/core-api/src/inkforge_core/outlines/service.py`
-- Create: `apps/core-api/src/inkforge_core/outlines/repository.py`
-- Create: `apps/core-api/src/inkforge_core/outlines/validation.py`
-- Create: `apps/core-api/src/inkforge_core/references/router.py`
-- Create: `apps/core-api/src/inkforge_core/references/schemas.py`
-- Create: `apps/core-api/src/inkforge_core/references/service.py`
-- Create: `apps/core-api/src/inkforge_core/references/repository.py`
-- Create: `apps/core-api/src/inkforge_core/references/rag.py`
-- Create: `apps/core-api/tests/lore/test_lore_api.py`
-- Create: `apps/core-api/tests/outlines/test_outline_api.py`
-- Create: `apps/core-api/tests/references/test_reference_api.py`
-- Create: `apps/core-api/tests/references/test_rag.py`
+**文件：**
+- 新建：`apps/core-api/src/inkforge_core/lore/router.py`
+- 新建：`apps/core-api/src/inkforge_core/lore/schemas.py`
+- 新建：`apps/core-api/src/inkforge_core/lore/service.py`
+- 新建：`apps/core-api/src/inkforge_core/lore/repository.py`
+- 新建：`apps/core-api/src/inkforge_core/outlines/router.py`
+- 新建：`apps/core-api/src/inkforge_core/outlines/schemas.py`
+- 新建：`apps/core-api/src/inkforge_core/outlines/service.py`
+- 新建：`apps/core-api/src/inkforge_core/outlines/repository.py`
+- 新建：`apps/core-api/src/inkforge_core/outlines/validation.py`
+- 新建：`apps/core-api/src/inkforge_core/references/router.py`
+- 新建：`apps/core-api/src/inkforge_core/references/schemas.py`
+- 新建：`apps/core-api/src/inkforge_core/references/service.py`
+- 新建：`apps/core-api/src/inkforge_core/references/repository.py`
+- 新建：`apps/core-api/src/inkforge_core/references/rag.py`
+- 新建：`apps/core-api/tests/lore/test_lore_api.py`
+- 新建：`apps/core-api/tests/outlines/test_outline_api.py`
+- 新建：`apps/core-api/tests/references/test_reference_api.py`
+- 新建：`apps/core-api/tests/references/test_rag.py`
 
-- [ ] **Step 1: Write failing domain parity tests**
+- [ ] **步骤 1：编写失败的领域行为一致性测试**
 
-Cover every create/update/delete action for Character, CharacterExperience, CharacterRelation, Item, Location, Faction and Glossary; StoryBackground, WorldSetting, WritingBible, story/chapter progress; Outline text, three-level node hierarchy, child compatibility, chapter-range containment and sibling non-overlap; PlotProgress, Foreshadowing and ReferenceMaterial.
+覆盖 Character、CharacterExperience、CharacterRelation、Item、Location、Faction 和 Glossary 的每个创建、更新和删除操作；StoryBackground、WorldSetting、WritingBible、故事和章节进度；大纲文本、三层节点层级、子节点兼容性、章节范围包含和同级范围不重叠；以及 PlotProgress、Foreshadowing 和 ReferenceMaterial。
 
-- [ ] **Step 2: Add lossless RAG tests**
+- [ ] **步骤 2：添加无损检索增强生成测试**
 
-Port the current chunking tests and assert `"".join(chunks with separators removed)` retains all source characters. Test disabled embedding, successful vector insert, failed indexing status and novel-scoped cosine search.
+迁移当前分块测试，并断言“移除分隔符后连接所有分块”仍保留源文本的全部字符。测试禁用嵌入、向量插入成功、索引失败状态和小说范围内的余弦搜索。
 
-- [ ] **Step 3: Verify RED**
+- [ ] **步骤 3：确认失败**
 
-Run: `uv run pytest apps/core-api/tests/lore apps/core-api/tests/outlines apps/core-api/tests/references -v`
+运行：`uv run pytest apps/core-api/tests/lore apps/core-api/tests/outlines apps/core-api/tests/references -v`
 
-Expected: FAIL because domains do not exist.
+预期：测试失败，因为领域尚不存在。
 
-- [ ] **Step 4: Implement repositories and services**
+- [ ] **步骤 4：实现仓储和服务**
 
-Use resource-scoped update/delete statements and assert affected row count. Preserve exact enum values, all optional fields and current Chinese errors. RAG raw SQL binds every value and never interpolates vector/user input into SQL text.
+使用资源范围内的更新和删除语句，并断言受影响行数。保留精确枚举值、所有可选字段和当前中文错误。检索增强生成的原始 SQL 绑定每个值，绝不把向量或用户输入插入 SQL 文本。
 
-- [ ] **Step 5: Verify GREEN**
+- [ ] **步骤 5：确认通过**
 
-Run: `uv run pytest apps/core-api/tests/lore apps/core-api/tests/outlines apps/core-api/tests/references -v`
+运行：`uv run pytest apps/core-api/tests/lore apps/core-api/tests/outlines apps/core-api/tests/references -v`
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 6: Commit**
+- [ ] **步骤 6：提交**
 
 ```bash
 git add apps/core-api/src/inkforge_core/lore apps/core-api/src/inkforge_core/outlines apps/core-api/src/inkforge_core/references apps/core-api/tests/lore apps/core-api/tests/outlines apps/core-api/tests/references
-git commit -m "feat: migrate creative knowledge domains"
+git commit -m "功能：迁移创作知识领域"
 ```
 
-### Task 9: Migrate style files and portrait task state
+### 任务 9：迁移文风文件和画像任务状态
 
-**Files:**
-- Create: `apps/core-api/src/inkforge_core/styles/router.py`
-- Create: `apps/core-api/src/inkforge_core/styles/schemas.py`
-- Create: `apps/core-api/src/inkforge_core/styles/service.py`
-- Create: `apps/core-api/src/inkforge_core/styles/repository.py`
-- Create: `apps/core-api/src/inkforge_core/styles/storage.py`
-- Create: `apps/core-api/tests/styles/test_style_api.py`
-- Create: `apps/core-api/tests/styles/test_storage.py`
+**文件：**
+- 新建：`apps/core-api/src/inkforge_core/styles/router.py`
+- 新建：`apps/core-api/src/inkforge_core/styles/schemas.py`
+- 新建：`apps/core-api/src/inkforge_core/styles/service.py`
+- 新建：`apps/core-api/src/inkforge_core/styles/repository.py`
+- 新建：`apps/core-api/src/inkforge_core/styles/storage.py`
+- 新建：`apps/core-api/tests/styles/test_style_api.py`
+- 新建：`apps/core-api/tests/styles/test_storage.py`
 
-- [ ] **Step 1: Write failing storage and API tests**
+- [ ] **步骤 1：编写失败的存储和接口测试**
 
-Cover `.txt` only, non-empty content, 50 MB rejection, Unicode filename sanitization, traversal rejection, symlink escape rejection, character counting without whitespace, legacy Windows filepath resolution, file deletion, style cascade behavior, portrait task creation/status, section update and application to a novel.
+覆盖只允许 `.txt`、内容非空、拒绝超过 50 MB、Unicode 文件名净化、拒绝路径穿越、拒绝符号链接逃逸、不计空白的字符统计、旧 Windows 文件路径解析、文件删除、文风级联行为、画像任务创建和状态、分节更新以及应用到小说。
 
-- [ ] **Step 2: Verify RED**
+- [ ] **步骤 2：确认失败**
 
-Run: `uv run pytest apps/core-api/tests/styles -v`
+运行：`uv run pytest apps/core-api/tests/styles -v`
 
-Expected: FAIL.
+预期：失败。
 
-- [ ] **Step 3: Implement storage root and style services**
+- [ ] **步骤 3：实现存储根目录和文风服务**
 
-All writes resolve below `/data/uploads`. Store rollback-compatible `/app/uploads/styles/...` paths while resolving existing Windows paths by their `uploads/styles/` suffix. Portrait generation is submitted to Agent Service; Core alone updates task and style rows from signed callbacks.
+所有写入都解析到 `/data/uploads` 之下。保存兼容回滚的 `/app/uploads/styles/...` 路径，同时根据现有 Windows 路径的 `uploads/styles/` 后缀进行解析。画像生成提交到智能体服务；只有核心接口服务能根据签名回调更新任务和文风记录。
 
-- [ ] **Step 4: Verify GREEN**
+- [ ] **步骤 4：确认通过**
 
-Run: `uv run pytest apps/core-api/tests/styles -v`
+运行：`uv run pytest apps/core-api/tests/styles -v`
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 5: Commit**
+- [ ] **步骤 5：提交**
 
 ```bash
 git add apps/core-api/src/inkforge_core/styles apps/core-api/tests/styles
-git commit -m "feat: migrate writing style workflows"
+git commit -m "功能：迁移文风工作流"
 ```
 
-### Task 10: Migrate billing and idempotent model grants
+### 任务 10：迁移计费和幂等模型授权
 
-**Files:**
-- Create: `apps/core-api/src/inkforge_core/billing/router.py`
-- Create: `apps/core-api/src/inkforge_core/billing/schemas.py`
-- Create: `apps/core-api/src/inkforge_core/billing/service.py`
-- Create: `apps/core-api/src/inkforge_core/billing/repository.py`
-- Create: `apps/core-api/src/inkforge_core/billing/pricing.py`
-- Create: `apps/core-api/tests/billing/test_pricing.py`
-- Create: `apps/core-api/tests/billing/test_model_grants.py`
-- Create: `apps/core-api/tests/billing/test_usage_charge.py`
+**文件：**
+- 新建：`apps/core-api/src/inkforge_core/billing/router.py`
+- 新建：`apps/core-api/src/inkforge_core/billing/schemas.py`
+- 新建：`apps/core-api/src/inkforge_core/billing/service.py`
+- 新建：`apps/core-api/src/inkforge_core/billing/repository.py`
+- 新建：`apps/core-api/src/inkforge_core/billing/pricing.py`
+- 新建：`apps/core-api/tests/billing/test_pricing.py`
+- 新建：`apps/core-api/tests/billing/test_model_grants.py`
+- 新建：`apps/core-api/tests/billing/test_usage_charge.py`
 
-- [ ] **Step 1: Port failing pricing tests**
+- [ ] **步骤 1：迁移失败的定价测试**
 
-Preserve credit micros conversion, DeepSeek flash input/cached/output rates, prompt estimation, minimum output budget, insufficient balance errors and display formatting.
+保留积分微单位换算、DeepSeek flash 输入、缓存和输出费率、提示词估算、最小输出预算、余额不足错误和显示格式。
 
-- [ ] **Step 2: Add concurrency and retry tests**
+- [ ] **步骤 2：添加并发和重试测试**
 
-Two simultaneous usage callbacks with the same `requestId` must produce one debit, one `ai_charge` ledger row and one TokenUsage record. Use a PostgreSQL advisory transaction lock and existing `CreditLedger.requestId`, without a schema change.
+使用同一 `requestId` 的两个并发用量回调必须只产生一次扣款、一条 `ai_charge` 账本记录和一条 TokenUsage 记录。使用 PostgreSQL 事务级咨询锁和现有 `CreditLedger.requestId`，不得修改数据库结构。
 
-- [ ] **Step 3: Verify RED**
+- [ ] **步骤 3：确认失败**
 
-Run: `uv run pytest apps/core-api/tests/billing -v`
+运行：`uv run pytest apps/core-api/tests/billing -v`
 
-Expected: FAIL.
+预期：失败。
 
-- [ ] **Step 4: Implement grants, charges and summary endpoints**
+- [ ] **步骤 4：实现授权、扣费和汇总接口**
 
-Implement internal preflight/usage endpoints scoped to task/run tokens and public `/api/v1/billing/summary` and `/usage`. Fake provider grants carry `billable=false` and never write usage.
+实现受任务和运行令牌约束的内部预检与用量接口，以及公开的 `/api/v1/billing/summary` 和 `/usage`。模拟模型提供方授权携带 `billable=false`，并且绝不写入用量。
 
-- [ ] **Step 5: Verify GREEN**
+- [ ] **步骤 5：确认通过**
 
-Run: `uv run pytest apps/core-api/tests/billing -v`
+运行：`uv run pytest apps/core-api/tests/billing -v`
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 6: Commit**
+- [ ] **步骤 6：提交**
 
 ```bash
 git add apps/core-api/src/inkforge_core/billing apps/core-api/tests/billing
-git commit -m "feat: migrate idempotent AI billing"
+git commit -m "功能：迁移幂等人工智能计费"
 ```
 
-### Task 11: Migrate writing sessions, messages, tasks and ReviewArtifact
+### 任务 11：迁移写作会话、消息、任务和 ReviewArtifact
 
-**Files:**
-- Create: `apps/core-api/src/inkforge_core/writing/router.py`
-- Create: `apps/core-api/src/inkforge_core/writing/schemas.py`
-- Create: `apps/core-api/src/inkforge_core/writing/service.py`
-- Create: `apps/core-api/src/inkforge_core/writing/repository.py`
-- Create: `apps/core-api/src/inkforge_core/writing/sse.py`
-- Create: `apps/core-api/src/inkforge_core/writing/recovery.py`
-- Create: `apps/core-api/src/inkforge_core/writing/context.py`
-- Create: `apps/core-api/src/inkforge_core/writing/tool_gateway.py`
-- Create: `apps/core-api/src/inkforge_core/reviews/router.py`
-- Create: `apps/core-api/src/inkforge_core/reviews/schemas.py`
-- Create: `apps/core-api/src/inkforge_core/reviews/service.py`
-- Create: `apps/core-api/src/inkforge_core/reviews/repository.py`
-- Create: `apps/core-api/src/inkforge_core/reviews/apply.py`
-- Create: `apps/core-api/src/inkforge_core/reviews/diff.py`
-- Create: `apps/core-api/src/inkforge_core/reviews/updates.py`
-- Create: `apps/core-api/tests/writing/test_sessions.py`
-- Create: `apps/core-api/tests/writing/test_recovery.py`
-- Create: `apps/core-api/tests/writing/test_sse.py`
-- Create: `apps/core-api/tests/writing/test_context.py`
-- Create: `apps/core-api/tests/writing/test_tool_gateway.py`
-- Create: `apps/core-api/tests/reviews/test_artifact_lifecycle.py`
-- Create: `apps/core-api/tests/reviews/test_artifact_apply.py`
+**文件：**
+- 新建：`apps/core-api/src/inkforge_core/writing/router.py`
+- 新建：`apps/core-api/src/inkforge_core/writing/schemas.py`
+- 新建：`apps/core-api/src/inkforge_core/writing/service.py`
+- 新建：`apps/core-api/src/inkforge_core/writing/repository.py`
+- 新建：`apps/core-api/src/inkforge_core/writing/sse.py`
+- 新建：`apps/core-api/src/inkforge_core/writing/recovery.py`
+- 新建：`apps/core-api/src/inkforge_core/writing/context.py`
+- 新建：`apps/core-api/src/inkforge_core/writing/tool_gateway.py`
+- 新建：`apps/core-api/src/inkforge_core/reviews/router.py`
+- 新建：`apps/core-api/src/inkforge_core/reviews/schemas.py`
+- 新建：`apps/core-api/src/inkforge_core/reviews/service.py`
+- 新建：`apps/core-api/src/inkforge_core/reviews/repository.py`
+- 新建：`apps/core-api/src/inkforge_core/reviews/apply.py`
+- 新建：`apps/core-api/src/inkforge_core/reviews/diff.py`
+- 新建：`apps/core-api/src/inkforge_core/reviews/updates.py`
+- 新建：`apps/core-api/tests/writing/test_sessions.py`
+- 新建：`apps/core-api/tests/writing/test_recovery.py`
+- 新建：`apps/core-api/tests/writing/test_sse.py`
+- 新建：`apps/core-api/tests/writing/test_context.py`
+- 新建：`apps/core-api/tests/writing/test_tool_gateway.py`
+- 新建：`apps/core-api/tests/reviews/test_artifact_lifecycle.py`
+- 新建：`apps/core-api/tests/reviews/test_artifact_apply.py`
 
-- [ ] **Step 1: Write failing session and recovery tests**
+- [ ] **步骤 1：编写失败的会话和恢复测试**
 
-Port explicit session binding, currentTask/lastTask separation, message persistence, completed/error non-resume behavior, malformed snapshot rejection, runtime-only field exclusion and task ownership tests.
+迁移显式会话绑定、当前任务与最近任务分离、消息持久化、已完成或错误任务不可恢复、拒绝格式错误快照、排除仅运行时字段和任务归属测试。
 
-- [ ] **Step 2: Write failing ReviewArtifact tests**
+- [ ] **步骤 2：编写失败的 ReviewArtifact 测试**
 
-Port artifact kinds/statuses, revision uniqueness, evaluation pass/revise/block, patch safety, hard discard, partial agent_updates selection, chapter target resolution, beat-plan application and the prohibition on revision_brief formal writes.
+迁移草案种类和状态、修订唯一性、通过、修改或阻断评估、补丁安全、彻底丢弃、部分 `agent_updates` 选择、章节目标解析、章节节拍计划应用，以及禁止把 `revision_brief` 正式写库的规则。
 
-- [ ] **Step 3: Write failing SSE replay tests**
+- [ ] **步骤 3：编写失败的 SSE 重放测试**
 
-Events have monotonic IDs, heartbeat, typed payload and replay from `Last-Event-ID`. Duplicate callbacks are ignored; a sequence gap returns a recoverable stream error and triggers status reconciliation.
+事件具有单调递增标识、心跳、类型化载荷，并支持从 `Last-Event-ID` 开始重放。重复回调会被忽略；序号缺口返回可恢复的流错误并触发状态对账。
 
-- [ ] **Step 4: Write failing context and Tool Gateway tests**
+- [ ] **步骤 4：编写失败的上下文和工具网关测试**
 
-Port the current operation-scoped context aggregation, approved Beat Plan and unique chapter-group resolution. Test every read/control tool scope, full-result behavior, artifact-only draft visibility, task/novel binding and denial when an Agent attempts a capability it was not granted.
+迁移当前操作范围内的上下文聚合、已批准章节节拍计划和唯一章节组解析。测试每个只读和控制工具的权限范围、完整结果行为、仅草案可见性、任务与小说绑定，以及智能体尝试未经授权的能力时被拒绝。
 
-- [ ] **Step 5: Verify RED**
+- [ ] **步骤 5：确认失败**
 
-Run: `uv run pytest apps/core-api/tests/writing apps/core-api/tests/reviews -v`
+运行：`uv run pytest apps/core-api/tests/writing apps/core-api/tests/reviews -v`
 
-Expected: FAIL.
+预期：失败。
 
-- [ ] **Step 6: Implement Core-owned task, artifact, context, Tool Gateway and SSE services**
+- [ ] **步骤 6：实现核心接口服务拥有的任务、草案、上下文、工具网关和 SSE 服务**
 
-Create all public writing/session/artifact endpoints and internal Agent callback endpoints. Core validates service identity and task binding before accepting event, checkpoint, completion or failure. Stable snapshots write to existing `graphStateJson`; runtime callbacks and novel aggregate data never persist.
+创建全部公开写作、会话和草案接口，以及内部智能体回调接口。核心接口服务在接受事件、检查点、完成或失败回调前验证服务身份和任务绑定。稳定快照写入现有 `graphStateJson`；运行时回调和小说聚合数据绝不持久化。
 
-- [ ] **Step 7: Verify GREEN**
+- [ ] **步骤 7：确认通过**
 
-Run: `uv run pytest apps/core-api/tests/writing apps/core-api/tests/reviews -v`
+运行：`uv run pytest apps/core-api/tests/writing apps/core-api/tests/reviews -v`
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 8: Commit**
+- [ ] **步骤 8：提交**
 
 ```bash
 git add apps/core-api/src/inkforge_core/writing apps/core-api/src/inkforge_core/reviews apps/core-api/tests/writing apps/core-api/tests/reviews
-git commit -m "feat: migrate writing and artifact persistence"
+git commit -m "功能：迁移写作和草案持久化"
 ```
 
-### Task 12: Bootstrap Agent Service and explicit providers
+### 任务 12：搭建智能体服务和显式模型提供方
 
-**Files:**
-- Create: `apps/agent-service/src/inkforge_agents/config.py`
-- Create: `apps/agent-service/src/inkforge_agents/app.py`
-- Create: `apps/agent-service/src/inkforge_agents/providers/base.py`
-- Create: `apps/agent-service/src/inkforge_agents/providers/openai_compatible.py`
-- Create: `apps/agent-service/src/inkforge_agents/providers/fake.py`
-- Create: `apps/agent-service/src/inkforge_agents/runtime/model_runtime.py`
-- Create: `apps/agent-service/tests/test_health.py`
-- Create: `apps/agent-service/tests/providers/test_fake_provider.py`
-- Create: `apps/agent-service/tests/providers/test_provider_config.py`
+**文件：**
+- 新建：`apps/agent-service/src/inkforge_agents/config.py`
+- 新建：`apps/agent-service/src/inkforge_agents/app.py`
+- 新建：`apps/agent-service/src/inkforge_agents/providers/base.py`
+- 新建：`apps/agent-service/src/inkforge_agents/providers/openai_compatible.py`
+- 新建：`apps/agent-service/src/inkforge_agents/providers/fake.py`
+- 新建：`apps/agent-service/src/inkforge_agents/runtime/model_runtime.py`
+- 新建：`apps/agent-service/tests/test_health.py`
+- 新建：`apps/agent-service/tests/providers/test_fake_provider.py`
+- 新建：`apps/agent-service/tests/providers/test_provider_config.py`
 
-- [ ] **Step 1: Write failing provider tests**
+- [ ] **步骤 1：编写失败的模型提供方测试**
 
-Test that missing real credentials select fake provider only when `MODEL_PROVIDER=fake`; production `openai_compatible` without key fails readiness. Fake provider returns deterministic text/tool calls/usage and never opens a network connection.
+测试缺少真实凭据时，只有 `MODEL_PROVIDER=fake` 才选择模拟模型提供方；生产环境的 `openai_compatible` 缺少密钥时就绪检查失败。模拟模型提供方返回确定性的文本、工具调用和用量，并且绝不建立网络连接。
 
-- [ ] **Step 2: Verify RED**
+- [ ] **步骤 2：确认失败**
 
-Run: `uv run pytest apps/agent-service/tests/test_health.py apps/agent-service/tests/providers -v`
+运行：`uv run pytest apps/agent-service/tests/test_health.py apps/agent-service/tests/providers -v`
 
-Expected: FAIL.
+预期：失败。
 
-- [ ] **Step 3: Implement app and providers**
+- [ ] **步骤 3：实现应用和模型提供方**
 
-Provider selection is explicit, dependency-injected and testable. Model Runtime performs one supplier turn only; it does not interpret business control tools. Agent Service exposes live/ready and signed internal run endpoints only.
+模型提供方选择必须显式、通过依赖注入且可测试。模型运行时只执行一个供应商轮次，不解释业务控制工具。智能体服务只暴露存活、就绪和签名内部运行接口。
 
-- [ ] **Step 4: Verify GREEN**
+- [ ] **步骤 4：确认通过**
 
-Run: `uv run pytest apps/agent-service/tests/test_health.py apps/agent-service/tests/providers -v`
+运行：`uv run pytest apps/agent-service/tests/test_health.py apps/agent-service/tests/providers -v`
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 5: Commit**
+- [ ] **步骤 5：提交**
 
 ```bash
 git add apps/agent-service/src apps/agent-service/tests
-git commit -m "feat: bootstrap Agent Service runtime"
+git commit -m "功能：搭建智能体服务运行时"
 ```
 
-### Task 13: Port Agent definitions, prompts, capabilities and tool runtime
+### 任务 13：迁移智能体定义、提示词、能力和工具运行时
 
-**Files:**
-- Create: `apps/agent-service/src/inkforge_agents/definitions/agents.py`
-- Create: `apps/agent-service/src/inkforge_agents/definitions/capabilities.py`
-- Create: `apps/agent-service/src/inkforge_agents/prompts/lore.py`
-- Create: `apps/agent-service/src/inkforge_agents/prompts/plot.py`
-- Create: `apps/agent-service/src/inkforge_agents/prompts/author.py`
-- Create: `apps/agent-service/src/inkforge_agents/prompts/validator.py`
-- Create: `apps/agent-service/src/inkforge_agents/prompts/editor.py`
-- Create: `apps/agent-service/src/inkforge_agents/runtime/agent_runtime.py`
-- Create: `apps/agent-service/src/inkforge_agents/runtime/agent_runner.py`
-- Create: `apps/agent-service/src/inkforge_agents/runtime/turn_result.py`
-- Create: `apps/agent-service/src/inkforge_agents/tools/registry.py`
-- Create: `apps/agent-service/src/inkforge_agents/tools/permissions.py`
-- Create: `apps/agent-service/src/inkforge_agents/tools/read.py`
-- Create: `apps/agent-service/src/inkforge_agents/tools/control.py`
-- Create: `apps/agent-service/src/inkforge_agents/tools/proposals.py`
-- Create: `apps/agent-service/tests/runtime/test_agent_runtime.py`
-- Create: `apps/agent-service/tests/runtime/test_agent_runner.py`
-- Create: `apps/agent-service/tests/runtime/test_visible_content.py`
-- Create: `apps/agent-service/tests/tools/test_registry.py`
-- Create: `apps/agent-service/tests/tools/test_permissions.py`
-- Create: `apps/agent-service/tests/tools/test_arguments.py`
-- Create: `apps/agent-service/tests/golden/prompts/lore.txt`
-- Create: `apps/agent-service/tests/golden/prompts/plot.txt`
-- Create: `apps/agent-service/tests/golden/prompts/author.txt`
-- Create: `apps/agent-service/tests/golden/prompts/validator.txt`
-- Create: `apps/agent-service/tests/golden/prompts/editor.txt`
+**文件：**
+- 新建：`apps/agent-service/src/inkforge_agents/definitions/agents.py`
+- 新建：`apps/agent-service/src/inkforge_agents/definitions/capabilities.py`
+- 新建：`apps/agent-service/src/inkforge_agents/prompts/lore.py`
+- 新建：`apps/agent-service/src/inkforge_agents/prompts/plot.py`
+- 新建：`apps/agent-service/src/inkforge_agents/prompts/author.py`
+- 新建：`apps/agent-service/src/inkforge_agents/prompts/validator.py`
+- 新建：`apps/agent-service/src/inkforge_agents/prompts/editor.py`
+- 新建：`apps/agent-service/src/inkforge_agents/runtime/agent_runtime.py`
+- 新建：`apps/agent-service/src/inkforge_agents/runtime/agent_runner.py`
+- 新建：`apps/agent-service/src/inkforge_agents/runtime/turn_result.py`
+- 新建：`apps/agent-service/src/inkforge_agents/tools/registry.py`
+- 新建：`apps/agent-service/src/inkforge_agents/tools/permissions.py`
+- 新建：`apps/agent-service/src/inkforge_agents/tools/read.py`
+- 新建：`apps/agent-service/src/inkforge_agents/tools/control.py`
+- 新建：`apps/agent-service/src/inkforge_agents/tools/proposals.py`
+- 新建：`apps/agent-service/tests/runtime/test_agent_runtime.py`
+- 新建：`apps/agent-service/tests/runtime/test_agent_runner.py`
+- 新建：`apps/agent-service/tests/runtime/test_visible_content.py`
+- 新建：`apps/agent-service/tests/tools/test_registry.py`
+- 新建：`apps/agent-service/tests/tools/test_permissions.py`
+- 新建：`apps/agent-service/tests/tools/test_arguments.py`
+- 新建：`apps/agent-service/tests/golden/prompts/lore.txt`
+- 新建：`apps/agent-service/tests/golden/prompts/plot.txt`
+- 新建：`apps/agent-service/tests/golden/prompts/author.txt`
+- 新建：`apps/agent-service/tests/golden/prompts/validator.txt`
+- 新建：`apps/agent-service/tests/golden/prompts/editor.txt`
 
-- [ ] **Step 1: Create failing golden and permission tests**
+- [ ] **步骤 1：创建失败的基准文本和权限测试**
 
-Port five Agent IDs, names, system prompt invariants, `paragraph_text_with_control_tools`, capability cards and current tool exposure matrix. Assert non-authorized agents never receive or execute a control tool.
+迁移五个智能体标识、名称、系统提示词不变量、`paragraph_text_with_control_tools`、能力卡片和当前工具暴露矩阵。断言未获授权的智能体绝不会收到或执行控制工具。
 
-- [ ] **Step 2: Create failing multi-turn runtime tests**
+- [ ] **步骤 2：创建失败的多轮运行时测试**
 
-Port visible text accumulation, read-tool parallelism, control-tool ordering, invalid arguments, unexposed tool rejection, maximum turn count, supplier failure, no silent truncation and structured control event capture.
+迁移可见文本累积、只读工具并行、控制工具排序、无效参数、拒绝未暴露工具、最大轮次数、供应商失败、禁止静默截断和结构化控制事件捕获。
 
-- [ ] **Step 3: Verify RED**
+- [ ] **步骤 3：确认失败**
 
-Run: `uv run pytest apps/agent-service/tests/runtime apps/agent-service/tests/tools -v`
+运行：`uv run pytest apps/agent-service/tests/runtime apps/agent-service/tests/tools -v`
 
-Expected: FAIL.
+预期：失败。
 
-- [ ] **Step 4: Implement declarative definitions and the unique tool loop**
+- [ ] **步骤 4：实现声明式定义和唯一工具循环**
 
-Agent Runtime is the only multi-turn loop. Model Runtime remains supplier-only. Read tools call Core Tool Gateway with the run capability. Control/proposal tools produce typed events and never write data directly.
+智能体运行时是唯一多轮循环。模型运行时仍只负责供应商调用。只读工具携带运行权限调用核心工具网关。控制工具和提案工具生成类型化事件，绝不直接写数据。
 
-- [ ] **Step 5: Verify GREEN**
+- [ ] **步骤 5：确认通过**
 
-Run: `uv run pytest apps/agent-service/tests/runtime apps/agent-service/tests/tools -v`
+运行：`uv run pytest apps/agent-service/tests/runtime apps/agent-service/tests/tools -v`
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 6: Commit**
+- [ ] **步骤 6：提交**
 
 ```bash
 git add apps/agent-service/src/inkforge_agents/definitions apps/agent-service/src/inkforge_agents/prompts apps/agent-service/src/inkforge_agents/runtime apps/agent-service/src/inkforge_agents/tools apps/agent-service/tests/runtime apps/agent-service/tests/tools apps/agent-service/tests/golden
-git commit -m "feat: port Agent runtime and tools"
+git commit -m "功能：迁移智能体运行时和工具"
 ```
 
-### Task 14: Port CreativeOperation and LangGraph workflow
+### 任务 14：迁移 CreativeOperation 和 LangGraph 工作流
 
-**Files:**
-- Create: `apps/agent-service/src/inkforge_agents/operations/contracts.py`
-- Create: `apps/agent-service/src/inkforge_agents/operations/definitions.py`
-- Create: `apps/agent-service/src/inkforge_agents/operations/router.py`
-- Create: `apps/agent-service/src/inkforge_agents/operations/graph.py`
-- Create: `apps/agent-service/src/inkforge_agents/graph/state.py`
-- Create: `apps/agent-service/src/inkforge_agents/graph/parent_graph.py`
-- Create: `apps/agent-service/src/inkforge_agents/graph/snapshots.py`
-- Create: `apps/agent-service/src/inkforge_agents/graph/context.py`
-- Create: `apps/agent-service/src/inkforge_agents/artifacts/updates.py`
-- Create: `apps/agent-service/src/inkforge_agents/artifacts/diff.py`
-- Create: `apps/agent-service/src/inkforge_agents/artifacts/patch.py`
-- Create: `apps/agent-service/src/inkforge_agents/studio.py`
-- Modify: `langgraph.json`
-- Create: `apps/agent-service/tests/operations/test_definitions.py`
-- Create: `apps/agent-service/tests/operations/test_router.py`
-- Create: `apps/agent-service/tests/operations/test_review_routing.py`
-- Create: `apps/agent-service/tests/graph/test_parent_graph.py`
-- Create: `apps/agent-service/tests/graph/test_operation_graph.py`
-- Create: `apps/agent-service/tests/graph/test_snapshots.py`
-- Create: `apps/agent-service/tests/graph/test_context.py`
+**文件：**
+- 新建：`apps/agent-service/src/inkforge_agents/operations/contracts.py`
+- 新建：`apps/agent-service/src/inkforge_agents/operations/definitions.py`
+- 新建：`apps/agent-service/src/inkforge_agents/operations/router.py`
+- 新建：`apps/agent-service/src/inkforge_agents/operations/graph.py`
+- 新建：`apps/agent-service/src/inkforge_agents/graph/state.py`
+- 新建：`apps/agent-service/src/inkforge_agents/graph/parent_graph.py`
+- 新建：`apps/agent-service/src/inkforge_agents/graph/snapshots.py`
+- 新建：`apps/agent-service/src/inkforge_agents/graph/context.py`
+- 新建：`apps/agent-service/src/inkforge_agents/artifacts/updates.py`
+- 新建：`apps/agent-service/src/inkforge_agents/artifacts/diff.py`
+- 新建：`apps/agent-service/src/inkforge_agents/artifacts/patch.py`
+- 新建：`apps/agent-service/src/inkforge_agents/studio.py`
+- 修改：`langgraph.json`
+- 新建：`apps/agent-service/tests/operations/test_definitions.py`
+- 新建：`apps/agent-service/tests/operations/test_router.py`
+- 新建：`apps/agent-service/tests/operations/test_review_routing.py`
+- 新建：`apps/agent-service/tests/graph/test_parent_graph.py`
+- 新建：`apps/agent-service/tests/graph/test_operation_graph.py`
+- 新建：`apps/agent-service/tests/graph/test_snapshots.py`
+- 新建：`apps/agent-service/tests/graph/test_context.py`
 
-- [ ] **Step 1: Write failing operation-definition and routing tests**
+- [ ] **步骤 1：编写失败的操作定义和路由测试**
 
-Port all CreativeOperation kinds, legacy `@Agent` mapping, primary Agent, reviewers, artifact strategy, chapter target resolution and low-confidence fallback.
+迁移全部 CreativeOperation 种类、旧 `@Agent` 映射、主责智能体、复审智能体、草案策略、章节目标解析和低置信度回退。
 
-- [ ] **Step 2: Write failing graph tests**
+- [ ] **步骤 2：编写失败的图测试**
 
-Cover prepare, execute, direct response, artifact submission, reviewer fan-out, deterministic verdict precedence, patch/rewrite, maximum revision count, interrupt payload, resume, user approve/revise/discard and next-action completion.
+覆盖准备、执行、直接响应、草案提交、复审智能体扇出、确定性结论优先级、补丁或重写、最大修订次数、中断载荷、恢复、用户批准、修改或丢弃，以及下一步动作完成。
 
-- [ ] **Step 3: Write failing snapshot tests**
+- [ ] **步骤 3：编写失败的快照测试**
 
-Snapshot schema must preserve current recoverable fields and reject runtime-only data. Serialize with a version envelope that the rollback adapter can translate to the existing TypeScript shape.
+快照结构必须保留当前可恢复字段，并拒绝仅运行时数据。使用版本信封进行序列化，使回滚适配器可以转换为现有 TypeScript 形状。
 
-- [ ] **Step 4: Verify RED**
+- [ ] **步骤 4：确认失败**
 
-Run: `uv run pytest apps/agent-service/tests/operations apps/agent-service/tests/graph -v`
+运行：`uv run pytest apps/agent-service/tests/operations apps/agent-service/tests/graph -v`
 
-Expected: FAIL.
+预期：失败。
 
-- [ ] **Step 5: Implement LangGraph Python state and graphs**
+- [ ] **步骤 5：实现 LangGraph Python 状态和图**
 
-Use StateGraph, conditional edges, Send for reviewers, Command/resume and interrupt. Do not implement a parallel while/switch workflow engine. All persistence and tool effects go through signed Core clients.
+使用 StateGraph、条件边、面向复审智能体的 Send、Command 恢复和中断。不得实现平行的 while 或 switch 工作流引擎。所有持久化和工具副作用都通过签名的核心接口服务客户端完成。
 
-- [ ] **Step 6: Verify GREEN**
+- [ ] **步骤 6：确认通过**
 
-Run: `uv run pytest apps/agent-service/tests/operations apps/agent-service/tests/graph -v`
+运行：`uv run pytest apps/agent-service/tests/operations apps/agent-service/tests/graph -v`
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 7: Commit**
+- [ ] **步骤 7：提交**
 
 ```bash
 git add apps/agent-service/src/inkforge_agents/operations apps/agent-service/src/inkforge_agents/graph apps/agent-service/src/inkforge_agents/artifacts apps/agent-service/src/inkforge_agents/studio.py apps/agent-service/tests/operations apps/agent-service/tests/graph langgraph.json
-git commit -m "feat: port LangGraph writing workflow"
+git commit -m "功能：迁移 LangGraph 写作工作流"
 ```
 
-### Task 15: Implement the recoverable run queue and Core-Agent integration
+### 任务 15：实现可恢复运行队列和核心服务与智能体服务集成
 
-**Files:**
-- Create: `apps/agent-service/src/inkforge_agents/queue/consumer.py`
-- Create: `apps/agent-service/src/inkforge_agents/queue/repository.py`
-- Create: `apps/agent-service/src/inkforge_agents/queue/recovery.py`
-- Create: `apps/agent-service/src/inkforge_agents/clients/core.py`
-- Create: `apps/agent-service/src/inkforge_agents/jobs/portrait.py`
-- Create: `apps/agent-service/src/inkforge_agents/jobs/rag.py`
-- Create: `apps/agent-service/src/inkforge_agents/jobs/quality.py`
-- Create: `apps/agent-service/src/inkforge_agents/observability/workflow_log.py`
-- Create: `apps/agent-service/src/inkforge_agents/debug/router.py`
-- Create: `apps/core-api/src/inkforge_core/agent_client.py`
-- Create: `apps/core-api/src/inkforge_core/writing/reconciler.py`
-- Create: `apps/core-api/src/inkforge_core/operations/debug_proxy.py`
-- Create: `apps/agent-service/tests/queue/test_consumer.py`
-- Create: `apps/agent-service/tests/integration/test_core_callbacks.py`
-- Create: `apps/agent-service/tests/jobs/test_portrait.py`
-- Create: `apps/agent-service/tests/jobs/test_rag.py`
-- Create: `apps/agent-service/tests/jobs/test_quality.py`
-- Create: `apps/agent-service/tests/observability/test_workflow_log.py`
-- Create: `apps/core-api/tests/operations/test_debug_proxy.py`
-- Create: `apps/core-api/tests/writing/test_reconciler.py`
+**文件：**
+- 新建：`apps/agent-service/src/inkforge_agents/queue/consumer.py`
+- 新建：`apps/agent-service/src/inkforge_agents/queue/repository.py`
+- 新建：`apps/agent-service/src/inkforge_agents/queue/recovery.py`
+- 新建：`apps/agent-service/src/inkforge_agents/clients/core.py`
+- 新建：`apps/agent-service/src/inkforge_agents/jobs/portrait.py`
+- 新建：`apps/agent-service/src/inkforge_agents/jobs/rag.py`
+- 新建：`apps/agent-service/src/inkforge_agents/jobs/quality.py`
+- 新建：`apps/agent-service/src/inkforge_agents/observability/workflow_log.py`
+- 新建：`apps/agent-service/src/inkforge_agents/debug/router.py`
+- 新建：`apps/core-api/src/inkforge_core/agent_client.py`
+- 新建：`apps/core-api/src/inkforge_core/writing/reconciler.py`
+- 新建：`apps/core-api/src/inkforge_core/operations/debug_proxy.py`
+- 新建：`apps/agent-service/tests/queue/test_consumer.py`
+- 新建：`apps/agent-service/tests/integration/test_core_callbacks.py`
+- 新建：`apps/agent-service/tests/jobs/test_portrait.py`
+- 新建：`apps/agent-service/tests/jobs/test_rag.py`
+- 新建：`apps/agent-service/tests/jobs/test_quality.py`
+- 新建：`apps/agent-service/tests/observability/test_workflow_log.py`
+- 新建：`apps/core-api/tests/operations/test_debug_proxy.py`
+- 新建：`apps/core-api/tests/writing/test_reconciler.py`
 
-- [ ] **Step 1: Write failing queue and crash tests**
+- [ ] **步骤 1：编写失败的队列和崩溃测试**
 
-Cover priority ordering, single concurrency, visibility timeout, explicit ack, graceful shutdown, duplicate run idempotency, Redis message loss, Agent restart, Core re-submit and stale task cancellation.
+覆盖优先级排序、单并发、可见性超时、显式确认、优雅关闭、重复运行幂等、Redis 消息丢失、智能体服务重启、核心接口服务重新提交和过期任务取消。
 
-- [ ] **Step 2: Write failing signed integration tests**
+- [ ] **步骤 2：编写失败的签名集成测试**
 
-Run request, context/tool read, event batches, checkpoint, complete, fail and billing callbacks must succeed with correct claims and fail with wrong task/novel/run/audience/scope.
+运行请求、上下文和工具读取、事件批次、检查点、完成、失败和计费回调必须在声明正确时成功，并在任务、小说、运行、受众或权限范围错误时失败。
 
-- [ ] **Step 3: Write failing non-writing job and log tests**
+- [ ] **步骤 3：编写失败的非写作任务和日志测试**
 
-Port portrait generation, portrait section regeneration, RAG embedding and quality-check jobs through the same single-concurrency queue. Port the human workflow log contract (`REQUEST`/`RESPONSE` plus Chinese state transitions) and verify Core can query it only after browser authorization and signed Agent debug access.
+通过同一个单并发队列迁移画像生成、画像分节重新生成、检索增强生成嵌入和质量检查任务。迁移人工工作流日志契约，即请求、响应和中文状态切换，并验证核心接口服务只有在浏览器授权和签名智能体调试访问后才能查询日志。
 
-- [ ] **Step 4: Verify RED**
+- [ ] **步骤 4：确认失败**
 
-Run: `uv run pytest apps/agent-service/tests/queue apps/agent-service/tests/integration apps/agent-service/tests/jobs apps/agent-service/tests/observability apps/core-api/tests/writing/test_reconciler.py apps/core-api/tests/operations/test_debug_proxy.py -v`
+运行：`uv run pytest apps/agent-service/tests/queue apps/agent-service/tests/integration apps/agent-service/tests/jobs apps/agent-service/tests/observability apps/core-api/tests/writing/test_reconciler.py apps/core-api/tests/operations/test_debug_proxy.py -v`
 
-Expected: FAIL.
+预期：失败。
 
-- [ ] **Step 5: Implement Redis queue, job handlers, debug proxy and reconciliation**
+- [ ] **步骤 5：实现 Redis 队列、任务处理器、调试代理和对账**
 
-Redis is a delivery optimization. Core periodically scans existing non-terminal WritingTask rows and re-submits missing runs with the same deterministic idempotency key. Agent verifies Core state before every recovered execution.
+Redis 只是投递优化。核心接口服务定期扫描现有非终态 WritingTask 记录，并使用相同的确定性幂等键重新提交缺失运行。智能体服务在每次恢复执行前验证核心接口服务状态。
 
-- [ ] **Step 6: Verify GREEN**
+- [ ] **步骤 6：确认通过**
 
-Run: `uv run pytest apps/agent-service/tests/queue apps/agent-service/tests/integration apps/agent-service/tests/jobs apps/agent-service/tests/observability apps/core-api/tests/writing/test_reconciler.py apps/core-api/tests/operations/test_debug_proxy.py -v`
+运行：`uv run pytest apps/agent-service/tests/queue apps/agent-service/tests/integration apps/agent-service/tests/jobs apps/agent-service/tests/observability apps/core-api/tests/writing/test_reconciler.py apps/core-api/tests/operations/test_debug_proxy.py -v`
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 7: Commit**
+- [ ] **步骤 7：提交**
 
 ```bash
 git add apps/agent-service/src/inkforge_agents/queue apps/agent-service/src/inkforge_agents/clients apps/agent-service/src/inkforge_agents/jobs apps/agent-service/src/inkforge_agents/observability apps/agent-service/src/inkforge_agents/debug apps/agent-service/tests/queue apps/agent-service/tests/integration apps/agent-service/tests/jobs apps/agent-service/tests/observability apps/core-api/src/inkforge_core/agent_client.py apps/core-api/src/inkforge_core/writing/reconciler.py apps/core-api/src/inkforge_core/operations/debug_proxy.py apps/core-api/tests/writing/test_reconciler.py apps/core-api/tests/operations/test_debug_proxy.py
-git commit -m "feat: integrate recoverable Agent runs"
+git commit -m "功能：集成可恢复智能体运行"
 ```
 
-### Task 16: Generate the TypeScript API client and move Next into apps/web
+### 任务 16：生成 TypeScript 接口客户端并把 Next.js 移入 apps/web
 
-**Files:**
-- Create: `packages/api-client/package.json`
-- Create: `packages/api-client/src/generated/**`
-- Create: `packages/api-client/src/sse.ts`
-- Create: `scripts/export_openapi.py`
-- Create: `scripts/generate_api_client.mjs`
-- Move: current Next config, `src`, `public`, TypeScript config and CSS into `apps/web/**`
-- Modify: root `package.json`
-- Modify: `package-lock.json`
-- Create: `apps/web/src/lib/api/server.ts`
-- Create: `apps/web/src/lib/api/browser.ts`
-- Create: `apps/web/src/lib/api/__tests__/sse.test.ts`
+**文件：**
+- 新建：`packages/api-client/package.json`
+- 新建：`packages/api-client/src/generated/**`
+- 新建：`packages/api-client/src/sse.ts`
+- 新建：`scripts/export_openapi.py`
+- 新建：`scripts/generate_api_client.mjs`
+- 移动：把当前 Next.js 配置、`src`、`public`、TypeScript 配置和 CSS 移入 `apps/web/**`
+- 修改：根目录 `package.json`
+- 修改：`package-lock.json`
+- 新建：`apps/web/src/lib/api/server.ts`
+- 新建：`apps/web/src/lib/api/browser.ts`
+- 新建：`apps/web/src/lib/api/__tests__/sse.test.ts`
 
-- [ ] **Step 1: Write failing generation-drift and SSE tests**
+- [ ] **步骤 1：编写失败的生成漂移和 SSE 测试**
 
-The generation check exports Core OpenAPI, regenerates client files and fails when `git diff --exit-code packages/api-client/src/generated` is non-empty. SSE test covers typed event parsing, Last-Event-ID, heartbeat, duplicate sequence and reconnect.
+生成检查导出核心接口服务的 OpenAPI，重新生成客户端文件，并在 `git diff --exit-code packages/api-client/src/generated` 非空时失败。SSE 测试覆盖类型化事件解析、`Last-Event-ID`、心跳、重复序号和重新连接。
 
-- [ ] **Step 2: Verify RED**
+- [ ] **步骤 2：确认失败**
 
-Run: `npm run api:check`
+运行：`npm run api:check`
 
-Expected: FAIL because the client does not exist.
+预期：失败，因为客户端尚不存在。
 
-- [ ] **Step 3: Add npm workspaces and generated client**
+- [ ] **步骤 3：添加 npm 工作区和生成客户端**
 
-Root scripts must include `dev`, `build`, `lint`, `typecheck`, `api:generate`, `api:check`, `test:web` and `test:python`. Server fetch forwards only the session Cookie and request ID to Core; browser fetch uses same-origin credentials.
+根脚本必须包含 `dev`、`build`、`lint`、`typecheck`、`api:generate`、`api:check`、`test:web` 和 `test:python`。服务端请求只把会话 Cookie 和请求标识转发给核心接口服务；浏览器请求使用同源凭据。
 
-- [ ] **Step 4: Move the Next application mechanically**
+- [ ] **步骤 4：机械移动 Next.js 应用**
 
-Use `git mv` so history remains traceable. Update aliases and Next output paths. Do not change UI behavior in the move commit.
+使用 `git mv`，使历史仍可追溯。更新别名和 Next.js 输出路径。移动提交不得改变界面行为。
 
-- [ ] **Step 5: Verify the moved UI baseline**
+- [ ] **步骤 5：验证移动后的界面基线**
 
-Run: `npm ci`
+运行：`npm ci`
 
-Run: `npm run typecheck`
+运行：`npm run typecheck`
 
-Expected: PASS.
+预期：通过。
 
-Run: `npm run build`
+运行：`npm run build`
 
-Expected: PASS without `DATABASE_URL`, model keys or Redis variables.
+预期：在没有 `DATABASE_URL`、模型密钥或 Redis 变量时仍通过。
 
-- [ ] **Step 6: Commit**
+- [ ] **步骤 6：提交**
 
 ```bash
 git add package.json package-lock.json apps/web packages/api-client scripts/export_openapi.py scripts/generate_api_client.mjs
-git commit -m "refactor: move Next app and generate API client"
+git commit -m "重构：移动 Next.js 应用并生成接口客户端"
 ```
 
-### Task 17: Replace every Server Action, Route Handler and server-side Prisma query
+### 任务 17：替换全部服务器操作、路由处理器和服务端 Prisma 查询
 
-**Files:**
-- Modify: `apps/web/src/app/page.tsx`
-- Modify: `apps/web/src/app/dashboard/page.tsx`
-- Modify: `apps/web/src/app/workspace/[novelId]/page.tsx`
-- Modify: `apps/web/src/app/styles/page.tsx`
-- Modify: `apps/web/src/app/billing/page.tsx`
-- Modify: `apps/web/src/app/login/page.tsx`
-- Modify: `apps/web/src/app/layout.tsx`
-- Modify: `apps/web/src/features/auth/login-form.tsx`
-- Modify: `apps/web/src/features/auth/user-menu.tsx`
-- Modify: `apps/web/src/features/projects/create-novel-modal.tsx`
-- Modify: `apps/web/src/features/projects/novel-list-client.tsx`
-- Modify: `apps/web/src/features/chapters/chapter-list.tsx`
-- Modify: `apps/web/src/features/editor/chapter-editor.tsx`
-- Modify: `apps/web/src/features/lore/lore-panel.tsx`
-- Modify: `apps/web/src/features/outline/outline-panel.tsx`
-- Modify: `apps/web/src/features/progress/progress-panel.tsx`
-- Modify: `apps/web/src/features/references/reference-panel.tsx`
-- Modify: `apps/web/src/features/styles/style-library-panel.tsx`
-- Modify: `apps/web/src/features/styles/style-panel.tsx`
-- Modify: `apps/web/src/features/workspace/inspector-tabs.tsx`
-- Modify: `apps/web/src/features/workspace/sidebar-tabs.tsx`
-- Modify: `apps/web/src/features/writing/writing-conversation.tsx`
-- Modify: `apps/web/src/features/debug/workflow-events-inspector.tsx`
-- Modify: `apps/web/src/middleware.ts` or `apps/web/src/proxy.ts`
-- Delete: migrated `apps/web/src/app/actions.ts`
-- Delete: migrated business `apps/web/src/app/api/**`
-- Delete: `apps/web/src/shared/db/**`
-- Create: `apps/web/src/lib/api/__tests__/action-mapping.test.ts`
-- Create: `tests/architecture/legacy-backend-map.json`
+**文件：**
+- 修改：`apps/web/src/app/page.tsx`
+- 修改：`apps/web/src/app/dashboard/page.tsx`
+- 修改：`apps/web/src/app/workspace/[novelId]/page.tsx`
+- 修改：`apps/web/src/app/styles/page.tsx`
+- 修改：`apps/web/src/app/billing/page.tsx`
+- 修改：`apps/web/src/app/login/page.tsx`
+- 修改：`apps/web/src/app/layout.tsx`
+- 修改：`apps/web/src/features/auth/login-form.tsx`
+- 修改：`apps/web/src/features/auth/user-menu.tsx`
+- 修改：`apps/web/src/features/projects/create-novel-modal.tsx`
+- 修改：`apps/web/src/features/projects/novel-list-client.tsx`
+- 修改：`apps/web/src/features/chapters/chapter-list.tsx`
+- 修改：`apps/web/src/features/editor/chapter-editor.tsx`
+- 修改：`apps/web/src/features/lore/lore-panel.tsx`
+- 修改：`apps/web/src/features/outline/outline-panel.tsx`
+- 修改：`apps/web/src/features/progress/progress-panel.tsx`
+- 修改：`apps/web/src/features/references/reference-panel.tsx`
+- 修改：`apps/web/src/features/styles/style-library-panel.tsx`
+- 修改：`apps/web/src/features/styles/style-panel.tsx`
+- 修改：`apps/web/src/features/workspace/inspector-tabs.tsx`
+- 修改：`apps/web/src/features/workspace/sidebar-tabs.tsx`
+- 修改：`apps/web/src/features/writing/writing-conversation.tsx`
+- 修改：`apps/web/src/features/debug/workflow-events-inspector.tsx`
+- 修改：`apps/web/src/middleware.ts` 或 `apps/web/src/proxy.ts`
+- 删除：已迁移的 `apps/web/src/app/actions.ts`
+- 删除：已迁移的业务 `apps/web/src/app/api/**`
+- 删除：`apps/web/src/shared/db/**`
+- 新建：`apps/web/src/lib/api/__tests__/action-mapping.test.ts`
+- 新建：`tests/architecture/legacy-backend-map.json`
 
-- [ ] **Step 1: Create the exhaustive failing action map**
+- [ ] **步骤 1：创建完整且失败的操作映射**
 
-List all 50 exported actions and all current API methods with exactly one replacement HTTP method/path and frontend caller. The test parses the legacy inventory and fails if an entry is missing or duplicated.
+列出全部 50 个导出操作和所有当前接口方法，每项都精确对应一个替代 HTTP 方法、路径和前端调用方。测试解析旧清单，并在条目缺失或重复时失败。
 
-- [ ] **Step 2: Replace page reads**
+- [ ] **步骤 2：替换页面读取**
 
-Dashboard, workspace, styles and billing Server Components call Core aggregate endpoints. Handle 401 with login redirect and 403/404 with stable UI errors. No page imports Prisma types.
+仪表盘、工作区、文风和计费服务器组件调用核心接口服务聚合接口。对 401 使用登录重定向，对 403 和 404 使用稳定界面错误。任何页面都不得导入 Prisma 类型。
 
-- [ ] **Step 3: Replace mutation calls domain by domain**
+- [ ] **步骤 3：逐领域替换变更调用**
 
-Migrate auth, project/chapter, lore, outline/progress, references, styles, writing settings, quality, sessions/messages, artifacts and billing. Preserve 1.2-second autosave, interaction states and Chinese messages.
+迁移认证、项目和章节、设定、大纲和进度、参考资料、文风、写作设置、质量、会话和消息、草案及计费。保留 1.2 秒自动保存、交互状态和中文消息。
 
-- [ ] **Step 4: Replace writing SSE and recovery**
+- [ ] **步骤 4：替换写作 SSE 和恢复逻辑**
 
-Frontend connects only to Core SSE, preserves existing event semantics and adds sequence/replay handling. CurrentTask/lastTask and artifact recovery continue to use explicit session bindings.
+前端只连接核心接口服务 SSE，保留现有事件语义并增加序号和重放处理。当前任务、最近任务和草案恢复继续使用显式会话绑定。
 
-- [ ] **Step 5: Delete Next backend entrypoints and verify architecture**
+- [ ] **步骤 5：删除 Next.js 后端入口并验证架构**
 
-Run:
+运行：
 
 ```bash
 rg -n '@/shared/db/prisma|@prisma/client|DATABASE_URL|"use server"|from "openai"|@langchain' apps/web
 ```
 
-Expected: no backend matches. A narrowly scoped framework-only occurrence must be documented and tested; business occurrences are forbidden.
+预期：没有后端匹配项。仅框架使用且范围严格受限的匹配项必须记录并测试；禁止业务匹配项。
 
-- [ ] **Step 6: Fix existing lint failures without changing UX**
+- [ ] **步骤 6：在不改变用户体验的前提下修复现有代码检查失败**
 
-Move render-created components to module scope, replace state-reset effects with keyed component boundaries/derived state, and remove render-time ref access. Add focused React tests for each changed behavior.
+把渲染期间创建的组件移到模块作用域，用带键组件边界或派生状态替代状态重置副作用，并移除渲染期间的引用访问。为每项行为变更添加聚焦的 React 测试。
 
-- [ ] **Step 7: Verify frontend**
+- [ ] **步骤 7：验证前端**
 
-Run: `npm run typecheck`
+运行：`npm run typecheck`
 
-Run: `npm run lint`
+运行：`npm run lint`
 
-Run: `npm run test:web`
+运行：`npm run test:web`
 
-Run: `npm run build`
+运行：`npm run build`
 
-Expected: all PASS with zero warnings caused by backend filesystem tracing.
+预期：全部通过，且没有后端文件系统追踪造成的警告。
 
-- [ ] **Step 8: Commit**
+- [ ] **步骤 8：提交**
 
 ```bash
 git add apps/web packages/api-client tests/architecture/legacy-backend-map.json
-git commit -m "refactor: make Next a frontend-only application"
+git commit -m "重构：把 Next.js 改为纯前端应用"
 ```
 
-### Task 18: Add production Docker images, Compose and Nginx
+### 任务 18：添加生产 Docker 镜像、编排和 Nginx
 
-**Files:**
-- Create: `infra/docker/core-api.Dockerfile`
-- Create: `infra/docker/agent-service.Dockerfile`
-- Create: `infra/docker/web.Dockerfile`
-- Create: `infra/nginx/nginx.conf`
-- Create: `infra/compose.yaml`
-- Create: `infra/compose.test.yaml`
-- Create: `infra/redis/redis.conf`
-- Create: `.env.example`
-- Create: `scripts/compose_smoke.ps1`
-- Create: `scripts/compose_smoke.sh`
-- Create: `tests/architecture/test_compose_security.py`
+**文件：**
+- 新建：`infra/docker/core-api.Dockerfile`
+- 新建：`infra/docker/agent-service.Dockerfile`
+- 新建：`infra/docker/web.Dockerfile`
+- 新建：`infra/nginx/nginx.conf`
+- 新建：`infra/compose.yaml`
+- 新建：`infra/compose.test.yaml`
+- 新建：`infra/redis/redis.conf`
+- 新建：`.env.example`
+- 新建：`scripts/compose_smoke.ps1`
+- 新建：`scripts/compose_smoke.sh`
+- 新建：`tests/architecture/test_compose_security.py`
 
-- [ ] **Step 1: Write failing Compose policy tests**
+- [ ] **步骤 1：编写失败的编排策略测试**
 
-Parse Compose and assert only Nginx publishes ports; Agent has no `DATABASE_URL` and no `data_net`; Postgres has no init scripts; all application containers are non-root, have health checks and resource limits; Redis maxmemory is 64 MB with no AOF.
+解析编排文件并断言只有 Nginx 发布端口；智能体服务没有 `DATABASE_URL` 且不加入 `data_net`；PostgreSQL 没有初始化脚本；所有应用容器都使用非根用户，具有健康检查和资源限制；Redis 最大内存为 64 MB 且不启用 AOF。
 
-- [ ] **Step 2: Verify RED**
+- [ ] **步骤 2：确认失败**
 
-Run: `uv run pytest tests/architecture/test_compose_security.py -v`
+运行：`uv run pytest tests/architecture/test_compose_security.py -v`
 
-Expected: FAIL.
+预期：失败。
 
-- [ ] **Step 3: Implement multi-stage non-root images**
+- [ ] **步骤 3：实现多阶段非根用户镜像**
 
-Web image contains only standalone Next output. Python runtime images contain locked wheels and application packages, not uv caches or test files. Containers use read-only roots with explicit tmpfs and writable data/log volumes.
+Web 镜像只包含 Next.js 独立输出。Python 运行时镜像包含锁定的 wheel 包和应用包，不包含 uv 缓存或测试文件。容器使用只读根文件系统、显式临时文件系统和可写数据及日志卷。
 
-- [ ] **Step 4: Implement networks, secrets and resource limits**
+- [ ] **步骤 4：实现网络、密钥和资源限制**
 
-Use `public_net`, `agent_net` and internal `data_net`; memory caps match the spec. Mount existing PostgreSQL data volume without init SQL. Nginx disables proxy buffering for SSE and blocks `/internal/`.
+使用 `public_net`、`agent_net` 和内部 `data_net`；内存上限与规格一致。挂载现有 PostgreSQL 数据卷，不使用初始化 SQL。Nginx 为 SSE 禁用代理缓冲并阻止 `/internal/`。
 
-- [ ] **Step 5: Verify Compose config and health**
+- [ ] **步骤 5：验证编排配置和健康状态**
 
-Run: `docker compose -f infra/compose.yaml config`
+运行：`docker compose -f infra/compose.yaml config`
 
-Expected: valid configuration with no interpolated missing required secrets.
+预期：配置有效，插值后不存在缺失的必需密钥。
 
-Run: `uv run pytest tests/architecture/test_compose_security.py -v`
+运行：`uv run pytest tests/architecture/test_compose_security.py -v`
 
-Expected: PASS.
+预期：通过。
 
-Run: `docker compose -f infra/compose.test.yaml up --build --wait`
+运行：`docker compose -f infra/compose.test.yaml up --build --wait`
 
-Expected: every service healthy.
+预期：每个服务都健康。
 
-- [ ] **Step 6: Run smoke and shutdown**
+- [ ] **步骤 6：运行冒烟验证并关闭**
 
-Run: `pwsh scripts/compose_smoke.ps1`
+运行：`pwsh scripts/compose_smoke.ps1`
 
-Expected: public page, auth fake flow, Core readiness, Agent readiness, SSE fake run and database fingerprint checks PASS.
+预期：公开页面、模拟认证流程、核心接口服务就绪、智能体服务就绪、SSE 模拟运行和数据库指纹检查均通过。
 
-Run: `docker compose -f infra/compose.test.yaml down -v`
+运行：`docker compose -f infra/compose.test.yaml down -v`
 
-- [ ] **Step 7: Commit**
+- [ ] **步骤 7：提交**
 
 ```bash
 git add infra .env.example scripts/compose_smoke.ps1 scripts/compose_smoke.sh tests/architecture/test_compose_security.py
-git commit -m "ops: add production Docker Compose deployment"
+git commit -m "运维：添加生产 Docker Compose 部署"
 ```
 
-### Task 19: Delete the TypeScript backend and update authority documents
+### 任务 19：删除 TypeScript 后端并更新权威文档
 
-**Files:**
-- Delete: legacy `src/agents/**` after the web move
-- Delete: legacy server-only shared libraries and contracts replaced by OpenAPI
-- Delete: `prisma/**` runtime tooling after schema contract proof, while archiving the final schema as historical evidence
-- Modify: `package.json` and `package-lock.json`
-- Modify: `AGENTS.md`
-- Modify: `DOCS.md`
-- Replace: `src/agents/AGENTS.md` with `apps/agent-service/AGENTS.md`
-- Modify: `docs/requirements/00-overview.md`
-- Modify: `docs/requirements/01-projects-and-chapters.md`
-- Modify: `docs/requirements/02-creative-knowledge-base.md`
-- Modify: `docs/requirements/03-ai-writing-and-agents.md`
-- Modify: `docs/requirements/04-review-quality-and-workflow.md`
-- Modify: `docs/requirements/05-auth-billing-and-ops.md`
-- Modify: `docs/LANGGRAPH_STUDIO.md`
-- Modify: `docs/WORKFLOW_EVENT_LOG_FORMAT.md`
-- Modify: `README.md`
+**文件：**
+- 删除：前端移动后的旧 `src/agents/**`
+- 删除：已由 OpenAPI 替代的旧服务端专用共享库和契约
+- 删除：证明数据库结构契约后删除 `prisma/**` 运行时工具，同时把最终数据库结构归档为历史证据
+- 修改：`package.json` 和 `package-lock.json`
+- 修改：`AGENTS.md`
+- 修改：`DOCS.md`
+- 替换：用 `apps/agent-service/AGENTS.md` 替换 `src/agents/AGENTS.md`
+- 修改：`docs/requirements/00-overview.md`
+- 修改：`docs/requirements/01-projects-and-chapters.md`
+- 修改：`docs/requirements/02-creative-knowledge-base.md`
+- 修改：`docs/requirements/03-ai-writing-and-agents.md`
+- 修改：`docs/requirements/04-review-quality-and-workflow.md`
+- 修改：`docs/requirements/05-auth-billing-and-ops.md`
+- 修改：`docs/LANGGRAPH_STUDIO.md`
+- 修改：`docs/WORKFLOW_EVENT_LOG_FORMAT.md`
+- 修改：`README.md`
 
-- [ ] **Step 1: Write the failing forbidden-backend scan**
+- [ ] **步骤 1：编写失败的禁用后端扫描**
 
-Create `tests/architecture/test_no_typescript_backend.py` that rejects Prisma, LangGraph.js, LangChain.js, Node OpenAI SDK, business Route Handlers, business Server Actions and database/model secrets anywhere in `apps/web` or TypeScript runtime dependencies.
+创建 `tests/architecture/test_no_typescript_backend.py`，拒绝 `apps/web` 或 TypeScript 运行时依赖中任何位置出现 Prisma、LangGraph.js、LangChain.js、Node OpenAI SDK、业务路由处理器、业务服务器操作和数据库或模型密钥。
 
-- [ ] **Step 2: Verify RED**
+- [ ] **步骤 2：确认失败**
 
-Run: `uv run pytest tests/architecture/test_no_typescript_backend.py -v`
+运行：`uv run pytest tests/architecture/test_no_typescript_backend.py -v`
 
-Expected: FAIL while legacy backend files/dependencies remain.
+预期：只要旧后端文件或依赖仍然存在就失败。
 
-- [ ] **Step 3: Delete migrated code and dependencies**
+- [ ] **步骤 3：删除已迁移代码和依赖**
 
-Retain only frontend-safe TypeScript helpers and generated contracts. Archive the final Prisma schema under `docs/archive/database/` with a header that it is historical evidence, not a migration source. Production Python continues to use `schema-contract.json`.
+只保留前端安全的 TypeScript 辅助函数和生成契约。把最终 Prisma 数据库结构归档到 `docs/archive/database/`，并在文件头注明它是历史证据而非迁移来源。生产 Python 继续使用 `schema-contract.json`。
 
-- [ ] **Step 4: Update current authority and requirements**
+- [ ] **步骤 4：更新当前权威文档和需求文档**
 
-Document Core/Agent boundaries, commands, service JWT, no-database Agent rule, Compose deployment, recovery and logs. Remove claims that Prisma or LangGraph.js are current runtime facts.
+记录核心接口服务与智能体服务边界、命令、服务 JWT、智能体服务不得访问数据库规则、编排部署、恢复和日志。删除把 Prisma 或 LangGraph.js 视为当前运行时事实的说法。
 
-- [ ] **Step 5: Verify GREEN**
+- [ ] **步骤 5：确认通过**
 
-Run: `uv run pytest tests/architecture/test_no_typescript_backend.py -v`
+运行：`uv run pytest tests/architecture/test_no_typescript_backend.py -v`
 
-Expected: PASS.
+预期：通过。
 
-Run: `npm ci`
+运行：`npm ci`
 
-Run: `npm run typecheck`
+运行：`npm run typecheck`
 
-Run: `npm run lint`
+运行：`npm run lint`
 
-Run: `npm run build`
+运行：`npm run build`
 
-Expected: PASS.
+预期：通过。
 
-Run: `uv sync --frozen --all-packages --group dev`
+运行：`uv sync --frozen --all-packages --group dev`
 
-Run: `uv run ruff check .`
+运行：`uv run ruff check .`
 
-Run: `uv run mypy apps/core-api/src apps/agent-service/src packages/service-contracts/src`
+运行：`uv run mypy apps/core-api/src apps/agent-service/src packages/service-contracts/src`
 
-Run: `uv run pytest`
+运行：`uv run pytest`
 
-Expected: PASS.
+预期：通过。
 
-- [ ] **Step 6: Commit**
+- [ ] **步骤 6：提交**
 
 ```bash
 git add -A
-git commit -m "refactor: remove legacy Next backend"
+git commit -m "重构：移除旧 Next.js 后端"
 ```
 
-### Task 20: Run production acceptance, recovery, backup and rollback proof
+### 任务 20：执行生产验收、恢复、备份和回滚证明
 
-**Files:**
-- Create: `tests/e2e/auth.spec.ts`
-- Create: `tests/e2e/project-editor.spec.ts`
-- Create: `tests/e2e/knowledge-style.spec.ts`
-- Create: `tests/e2e/writing-artifact.spec.ts`
-- Create: `tests/e2e/quality-billing.spec.ts`
-- Create: `scripts/backup.sh`
-- Create: `scripts/restore_verify.sh`
-- Create: `scripts/schema_fingerprint.sh`
-- Create: `scripts/recovery_drill.sh`
-- Create: `scripts/rollback_drill.sh`
-- Create: `docs/PYTHON_BACKEND_CUTOVER.md`
-- Create: `docs/audits/2026-07-10-python-backend-acceptance.md`
+**文件：**
+- 新建：`tests/e2e/auth.spec.ts`
+- 新建：`tests/e2e/project-editor.spec.ts`
+- 新建：`tests/e2e/knowledge-style.spec.ts`
+- 新建：`tests/e2e/writing-artifact.spec.ts`
+- 新建：`tests/e2e/quality-billing.spec.ts`
+- 新建：`scripts/backup.sh`
+- 新建：`scripts/restore_verify.sh`
+- 新建：`scripts/schema_fingerprint.sh`
+- 新建：`scripts/recovery_drill.sh`
+- 新建：`scripts/rollback_drill.sh`
+- 新建：`docs/PYTHON_BACKEND_CUTOVER.md`
+- 新建：`docs/audits/2026-07-10-python-backend-acceptance.md`
 
-- [ ] **Step 1: Implement Playwright end-to-end tests**
+- [ ] **步骤 1：实现 Playwright 端到端测试**
 
-Cover registration/login, dashboard, novel creation, chapter autosave, lore CRUD, outline hierarchy, reference upload, style upload/portrait fake task, writing session, Agent fake stream, ReviewArtifact approve/discard/revise, quality check and billing summary.
+覆盖注册和登录、仪表盘、创建小说、章节自动保存、设定增删改查、大纲层级、参考资料上传、文风上传和模拟画像任务、写作会话、智能体模拟流、ReviewArtifact 批准、丢弃和修改、质量检查及计费汇总。
 
-- [ ] **Step 2: Run complete static and unit gates**
+- [ ] **步骤 2：运行完整静态和单元测试门槛**
 
-Run: `npm run api:check`
+运行：`npm run api:check`
 
-Run: `npm run typecheck`
+运行：`npm run typecheck`
 
-Run: `npm run lint`
+运行：`npm run lint`
 
-Run: `npm run test:web`
+运行：`npm run test:web`
 
-Run: `npm run build`
+运行：`npm run build`
 
-Run: `uv run ruff check .`
+运行：`uv run ruff check .`
 
-Run: `uv run mypy apps/core-api/src apps/agent-service/src packages/service-contracts/src`
+运行：`uv run mypy apps/core-api/src apps/agent-service/src packages/service-contracts/src`
 
-Run: `uv run pytest --cov=inkforge_core --cov=inkforge_agents --cov=inkforge_contracts --cov-report=term-missing`
+运行：`uv run pytest --cov=inkforge_core --cov=inkforge_agents --cov=inkforge_contracts --cov-report=term-missing`
 
-Expected: all PASS; changed Python business modules have meaningful branch coverage and no untested critical authorization/write path.
+预期：全部通过；变更的 Python 业务模块具有有意义的分支覆盖率，并且不存在未测试的关键授权或写入路径。
 
-- [ ] **Step 3: Run full Compose E2E**
+- [ ] **步骤 3：运行完整编排端到端测试**
 
-Run: `docker compose -f infra/compose.test.yaml up --build --wait`
+运行：`docker compose -f infra/compose.test.yaml up --build --wait`
 
-Run: `npm run test:e2e`
+运行：`npm run test:e2e`
 
-Expected: all primary workflows PASS through Nginx.
+预期：全部主要工作流通过 Nginx 后均通过测试。
 
-- [ ] **Step 4: Prove restart recovery**
+- [ ] **步骤 4：证明重启恢复能力**
 
-Start a fake Agent run, stop Agent during a model step, restart it and verify the task resumes from the last stable checkpoint. Delete Redis runtime keys and verify Core reconciliation re-submits the existing non-terminal WritingTask without duplicate artifacts or charges.
+启动一次模拟智能体运行，在模型步骤中停止智能体服务，重新启动并验证任务从最后一个稳定检查点恢复。删除 Redis 运行时键，并验证核心接口服务对账器重新提交现有非终态 WritingTask，且不产生重复草案或扣费。
 
-- [ ] **Step 5: Prove database and upload backup/restore**
+- [ ] **步骤 5：证明数据库和上传文件备份恢复能力**
 
-Run backup against the test deployment, record checksums, restore into a separate validation volume and compare schema fingerprint plus row counts. The production script must never restore over a running database.
+对测试部署运行备份并记录校验和，恢复到单独的验证卷，再比较数据库结构指纹和行数。生产脚本绝不能覆盖正在运行的数据库进行恢复。
 
-- [ ] **Step 6: Prove rollback compatibility**
+- [ ] **步骤 6：证明回滚兼容性**
 
-Using the staging copy, write representative data with Python, stop the new stack, start the archived old image read-only and verify user Cookie, IDs, bcrypt, artifact payload, graph snapshot adapter and upload paths are readable. Record any task states intentionally excluded from rollback and resolve them before release.
+使用预发布副本，通过 Python 写入代表性数据，停止新服务栈，以只读方式启动归档的旧镜像，并验证用户 Cookie、标识、bcrypt、草案载荷、图快照适配器和上传路径可读。记录任何有意排除在回滚之外的任务状态，并在发布前解决。
 
-- [ ] **Step 7: Run the 2-core/2-GB soak**
+- [ ] **步骤 7：运行 2 核 2 GB 稳定性压测**
 
-Apply Compose memory limits and CPU quota, execute mixed CRUD plus one Agent run at a time for 30 minutes, and record OOM count, peak RSS, database connections, task loss, p95 CRUD, SSE first-event and run-accept latency.
+应用编排内存限制和处理器配额，执行混合增删改查并保持同一时间只有一次智能体运行，持续 30 分钟，记录内存溢出次数、常驻内存峰值、数据库连接数、任务丢失、第 95 百分位增删改查延迟、SSE 首事件延迟和运行接受延迟。
 
-- [ ] **Step 8: Complete the acceptance audit**
+- [ ] **步骤 8：完成验收审计**
 
-For every spec acceptance bullet, link exact test output, command output, file scan or runtime evidence. Missing or indirect evidence is a failure, not “probably complete”.
+为规格中的每条验收项链接精确的测试输出、命令输出、文件扫描或运行时证据。缺失或间接证据都视为失败，不能写成“可能已完成”。
 
-- [ ] **Step 9: Commit**
+- [ ] **步骤 9：提交**
 
 ```bash
 git add tests/e2e scripts docs/PYTHON_BACKEND_CUTOVER.md docs/audits/2026-07-10-python-backend-acceptance.md
-git commit -m "test: prove Python backend production readiness"
+git commit -m "测试：证明 Python 后端生产就绪"
 ```
 
-## Final Completion Gate
+## 最终完成门槛
 
-- [ ] Every Task 1-20 checkbox is complete.
-- [ ] No uncommitted generated files or secrets exist.
-- [ ] The immutable database fingerprint is unchanged.
-- [ ] The frontend contains no backend implementation.
-- [ ] Agent Service has no database access path.
-- [ ] All static, unit, integration, E2E, restart, backup, rollback and soak evidence passes.
-- [ ] Authority and current-requirement documents describe the Python architecture.
-- [ ] The acceptance audit maps every spec requirement to direct evidence.
-- [ ] Only after all checks pass, archive this plan according to `DOCS.md` and mark the active goal complete.
+- [ ] 任务 1 至 20 的每个勾选项都已完成。
+- [ ] 不存在未提交的生成文件或密钥。
+- [ ] 不可变数据库指纹没有变化。
+- [ ] 前端不包含后端实现。
+- [ ] 智能体服务不存在数据库访问路径。
+- [ ] 所有静态、单元、集成、端到端、重启、备份、回滚和稳定性压测证据均通过。
+- [ ] 权威文档和当前需求文档描述 Python 架构。
+- [ ] 验收审计把每项规格要求映射到直接证据。
+- [ ] 只有全部检查通过后，才按照 `DOCS.md` 归档本计划并把活动目标标记为完成。
