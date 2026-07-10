@@ -52,6 +52,7 @@ class ServiceJwtClaims(BaseModel):
     iat: StrictInt
     exp: StrictInt
     body_sha256: BodySha256
+    query_sha256: BodySha256
     idempotency_key: NonBlankClaim
     request_timestamp: StrictInt
     http_method: HttpMethod

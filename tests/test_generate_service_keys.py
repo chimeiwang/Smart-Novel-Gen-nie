@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import os
+import runpy
 import stat
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from cryptography.hazmat.primitives import serialization
 
 GENERATED_FILENAMES = (
@@ -63,3 +65,26 @@ def test_script_refuses_to_overwrite_and_output_never_contains_private_material(
     assert not any(
         value.decode("ascii", errors="ignore") in combined_output for value in before.values()
     )
+
+
+def test_generation_failure_never_publishes_a_partial_key_directory(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output_dir = tmp_path / "keys"
+    namespace = runpy.run_path("scripts/generate_service_keys.py")
+    generate_service_keys = namespace["generate_service_keys"]
+
+    def fail_permission_restriction(path: Path) -> None:
+        raise RuntimeError("模拟权限收敛失败")
+
+    monkeypatch.setitem(
+        generate_service_keys.__globals__,
+        "_restrict_private_key",
+        fail_permission_restriction,
+    )
+    with pytest.raises(RuntimeError, match="模拟权限收敛失败"):
+        generate_service_keys(output_dir)
+
+    assert not output_dir.exists()
+    assert not list(tmp_path.glob(".keys.*"))

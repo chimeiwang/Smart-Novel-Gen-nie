@@ -3,9 +3,12 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
+import re
+import stat
 import time
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, Sequence, Set
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -27,6 +30,8 @@ DEFAULT_TOKEN_TTL_SECONDS = 120
 MAX_TOKEN_TTL_SECONDS = 300
 DEFAULT_CLOCK_SKEW_SECONDS = 10
 MAX_CLOCK_SKEW_SECONDS = 30
+REPLAY_TTL_SECONDS = MAX_TOKEN_TTL_SECONDS
+_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
 class ReplayPolicy(StrEnum):
@@ -159,6 +164,15 @@ def _validate_skew(clock_skew_seconds: int) -> int:
     return clock_skew_seconds
 
 
+def _normalize_allowed_scopes(
+    allowed_scopes: Set[ServiceScope] | None,
+) -> frozenset[ServiceScope]:
+    normalized = frozenset(ServiceScope) if allowed_scopes is None else frozenset(allowed_scopes)
+    if not normalized or any(not isinstance(scope, ServiceScope) for scope in normalized):
+        raise ValueError("允许的服务权限范围无效")
+    return normalized
+
+
 class ServiceTokenSigner:
     def __init__(
         self,
@@ -169,6 +183,7 @@ class ServiceTokenSigner:
         audience: str,
         kid: str,
         default_ttl_seconds: int = DEFAULT_TOKEN_TTL_SECONDS,
+        allowed_scopes: Set[ServiceScope] | None = None,
     ) -> None:
         self._private_key = _load_private_key(private_key_path)
         self.public_key = self._private_key.public_key()
@@ -177,6 +192,7 @@ class ServiceTokenSigner:
         self._audience = _non_blank(audience, "受众")
         self._kid = _non_blank(kid, "kid")
         self._default_ttl_seconds = _validate_ttl(default_ttl_seconds)
+        self._allowed_scopes = _normalize_allowed_scopes(allowed_scopes)
 
     @classmethod
     def from_pkcs8_file(
@@ -188,6 +204,7 @@ class ServiceTokenSigner:
         audience: str,
         kid: str,
         default_ttl_seconds: int = DEFAULT_TOKEN_TTL_SECONDS,
+        allowed_scopes: Set[ServiceScope] | None = None,
     ) -> ServiceTokenSigner:
         return cls(
             private_key_path=path,
@@ -196,6 +213,7 @@ class ServiceTokenSigner:
             audience=audience,
             kid=kid,
             default_ttl_seconds=default_ttl_seconds,
+            allowed_scopes=allowed_scopes,
         )
 
     def sign_request(
@@ -204,6 +222,7 @@ class ServiceTokenSigner:
         body: bytes,
         http_method: str,
         http_path: str,
+        query_string: bytes,
         idempotency_key: str,
         scope: Sequence[ServiceScope],
         task_id: str,
@@ -215,11 +234,20 @@ class ServiceTokenSigner:
     ) -> SignedServiceRequest:
         if not isinstance(body, bytes):
             raise TypeError("请求体必须是原始字节")
+        if not isinstance(query_string, bytes):
+            raise TypeError("查询字符串必须是原始字节")
+        requested_scopes = tuple(scope)
+        if not requested_scopes or not set(requested_scopes) <= self._allowed_scopes:
+            raise ServiceAuthorizationError(
+                "服务令牌权限范围超出调用方向",
+                code="SERVICE_SCOPE_FORBIDDEN",
+            )
         issued_at = _utc_seconds(now)
         lifetime = _validate_ttl(
             self._default_ttl_seconds if ttl_seconds is None else ttl_seconds
         )
         digest = hashlib.sha256(body).hexdigest()
+        query_digest = hashlib.sha256(query_string).hexdigest()
         method = canonical_http_method(http_method)
         path = canonical_http_path(http_path)
         idempotency = _non_blank(idempotency_key, "Idempotency-Key")
@@ -227,7 +255,7 @@ class ServiceTokenSigner:
             iss=self._issuer,
             sub=self._subject,
             aud=self._audience,
-            scope=tuple(scope),
+            scope=requested_scopes,
             task_id=task_id,
             run_id=run_id,
             novel_id=novel_id,
@@ -235,6 +263,7 @@ class ServiceTokenSigner:
             iat=issued_at,
             exp=issued_at + lifetime,
             body_sha256=digest,
+            query_sha256=query_digest,
             idempotency_key=idempotency,
             request_timestamp=issued_at,
             http_method=method,
@@ -268,6 +297,7 @@ class ServiceTokenVerifier:
         replay_store: ReplayStore,
         replay_policy: ReplayPolicy = ReplayPolicy.ALL_SCOPES,
         clock_skew_seconds: int = DEFAULT_CLOCK_SKEW_SECONDS,
+        allowed_scopes: Set[ServiceScope] | None = None,
     ) -> None:
         public_keys = _load_jwks(jwks_path)
         if not 1 <= len(public_keys) <= 2:
@@ -281,6 +311,7 @@ class ServiceTokenVerifier:
         self._replay_store = replay_store
         self._replay_policy = replay_policy
         self._clock_skew_seconds = _validate_skew(clock_skew_seconds)
+        self._allowed_scopes = _normalize_allowed_scopes(allowed_scopes)
 
     @classmethod
     def from_jwks_file(
@@ -293,6 +324,7 @@ class ServiceTokenVerifier:
         replay_store: ReplayStore,
         replay_policy: ReplayPolicy = ReplayPolicy.ALL_SCOPES,
         clock_skew_seconds: int = DEFAULT_CLOCK_SKEW_SECONDS,
+        allowed_scopes: Set[ServiceScope] | None = None,
     ) -> ServiceTokenVerifier:
         _validate_skew(clock_skew_seconds)
         return cls(
@@ -303,6 +335,7 @@ class ServiceTokenVerifier:
             replay_store=replay_store,
             replay_policy=replay_policy,
             clock_skew_seconds=clock_skew_seconds,
+            allowed_scopes=allowed_scopes,
         )
 
     async def verify_request(
@@ -312,6 +345,7 @@ class ServiceTokenVerifier:
         body: bytes,
         http_method: str,
         http_path: str,
+        query_string: bytes,
         idempotency_key: str,
         request_timestamp: str,
         body_sha256: str,
@@ -321,13 +355,24 @@ class ServiceTokenVerifier:
         novel_id: str,
         now: int | datetime | None = None,
     ) -> ServiceJwtClaims:
+        if required_scope not in self._allowed_scopes:
+            raise ServiceAuthorizationError(
+                "服务令牌权限范围超出调用方向",
+                code="SERVICE_SCOPE_FORBIDDEN",
+            )
         current_time = _utc_seconds(now)
         claims = self._authenticate_token(token, now=current_time)
+        if not set(claims.scope) <= self._allowed_scopes:
+            raise ServiceAuthorizationError(
+                "服务令牌权限范围超出调用方向",
+                code="SERVICE_SCOPE_FORBIDDEN",
+            )
         self._verify_request_binding(
             claims,
             body=body,
             http_method=http_method,
             http_path=http_path,
+            query_string=query_string,
             idempotency_key=idempotency_key,
             request_timestamp=request_timestamp,
             body_sha256=body_sha256,
@@ -345,7 +390,7 @@ class ServiceTokenVerifier:
                 code="SERVICE_SCOPE_FORBIDDEN",
             )
         if self._must_consume_replay(required_scope):
-            ttl_seconds = max(1, claims.exp + self._clock_skew_seconds - current_time)
+            ttl_seconds = REPLAY_TTL_SECONDS
             try:
                 consumed = await self._replay_store.consume(
                     claims.jti,
@@ -392,6 +437,7 @@ class ServiceTokenVerifier:
                         "iat",
                         "exp",
                         "body_sha256",
+                        "query_sha256",
                         "idempotency_key",
                         "request_timestamp",
                         "http_method",
@@ -417,12 +463,17 @@ class ServiceTokenVerifier:
         body: bytes,
         http_method: str,
         http_path: str,
+        query_string: bytes,
         idempotency_key: str,
         request_timestamp: str,
         body_sha256: str,
         now: int,
     ) -> None:
         try:
+            if not isinstance(body, bytes) or not isinstance(query_string, bytes):
+                raise ValueError
+            if not isinstance(body_sha256, str) or _SHA256_PATTERN.fullmatch(body_sha256) is None:
+                raise ValueError
             if not request_timestamp.isascii() or str(int(request_timestamp)) != request_timestamp:
                 raise ValueError
             timestamp = int(request_timestamp)
@@ -433,11 +484,14 @@ class ServiceTokenVerifier:
         if abs(now - timestamp) > self._clock_skew_seconds:
             raise ServiceRequestBindingError("服务请求时间超出允许偏差")
         expected_digest = hashlib.sha256(body).hexdigest()
+        expected_query_digest = hashlib.sha256(query_string).hexdigest()
         if not hmac.compare_digest(body_sha256, expected_digest) or not hmac.compare_digest(
             claims.body_sha256,
             expected_digest,
         ):
             raise ServiceRequestBindingError("服务请求体摘要不匹配")
+        if not hmac.compare_digest(claims.query_sha256, expected_query_digest):
+            raise ServiceRequestBindingError("服务请求查询字符串摘要不匹配")
         bindings = (
             (claims.request_timestamp, timestamp, "请求时间"),
             (claims.idempotency_key, idempotency_key, "幂等键"),
@@ -514,7 +568,7 @@ def _load_jwks(path: str | Path) -> dict[str, Ed25519PublicKey]:
 
 def _load_private_key(path: str | Path) -> Ed25519PrivateKey:
     try:
-        private_bytes = Path(path).read_bytes()
+        private_bytes = _read_private_key_file(path)
         if not private_bytes.startswith(b"-----BEGIN PRIVATE KEY-----"):
             raise ValueError
         loaded = serialization.load_pem_private_key(private_bytes, password=None)
@@ -523,6 +577,53 @@ def _load_private_key(path: str | Path) -> Ed25519PrivateKey:
         return loaded
     except (OSError, TypeError, ValueError):
         raise ServiceAuthenticationError("无法加载 Ed25519 PKCS8 私钥") from None
+
+
+def _read_private_key_file(path: str | Path) -> bytes:
+    raw_path = os.fspath(path)
+    path_stat = os.lstat(raw_path)
+    _validate_private_key_path_metadata(path_stat)
+
+    flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(raw_path, flags)
+    try:
+        opened_stat = os.fstat(descriptor)
+        _validate_private_key_path_metadata(opened_stat)
+        if (path_stat.st_dev, path_stat.st_ino) != (opened_stat.st_dev, opened_stat.st_ino):
+            raise ValueError
+        uid_getter = getattr(os, "getuid", None)
+        current_uid = int(uid_getter()) if os.name == "posix" and callable(uid_getter) else None
+        _validate_private_key_permissions(
+            opened_stat,
+            platform_name=os.name,
+            current_uid=current_uid,
+        )
+        private_bytes = os.read(descriptor, 65_537)
+        if len(private_bytes) > 65_536:
+            raise ValueError
+        return private_bytes
+    finally:
+        os.close(descriptor)
+
+
+def _validate_private_key_path_metadata(file_stat: os.stat_result) -> None:
+    if stat.S_ISLNK(file_stat.st_mode) or not stat.S_ISREG(file_stat.st_mode):
+        raise ValueError
+
+
+def _validate_private_key_permissions(
+    file_stat: os.stat_result,
+    *,
+    platform_name: str,
+    current_uid: int | None,
+) -> None:
+    if platform_name != "posix":
+        return
+    if current_uid is None or file_stat.st_uid != current_uid:
+        raise ValueError
+    if stat.S_IMODE(file_stat.st_mode) & 0o077:
+        raise ValueError
 
 
 def _non_blank(value: str, label: str) -> str:

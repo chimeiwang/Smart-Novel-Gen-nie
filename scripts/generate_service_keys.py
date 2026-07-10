@@ -4,6 +4,7 @@ import argparse
 import base64
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import uuid
@@ -79,7 +80,8 @@ def _restrict_private_key(path: Path) -> None:
 
 def generate_service_keys(output_dir: Path) -> None:
     output_dir.parent.mkdir(parents=True, exist_ok=True)
-    output_dir.mkdir(exist_ok=False)
+    if output_dir.exists():
+        raise FileExistsError("服务密钥输出目录已存在，拒绝覆盖")
     core_private, core_jwks = _build_pair("core")
     agent_private, agent_jwks = _build_pair("agent")
     payloads = {
@@ -88,43 +90,38 @@ def generate_service_keys(output_dir: Path) -> None:
         "agent-to-core-private.pem": (agent_private, True),
         "agent-to-core-jwks.json": (agent_jwks, False),
     }
-    temporary_paths: list[Path] = []
-    published_paths: list[Path] = []
+    temporary_dir = Path(
+        tempfile.mkdtemp(prefix=f".{output_dir.name}.", dir=output_dir.parent)
+    )
+    published = False
     try:
         for name, (content, private) in payloads.items():
-            descriptor, temporary_name = tempfile.mkstemp(prefix=f".{name}.", dir=output_dir)
-            temporary_path = Path(temporary_name)
-            temporary_paths.append(temporary_path)
+            destination = temporary_dir / name
+            descriptor = os.open(
+                destination,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0),
+                0o600 if private else 0o644,
+            )
             try:
                 with os.fdopen(descriptor, "wb") as handle:
                     handle.write(content)
                     handle.flush()
                     os.fsync(handle.fileno())
                 if private:
-                    _restrict_private_key(temporary_path)
+                    _restrict_private_key(destination)
             except Exception:
                 try:
                     os.close(descriptor)
                 except OSError:
                     pass
                 raise
-        for temporary_path, name in zip(temporary_paths, payloads, strict=True):
-            destination = output_dir / name
-            if destination.exists():
-                raise FileExistsError("发布期间发现同名服务密钥文件，拒绝覆盖")
-            os.replace(temporary_path, destination)
-            published_paths.append(destination)
-        temporary_paths.clear()
-    except Exception:
-        for path in temporary_paths:
-            path.unlink(missing_ok=True)
-        for path in published_paths:
-            path.unlink(missing_ok=True)
-        try:
-            output_dir.rmdir()
-        except OSError:
-            pass
-        raise
+        if output_dir.exists():
+            raise FileExistsError("发布期间发现服务密钥输出目录，拒绝覆盖")
+        os.replace(temporary_dir, output_dir)
+        published = True
+    finally:
+        if not published:
+            shutil.rmtree(temporary_dir, ignore_errors=True)
 
 
 def main() -> int:

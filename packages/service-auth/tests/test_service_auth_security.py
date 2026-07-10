@@ -4,11 +4,14 @@ import asyncio
 import base64
 import hashlib
 import json
+import os
+import stat
 import traceback
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import jwt
 import orjson
@@ -28,6 +31,7 @@ from inkforge_service_auth import (
     ServiceTokenVerifier,
     canonical_json_body,
 )
+from inkforge_service_auth import service_auth as service_auth_implementation
 from pydantic import ValidationError
 
 NOW = datetime(2026, 7, 10, 12, 0, tzinfo=UTC)
@@ -65,6 +69,7 @@ def _write_key_pair(directory: Path, stem: str, kid: str) -> tuple[Path, Path, E
             encryption_algorithm=serialization.NoEncryption(),
         )
     )
+    os.chmod(private_path, 0o600)
     public_bytes = private_key.public_key().public_bytes(
         encoding=serialization.Encoding.Raw,
         format=serialization.PublicFormat.Raw,
@@ -124,12 +129,14 @@ def _issue(
     scope: ServiceScope = ServiceScope.AGENT_RUN,
     now_seconds: int = NOW_SECONDS,
     ttl_seconds: int | None = None,
+    query_string: bytes = b"",
 ) -> tuple[bytes, Any]:
     request_body = body if body is not None else canonical_json_body({"message": "开始"})
     signed = signer.sign_request(
         body=request_body,
         http_method="POST",
         http_path="/internal/v1/runs",
+        query_string=query_string,
         idempotency_key="idem-1",
         scope=(scope,),
         task_id="task-1",
@@ -156,6 +163,7 @@ async def _verify(
         "body": body,
         "http_method": "POST",
         "http_path": "/internal/v1/runs",
+        "query_string": b"",
         "idempotency_key": signed.headers["Idempotency-Key"],
         "request_timestamp": signed.headers["X-InkForge-Timestamp"],
         "body_sha256": signed.headers["X-InkForge-Body-SHA256"],
@@ -182,6 +190,7 @@ def test_claims_reject_unknown_fields_and_empty_scope() -> None:
         "iat": NOW_SECONDS,
         "exp": NOW_SECONDS + 120,
         "body_sha256": "0" * 64,
+        "query_sha256": hashlib.sha256(b"").hexdigest(),
         "idempotency_key": "idem-1",
         "request_timestamp": NOW_SECONDS,
         "http_method": "POST",
@@ -257,6 +266,7 @@ def test_signer_rejects_non_canonical_path_aliases(tmp_path: Path, path: str) ->
             body=b"{}",
             http_method="POST",
             http_path=path,
+            query_string=b"",
             idempotency_key="idem-1",
             scope=(ServiceScope.AGENT_RUN,),
             task_id="task-1",
@@ -298,6 +308,85 @@ def test_private_key_loader_rejects_public_key_and_non_pkcs8(tmp_path: Path) -> 
         )
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX 文件模式只在 POSIX 平台有效")
+def test_private_key_loader_requires_mode_0600(tmp_path: Path) -> None:
+    private_path, _, _ = _write_key_pair(tmp_path, "mode", "core-v1")
+    os.chmod(private_path, 0o644)
+    with pytest.raises(ServiceAuthenticationError):
+        ServiceTokenSigner.from_pkcs8_file(
+            private_path,
+            issuer="core-api",
+            subject="core-api",
+            audience="agent-service",
+            kid="core-v1",
+        )
+
+    os.chmod(private_path, 0o600)
+    signer = ServiceTokenSigner.from_pkcs8_file(
+        private_path,
+        issuer="core-api",
+        subject="core-api",
+        audience="agent-service",
+        kid="core-v1",
+    )
+    assert signer.public_key is not None
+
+
+def test_posix_private_key_metadata_rejects_unsafe_mode_owner_and_symlink() -> None:
+    safe = cast(
+        os.stat_result,
+        SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_uid=1000),
+    )
+    service_auth_implementation._validate_private_key_path_metadata(safe)
+    service_auth_implementation._validate_private_key_permissions(
+        safe,
+        platform_name="posix",
+        current_uid=1000,
+    )
+
+    unsafe_metadata = (
+        SimpleNamespace(st_mode=stat.S_IFREG | 0o644, st_uid=1000),
+        SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_uid=1001),
+        SimpleNamespace(st_mode=stat.S_IFLNK | 0o600, st_uid=1000),
+    )
+    for metadata in unsafe_metadata:
+        with pytest.raises(ValueError):
+            typed_metadata = cast(os.stat_result, metadata)
+            service_auth_implementation._validate_private_key_path_metadata(typed_metadata)
+            service_auth_implementation._validate_private_key_permissions(
+                typed_metadata,
+                platform_name="posix",
+                current_uid=1000,
+            )
+
+
+def test_private_key_loader_rejects_symlink_and_non_regular_file_without_leaking_path(
+    tmp_path: Path,
+) -> None:
+    private_path, _, _ = _write_key_pair(tmp_path, "real-secret-name", "core-v1")
+    link_path = tmp_path / "linked-secret.pem"
+    unsafe_paths = [tmp_path]
+    try:
+        link_path.symlink_to(private_path)
+    except OSError:
+        pass
+    else:
+        unsafe_paths.append(link_path)
+
+    for unsafe_path in unsafe_paths:
+        with pytest.raises(ServiceAuthenticationError) as captured:
+            ServiceTokenSigner.from_pkcs8_file(
+                unsafe_path,
+                issuer="core-api",
+                subject="core-api",
+                audience="agent-service",
+                kid="core-v1",
+            )
+        rendered = str(captured.value)
+        assert str(unsafe_path) not in rendered
+        assert "PRIVATE KEY" not in rendered
+
+
 @pytest.mark.asyncio
 async def test_valid_token_verifies_all_bindings_and_consumes_jti(tmp_path: Path) -> None:
     signer, verifier, redis = _build_auth(tmp_path)
@@ -306,7 +395,55 @@ async def test_valid_token_verifies_all_bindings_and_consumes_jti(tmp_path: Path
     assert claims.task_id == "task-1"
     assert claims.run_id == "run-1"
     assert claims.novel_id == "novel-1"
-    assert redis.calls == [("测试:重放:jti-1", "1", True, 130)]
+    assert redis.calls == [("测试:重放:jti-1", "1", True, 300)]
+
+
+@pytest.mark.asyncio
+async def test_query_string_uses_exact_raw_bytes_for_request_binding(tmp_path: Path) -> None:
+    signer, verifier, redis = _build_auth(tmp_path)
+    raw_query = b"name=%E4%B8%AD%E6%96%87&path=%2F"
+    body, signed = _issue(signer, query_string=raw_query)
+
+    claims = await _verify(verifier, signed, body, query_string=raw_query)
+
+    assert claims.query_sha256 == hashlib.sha256(raw_query).hexdigest()
+    assert redis.calls == [("测试:重放:jti-1", "1", True, 300)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "tampered_query",
+    (b"name=%E4%B8%AD%E6%96%87&path=/", b"path=%2F&name=%E4%B8%AD%E6%96%87"),
+)
+async def test_query_string_tampering_is_rejected_before_replay(
+    tmp_path: Path,
+    tampered_query: bytes,
+) -> None:
+    signer, verifier, redis = _build_auth(tmp_path)
+    body, signed = _issue(signer, query_string=b"name=%E4%B8%AD%E6%96%87&path=%2F")
+
+    with pytest.raises(ServiceRequestBindingError):
+        await _verify(verifier, signed, body, query_string=tampered_query)
+
+    assert redis.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "malformed_digest",
+    (None, 123, b"0" * 64, "0" * 63, "G" * 64, "中" * 64),
+)
+async def test_malformed_body_digest_is_a_stable_request_binding_error(
+    tmp_path: Path,
+    malformed_digest: object,
+) -> None:
+    signer, verifier, redis = _build_auth(tmp_path)
+    body, signed = _issue(signer)
+
+    with pytest.raises(ServiceRequestBindingError):
+        await _verify(verifier, signed, body, body_sha256=malformed_digest)
+
+    assert redis.calls == []
 
 
 @pytest.mark.asyncio
@@ -550,6 +687,7 @@ async def test_current_and_previous_jwks_keys_are_accepted(tmp_path: Path) -> No
             body=body,
             http_method="POST",
             http_path="/internal/v1/runs",
+            query_string=b"",
             idempotency_key=f"idem-{kid}",
             scope=(ServiceScope.AGENT_RUN,),
             task_id="task-1",
@@ -619,6 +757,7 @@ def test_authentication_errors_do_not_expose_token_key_or_claims(tmp_path: Path)
                 body=b"{}",
                 http_method="POST",
                 http_path="/internal/v1/runs",
+                query_string=b"",
                 idempotency_key="idem-1",
                 request_timestamp=str(NOW_SECONDS),
                 body_sha256=hashlib.sha256(b"{}").hexdigest(),

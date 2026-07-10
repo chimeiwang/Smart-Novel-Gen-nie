@@ -427,7 +427,7 @@ def test_agent_token_cannot_call_another_novel(verifier, signed_token) -> None:
 
 - [ ] **步骤 3：实现密钥加载、签名和验证**
 
-私钥只能从配置文件加载。声明在 120 秒后过期。内部写入权限范围必须使用 Redis 重放保护，幂等读取可以选择使用。请求模型进入业务服务前，必须验证 `Idempotency-Key`、`X-InkForge-Timestamp` 和 `X-InkForge-Body-SHA256`。密码学、请求绑定和重放保护的通用实现集中在 `inkforge-service-auth` 工作区库；该库不监听端口、不增加部署进程，两个运行服务只通过各自模块暴露固定方向的构造函数。
+私钥只能从拒绝符号链接和非普通文件的安全文件描述符加载；POSIX 私钥必须属于当前用户且禁止组和其他用户访问。声明在 120 秒后过期。内部写入权限范围必须使用 Redis 重放保护，并将已消费 `jti` 固定保留 300 秒；幂等读取可以选择使用。请求模型进入业务服务前，必须验证 `Idempotency-Key`、`X-InkForge-Timestamp` 和 `X-InkForge-Body-SHA256`，并使用 `query_sha256` 绑定 ASGI 原始查询字符串字节。密码学、请求绑定和重放保护的通用实现集中在 `inkforge-service-auth` 工作区库；该库不监听端口、不增加部署进程，两个运行服务只通过各自模块暴露固定方向的构造函数和服务认证异常处理器。
 
 - [ ] **步骤 4：确认通过**
 

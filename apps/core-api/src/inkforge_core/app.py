@@ -17,6 +17,7 @@ from .errors import (
 from .http import RequestIdMiddleware
 from .operations import register_readiness_check
 from .operations import router as operations_router
+from .service_auth import install_service_auth_error_handler
 
 
 @asynccontextmanager
@@ -59,5 +60,6 @@ def create_app(*, testing: bool = False, settings: Settings | None = None) -> Fa
     app.add_middleware(SafeUnhandledExceptionMiddleware)
     app.add_middleware(RequestIdMiddleware)
     install_exception_handlers(app)
+    install_service_auth_error_handler(app)
     app.include_router(operations_router, prefix="/api/v1")
     return app
