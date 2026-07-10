@@ -1,8 +1,8 @@
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, NonNegativeInt
+from pydantic import BaseModel, ConfigDict, NonNegativeInt, model_validator
 
-from .identity import Identifier
+from .identity import Identifier, NonBlankString
 
 CreativeOperationKind = Literal[
     "answer_question",
@@ -55,4 +55,12 @@ class RunStatusResponse(BaseModel):
         "cancelled",
     ]
     lastSequence: NonNegativeInt
-    error: str | None
+    error: NonBlankString | None
+
+    @model_validator(mode="after")
+    def validate_error(self) -> Self:
+        if self.status == "failed" and self.error is None:
+            raise ValueError("失败状态必须包含非空错误")
+        if self.status != "failed" and self.error is not None:
+            raise ValueError("非失败状态不能包含错误")
+        return self

@@ -154,3 +154,66 @@ def test_run_status_rejects_negative_last_sequence() -> None:
             lastSequence=-1,
             error="执行失败",
         )
+
+
+@pytest.mark.parametrize("error", [None, "", "   "])
+def test_failed_run_status_requires_non_blank_error(error: str | None) -> None:
+    with pytest.raises(ValidationError):
+        RunStatusResponse(
+            protocolVersion="1.0",
+            runId="run-1",
+            taskId="task-1",
+            status="failed",
+            lastSequence=1,
+            error=error,
+        )
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["queued", "running", "awaiting_user", "completed", "cancelled"],
+)
+def test_non_failed_run_status_rejects_error(
+    status: Literal["queued", "running", "awaiting_user", "completed", "cancelled"],
+) -> None:
+    with pytest.raises(ValidationError):
+        RunStatusResponse(
+            protocolVersion="1.0",
+            runId="run-1",
+            taskId="task-1",
+            status=status,
+            lastSequence=1,
+            error="不应存在错误",
+        )
+
+
+def test_failed_run_status_accepts_non_blank_error() -> None:
+    response = RunStatusResponse(
+        protocolVersion="1.0",
+        runId="run-1",
+        taskId="task-1",
+        status="failed",
+        lastSequence=1,
+        error="执行失败",
+    )
+
+    assert response.error == "执行失败"
+
+
+@pytest.mark.parametrize(
+    "status",
+    ["queued", "running", "awaiting_user", "completed", "cancelled"],
+)
+def test_non_failed_run_status_accepts_empty_error(
+    status: Literal["queued", "running", "awaiting_user", "completed", "cancelled"],
+) -> None:
+    response = RunStatusResponse(
+        protocolVersion="1.0",
+        runId="run-1",
+        taskId="task-1",
+        status=status,
+        lastSequence=1,
+        error=None,
+    )
+
+    assert response.error is None
