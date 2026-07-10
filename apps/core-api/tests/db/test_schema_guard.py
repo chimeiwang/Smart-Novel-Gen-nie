@@ -23,6 +23,7 @@ from inkforge_core.db.schema_guard import (
     inspect_schema,
     load_schema_contract,
     verify_live_schema,
+    verify_live_schema_with_engine,
 )
 
 
@@ -671,6 +672,31 @@ class FakeEngine:
 
     async def dispose(self) -> None:
         self.disposed = True
+
+
+async def test_shared_engine_schema_verification_never_disposes_main_pool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    contract_path = tmp_path / "schema-contract.json"
+    expected = sample_contract()
+    contract_path.write_text(
+        json.dumps(add_contract_fingerprint(expected)), encoding="utf-8"
+    )
+    engine = FakeEngine(RecordingConnection(catalog_result_sets()))
+
+    async def exact_inspection(*args: object, **kwargs: object) -> dict[str, Any]:
+        return copy.deepcopy(expected)
+
+    monkeypatch.setattr(schema_guard, "inspect_schema", exact_inspection)
+
+    result = await verify_live_schema_with_engine(engine, contract_path)  # type: ignore[arg-type]
+
+    assert result.ready is True
+    assert engine.disposed is False
+    assert engine.connection.statements[:2] == [
+        "SET TRANSACTION READ ONLY",
+        "SET LOCAL search_path = pg_catalog, public",
+    ]
 
 
 async def test_export_refuses_existing_file_by_default_and_overwrites_atomically(

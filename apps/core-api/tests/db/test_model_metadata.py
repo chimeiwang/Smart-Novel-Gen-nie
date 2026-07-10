@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import json
+import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from time import time
+from typing import Any, cast, get_origin, get_type_hints
 
 import pytest
 from fastapi.testclient import TestClient
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import BigInteger, Boolean, Integer, Text
+from sqlalchemy import BigInteger, Boolean, Integer, Text, inspect
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.orm import Mapped, configure_mappers
 
 CONTRACT_PATH = Path(__file__).parents[2] / "src" / "inkforge_core" / "db" / "schema-contract.json"
 EXPECTED_MODEL_TABLES = {
@@ -72,6 +77,12 @@ def _business_contract_tables() -> dict[str, dict[str, Any]]:
     }
 
 
+def _mapped_tables() -> dict[str, Any]:
+    from inkforge_core.db.base import Base
+
+    return {table.name: table for table in Base.metadata.tables.values()}
+
+
 def _server_default_sql(column: Any) -> str | None:
     if column.server_default is None:
         return None
@@ -98,7 +109,8 @@ def test_sqlalchemy_maps_exactly_the_business_tables_and_association_table() -> 
     from inkforge_core.db import models
     from inkforge_core.db.base import Base
 
-    assert set(Base.metadata.tables) == EXPECTED_TABLES
+    assert {table.name for table in Base.metadata.tables.values()} == EXPECTED_TABLES
+    assert {table.schema for table in Base.metadata.tables.values()} == {"public"}
     assert {name for name in EXPECTED_MODEL_TABLES if hasattr(models, name)} == (
         EXPECTED_MODEL_TABLES
     )
@@ -106,10 +118,9 @@ def test_sqlalchemy_maps_exactly_the_business_tables_and_association_table() -> 
 
 
 def test_every_column_matches_the_frozen_contract() -> None:
-    from inkforge_core.db.base import Base
 
     for table_name, expected_table in _business_contract_tables().items():
-        actual_table = Base.metadata.tables[table_name]
+        actual_table = _mapped_tables()[table_name]
         expected_columns = {column["name"]: column for column in expected_table["columns"]}
         actual_columns = {column.name: column for column in actual_table.columns}
 
@@ -172,7 +183,7 @@ def test_timestamp_text_bigint_and_vector_types_preserve_existing_storage() -> N
         )
         == "text"
     )
-    embedding = Base.metadata.tables["RagChunk"].c.embedding
+    embedding = _mapped_tables()["RagChunk"].c.embedding
     assert isinstance(embedding.type, Vector)
     assert embedding.type.dim is None
     assert not any(
@@ -181,10 +192,9 @@ def test_timestamp_text_bigint_and_vector_types_preserve_existing_storage() -> N
 
 
 def test_primary_keys_foreign_keys_and_indexes_match_the_frozen_contract() -> None:
-    from inkforge_core.db.base import Base
 
     for table_name, expected_table in _business_contract_tables().items():
-        table = Base.metadata.tables[table_name]
+        table = _mapped_tables()[table_name]
         expected_primary_key = expected_table["primaryKey"]
         assert table.primary_key.name == expected_primary_key["name"]
         assert [column.name for column in table.primary_key.columns] == expected_primary_key[
@@ -207,6 +217,7 @@ def test_primary_keys_foreign_keys_and_indexes_match_the_frozen_contract() -> No
             assert {element.column.table.name for element in actual.elements} == {
                 expected["targetTable"]
             }
+            assert {element.column.table.schema for element in actual.elements} == {"public"}
             assert actual.ondelete == expected["onDelete"]
             assert actual.onupdate == expected["onUpdate"]
 
@@ -228,10 +239,9 @@ def test_primary_keys_foreign_keys_and_indexes_match_the_frozen_contract() -> No
 
 
 def test_association_table_and_writing_message_reserved_attribute_are_exact() -> None:
-    from inkforge_core.db.base import Base
     from inkforge_core.db.models import WritingMessage, faction_territories
 
-    assert faction_territories is Base.metadata.tables["_FactionTerritories"]
+    assert faction_territories is _mapped_tables()["_FactionTerritories"]
     assert [column.name for column in faction_territories.primary_key.columns] == ["A", "B"]
     assert faction_territories.primary_key.name == "_FactionTerritories_AB_pkey"
     assert {index.name for index in faction_territories.indexes} == {"_FactionTerritories_B_index"}
@@ -239,11 +249,15 @@ def test_association_table_and_writing_message_reserved_attribute_are_exact() ->
 
 
 def test_application_defaults_generate_compatible_ids_and_utc_naive_milliseconds() -> None:
-    from inkforge_core.db.base import Base, generate_id, utc_now
+    from inkforge_core.db.base import generate_id, utc_now
 
     generated = {generate_id() for _ in range(100)}
     assert len(generated) == 100
-    assert all(isinstance(identifier, str) and identifier for identifier in generated)
+    assert all(re.fullmatch(r"c[0-9a-z]{24}", identifier) for identifier in generated)
+    current_milliseconds = int(time() * 1000)
+    assert all(
+        abs(int(identifier[1:9], 36) - current_milliseconds) < 5_000 for identifier in generated
+    )
 
     now = utc_now()
     assert now.tzinfo is None
@@ -251,7 +265,7 @@ def test_application_defaults_generate_compatible_ids_and_utc_naive_milliseconds
     assert abs((datetime.now(UTC).replace(tzinfo=None) - now).total_seconds()) < 1
 
     for table_name in EXPECTED_MODEL_TABLES:
-        table = Base.metadata.tables[table_name]
+        table = _mapped_tables()[table_name]
         assert table.c.id.default is not None
         assert table.c.id.default.arg.__wrapped__ is generate_id
         if "updatedAt" in table.c:
@@ -293,7 +307,7 @@ def test_database_url_is_safely_normalized_for_asyncpg() -> None:
     assert url.username == "name"
     assert url.password == "p@ss:word"  # noqa: S105
     assert url.database == "inkforge"
-    assert url.query == {"sslmode": "require"}
+    assert url.query == {"ssl": "require"}
 
 
 def test_database_engine_uses_the_bounded_single_host_pool(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -309,10 +323,14 @@ def test_database_engine_uses_the_bounded_single_host_pool(monkeypatch: pytest.M
 
     monkeypatch.setattr(session, "create_async_engine", fake_create_async_engine)
 
-    engine = session.create_database_engine("postgresql://user:password@db/inkforge")
+    engine = session.create_database_engine(
+        "postgresql://user:password@db/inkforge?sslmode=verify-full"
+    )
 
     assert engine is sentinel
-    assert cast(URL, captured["url"]).drivername == "postgresql+asyncpg"
+    captured_url = cast(URL, captured["url"])
+    assert captured_url.drivername == "postgresql+asyncpg"
+    assert captured_url.query == {"ssl": "verify-full"}
     assert captured["pool_size"] == 5
     assert captured["max_overflow"] == 0
     assert captured["pool_pre_ping"] is True
@@ -410,13 +428,13 @@ def test_database_readiness_failure_returns_generic_not_ready_without_secret(
     async def failed_connection(_engine: AsyncEngine) -> bool:
         raise RuntimeError(opaque_marker)
 
-    async def failed_schema(_url: str, _path: Path) -> Any:
+    async def failed_schema(_engine: AsyncEngine, _path: Path) -> Any:
         raise RuntimeError(opaque_marker)
 
     monkeypatch.setattr(session, "create_database_engine", lambda _url: engine)
     monkeypatch.setattr(session, "create_session_factory", lambda _engine: object())
     monkeypatch.setattr(session, "check_database_connection", failed_connection)
-    monkeypatch.setattr(session, "verify_live_schema", failed_schema)
+    monkeypatch.setattr(session, "verify_live_schema_with_engine", failed_schema)
 
     app = app_module.create_app(
         settings=Settings.model_validate(
@@ -454,13 +472,13 @@ def test_schema_drift_marks_only_schema_readiness_as_failed(
     async def connected(_engine: AsyncEngine) -> bool:
         return True
 
-    async def drifted(_url: str, _path: Path) -> SchemaVerificationResult:
+    async def drifted(_engine: AsyncEngine, _path: Path) -> SchemaVerificationResult:
         return SchemaVerificationResult(ready=False, fingerprint="drifted", diffs=[])
 
     monkeypatch.setattr(session, "create_database_engine", lambda _url: engine)
     monkeypatch.setattr(session, "create_session_factory", lambda _engine: object())
     monkeypatch.setattr(session, "check_database_connection", connected)
-    monkeypatch.setattr(session, "verify_live_schema", drifted)
+    monkeypatch.setattr(session, "verify_live_schema_with_engine", drifted)
 
     app = app_module.create_app(
         settings=Settings.model_validate(
@@ -509,3 +527,205 @@ def test_application_lifespan_disposes_database_pool_once(
         assert engine.dispose_count == 0
 
     assert engine.dispose_count == 1
+
+
+def test_application_lifespan_prewarms_database_readiness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from inkforge_core import app as app_module
+    from inkforge_core.config import Settings
+    from inkforge_core.db import session
+
+    engine = _DisposableEngine()
+    warm_up_count = 0
+
+    async def record_warm_up(_self: object) -> None:
+        nonlocal warm_up_count
+        warm_up_count += 1
+
+    monkeypatch.setattr(
+        session,
+        "create_database_engine",
+        lambda _url: cast(AsyncEngine, engine),
+    )
+    monkeypatch.setattr(session, "create_session_factory", lambda _engine: object())
+    monkeypatch.setattr(session.DatabaseReadiness, "warm_up", record_warm_up)
+    app = app_module.create_app(
+        settings=Settings.model_validate(
+            {"environment": "dev", "database_url": "postgresql://user:secret@db/inkforge"}
+        )
+    )
+
+    with TestClient(app):
+        assert warm_up_count == 1
+
+    assert engine.dispose_count == 1
+
+
+def test_all_model_columns_are_static_mapped_attributes() -> None:
+    from inkforge_core.db import models
+
+    for table_name, contract in _business_contract_tables().items():
+        if table_name == "_FactionTerritories":
+            continue
+        model = getattr(models, table_name)
+        annotations = get_type_hints(model)
+        expected_attributes = {
+            "metadata_" if column["name"] == "metadata" else column["name"]
+            for column in contract["columns"]
+        }
+        assert expected_attributes <= set(annotations), table_name
+        assert all(get_origin(annotations[name]) is Mapped for name in expected_attributes)
+
+    assert models.User.id.key == "id"
+    assert models.User.username.key == "username"
+    assert models.WritingMessage.metadata_.key == "metadata_"
+
+
+def test_mappers_cover_every_real_foreign_key_without_logical_id_relationships() -> None:
+    from inkforge_core.db import models
+
+    configure_mappers()
+    mapped_models = [getattr(models, name) for name in EXPECTED_MODEL_TABLES]
+    relationship_count = sum(len(inspect(model).relationships) for model in mapped_models)
+
+    assert relationship_count == 110
+    assert set(inspect(models.CharacterRelation).relationships.keys()) == {"character", "target"}
+    assert inspect(models.Location).relationships["parent"].remote_side == {
+        models.Location.__table__.c.id
+    }
+    assert inspect(models.OutlineNode).relationships["parent"].remote_side == {
+        models.OutlineNode.__table__.c.id
+    }
+    assert inspect(models.Faction).relationships["territories"].secondary is (
+        models.faction_territories
+    )
+    assert inspect(models.Location).relationships["factions"].secondary is (
+        models.faction_territories
+    )
+    assert "user" not in inspect(models.WorkflowRun).relationships
+    assert "chapter" not in inspect(models.WorkflowRun).relationships
+    assert "chapter" not in inspect(models.CharacterStateChange).relationships
+
+
+def test_cuid_generator_is_unique_under_thread_contention() -> None:
+    from inkforge_core.db.base import generate_id
+
+    with ThreadPoolExecutor(max_workers=32) as executor:
+        identifiers = list(executor.map(lambda _index: generate_id(), range(10_000)))
+
+    assert len(set(identifiers)) == len(identifiers)
+    assert all(re.fullmatch(r"c[0-9a-z]{24}", identifier) for identifier in identifiers)
+
+
+def test_model_instance_receives_cuid_before_flush() -> None:
+    from inkforge_core.db.models import User
+
+    user = User(username="静态类型测试", passwordHash="仅用于对象构造")
+
+    assert re.fullmatch(r"c[0-9a-z]{24}", user.id)
+
+
+@pytest.mark.parametrize(
+    ("sslmode", "ssl"),
+    [
+        ("disable", "disable"),
+        ("prefer", "prefer"),
+        ("require", "require"),
+        ("verify-ca", "verify-ca"),
+        ("verify-full", "verify-full"),
+    ],
+)
+def test_libpq_sslmode_is_translated_to_asyncpg_ssl(sslmode: str, ssl: str) -> None:
+    from inkforge_core.db.session import normalize_database_url
+
+    normalized = normalize_database_url(
+        f"postgresql://user:credential@database/inkforge?application_name=core&sslmode={sslmode}"
+    )
+
+    assert normalized.query == {"application_name": "core", "ssl": ssl}
+
+
+def test_invalid_sslmode_does_not_echo_the_database_url() -> None:
+    from inkforge_core.db.session import normalize_database_url
+
+    marker = "sensitive-invalid-mode"
+    with pytest.raises(ValueError) as caught:
+        normalize_database_url(f"postgresql://user:credential@database/inkforge?sslmode={marker}")
+
+    assert marker not in str(caught.value)
+    assert "credential" not in str(caught.value)
+
+
+async def test_schema_readiness_reuses_main_pool_and_coalesces_concurrent_probes() -> None:
+    from inkforge_core.db.schema_guard import SchemaVerificationResult
+    from inkforge_core.db.session import DatabaseReadiness
+
+    engine = cast(AsyncEngine, object())
+    clock = [0.0]
+    calls: list[AsyncEngine] = []
+
+    async def verifier(
+        received_engine: AsyncEngine, _contract_path: Path
+    ) -> SchemaVerificationResult:
+        calls.append(received_engine)
+        await asyncio.sleep(0)
+        return SchemaVerificationResult(ready=True, fingerprint="exact", diffs=[])
+
+    readiness = DatabaseReadiness(
+        engine,
+        CONTRACT_PATH,
+        schema_verifier=verifier,
+        monotonic_clock=lambda: clock[0],
+    )
+
+    results = await asyncio.gather(*(readiness.check_schema() for _ in range(20)))
+    assert results == [True] * 20
+    assert calls == [engine]
+
+    clock[0] = 29.0
+    assert await readiness.check_schema() is True
+    assert calls == [engine]
+
+    clock[0] = 31.0
+    assert await readiness.check_schema() is True
+    assert calls == [engine, engine]
+
+
+async def test_failed_schema_readiness_recovers_after_short_cache_period() -> None:
+    from inkforge_core.db.schema_guard import SchemaVerificationResult
+    from inkforge_core.db.session import DatabaseReadiness
+
+    engine = cast(AsyncEngine, object())
+    clock = [0.0]
+    calls = 0
+
+    async def verifier(_engine: AsyncEngine, _contract_path: Path) -> SchemaVerificationResult:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return SchemaVerificationResult(ready=False, fingerprint="drifted", diffs=[])
+        return SchemaVerificationResult(ready=True, fingerprint="recovered", diffs=[])
+
+    readiness = DatabaseReadiness(
+        engine,
+        CONTRACT_PATH,
+        schema_verifier=verifier,
+        monotonic_clock=lambda: clock[0],
+    )
+
+    assert await readiness.check_schema() is False
+    clock[0] = 4.0
+    assert await readiness.check_schema() is False
+    assert calls == 1
+    clock[0] = 6.0
+    assert await readiness.check_schema() is True
+    assert calls == 2
+
+
+def test_models_do_not_parse_the_schema_contract_dynamically() -> None:
+    models_path = Path(__file__).parents[2] / "src" / "inkforge_core" / "db" / "models.py"
+    source = models_path.read_text("utf-8")
+
+    assert "json.loads" not in source
+    assert "_build_table" not in source

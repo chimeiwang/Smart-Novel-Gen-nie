@@ -781,17 +781,8 @@ def _async_database_url(database_url: str) -> str:
     return database_url
 
 
-async def _inspect_live(database_url: str, schema: str) -> Contract:
-    try:
-        engine: AsyncEngine = create_async_engine(
-            _async_database_url(database_url), pool_pre_ping=True
-        )
-    except Exception as error:
-        raise SchemaConnectionError(
-            "无法初始化 PostgreSQL 只读结构检查连接。",
-            diagnostic="engine_creation_failed",
-            exception_type=type(error).__name__,
-        ) from None
+async def _inspect_with_engine(engine: AsyncEngine, schema: str) -> Contract:
+    """复用调用方引擎，在显式只读事务中采集结构。"""
 
     inspection_error: SchemaConnectionError | None = None
     contract: Contract | None = None
@@ -822,6 +813,35 @@ async def _inspect_live(database_url: str, schema: str) -> Contract:
                 diagnostic="connection_failed",
                 exception_type=type(error).__name__,
             )
+    if inspection_error is not None:
+        raise inspection_error from None
+    if contract is None:
+        raise SchemaConnectionError(
+            "数据库结构检查未返回契约。",
+            diagnostic="inspection_failed",
+            exception_type="MissingInspectionResult",
+        ) from None
+    return contract
+
+
+async def _inspect_live(database_url: str, schema: str) -> Contract:
+    try:
+        engine: AsyncEngine = create_async_engine(
+            _async_database_url(database_url), pool_pre_ping=True
+        )
+    except Exception as error:
+        raise SchemaConnectionError(
+            "无法初始化 PostgreSQL 只读结构检查连接。",
+            diagnostic="engine_creation_failed",
+            exception_type=type(error).__name__,
+        ) from None
+
+    inspection_error: SchemaConnectionError | None = None
+    contract: Contract | None = None
+    try:
+        contract = await _inspect_with_engine(engine, schema)
+    except SchemaConnectionError as error:
+        inspection_error = error
     finally:
         try:
             await engine.dispose()
@@ -908,6 +928,23 @@ async def verify_live_schema(
     expected = load_schema_contract(contract_path)
     actual = add_contract_fingerprint(
         await _inspect_live(database_url, str(expected.get("schema", "public")))
+    )
+    diffs = compare_schema_contract(expected, actual)
+    return SchemaVerificationResult(
+        ready=not diffs,
+        fingerprint=str(actual["fingerprint"]),
+        diffs=diffs,
+    )
+
+
+async def verify_live_schema_with_engine(
+    engine: AsyncEngine, contract_path: str | Path
+) -> SchemaVerificationResult:
+    """复用主连接池验证实时结构，不接管引擎生命周期。"""
+
+    expected = load_schema_contract(contract_path)
+    actual = add_contract_fingerprint(
+        await _inspect_with_engine(engine, str(expected.get("schema", "public")))
     )
     diffs = compare_schema_contract(expected, actual)
     return SchemaVerificationResult(

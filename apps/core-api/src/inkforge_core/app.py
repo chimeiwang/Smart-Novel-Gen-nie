@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from .config import Settings, create_testing_settings
-from .db.session import configure_database
+from .db.session import DatabaseReadiness, configure_database
 from .errors import (
     PUBLIC_ERROR_RESPONSES,
     SafeUnhandledExceptionMiddleware,
@@ -24,6 +24,12 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """在应用退出时释放已创建的数据库连接池。"""
 
     try:
+        readiness = cast(
+            DatabaseReadiness | None,
+            getattr(app.state, "database_readiness", None),
+        )
+        if readiness is not None:
+            await readiness.warm_up()
         yield
     finally:
         engine = cast(AsyncEngine | None, getattr(app.state, "database_engine", None))

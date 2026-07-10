@@ -56,6 +56,7 @@ from .schema_guard import (
     inspect_schema,
     load_schema_contract,
     verify_live_schema,
+    verify_live_schema_with_engine,
 )
 
 __all__ = [
@@ -114,4 +115,5 @@ __all__ = [
     "load_schema_contract",
     "utc_now",
     "verify_live_schema",
+    "verify_live_schema_with_engine",
 ]
