@@ -351,16 +351,13 @@ def test_runtime_source_contains_no_schema_mutation_capability() -> None:
 
 
 def test_database_url_is_safely_normalized_for_asyncpg() -> None:
-    from inkforge_core.db.url import asyncpg_connection_options, normalize_database_url
+    from inkforge_core.db.url import asyncpg_connection_options
 
-    normalized = normalize_database_url(
-        "postgresql://name:p%40ss%3Aword@database:5432/inkforge?sslmode=require&application_name=core-api"
-    )
     options = asyncpg_connection_options(
         "postgresql://name:p%40ss%3Aword@database:5432/inkforge?sslmode=require&application_name=core-api"
     )
 
-    url = cast(URL, normalized)
+    url = options.url
     assert url.drivername == "postgresql+asyncpg"
     assert url.username == "name"
     assert url.password == "p@ss:word"  # noqa: S105
@@ -862,27 +859,37 @@ def test_libpq_sslmode_is_translated_to_asyncpg_ssl(sslmode: str, ssl: str) -> N
 
 
 def test_invalid_sslmode_does_not_echo_the_database_url() -> None:
-    from inkforge_core.db.url import normalize_database_url
+    from inkforge_core.db.url import asyncpg_connection_options
 
     marker = "sensitive-invalid-mode"
     with pytest.raises(ValueError) as caught:
-        normalize_database_url(f"postgresql://user:credential@database/inkforge?sslmode={marker}")
+        asyncpg_connection_options(
+            f"postgresql://user:credential@database/inkforge?sslmode={marker}"
+        )
 
     assert marker not in str(caught.value)
     assert "credential" not in str(caught.value)
 
 
 def test_unknown_asyncpg_query_parameter_is_rejected_without_echo() -> None:
-    from inkforge_core.db.url import normalize_database_url
+    from inkforge_core.db.url import asyncpg_connection_options
 
     marker = "sensitive-unknown-value"
     with pytest.raises(ValueError) as caught:
-        normalize_database_url(
+        asyncpg_connection_options(
             f"postgresql://user:credential@database/inkforge?connect_timeout={marker}"
         )
 
     assert marker not in str(caught.value)
     assert "credential" not in str(caught.value)
+
+
+def test_database_package_does_not_expose_incomplete_url_only_api() -> None:
+    import inkforge_core.db as database_package
+    from inkforge_core.db import url
+
+    assert not hasattr(database_package, "normalize_database_url")
+    assert not hasattr(url, "normalize_database_url")
 
 
 async def test_schema_readiness_reuses_main_pool_and_coalesces_concurrent_probes() -> None:

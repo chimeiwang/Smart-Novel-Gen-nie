@@ -58,7 +58,7 @@ from .schema_guard import (
     verify_live_schema,
     verify_live_schema_with_engine,
 )
-from .url import AsyncpgConnectionOptions, asyncpg_connection_options, normalize_database_url
+from .url import AsyncpgConnectionOptions, asyncpg_connection_options
 
 __all__ = [
     "AsyncpgConnectionOptions",
@@ -116,7 +116,6 @@ __all__ = [
     "generate_id",
     "inspect_schema",
     "load_schema_contract",
-    "normalize_database_url",
     "utc_now",
     "verify_live_schema",
     "verify_live_schema_with_engine",

@@ -57,9 +57,3 @@ def asyncpg_connection_options(database_url: str) -> AsyncpgConnectionOptions:
         url=url.set(drivername="postgresql+asyncpg", query={}),
         connect_args=connect_args,
     )
-
-
-def normalize_database_url(database_url: str) -> URL:
-    """返回不含驱动不兼容查询参数的 asyncpg 地址。"""
-
-    return asyncpg_connection_options(database_url).url
