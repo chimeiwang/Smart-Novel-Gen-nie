@@ -41,6 +41,7 @@ async def _run(args: argparse.Namespace) -> int:
         "导出成功："
         f"表 {len(contract['tables'])} 张，"
         f"枚举 {len(contract['enums'])} 个，"
+        f"来源 {contract['source']['product']} {contract['source']['serverVersion']}，"
         f"指纹 {contract['fingerprint']}"
     )
     return 0

@@ -213,12 +213,22 @@
   "extensions": [
     {
       "installed": true,
+      "name": "plpgsql",
+      "version": "1.0"
+    },
+    {
+      "installed": true,
       "name": "vector",
       "version": "0.8.0"
     }
   ],
-  "fingerprint": "a72d53163effe842369418b1a2bbba2b36535c4cf2e594792b14f7abc28de883",
+  "fingerprint": "e84c45488a0dce5f696ca7e7a401290f17446770d4cfa066fd322a6435f30175",
   "schema": "public",
+  "source": {
+    "product": "PostgreSQL",
+    "serverVersion": "14.23 (Ubuntu 14.23-0ubuntu0.22.04.1)",
+    "serverVersionNum": 140023
+  },
   "tables": [
     {
       "columns": [
@@ -303,35 +313,88 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "novelId",
-            "order"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "order",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "int4_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Chapter_novelId_order_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Chapter_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "status"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "status",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "enum_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Chapter_status_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         }
       ],
       "name": "Chapter",
@@ -453,34 +516,76 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "chapterId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "chapterId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ChapterBeatPlan_chapterId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ChapterBeatPlan_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "status"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "status",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "enum_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ChapterBeatPlan_status_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         }
       ],
       "name": "ChapterBeatPlan",
@@ -547,24 +652,52 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "chapterId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "chapterId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ChapterProgress_chapterId_key",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ChapterProgress_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "ChapterProgress",
@@ -722,45 +855,112 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "chapterId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "chapterId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ChapterQualityCheck_chapterId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "chapterId",
-            "type"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "chapterId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "type",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "enum_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ChapterQualityCheck_chapterId_type_key",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ChapterQualityCheck_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "status"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "status",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "enum_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ChapterQualityCheck_status_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         }
       ],
       "name": "ChapterQualityCheck",
@@ -889,35 +1089,88 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "chapterId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "chapterId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ChapterWritingGoal_chapterId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "novelId",
-            "chapterId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "chapterId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ChapterWritingGoal_novelId_chapterId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ChapterWritingGoal_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "ChapterWritingGoal",
@@ -1123,44 +1376,100 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "currentStatus"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "currentStatus",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "enum_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Character_currentStatus_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "factionId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "factionId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Character_factionId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "novelId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Character_novelId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Character_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "Character",
@@ -1241,34 +1550,76 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "chapterId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "chapterId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "CharacterExperience_chapterId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "characterId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "characterId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "CharacterExperience_characterId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "CharacterExperience_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "CharacterExperience",
@@ -1383,44 +1734,100 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "characterId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "characterId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "CharacterRelation_characterId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "CharacterRelation_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "relationType"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "relationType",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "enum_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "CharacterRelation_relationType_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "targetId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "targetId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "CharacterRelation_targetId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         }
       ],
       "name": "CharacterRelation",
@@ -1508,34 +1915,76 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "chapterId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "chapterId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "CharacterStateChange_chapterId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "characterId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "characterId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "CharacterStateChange_characterId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "CharacterStateChange_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "CharacterStateChange",
@@ -1672,55 +2121,136 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "CreditLedger_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "requestId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "requestId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "CreditLedger_requestId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "type"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "type",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "CreditLedger_type_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "userId",
-            "createdAt"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "userId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "createdAt",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "timestamp_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "CreditLedger_userId_createdAt_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "userId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "userId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "CreditLedger_userId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         }
       ],
       "name": "CreditLedger",
@@ -1828,34 +2358,76 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "baseId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "baseId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Faction_baseId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "novelId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Faction_novelId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Faction_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "Faction",
@@ -1957,34 +2529,76 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "novelId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Foreshadowing_novelId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Foreshadowing_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "status"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "status",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "enum_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Foreshadowing_status_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         }
       ],
       "name": "Foreshadowing",
@@ -2065,24 +2679,52 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "novelId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Glossary_novelId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Glossary_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "Glossary",
@@ -2211,34 +2853,76 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "novelId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Item_novelId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "ownerId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "ownerId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Item_ownerId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Item_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "Item",
@@ -2360,34 +3044,76 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "novelId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Location_novelId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "parentId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "parentId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Location_parentId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Location_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "Location",
@@ -2488,24 +3214,52 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Novel_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "userId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "userId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Novel_userId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         }
       ],
       "name": "Novel",
@@ -2572,24 +3326,52 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "novelId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Outline_novelId_key",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "Outline_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "Outline",
@@ -2739,68 +3521,196 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "novelId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "OutlineNode_novelId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "novelId",
-            "kind",
-            "chapterStartOrder",
-            "chapterEndOrder"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "kind",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "enum_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "chapterStartOrder",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "int4_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 3
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "chapterEndOrder",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "int4_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 4
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "OutlineNode_novelId_kind_chapterStartOrder_chapterEndOrder_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "novelId",
-            "kind"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "kind",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "enum_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "OutlineNode_novelId_kind_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "parentId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "parentId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "OutlineNode_parentId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "OutlineNode_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "status"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "status",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "enum_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "OutlineNode_status_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         }
       ],
       "name": "OutlineNode",
@@ -2881,24 +3791,52 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "novelId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "PlotProgress_novelId_key",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "PlotProgress_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "PlotProgress",
@@ -3006,35 +3944,88 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "documentId",
-            "chunkIndex"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "documentId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "chunkIndex",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "int4_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "RagChunk_documentId_chunkIndex_key",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "novelId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "RagChunk_novelId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "RagChunk_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "RagChunk",
@@ -3136,36 +4127,100 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "novelId",
-            "sourceType"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "sourceType",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "enum_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "RagDocument_novelId_sourceType_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "RagDocument_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "sourceType",
-            "sourceId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "sourceType",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "enum_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "sourceId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "RagDocument_sourceType_sourceId_key",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "RagDocument",
@@ -3253,25 +4308,64 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "novelId",
-            "type"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "type",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "enum_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ReferenceMaterial_novelId_type_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ReferenceMaterial_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "ReferenceMaterial",
@@ -3475,66 +4569,172 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "artifactKey"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "artifactKey",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ReviewArtifact_artifactKey_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "chapterId",
-            "status"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "chapterId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "status",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "enum_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ReviewArtifact_chapterId_status_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "novelId",
-            "status"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "status",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "enum_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ReviewArtifact_novelId_status_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ReviewArtifact_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "taskId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "taskId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ReviewArtifact_taskId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "workflowRunId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "workflowRunId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ReviewArtifact_workflowRunId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         }
       ],
       "name": "ReviewArtifact",
@@ -3622,35 +4822,88 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "artifactId",
-            "revision"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "artifactId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "revision",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "int4_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ReviewArtifactEvaluation_artifactId_revision_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "evaluatorAgent"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "evaluatorAgent",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ReviewArtifactEvaluation_evaluatorAgent_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ReviewArtifactEvaluation_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "ReviewArtifactEvaluation",
@@ -3738,35 +4991,88 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "artifactId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "artifactId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ReviewArtifactRevision_artifactId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "artifactId",
-            "revision"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "artifactId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "revision",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "int4_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ReviewArtifactRevision_artifactId_revision_key",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "ReviewArtifactRevision_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "ReviewArtifactRevision",
@@ -3861,24 +5167,52 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "beatPlanId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "beatPlanId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "SceneBeat_beatPlanId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "SceneBeat_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "SceneBeat",
@@ -3945,24 +5279,52 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "novelId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "StoryBackground_novelId_key",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "StoryBackground_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "StoryBackground",
@@ -4036,24 +5398,52 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "StylePortraitTask_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "styleId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "styleId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "StylePortraitTask_styleId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         }
       ],
       "name": "StylePortraitTask",
@@ -4141,24 +5531,52 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "StyleReference_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "styleId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "styleId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "StyleReference_styleId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         }
       ],
       "name": "StyleReference",
@@ -4260,55 +5678,136 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "agentId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "agentId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "TokenUsage_agentId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "novelId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "TokenUsage_novelId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "TokenUsage_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "userId",
-            "createdAt"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "userId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "createdAt",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "timestamp_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "TokenUsage_userId_createdAt_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "userId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "userId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "TokenUsage_userId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         }
       ],
       "name": "TokenUsage",
@@ -4368,24 +5867,52 @@
       "foreignKeys": [],
       "indexes": [
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "User_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "username"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "username",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "User_username_key",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "User",
@@ -4515,64 +6042,148 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "chapterId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "chapterId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WorkflowRun_chapterId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "kind"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "kind",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "enum_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WorkflowRun_kind_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "novelId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WorkflowRun_novelId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WorkflowRun_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "status"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "status",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "enum_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WorkflowRun_status_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "userId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "userId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WorkflowRun_userId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         }
       ],
       "name": "WorkflowRun",
@@ -4667,24 +6278,52 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WorkflowStep_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "runId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "runId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WorkflowStep_runId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         }
       ],
       "name": "WorkflowStep",
@@ -4751,24 +6390,52 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "novelId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WorldSetting_novelId_key",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WorldSetting_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "WorldSetting",
@@ -4898,24 +6565,52 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "novelId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WritingBible_novelId_key",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WritingBible_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "WritingBible",
@@ -4989,24 +6684,52 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "novelId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WritingConfig_novelId_key",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WritingConfig_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "WritingConfig",
@@ -5101,25 +6824,64 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WritingMessage_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "sessionId",
-            "createdAt"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "sessionId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "createdAt",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "timestamp_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WritingMessage_sessionId_createdAt_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         }
       ],
       "name": "WritingMessage",
@@ -5213,34 +6975,76 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "chapterId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "chapterId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WritingSession_chapterId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "novelId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WritingSession_novelId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WritingSession_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "WritingSession",
@@ -5363,14 +7167,28 @@
       "foreignKeys": [],
       "indexes": [
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WritingStyle_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "WritingStyle",
@@ -5547,44 +7365,100 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "chapterId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "chapterId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WritingTask_chapterId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "novelId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WritingTask_novelId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         },
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WritingTask_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "writingSessionId"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "writingSessionId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "WritingTask_writingSessionId_idx",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         }
       ],
       "name": "WritingTask",
@@ -5643,25 +7517,64 @@
       ],
       "indexes": [
         {
-          "columns": [
-            "A",
-            "B"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "A",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "B",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "_FactionTerritories_AB_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         },
         {
-          "columns": [
-            "B"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "B",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "_FactionTerritories_B_index",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": false
+          "ready": true,
+          "unique": false,
+          "valid": true
         }
       ],
       "name": "_FactionTerritories",
@@ -5736,14 +7649,28 @@
       "foreignKeys": [],
       "indexes": [
         {
-          "columns": [
-            "id"
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
           ],
-          "expressions": [],
           "method": "btree",
           "name": "_prisma_migrations_pkey",
+          "nullsNotDistinct": false,
           "predicate": null,
-          "unique": true
+          "ready": true,
+          "unique": true,
+          "valid": true
         }
       ],
       "name": "_prisma_migrations",

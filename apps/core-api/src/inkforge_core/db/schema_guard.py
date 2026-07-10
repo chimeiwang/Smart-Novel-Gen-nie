@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 Contract = dict[str, Any]
@@ -24,6 +25,10 @@ class ContractIntegrityError(ValueError):
 
 class SchemaConnectionError(RuntimeError):
     """无法安全读取实时数据库结构。"""
+
+    def __init__(self, message: str, *, diagnostic: str) -> None:
+        super().__init__(message)
+        self.diagnostic = diagnostic
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,6 +181,15 @@ WHERE namespace.nspname = :schema
 ORDER BY table_class.relname, constraint_info.conname, key_position.ordinality
 """
 
+_SOURCE_QUERY = """
+SELECT
+  current_setting('server_version') AS server_version,
+  current_setting('server_version_num')::integer AS server_version_num
+FROM information_schema.sql_implementation_info
+LIMIT 1
+"""
+
+
 _INDEXES_QUERY = """
 SELECT
   table_class.relname AS table_name,
@@ -183,12 +197,30 @@ SELECT
   index_info.indisunique AS is_unique,
   access_method.amname AS method,
   key_position.position,
+  key_position.position <= index_info.indnkeyatts AS is_key,
   indexed_attribute.attname AS column_name,
-  CASE WHEN indexed_attribute.attname IS NULL
+  CASE WHEN key_position.position <= index_info.indnkeyatts
+         AND indexed_attribute.attname IS NULL
     THEN pg_catalog.pg_get_indexdef(index_info.indexrelid, key_position.position, true)
     ELSE NULL
   END AS expression,
-  pg_catalog.pg_get_expr(index_info.indpred, index_info.indrelid) AS predicate
+  opclass_namespace.nspname AS opclass_schema,
+  opclass.opcname AS opclass_name,
+  collation_namespace.nspname AS collation_schema,
+  collation_info.collname AS collation_name,
+  CASE WHEN ((index_info.indoption::smallint[])[key_position.position - 1] & 1) = 1
+    THEN 'DESC' ELSE 'ASC'
+  END AS order_direction,
+  CASE WHEN ((index_info.indoption::smallint[])[key_position.position - 1] & 2) = 2
+    THEN 'FIRST' ELSE 'LAST'
+  END AS nulls_position,
+  pg_catalog.pg_get_expr(index_info.indpred, index_info.indrelid) AS predicate,
+  index_info.indisvalid AS is_valid,
+  index_info.indisready AS is_ready,
+  COALESCE(
+    (pg_catalog.to_jsonb(index_info) ->> 'indnullsnotdistinct')::boolean,
+    false
+  ) AS nulls_not_distinct
 FROM pg_catalog.pg_index AS index_info
 JOIN pg_catalog.pg_class AS table_class
   ON table_class.oid = index_info.indrelid
@@ -198,11 +230,21 @@ JOIN pg_catalog.pg_class AS index_class
   ON index_class.oid = index_info.indexrelid
 JOIN pg_catalog.pg_am AS access_method
   ON access_method.oid = index_class.relam
-JOIN LATERAL generate_series(1, index_info.indnkeyatts) AS key_position(position)
+JOIN LATERAL generate_series(1, index_info.indnatts) AS key_position(position)
   ON true
 LEFT JOIN pg_catalog.pg_attribute AS indexed_attribute
   ON indexed_attribute.attrelid = table_class.oid
  AND indexed_attribute.attnum = (index_info.indkey::smallint[])[key_position.position - 1]
+LEFT JOIN pg_catalog.pg_opclass AS opclass
+  ON opclass.oid = (index_info.indclass::oid[])[key_position.position - 1]
+ AND key_position.position <= index_info.indnkeyatts
+LEFT JOIN pg_catalog.pg_namespace AS opclass_namespace
+  ON opclass_namespace.oid = opclass.opcnamespace
+LEFT JOIN pg_catalog.pg_collation AS collation_info
+  ON collation_info.oid = (index_info.indcollation::oid[])[key_position.position - 1]
+ AND key_position.position <= index_info.indnkeyatts
+LEFT JOIN pg_catalog.pg_namespace AS collation_namespace
+  ON collation_namespace.oid = collation_info.collnamespace
 WHERE namespace.nspname = :schema
   AND table_class.relkind = 'r'
 ORDER BY table_class.relname, index_class.relname, key_position.position
@@ -225,7 +267,6 @@ ORDER BY type_info.typname, enum_info.enumsortorder
 _EXTENSIONS_QUERY = """
 SELECT extension_info.extname AS extension_name, extension_info.extversion AS version
 FROM pg_catalog.pg_extension AS extension_info
-WHERE extension_info.extname = 'vector'
 ORDER BY extension_info.extname
 """
 
@@ -300,12 +341,21 @@ async def inspect_schema(
     """仅通过 PostgreSQL catalog 查询采集指定 schema 的结构。"""
 
     parameters: Mapping[str, object] = {"schema": schema}
+    source_rows = await _rows(connection, _SOURCE_QUERY, {})
+    if len(source_rows) != 1:
+        raise RuntimeError("无法确定 PostgreSQL 来源服务器版本。")
+    source_row = source_rows[0]
+    server_version_num = int(str(source_row["server_version_num"]))
     table_rows = await _rows(connection, _TABLES_QUERY, parameters)
     column_rows = await _rows(connection, _COLUMNS_QUERY, parameters)
     primary_key_rows = await _rows(connection, _PRIMARY_KEYS_QUERY, parameters)
     foreign_key_rows = await _rows(connection, _FOREIGN_KEYS_QUERY, parameters)
     unique_rows = await _rows(connection, _UNIQUE_CONSTRAINTS_QUERY, parameters)
-    index_rows = await _rows(connection, _INDEXES_QUERY, parameters)
+    index_rows = await _rows(
+        connection,
+        _INDEXES_QUERY,
+        parameters,
+    )
     enum_rows = await _rows(connection, _ENUMS_QUERY, parameters)
     extension_rows = await _rows(connection, _EXTENSIONS_QUERY, parameters)
 
@@ -373,15 +423,48 @@ async def inspect_schema(
                 "name": index_name,
                 "unique": bool(row["is_unique"]),
                 "method": str(row["method"]),
-                "columns": [],
-                "expressions": [],
+                "keyItems": [],
+                "includeColumns": [],
                 "predicate": _normalize_default(row["predicate"]),
+                "valid": bool(row["is_valid"]),
+                "ready": bool(row["is_ready"]),
+                "nullsNotDistinct": bool(row["nulls_not_distinct"]),
             },
         )
-        if row["column_name"] is None:
-            index["expressions"].append(str(row["expression"]))
+        if bool(row["is_key"]):
+            is_expression = row["column_name"] is None
+            index["keyItems"].append(
+                {
+                    "position": int(str(row["position"])),
+                    "kind": "expression" if is_expression else "column",
+                    "column": None if is_expression else str(row["column_name"]),
+                    "expression": str(row["expression"]) if is_expression else None,
+                    "opclassSchema": (
+                        str(row["opclass_schema"])
+                        if row["opclass_schema"] is not None
+                        else None
+                    ),
+                    "opclass": (
+                        str(row["opclass_name"])
+                        if row["opclass_name"] is not None
+                        else None
+                    ),
+                    "collationSchema": (
+                        str(row["collation_schema"])
+                        if row["collation_schema"] is not None
+                        else None
+                    ),
+                    "collation": (
+                        str(row["collation_name"])
+                        if row["collation_name"] is not None
+                        else None
+                    ),
+                    "order": str(row["order_direction"]),
+                    "nulls": str(row["nulls_position"]),
+                }
+            )
         else:
-            index["columns"].append(str(row["column_name"]))
+            index["includeColumns"].append(str(row["column_name"]))
     for (table_name, _), index in indexes.items():
         tables[table_name]["indexes"].append(index)
 
@@ -389,14 +472,14 @@ async def inspect_schema(
     for row in enum_rows:
         enums.setdefault(str(row["enum_name"]), []).append(str(row["enum_value"]))
 
-    vector_extension: Contract = {"name": "vector", "installed": False, "version": None}
-    for row in extension_rows:
-        if str(row["extension_name"]) == "vector":
-            vector_extension = {
-                "name": "vector",
-                "installed": True,
-                "version": str(row["version"]),
-            }
+    extensions: list[Contract] = [
+        {
+            "name": str(row["extension_name"]),
+            "installed": True,
+            "version": str(row["version"]),
+        }
+        for row in extension_rows
+    ]
 
     for table in tables.values():
         table["columns"].sort(key=lambda item: item["name"])
@@ -409,7 +492,12 @@ async def inspect_schema(
         "schema": schema,
         "tables": [tables[name] for name in sorted(tables)],
         "enums": [{"name": name, "values": enums[name]} for name in sorted(enums)],
-        "extensions": [vector_extension],
+        "extensions": extensions,
+        "source": {
+            "product": "PostgreSQL",
+            "serverVersion": str(source_row["server_version"]),
+            "serverVersionNum": server_version_num,
+        },
     }
 
 
@@ -468,11 +556,50 @@ def _compare_named_collection(
     return expected, actual
 
 
-def _extension_version_key(value: object) -> object:
-    if not isinstance(value, str):
-        return value
-    parts = value.split(".")
-    return tuple(parts[:2])
+def _positioned_items(value: object) -> dict[int, Mapping[str, object]]:
+    if not isinstance(value, list):
+        return {}
+    return {
+        int(item["position"]): item
+        for item in value
+        if isinstance(item, dict) and isinstance(item.get("position"), int)
+    }
+
+
+def _compare_index_key_items(
+    diffs: list[SchemaDiff],
+    path: str,
+    expected_value: object,
+    actual_value: object,
+) -> None:
+    expected = _positioned_items(expected_value)
+    actual = _positioned_items(actual_value)
+    for position in sorted(set(expected) - set(actual)):
+        diffs.append(
+            SchemaDiff(
+                f"{path}.{position}",
+                expected[position],
+                None,
+                f"缺少索引键位置：{path}.{position}。",
+            )
+        )
+    for position in sorted(set(actual) - set(expected)):
+        diffs.append(
+            SchemaDiff(
+                f"{path}.{position}",
+                None,
+                actual[position],
+                f"存在额外索引键位置：{path}.{position}。",
+            )
+        )
+    for position in sorted(set(expected) & set(actual)):
+        _compare_mapping(
+            diffs,
+            f"{path}.{position}",
+            expected[position],
+            actual[position],
+            ignored=frozenset({"position"}),
+        )
 
 
 def compare_schema_contract(
@@ -485,6 +612,12 @@ def compare_schema_contract(
         diffs, "contractVersion", expected.get("contractVersion"), actual.get("contractVersion")
     )
     _append_value_diff(diffs, "schema", expected.get("schema"), actual.get("schema"))
+    expected_source = expected.get("source")
+    actual_source = actual.get("source")
+    if isinstance(expected_source, dict) and isinstance(actual_source, dict):
+        _compare_mapping(diffs, "source", expected_source, actual_source)
+    else:
+        _append_value_diff(diffs, "source", expected_source, actual_source)
 
     expected_tables, actual_tables = _compare_named_collection(
         diffs, "tables", expected.get("tables"), actual.get("tables")
@@ -530,13 +663,23 @@ def compare_schema_contract(
                 actual_table.get(collection_name),
             )
             for item_name in sorted(set(expected_items) & set(actual_items)):
+                ignored = {"name"}
+                if collection_name == "indexes":
+                    ignored.add("keyItems")
                 _compare_mapping(
                     diffs,
                     f"{table_path}.{collection_name}.{item_name}",
                     expected_items[item_name],
                     actual_items[item_name],
-                    ignored=frozenset({"name"}),
+                    ignored=frozenset(ignored),
                 )
+                if collection_name == "indexes":
+                    _compare_index_key_items(
+                        diffs,
+                        f"{table_path}.{collection_name}.{item_name}.keyItems",
+                        expected_items[item_name].get("keyItems"),
+                        actual_items[item_name].get("keyItems"),
+                    )
 
     expected_enums, actual_enums = _compare_named_collection(
         diffs, "enums", expected.get("enums"), actual.get("enums")
@@ -561,13 +704,12 @@ def compare_schema_contract(
         _append_value_diff(
             diffs, f"{extension_path}.installed", expected_installed, actual_installed
         )
-        if expected_installed is True and actual_installed is True:
-            _append_value_diff(
-                diffs,
-                f"{extension_path}.version",
-                _extension_version_key(expected_extension.get("version")),
-                _extension_version_key(actual_extension.get("version")),
-            )
+        _append_value_diff(
+            diffs,
+            f"{extension_path}.version",
+            expected_extension.get("version"),
+            actual_extension.get("version"),
+        )
 
     return sorted(diffs, key=lambda diff: (diff.path, repr(diff.expected), repr(diff.actual)))
 
@@ -581,22 +723,48 @@ def _async_database_url(database_url: str) -> str:
 
 
 async def _inspect_live(database_url: str, schema: str) -> Contract:
-    engine: AsyncEngine = create_async_engine(
-        _async_database_url(database_url), pool_pre_ping=True
-    )
+    try:
+        engine: AsyncEngine = create_async_engine(
+            _async_database_url(database_url), pool_pre_ping=True
+        )
+    except (SQLAlchemyError, ValueError):
+        raise SchemaConnectionError(
+            "无法初始化 PostgreSQL 只读结构检查连接。",
+            diagnostic="engine_creation_failed",
+        ) from None
+
+    inspection_error: SchemaConnectionError | None = None
+    contract: Contract | None = None
     try:
         async with engine.begin() as connection:
             await connection.execute(text("SET TRANSACTION READ ONLY"))
-            return await inspect_schema(cast(CatalogConnection, connection), schema)
-    except Exception:
-        raise SchemaConnectionError(
-            "无法以只读方式连接并检查 PostgreSQL 数据库结构。"
-        ) from None
+            await connection.execute(text("SET LOCAL search_path = pg_catalog, public"))
+            contract = await inspect_schema(cast(CatalogConnection, connection), schema)
+    except (SQLAlchemyError, OSError, ConnectionError):
+        inspection_error = SchemaConnectionError(
+            "无法以只读方式连接并检查 PostgreSQL 数据库结构。",
+            diagnostic="connection_failed",
+        )
     finally:
-        await engine.dispose()
+        try:
+            await engine.dispose()
+        except SQLAlchemyError:
+            if inspection_error is None:
+                inspection_error = SchemaConnectionError(
+                    "数据库结构检查连接无法安全关闭。",
+                    diagnostic="dispose_failed",
+                )
+
+    if inspection_error is not None:
+        raise inspection_error from None
+    if contract is None:
+        raise RuntimeError("数据库结构检查未返回契约。")
+    return contract
 
 
-def _write_contract_atomic(contract: Mapping[str, object], output_path: Path) -> None:
+def _write_contract_atomic(
+    contract: Mapping[str, object], output_path: Path, *, overwrite: bool
+) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path: Path | None = None
     try:
@@ -614,8 +782,16 @@ def _write_contract_atomic(contract: Mapping[str, object], output_path: Path) ->
             temporary_file.write("\n")
             temporary_file.flush()
             os.fsync(temporary_file.fileno())
-        os.replace(temporary_path, output_path)
-        temporary_path = None
+        if overwrite:
+            os.replace(temporary_path, output_path)
+            temporary_path = None
+        else:
+            try:
+                os.link(temporary_path, output_path)
+            except FileExistsError:
+                raise FileExistsError(
+                    "数据库结构契约已存在；必须显式允许覆盖。"
+                ) from None
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
@@ -638,7 +814,7 @@ async def export_schema_contract(
     if _path_exists(destination) and not overwrite:
         raise FileExistsError("数据库结构契约已存在；必须显式允许覆盖。")
     contract = add_contract_fingerprint(await _inspect_live(database_url, schema))
-    _write_contract_atomic(contract, destination)
+    _write_contract_atomic(contract, destination, overwrite=overwrite)
     return contract
 
 
