@@ -8,7 +8,6 @@ from typing import cast
 
 from fastapi import FastAPI
 from sqlalchemy import text
-from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -19,38 +18,20 @@ from sqlalchemy.ext.asyncio import (
 from ..config import Settings
 from ..operations import register_readiness_check
 from .schema_guard import SchemaVerificationResult, verify_live_schema_with_engine
+from .url import asyncpg_connection_options
 
 SCHEMA_CONTRACT_PATH = Path(__file__).with_name("schema-contract.json")
-_ASYNCPG_SSL_MODES = frozenset({"disable", "prefer", "require", "verify-ca", "verify-full"})
 SchemaVerifier = Callable[[AsyncEngine, Path], Awaitable[SchemaVerificationResult]]
 MonotonicClock = Callable[[], float]
-
-
-def normalize_database_url(database_url: str) -> URL:
-    """解析数据库地址并安全切换到 asyncpg 驱动。"""
-
-    url = make_url(database_url)
-    if url.get_backend_name() not in {"postgres", "postgresql"}:
-        raise ValueError("核心接口服务只允许连接 PostgreSQL 数据库。")
-    if url.drivername not in {"postgres", "postgresql", "postgresql+asyncpg"}:
-        raise ValueError("数据库地址使用了不受支持的 PostgreSQL 驱动。")
-    query = dict(url.query)
-    sslmode = query.pop("sslmode", None)
-    if sslmode is not None:
-        if not isinstance(sslmode, str) or sslmode not in _ASYNCPG_SSL_MODES:
-            raise ValueError("数据库地址包含不受支持的 SSL 模式。")
-        existing_ssl = query.get("ssl")
-        if existing_ssl is not None and existing_ssl != sslmode:
-            raise ValueError("数据库地址包含冲突的 SSL 配置。")
-        query["ssl"] = sslmode
-    return url.set(drivername="postgresql+asyncpg", query=query)
 
 
 def create_database_engine(database_url: str) -> AsyncEngine:
     """创建受单机资源预算约束的异步数据库引擎。"""
 
+    options = asyncpg_connection_options(database_url)
     return create_async_engine(
-        normalize_database_url(database_url),
+        options.url,
+        connect_args=options.connect_args,
         pool_size=5,
         max_overflow=0,
         pool_pre_ping=True,

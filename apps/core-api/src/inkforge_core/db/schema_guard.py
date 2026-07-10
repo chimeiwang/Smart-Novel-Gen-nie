@@ -15,6 +15,8 @@ from typing import Any, Protocol, cast
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from .url import asyncpg_connection_options
+
 Contract = dict[str, Any]
 
 
@@ -773,14 +775,6 @@ def compare_schema_contract(
     return sorted(diffs, key=lambda diff: (diff.path, repr(diff.expected), repr(diff.actual)))
 
 
-def _async_database_url(database_url: str) -> str:
-    if database_url.startswith("postgresql://"):
-        return database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
-    if database_url.startswith("postgres://"):
-        return database_url.replace("postgres://", "postgresql+asyncpg://", 1)
-    return database_url
-
-
 async def _inspect_with_engine(engine: AsyncEngine, schema: str) -> Contract:
     """复用调用方引擎，在显式只读事务中采集结构。"""
 
@@ -826,8 +820,11 @@ async def _inspect_with_engine(engine: AsyncEngine, schema: str) -> Contract:
 
 async def _inspect_live(database_url: str, schema: str) -> Contract:
     try:
+        options = asyncpg_connection_options(database_url)
         engine: AsyncEngine = create_async_engine(
-            _async_database_url(database_url), pool_pre_ping=True
+            options.url,
+            connect_args=options.connect_args,
+            pool_pre_ping=True,
         )
     except Exception as error:
         raise SchemaConnectionError(

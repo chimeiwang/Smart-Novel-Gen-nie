@@ -58,8 +58,10 @@ from .schema_guard import (
     verify_live_schema,
     verify_live_schema_with_engine,
 )
+from .url import AsyncpgConnectionOptions, asyncpg_connection_options, normalize_database_url
 
 __all__ = [
+    "AsyncpgConnectionOptions",
     "Base",
     "Chapter",
     "ChapterBeatPlan",
@@ -106,6 +108,7 @@ __all__ = [
     "WritingStyle",
     "WritingTask",
     "add_contract_fingerprint",
+    "asyncpg_connection_options",
     "canonical_fingerprint",
     "compare_schema_contract",
     "export_schema_contract",
@@ -113,6 +116,7 @@ __all__ = [
     "generate_id",
     "inspect_schema",
     "load_schema_contract",
+    "normalize_database_url",
     "utc_now",
     "verify_live_schema",
     "verify_live_schema_with_engine",

@@ -13,11 +13,11 @@ from typing import Any, cast, get_origin, get_type_hints
 import pytest
 from fastapi.testclient import TestClient
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import BigInteger, Boolean, Integer, Text, inspect
+from sqlalchemy import BigInteger, Boolean, Integer, Text, create_engine, event, inspect
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncEngine
-from sqlalchemy.orm import Mapped, configure_mappers
+from sqlalchemy.orm import MANYTOMANY, ONETOMANY, Mapped, Session, configure_mappers
 
 CONTRACT_PATH = Path(__file__).parents[2] / "src" / "inkforge_core" / "db" / "schema-contract.json"
 EXPECTED_MODEL_TABLES = {
@@ -103,6 +103,34 @@ def _expected_python_type(udt_name: str) -> type[Any]:
     if udt_name == "vector":
         return Vector
     return postgresql.ENUM
+
+
+def _default_postgresql_opclass(column: Any) -> str:
+    if isinstance(column.type, Text):
+        return "text_ops"
+    if isinstance(column.type, Integer):
+        return "int4_ops"
+    if isinstance(column.type, postgresql.TIMESTAMP):
+        return "timestamp_ops"
+    if isinstance(column.type, postgresql.ENUM):
+        return "enum_ops"
+    raise AssertionError(f"索引列类型没有已确认的 PostgreSQL 默认操作符类：{column.type}")
+
+
+def _assert_index_key_defaults(column: Any, expected: dict[str, Any]) -> None:
+    assert expected["kind"] == "column"
+    assert expected["expression"] is None
+    assert expected["column"] == column.name
+    assert expected["opclassSchema"] == "pg_catalog"
+    assert expected["opclass"] == _default_postgresql_opclass(column)
+    if isinstance(column.type, Text):
+        assert expected["collationSchema"] == "pg_catalog"
+        assert expected["collation"] == "default"
+    else:
+        assert expected["collationSchema"] is None
+        assert expected["collation"] is None
+    assert expected["order"] == "ASC"
+    assert expected["nulls"] == "LAST"
 
 
 def test_sqlalchemy_maps_exactly_the_business_tables_and_association_table() -> None:
@@ -231,9 +259,36 @@ def test_primary_keys_foreign_keys_and_indexes_match_the_frozen_contract() -> No
         for name, expected in expected_indexes.items():
             actual = actual_indexes[name]
             assert actual.unique is expected["unique"]
-            assert [column.name for column in actual.columns] == [
+            actual_columns = list(actual.columns)
+            assert [column.name for column in actual_columns] == [
                 item["column"] for item in expected["keyItems"]
             ]
+            postgresql_options = actual.dialect_options["postgresql"]
+            assert (postgresql_options["using"] or "btree") == expected["method"]
+            assert (postgresql_options["ops"] or {}) == {}
+            assert (postgresql_options["with"] or {}) == {}
+            assert postgresql_options["tablespace"] is expected["tablespace"] is None
+            assert postgresql_options["where"] is expected["predicate"] is None
+            assert expected["includeColumns"] == []
+            assert expected["options"] == []
+            assert expected["nullsNotDistinct"] is False
+            for column, key_item in zip(actual_columns, expected["keyItems"], strict=True):
+                _assert_index_key_defaults(column, key_item)
+
+        primary_index = next(
+            index
+            for index in expected_table["indexes"]
+            if index["name"] == expected_primary_key["name"]
+        )
+        assert primary_index["method"] == "btree"
+        assert primary_index["options"] == []
+        assert primary_index["tablespace"] is None
+        for column, key_item in zip(
+            table.primary_key.columns,
+            primary_index["keyItems"],
+            strict=True,
+        ):
+            _assert_index_key_defaults(column, key_item)
 
         assert not table.constraints.difference({table.primary_key, *table.foreign_key_constraints})
 
@@ -296,10 +351,13 @@ def test_runtime_source_contains_no_schema_mutation_capability() -> None:
 
 
 def test_database_url_is_safely_normalized_for_asyncpg() -> None:
-    from inkforge_core.db.session import normalize_database_url
+    from inkforge_core.db.url import asyncpg_connection_options, normalize_database_url
 
     normalized = normalize_database_url(
-        "postgresql://name:p%40ss%3Aword@database:5432/inkforge?sslmode=require"
+        "postgresql://name:p%40ss%3Aword@database:5432/inkforge?sslmode=require&application_name=core-api"
+    )
+    options = asyncpg_connection_options(
+        "postgresql://name:p%40ss%3Aword@database:5432/inkforge?sslmode=require&application_name=core-api"
     )
 
     url = cast(URL, normalized)
@@ -307,7 +365,11 @@ def test_database_url_is_safely_normalized_for_asyncpg() -> None:
     assert url.username == "name"
     assert url.password == "p@ss:word"  # noqa: S105
     assert url.database == "inkforge"
-    assert url.query == {"ssl": "require"}
+    assert url.query == {}
+    assert options.connect_args == {
+        "ssl": "require",
+        "server_settings": {"application_name": "core-api"},
+    }
 
 
 def test_database_engine_uses_the_bounded_single_host_pool(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -324,13 +386,17 @@ def test_database_engine_uses_the_bounded_single_host_pool(monkeypatch: pytest.M
     monkeypatch.setattr(session, "create_async_engine", fake_create_async_engine)
 
     engine = session.create_database_engine(
-        "postgresql://user:password@db/inkforge?sslmode=verify-full"
+        "postgresql://user:password@db/inkforge?sslmode=verify-full&application_name=core-api"
     )
 
     assert engine is sentinel
     captured_url = cast(URL, captured["url"])
     assert captured_url.drivername == "postgresql+asyncpg"
-    assert captured_url.query == {"ssl": "verify-full"}
+    assert captured_url.query == {}
+    assert captured["connect_args"] == {
+        "ssl": "verify-full",
+        "server_settings": {"application_name": "core-api"},
+    }
     assert captured["pool_size"] == 5
     assert captured["max_overflow"] == 0
     assert captured["pool_pre_ping"] is True
@@ -608,6 +674,150 @@ def test_mappers_cover_every_real_foreign_key_without_logical_id_relationships()
     assert "chapter" not in inspect(models.CharacterStateChange).relationships
 
 
+def test_parent_relationship_delete_policy_matches_every_real_foreign_key() -> None:
+    from inkforge_core.db import models
+
+    configure_mappers()
+    parent_relationships = 0
+    for model_name in EXPECTED_MODEL_TABLES:
+        for relation in inspect(getattr(models, model_name)).relationships:
+            if relation.direction is MANYTOMANY:
+                assert relation.passive_deletes is True
+                assert "delete" not in relation.cascade
+                assert "delete-orphan" not in relation.cascade
+                continue
+            if relation.direction is not ONETOMANY:
+                continue
+            parent_relationships += 1
+            on_delete = {
+                foreign_key.ondelete
+                for column in relation._calculated_foreign_keys
+                for foreign_key in column.foreign_keys
+            }
+            assert len(on_delete) == 1, (model_name, relation.key)
+            assert relation.passive_deletes is True, (model_name, relation.key)
+            if on_delete == {"CASCADE"}:
+                assert "delete" in relation.cascade, (model_name, relation.key)
+            else:
+                assert on_delete == {"SET NULL"}, (model_name, relation.key)
+                assert "delete" not in relation.cascade, (model_name, relation.key)
+            assert "delete-orphan" not in relation.cascade, (model_name, relation.key)
+
+    assert parent_relationships == 54
+
+
+def _sqlite_uow_engine(*tables: Any) -> Any:
+    from inkforge_core.db.base import Base
+
+    engine = create_engine(
+        "sqlite:///:memory:",
+        execution_options={"schema_translate_map": {"public": None}},
+    )
+    Base.metadata.create_all(engine, tables=list(tables))
+    return engine
+
+
+@pytest.mark.parametrize("loaded", [True, False])
+def test_cascade_parent_delete_never_sets_child_foreign_key_to_null(loaded: bool) -> None:
+    from inkforge_core.db.models import CreditLedger, User
+
+    engine = _sqlite_uow_engine(User.__table__, CreditLedger.__table__)
+    statements: list[str] = []
+    event.listen(
+        engine,
+        "before_cursor_execute",
+        lambda _conn, _cursor, statement, _parameters, _context, _many: statements.append(
+            statement
+        ),
+    )
+    with Session(engine, expire_on_commit=False) as session:
+        user = User(username=f"级联删除-{loaded}", passwordHash="内存测试")
+        ledger = CreditLedger(
+            type="test",
+            amountMicros=1,
+            balanceAfterMicros=1,
+            userId=user.id,
+        )
+        user.creditLedgerEntries.append(ledger)
+        session.add(user)
+        session.flush()
+        identifier = user.id
+        if loaded:
+            assert user.creditLedgerEntries == [ledger]
+        else:
+            session.expunge_all()
+            user = session.get(User, identifier)
+            assert user is not None
+        statements.clear()
+
+        session.delete(user)
+        session.flush()
+
+        normalized = [statement.upper() for statement in statements]
+        assert not any(
+            statement.startswith("UPDATE ") and '"CREDITLEDGER"' in statement
+            for statement in normalized
+        )
+        assert not any('"USERID"=NULL' in statement.replace(" ", "") for statement in normalized)
+        if loaded:
+            assert any(
+                statement.startswith("DELETE FROM ") and '"CREDITLEDGER"' in statement
+                for statement in normalized
+            ), normalized
+        else:
+            assert not any('CREDITLEDGER' in statement for statement in normalized)
+        session.rollback()
+    engine.dispose()
+
+
+@pytest.mark.parametrize("loaded", [True, False])
+def test_set_null_parent_delete_uses_orm_only_for_loaded_children(loaded: bool) -> None:
+    from inkforge_core.db.models import Novel, User
+
+    engine = _sqlite_uow_engine(User.__table__, Novel.__table__)
+    statements: list[str] = []
+    event.listen(
+        engine,
+        "before_cursor_execute",
+        lambda _conn, _cursor, statement, _parameters, _context, _many: statements.append(
+            statement
+        ),
+    )
+    with Session(engine, expire_on_commit=False) as session:
+        user = User(username=f"置空删除-{loaded}", passwordHash="内存测试")
+        novel = Novel(name="内存测试小说", userId=user.id)
+        user.novels.append(novel)
+        session.add(user)
+        session.flush()
+        identifier = user.id
+        if loaded:
+            assert user.novels == [novel]
+        else:
+            session.expunge_all()
+            user = session.get(User, identifier)
+            assert user is not None
+        statements.clear()
+
+        session.delete(user)
+        session.flush()
+
+        normalized = [statement.upper() for statement in statements]
+        assert not any(
+            statement.startswith("DELETE FROM ") and '"NOVEL"' in statement
+            for statement in normalized
+        )
+        if loaded:
+            assert any(
+                statement.startswith("UPDATE ") and '"NOVEL"' in statement
+                for statement in normalized
+            ), normalized
+            assert novel.userId is None
+        else:
+            assert not any('NOVEL' in statement for statement in normalized)
+        session.rollback()
+    engine.dispose()
+
+
 def test_cuid_generator_is_unique_under_thread_contention() -> None:
     from inkforge_core.db.base import generate_id
 
@@ -630,6 +840,7 @@ def test_model_instance_receives_cuid_before_flush() -> None:
     ("sslmode", "ssl"),
     [
         ("disable", "disable"),
+        ("allow", "allow"),
         ("prefer", "prefer"),
         ("require", "require"),
         ("verify-ca", "verify-ca"),
@@ -637,21 +848,38 @@ def test_model_instance_receives_cuid_before_flush() -> None:
     ],
 )
 def test_libpq_sslmode_is_translated_to_asyncpg_ssl(sslmode: str, ssl: str) -> None:
-    from inkforge_core.db.session import normalize_database_url
+    from inkforge_core.db.url import asyncpg_connection_options
 
-    normalized = normalize_database_url(
+    options = asyncpg_connection_options(
         f"postgresql://user:credential@database/inkforge?application_name=core&sslmode={sslmode}"
     )
 
-    assert normalized.query == {"application_name": "core", "ssl": ssl}
+    assert options.url.query == {}
+    assert options.connect_args == {
+        "ssl": ssl,
+        "server_settings": {"application_name": "core"},
+    }
 
 
 def test_invalid_sslmode_does_not_echo_the_database_url() -> None:
-    from inkforge_core.db.session import normalize_database_url
+    from inkforge_core.db.url import normalize_database_url
 
     marker = "sensitive-invalid-mode"
     with pytest.raises(ValueError) as caught:
         normalize_database_url(f"postgresql://user:credential@database/inkforge?sslmode={marker}")
+
+    assert marker not in str(caught.value)
+    assert "credential" not in str(caught.value)
+
+
+def test_unknown_asyncpg_query_parameter_is_rejected_without_echo() -> None:
+    from inkforge_core.db.url import normalize_database_url
+
+    marker = "sensitive-unknown-value"
+    with pytest.raises(ValueError) as caught:
+        normalize_database_url(
+            f"postgresql://user:credential@database/inkforge?connect_timeout={marker}"
+        )
 
     assert marker not in str(caught.value)
     assert "credential" not in str(caught.value)

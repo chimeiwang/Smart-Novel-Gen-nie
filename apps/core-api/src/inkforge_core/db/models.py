@@ -88,30 +88,44 @@ class Chapter(Base):
         foreign_keys=lambda: [Chapter.novelId],
     )
     beatPlans: Mapped[list[ChapterBeatPlan]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="chapter",
         foreign_keys=lambda: [ChapterBeatPlan.chapterId],
     )
     chapterProgress: Mapped[ChapterProgress | None] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="chapter",
         foreign_keys=lambda: [ChapterProgress.chapterId],
     )
     qualityChecks: Mapped[list[ChapterQualityCheck]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="chapter",
         foreign_keys=lambda: [ChapterQualityCheck.chapterId],
     )
     writingGoals: Mapped[list[ChapterWritingGoal]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="chapter",
         foreign_keys=lambda: [ChapterWritingGoal.chapterId],
     )
     reviewArtifacts: Mapped[list[ReviewArtifact]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="chapter",
         foreign_keys=lambda: [ReviewArtifact.chapterId],
     )
     writingSessions: Mapped[list[WritingSession]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="chapter",
         foreign_keys=lambda: [WritingSession.chapterId],
     )
     writingTasks: Mapped[list[WritingTask]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="chapter",
         foreign_keys=lambda: [WritingTask.chapterId],
     )
@@ -189,6 +203,8 @@ class ChapterBeatPlan(Base):
         foreign_keys=lambda: [ChapterBeatPlan.goalId],
     )
     sceneBeats: Mapped[list[SceneBeat]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="beatPlan",
         foreign_keys=lambda: [SceneBeat.beatPlanId],
     )
@@ -360,6 +376,7 @@ class ChapterWritingGoal(Base):
     wordCountMin: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     beatPlans: Mapped[list[ChapterBeatPlan]] = relationship(
+        passive_deletes=True,
         back_populates="goal",
         foreign_keys=lambda: [ChapterBeatPlan.goalId],
     )
@@ -452,22 +469,31 @@ class Character(Base):
         foreign_keys=lambda: [Character.novelId],
     )
     experiences: Mapped[list[CharacterExperience]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="character",
         foreign_keys=lambda: [CharacterExperience.characterId],
     )
     outgoingRelations: Mapped[list[CharacterRelation]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="character",
         foreign_keys=lambda: [CharacterRelation.characterId],
     )
     incomingRelations: Mapped[list[CharacterRelation]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="target",
         foreign_keys=lambda: [CharacterRelation.targetId],
     )
     stateChanges: Mapped[list[CharacterStateChange]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="character",
         foreign_keys=lambda: [CharacterStateChange.characterId],
     )
     ownedItems: Mapped[list[Item]] = relationship(
+        passive_deletes=True,
         back_populates="owner",
         foreign_keys=lambda: [Item.ownerId],
     )
@@ -727,6 +753,7 @@ class Faction(Base):
     )
 
     characters: Mapped[list[Character]] = relationship(
+        passive_deletes=True,
         back_populates="faction",
         foreign_keys=lambda: [Character.factionId],
     )
@@ -739,6 +766,7 @@ class Faction(Base):
         foreign_keys=lambda: [Faction.novelId],
     )
     territories: Mapped[list[Location]] = relationship(
+        passive_deletes=True,
         secondary=faction_territories,
         primaryjoin=lambda: Faction.id == faction_territories.c.A,
         secondaryjoin=lambda: Location.id == faction_territories.c.B,
@@ -934,6 +962,7 @@ class Location(Base):
     )
 
     basedFactions: Mapped[list[Faction]] = relationship(
+        passive_deletes=True,
         back_populates="base",
         foreign_keys=lambda: [Faction.baseId],
     )
@@ -947,10 +976,12 @@ class Location(Base):
         remote_side=lambda: [Location.id],
     )
     children: Mapped[list[Location]] = relationship(
+        passive_deletes=True,
         back_populates="parent",
         foreign_keys=lambda: [Location.parentId],
     )
     factions: Mapped[list[Faction]] = relationship(
+        passive_deletes=True,
         secondary=faction_territories,
         primaryjoin=lambda: Location.id == faction_territories.c.B,
         secondaryjoin=lambda: Faction.id == faction_territories.c.A,
@@ -1002,34 +1033,50 @@ class Novel(Base):
     )
 
     chapters: Mapped[list[Chapter]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="novel",
         foreign_keys=lambda: [Chapter.novelId],
     )
     chapterWritingGoals: Mapped[list[ChapterWritingGoal]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="novel",
         foreign_keys=lambda: [ChapterWritingGoal.novelId],
     )
     characters: Mapped[list[Character]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="novel",
         foreign_keys=lambda: [Character.novelId],
     )
     factions: Mapped[list[Faction]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="novel",
         foreign_keys=lambda: [Faction.novelId],
     )
     foreshadowings: Mapped[list[Foreshadowing]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="novel",
         foreign_keys=lambda: [Foreshadowing.novelId],
     )
     glossaryEntries: Mapped[list[Glossary]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="novel",
         foreign_keys=lambda: [Glossary.novelId],
     )
     items: Mapped[list[Item]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="novel",
         foreign_keys=lambda: [Item.novelId],
     )
     locations: Mapped[list[Location]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="novel",
         foreign_keys=lambda: [Location.novelId],
     )
@@ -1042,58 +1089,86 @@ class Novel(Base):
         foreign_keys=lambda: [Novel.userId],
     )
     outline: Mapped[Outline | None] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="novel",
         foreign_keys=lambda: [Outline.novelId],
     )
     outlineNodes: Mapped[list[OutlineNode]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="novel",
         foreign_keys=lambda: [OutlineNode.novelId],
     )
     plotProgress: Mapped[PlotProgress | None] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="novel",
         foreign_keys=lambda: [PlotProgress.novelId],
     )
     ragChunks: Mapped[list[RagChunk]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="novel",
         foreign_keys=lambda: [RagChunk.novelId],
     )
     ragDocuments: Mapped[list[RagDocument]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="novel",
         foreign_keys=lambda: [RagDocument.novelId],
     )
     referenceMaterials: Mapped[list[ReferenceMaterial]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="novel",
         foreign_keys=lambda: [ReferenceMaterial.novelId],
     )
     reviewArtifacts: Mapped[list[ReviewArtifact]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="novel",
         foreign_keys=lambda: [ReviewArtifact.novelId],
     )
     storyBackground: Mapped[StoryBackground | None] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="novel",
         foreign_keys=lambda: [StoryBackground.novelId],
     )
     workflowRuns: Mapped[list[WorkflowRun]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="novel",
         foreign_keys=lambda: [WorkflowRun.novelId],
     )
     worldSetting: Mapped[WorldSetting | None] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="novel",
         foreign_keys=lambda: [WorldSetting.novelId],
     )
     writingBible: Mapped[WritingBible | None] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="novel",
         foreign_keys=lambda: [WritingBible.novelId],
     )
     writingConfig: Mapped[WritingConfig | None] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="novel",
         foreign_keys=lambda: [WritingConfig.novelId],
     )
     writingSessions: Mapped[list[WritingSession]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="novel",
         foreign_keys=lambda: [WritingSession.novelId],
     )
     writingTasks: Mapped[list[WritingTask]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="novel",
         foreign_keys=lambda: [WritingTask.novelId],
     )
@@ -1212,6 +1287,7 @@ class OutlineNode(Base):
         remote_side=lambda: [OutlineNode.id],
     )
     children: Mapped[list[OutlineNode]] = relationship(
+        passive_deletes=True,
         back_populates="parent",
         foreign_keys=lambda: [OutlineNode.parentId],
     )
@@ -1360,6 +1436,8 @@ class RagDocument(Base):
     )
 
     chunks: Mapped[list[RagChunk]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="document",
         foreign_keys=lambda: [RagChunk.documentId],
     )
@@ -1543,10 +1621,14 @@ class ReviewArtifact(Base):
         foreign_keys=lambda: [ReviewArtifact.workflowRunId],
     )
     evaluations: Mapped[list[ReviewArtifactEvaluation]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="artifact",
         foreign_keys=lambda: [ReviewArtifactEvaluation.artifactId],
     )
     revisions: Mapped[list[ReviewArtifactRevision]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="artifact",
         foreign_keys=lambda: [ReviewArtifactRevision.artifactId],
     )
@@ -1872,14 +1954,19 @@ class User(Base):
     username: Mapped[str] = mapped_column(Text, nullable=False)
 
     creditLedgerEntries: Mapped[list[CreditLedger]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="user",
         foreign_keys=lambda: [CreditLedger.userId],
     )
     novels: Mapped[list[Novel]] = relationship(
+        passive_deletes=True,
         back_populates="user",
         foreign_keys=lambda: [Novel.userId],
     )
     tokenUsages: Mapped[list[TokenUsage]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="user",
         foreign_keys=lambda: [TokenUsage.userId],
     )
@@ -1952,6 +2039,7 @@ class WorkflowRun(Base):
     userId: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     reviewArtifacts: Mapped[list[ReviewArtifact]] = relationship(
+        passive_deletes=True,
         back_populates="workflowRun",
         foreign_keys=lambda: [ReviewArtifact.workflowRunId],
     )
@@ -1960,6 +2048,8 @@ class WorkflowRun(Base):
         foreign_keys=lambda: [WorkflowRun.novelId],
     )
     steps: Mapped[list[WorkflowStep]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="run",
         foreign_keys=lambda: [WorkflowStep.runId],
     )
@@ -2253,6 +2343,8 @@ class WritingSession(Base):
     )
 
     messages: Mapped[list[WritingMessage]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="session",
         foreign_keys=lambda: [WritingMessage.sessionId],
     )
@@ -2265,6 +2357,7 @@ class WritingSession(Base):
         foreign_keys=lambda: [WritingSession.novelId],
     )
     tasks: Mapped[list[WritingTask]] = relationship(
+        passive_deletes=True,
         back_populates="writingSession",
         foreign_keys=lambda: [WritingTask.writingSessionId],
     )
@@ -2312,14 +2405,19 @@ class WritingStyle(Base):
     usedCharCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
 
     novels: Mapped[list[Novel]] = relationship(
+        passive_deletes=True,
         back_populates="appliedStyle",
         foreign_keys=lambda: [Novel.appliedStyleId],
     )
     tasks: Mapped[list[StylePortraitTask]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="style",
         foreign_keys=lambda: [StylePortraitTask.styleId],
     )
     references: Mapped[list[StyleReference]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
         back_populates="style",
         foreign_keys=lambda: [StyleReference.styleId],
     )
@@ -2401,6 +2499,7 @@ class WritingTask(Base):
     )
 
     reviewArtifacts: Mapped[list[ReviewArtifact]] = relationship(
+        passive_deletes=True,
         back_populates="task",
         foreign_keys=lambda: [ReviewArtifact.taskId],
     )

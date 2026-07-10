@@ -699,6 +699,42 @@ async def test_shared_engine_schema_verification_never_disposes_main_pool(
     ]
 
 
+async def test_temporary_guard_engine_uses_shared_url_normalization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    contract_path = tmp_path / "schema-contract.json"
+    expected = sample_contract()
+    contract_path.write_text(
+        json.dumps(add_contract_fingerprint(expected)), encoding="utf-8"
+    )
+    engine = FakeEngine(RecordingConnection(catalog_result_sets()))
+    captured: dict[str, Any] = {}
+
+    def create_engine(url: object, **kwargs: object) -> FakeEngine:
+        captured["url"] = url
+        captured.update(kwargs)
+        return engine
+
+    async def exact_inspection(*args: object, **kwargs: object) -> dict[str, Any]:
+        return copy.deepcopy(expected)
+
+    monkeypatch.setattr(schema_guard, "create_async_engine", create_engine)
+    monkeypatch.setattr(schema_guard, "inspect_schema", exact_inspection)
+
+    result = await verify_live_schema(
+        "postgresql://user:credential@database/inkforge?sslmode=allow&application_name=schema-guard",
+        contract_path,
+    )
+
+    assert result.ready is True
+    assert captured["url"].drivername == "postgresql+asyncpg"
+    assert captured["url"].query == {}
+    assert captured["connect_args"] == {
+        "ssl": "allow",
+        "server_settings": {"application_name": "schema-guard"},
+    }
+
+
 async def test_export_refuses_existing_file_by_default_and_overwrites_atomically(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
