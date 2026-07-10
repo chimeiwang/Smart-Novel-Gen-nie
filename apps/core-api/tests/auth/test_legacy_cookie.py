@@ -26,17 +26,15 @@ def test_session_token_uses_hs256_string_subject_and_thirty_day_lifetime() -> No
 
 
 def test_python_accepts_legacy_jose_cookie_without_new_claims() -> None:
-    jwt_key = TEST_JWT_KEY
-    now = datetime.now(UTC)
-    legacy_token = jwt.encode(
-        {"sub": "legacy-user", "iat": now, "exp": now + timedelta(days=30)},
-        jwt_key,
-        algorithm="HS256",
-        headers={"typ": "JWT"},
+    # 该夹具由仓库当前 jose 使用固定声明和 HS256 直接生成。
+    node_jose_fixture = (
+        "eyJhbGciOiJIUzI1NiJ9."
+        "eyJzdWIiOiJsZWdhY3ktdXNlciIsImlhdCI6MTcwMDAwMDAwMCwiZXhwIjo0MTAyNDQ0ODAwfQ."
+        "g4qCrC8KNtFeH0fwQQEvn2TFb-V1mXpEPwePYy5NRUg"
     )
-    service = build_service(empty_repository(), jwt_key=jwt_key)
+    service = build_service(empty_repository(), jwt_key=TEST_JWT_KEY)
 
-    assert service.verify_session_token(legacy_token) == "legacy-user"
+    assert service.verify_session_token(node_jose_fixture) == "legacy-user"
 
 
 def test_legacy_verifier_can_read_python_token() -> None:

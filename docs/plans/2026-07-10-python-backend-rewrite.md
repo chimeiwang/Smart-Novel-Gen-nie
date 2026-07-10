@@ -455,7 +455,7 @@ git commit -m "功能：保护核心服务与智能体服务调用"
 
 - [ ] **步骤 1：编写失败的行为一致性测试**
 
-覆盖用户名规范化和正则表达式、密码最短长度、重复用户名、bcryptjs 哈希验证、HS256 Cookie 兼容、30 天有效期、安全生产 Cookie、统一无效登录错误、注册赠送余额和 CreditLedger 事务。
+覆盖用户名规范化和正则表达式、密码最短长度、bcryptjs 的 UTF-8 前 72 字节兼容语义、重复用户名、bcryptjs 固定哈希验证、jose 固定 Cookie 兼容、30 天有效期、安全生产 Cookie、可信代理地址解析、双桶 Redis 限流、统一无效登录错误、注册赠送余额和 CreditLedger 事务。
 
 - [ ] **步骤 2：确认失败**
 
@@ -465,7 +465,7 @@ git commit -m "功能：保护核心服务与智能体服务调用"
 
 - [ ] **步骤 3：实现认证接口**
 
-实现 `/api/v1/auth/register`、`/login`、`/logout` 和 `/me`。保留 `inkforge-token`、HS256 和 `sub=userId`。生产环境拒绝旧默认密钥。注册在同一个成功请求中创建 User、把 `creditBalanceMicros` 增加 `1_000_000_000`、写入 `signup_bonus` 并设置 Cookie。
+实现 `/api/v1/auth/register`、`/login`、`/logout` 和 `/me`。保留 `inkforge-token`、HS256 和 `sub=userId`。生产环境拒绝旧默认密钥和少于 32 个 UTF-8 字节的密钥，并要求配置可信代理网段。注册在同一个成功请求中创建 User、把 `creditBalanceMicros` 增加 `1_000_000_000`、写入 `signup_bonus` 并设置 Cookie。登录和注册使用来源桶加来源/账号桶，两个桶通过 Redis Lua 原子检查；Redis 故障时认证请求失败关闭。
 
 - [ ] **步骤 4：确认通过并验证未授权资源行为**
 

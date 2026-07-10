@@ -4,6 +4,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, Response, status
 
+from ..config import Settings
+from .client_ip import resolve_client_identity
 from .dependencies import get_auth_service, get_current_user
 from .repository import AuthUser
 from .schemas import LoginRequest, RegisterRequest, UserResponse
@@ -85,4 +87,5 @@ def _user_response(user: AuthUser) -> UserResponse:
 
 
 def _client_identity(request: Request) -> str:
-    return request.client.host if request.client is not None else "unknown"
+    settings: Settings = request.app.state.settings
+    return resolve_client_identity(request, settings.trusted_proxy_cidrs)

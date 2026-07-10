@@ -9,7 +9,8 @@ PRODUCTION_VALUES = {
     "environment": "production",
     "database_url": "postgresql://user:password@database:5432/inkforge",
     "redis_url": "redis://:redis-secret@redis:6379/0",
-    "jwt_secret": "production-only-secret",
+    "jwt_secret": "production-only-secret-at-least-32-bytes",
+    "trusted_proxy_cidrs": ["172.16.0.0/12"],
     "core_service_private_key_path": "/run/secrets/core-private.pem",
     "agent_service_public_key_path": "/run/secrets/agent-public.pem",
     "agent_service_url": "http://agent-service:8001",
@@ -19,13 +20,14 @@ CRITICAL_FIELDS = [
     "database_url",
     "redis_url",
     "jwt_secret",
+    "trusted_proxy_cidrs",
     "core_service_private_key_path",
     "agent_service_public_key_path",
     "agent_service_url",
 ]
 
 
-def production_settings(**overrides: str | None) -> Settings:
+def production_settings(**overrides: object) -> Settings:
     values: dict[str, object] = dict(PRODUCTION_VALUES)
     values.update(overrides)
     return Settings.model_validate(values)
@@ -48,6 +50,42 @@ def test_production_accepts_complete_explicit_configuration() -> None:
     assert isinstance(settings.redis_url, SecretStr)
     assert isinstance(settings.jwt_secret, SecretStr)
     assert settings.jwt_secret.get_secret_value() == PRODUCTION_VALUES["jwt_secret"]
+    assert settings.trusted_proxy_cidrs == ("172.16.0.0/12",)
+
+
+def test_production_rejects_short_jwt_secret_without_echoing_it() -> None:
+    short_jwt_key = "不可用于生产"
+    with pytest.raises(ValidationError) as caught:
+        production_settings(jwt_secret=short_jwt_key)
+
+    rendered_error = str(caught.value)
+    assert "至少需要 32 个 UTF-8 字节" in rendered_error
+    assert short_jwt_key not in rendered_error
+
+
+def test_trusted_proxy_cidrs_accept_comma_separated_environment_value() -> None:
+    settings = Settings.model_validate(
+        {
+            "environment": "dev",
+            "trusted_proxy_cidrs": "172.16.0.0/12, 2001:db8::/32",
+        }
+    )
+    assert settings.trusted_proxy_cidrs == ("172.16.0.0/12", "2001:db8::/32")
+
+
+def test_trusted_proxy_cidrs_load_from_comma_separated_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TRUSTED_PROXY_CIDRS", "172.16.0.0/12,2001:db8::/32")
+    settings = Settings(environment="dev")
+    assert settings.trusted_proxy_cidrs == ("172.16.0.0/12", "2001:db8::/32")
+
+
+def test_invalid_trusted_proxy_cidr_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="可信代理网段无效"):
+        Settings.model_validate(
+            {"environment": "dev", "trusted_proxy_cidrs": ["不是网段"]}
+        )
 
 
 def test_sensitive_settings_are_masked_in_repr_dump_and_validation_error() -> None:
@@ -98,6 +136,7 @@ def test_testing_app_does_not_read_bad_production_environment(
     assert settings.database_url is None
     assert settings.redis_url is None
     assert settings.jwt_secret is None
+    assert settings.trusted_proxy_cidrs == ()
     assert settings.core_service_private_key_path is None
     assert settings.agent_service_public_key_path is None
     assert settings.agent_service_url is None

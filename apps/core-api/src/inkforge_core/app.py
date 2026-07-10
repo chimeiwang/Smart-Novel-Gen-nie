@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from .auth import router as auth_router
+from .auth.readiness import RedisReadiness
 from .auth.repository import AuthRepository
 from .auth.service import AuthService, RedisRateLimiter
 from .config import OLD_DEFAULT_JWT_SECRET, Settings, create_testing_settings
@@ -45,6 +46,9 @@ def _configure_auth(app: FastAPI, settings: Settings) -> None:
         else OLD_DEFAULT_JWT_SECRET
     )
     app.state.auth_redis = redis
+    redis_readiness = RedisReadiness(redis)
+    app.state.redis_readiness = redis_readiness
+    register_readiness_check(app, "redis", redis_readiness.check)
     app.state.auth_service = AuthService(
         repository=AuthRepository(session_factory),
         rate_limiter=RedisRateLimiter(redis),

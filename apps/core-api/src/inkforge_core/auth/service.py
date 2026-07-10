@@ -20,12 +20,27 @@ SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 _USERNAME_PATTERN = re.compile(r"^[a-z0-9_-]{3,32}$")
 _DUMMY_PASSWORD_HASH = "$2b$12$" + "C6UzMDM.H6dfI/f/IKcEe.5mGuDVYXrHD1Lh5MJ5CnCGg9iMi2D0S"
 _RATE_LIMIT_SCRIPT = """
-local count = redis.call('INCR', KEYS[1])
-if count == 1 then
+local source_count = redis.call('INCR', KEYS[1])
+if source_count == 1 then
   redis.call('PEXPIRE', KEYS[1], ARGV[2])
 end
-local ttl = redis.call('PTTL', KEYS[1])
-return {count, ttl}
+local account_count = redis.call('INCR', KEYS[2])
+if account_count == 1 then
+  redis.call('PEXPIRE', KEYS[2], ARGV[4])
+end
+local source_ttl = redis.call('PTTL', KEYS[1])
+local account_ttl = redis.call('PTTL', KEYS[2])
+local blocked = 0
+local retry_ms = 0
+if source_count > tonumber(ARGV[1]) then
+  blocked = 1
+  retry_ms = math.max(retry_ms, source_ttl)
+end
+if account_count > tonumber(ARGV[3]) then
+  blocked = 1
+  retry_ms = math.max(retry_ms, account_ttl)
+end
+return {blocked, retry_ms, source_count, account_count}
 """
 
 
@@ -38,21 +53,31 @@ class AsyncRedisRateLimit(Protocol):
         self,
         script: str,
         key_count: int,
-        key: str,
-        limit: int,
-        window_ms: int,
+        *args: object,
     ) -> object: ...
 
 
 @dataclass(frozen=True, slots=True)
 class RateLimitPolicy:
-    limit: int
-    window_ms: int
+    source_limit: int
+    source_window_ms: int
+    account_limit: int
+    account_window_ms: int
 
 
 RATE_LIMIT_POLICIES: dict[Literal["login", "register"], RateLimitPolicy] = {
-    "login": RateLimitPolicy(limit=5, window_ms=60_000),
-    "register": RateLimitPolicy(limit=3, window_ms=3_600_000),
+    "login": RateLimitPolicy(
+        source_limit=20,
+        source_window_ms=60_000,
+        account_limit=5,
+        account_window_ms=60_000,
+    ),
+    "register": RateLimitPolicy(
+        source_limit=3,
+        source_window_ms=3_600_000,
+        account_limit=3,
+        account_window_ms=3_600_000,
+    ),
 }
 
 
@@ -69,29 +94,34 @@ class RedisRateLimiter:
         username: str,
     ) -> None:
         policy = RATE_LIMIT_POLICIES[action]
-        identity_digest = hashlib.sha256(
+        source_digest = hashlib.sha256(client_identity.encode()).hexdigest()
+        account_digest = hashlib.sha256(
             f"{client_identity}\0{username}".encode()
         ).hexdigest()
-        key = f"{self._key_prefix}{action}:{identity_digest}"
+        source_key = f"{self._key_prefix}{action}:source:{source_digest}"
+        account_key = f"{self._key_prefix}{action}:account:{account_digest}"
         try:
             raw_result = await self._redis.eval(
                 _RATE_LIMIT_SCRIPT,
-                1,
-                key,
-                policy.limit,
-                policy.window_ms,
+                2,
+                source_key,
+                account_key,
+                policy.source_limit,
+                policy.source_window_ms,
+                policy.account_limit,
+                policy.account_window_ms,
             )
             result = cast(list[object] | tuple[object, ...], raw_result)
-            count = int(cast(int | bytes | str, result[0]))
-            ttl_ms = int(cast(int | bytes | str, result[1]))
+            blocked = bool(int(cast(int | bytes | str, result[0])))
+            retry_ms = int(cast(int | bytes | str, result[1]))
         except Exception as exc:
             raise ApiError(
                 status_code=503,
                 code="RATE_LIMIT_UNAVAILABLE",
                 message="认证服务暂时不可用",
             ) from exc
-        if count > policy.limit:
-            retry_after = max(1, math.ceil(max(ttl_ms, 0) / 1000))
+        if blocked:
+            retry_after = max(1, math.ceil(max(retry_ms, 0) / 1000))
             raise ApiError(
                 status_code=429,
                 code="RATE_LIMITED",
@@ -113,6 +143,8 @@ class AuthService:
             raise ValueError("会话签名密钥不能为空")
         if environment == "production" and jwt_secret == OLD_DEFAULT_JWT_SECRET:
             raise ValueError("生产环境禁止使用旧默认会话签名密钥")
+        if environment == "production" and len(jwt_secret.encode()) < 32:
+            raise ValueError("生产环境会话签名密钥至少需要 32 个 UTF-8 字节")
         self._repository = repository
         self._rate_limiter = rate_limiter
         self._jwt_secret = jwt_secret
@@ -149,13 +181,6 @@ class AuthService:
                 status_code=400,
                 code="PASSWORD_MISMATCH",
                 message="两次输入的密码不一致",
-            )
-        password_bytes = _encode_password(password)
-        if len(password_bytes) > 72:
-            raise ApiError(
-                status_code=400,
-                code="PASSWORD_TOO_LONG",
-                message="密码的 UTF-8 编码不能超过 72 字节",
             )
         password_hash = await hash_password(password)
         try:
@@ -243,9 +268,8 @@ def utf16_code_unit_length(value: str) -> int:
 
 
 async def hash_password(password: str) -> str:
-    password_bytes = _encode_password(password)
-    if len(password_bytes) > 72:
-        raise ValueError("密码的 UTF-8 编码不能超过 72 字节")
+    # bcryptjs 历史实现按 UTF-8 字节截取前 72 字节；注册必须保持同一兼容语义。
+    password_bytes = _encode_password(password)[:72]
     hashed = await asyncio.to_thread(bcrypt.hashpw, password_bytes, bcrypt.gensalt(rounds=12))
     return hashed.decode("ascii")
 

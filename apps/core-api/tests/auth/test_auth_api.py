@@ -72,22 +72,24 @@ class FakeRepository:
 
 class FakeRedis:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, int, int]] = []
+        self.calls: list[tuple[str, int, tuple[object, ...]]] = []
         self.results: list[list[int]] = []
         self.error: Exception | None = None
         self.closed = False
+        self.ping_result: bool | Exception = True
 
-    async def eval(
-        self, script: str, key_count: int, key: str, limit: int, window_ms: int
-    ) -> list[int]:
-        del script
-        assert key_count == 1
-        self.calls.append((key, limit, window_ms))
+    async def eval(self, script: str, key_count: int, *args: object) -> list[int]:
+        self.calls.append((script, key_count, args))
         if self.error is not None:
             raise self.error
         if self.results:
             return self.results.pop(0)
-        return [1, window_ms]
+        return [0, 0, 1, 1]
+
+    async def ping(self) -> bool:
+        if isinstance(self.ping_result, Exception):
+            raise self.ping_result
+        return self.ping_result
 
     async def aclose(self) -> None:
         self.closed = True
@@ -205,18 +207,38 @@ async def test_register_does_not_trim_password_and_requires_exact_confirmation()
 
 
 @pytest.mark.asyncio
-async def test_register_rejects_new_password_over_bcrypt_utf8_limit() -> None:
-    password = "密" * 25
-    assert len(password.encode("utf-8")) == 75
-    async with auth_client(build_service(empty_repository())) as (_, client):
+async def test_register_preserves_bcryptjs_truncation_for_password_over_72_bytes() -> None:
+    shared_prefix = "a" * 72
+    password = shared_prefix + "第一个后缀"
+    compatible_password = shared_prefix + "另一个后缀"
+    repository = empty_repository()
+    async with auth_client(build_service(repository)) as (_, client):
         response = await client.post(
             "/api/v1/auth/register",
             json={"username": "alice", "password": password, "confirmPassword": password},
         )
 
-    assert response.status_code == 400
-    assert response.json()["code"] == "PASSWORD_TOO_LONG"
-    assert "set-cookie" not in response.headers
+    assert response.status_code == 201
+    created = repository.users_by_name["alice"]
+    assert await verify_password(password, created.password_hash) is True
+    assert await verify_password(compatible_password, created.password_hash) is True
+
+
+@pytest.mark.asyncio
+async def test_auth_input_rejects_unreasonably_large_password() -> None:
+    oversized_password = "a" * 4097
+    async with auth_client(build_service(empty_repository())) as (_, client):
+        response = await client.post(
+            "/api/v1/auth/register",
+            json={
+                "username": "alice",
+                "password": oversized_password,
+                "confirmPassword": oversized_password,
+            },
+        )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
 
 
 @pytest.mark.asyncio
@@ -365,6 +387,13 @@ async def test_legacy_bcryptjs_verification_truncates_utf8_to_72_bytes() -> None
 
 
 @pytest.mark.asyncio
+async def test_node_bcryptjs_fixed_hash_is_accepted() -> None:
+    # 该夹具由仓库当前 bcryptjs 使用固定成本和固定盐直接生成。
+    node_bcryptjs_hash = "$2b$12$abcdefghijklmnopqrstuu54EclbqC8XduEGLYgonKPRJ3bZnTXsi"
+    assert await verify_password("a" * 72 + "后缀", node_bcryptjs_hash) is True
+
+
+@pytest.mark.asyncio
 async def test_cookie_security_attributes_follow_environment() -> None:
     password_hash = await hash_password("123456")
     user = AuthUser("user-1", "alice", password_hash, 0)
@@ -492,6 +521,8 @@ async def test_application_configures_small_bounded_redis_pool(
         )
     )
     try:
+        assert "redis" in app.state.readiness_checks
+        assert await app.state.readiness_checks["redis"]() is True
         assert captured == {
             "url": "redis://redis:6379/0",
             "decode_responses": False,
@@ -506,7 +537,7 @@ async def test_application_configures_small_bounded_redis_pool(
 @pytest.mark.asyncio
 async def test_rate_limit_key_does_not_include_plain_username_and_has_retry_after() -> None:
     redis = FakeRedis()
-    redis.results = [[6, 31_000]]
+    redis.results = [[1, 31_000, 6, 6]]
     async with auth_client(build_service(empty_repository(), redis=redis)) as (_, client):
         response = await client.post(
             "/api/v1/auth/login",
@@ -517,10 +548,13 @@ async def test_rate_limit_key_does_not_include_plain_username_and_has_retry_afte
     assert response.headers["retry-after"] == "31"
     assert response.json()["code"] == "RATE_LIMITED"
     assert len(redis.calls) == 1
-    key, limit, window_ms = redis.calls[0]
-    assert "sensitive_user" not in key
-    assert limit == 5
-    assert window_ms == 60_000
+    _, key_count, args = redis.calls[0]
+    source_key, account_key, source_limit, source_window, account_limit, account_window = args
+    assert key_count == 2
+    assert "sensitive_user" not in str(source_key)
+    assert "sensitive_user" not in str(account_key)
+    assert (source_limit, source_window) == (20, 60_000)
+    assert (account_limit, account_window) == (5, 60_000)
 
 
 @pytest.mark.asyncio
@@ -533,9 +567,9 @@ async def test_register_uses_separate_rate_limit_strategy() -> None:
         )
 
     assert response.status_code == 201
-    _, limit, window_ms = redis.calls[0]
-    assert limit == 3
-    assert window_ms == 3_600_000
+    _, key_count, args = redis.calls[0]
+    assert key_count == 2
+    assert args[2:] == (3, 3_600_000, 3, 3_600_000)
 
 
 @pytest.mark.asyncio
@@ -573,6 +607,7 @@ def test_production_rejects_old_default_browser_jwt_secret() -> None:
         "database_url": "postgresql://user:password@database:5432/inkforge",
         "redis_url": "redis://redis:6379/0",
         "jwt_secret": OLD_DEFAULT_JWT_SECRET,
+        "trusted_proxy_cidrs": ["172.16.0.0/12"],
         "core_service_private_key_path": "/run/secrets/core-private.pem",
         "agent_service_public_key_path": "/run/secrets/agent-public.pem",
         "agent_service_url": "http://agent-service:8001",
@@ -670,7 +705,27 @@ async def test_repository_rolls_back_user_when_ledger_insert_fails() -> None:
 async def test_public_auth_schema_does_not_expose_secrets() -> None:
     app = create_app(testing=True)
     schema = app.openapi()
-    serialized = str(schema)
-    assert "passwordHash" not in serialized
-    assert "jwt_secret" not in serialized
-    assert '"token"' not in serialized
+    forbidden_keys = {"passwordHash", "jwt_secret", "token", "secret"}
+
+    def collect_keys(value: object) -> set[str]:
+        if isinstance(value, dict):
+            return set(value) | {
+                nested_key
+                for nested_value in value.values()
+                for nested_key in collect_keys(nested_value)
+            }
+        if isinstance(value, list):
+            return {
+                nested_key
+                for nested_value in value
+                for nested_key in collect_keys(nested_value)
+            }
+        return set()
+
+    assert forbidden_keys.isdisjoint(collect_keys(schema))
+    components = schema["components"]["schemas"]
+    for request_schema in ("LoginRequest", "RegisterRequest"):
+        password_schema = components[request_schema]["properties"]["password"]
+        assert password_schema["format"] == "password"
+        assert password_schema["writeOnly"] is True
+        assert password_schema["maxLength"] == 4096
