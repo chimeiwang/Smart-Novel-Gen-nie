@@ -21,6 +21,7 @@ members = [
 ]
 
 [tool.pytest.ini_options]
+addopts = ["--strict-config", "--strict-markers"]
 asyncio_mode = "auto"
 testpaths = [
     "tests",
