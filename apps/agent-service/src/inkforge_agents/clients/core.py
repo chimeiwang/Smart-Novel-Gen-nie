@@ -257,6 +257,71 @@ class CoreServiceClient:
             idempotency_key=request_id,
         )
 
+    async def get_rag_context(
+        self,
+        resource: RunResource,
+        reference_id: str,
+        content_hash: str,
+    ) -> dict[str, Any]:
+        payload = {
+            "userId": resource.userId,
+            "taskId": resource.taskId,
+            "runId": resource.runId,
+            "expectedContentHash": content_hash,
+        }
+        return await self._request(
+            "POST",
+            f"/internal/v1/novels/{resource.novelId}/references/{reference_id}/index-context",
+            payload,
+            scope=ServiceScope.RAG_INDEX_WRITE,
+            resource=resource,
+            idempotency_key=_idempotency(resource.runId, "rag-context", reference_id, content_hash),
+        )
+
+    async def complete_rag(
+        self,
+        resource: RunResource,
+        reference_id: str,
+        content_hash: str,
+        embeddings: list[list[float]],
+    ) -> None:
+        payload = {
+            "taskId": resource.taskId,
+            "runId": resource.runId,
+            "expectedContentHash": content_hash,
+            "embeddings": embeddings,
+        }
+        await self._request(
+            "PUT",
+            f"/internal/v1/novels/{resource.novelId}/references/{reference_id}/index-success",
+            payload,
+            scope=ServiceScope.RAG_INDEX_WRITE,
+            resource=resource,
+            idempotency_key=_idempotency(resource.runId, "rag-success", reference_id, content_hash),
+        )
+
+    async def fail_rag(
+        self,
+        resource: RunResource,
+        reference_id: str,
+        content_hash: str,
+        message: str,
+    ) -> None:
+        payload = {
+            "taskId": resource.taskId,
+            "runId": resource.runId,
+            "expectedContentHash": content_hash,
+            "message": message,
+        }
+        await self._request(
+            "PUT",
+            f"/internal/v1/novels/{resource.novelId}/references/{reference_id}/index-failure",
+            payload,
+            scope=ServiceScope.RAG_INDEX_WRITE,
+            resource=resource,
+            idempotency_key=_idempotency(resource.runId, "rag-failure", reference_id, content_hash),
+        )
+
     async def _request(
         self,
         method: str,

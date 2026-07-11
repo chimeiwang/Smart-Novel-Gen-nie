@@ -12,6 +12,8 @@ from .router import get_reference_service
 from .schemas import (
     CompleteReferenceIndexRequest,
     FailReferenceIndexRequest,
+    ReferenceIndexContextRequest,
+    ReferenceIndexContextResponse,
     ReferenceMaterialResponse,
 )
 from .service import ReferenceService
@@ -121,6 +123,34 @@ async def complete_reference_index(
         body.expectedContentHash,
         body.embeddings,
     )
+
+
+@router.post(
+    "/novels/{novel_id}/references/{reference_id}/index-context",
+    response_model=ReferenceIndexContextResponse,
+)
+async def get_reference_index_context(
+    novel_id: str,
+    reference_id: str,
+    body: ReferenceIndexContextRequest,
+    request: Request,
+    verifier: Verifier,
+    service: Service,
+) -> ReferenceIndexContextResponse:
+    await _verify_callback(
+        request,
+        verifier,
+        task_id=body.taskId,
+        run_id=body.runId,
+        novel_id=novel_id,
+    )
+    value = await service.get_index_context(
+        body.userId,
+        novel_id,
+        reference_id,
+        body.expectedContentHash,
+    )
+    return ReferenceIndexContextResponse.model_validate(value)
 
 
 @router.put(

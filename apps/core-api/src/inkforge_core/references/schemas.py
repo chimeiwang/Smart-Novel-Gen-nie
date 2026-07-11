@@ -60,6 +60,18 @@ class FailReferenceIndexRequest(StrictModel):
     message: str = Field(min_length=1, max_length=1000)
 
 
+class ReferenceIndexContextRequest(StrictModel):
+    userId: str = Field(min_length=1, max_length=256)
+    taskId: str = Field(min_length=1, max_length=256)
+    runId: str = Field(min_length=1, max_length=256)
+    expectedContentHash: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+
+
+class ReferenceIndexContextResponse(StrictModel):
+    contentHash: Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
+    chunks: list[str] = Field(max_length=64)
+
+
 class RagSearchResult(StrictModel):
     title: str
     sourceId: str

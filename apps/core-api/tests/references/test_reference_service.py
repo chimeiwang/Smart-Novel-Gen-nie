@@ -43,18 +43,26 @@ class RecordingRepository:
     async def mark_index_failed(self, novel_id, reference_id, expected_content_hash, message):
         self.failed = (novel_id, reference_id, expected_content_hash, message)
 
+    async def require_reference(self, novel_id, user_id, reference_id):
+        assert (novel_id, user_id, reference_id) == ("novel-1", "user-1", "reference-1")
+        return {"content": "甲" * 1800 + "乙", "contentHash": HASH}
+
 
 class RecordingSubmitter:
     def __init__(self) -> None:
-        self.jobs: list[tuple[str, str, str]] = []
+        self.jobs: list[tuple[str, str, str, str]] = []
 
-    async def submit(self, novel_id: str, reference_id: str, content_hash: str) -> None:
-        self.jobs.append((novel_id, reference_id, content_hash))
+    async def submit(
+        self, user_id: str, novel_id: str, reference_id: str, content_hash: str
+    ) -> None:
+        self.jobs.append((user_id, novel_id, reference_id, content_hash))
 
 
 class FailingSubmitter:
-    async def submit(self, novel_id: str, reference_id: str, content_hash: str) -> None:
-        del novel_id, reference_id, content_hash
+    async def submit(
+        self, user_id: str, novel_id: str, reference_id: str, content_hash: str
+    ) -> None:
+        del user_id, novel_id, reference_id, content_hash
         raise RuntimeError("队列不可用")
 
 
@@ -82,7 +90,18 @@ async def test_configured_indexer_receives_saved_reference_id() -> None:
         "novel-1",
         CreateReferenceRequest(title="资料", type="book", content="正文", sourceUrl=None),
     )
-    assert submitter.jobs == [("novel-1", "reference-1", result.contentHash)]
+    assert submitter.jobs == [("user-1", "novel-1", "reference-1", result.contentHash)]
+
+
+@pytest.mark.asyncio
+async def test_index_context_revalidates_owner_hash_and_returns_lossless_chunks() -> None:
+    service = ReferenceService(RecordingRepository(), submitter=None)  # type: ignore[arg-type]
+
+    context = await service.get_index_context(
+        "user-1", "novel-1", "reference-1", HASH
+    )
+
+    assert context == {"contentHash": HASH, "chunks": ["甲" * 1800, "乙"]}
 
 
 @pytest.mark.asyncio

@@ -22,6 +22,9 @@ INTERNAL_SUCCESS_PATH = (
 INTERNAL_FAILURE_PATH = (
     "/internal/v1/novels/novel-1/references/reference-1/index-failure"
 )
+INTERNAL_CONTEXT_PATH = (
+    "/internal/v1/novels/novel-1/references/reference-1/index-context"
+)
 
 
 class RecordingVerifier:
@@ -68,6 +71,10 @@ class RecordingService:
 
     async def fail_index(self, novel_id, reference_id, expected_hash, message):
         self.failed = (novel_id, reference_id, expected_hash, message)
+
+    async def get_index_context(self, user_id, novel_id, reference_id, expected_hash):
+        self.context = (user_id, novel_id, reference_id, expected_hash)
+        return {"contentHash": expected_hash, "chunks": ["正文"]}
 
 
 def headers(body: bytes) -> dict[str, str]:
@@ -271,6 +278,29 @@ def test_failure_callback_uses_same_signed_boundary() -> None:
     assert response.status_code == 204
     assert verifier.kwargs["required_scope"] is ServiceScope.RAG_INDEX_WRITE
     assert service.failed == ("novel-1", "reference-1", HASH, "嵌入服务失败")
+
+
+def test_index_context_revalidates_user_and_signed_resources() -> None:
+    app = internal_app()
+    verifier = RecordingVerifier()
+    service = RecordingService()
+    app.state.rag_callback_verifier = verifier
+    app.state.reference_service = service
+    body = (
+        '{"userId":"user-1","taskId":"task-1","runId":"run-1",'
+        '"expectedContentHash":"' + HASH + '"}'
+    ).encode()
+
+    response = TestClient(app, client=("127.0.0.1", 50000)).post(
+        INTERNAL_CONTEXT_PATH,
+        content=body,
+        headers=headers(body),
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"contentHash": HASH, "chunks": ["正文"]}
+    assert verifier.kwargs["required_scope"] is ServiceScope.RAG_INDEX_WRITE
+    assert service.context == ("user-1", "novel-1", "reference-1", HASH)
 
 
 def test_real_ed25519_callback_consumes_redis_replay_token(tmp_path) -> None:

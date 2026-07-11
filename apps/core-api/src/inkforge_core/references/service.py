@@ -4,13 +4,20 @@ import logging
 from typing import Any, Protocol
 
 from ..errors import ApiError
+from .rag import chunk_text_losslessly, validate_chunk_capacity
 from .schemas import CreateReferenceRequest, ReferenceMaterialResponse, UpdateReferenceRequest
 
 logger = logging.getLogger(__name__)
 
 
 class IndexSubmitter(Protocol):
-    async def submit(self, novel_id: str, reference_id: str, content_hash: str) -> None: ...
+    async def submit(
+        self,
+        user_id: str,
+        novel_id: str,
+        reference_id: str,
+        content_hash: str,
+    ) -> None: ...
 
 
 class ReferenceRepositoryPort(Protocol):
@@ -65,6 +72,7 @@ class ReferenceService:
         if self._submitter is not None:
             try:
                 await self._submitter.submit(
+                    user_id,
                     novel_id,
                     str(value["id"]),
                     str(value["contentHash"]),
@@ -93,6 +101,7 @@ class ReferenceService:
         if self._submitter is not None and {"title", "content"} & fields.keys():
             try:
                 await self._submitter.submit(
+                    user_id,
                     novel_id,
                     reference_id,
                     str(value["contentHash"]),
@@ -113,7 +122,7 @@ class ReferenceService:
             )
         content_hash = await self._repository.prepare_reindex(novel_id, user_id, reference_id)
         try:
-            await self._submitter.submit(novel_id, reference_id, content_hash)
+            await self._submitter.submit(user_id, novel_id, reference_id, content_hash)
         except Exception:
             await self._repository.mark_index_failed(
                 novel_id, reference_id, content_hash, "索引任务提交失败"
@@ -135,6 +144,27 @@ class ReferenceService:
             novel_id, reference_id, expected_content_hash, embeddings
         )
         return ReferenceMaterialResponse.model_validate(value)
+
+    async def get_index_context(
+        self,
+        user_id: str,
+        novel_id: str,
+        reference_id: str,
+        expected_content_hash: str,
+    ) -> dict[str, Any]:
+        value = await self._repository.require_reference(novel_id, user_id, reference_id)
+        content = value.get("content")
+        content_hash = value.get("contentHash")
+        if not isinstance(content, str) or content_hash != expected_content_hash:
+            raise ApiError(
+                status_code=409,
+                code="RAG_INDEX_STALE",
+                message="参考资料内容已变化，需要重新提交索引任务",
+            )
+        return {
+            "contentHash": expected_content_hash,
+            "chunks": validate_chunk_capacity(chunk_text_losslessly(content)),
+        }
 
     async def fail_index(
         self,

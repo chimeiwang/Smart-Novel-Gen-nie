@@ -14,12 +14,13 @@ from .clients.core import CoreBillingGateway, CoreServiceClient
 from .config import Settings, create_testing_settings
 from .graph.parent_graph import ParentGraphDependencies, build_parent_graph
 from .jobs.adapters import CoreArtifactPort, CoreGraphAgentExecutor, CoreToolGateway
+from .jobs.rag import OpenAIEmbeddingProvider, RagJobHandler
 from .jobs.writing import WritingJobHandler
 from .operations.graph import OperationDependencies, build_operation_graph
 from .providers.base import ModelProvider
 from .providers.selector import create_model_provider
-from .queue.consumer import QueueConsumer
-from .queue.repository import RedisRunQueue
+from .queue.consumer import JobHandler, QueueConsumer
+from .queue.repository import JobKind, RedisRunQueue
 from .runs.router import CoreRequestVerifier
 from .runs.router import router as runs_router
 from .runtime.agent_runner import AgentRunner
@@ -73,6 +74,12 @@ def create_app(
             )
             if core_http is not None:
                 await core_http.aclose()
+            embedding_http = cast(
+                httpx.AsyncClient | None,
+                getattr(app.state, "embedding_http", None),
+            )
+            if embedding_http is not None:
+                await embedding_http.aclose()
             redis = getattr(app.state, "redis", None)
             if redis is not None:
                 await redis.aclose()
@@ -190,6 +197,32 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                     operation_graph=build_operation_graph(dependencies),
                 )
                 app.state.model_runtime = model_runtime
-                app.state.queue_consumer = QueueConsumer(queue, {"writing": writing})
+                handlers: dict[JobKind, JobHandler] = {"writing": writing}
+                if (
+                    settings.rag_embedding_api_key is not None
+                    and settings.rag_embedding_base_url
+                    and settings.rag_embedding_model
+                ):
+                    embedding_base = settings.rag_embedding_base_url.rstrip("/")
+                    if not embedding_base.endswith("/v1"):
+                        embedding_base += "/v1"
+                    embedding_http = httpx.AsyncClient(
+                        base_url=embedding_base,
+                        headers={
+                            "Authorization": "Bearer "
+                            + settings.rag_embedding_api_key.get_secret_value()
+                        },
+                        timeout=httpx.Timeout(30, connect=3),
+                        limits=httpx.Limits(max_connections=2, max_keepalive_connections=1),
+                    )
+                    app.state.embedding_http = embedding_http
+                    handlers["rag"] = RagJobHandler(
+                        core,
+                        OpenAIEmbeddingProvider(
+                            embedding_http,
+                            model=settings.rag_embedding_model,
+                        ),
+                    )
+                app.state.queue_consumer = QueueConsumer(queue, handlers)
     except (OSError, ValueError) as exc:
         app.state.runtime_error = str(exc)

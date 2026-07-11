@@ -166,6 +166,7 @@ class RagAgentSubmitter:
 
     async def submit(
         self,
+        user_id: str,
         novel_id: str,
         reference_id: str,
         content_hash: str,
@@ -180,7 +181,7 @@ class RagAgentSubmitter:
                 runId=run_id,
                 taskId=run_id,
                 novelId=novel_id,
-                userId="system",
+                userId=user_id,
                 priority=30,
                 payload={
                     "referenceId": reference_id,
