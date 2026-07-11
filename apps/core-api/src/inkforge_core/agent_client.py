@@ -144,7 +144,14 @@ class PortraitAgentSubmitter:
     def __init__(self, client: AgentJobClient) -> None:
         self._client = client
 
-    async def submit(self, *, style_id: str, task_id: str, run_id: str) -> None:
+    async def submit(
+        self,
+        *,
+        user_id: str,
+        style_id: str,
+        task_id: str,
+        run_id: str,
+    ) -> None:
         await self._client.submit(
             AgentJobRequest(
                 protocolVersion="1.0",
@@ -153,7 +160,7 @@ class PortraitAgentSubmitter:
                 runId=run_id,
                 taskId=task_id,
                 novelId=f"style:{style_id}",
-                userId="system",
+                userId=user_id,
                 priority=20,
                 payload={"styleId": style_id},
             )

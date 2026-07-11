@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Mapping
 from typing import Any, Protocol
@@ -35,6 +36,9 @@ class StyleRepositoryPort(Protocol):
     async def delete_reference(self, style_id: str, reference_id: str) -> str: ...
     async def delete_style(self, style_id: str) -> list[str]: ...
     async def create_portrait_task(self, style_id: str) -> dict[str, Any]: ...
+    async def get_portrait_sources(
+        self, style_id: str, task_id: str
+    ) -> list[dict[str, Any]]: ...
     async def get_portrait_task(self, task_id: str) -> dict[str, Any]: ...
     async def transition_portrait_task(
         self,
@@ -50,7 +54,14 @@ class StyleRepositoryPort(Protocol):
 
 
 class PortraitRunSubmitter(Protocol):
-    async def submit(self, *, style_id: str, task_id: str, run_id: str) -> None: ...
+    async def submit(
+        self,
+        *,
+        user_id: str,
+        style_id: str,
+        task_id: str,
+        run_id: str,
+    ) -> None: ...
 
 
 class StyleService:
@@ -104,7 +115,7 @@ class StyleService:
         for path in paths:
             self._storage.delete(path)
 
-    async def create_portrait(self, style_id: str) -> PortraitAcceptedResponse:
+    async def create_portrait(self, user_id: str, style_id: str) -> PortraitAcceptedResponse:
         if self._submitter is None:
             raise ApiError(
                 status_code=503,
@@ -114,13 +125,51 @@ class StyleService:
         task = await self._repository.create_portrait_task(style_id)
         task_id = str(task["id"])
         try:
-            await self._submitter.submit(style_id=style_id, task_id=task_id, run_id=task_id)
+            await self._submitter.submit(
+                user_id=user_id,
+                style_id=style_id,
+                task_id=task_id,
+                run_id=task_id,
+            )
         except Exception:
             logger.warning(
                 "画像任务提交失败，保留待处理任务供后续对账",
                 extra={"code": "PORTRAIT_SUBMIT_FAILED", "taskId": task_id},
             )
         return PortraitAcceptedResponse(taskId=task_id, status="pending")
+
+    async def get_portrait_context(self, style_id: str, task_id: str) -> dict[str, Any]:
+        sources = await self._repository.get_portrait_sources(style_id, task_id)
+        if not sources:
+            raise ApiError(
+                status_code=409,
+                code="STYLE_REFERENCE_REQUIRED",
+                message="没有可用的文风参考资料",
+            )
+        parts: list[str] = []
+        original_count = 0
+        for source in sources:
+            path = source.get("filepath")
+            filename = source.get("filename")
+            char_count = source.get("charCount")
+            if not isinstance(path, str) or not isinstance(filename, str):
+                raise ApiError(
+                    status_code=409,
+                    code="STYLE_REFERENCE_INVALID",
+                    message="文风参考资料元数据无效",
+                )
+            resolved = self._storage.resolve(path)
+            content = await asyncio.to_thread(resolved.read_text, encoding="utf-8")
+            parts.append(f"参考资料：{filename}\n\n{content}")
+            original_count += (
+                char_count
+                if isinstance(char_count, int) and not isinstance(char_count, bool)
+                else sum(not character.isspace() for character in content)
+            )
+        return {
+            "sourceText": "\n\n".join(parts),
+            "originalCharCount": original_count,
+        }
 
     async def get_portrait_task(self, task_id: str) -> PortraitTaskResponse:
         return PortraitTaskResponse.model_validate(

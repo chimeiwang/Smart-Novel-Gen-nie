@@ -8,7 +8,7 @@ from datetime import datetime
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ..db.models import CreditLedger, Novel, TokenUsage, User, WritingTask
+from ..db.models import CreditLedger, Novel, StylePortraitTask, TokenUsage, User, WritingTask
 from .pricing import calculate_usage_cost_micros
 
 
@@ -87,6 +87,18 @@ class BillingRepository:
                 .where(User.id == user_id, Novel.id == novel_id, WritingTask.id == task_id)
             )
             balance = result.scalar_one_or_none()
+            if balance is None and novel_id.startswith("style:"):
+                style_id = novel_id.removeprefix("style:")
+                balance = (
+                    await session.execute(
+                        select(User.creditBalanceMicros)
+                        .join(StylePortraitTask, StylePortraitTask.id == task_id)
+                        .where(
+                            User.id == user_id,
+                            StylePortraitTask.styleId == style_id,
+                        )
+                    )
+                ).scalar_one_or_none()
         return None if balance is None else AuthorizationContext(int(balance))
 
     async def get_balance(self, user_id: str) -> int | None:

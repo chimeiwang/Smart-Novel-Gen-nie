@@ -92,8 +92,7 @@ async def delete_reference(
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def create_portrait(style_id: str, user: User, service: Service) -> PortraitAcceptedResponse:
-    del user
-    return await service.create_portrait(style_id)
+    return await service.create_portrait(user.id, style_id)
 
 
 @router.get("/portrait-tasks/{task_id}", response_model=PortraitTaskResponse)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 
 import httpx
@@ -99,7 +99,7 @@ class CoreServiceClient:
             sequence=sequence,
             event=event,
             data=data,
-            occurredAt=datetime.now(UTC),
+            occurredAt=_occurred_at(event_id),
         )
         await self._request(
             "POST",
@@ -125,7 +125,7 @@ class CoreServiceClient:
             taskId=resource.taskId,
             sequence=sequence,
             checkpoint=checkpoint,
-            occurredAt=datetime.now(UTC),
+            occurredAt=_occurred_at(event_id),
         )
         await self._request(
             "PUT",
@@ -151,7 +151,7 @@ class CoreServiceClient:
             taskId=resource.taskId,
             sequence=sequence,
             result=result,
-            occurredAt=datetime.now(UTC),
+            occurredAt=_occurred_at(event_id),
         )
         await self._request(
             "PUT",
@@ -181,7 +181,7 @@ class CoreServiceClient:
             code=code,
             message=message,
             recoverable=recoverable,
-            occurredAt=datetime.now(UTC),
+            occurredAt=_occurred_at(event_id),
         )
         await self._request(
             "PUT",
@@ -322,6 +322,66 @@ class CoreServiceClient:
             idempotency_key=_idempotency(resource.runId, "rag-failure", reference_id, content_hash),
         )
 
+    async def get_portrait_context(
+        self,
+        resource: RunResource,
+        style_id: str,
+    ) -> dict[str, Any]:
+        payload = {"runId": resource.runId}
+        return await self._request(
+            "POST",
+            f"/internal/v1/styles/{style_id}/portrait-tasks/{resource.taskId}/portrait-context",
+            payload,
+            scope=ServiceScope.PORTRAIT_WRITE,
+            resource=resource,
+            idempotency_key=_idempotency(resource.runId, "portrait-context", style_id),
+        )
+
+    async def mark_portrait_processing(
+        self,
+        resource: RunResource,
+        style_id: str,
+    ) -> None:
+        await self._request(
+            "PUT",
+            f"/internal/v1/styles/{style_id}/portrait-tasks/{resource.taskId}/processing",
+            {"runId": resource.runId},
+            scope=ServiceScope.PORTRAIT_WRITE,
+            resource=resource,
+            idempotency_key=_idempotency(resource.runId, "portrait-processing", style_id),
+        )
+
+    async def complete_portrait(
+        self,
+        resource: RunResource,
+        style_id: str,
+        result: dict[str, Any],
+    ) -> None:
+        payload = {"runId": resource.runId, **result}
+        await self._request(
+            "PUT",
+            f"/internal/v1/styles/{style_id}/portrait-tasks/{resource.taskId}/success",
+            payload,
+            scope=ServiceScope.PORTRAIT_WRITE,
+            resource=resource,
+            idempotency_key=_idempotency(resource.runId, "portrait-success", style_id),
+        )
+
+    async def fail_portrait(
+        self,
+        resource: RunResource,
+        style_id: str,
+        message: str,
+    ) -> None:
+        await self._request(
+            "PUT",
+            f"/internal/v1/styles/{style_id}/portrait-tasks/{resource.taskId}/failure",
+            {"runId": resource.runId, "message": message},
+            scope=ServiceScope.PORTRAIT_WRITE,
+            resource=resource,
+            idempotency_key=_idempotency(resource.runId, "portrait-failure", style_id),
+        )
+
     async def _request(
         self,
         method: str,
@@ -410,6 +470,11 @@ class CoreBillingGateway:
 def _event_id(run_id: str, sequence: int, event: str) -> str:
     digest = hashlib.sha256(f"{run_id}:{sequence}:{event}".encode()).hexdigest()[:32]
     return f"event-{digest}"
+
+
+def _occurred_at(event_id: str) -> datetime:
+    seconds = int(hashlib.sha256(event_id.encode()).hexdigest()[:8], 16)
+    return datetime(2020, 1, 1, tzinfo=UTC) + timedelta(seconds=seconds)
 
 
 def _idempotency(run_id: str, *parts: object) -> str:

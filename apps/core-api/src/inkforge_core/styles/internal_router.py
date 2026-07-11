@@ -9,6 +9,8 @@ from ..errors import ApiError
 from ..references.internal_router import RagCallbackVerifier, get_rag_callback_verifier
 from .router import get_style_service
 from .schemas import (
+    PortraitContextRequest,
+    PortraitContextResponse,
     PortraitFailureRequest,
     PortraitProcessingRequest,
     PortraitSuccessRequest,
@@ -77,6 +79,30 @@ async def mark_processing(
         run_id=body.runId,
     )
     return await service.mark_processing(style_id, task_id, body)
+
+
+@router.post(
+    "/{style_id}/portrait-tasks/{task_id}/portrait-context",
+    response_model=PortraitContextResponse,
+)
+async def get_portrait_context(
+    style_id: str,
+    task_id: str,
+    body: PortraitContextRequest,
+    request: Request,
+    verifier: Verifier,
+    service: Service,
+) -> PortraitContextResponse:
+    await _verify_callback(
+        request,
+        verifier,
+        style_id=style_id,
+        task_id=task_id,
+        run_id=body.runId,
+    )
+    return PortraitContextResponse.model_validate(
+        await service.get_portrait_context(style_id, task_id)
+    )
 
 
 @router.put(

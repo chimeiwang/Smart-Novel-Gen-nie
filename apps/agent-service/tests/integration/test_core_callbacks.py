@@ -38,6 +38,11 @@ async def test_core_client_signs_tools_events_checkpoint_and_completion() -> Non
             return httpx.Response(200, json={"result": {"planning": {"taskId": "task-1"}}})
         if request.url.path.endswith("/index-context"):
             return httpx.Response(200, json={"contentHash": "a" * 64, "chunks": ["正文"]})
+        if request.url.path.endswith("/portrait-context"):
+            return httpx.Response(
+                200,
+                json={"sourceText": "完整参考正文", "originalCharCount": 6},
+            )
         return httpx.Response(204)
 
     signer = Signer()
@@ -59,17 +64,37 @@ async def test_core_client_signs_tools_events_checkpoint_and_completion() -> Non
     await client.complete(resource, sequence=3, result={"finalContent": "完成"})
     rag_context = await client.get_rag_context(resource, "reference-1", "a" * 64)
     await client.complete_rag(resource, "reference-1", "a" * 64, [[1.0]])
+    portrait = await client.get_portrait_context(resource, "style-1")
+    await client.mark_portrait_processing(resource, "style-1")
+    await client.complete_portrait(
+        resource,
+        "style-1",
+        {
+            "creativeMethodology": "方法",
+            "uniqueMarkers": "标记",
+            "generationStyle": "风格",
+            "expressionFeatures": "表达",
+            "styleTraits": "特质",
+            "originalCharCount": 6,
+            "usedCharCount": 6,
+            "truncated": False,
+        },
+    )
 
     assert result["planning"]["taskId"] == "task-1"
     assert rag_context["chunks"] == ["正文"]
+    assert portrait["sourceText"] == "完整参考正文"
     assert [call["scope"] for call in signer.calls] == [
         (ServiceScope.TOOL_READ,),
         (ServiceScope.CALLBACK_EVENT,),
         (ServiceScope.CALLBACK_CHECKPOINT,),
-        (ServiceScope.CALLBACK_COMPLETE,),
-        (ServiceScope.RAG_INDEX_WRITE,),
-        (ServiceScope.RAG_INDEX_WRITE,),
-    ]
+            (ServiceScope.CALLBACK_COMPLETE,),
+            (ServiceScope.RAG_INDEX_WRITE,),
+            (ServiceScope.RAG_INDEX_WRITE,),
+            (ServiceScope.PORTRAIT_WRITE,),
+            (ServiceScope.PORTRAIT_WRITE,),
+            (ServiceScope.PORTRAIT_WRITE,),
+        ]
     assert [path for _, path, _ in requests] == [
         "/internal/v1/tools/get_writing_context",
         "/internal/v1/writing/runs/run-1/events",
@@ -77,6 +102,9 @@ async def test_core_client_signs_tools_events_checkpoint_and_completion() -> Non
         "/internal/v1/writing/runs/run-1/complete",
         "/internal/v1/novels/novel-1/references/reference-1/index-context",
         "/internal/v1/novels/novel-1/references/reference-1/index-success",
+        "/internal/v1/styles/style-1/portrait-tasks/task-1/portrait-context",
+        "/internal/v1/styles/style-1/portrait-tasks/task-1/processing",
+        "/internal/v1/styles/style-1/portrait-tasks/task-1/success",
     ]
     await http.aclose()
 

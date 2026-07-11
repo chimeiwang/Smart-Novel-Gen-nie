@@ -156,6 +156,43 @@ class StyleRepository:
                 result = self._task_dto(task)
         return result
 
+    async def get_portrait_sources(
+        self, style_id: str, task_id: str
+    ) -> list[dict[str, Any]]:
+        async with self._session_factory() as session:
+            task = await session.scalar(
+                select(StylePortraitTask).where(
+                    StylePortraitTask.id == task_id,
+                    StylePortraitTask.styleId == style_id,
+                )
+            )
+            if task is None:
+                raise ApiError(
+                    status_code=404,
+                    code="PORTRAIT_TASK_NOT_FOUND",
+                    message="画像任务不存在",
+                )
+            references = list(
+                (
+                    await session.scalars(
+                        select(StyleReference)
+                        .where(
+                            StyleReference.styleId == style_id,
+                            StyleReference.status == "ready",
+                        )
+                        .order_by(StyleReference.createdAt, StyleReference.id)
+                    )
+                ).all()
+            )
+        return [
+            {
+                "filepath": reference.filepath,
+                "filename": reference.filename,
+                "charCount": reference.charCount,
+            }
+            for reference in references
+        ]
+
     async def get_portrait_task(self, task_id: str) -> dict[str, Any]:
         async with self._session_factory() as session:
             task = await session.get(StylePortraitTask, task_id)

@@ -96,3 +96,12 @@ class PortraitSuccessRequest(StrictModel):
 class PortraitFailureRequest(StrictModel):
     runId: str = Field(min_length=1, max_length=256)
     message: str = Field(min_length=1, max_length=1000)
+
+
+class PortraitContextRequest(StrictModel):
+    runId: str = Field(min_length=1, max_length=256)
+
+
+class PortraitContextResponse(StrictModel):
+    sourceText: str = Field(min_length=1)
+    originalCharCount: int = Field(ge=0)

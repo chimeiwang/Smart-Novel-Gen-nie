@@ -141,6 +141,14 @@ class MemoryRepository:
             self.styles[style_id]["errorMessage"] = "画像生成失败"
         return task
 
+    async def get_portrait_sources(self, style_id, task_id):
+        assert self.tasks[task_id]["styleId"] == style_id
+        return [
+            value
+            for value in self.styles[style_id]["references"]
+            if value["status"] == "ready"
+        ]
+
     async def update_section(self, style_id, section, content):
         self.styles[style_id][section] = content
         from inkforge_core.styles.service import build_portrait_markdown
@@ -257,7 +265,7 @@ async def test_create_portrait_requires_submitter_without_creating_task(tmp_path
     repository = MemoryRepository()
     await service(tmp_path, repository).upload_reference("style-1", upload())
     with pytest.raises(ApiError) as caught:
-        await service(tmp_path, repository, None).create_portrait("style-1")
+        await service(tmp_path, repository, None).create_portrait("user-1", "style-1")
     assert caught.value.status_code == 503
     assert repository.tasks == {}
 
@@ -266,7 +274,9 @@ async def test_create_portrait_requires_submitter_without_creating_task(tmp_path
 async def test_portrait_requires_ready_reference(tmp_path: Path) -> None:
     repository = MemoryRepository()
     with pytest.raises(ApiError) as caught:
-        await service(tmp_path, repository, RecordingSubmitter()).create_portrait("style-1")
+        await service(tmp_path, repository, RecordingSubmitter()).create_portrait(
+            "user-1", "style-1"
+        )
     assert caught.value.code == "STYLE_REFERENCE_REQUIRED"
 
 
@@ -285,7 +295,7 @@ async def test_portrait_rejects_existing_active_task(tmp_path: Path, active_stat
         "updatedAt": NOW,
     }
     with pytest.raises(ApiError) as caught:
-        await style_service.create_portrait("style-1")
+        await style_service.create_portrait("user-1", "style-1")
     assert caught.value.code == "PORTRAIT_TASK_ACTIVE"
 
 
@@ -297,11 +307,18 @@ async def test_submit_failure_keeps_pending_task_and_returns_reconcilable_id(
     failing = RecordingSubmitter(failure=True)
     style_service = service(tmp_path, repository, failing)
     await style_service.upload_reference("style-1", upload())
-    result = await style_service.create_portrait("style-1")
+    result = await style_service.create_portrait("user-1", "style-1")
     assert result.taskId == "task-1"
     assert result.status == "pending"
     assert repository.tasks["task-1"]["status"] == "pending"
-    assert failing.calls == [{"style_id": "style-1", "task_id": "task-1", "run_id": "task-1"}]
+    assert failing.calls == [
+        {
+            "user_id": "user-1",
+            "style_id": "style-1",
+            "task_id": "task-1",
+            "run_id": "task-1",
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -310,7 +327,7 @@ async def test_portrait_state_machine_and_success_are_idempotent(tmp_path: Path)
     submitter = RecordingSubmitter()
     style_service = service(tmp_path, repository, submitter)
     await style_service.upload_reference("style-1", upload("甲 乙"))
-    await style_service.create_portrait("style-1")
+    await style_service.create_portrait("user-1", "style-1")
     processing = PortraitProcessingRequest(runId="task-1")
     await style_service.mark_processing("style-1", "task-1", processing)
     await style_service.mark_processing("style-1", "task-1", processing)
@@ -333,6 +350,22 @@ async def test_portrait_state_machine_and_success_are_idempotent(tmp_path: Path)
         await style_service.fail_portrait(
             "style-1", "task-1", PortraitFailureRequest(runId="task-1", message="供应商密钥泄漏")
         )
+
+
+@pytest.mark.asyncio
+async def test_portrait_context_reads_all_reference_files_without_truncation(
+    tmp_path: Path,
+) -> None:
+    repository = MemoryRepository()
+    style_service = service(tmp_path, repository, RecordingSubmitter())
+    source = "甲" * 5000
+    await style_service.upload_reference("style-1", upload(source, "长篇.txt"))
+    await style_service.create_portrait("user-1", "style-1")
+
+    context = await style_service.get_portrait_context("style-1", "task-1")
+
+    assert context["sourceText"].endswith(source)
+    assert context["originalCharCount"] == 5000
 
 
 @pytest.mark.asyncio

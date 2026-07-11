@@ -14,6 +14,7 @@ from .clients.core import CoreBillingGateway, CoreServiceClient
 from .config import Settings, create_testing_settings
 from .graph.parent_graph import ParentGraphDependencies, build_parent_graph
 from .jobs.adapters import CoreArtifactPort, CoreGraphAgentExecutor, CoreToolGateway
+from .jobs.portrait import ModelPortraitGenerator, PortraitJobHandler
 from .jobs.rag import OpenAIEmbeddingProvider, RagJobHandler
 from .jobs.writing import WritingJobHandler
 from .operations.graph import OperationDependencies, build_operation_graph
@@ -198,6 +199,10 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                 )
                 app.state.model_runtime = model_runtime
                 handlers: dict[JobKind, JobHandler] = {"writing": writing}
+                handlers["portrait"] = PortraitJobHandler(
+                    core,
+                    ModelPortraitGenerator(model_runtime),
+                )
                 if (
                     settings.rag_embedding_api_key is not None
                     and settings.rag_embedding_base_url
