@@ -1,0 +1,17 @@
+{
+  "name": "@inkforge/api-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./sse": "./src/sse.ts"
+  },
+  "scripts": {
+    "test": "tsx --test src/__tests__/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "openapi-fetch": "^0.15.0"
+  }
+}

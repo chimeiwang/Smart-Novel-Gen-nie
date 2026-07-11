@@ -1,0 +1,40 @@
+{
+  "name": "@inkforge/web",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev -p 43119",
+    "build": "next build",
+    "start": "next start -p 43119",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@inkforge/api-client": "*",
+    "@langchain/core": "^1.1.49",
+    "@langchain/langgraph": "^1.4.4",
+    "@langchain/langgraph-sdk": "^1.9.23",
+    "@langchain/openai": "^1.4.7",
+    "@prisma/client": "^6.8.2",
+    "antd": "^6.3.6",
+    "bcryptjs": "^3.0.3",
+    "jose": "^6.2.3",
+    "langsmith": "0.5.20",
+    "next": "^16.2.1",
+    "openai": "^6.33.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^3.0.0",
+    "@types/node": "^25.5.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "cross-env": "^10.1.0",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.1",
+    "tsx": "^4.22.4",
+    "typescript": "^5.9.3"
+  }
+}
