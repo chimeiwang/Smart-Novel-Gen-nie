@@ -12,6 +12,7 @@ from typing import Literal
 from sqlalchemy import text
 
 from inkforge_core.db.session import create_database_engine
+from inkforge_core.writing.job_identity import build_writing_job_id
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +25,7 @@ class RecoverySnapshot:
     artifact_keys: tuple[str, ...]
     artifact_count: int
     duplicate_billing_request_ids: tuple[str, ...]
+    job_id: str
 
     @classmethod
     def from_dict(cls, value: dict[str, object]) -> RecoverySnapshot:
@@ -43,6 +45,7 @@ class RecoverySnapshot:
                 value.get("duplicate_billing_request_ids"),
                 "duplicate_billing_request_ids",
             ),
+            job_id=str(value["job_id"]),
         )
 
 
@@ -155,6 +158,11 @@ async def collect_snapshot(task_id: str, database_url: str) -> RecoverySnapshot:
             "<空请求标识>" if request_id is None else str(request_id)
             for request_id in duplicate_billing
         ),
+        job_id=build_writing_job_id(
+            task_id,
+            resume=graph_state is not None,
+            graph_state_json=str(graph_state) if graph_state is not None else None,
+        ),
     )
 
 
@@ -167,6 +175,10 @@ def _database_url() -> str:
 
 async def _run(arguments: argparse.Namespace) -> int:
     current = await collect_snapshot(arguments.task_id, _database_url())
+    if arguments.command == "job-id":
+        print(current.job_id)
+        return 0
+
     output = Path(arguments.output)
     if arguments.command == "snapshot":
         if current.phase not in {"idle", "active", "waiting_call"}:
@@ -201,6 +213,8 @@ def main() -> int:
         command_parser = subparsers.add_parser(command)
         command_parser.add_argument("--task-id", required=True)
         command_parser.add_argument("--output", required=True)
+    job_id_parser = subparsers.add_parser("job-id")
+    job_id_parser.add_argument("--task-id", required=True)
     return asyncio.run(_run(parser.parse_args()))
 
 

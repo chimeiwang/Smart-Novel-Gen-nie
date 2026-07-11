@@ -14,8 +14,18 @@ compose() {
 baseline="/tmp/inkforge-recovery-${TASK_ID}.json"
 compose exec -T core-api python -m inkforge_core.ops.recovery_audit snapshot \
   --task-id "$TASK_ID" --output "$baseline"
+job_id="$(compose exec -T core-api python -m inkforge_core.ops.recovery_audit job-id \
+  --task-id "$TASK_ID" | tr -d '\r')"
+[ -n "$job_id" ] || { echo "无法计算当前队列任务标识" >&2; exit 1; }
 
 compose stop agent-service
+compose exec -T redis redis-cli ZREM inkforge:runs:ready "$job_id" >/dev/null
+compose exec -T redis redis-cli ZREM inkforge:runs:processing "$job_id" >/dev/null
+compose exec -T redis redis-cli HDEL inkforge:runs:payloads "$job_id" >/dev/null
+compose exec -T redis redis-cli HDEL inkforge:runs:statuses "$job_id" >/dev/null
+compose exec -T redis redis-cli HDEL inkforge:runs:leases "$job_id" >/dev/null
+compose exec -T redis redis-cli HDEL inkforge:runs:attempts "$job_id" >/dev/null
+compose exec -T redis redis-cli HDEL inkforge:runs:scores "$job_id" >/dev/null
 compose start agent-service
 i=0
 until compose exec -T agent-service python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/internal/v1/health/ready', timeout=5)"; do

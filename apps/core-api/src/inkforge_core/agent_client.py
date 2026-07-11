@@ -11,6 +11,7 @@ from inkforge_service_auth import ServiceTokenSigner, canonical_json_body
 from pydantic import JsonValue
 
 from .errors import ApiError
+from .writing.job_identity import build_writing_job_id
 from .writing.tasks import TaskRecord
 
 
@@ -124,14 +125,14 @@ class WritingTaskAgentSubmitter:
         force: bool,
         resume_input: dict[str, object] | None,
     ) -> None:
-        fingerprint = task.graph_state_json or "initial"
-        digest = hashlib.sha256(f"writing:{task.id}:{resume}:{fingerprint}".encode()).hexdigest()[
-            :32
-        ]
         await self._client.submit(
             AgentJobRequest(
                 protocolVersion="1.0",
-                jobId=f"writing-{digest}",
+                jobId=build_writing_job_id(
+                    task.id,
+                    resume=resume,
+                    graph_state_json=task.graph_state_json,
+                ),
                 kind="writing",
                 runId=task.id,
                 taskId=task.id,

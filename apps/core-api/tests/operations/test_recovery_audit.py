@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import runpy
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ def _snapshot(module: dict[str, Any], **overrides: object) -> object:
         "artifact_keys": (),
         "artifact_count": 0,
         "duplicate_billing_request_ids": (),
+        "job_id": "writing-current",
     }
     values.update(overrides)
     return module["RecoverySnapshot"](**values)
@@ -86,6 +88,21 @@ def test_recovery_audit_database_collection_is_read_only() -> None:
     assert "DELETE " not in source
 
 
+def test_recovery_audit_builds_same_deterministic_writing_job_id_as_core() -> None:
+    module = _load_module()
+    graph_state = '{"phase":"active"}'
+    digest = hashlib.sha256(f"writing:task-1:True:{graph_state}".encode()).hexdigest()[:32]
+
+    assert (
+        module["build_writing_job_id"](
+            "task-1",
+            resume=True,
+            graph_state_json=graph_state,
+        )
+        == f"writing-{digest}"
+    )
+
+
 def test_recovery_drill_uses_machine_verification() -> None:
     source = (ROOT / "scripts" / "recovery_drill.sh").read_text(encoding="utf-8")
 
@@ -93,3 +110,7 @@ def test_recovery_drill_uses_machine_verification() -> None:
     assert "请在 Core 调试接口确认" not in source
     assert '[ "$status" -eq 2 ]' in source
     assert "else\n    status=$?\n  fi" in source
+    assert "redis-cli" in source
+    for suffix in ("ready", "processing", "payloads", "statuses", "leases", "attempts", "scores"):
+        assert f"inkforge:runs:{suffix}" in source
+    assert "FLUSHDB" not in source.upper()

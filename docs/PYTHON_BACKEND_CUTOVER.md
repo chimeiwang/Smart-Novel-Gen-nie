@@ -32,7 +32,7 @@
 ALLOW_RECOVERY_DRILL=yes TASK_ID=<写作任务标识> scripts/recovery_drill.sh
 ```
 
-脚本在 Core API 容器内使用只读事务记录基线，随后重启 Agent Service 并轮询任务结果。只有任务推进到待用户确认或完成阶段，且没有重复草案键、多个新草案或重复计费请求时才通过。Agent Service 不会获得数据库连接。
+脚本在 Core API 容器内使用只读事务记录基线，停止 Agent Service 后只删除当前任务对应的 Redis 队列字段，再启动 Agent Service 并等待 Core 对账器重新提交。脚本不会执行 `FLUSHDB` 或删除其他任务。只有任务推进到待用户确认或完成阶段，且没有重复草案键、多个新草案或重复计费请求时才通过。Agent Service 不会获得数据库连接。
 
 ## 2 核 2 GB 观察项
 
