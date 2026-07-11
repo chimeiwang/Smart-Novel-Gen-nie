@@ -199,6 +199,91 @@ class OutlineRepository:
                 if outcome.rowcount != 1:
                     raise self._not_found()
 
+    async def replace_nodes(
+        self, novel_id: str, user_id: str, adjustments: list[dict[str, Any]]
+    ) -> None:
+        async with self._session_factory() as session:
+            async with session.begin():
+                await self._require_owner(session, novel_id, user_id)
+                await self._lock_novel(session, novel_id)
+                if any(item.get("action") != "create" for item in adjustments):
+                    raise ApiError(
+                        status_code=422,
+                        code="OUTLINE_REPLACE_CREATE_ONLY",
+                        message="整树替换只能包含新建节点",
+                    )
+                await session.execute(delete(OutlineNode).where(OutlineNode.novelId == novel_id))
+                snapshots: list[OutlineNodeSnapshot] = []
+                client_ids: dict[str, str] = {}
+                for order, adjustment in enumerate(adjustments):
+                    parent_id = adjustment.get("parentId")
+                    parent_key = adjustment.get("parentKey")
+                    if isinstance(parent_key, str):
+                        parent_id = client_ids.get(parent_key)
+                        if parent_id is None:
+                            raise ApiError(
+                                status_code=422,
+                                code="OUTLINE_PARENT_KEY_NOT_FOUND",
+                                message="大纲父节点临时标识无法解析",
+                            )
+                    title = adjustment.get("title") or adjustment.get("nodeTitle")
+                    kind = adjustment.get("kind")
+                    if not isinstance(title, str) or not isinstance(kind, str):
+                        raise ApiError(
+                            status_code=422,
+                            code="OUTLINE_REPLACE_INVALID",
+                            message="整树替换节点缺少标题或类型",
+                        )
+                    fields = {
+                        key: adjustment[key]
+                        for key in (
+                            "content",
+                            "status",
+                            "estimatedWordCount",
+                            "actualWordCount",
+                            "chapterStartOrder",
+                            "chapterEndOrder",
+                        )
+                        if key in adjustment
+                    }
+                    fields.update(
+                        {
+                            "title": title,
+                            "kind": kind,
+                            "parentId": parent_id,
+                            "order": order,
+                        }
+                    )
+                    candidate = OutlineNodeSnapshot(
+                        id=f"待创建-{order}",
+                        kind=kind,
+                        parent_id=cast(str | None, parent_id),
+                        start=cast(int | None, adjustment.get("chapterStartOrder")),
+                        end=cast(int | None, adjustment.get("chapterEndOrder")),
+                    )
+                    validate_outline_node(candidate, snapshots, title=title)
+                    value = OutlineNode(novelId=novel_id, **fields)
+                    session.add(value)
+                    await session.flush()
+                    snapshots.append(
+                        OutlineNodeSnapshot(
+                            id=value.id,
+                            kind=value.kind,
+                            parent_id=value.parentId,
+                            start=value.chapterStartOrder,
+                            end=value.chapterEndOrder,
+                        )
+                    )
+                    client_key = adjustment.get("clientKey")
+                    if isinstance(client_key, str):
+                        if client_key in client_ids:
+                            raise ApiError(
+                                status_code=422,
+                                code="OUTLINE_CLIENT_KEY_DUPLICATE",
+                                message="大纲节点临时标识重复",
+                            )
+                        client_ids[client_key] = value.id
+
     async def _upsert_singleton(
         self,
         novel_id: str,

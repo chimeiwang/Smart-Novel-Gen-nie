@@ -24,6 +24,7 @@ from .config import OLD_DEFAULT_JWT_SECRET, Settings, create_testing_settings
 from .db.session import DatabaseReadiness, configure_database
 from .errors import (
     PUBLIC_ERROR_RESPONSES,
+    ApiError,
     SafeUnhandledExceptionMiddleware,
     install_exception_handlers,
 )
@@ -46,12 +47,32 @@ from .references.internal_router import router as references_internal_router
 from .references.repository import ReferenceRepository
 from .references.router import router as references_router
 from .references.service import ReferenceService
+from .reviews.apply import FormalArtifactApplier
+from .reviews.formal_writes import FormalWriteRepository
+from .reviews.internal_router import router as reviews_internal_router
+from .reviews.repository import ReviewRepository
+from .reviews.router import router as reviews_router
+from .reviews.service import ReviewService
+from .reviews.updates import AgentUpdatesExecutor
 from .service_auth import create_agent_callback_verifier, install_service_auth_error_handler
 from .styles.internal_router import router as styles_internal_router
 from .styles.repository import StyleRepository
 from .styles.router import router as styles_router
 from .styles.service import StyleService
 from .styles.storage import StyleStorage
+from .writing.callbacks import router as writing_callback_router
+from .writing.context import WritingContextRepository, WritingContextService
+from .writing.repository import WritingRepository
+from .writing.router import router as writing_router
+from .writing.service import WritingService
+from .writing.sse import InMemoryWritingEventStore, RedisWritingEventStore
+from .writing.tasks import (
+    WritingCallbackService,
+    WritingTaskRepository,
+    WritingTaskService,
+)
+from .writing.tool_gateway import ToolGateway, ToolRequest
+from .writing.tool_gateway import internal_router as tool_internal_router
 
 
 def _configure_auth(app: FastAPI, settings: Settings) -> None:
@@ -101,6 +122,10 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
     reference_repository = ReferenceRepository(session_factory)
     style_repository = StyleRepository(session_factory)
     billing_repository = BillingRepository(session_factory)
+    writing_repository = WritingRepository(session_factory)
+    review_repository = ReviewRepository(session_factory)
+    context_repository = WritingContextRepository(session_factory)
+    writing_task_repository = WritingTaskRepository(session_factory)
     app.state.novel_service = NovelService(novel_repository)
     app.state.chapter_service = ChapterService(chapter_repository)
     app.state.quality_service = QualityService(quality_repository, submitter=None)
@@ -118,6 +143,62 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
         else None
     )
     app.state.billing_service = BillingService(billing_repository, grant_codec)
+    app.state.writing_service = WritingService(writing_repository)
+    updates_executor = AgentUpdatesExecutor(
+        lore_repository,
+        outline_repository,
+        reference_repository,
+    )
+    artifact_applier = FormalArtifactApplier(
+        FormalWriteRepository(session_factory),
+        updates_executor,
+    )
+    app.state.review_repository = review_repository
+    app.state.review_service = ReviewService(review_repository, artifact_applier)
+    context_service = WritingContextService(context_repository, novel_repository)
+    app.state.writing_context_service = context_service
+    tool_gateway = ToolGateway(context_repository)
+
+    async def get_writing_context(request: ToolRequest) -> dict[str, object]:
+        return await context_service.build(request.user_id, request.task_id)
+
+    async def get_review_artifact(request: ToolRequest) -> dict[str, object]:
+        artifact_id = request.arguments.get("artifactId")
+        if not isinstance(artifact_id, str) or not artifact_id:
+            raise ApiError(
+                status_code=422,
+                code="ARTIFACT_ID_REQUIRED",
+                message="读取草案必须提供 artifactId",
+            )
+        artifact = await review_repository.require_artifact(request.user_id, artifact_id)
+        if artifact.task_id != request.task_id or artifact.novel_id != request.novel_id:
+            raise ApiError(
+                status_code=403,
+                code="ARTIFACT_TASK_MISMATCH",
+                message="待审核草案不属于当前任务",
+            )
+        return {
+            "id": artifact.id,
+            "kind": artifact.kind,
+            "status": artifact.status,
+            "revision": artifact.revision,
+            "payload": artifact.payload,
+        }
+
+    all_agents = {"设定", "剧情", "写作", "校验", "编辑"}
+    tool_gateway.register("get_writing_context", all_agents, True, get_writing_context)
+    tool_gateway.register("get_review_artifact", all_agents, True, get_review_artifact)
+    app.state.tool_gateway = tool_gateway
+    redis = getattr(app.state, "auth_redis", None)
+    event_store = (
+        RedisWritingEventStore(redis) if redis is not None else InMemoryWritingEventStore()
+    )
+    app.state.writing_event_store = event_store
+    app.state.writing_task_repository = writing_task_repository
+    app.state.writing_task_service = WritingTaskService(writing_task_repository, submitter=None)
+    app.state.writing_callback_service = WritingCallbackService(
+        writing_task_repository, event_store
+    )
 
 
 def _configure_rag_callback_auth(app: FastAPI, settings: Settings) -> None:
@@ -190,8 +271,13 @@ def create_app(*, testing: bool = False, settings: Settings | None = None) -> Fa
     app.include_router(references_router, prefix="/api/v1")
     app.include_router(styles_router, prefix="/api/v1")
     app.include_router(billing_router, prefix="/api/v1")
+    app.include_router(writing_router, prefix="/api/v1")
+    app.include_router(reviews_router, prefix="/api/v1")
     app.include_router(references_internal_router, include_in_schema=False)
     app.include_router(styles_internal_router, include_in_schema=False)
     app.include_router(billing_internal_router, include_in_schema=False)
+    app.include_router(tool_internal_router, include_in_schema=False)
+    app.include_router(writing_callback_router, include_in_schema=False)
+    app.include_router(reviews_internal_router, include_in_schema=False)
     app.include_router(operations_router, prefix="/api/v1")
     return app

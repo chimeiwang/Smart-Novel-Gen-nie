@@ -264,3 +264,11 @@ WorkflowStep 记录运行步骤：
 - 一致性终检运行报告能保存到 ChapterQualityCheck。
 - 章节完成前必须完成或跳过一致性终检。
 - 章节状态和质量检查状态写入使用相同锁顺序：先锁章节并校验所有者，再锁质量检查项。
+
+## Python 重构阶段实现
+
+- Core API 已接管 ReviewArtifact 查询、物理丢弃、状态条件更新、修订记录和复审结论幂等写入。
+- Agent 创建或修订草案、提交复审结论必须使用签名内部接口，并绑定同一用户、小说、任务和运行。
+- 正文、大纲、Beat Plan 和 `agent_updates` 只有在 `awaiting_user` 状态下由用户批准后才能正式写入；应用失败会恢复为等待用户确认。
+- `revision_brief` 永远不能正式应用，部分 `agent_updates` 只执行用户明确选择的 section 或 item。
+- 正文和长文本不会静默截断；现有数据库无法承载的字段会明确拒绝。

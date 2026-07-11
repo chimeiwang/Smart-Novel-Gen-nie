@@ -231,3 +231,14 @@ Studio 运行会真实创建或更新 `WritingTask`、`ReviewArtifact` 和 evalu
 12. `docs/requirements/04-review-quality-and-workflow.md`
 
 修改共享协议、SSE、control tool、ReviewArtifact 状态机或 LangGraph 路由后，必须同步检查本文。
+
+## Python 重构阶段边界
+
+当前迁移分支已由 `apps/core-api/src/inkforge_core/writing/**` 接管写作会话、消息、
+WritingTask 稳定快照、浏览器 SSE 重放和签名智能体回调；由
+`apps/core-api/src/inkforge_core/reviews/**` 接管 ReviewArtifact 修订、复审结论、用户决策
+和正式应用。智能体工具只能通过签名的 Core 工具网关读取上下文或草案，并同时校验
+智能体白名单与用户、小说、任务绑定。
+
+在任务 19 删除旧后端前，`src/agents/**` 仍作为行为迁移依据，但不得再成为 Python
+服务的持久化入口。Python 智能体服务不得连接数据库，正式写入继续只发生在 Core。
