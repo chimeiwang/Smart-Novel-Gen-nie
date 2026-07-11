@@ -61,7 +61,16 @@ class GraphPort(Protocol):
 
 
 class WorkflowLogPort(Protocol):
-    def start_run(self, **kwargs: object) -> object: ...
+    def start_run(
+        self,
+        *,
+        run_id: str,
+        task_id: str,
+        run_kind: str,
+        user_id: str,
+        novel_id: str,
+        chapter_id: str | None,
+    ) -> object: ...
 
     def record_state(self, run_id: str, node: str, changes: dict[str, Any]) -> None: ...
 

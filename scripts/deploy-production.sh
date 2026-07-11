@@ -1,54 +1,13 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/sh
+set -eu
 
-APP_DIR="${APP_DIR:-/srv/smart-novel-gen}"
-REPO_URL="${REPO_URL:-https://github.com/chimeiwang/Smart-Novel-Gen-nie.git}"
-BRANCH="${BRANCH:-main}"
-IMAGE_NAME="${IMAGE_NAME:-inkforge:latest}"
-SKIP_DOCKER_BUILD="${SKIP_DOCKER_BUILD:-false}"
+compose_file="infra/compose.yaml"
 
-if ! command -v docker >/dev/null 2>&1; then
-  echo "docker is required on the deployment server" >&2
-  exit 1
-fi
+command -v docker >/dev/null 2>&1 || { echo "缺少 docker 命令" >&2; exit 1; }
+[ -f .env ] || { echo "缺少 .env" >&2; exit 1; }
+[ -f infra/secrets/core-to-agent-private.pem ] || { echo "缺少服务密钥" >&2; exit 1; }
 
-if [ "$SKIP_DOCKER_BUILD" != "true" ] && ! command -v git >/dev/null 2>&1; then
-  echo "git is required on the deployment server when SKIP_DOCKER_BUILD is not true" >&2
-  exit 1
-fi
-
-mkdir -p "$APP_DIR"
-cd "$APP_DIR"
-
-if [ "$SKIP_DOCKER_BUILD" != "true" ]; then
-  if [ ! -d .git ]; then
-    echo "Initializing repository in $APP_DIR"
-    git init -b "$BRANCH"
-    git remote add origin "$REPO_URL"
-  fi
-
-  echo "Fetching $BRANCH from $REPO_URL"
-  git -c http.version=HTTP/1.1 fetch --depth=1 origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
-  git reset --hard "origin/$BRANCH"
-elif [ ! -f docker-compose.yml ]; then
-  echo "docker-compose.yml is missing in $APP_DIR" >&2
-  exit 1
-fi
-
-if [ ! -f .env.production ]; then
-  echo ".env.production is missing in $APP_DIR" >&2
-  exit 1
-fi
-
-if [ "$SKIP_DOCKER_BUILD" = "true" ]; then
-  echo "Using prebuilt Docker image $IMAGE_NAME"
-else
-  echo "Building Docker image $IMAGE_NAME"
-  docker build -t "$IMAGE_NAME" .
-fi
-
-echo "Starting Docker Compose services"
-docker compose up -d
-
-echo "Pruning unused Docker images"
-docker image prune -f
+docker compose --env-file .env -f "$compose_file" config >/dev/null
+docker compose --env-file .env -f "$compose_file" up --build -d --wait
+docker compose --env-file .env -f "$compose_file" ps
+echo "生产编排已启动"
