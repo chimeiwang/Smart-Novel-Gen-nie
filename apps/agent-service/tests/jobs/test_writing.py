@@ -55,6 +55,20 @@ class Graph:
         return {**value, **self.result}
 
 
+class WorkflowLog:
+    def __init__(self) -> None:
+        self.entries: list[tuple[str, object]] = []
+
+    def start_run(self, **kwargs: object) -> None:
+        self.entries.append(("开始", kwargs))
+
+    def record_state(self, run_id: str, node: str, changes: dict[str, Any]) -> None:
+        self.entries.append(("状态", (run_id, node, changes)))
+
+    def finish_run(self, run_id: str, status: str) -> None:
+        self.entries.append(("结束", (run_id, status)))
+
+
 def _job(*, resume: bool = False, resume_input: dict[str, Any] | None = None) -> QueueJob:
     return QueueJob(
         jobId="job-1",
@@ -154,3 +168,41 @@ async def test_resume_writing_job_uses_flat_snapshot_and_continues_sequence() ->
     assert core.events == [(9, "agent_start")]
     assert core.checkpoints[0][0] == 10
     assert core.completions == [(11, {"finalResponse": "已按意见处理"})]
+
+
+@pytest.mark.asyncio
+async def test_writing_job_records_human_workflow_states() -> None:
+    core = CoreClient(
+        {
+            "workspace": {},
+            "planning": {
+                "taskId": "task-1",
+                "novelId": "novel-1",
+                "chapterId": "chapter-1",
+                "targetWordCount": 4000,
+                "conversationHistory": [],
+                "userMessage": "继续写作",
+                "graphState": None,
+            },
+        }
+    )
+    workflow_log = WorkflowLog()
+    handler = WritingJobHandler(
+        core,
+        parent_graph=Graph({"phase": "completed", "finalResponse": "完成"}),
+        operation_graph=Graph({}),
+        workflow_log=workflow_log,
+    )
+
+    await handler(_job())
+
+    assert [entry[0] for entry in workflow_log.entries] == ["开始", "状态", "状态", "结束"]
+    assert workflow_log.entries[0][1] == {
+        "run_id": "task-1",
+        "task_id": "task-1",
+        "run_kind": "初次运行",
+        "user_id": "user-1",
+        "novel_id": "novel-1",
+        "chapter_id": "chapter-1",
+    }
+    assert workflow_log.entries[-1] == ("结束", ("task-1", "完成"))

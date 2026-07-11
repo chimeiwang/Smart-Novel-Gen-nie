@@ -59,6 +59,19 @@ class Billing:
         self.usages.append({**payload, "requestId": request_id})
 
 
+class ModelObserver:
+    def __init__(self) -> None:
+        self.calls: list[tuple[ModelCallContext, list[dict[str, str]], str]] = []
+
+    def record_model_call(
+        self,
+        context: ModelCallContext,
+        messages: list[dict[str, str]],
+        output: str,
+    ) -> None:
+        self.calls.append((context, messages, output))
+
+
 @pytest.mark.asyncio
 async def test_billable_runtime_authorizes_then_reports_exact_usage() -> None:
     billing = Billing()
@@ -112,3 +125,41 @@ async def test_fake_runtime_never_calls_billing() -> None:
 
     assert billing.authorizations == []
     assert billing.usages == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("billable", [False, True])
+async def test_runtime_records_complete_messages_without_tool_schema(billable: bool) -> None:
+    class SelectedProvider(Provider):
+        pass
+
+    SelectedProvider.billable = billable
+    observer = ModelObserver()
+    billing = Billing()
+    runtime = ModelRuntime(  # type: ignore[arg-type]
+        SelectedProvider(),
+        billing=billing,
+        observer=observer,
+    )
+    context = ModelCallContext(
+        userId="user-1",
+        novelId="novel-1",
+        taskId="task-1",
+        runId="run-1",
+        agentId="写作",
+    )
+    request = ModelTurnRequest(
+        messages=[{"role": "user", "content": "完整请求" * 5000}],
+        tools=[{"name": "secret_tool", "description": "不应记录", "parameters": {}}],
+        maxOutputTokens=128,
+    )
+
+    await runtime.run_turn(request, context=context)
+
+    assert observer.calls == [
+        (
+            context,
+            [{"role": "user", "content": "完整请求" * 5000}],
+            "完成",
+        )
+    ]

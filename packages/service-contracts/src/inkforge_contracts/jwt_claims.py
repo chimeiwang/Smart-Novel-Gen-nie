@@ -17,6 +17,7 @@ HttpPath = Annotated[str, StringConstraints(pattern=r"^/", min_length=1, max_len
 class ServiceScope(StrEnum):
     AGENT_RUN = "agent:run"
     AGENT_CANCEL = "agent:cancel"
+    AGENT_DEBUG_READ = "agent:debug:read"
     CALLBACK_EVENT = "callback:event"
     CALLBACK_CHECKPOINT = "callback:checkpoint"
     CALLBACK_COMPLETE = "callback:complete"

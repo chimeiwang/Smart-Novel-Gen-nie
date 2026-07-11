@@ -33,6 +33,7 @@ _CORE_TO_AGENT_SCOPES = frozenset(
     {
         ServiceScope.AGENT_RUN,
         ServiceScope.AGENT_CANCEL,
+        ServiceScope.AGENT_DEBUG_READ,
     }
 )
 _AGENT_TO_CORE_SCOPES = frozenset(

@@ -60,6 +60,14 @@ class GraphPort(Protocol):
     async def ainvoke(self, value: GraphState) -> dict[str, Any]: ...
 
 
+class WorkflowLogPort(Protocol):
+    def start_run(self, **kwargs: object) -> object: ...
+
+    def record_state(self, run_id: str, node: str, changes: dict[str, Any]) -> None: ...
+
+    def finish_run(self, run_id: str, status: str) -> object: ...
+
+
 class WritingJobHandler:
     def __init__(
         self,
@@ -67,10 +75,12 @@ class WritingJobHandler:
         *,
         parent_graph: GraphPort,
         operation_graph: GraphPort,
+        workflow_log: WorkflowLogPort | None = None,
     ) -> None:
         self._core = core
         self._parent_graph = parent_graph
         self._operation_graph = operation_graph
+        self._workflow_log = workflow_log
 
     async def __call__(self, job: QueueJob) -> None:
         if job.kind != "writing":
@@ -81,8 +91,26 @@ class WritingJobHandler:
             taskId=job.taskId,
             runId=job.runId,
         )
+        if self._workflow_log is not None:
+            self._workflow_log.start_run(
+                run_id=job.runId,
+                task_id=job.taskId,
+                run_kind="恢复运行" if job.payload.get("resume") is True else "初次运行",
+                user_id=job.userId,
+                novel_id=job.novelId,
+                chapter_id=(
+                    str(job.payload["chapterId"])
+                    if isinstance(job.payload.get("chapterId"), str)
+                    else None
+                ),
+            )
         context = await self._core.call_tool(resource, "写作", "get_writing_context", {})
         state, graph = self._prepare_state(job, context)
+        self._record_state(
+            job.runId,
+            "准备运行",
+            {"阶段": state.get("phase"), "操作阶段": state.get("operationStage")},
+        )
         sequence = int(state.get("eventSequence", 0)) + 1
         await self._core.send_event(
             resource,
@@ -93,6 +121,8 @@ class WritingJobHandler:
         try:
             result = await graph.ainvoke(state)
         except Exception as exc:
+            self._record_state(job.runId, "运行异常", {"错误": str(exc) or "智能体运行失败"})
+            self._finish_log(job.runId, "错误")
             await self._core.fail(
                 resource,
                 sequence=sequence + 1,
@@ -108,18 +138,33 @@ class WritingJobHandler:
         )
         stable["eventSequence"] = sequence + 1
         checkpoint = to_typescript_snapshot(serialize_snapshot(stable))
+        self._record_state(
+            job.runId,
+            "保存稳定快照",
+            {"阶段": checkpoint.get("phase"), "操作阶段": checkpoint.get("operationStage")},
+        )
         await self._core.save_checkpoint(
             resource,
             sequence=sequence + 1,
             checkpoint=checkpoint,
         )
         if checkpoint.get("phase") == "awaiting_user_review" or "__interrupt__" in result:
+            self._finish_log(job.runId, "等待用户确认")
             return
         await self._core.complete(
             resource,
             sequence=sequence + 2,
             result={"finalResponse": str(stable.get("finalResponse", ""))},
         )
+        self._finish_log(job.runId, "完成")
+
+    def _record_state(self, run_id: str, node: str, changes: dict[str, Any]) -> None:
+        if self._workflow_log is not None:
+            self._workflow_log.record_state(run_id, node, changes)
+
+    def _finish_log(self, run_id: str, status: str) -> None:
+        if self._workflow_log is not None:
+            self._workflow_log.finish_run(run_id, status)
 
     def _prepare_state(
         self,

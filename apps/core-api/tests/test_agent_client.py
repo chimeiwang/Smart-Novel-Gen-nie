@@ -104,3 +104,43 @@ async def test_writing_job_id_is_stable_per_checkpoint_and_changes_on_resume() -
 
     assert captured[0].jobId == captured[1].jobId
     assert captured[0].jobId != captured[2].jobId
+
+
+@pytest.mark.asyncio
+async def test_agent_debug_query_signs_exact_path_and_query() -> None:
+    signer = Signer()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/internal/v1/debug/workflow-runs/run-1"
+        assert request.url.query == b"userId=user-1"
+        return httpx.Response(
+            200,
+            json={
+                "summary": {
+                    "runId": "run-1",
+                    "taskId": "task-1",
+                    "runKind": "初次运行",
+                    "userId": "user-1",
+                    "novelId": "novel-1",
+                    "chapterId": "chapter-1",
+                    "startedAt": "2026-07-11T00:00:00Z",
+                    "endedAt": "2026-07-11T00:01:00Z",
+                    "status": "完成",
+                },
+                "content": "完整日志",
+            },
+        )
+
+    http = httpx.AsyncClient(
+        base_url="https://agent.example",
+        transport=httpx.MockTransport(handler),
+    )
+    client = AgentClient(http, signer)
+
+    result = await client.get_workflow_runs("user-1", "run-1")
+
+    assert result["content"] == "完整日志"
+    assert signer.calls[0]["scope"] == (ServiceScope.AGENT_DEBUG_READ,)
+    assert signer.calls[0]["query_string"] == b"userId=user-1"
+    assert signer.calls[0]["task_id"] == "debug"
+    await http.aclose()

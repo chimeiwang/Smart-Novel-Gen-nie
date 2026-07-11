@@ -1,529 +1,114 @@
 "use client";
 
+import type { components } from "@inkforge/api-client";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
-import styles from "./workflow-events-inspector.module.css";
+import { browserApi } from "@/lib/api/browser";
+import { requireApiData } from "@/lib/api/response";
 
-type WorkflowEventSource = "workflow" | "langgraph" | "sse" | "persistence" | "error";
-
-interface WorkflowEventLogEntry {
-  schemaVersion: number;
-  runId: string;
-  seq: number;
-  timestamp: string;
-  source: WorkflowEventSource;
-  eventType: string;
-  taskId: string;
-  runKind: "writing-workflow" | "resume-writing-workflow";
-  userId?: string | null;
-  novelId?: string | null;
-  chapterId?: string | null;
-  qualityCheckId?: string | null;
-  node?: string | null;
-  agentId?: string | null;
-  langGraphEvent?: string | null;
-  changedKeys?: Record<string, string[]> | string[];
-  payload?: unknown;
-}
-
-interface WorkflowRunSummary {
-  runId: string;
-  taskId: string;
-  runKind: WorkflowEventLogEntry["runKind"];
-  novelId?: string | null;
-  chapterId?: string | null;
-  startedAt: string;
-  endedAt: string;
-  eventCount: number;
-  status: "completed" | "interrupted" | "error" | "active";
-  sources: WorkflowEventSource[];
-  nodes: string[];
-  agents: string[];
-}
-
-interface ApiResponse {
-  runs: WorkflowRunSummary[];
-  selectedRun?: WorkflowRunSummary;
-  events: WorkflowEventLogEntry[];
-  error?: string;
-}
-
-interface GraphNode {
-  id: string;
-  label: string;
-  x: number;
-  y: number;
-  kind: "system" | "agent" | "process" | "terminal";
-}
-
-interface GraphEdge {
-  from: string;
-  to: string;
-  label?: string;
-}
-
-const GRAPH_NODES: GraphNode[] = [
-  { id: "START", label: "START", x: 6, y: 50, kind: "terminal" },
-  { id: "initSession", label: "initSession", x: 18, y: 50, kind: "system" },
-  { id: "operationWorkflow", label: "operationWorkflow", x: 38, y: 50, kind: "process" },
-  { id: "prepareOperationContext", label: "prepare", x: 52, y: 18, kind: "process" },
-  { id: "executeOperation", label: "execute", x: 52, y: 34, kind: "agent" },
-  { id: "submitArtifactOrRespond", label: "submit/respond", x: 52, y: 50, kind: "process" },
-  { id: "reviewArtifact", label: "review", x: 52, y: 66, kind: "agent" },
-  { id: "awaitUserDecision", label: "await user", x: 52, y: 82, kind: "process" },
-  { id: "reviseArtifact", label: "revise", x: 70, y: 66, kind: "agent" },
-  { id: "suggestNextAction", label: "suggest", x: 76, y: 50, kind: "process" },
-  { id: "statusReport", label: "statusReport", x: 38, y: 18, kind: "system" },
-  { id: "END", label: "END", x: 91, y: 50, kind: "terminal" },
-];
-
-const GRAPH_EDGES: GraphEdge[] = [
-  { from: "START", to: "initSession" },
-  { from: "initSession", to: "operationWorkflow" },
-  { from: "initSession", to: "statusReport" },
-  { from: "operationWorkflow", to: "prepareOperationContext" },
-  { from: "prepareOperationContext", to: "executeOperation" },
-  { from: "executeOperation", to: "submitArtifactOrRespond" },
-  { from: "executeOperation", to: "awaitUserDecision" },
-  { from: "submitArtifactOrRespond", to: "reviewArtifact" },
-  { from: "submitArtifactOrRespond", to: "suggestNextAction" },
-  { from: "reviewArtifact", to: "reviseArtifact" },
-  { from: "reviewArtifact", to: "awaitUserDecision" },
-  { from: "reviewArtifact", to: "suggestNextAction" },
-  { from: "reviseArtifact", to: "executeOperation" },
-  { from: "awaitUserDecision", to: "suggestNextAction" },
-  { from: "suggestNextAction", to: "END" },
-  { from: "statusReport", to: "END" },
-];
-
-const NODE_IDS = new Set(GRAPH_NODES.map((node) => node.id));
+type WorkflowRunSummary = components["schemas"]["WorkflowRunSummary"];
 
 function formatTime(value: string): string {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
-function shortId(value: string, size = 8): string {
-  if (value.length <= size * 2 + 1) return value;
-  return `${value.slice(0, size)}…${value.slice(-size)}`;
-}
-
-function getEntryNodes(entry: WorkflowEventLogEntry): string[] {
-  const nodes = new Set<string>();
-  if (entry.node && NODE_IDS.has(entry.node)) nodes.add(entry.node);
-  if (
-    entry.source === "langgraph" &&
-    entry.eventType === "updates" &&
-    entry.changedKeys &&
-    !Array.isArray(entry.changedKeys)
-  ) {
-    for (const node of Object.keys(entry.changedKeys)) {
-      if (NODE_IDS.has(node)) nodes.add(node);
-    }
-  }
-  return Array.from(nodes);
-}
-
-function getChangedKeyText(entry: WorkflowEventLogEntry): string {
-  if (!entry.changedKeys) return "";
-  if (Array.isArray(entry.changedKeys)) return entry.changedKeys.join(", ");
-  return Object.entries(entry.changedKeys)
-    .map(([node, keys]) => `${node}: ${keys.join(", ")}`)
-    .join(" | ");
-}
-
-function getPayloadText(entry: WorkflowEventLogEntry | null): string {
-  if (!entry) return "";
-  return JSON.stringify(
-    {
-      seq: entry.seq,
-      timestamp: entry.timestamp,
-      source: entry.source,
-      eventType: entry.eventType,
-      node: entry.node,
-      agentId: entry.agentId,
-      changedKeys: entry.changedKeys,
-      payload: entry.payload,
-    },
-    null,
-    2
-  );
-}
-
-function buildVisitedNodes(events: WorkflowEventLogEntry[], status?: WorkflowRunSummary["status"]): string[] {
-  const result: string[] = ["START"];
-  for (const event of events) {
-    for (const node of getEntryNodes(event)) {
-      if (result[result.length - 1] !== node) result.push(node);
-    }
-  }
-  if (status === "completed" && result[result.length - 1] !== "END") {
-    result.push("END");
-  }
-  return result;
-}
-
-function buildActiveEdges(visitedNodes: string[]): Set<string> {
-  const active = new Set<string>();
-  const edgeKeys = new Set(GRAPH_EDGES.map((edge) => `${edge.from}->${edge.to}`));
-
-  for (let i = 0; i < visitedNodes.length - 1; i++) {
-    const directKey = `${visitedNodes[i]}->${visitedNodes[i + 1]}`;
-    if (edgeKeys.has(directKey)) active.add(directKey);
-  }
-
-  return active;
-}
-
-function sourceLabel(source: WorkflowEventSource): string {
-  const labels: Record<WorkflowEventSource, string> = {
-    workflow: "流程",
-    langgraph: "图事件",
-    sse: "前端流",
-    persistence: "持久化",
-    error: "错误",
-  };
-  return labels[source];
-}
-
-function statusLabel(status: WorkflowRunSummary["status"]): string {
-  const labels: Record<WorkflowRunSummary["status"], string> = {
-    completed: "完成",
-    interrupted: "中断",
-    error: "错误",
-    active: "活跃",
-  };
-  return labels[status];
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString("zh-CN");
 }
 
 export function WorkflowEventsInspector() {
   const [runs, setRuns] = useState<WorkflowRunSummary[]>([]);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [selectedRun, setSelectedRun] = useState<WorkflowRunSummary | null>(null);
-  const [events, setEvents] = useState<WorkflowEventLogEntry[]>([]);
-  const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
-  const [selectedNode, setSelectedNode] = useState<string | null>(null);
-  const [query, setQuery] = useState("");
+  const [content, setContent] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  async function loadRuns(nextRunId?: string | null) {
+  const loadRuns = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("/api/debug/workflow-events", { cache: "no-store" });
-      const data = (await response.json()) as ApiResponse;
-      if (!response.ok) throw new Error(data.error ?? "读取运行列表失败");
-      setRuns(data.runs);
-      const runId = nextRunId ?? selectedRunId ?? data.runs[0]?.runId ?? null;
-      setSelectedRunId(runId);
-      if (!runId) {
-        setSelectedRun(null);
-        setEvents([]);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "读取运行列表失败");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function loadRunDetail(runId: string) {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch(`/api/debug/workflow-events?runId=${encodeURIComponent(runId)}`, {
+      const data = requireApiData(await browserApi.GET("/api/v1/debug/workflow-runs", {
         cache: "no-store",
-      });
-      const data = (await response.json()) as ApiResponse;
-      if (!response.ok) throw new Error(data.error ?? "读取运行详情失败");
+      }));
       setRuns(data.runs);
-      setSelectedRun(data.selectedRun ?? null);
-      setEvents(data.events);
-      setSelectedSeq(data.events[0]?.seq ?? null);
-      setSelectedNode(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "读取运行详情失败");
+      setSelectedRunId((current) => current ?? data.runs[0]?.runId ?? null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "读取运行日志失败");
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
-  useEffect(() => {
-    void loadRuns();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  const loadRun = useCallback(async (runId: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = requireApiData(await browserApi.GET(
+        "/api/v1/debug/workflow-runs/{run_id}",
+        { params: { path: { run_id: runId } }, cache: "no-store" },
+      ));
+      setContent(data.content);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "读取运行日志失败");
+      setContent("");
+    } finally {
+      setLoading(false);
+    }
   }, []);
 
   useEffect(() => {
-    if (selectedRunId) void loadRunDetail(selectedRunId);
-  }, [selectedRunId]);
+    const timer = window.setTimeout(() => void loadRuns(), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadRuns]);
 
-  const filteredRuns = useMemo(() => {
-    const text = query.trim().toLowerCase();
-    if (!text) return runs;
-    return runs.filter((run) =>
-      [
-        run.runId,
-        run.taskId,
-        run.novelId ?? "",
-        run.chapterId ?? "",
-        run.runKind,
-        run.status,
-        ...run.nodes,
-        ...run.agents,
-      ].some((value) => value.toLowerCase().includes(text))
-    );
-  }, [runs, query]);
-
-  const selectedEvent = useMemo(() => {
-    return events.find((event) => event.seq === selectedSeq) ?? events[0] ?? null;
-  }, [events, selectedSeq]);
-
-  const visitedNodes = useMemo(
-    () => buildVisitedNodes(events, selectedRun?.status),
-    [events, selectedRun?.status]
-  );
-  const activeNodeSet = useMemo(() => new Set(visitedNodes), [visitedNodes]);
-  const activeEdges = useMemo(() => buildActiveEdges(visitedNodes), [visitedNodes]);
-  const nodeCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const event of events) {
-      for (const node of getEntryNodes(event)) {
-        counts.set(node, (counts.get(node) ?? 0) + 1);
-      }
-    }
-    return counts;
-  }, [events]);
-
-  const visibleEvents = useMemo(() => {
-    if (!selectedNode) return events;
-    return events.filter((event) => getEntryNodes(event).includes(selectedNode));
-  }, [events, selectedNode]);
+  useEffect(() => {
+    if (!selectedRunId) return;
+    const timer = window.setTimeout(() => void loadRun(selectedRunId), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadRun, selectedRunId]);
 
   return (
-    <main className={styles.page}>
-      <header className={styles.header}>
+    <main className="page stack">
+      <div className="row row-between">
         <div>
-          <h1>Workflow Inspector</h1>
-          <p>按本地 JSONL 审计日志回放 LangGraph 节点、边、状态变更和业务数据流。</p>
+          <h1 className="title-xl">智能体工作流日志</h1>
+          <p className="muted">查看完整模型消息、响应正文和中文状态切换。</p>
         </div>
-        <div className={styles.headerActions}>
-          <button className="button secondary" type="button" onClick={() => void loadRuns(selectedRunId)}>
+        <div className="row">
+          <button className="button secondary" type="button" onClick={() => void loadRuns()}>
             刷新
           </button>
-          <Link className="button ghost" href="/">
-            返回项目
-          </Link>
+          <Link href="/dashboard" className="button ghost">返回工作台</Link>
         </div>
-      </header>
+      </div>
 
-      {error && <div className="notice notice-danger">{error}</div>}
-
-      <section className={styles.layout}>
-        <aside className={styles.runsPane}>
-          <div className={styles.paneHeader}>
-            <div>
-              <h2>运行记录</h2>
-              <span>{loading ? "读取中" : `${filteredRuns.length} 条`}</span>
-            </div>
-          </div>
-          <div className={styles.searchBox}>
-            <input
-              className="input"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜索 runId / taskId / 节点 / Agent"
-            />
-          </div>
-          <div className={styles.runList}>
-            {filteredRuns.map((run) => (
+      {error ? <div className="notice notice-danger">{error}</div> : null}
+      <div className="grid-two">
+        <section className="panel">
+          <div className="panel-header"><h2 className="title-lg">运行记录</h2></div>
+          <div className="panel-body list">
+            {runs.map((run) => (
               <button
                 key={run.runId}
-                className={`${styles.runItem} ${run.runId === selectedRunId ? styles.activeRun : ""}`}
+                className={`list-item ${selectedRunId === run.runId ? "active" : ""}`}
                 type="button"
                 onClick={() => setSelectedRunId(run.runId)}
               >
-                <span className={`${styles.statusDot} ${styles[`status_${run.status}`]}`} />
-                <span className={styles.runMain}>
-                  <strong>{shortId(run.runId, 10)}</strong>
-                  <small>{formatTime(run.startedAt)} · {run.eventCount} events</small>
-                  <small>{shortId(run.taskId, 8)}</small>
-                </span>
-                <span className={styles.runStatus}>{statusLabel(run.status)}</span>
+                <strong>{run.runKind}</strong>
+                <span className="muted small-text">{formatTime(run.startedAt)}</span>
+                <span className="badge">{run.status}</span>
               </button>
             ))}
-            {!loading && filteredRuns.length === 0 && (
-              <div className="empty">还没有可读取的 workflow event 日志。</div>
-            )}
-          </div>
-        </aside>
-
-        <section className={styles.graphPane}>
-          <div className={styles.graphToolbar}>
-            <div>
-              <h2>节点与边</h2>
-              <span>
-                {selectedRun ? `${shortId(selectedRun.runId, 12)} · ${statusLabel(selectedRun.status)}` : "未选择运行"}
-              </span>
-            </div>
-            <button
-              className="button ghost sm"
-              type="button"
-              onClick={() => setSelectedNode(null)}
-              disabled={!selectedNode}
-            >
-              显示全部事件
-            </button>
-          </div>
-
-          <div className={styles.graphCanvas}>
-            <svg className={styles.edgeLayer} viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
-              <defs>
-                <marker id="workflow-arrow" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-                  <path d="M0,0 L6,3 L0,6 Z" fill="currentColor" />
-                </marker>
-              </defs>
-              {GRAPH_EDGES.map((edge) => {
-                const from = GRAPH_NODES.find((node) => node.id === edge.from);
-                const to = GRAPH_NODES.find((node) => node.id === edge.to);
-                if (!from || !to) return null;
-                const key = `${edge.from}->${edge.to}`;
-                const active = activeEdges.has(key);
-                const midX = (from.x + to.x) / 2;
-                const bend = from.y === to.y ? from.y : (from.y + to.y) / 2;
-                const path = `M ${from.x} ${from.y} C ${midX} ${from.y}, ${midX} ${bend}, ${to.x} ${to.y}`;
-                return (
-                  <path
-                    key={key}
-                    className={`${styles.edge} ${active ? styles.activeEdge : ""}`}
-                    d={path}
-                    markerEnd="url(#workflow-arrow)"
-                  />
-                );
-              })}
-            </svg>
-
-            {GRAPH_NODES.map((node) => {
-              const active = activeNodeSet.has(node.id);
-              const selected = selectedNode === node.id;
-              const count = nodeCounts.get(node.id) ?? 0;
-              return (
-                <button
-                  key={node.id}
-                  className={[
-                    styles.graphNode,
-                    styles[`node_${node.kind}`],
-                    active ? styles.activeNode : "",
-                    selected ? styles.selectedNode : "",
-                  ].join(" ")}
-                  style={{ left: `${node.x}%`, top: `${node.y}%` }}
-                  type="button"
-                  title={`筛选 ${node.label} 节点事件`}
-                  onClick={() => setSelectedNode(selected ? null : node.id)}
-                >
-                  <span>{node.label}</span>
-                  {count > 0 && <em>{count}</em>}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className={styles.timeline}>
-            <div className={styles.timelineHeader}>
-              <h2>{selectedNode ? `${selectedNode} 事件` : "执行时间线"}</h2>
-              <span>{visibleEvents.length} / {events.length}</span>
-            </div>
-            <div className={styles.eventList}>
-              {visibleEvents.map((event) => {
-                const isSelected = selectedEvent?.seq === event.seq;
-                const nodes = getEntryNodes(event);
-                return (
-                  <button
-                    key={`${event.runId}-${event.seq}`}
-                    className={`${styles.eventItem} ${isSelected ? styles.activeEvent : ""}`}
-                    type="button"
-                    onClick={() => setSelectedSeq(event.seq)}
-                  >
-                    <span className={styles.seq}>#{event.seq}</span>
-                    <span className={`${styles.source} ${styles[`source_${event.source}`]}`}>
-                      {sourceLabel(event.source)}
-                    </span>
-                    <span className={styles.eventText}>
-                      <strong>{event.eventType}</strong>
-                      <small>
-                        {nodes.join(", ") || event.agentId || event.langGraphEvent || "全局"} · {formatTime(event.timestamp)}
-                      </small>
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
+            {!loading && runs.length === 0 ? <div className="empty">暂无运行日志。</div> : null}
           </div>
         </section>
 
-        <aside className={styles.detailPane}>
-          <div className={styles.paneHeader}>
-            <div>
-              <h2>状态内容</h2>
-              <span>{selectedEvent ? `#${selectedEvent.seq} ${selectedEvent.eventType}` : "未选择事件"}</span>
-            </div>
+        <section className="panel">
+          <div className="panel-header"><h2 className="title-lg">完整日志</h2></div>
+          <div className="panel-body">
+            {loading && !content ? <div className="empty">正在读取...</div> : null}
+            {content ? <pre className="workflow-human-log">{content}</pre> : null}
           </div>
-
-          {selectedRun && (
-            <div className={styles.summaryBlock}>
-              <dl>
-                <div>
-                  <dt>runId</dt>
-                  <dd>{selectedRun.runId}</dd>
-                </div>
-                <div>
-                  <dt>taskId</dt>
-                  <dd>{selectedRun.taskId}</dd>
-                </div>
-                <div>
-                  <dt>时间</dt>
-                  <dd>{formatTime(selectedRun.startedAt)} → {formatTime(selectedRun.endedAt)}</dd>
-                </div>
-              </dl>
-            </div>
-          )}
-
-          {selectedEvent ? (
-            <>
-              <div className={styles.metaGrid}>
-                <div>
-                  <span>来源</span>
-                  <strong>{sourceLabel(selectedEvent.source)}</strong>
-                </div>
-                <div>
-                  <span>节点</span>
-                  <strong>{getEntryNodes(selectedEvent).join(", ") || selectedEvent.node || "-"}</strong>
-                </div>
-                <div>
-                  <span>Agent</span>
-                  <strong>{selectedEvent.agentId || "-"}</strong>
-                </div>
-                <div>
-                  <span>变更字段</span>
-                  <strong>{getChangedKeyText(selectedEvent) || "-"}</strong>
-                </div>
-              </div>
-
-              <pre className={styles.payloadView}>{getPayloadText(selectedEvent)}</pre>
-            </>
-          ) : (
-            <div className="empty">选择一个事件后查看状态 patch 和 payload 摘要。</div>
-          )}
-        </aside>
-      </section>
+        </section>
+      </div>
     </main>
   );
 }

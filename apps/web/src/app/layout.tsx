@@ -10,6 +10,8 @@ export const metadata: Metadata = {
   description: "面向中文小说作者的本地优先智能创作工作台",
 };
 
+export const dynamic = "force-dynamic";
+
 async function getUserMenuData(): Promise<{
   username: string | null;
   creditBalance: string;

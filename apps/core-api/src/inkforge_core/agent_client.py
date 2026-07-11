@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from typing import Protocol, cast
+from urllib.parse import urlencode
 
 import httpx
 from inkforge_contracts.jobs import AgentJobAccepted, AgentJobRequest
@@ -45,6 +46,47 @@ class AgentClient:
                 status_code=503,
                 code="AGENT_RUN_SUBMIT_FAILED",
                 message="智能体运行提交失败",
+            ) from exc
+
+    async def get_workflow_runs(
+        self,
+        user_id: str,
+        run_id: str | None = None,
+    ) -> dict[str, object]:
+        path = "/internal/v1/debug/workflow-runs"
+        if run_id is not None:
+            path += f"/{run_id}"
+        query = urlencode({"userId": user_id}).encode()
+        idempotency_key = "debug-" + hashlib.sha256(
+            f"{user_id}:{run_id or 'list'}".encode()
+        ).hexdigest()[:32]
+        signed = self._signer.sign_request(
+            body=b"",
+            http_method="GET",
+            http_path=path,
+            query_string=query,
+            idempotency_key=idempotency_key,
+            scope=(ServiceScope.AGENT_DEBUG_READ,),
+            task_id="debug",
+            run_id="debug",
+            novel_id="debug",
+        )
+        try:
+            response = await self._http.get(
+                path,
+                params={"userId": user_id},
+                headers=signed.headers,
+            )
+            response.raise_for_status()
+            value = response.json()
+            if not isinstance(value, dict):
+                raise ValueError("智能体调试接口返回值不是对象")
+            return cast(dict[str, object], value)
+        except (httpx.HTTPError, ValueError) as exc:
+            raise ApiError(
+                status_code=503,
+                code="AGENT_DEBUG_READ_FAILED",
+                message="读取智能体工作流日志失败",
             ) from exc
 
 

@@ -39,6 +39,7 @@ export function SmartWritingPanel({
     <div className="panel panel-flex">
       {currentChapter ? (
         <WritingConversation
+          key={currentChapter.id}
           novelId={novelId}
           chapterId={currentChapter.id}
           chapterContext={currentChapter}

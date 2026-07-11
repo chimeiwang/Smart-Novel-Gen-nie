@@ -18,6 +18,8 @@ from .jobs.portrait import ModelPortraitGenerator, PortraitJobHandler
 from .jobs.quality import QualityJobHandler
 from .jobs.rag import OpenAIEmbeddingProvider, RagJobHandler
 from .jobs.writing import WritingJobHandler
+from .observability import HumanWorkflowLog, WorkflowModelObserver
+from .observability.router import router as debug_router
 from .operations.graph import OperationDependencies, build_operation_graph
 from .providers.base import ModelProvider
 from .providers.selector import create_model_provider
@@ -49,6 +51,7 @@ def create_app(
     run_queue: RedisRunQueue | None = None,
     core_request_verifier: CoreRequestVerifier | None = None,
     queue_consumer: ConsumerPort | None = None,
+    workflow_log: HumanWorkflowLog | None = None,
 ) -> FastAPI:
     loaded_settings = settings or (create_testing_settings() if testing else Settings())
     provider: ModelProvider | None = None
@@ -95,6 +98,7 @@ def create_app(
         redoc_url=None,
     )
     app.state.settings = loaded_settings
+    app.state.workflow_log = workflow_log
     app.state.model_provider = provider
     app.state.model_runtime = ModelRuntime(provider) if provider is not None else None
     app.state.model_provider_error = provider_error
@@ -138,11 +142,16 @@ def create_app(
 
     install_service_auth_error_handler(app)
     app.include_router(runs_router)
+    app.include_router(debug_router)
     return app
 
 
 def _configure_runtime(app: FastAPI, settings: Settings) -> None:
     try:
+        workflow_log = cast(HumanWorkflowLog | None, app.state.workflow_log)
+        if workflow_log is None:
+            workflow_log = HumanWorkflowLog(settings.workflow_human_log_dir)
+            app.state.workflow_log = workflow_log
         redis = getattr(app.state, "redis", None)
         if redis is None and settings.redis_url is not None:
             from redis.asyncio import Redis
@@ -182,7 +191,11 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
             provider = cast(ModelProvider | None, app.state.model_provider)
             queue = cast(RedisRunQueue | None, app.state.run_queue)
             if provider is not None and queue is not None and app.state.queue_consumer is None:
-                model_runtime = ModelRuntime(provider, billing=CoreBillingGateway(core))
+                model_runtime = ModelRuntime(
+                    provider,
+                    billing=CoreBillingGateway(core),
+                    observer=WorkflowModelObserver(workflow_log),
+                )
                 gateway = CoreToolGateway(core)
                 registry = build_default_registry(gateway)
                 runner = AgentRunner(AgentRuntime(model_runtime, registry), registry)
@@ -197,6 +210,7 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                         ParentGraphDependencies(operation=dependencies)
                     ),
                     operation_graph=build_operation_graph(dependencies),
+                    workflow_log=workflow_log,
                 )
                 app.state.model_runtime = model_runtime
                 handlers: dict[JobKind, JobHandler] = {"writing": writing}

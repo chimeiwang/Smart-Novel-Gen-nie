@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     agent_service_private_key_path: str | None = None
     agent_service_key_id: str = "agent-service-v1"
     core_api_url: str = "http://core-api:8000"
+    workflow_human_log_dir: str = "/data/agent-logs"
     rag_embedding_api_key: SecretStr | None = None
     rag_embedding_base_url: str | None = None
     rag_embedding_model: str | None = None

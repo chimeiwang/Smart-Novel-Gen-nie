@@ -34,15 +34,26 @@ class BillingPort(Protocol):
     ) -> None: ...
 
 
+class ModelCallObserver(Protocol):
+    def record_model_call(
+        self,
+        context: ModelCallContext,
+        messages: list[dict[str, str]],
+        output: str,
+    ) -> None: ...
+
+
 class ModelRuntime:
     def __init__(
         self,
         provider: ModelProvider,
         *,
         billing: BillingPort | None = None,
+        observer: ModelCallObserver | None = None,
     ) -> None:
         self._provider = provider
         self._billing = billing
+        self._observer = observer
 
     async def run_turn(
         self,
@@ -51,7 +62,9 @@ class ModelRuntime:
         context: ModelCallContext | None = None,
     ) -> ModelTurnResult:
         if not self._provider.billable or self._billing is None:
-            return await self._provider.complete_turn(request)
+            result = await self._provider.complete_turn(request)
+            self._record(context, request, result)
+            return result
         if context is None:
             raise ValueError("真实模型调用缺少运行资源上下文")
 
@@ -97,7 +110,25 @@ class ModelRuntime:
             },
             request_id,
         )
+        self._record(context, request, result)
         return result
+
+    def _record(
+        self,
+        context: ModelCallContext | None,
+        request: ModelTurnRequest,
+        result: ModelTurnResult,
+    ) -> None:
+        if self._observer is None or context is None:
+            return
+        self._observer.record_model_call(
+            context,
+            [
+                {"role": message.role, "content": message.content}
+                for message in request.messages
+            ],
+            result.content,
+        )
 
 
 def _model_request_id(

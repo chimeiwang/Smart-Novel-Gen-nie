@@ -604,8 +604,8 @@ export function WritingConversation({
   const [selectedUpdateRefKeys, setSelectedUpdateRefKeys] = useState<Set<string>>(new Set());
   const [reviewArtifactAction, setReviewArtifactAction] = useState<ReviewArtifactActionState | null>(null);
   const [chapterTargetPrompt, setChapterTargetPrompt] = useState<ChapterTargetPrompt | null>(null);
-  const reviewDraftSourceKeyRef = useRef<string | null>(null);
-  const reviewUpdateSelectionSourceKeyRef = useRef<string | null>(null);
+  const [reviewDraftSourceKey, setReviewDraftSourceKey] = useState<string | null>(null);
+  const [reviewUpdateSelectionSourceKey, setReviewUpdateSelectionSourceKey] = useState<string | null>(null);
 
   // 其他状态
   const [generatedContent, setGeneratedContent] = useState<string>("");
@@ -681,8 +681,8 @@ export function WritingConversation({
     setChapterTargetPrompt(null);
     setReviewDraftText("");
     setSelectedUpdateRefKeys(new Set());
-    reviewDraftSourceKeyRef.current = null;
-    reviewUpdateSelectionSourceKeyRef.current = null;
+    setReviewDraftSourceKey(null);
+    setReviewUpdateSelectionSourceKey(null);
     pendingReviewArtifactRefreshRef.current = false;
     updateReviewArtifactAction(null);
     resetAgentActivity();
@@ -707,17 +707,22 @@ export function WritingConversation({
     }
     setReviewDialogArtifact(artifact);
     const draftSourceKey = `${artifact.id}:${artifact.revision}`;
-    if (reviewDraftSourceKeyRef.current !== draftSourceKey) {
-      reviewDraftSourceKeyRef.current = draftSourceKey;
+    if (reviewDraftSourceKey !== draftSourceKey) {
+      setReviewDraftSourceKey(draftSourceKey);
       setReviewDraftText(getReviewArtifactContent(artifact));
     }
     const updateSelectionSourceKey = `${artifact.id}:${artifact.revision}:updates`;
-    if (reviewUpdateSelectionSourceKeyRef.current !== updateSelectionSourceKey) {
-      reviewUpdateSelectionSourceKeyRef.current = updateSelectionSourceKey;
+    if (reviewUpdateSelectionSourceKey !== updateSelectionSourceKey) {
+      setReviewUpdateSelectionSourceKey(updateSelectionSourceKey);
       setSelectedUpdateRefKeys(new Set(getStructuredUpdateRefs(artifact.payload?.updates).map(getUpdateSelectionKey)));
     }
     setShowReviewArtifactModal(true);
-  }, [clearReviewActionCloseTimer, updateReviewArtifactAction]);
+  }, [
+    clearReviewActionCloseTimer,
+    reviewDraftSourceKey,
+    reviewUpdateSelectionSourceKey,
+    updateReviewArtifactAction,
+  ]);
 
   const closeReviewArtifactModal = useCallback((options?: { force?: boolean }) => {
     if (!options?.force && reviewArtifactActionRef.current?.status === "pending") return;
@@ -751,24 +756,20 @@ export function WritingConversation({
     };
   }, [clearReviewActionCloseTimer]);
 
-  useEffect(() => {
-    resetSessionContext(null);
-  }, [chapterId, resetSessionContext]);
-
   const getLocalReviewDraftForApply = useCallback((artifact: ReviewArtifactData): string | undefined => {
     if (!getReviewArtifactContent(artifact)) return undefined;
     const draftSourceKey = `${artifact.id}:${artifact.revision}`;
-    if (reviewDraftSourceKeyRef.current !== draftSourceKey) return undefined;
+    if (reviewDraftSourceKey !== draftSourceKey) return undefined;
     return reviewDraftText;
-  }, [reviewDraftText]);
+  }, [reviewDraftSourceKey, reviewDraftText]);
 
   const getSelectedUpdateRefsForApply = useCallback((artifact: ReviewArtifactData): AgentUpdateSelectionRef[] | undefined => {
     const allRefs = getStructuredUpdateRefs(artifact.payload?.updates);
     if (allRefs.length === 0) return undefined;
     const updateSelectionSourceKey = `${artifact.id}:${artifact.revision}:updates`;
-    if (reviewUpdateSelectionSourceKeyRef.current !== updateSelectionSourceKey) return undefined;
+    if (reviewUpdateSelectionSourceKey !== updateSelectionSourceKey) return undefined;
     return allRefs.filter((ref) => selectedUpdateRefKeys.has(getUpdateSelectionKey(ref)));
-  }, [selectedUpdateRefKeys]);
+  }, [reviewUpdateSelectionSourceKey, selectedUpdateRefKeys]);
 
   const toggleUpdateSelection = useCallback((ref: AgentUpdateSelectionRef) => {
     const key = getUpdateSelectionKey(ref);
@@ -845,7 +846,7 @@ export function WritingConversation({
         setReviewDialogArtifact(null);
         updateReviewArtifactAction(null);
         setShowReviewArtifactModal(false);
-        reviewDraftSourceKeyRef.current = null;
+        setReviewDraftSourceKey(null);
         setReviewDraftText("");
         setMessages(loadedMessages);
         replaceSessionWorkspace({
@@ -2251,7 +2252,8 @@ export function WritingConversation({
     );
   };
 
-  const ArtifactReviewCard = ({ artifact }: { artifact: ReviewArtifactData }) => {
+  /* eslint-disable react-hooks/refs -- 审核卡片事件处理器只在点击时读取运行句柄。 */
+  const renderArtifactReviewCard = (artifact: ReviewArtifactData) => {
     const diffItems = artifact.diff ?? artifact.payload?.updates?.__diff ?? [];
     const hasStructuredUpdates = Boolean(artifact.payload?.updates && (
       artifact.payload.updates.outlineContent ||
@@ -2374,6 +2376,7 @@ export function WritingConversation({
       </div>
     );
   };
+  /* eslint-enable react-hooks/refs */
 
   const renderArtifactReviewDialog = (artifact: ReviewArtifactData) => {
     const latestEvaluation = artifact.evaluations?.[0];
@@ -2391,9 +2394,9 @@ export function WritingConversation({
     const action = getReviewArtifactAction(artifact.id);
     const actionLocked = isReviewArtifactActionLocked(action);
     const isCurrentSessionArtifact =
-      activeReviewArtifactRef.current?.id === artifact.id &&
-      Boolean(taskIdRef.current) &&
-      taskIdRef.current === artifact.taskId;
+      activeReviewArtifact?.id === artifact.id &&
+      Boolean(taskId) &&
+      taskId === artifact.taskId;
 
     return (
       <div className={`review-dialog ${actionLocked ? "is-busy" : ""}`} aria-busy={actionLocked}>
@@ -2876,7 +2879,7 @@ export function WritingConversation({
                     </div>
                   )}
                   {msg.reviewArtifact ? (
-                    <ArtifactReviewCard artifact={resolveMessageReviewArtifact(msg.reviewArtifact)} />
+                    renderArtifactReviewCard(resolveMessageReviewArtifact(msg.reviewArtifact))
                   ) : null}
                 </div>
                 {isUser && <div className="message-avatar user-avatar">我</div>}
@@ -2960,7 +2963,7 @@ export function WritingConversation({
         ) : null}
 
         {messages.length === 0 && workflowReviewArtifact ? (
-          <ArtifactReviewCard artifact={workflowReviewArtifact} />
+          renderArtifactReviewCard(workflowReviewArtifact)
         ) : (() => {
           const pendingUpdates = messages[messages.length - 1]?.pendingUpdates;
           return pendingUpdates ? <UpdatesPreviewCard updates={pendingUpdates} /> : null;

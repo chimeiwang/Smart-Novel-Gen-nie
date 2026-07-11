@@ -31,6 +31,7 @@ from .chapters.router import router as chapters_router
 from .chapters.service import ChapterService
 from .config import OLD_DEFAULT_JWT_SECRET, Settings, create_testing_settings
 from .db.session import DatabaseReadiness, configure_database
+from .debug import router as debug_router
 from .errors import (
     PUBLIC_ERROR_RESPONSES,
     ApiError,
@@ -347,6 +348,7 @@ def create_app(
     app.include_router(billing_router, prefix="/api/v1")
     app.include_router(writing_router, prefix="/api/v1")
     app.include_router(reviews_router, prefix="/api/v1")
+    app.include_router(debug_router, prefix="/api/v1")
     app.include_router(references_internal_router, include_in_schema=False)
     app.include_router(styles_internal_router, include_in_schema=False)
     app.include_router(billing_internal_router, include_in_schema=False)
