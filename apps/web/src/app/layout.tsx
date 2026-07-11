@@ -1,10 +1,7 @@
 import type { Metadata } from "next";
 
-import { getSession } from "@/shared/lib/auth";
-import { prisma } from "@/shared/db/prisma";
 import { UserMenu } from "@/features/auth/user-menu";
-import { logger } from "@/shared/lib/logger";
-import { formatCreditMicros } from "@/shared/lib/billing";
+import { createServerApiClient } from "@/lib/api/server";
 
 import "./globals.css";
 
@@ -13,27 +10,20 @@ export const metadata: Metadata = {
   description: "面向中文小说作者的本地优先智能创作工作台",
 };
 
-async function getUserMenuData(session: { userId: string } | null): Promise<{
+async function getUserMenuData(): Promise<{
   username: string | null;
   creditBalance: string;
 }> {
-  if (!session) return { username: null, creditBalance: "0" };
-
   try {
-    const user = await prisma.user.findUnique({
-      where: { id: session.userId },
-      select: { username: true, creditBalanceMicros: true },
-    });
-
-    if (!user) return { username: null, creditBalance: "0" };
-
+    const client = await createServerApiClient();
+    const { data, response } = await client.GET("/api/v1/billing/summary");
+    if (response.status === 401 || !data) return { username: null, creditBalance: "0" };
     return {
-      username: user.username,
-      creditBalance: formatCreditMicros(user.creditBalanceMicros),
+      username: data.username,
+      creditBalance: data.balanceCredits,
     };
   } catch (error) {
-    logger.warn("AUTH", "加载用户菜单数据失败", {
-      userId: session.userId,
+    console.warn("加载用户菜单数据失败", {
       error: error instanceof Error ? error.message : String(error),
     });
     return { username: null, creditBalance: "0" };
@@ -45,13 +35,12 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const session = await getSession();
-  const { username, creditBalance } = await getUserMenuData(session);
+  const { username, creditBalance } = await getUserMenuData();
 
   return (
     <html lang="zh-CN">
       <body>
-        {session && username && (
+        {username && (
           <UserMenu username={username} creditBalance={creditBalance} />
         )}
         {children}

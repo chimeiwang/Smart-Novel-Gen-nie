@@ -1,9 +1,8 @@
 import Link from "next/link";
 
-import { getSession } from "@/shared/lib/auth";
-import { prisma } from "@/shared/db/prisma";
 import { redirect } from "next/navigation";
-import { formatCreditMicros } from "@/shared/lib/billing";
+import { createServerApiClient } from "@/lib/api/server";
+import { CoreApiPageError, requireApiData } from "@/lib/api/response";
 
 function ledgerTypeLabel(type: string): string {
   if (type === "signup_bonus") return "注册赠送";
@@ -14,30 +13,16 @@ function ledgerTypeLabel(type: string): string {
 }
 
 export default async function BillingPage() {
-  const session = await getSession();
-  if (!session) redirect("/login");
-
-  const [user, entries] = await Promise.all([
-    prisma.user.findUnique({
-      where: { id: session.userId },
-      select: { username: true, creditBalanceMicros: true },
-    }),
-    prisma.creditLedger.findMany({
-      where: { userId: session.userId },
-      orderBy: { createdAt: "desc" },
-      take: 20,
-      select: {
-        id: true,
-        type: true,
-        amountMicros: true,
-        balanceAfterMicros: true,
-        note: true,
-        createdAt: true,
-      },
-    }),
-  ]);
-
-  if (!user) redirect("/login");
+  let summary;
+  try {
+    const client = await createServerApiClient();
+    summary = requireApiData(await client.GET("/api/v1/billing/summary"));
+  } catch (error) {
+    if (error instanceof CoreApiPageError && error.status === 401) redirect("/login");
+    const message = error instanceof Error ? error.message : "加载积分信息失败";
+    return <main className="page"><div className="empty">{message}</div></main>;
+  }
+  const entries = summary.recentLedger;
 
   return (
     <main className="page stack">
@@ -45,7 +30,7 @@ export default async function BillingPage() {
         <div>
           <div className="home-kicker">Billing</div>
           <h1 className="title-xl">积分与充值</h1>
-          <p className="home-subtitle">当前账号：{user.username}</p>
+          <p className="home-subtitle">当前账号：{summary.username}</p>
         </div>
         <div className="row">
           <Link href="/" className="button ghost">
@@ -60,7 +45,7 @@ export default async function BillingPage() {
             <h2 className="title-lg">当前余额</h2>
           </div>
           <div className="panel-body stack">
-            <div className="billing-balance">{formatCreditMicros(user.creditBalanceMicros)} 积分</div>
+            <div className="billing-balance">{summary.balanceCredits} 积分</div>
             <p className="muted">
               AI 调用会按实际用量扣除积分。
             </p>
@@ -96,16 +81,16 @@ export default async function BillingPage() {
                   <div>
                     <div className="title-sm">{ledgerTypeLabel(entry.type)}</div>
                     <div className="muted small-text">
-                      {entry.createdAt.toLocaleString("zh-CN")}
+                      {new Date(entry.createdAt).toLocaleString("zh-CN")}
                       {entry.note ? ` · ${entry.note}` : ""}
                     </div>
                   </div>
                   <div className="billing-ledger-amount">
                     <strong>
-                      {entry.amountMicros > BigInt(0) ? "+" : ""}
-                      {formatCreditMicros(entry.amountMicros)}
+                      {BigInt(entry.amountMicros) > BigInt(0) ? "+" : ""}
+                      {(Number(entry.amountMicros) / 1_000_000).toString()}
                     </strong>
-                    <span>余额 {formatCreditMicros(entry.balanceAfterMicros)}</span>
+                    <span>余额 {(Number(entry.balanceAfterMicros) / 1_000_000).toString()}</span>
                   </div>
                 </div>
               ))}

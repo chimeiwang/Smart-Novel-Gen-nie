@@ -3,7 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { createNovelAction } from "@/app/actions";
+import { browserApi } from "@/lib/api/browser";
+import { requireApiData } from "@/lib/api/response";
 import {
   STORY_LENGTH_PROFILE_CONFIG,
   type StoryLengthProfile,
@@ -30,11 +31,22 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
   const handleSubmit = async (formData: FormData) => {
     setPending(true);
     try {
-      const result = await createNovelAction(formData);
-      if (result?.novelId) {
-        onClose();
-        router.push(`/workspace/${result.novelId}`);
-      }
+      const result = requireApiData(await browserApi.POST("/api/v1/novels", {
+        body: {
+          name: String(formData.get("name") ?? ""),
+          summary: String(formData.get("summary") ?? "") || null,
+          storyLengthProfile,
+          targetTotalWordCount: Number(targetTotalWordCount) || null,
+          genre: genre || null,
+          protagonist: protagonist || null,
+          coreSellingPoint: coreSellingPoint || null,
+          readerPromise: readerPromise || null,
+          firstChapterGoal: firstChapterGoal || null,
+        },
+      }));
+      onClose();
+      router.push(`/workspace/${result.novelId}`);
+      router.refresh();
     } finally {
       setPending(false);
     }

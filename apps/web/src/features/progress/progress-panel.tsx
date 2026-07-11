@@ -3,7 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import { updatePlotProgressAction } from "@/app/actions";
+import { browserApi } from "@/lib/api/browser";
+import { requireApiData } from "@/lib/api/response";
 
 type ProgressPanelProps = {
   novelId: string;
@@ -37,13 +38,10 @@ export function ProgressPanel({ novelId, progress }: ProgressPanelProps) {
 
   const handleSave = () => {
     startTransition(async () => {
-      await updatePlotProgressAction({
-        novelId,
-        currentStage,
-        currentGoal,
-        currentConflict,
-        nextMilestone,
-      });
+      requireApiData(await browserApi.PUT("/api/v1/novels/{novel_id}/plot-progress", {
+        params: { path: { novel_id: novelId } },
+        body: { currentStage, currentGoal, currentConflict, nextMilestone },
+      }));
 
       setDraft(null);
       router.refresh();

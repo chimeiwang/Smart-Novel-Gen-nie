@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 
-import { applyWritingStyleAction } from "@/app/actions";
+import { browserApi } from "@/lib/api/browser";
+import { requireApiData } from "@/lib/api/response";
 
 type StylePanelProps = {
   novelId: string;
@@ -23,10 +24,10 @@ export function StylePanel({ novelId, appliedStyleId, styles }: StylePanelProps)
 
   const handleApply = (styleId: string) => {
     startTransition(async () => {
-      await applyWritingStyleAction({
-        novelId,
-        styleId,
-      });
+      requireApiData(await browserApi.PATCH("/api/v1/novels/{novel_id}/applied-style", {
+        params: { path: { novel_id: novelId } },
+        body: { styleId },
+      }));
 
       router.refresh();
     });

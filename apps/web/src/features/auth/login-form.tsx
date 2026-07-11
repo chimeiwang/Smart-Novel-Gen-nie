@@ -2,7 +2,8 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { loginAction, registerAction } from "@/app/actions";
+import { browserApi } from "@/lib/api/browser";
+import { requireApiData } from "@/lib/api/response";
 
 interface LoginFormProps {
   initialMode?: "login" | "register";
@@ -18,16 +19,22 @@ export function LoginForm({ initialMode = "login" }: LoginFormProps) {
     setPending(true);
     setError(null);
     try {
+      const username = String(formData.get("username") ?? "");
+      const password = String(formData.get("password") ?? "");
       const result = mode === "login"
-        ? await loginAction(formData)
-        : await registerAction(formData);
-      if (result.success) {
-        router.push("/dashboard");
-      } else {
-        setError(result.error ?? (mode === "login" ? "登录失败" : "注册失败"));
-      }
-    } catch {
-      setError("网络错误，请重试");
+        ? await browserApi.POST("/api/v1/auth/login", { body: { username, password } })
+        : await browserApi.POST("/api/v1/auth/register", {
+            body: {
+              username,
+              password,
+              confirmPassword: String(formData.get("confirmPassword") ?? ""),
+            },
+          });
+      requireApiData(result);
+      router.push("/dashboard");
+      router.refresh();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "网络错误，请重试");
     } finally {
       setPending(false);
     }

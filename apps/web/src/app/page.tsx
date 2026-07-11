@@ -1,9 +1,11 @@
 import Link from "next/link";
 
-import { getSession } from "@/shared/lib/auth";
+import { createServerApiClient } from "@/lib/api/server";
 
 export default async function HomePage() {
-  const session = await getSession();
+  const client = await createServerApiClient();
+  const { data: currentUser } = await client.GET("/api/v1/auth/me");
+  const isAuthenticated = Boolean(currentUser);
 
   return (
     <main className="marketing-page">
@@ -16,7 +18,7 @@ export default async function HomePage() {
           </span>
         </Link>
         <div className="marketing-nav-actions">
-          {session ? (
+          {isAuthenticated ? (
             <>
               <Link href="/styles" className="marketing-nav-link">
                 文风库
@@ -47,7 +49,7 @@ export default async function HomePage() {
             AI 产物先进入待审核草案，作者确认后才写入正式内容。
           </p>
           <div className="marketing-cta-row">
-            {session ? (
+            {isAuthenticated ? (
               <Link href="/dashboard" className="button marketing-primary-cta">
                 打开我的作品
               </Link>
@@ -189,7 +191,7 @@ export default async function HomePage() {
           <h2>先创建一个作品，再让工作流替你守住边界</h2>
           <p>注册后即可进入工作台，新建小说，并从第一章、创作规划、设定和大纲开始搭建。</p>
         </div>
-        {session ? (
+        {isAuthenticated ? (
           <Link href="/dashboard" className="button marketing-primary-cta">
             进入工作台
           </Link>

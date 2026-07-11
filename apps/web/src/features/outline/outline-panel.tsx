@@ -3,12 +3,8 @@
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
-import {
-  createOutlineNodeAction,
-  deleteOutlineNodeAction,
-  updateOutlineAction,
-  updateOutlineNodeAction,
-} from "@/app/actions";
+import { browserApi } from "@/lib/api/browser";
+import { requireApiData } from "@/lib/api/response";
 
 type OutlineNodeKind = "stage" | "plot_unit" | "chapter_group";
 type OutlineNodeStatus = "planned" | "in_progress" | "completed" | "skipped";
@@ -173,7 +169,12 @@ export function OutlinePanel({ novelId, outline, outlineNodes = [] }: OutlinePan
 
   const handleSaveOutline = () => {
     runAction(
-      () => updateOutlineAction({ novelId, content }),
+      async () => {
+        requireApiData(await browserApi.PUT("/api/v1/novels/{novel_id}/outline", {
+          params: { path: { novel_id: novelId } },
+          body: { content },
+        }));
+      },
       "总纲已保存",
     );
   };
@@ -189,6 +190,11 @@ export function OutlinePanel({ novelId, outline, outlineNodes = [] }: OutlinePan
       return;
     }
 
+    const parentKey = form.kind === "stage" ? "root" : form.parentId;
+    const siblingOrder = (nodesByParent.get(parentKey) ?? []).reduce(
+      (maximum, node) => Math.max(maximum, node.order),
+      -1,
+    ) + 1;
     const payload = {
       novelId,
       title,
@@ -196,6 +202,7 @@ export function OutlinePanel({ novelId, outline, outlineNodes = [] }: OutlinePan
       kind: form.kind,
       parentId: form.kind === "stage" ? null : form.parentId,
       status: form.status,
+      order: selectedNode?.order ?? siblingOrder,
       estimatedWordCount: toNumberOrNull(form.estimatedWordCount),
       actualWordCount: toNumberOrNull(form.actualWordCount),
     };
@@ -203,12 +210,25 @@ export function OutlinePanel({ novelId, outline, outlineNodes = [] }: OutlinePan
     const nodeId = form.id;
     if (nodeId) {
       runAction(
-        () => updateOutlineNodeAction({ ...payload, id: nodeId }),
+        async () => {
+          requireApiData(await browserApi.PATCH(
+            "/api/v1/novels/{novel_id}/outline-nodes/{node_id}",
+            {
+              params: { path: { novel_id: novelId, node_id: nodeId } },
+              body: payload,
+            },
+          ));
+        },
         "大纲节点已更新",
       );
     } else {
       runAction(
-        () => createOutlineNodeAction(payload),
+        async () => {
+          requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/outline-nodes", {
+            params: { path: { novel_id: novelId } },
+            body: payload,
+          }));
+        },
         "大纲节点已创建",
       );
     }
@@ -220,7 +240,10 @@ export function OutlinePanel({ novelId, outline, outlineNodes = [] }: OutlinePan
     if (!window.confirm(`确认删除「${title}」？有子节点时系统会拒绝删除。`)) return;
     runAction(
       async () => {
-        await deleteOutlineNodeAction({ novelId, id: form.id as string });
+        requireApiData(await browserApi.DELETE(
+          "/api/v1/novels/{novel_id}/outline-nodes/{node_id}",
+          { params: { path: { novel_id: novelId, node_id: form.id as string } } },
+        ));
         setSelectedNodeId(null);
         setFormDraft(null);
       },

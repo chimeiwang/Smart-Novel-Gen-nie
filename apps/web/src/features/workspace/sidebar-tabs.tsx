@@ -3,12 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import {
-  updateStoryProgressAction,
-  updateStoryBackgroundAction,
-  updateWorldSettingAction,
-  updateWritingBibleAction,
-} from "@/app/actions";
+import { browserApi } from "@/lib/api/browser";
+import { requireApiData } from "@/lib/api/response";
 import { ChapterList } from "@/features/chapters/chapter-list";
 import { LorePanel } from "@/features/lore/lore-panel";
 import { OutlinePanel } from "@/features/outline/outline-panel";
@@ -267,10 +263,10 @@ export function SidebarTabs({
 
   const handleSaveStoryProgress = () => {
     startTransition(async () => {
-      await updateStoryProgressAction({
-        novelId,
-        content: storyProgressContent,
-      });
+      requireApiData(await browserApi.PUT("/api/v1/novels/{novel_id}/story-progress", {
+        params: { path: { novel_id: novelId } },
+        body: { content: storyProgressContent },
+      }));
       setStoryProgressDraft(null);
       router.refresh();
     });
@@ -278,10 +274,10 @@ export function SidebarTabs({
 
   const handleSaveStoryBackground = () => {
     startTransition(async () => {
-      await updateStoryBackgroundAction({
-        novelId,
-        content: storyBackgroundContent,
-      });
+      requireApiData(await browserApi.PUT("/api/v1/novels/{novel_id}/story-background", {
+        params: { path: { novel_id: novelId } },
+        body: { content: storyBackgroundContent },
+      }));
       setStoryBackgroundDraft(null);
       router.refresh();
     });
@@ -289,10 +285,10 @@ export function SidebarTabs({
 
   const handleSaveWorldSetting = () => {
     startTransition(async () => {
-      await updateWorldSettingAction({
-        novelId,
-        content: worldSettingContent,
-      });
+      requireApiData(await browserApi.PUT("/api/v1/novels/{novel_id}/world-setting", {
+        params: { path: { novel_id: novelId } },
+        body: { content: worldSettingContent },
+      }));
       setWorldSettingDraft(null);
       router.refresh();
     });
@@ -300,10 +296,13 @@ export function SidebarTabs({
 
   const handleSaveWritingBible = () => {
     startTransition(async () => {
-      await updateWritingBibleAction({
-        novelId,
-        ...writingBibleForm,
-      });
+      requireApiData(await browserApi.PUT("/api/v1/novels/{novel_id}/writing-bible", {
+        params: { path: { novel_id: novelId } },
+        body: {
+          ...writingBibleForm,
+          targetTotalWordCount: Number(writingBibleForm.targetTotalWordCount) || null,
+        },
+      }));
       setWritingBibleDraft(null);
       router.refresh();
     });

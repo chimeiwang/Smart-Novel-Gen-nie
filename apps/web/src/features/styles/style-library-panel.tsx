@@ -2,14 +2,9 @@
 
 import { useState, useRef } from "react";
 
-import {
-  createWritingStyleAction,
-  deleteStyleReferenceAction,
-  deleteWritingStyleAction,
-  uploadStyleReferenceAction,
-  updateStyleSectionAction,
-} from "@/app/actions";
 import { ParagraphText } from "@/features/writing/plain-text";
+import { browserApi } from "@/lib/api/browser";
+import { requireApiData } from "@/lib/api/response";
 
 type StyleReference = {
   id: string;
@@ -100,26 +95,15 @@ export function StyleLibraryPanel({ styles: initialStyles }: StyleLibraryPanelPr
 
   // 创建文风
   const handleCreateStyle = async () => {
-    const result = await createWritingStyleAction({ name: newStyleName });
+    const result = requireApiData(await browserApi.POST("/api/v1/styles", {
+      body: { name: newStyleName.trim() || "新文风" },
+    }));
     if (result) {
       const newStyle: StyleItem = {
-        id: result.styleId,
-        name: newStyleName || "新文风",
-        sourceType: "agent",
-        creativeMethodology: null,
-        uniqueMarkers: null,
-        generationStyle: null,
-        expressionFeatures: null,
-        styleTraits: null,
-        portraitMarkdown: null,
-        originalCharCount: 0,
-        usedCharCount: 0,
-        truncated: false,
-        errorMessage: null,
-        references: [],
+        ...result,
       };
       setStyles([newStyle, ...styles]);
-      setExpandedStyleId(result.styleId);
+      setExpandedStyleId(result.id);
       setNewStyleName("");
     }
   };
@@ -140,24 +124,21 @@ export function StyleLibraryPanel({ styles: initialStyles }: StyleLibraryPanelPr
     }
 
     try {
-      const content = await file.text();
-      const result = await uploadStyleReferenceAction({ styleId, filename: file.name, content });
-
-      if (result.success) {
-        setStyles((prev) =>
-          prev.map((s) => {
-            if (s.id === styleId) {
-              return {
-                ...s,
-                references: [{ id: result.referenceId, filename: file.name, charCount: result.charCount, status: "ready" }, ...s.references],
-              };
-            }
-            return s;
-          }),
-        );
-      } else {
-        setUploadError(result.error);
-      }
+      const result = requireApiData(await browserApi.POST(
+        "/api/v1/styles/{style_id}/references",
+        {
+          params: { path: { style_id: styleId } },
+          body: { file: file as unknown as string },
+          bodySerializer: () => {
+            const body = new FormData();
+            body.append("file", file);
+            return body;
+          },
+        },
+      ));
+      setStyles((prev) => prev.map((style) => style.id === styleId
+        ? { ...style, references: [result, ...style.references] }
+        : style));
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : "上传失败");
     }
@@ -165,7 +146,10 @@ export function StyleLibraryPanel({ styles: initialStyles }: StyleLibraryPanelPr
 
   // 删除文件
   const handleDeleteFile = async (styleId: string, referenceId: string) => {
-    await deleteStyleReferenceAction({ styleId, referenceId });
+    requireApiData(await browserApi.DELETE(
+      "/api/v1/styles/{style_id}/references/{reference_id}",
+      { params: { path: { style_id: styleId, reference_id: referenceId } } },
+    ));
     setStyles((prev) =>
       prev.map((s) => {
         if (s.id === styleId) {
@@ -179,103 +163,66 @@ export function StyleLibraryPanel({ styles: initialStyles }: StyleLibraryPanelPr
   // 删除文风
   const handleDeleteStyle = async (styleId: string) => {
     if (!confirm("确定要删除此文风吗？")) return;
-    await deleteWritingStyleAction({ styleId });
+    requireApiData(await browserApi.DELETE("/api/v1/styles/{style_id}", {
+      params: { path: { style_id: styleId } },
+    }));
     setStyles((prev) => prev.filter((s) => s.id !== styleId));
     if (expandedStyleId === styleId) setExpandedStyleId(null);
   };
 
-  // 生成单个维度
-  const generateSection = async (styleId: string, section: SectionKey) => {
-    setSectionStates((prev) => ({
-      ...prev,
-      [styleId]: { ...prev[styleId], [section]: { status: "generating", content: "" } },
-    }));
+  // Python 服务按完整画像生成，五个维度共享同一个持久任务。
+  const generateSection = async (styleId: string, _section: SectionKey) => {
+    const currentStyle = styles.find((style) => style.id === styleId);
+    const setAllSectionStates = (
+      status: SectionState["status"],
+      style: StyleItem | undefined = currentStyle,
+      error?: string,
+    ) => {
+      setSectionStates((previous) => ({
+        ...previous,
+        [styleId]: Object.fromEntries(SECTIONS.map(({ key }) => [
+          key,
+          { status, content: style?.[key] ?? "", error },
+        ])) as Record<SectionKey, SectionState>,
+      }));
+    };
 
+    setAllSectionStates("generating");
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
     try {
-      const response = await fetch("/api/portrait/section", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ styleId, section }),
-        signal: abortController.signal,
-      });
-
-      if (!response.ok) throw new Error(`请求失败: ${response.status}`);
-
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("无法读取响应");
-
-      const decoder = new TextDecoder();
-      let buffer = "";
+      const accepted = requireApiData(await browserApi.POST(
+        "/api/v1/styles/{style_id}/portrait",
+        { params: { path: { style_id: styleId } }, signal: abortController.signal },
+      ));
 
       while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (!line.startsWith("data: ")) continue;
-
-          try {
-            const data = JSON.parse(line.slice(6));
-
-            if (data.type === "chunk") {
-              setSectionStates((prev) => ({
-                ...prev,
-                [styleId]: {
-                  ...prev[styleId],
-                  [section]: {
-                    status: "generating",
-                    content: (prev[styleId]?.[section]?.content || "") + data.content,
-                  },
-                },
-              }));
-            } else if (data.type === "done") {
-              setSectionStates((prev) => ({
-                ...prev,
-                [styleId]: { ...prev[styleId], [section]: { status: "done", content: data.content } },
-              }));
-              setStyles((prev) => prev.map((s) => (s.id === styleId ? { ...s, [section]: data.content } : s)));
-            } else if (data.type === "error") {
-              setSectionStates((prev) => ({
-                ...prev,
-                [styleId]: { ...prev[styleId], [section]: { status: "error", content: "", error: data.message } },
-              }));
-            }
-          } catch {}
-        }
+        await new Promise((resolve) => window.setTimeout(resolve, 1000));
+        const task = requireApiData(await browserApi.GET("/api/v1/portrait-tasks/{task_id}", {
+          params: { path: { task_id: accepted.taskId } },
+          signal: abortController.signal,
+        }));
+        if (task.status === "error") throw new Error(task.errorMessage || "画像生成失败");
+        if (task.status === "success") break;
       }
+
+      const refreshedStyles = requireApiData(await browserApi.GET("/api/v1/styles"));
+      const refreshedStyle = refreshedStyles.find((style) => style.id === styleId);
+      if (!refreshedStyle) throw new Error("画像生成完成，但文风不存在");
+      setStyles(refreshedStyles);
+      setAllSectionStates("done", refreshedStyle);
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
-        setSectionStates((prev) => ({
-          ...prev,
-          [styleId]: { ...prev[styleId], [section]: { status: "idle", content: "" } },
-        }));
+        setAllSectionStates("idle");
       } else {
-        setSectionStates((prev) => ({
-          ...prev,
-          [styleId]: {
-            ...prev[styleId],
-            [section]: { status: "error", content: "", error: error instanceof Error ? error.message : "生成失败" },
-          },
-        }));
+        setAllSectionStates("error", currentStyle, error instanceof Error ? error.message : "生成失败");
       }
     }
   };
 
-  // 生成所有维度
   const generateAllSections = async (styleId: string) => {
-    for (const section of SECTIONS) {
-      const currentStatus = getSectionStatus(styles.find((s) => s.id === styleId)!, section.key);
-      if (currentStatus !== "done") {
-        await generateSection(styleId, section.key);
-      }
-    }
+    await generateSection(styleId, "creativeMethodology");
   };
 
   // 停止生成
@@ -303,11 +250,10 @@ export function StyleLibraryPanel({ styles: initialStyles }: StyleLibraryPanelPr
 
     setSaving(true);
     try {
-      await updateStyleSectionAction({
-        styleId: editingStyleId,
-        section: editState.section,
-        content: editState.content,
-      });
+      requireApiData(await browserApi.PATCH("/api/v1/styles/{style_id}/sections/{section}", {
+        params: { path: { style_id: editingStyleId, section: editState.section } },
+        body: { content: editState.content },
+      }));
 
       // 更新本地状态
       setStyles((prev) =>

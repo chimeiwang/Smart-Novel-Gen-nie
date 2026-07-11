@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useRef, useCallback, useEffect } from "react";
-import { logoutAction } from "@/app/actions";
+import { browserApi } from "@/lib/api/browser";
+import { requireApiData } from "@/lib/api/response";
 
 import "./user-menu.css";
 
@@ -108,8 +109,9 @@ export function LogoutButton() {
   const handleLogout = async () => {
     setPending(true);
     try {
-      await logoutAction();
+      requireApiData(await browserApi.POST("/api/v1/auth/logout"));
       router.push("/login");
+      router.refresh();
     } finally {
       setPending(false);
     }

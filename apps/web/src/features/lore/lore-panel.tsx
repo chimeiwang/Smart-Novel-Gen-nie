@@ -4,29 +4,8 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Form, Input, Select, InputNumber, Button, Space, Divider, Popconfirm, Card, Empty, Row, Col } from "antd";
 
-import {
-  createCharacterAction,
-  updateCharacterAction,
-  deleteCharacterAction,
-  createCharacterExperienceAction,
-  updateCharacterExperienceAction,
-  deleteCharacterExperienceAction,
-  createCharacterRelationAction,
-  updateCharacterRelationAction,
-  deleteCharacterRelationAction,
-  createItemAction,
-  updateItemAction,
-  deleteItemAction,
-  createLocationAction,
-  updateLocationAction,
-  deleteLocationAction,
-  createFactionAction,
-  updateFactionAction,
-  deleteFactionAction,
-  createGlossaryAction,
-  updateGlossaryAction,
-  deleteGlossaryAction,
-} from "@/app/actions";
+import { browserApi } from "@/lib/api/browser";
+import { requireApiData } from "@/lib/api/response";
 
 type LoreTabKey = "characters" | "items" | "locations" | "factions" | "glossaries";
 
@@ -415,15 +394,25 @@ export function LorePanel({
     if (!editingId) return;
     startTransition(async () => {
       if (activeTab === "characters") {
-        await deleteCharacterAction({ id: editingId, novelId });
+        requireApiData(await browserApi.DELETE("/api/v1/novels/{novel_id}/characters/{entity_id}", {
+          params: { path: { novel_id: novelId, entity_id: editingId } },
+        }));
       } else if (activeTab === "items") {
-        await deleteItemAction({ id: editingId, novelId });
+        requireApiData(await browserApi.DELETE("/api/v1/novels/{novel_id}/items/{entity_id}", {
+          params: { path: { novel_id: novelId, entity_id: editingId } },
+        }));
       } else if (activeTab === "locations") {
-        await deleteLocationAction({ id: editingId, novelId });
+        requireApiData(await browserApi.DELETE("/api/v1/novels/{novel_id}/locations/{entity_id}", {
+          params: { path: { novel_id: novelId, entity_id: editingId } },
+        }));
       } else if (activeTab === "factions") {
-        await deleteFactionAction({ id: editingId, novelId });
+        requireApiData(await browserApi.DELETE("/api/v1/novels/{novel_id}/factions/{entity_id}", {
+          params: { path: { novel_id: novelId, entity_id: editingId } },
+        }));
       } else if (activeTab === "glossaries") {
-        await deleteGlossaryAction({ id: editingId, novelId });
+        requireApiData(await browserApi.DELETE("/api/v1/novels/{novel_id}/glossary/{entity_id}", {
+          params: { path: { novel_id: novelId, entity_id: editingId } },
+        }));
       }
       closeModal();
       router.refresh();
@@ -433,178 +422,147 @@ export function LorePanel({
   const handleSubmit = () => {
     startTransition(async () => {
       if (activeTab === "characters") {
+        const characterPayload = {
+          name: characterForm.name,
+          aliases: characterForm.aliases,
+          gender: characterForm.gender,
+          age: characterForm.age,
+          appearance: characterForm.appearance,
+          personality: characterForm.personality,
+          identity: characterForm.identity,
+          background: characterForm.background,
+          coreDesire: characterForm.coreDesire,
+          behaviorBoundaries: characterForm.behaviorBoundaries,
+          speechStyle: characterForm.speechStyle,
+          relationshipPrinciples: characterForm.relationshipPrinciples,
+          shortTermGoal: characterForm.shortTermGoal,
+          factionId: characterForm.factionId || null,
+          powerLevel: characterForm.powerLevel,
+          combatAbility: characterForm.combatAbility,
+          specialSkills: characterForm.specialSkills,
+          currentStatus: characterForm.currentStatus,
+          statusNote: characterForm.statusNote,
+        };
         if (editingId) {
-          await updateCharacterAction({
-            id: editingId,
-            novelId,
-            name: characterForm.name,
-            aliases: characterForm.aliases,
-            gender: characterForm.gender,
-            age: characterForm.age,
-            appearance: characterForm.appearance,
-            personality: characterForm.personality,
-            identity: characterForm.identity,
-            background: characterForm.background,
-            coreDesire: characterForm.coreDesire,
-            behaviorBoundaries: characterForm.behaviorBoundaries,
-            speechStyle: characterForm.speechStyle,
-            relationshipPrinciples: characterForm.relationshipPrinciples,
-            shortTermGoal: characterForm.shortTermGoal,
-            factionId: characterForm.factionId,
-            // 新增：实力相关
-            powerLevel: characterForm.powerLevel,
-            combatAbility: characterForm.combatAbility,
-            specialSkills: characterForm.specialSkills,
-            // 新增：当前状态
-            currentStatus: characterForm.currentStatus,
-            statusNote: characterForm.statusNote,
-          });
+          requireApiData(await browserApi.PATCH(
+            "/api/v1/novels/{novel_id}/characters/{entity_id}",
+            {
+              params: { path: { novel_id: novelId, entity_id: editingId } },
+              body: characterPayload,
+            },
+          ));
 
           // 处理经历：先删除旧的，再创建新的
           const character = characters.find((c) => c.id === editingId);
           if (character) {
             for (const exp of character.experiences) {
-              await deleteCharacterExperienceAction({ id: exp.id });
+              requireApiData(await browserApi.DELETE(
+                "/api/v1/novels/{novel_id}/experiences/{experience_id}",
+                { params: { path: { novel_id: novelId, experience_id: exp.id } } },
+              ));
             }
           }
           for (let i = 0; i < characterForm.experiences.length; i++) {
             const exp = characterForm.experiences[i];
             if (exp.content.trim()) {
-              await createCharacterExperienceAction({
-                characterId: editingId,
-                chapterId: exp.chapterId || undefined,
-                content: exp.content,
-                order: i,
-              });
+              requireApiData(await browserApi.POST(
+                "/api/v1/novels/{novel_id}/characters/{character_id}/experiences",
+                {
+                  params: { path: { novel_id: novelId, character_id: editingId } },
+                  body: { chapterId: exp.chapterId || null, content: exp.content, order: i },
+                },
+              ));
             }
           }
 
           // 处理关系：先删除旧的，再创建新的
           if (character) {
             for (const rel of character.outgoingRelations) {
-              await deleteCharacterRelationAction({ id: rel.id, novelId });
+              requireApiData(await browserApi.DELETE(
+                "/api/v1/novels/{novel_id}/relations/{relation_id}",
+                { params: { path: { novel_id: novelId, relation_id: rel.id } } },
+              ));
             }
           }
           for (const rel of characterForm.relations) {
             if (rel.targetId && rel.relationType) {
-              await createCharacterRelationAction({
-                characterId: editingId,
-                targetId: rel.targetId,
-                relationType: rel.relationType,
-                description: rel.description,
-                intimacy: rel.intimacy,
-                startDate: rel.startDate,
-                endDate: rel.endDate,
-              });
+              requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/relations", {
+                params: { path: { novel_id: novelId } },
+                body: { characterId: editingId, ...rel },
+              }));
             }
           }
         } else {
-          const characterId = await createCharacterAction({
-            novelId,
-            name: characterForm.name,
-            aliases: characterForm.aliases,
-            gender: characterForm.gender,
-            age: characterForm.age,
-            appearance: characterForm.appearance,
-            personality: characterForm.personality,
-            identity: characterForm.identity,
-            background: characterForm.background,
-            coreDesire: characterForm.coreDesire,
-            behaviorBoundaries: characterForm.behaviorBoundaries,
-            speechStyle: characterForm.speechStyle,
-            relationshipPrinciples: characterForm.relationshipPrinciples,
-            shortTermGoal: characterForm.shortTermGoal,
-            factionId: characterForm.factionId,
-            // 新增：实力相关
-            powerLevel: characterForm.powerLevel,
-            combatAbility: characterForm.combatAbility,
-            specialSkills: characterForm.specialSkills,
-            // 新增：当前状态
-            currentStatus: characterForm.currentStatus,
-            statusNote: characterForm.statusNote,
-          });
+          const characterId = requireApiData(await browserApi.POST(
+            "/api/v1/novels/{novel_id}/characters",
+            { params: { path: { novel_id: novelId } }, body: characterPayload },
+          )).id;
 
           // 创建经历
           if (characterId) {
             for (let i = 0; i < characterForm.experiences.length; i++) {
               const exp = characterForm.experiences[i];
               if (exp.content.trim()) {
-                await createCharacterExperienceAction({
-                  characterId,
-                  chapterId: exp.chapterId || undefined,
-                  content: exp.content,
-                  order: i,
-                });
+                requireApiData(await browserApi.POST(
+                  "/api/v1/novels/{novel_id}/characters/{character_id}/experiences",
+                  {
+                    params: { path: { novel_id: novelId, character_id: characterId } },
+                    body: { chapterId: exp.chapterId || null, content: exp.content, order: i },
+                  },
+                ));
               }
             }
 
             // 创建关系
             for (const rel of characterForm.relations) {
               if (rel.targetId && rel.relationType) {
-                await createCharacterRelationAction({
-                  characterId,
-                  targetId: rel.targetId,
-                  relationType: rel.relationType,
-                  description: rel.description,
-                  intimacy: rel.intimacy,
-                  startDate: rel.startDate,
-                  endDate: rel.endDate,
-                });
+                requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/relations", {
+                  params: { path: { novel_id: novelId } },
+                  body: { characterId, ...rel },
+                }));
               }
             }
           }
         }
       } else if (activeTab === "items") {
         if (editingId) {
-          await updateItemAction({
-            id: editingId,
-            novelId,
-            ...itemForm,
-          });
+          requireApiData(await browserApi.PATCH("/api/v1/novels/{novel_id}/items/{entity_id}", {
+            params: { path: { novel_id: novelId, entity_id: editingId } }, body: itemForm,
+          }));
         } else {
-          await createItemAction({
-            novelId,
-            ...itemForm,
-          });
+          requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/items", {
+            params: { path: { novel_id: novelId } }, body: itemForm,
+          }));
         }
       } else if (activeTab === "locations") {
         if (editingId) {
-          await updateLocationAction({
-            id: editingId,
-            novelId,
-            ...locationForm,
-          });
+          requireApiData(await browserApi.PATCH("/api/v1/novels/{novel_id}/locations/{entity_id}", {
+            params: { path: { novel_id: novelId, entity_id: editingId } }, body: locationForm,
+          }));
         } else {
-          await createLocationAction({
-            novelId,
-            ...locationForm,
-          });
+          requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/locations", {
+            params: { path: { novel_id: novelId } }, body: locationForm,
+          }));
         }
       } else if (activeTab === "factions") {
         if (editingId) {
-          await updateFactionAction({
-            id: editingId,
-            novelId,
-            ...factionForm,
-          });
+          requireApiData(await browserApi.PATCH("/api/v1/novels/{novel_id}/factions/{entity_id}", {
+            params: { path: { novel_id: novelId, entity_id: editingId } }, body: factionForm,
+          }));
         } else {
-          await createFactionAction({
-            novelId,
-            ...factionForm,
-          });
+          requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/factions", {
+            params: { path: { novel_id: novelId } }, body: factionForm,
+          }));
         }
       } else if (activeTab === "glossaries") {
         if (editingId) {
-          await updateGlossaryAction({
-            id: editingId,
-            novelId,
-            ...glossaryForm,
-          });
+          requireApiData(await browserApi.PATCH("/api/v1/novels/{novel_id}/glossary/{entity_id}", {
+            params: { path: { novel_id: novelId, entity_id: editingId } }, body: glossaryForm,
+          }));
         } else {
-          await createGlossaryAction({
-            novelId,
-            ...glossaryForm,
-          });
+          requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/glossary", {
+            params: { path: { novel_id: novelId } }, body: glossaryForm,
+          }));
         }
       }
       closeModal();

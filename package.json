@@ -20,7 +20,7 @@
     "studio:input": "tsx -r tsconfig-paths/register scripts/create-langgraph-studio-input.ts",
     "api:generate": "node scripts/generate_api_client.mjs",
     "api:check": "node scripts/generate_api_client.mjs --check",
-    "test:web": "npm test --workspace @inkforge/api-client",
+    "test:web": "npm test --workspace @inkforge/web && npm test --workspace @inkforge/api-client",
     "test:python": "uv run pytest"
   },
   "keywords": [],

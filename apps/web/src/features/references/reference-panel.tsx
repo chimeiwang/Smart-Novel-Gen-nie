@@ -3,7 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
-import { createReferenceMaterialAction } from "@/app/actions";
+import { browserApi } from "@/lib/api/browser";
+import { requireApiData } from "@/lib/api/response";
 
 type ReferencePanelProps = {
   novelId: string;
@@ -26,13 +27,10 @@ export function ReferencePanel({ novelId, references }: ReferencePanelProps) {
 
   const handleSubmit = () => {
     startTransition(async () => {
-      await createReferenceMaterialAction({
-        novelId,
-        title,
-        type,
-        content,
-        sourceUrl,
-      });
+      requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/references", {
+        params: { path: { novel_id: novelId } },
+        body: { title, type, content, sourceUrl: sourceUrl || null },
+      }));
 
       setTitle("");
       setType("note");

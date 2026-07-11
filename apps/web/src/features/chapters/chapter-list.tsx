@@ -4,7 +4,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
 
-import { createChapterAction } from "@/app/actions";
+import { browserApi } from "@/lib/api/browser";
+import { requireApiData } from "@/lib/api/response";
 
 type ChapterListProps = {
   novelId: string;
@@ -33,12 +34,12 @@ export function ChapterList({
 
   const handleCreateChapter = () => {
     startTransition(async () => {
-      const chapterId = await createChapterAction(novelId);
-
-      if (chapterId) {
-        router.push(`/workspace/${novelId}?chapterId=${chapterId}`);
-        router.refresh();
-      }
+      const chapter = requireApiData(await browserApi.POST(
+        "/api/v1/novels/{novel_id}/chapters",
+        { params: { path: { novel_id: novelId } } },
+      ));
+      router.push(`/workspace/${novelId}?chapterId=${chapter.chapter.id}`);
+      router.refresh();
     });
   };
 

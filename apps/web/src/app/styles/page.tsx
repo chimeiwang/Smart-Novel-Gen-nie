@@ -1,27 +1,20 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import { StyleLibraryPanel } from "@/features/styles/style-library-panel";
-import { prisma } from "@/shared/db/prisma";
+import { createServerApiClient } from "@/lib/api/server";
+import { CoreApiPageError, requireApiData } from "@/lib/api/response";
 
 export default async function StylesPage() {
-  const styles = await prisma.writingStyle.findMany({
-    orderBy: {
-      updatedAt: "desc",
-    },
-    include: {
-      references: {
-        orderBy: {
-          createdAt: "desc",
-        },
-      },
-      tasks: {
-        orderBy: {
-          createdAt: "desc",
-        },
-        take: 1,
-      },
-    },
-  });
+  let styles;
+  try {
+    const client = await createServerApiClient();
+    styles = requireApiData(await client.GET("/api/v1/styles"));
+  } catch (error) {
+    if (error instanceof CoreApiPageError && error.status === 401) redirect("/login");
+    const message = error instanceof Error ? error.message : "加载文风库失败";
+    return <main className="page"><div className="empty">{message}</div></main>;
+  }
 
   const styleList = styles.map((style) => ({
     id: style.id,

@@ -3,12 +3,8 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 
-import {
-  saveChapterDraftAction,
-  setChapterStatusAction,
-  updateChapterQualityCheckStatusAction,
-  updateChapterProgressAction,
-} from "@/app/actions";
+import { browserApi } from "@/lib/api/browser";
+import { requireApiData } from "@/lib/api/response";
 import type { QualityCheckDto } from "@/shared/contracts/quality-check";
 import { countTextLength } from "@/shared/lib/word-count";
 
@@ -73,11 +69,10 @@ export function ChapterEditor({
 
     const timer = window.setTimeout(async () => {
       setSaveStatus("保存中...");
-      await saveChapterDraftAction({
-        chapterId: chapter.id,
-        title,
-        content,
-      });
+      requireApiData(await browserApi.PATCH("/api/v1/chapters/{chapter_id}", {
+        params: { path: { chapter_id: chapter.id } },
+        body: { title, content },
+      }));
 
       lastSavedRef.current = { title, content };
       setSaveStatus("已自动保存");
@@ -96,10 +91,10 @@ export function ChapterEditor({
 
   const handleSaveProgress = () => {
     startProgressTransition(async () => {
-      await updateChapterProgressAction({
-        chapterId: chapter.id,
-        content: progressContent,
-      });
+      requireApiData(await browserApi.PUT("/api/v1/chapters/{chapter_id}/progress", {
+        params: { path: { chapter_id: chapter.id } },
+        body: { content: progressContent },
+      }));
     });
   };
 
@@ -107,10 +102,10 @@ export function ChapterEditor({
     setQualityError(null);
     startStatusTransition(async () => {
       try {
-        await setChapterStatusAction({
-          chapterId: chapter.id,
-          status,
-        });
+        requireApiData(await browserApi.PATCH("/api/v1/chapters/{chapter_id}/status", {
+          params: { path: { chapter_id: chapter.id } },
+          body: { status },
+        }));
         setChapterStatus(status);
         router.refresh();
       } catch (error) {
@@ -124,24 +119,10 @@ export function ChapterEditor({
     setRunningCheckId(check.id);
     setQualityError(null);
     try {
-      const response = await fetch("/api/quality-check/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ checkId: check.id }),
-      });
-      if (!response.ok) {
-        const text = await response.text();
-        let message = "一致性终检启动失败";
-        try {
-          const parsed = JSON.parse(text) as { error?: string };
-          message = parsed.error || message;
-        } catch {
-          message = text || message;
-        }
-        setQualityError(message);
-        return;
-      }
-      await response.text();
+      requireApiData(await browserApi.POST("/api/v1/quality-checks/{check_id}/run", {
+        params: { path: { check_id: check.id } },
+        body: {},
+      }));
       router.refresh();
     } catch (error) {
       setQualityError(error instanceof Error ? error.message : "一致性终检启动失败");
@@ -153,7 +134,10 @@ export function ChapterEditor({
   const markQualityCheck = async (check: QualityCheckDto, status: "skipped" | "pending") => {
     setRunningCheckId(check.id);
     try {
-      await updateChapterQualityCheckStatusAction({ id: check.id, status });
+      requireApiData(await browserApi.PATCH("/api/v1/quality-checks/{check_id}", {
+        params: { path: { check_id: check.id } },
+        body: { status, resetResult: status === "pending" },
+      }));
       router.refresh();
     } finally {
       setRunningCheckId(null);

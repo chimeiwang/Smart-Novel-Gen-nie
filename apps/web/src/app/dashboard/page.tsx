@@ -1,32 +1,17 @@
 import { redirect } from "next/navigation";
 
-import { prisma } from "@/shared/db/prisma";
-import { getSession } from "@/shared/lib/auth";
-
 import { NovelListClient } from "@/features/projects/novel-list-client";
+import { createServerApiClient } from "@/lib/api/server";
+import { CoreApiPageError, requireApiData } from "@/lib/api/response";
 
 export default async function DashboardPage() {
-  const session = await getSession();
-  if (!session) redirect("/login");
-
-  const novels = await prisma.novel.findMany({
-    where: { userId: session.userId },
-    orderBy: {
-      updatedAt: "desc",
-    },
-    include: {
-      chapters: true,
-      appliedStyle: true,
-    },
-  });
-
-  const novelList = novels.map((n) => ({
-    id: n.id,
-    name: n.name,
-    summary: n.summary,
-    chapters: n.chapters.map((c) => ({ id: c.id })),
-    appliedStyle: n.appliedStyle ? { name: n.appliedStyle.name } : null,
-  }));
-
-  return <NovelListClient novels={novelList} />;
+  try {
+    const client = await createServerApiClient();
+    const dashboard = requireApiData(await client.GET("/api/v1/dashboard"));
+    return <NovelListClient novels={dashboard.novels} />;
+  } catch (error) {
+    if (error instanceof CoreApiPageError && error.status === 401) redirect("/login");
+    const message = error instanceof Error ? error.message : "加载作品列表失败";
+    return <main className="page"><div className="empty">{message}</div></main>;
+  }
 }

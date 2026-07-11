@@ -1,13 +1,13 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 
 import { ChapterEditor } from "@/features/editor/chapter-editor";
 import { SmartWritingPanel } from "@/features/workspace/smart-writing-panel";
 import { SidebarTabs } from "@/features/workspace/sidebar-tabs";
 import { countTextLength } from "@/shared/lib/word-count";
-import { prisma } from "@/shared/db/prisma";
-import { getSession } from "@/shared/lib/auth";
 import { LogoutButton } from "@/features/auth/user-menu";
+import { createServerApiClient } from "@/lib/api/server";
+import { CoreApiPageError, requireApiData } from "@/lib/api/response";
 
 // 角色状态枚举
 type CharacterStatus = "active" | "missing" | "dead" | "imprisoned" | "unknown";
@@ -26,91 +26,46 @@ export default async function WorkspacePage({
 }: WorkspacePageProps) {
   const { novelId } = await params;
   const { chapterId } = await searchParams;
-  const session = await getSession();
-
-  const novel = await prisma.novel.findUnique({
-    where: { id: novelId, userId: session?.userId ?? undefined },
-    include: {
-      chapters: {
-        orderBy: { order: "asc" },
-        include: {
-          chapterProgress: true,
-          qualityChecks: {
-            orderBy: { createdAt: "asc" },
-          },
-          beatPlans: {
-            where: { status: "approved" },
-            orderBy: { updatedAt: "desc" },
-            take: 1,
-            include: {
-              sceneBeats: {
-                orderBy: { order: "asc" },
-              },
-            },
-          },
-        },
+  let workspace;
+  try {
+    const client = await createServerApiClient();
+    workspace = requireApiData(await client.GET("/api/v1/novels/{novel_id}/workspace", {
+      params: {
+        path: { novel_id: novelId },
+        query: { chapterId },
       },
-      characters: {
-        orderBy: { updatedAt: "desc" },
-        include: {
-          faction: true,
-          experiences: {
-            orderBy: { order: "asc" },
-          },
-          outgoingRelations: {
-            include: {
-              target: { select: { id: true, name: true } },
-            },
-          },
-          incomingRelations: {
-            include: {
-              character: { select: { id: true, name: true } },
-            },
-          },
-        },
-      },
-      items: {
-        orderBy: { updatedAt: "desc" },
-        include: {
-          owner: true,
-        },
-      },
-      locations: {
-        orderBy: { updatedAt: "desc" },
-      },
-      factions: {
-        orderBy: { updatedAt: "desc" },
-      },
-      glossaries: {
-        orderBy: { updatedAt: "desc" },
-      },
-      storyBackground: true,
-      worldSetting: true,
-      writingBible: true,
-      outline: true,
-      outlineNodes: {
-        orderBy: [
-          { order: "asc" },
-          { title: "asc" },
-        ],
-      },
-      plotProgress: true,
-      references: {
-        orderBy: { updatedAt: "desc" },
-      },
-      appliedStyle: true,
-    },
-  });
-
-  if (!novel) {
-    notFound();
+    }));
+  } catch (error) {
+    if (error instanceof CoreApiPageError && error.status === 401) redirect("/login");
+    if (error instanceof CoreApiPageError && error.status === 404) notFound();
+    const message = error instanceof Error ? error.message : "加载作品工作区失败";
+    return <main className="page"><div className="empty">{message}</div></main>;
   }
 
-  const styles = await prisma.writingStyle.findMany({
-    orderBy: {
-      updatedAt: "desc",
-    },
-  });
+  const adaptedChapters = workspace.chapters.map((chapter) => ({
+    ...chapter,
+    updatedAt: new Date(chapter.updatedAt),
+    completedAt: chapter.completedAt ? new Date(chapter.completedAt) : null,
+    chapterProgress: chapter.progress,
+    beatPlans: chapter.approvedBeatPlan ? [chapter.approvedBeatPlan] : [],
+  }));
+  const novel = {
+    ...workspace.novel,
+    chapters: adaptedChapters,
+    characters: workspace.characters,
+    items: workspace.items,
+    locations: workspace.locations,
+    factions: workspace.factions,
+    glossaries: workspace.glossaries,
+    storyBackground: workspace.storyBackground,
+    worldSetting: workspace.worldSetting,
+    writingBible: workspace.writingBible,
+    outline: workspace.outline,
+    outlineNodes: workspace.outlineNodes,
+    plotProgress: workspace.plotProgress,
+    references: workspace.references,
+  };
+  const styles = workspace.styles;
 
   const chapters = novel.chapters as Array<{
     id: string;
