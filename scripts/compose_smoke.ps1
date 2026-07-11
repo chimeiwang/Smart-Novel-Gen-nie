@@ -1,5 +1,9 @@
 $ErrorActionPreference = "Stop"
-$compose = @("compose", "-f", "infra/compose.yaml", "-f", "infra/compose.test.yaml")
+$envFile = if ($env:COMPOSE_ENV_FILE) { $env:COMPOSE_ENV_FILE } else { ".env" }
+$compose = @("compose", "--env-file", $envFile, "-f", "infra/compose.yaml")
+if ($env:COMPOSE_OVERRIDE_FILE) {
+    $compose += @("-f", $env:COMPOSE_OVERRIDE_FILE)
+}
 $port = if ($env:INKFORGE_PORT) { $env:INKFORGE_PORT } else { "80" }
 $baseUrl = "http://127.0.0.1:$port"
 

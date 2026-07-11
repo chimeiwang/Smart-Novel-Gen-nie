@@ -19,6 +19,7 @@
 | 数据库结构未被仓库修改 | schema 归档与只读 `schema-contract.json` | 代码层通过 |
 | 2 核 2 GB 稳定性演练入口 | `tests/architecture/test_stability_drill.py`、`scripts/stability_drill.sh` | 脚本安全约束通过；30 分钟现场结果待执行 |
 | Agent 重启与 Redis 丢键接管入口 | `apps/core-api/tests/operations/test_recovery_audit.py`、`scripts/recovery_drill.sh` | 精确丢键和只读机器校验通过；部署机结果待执行 |
+| 上一版 Python 三服务回滚入口 | `tests/architecture/test_rollback_drill.py`、`scripts/rollback_drill.sh` | 测试环境、自动回切和指纹约束通过；部署机结果待执行 |
 
 ## 尚未执行的生产现场证据
 

@@ -20,7 +20,17 @@
 
 ## 回滚
 
-应用回滚只切换到已验证的旧镜像标签，不恢复或覆盖生产数据库。运行前设置 `ALLOW_ROLLBACK_DRILL=yes` 和 `ROLLBACK_IMAGE_TAG`，再执行 `scripts/rollback_drill.sh`。
+日常应用回滚只切换上一版 Python 三服务镜像，不恢复或覆盖数据库。`scripts/rollback_drill.sh` 只能在 `infra/compose.test.yaml` 和独立测试数据库中运行；它会检查当前与回滚版本的三张镜像，切换后执行冒烟、完整 Playwright 场景和只读数据库结构指纹检查，最后无论成功或失败都自动恢复当前镜像栈。
+
+```bash
+ALLOW_ROLLBACK_DRILL=yes \
+CURRENT_IMAGE_TAG=<当前标签> \
+ROLLBACK_IMAGE_TAG=<上一版标签> \
+ROLLBACK_ENV_FILE=.env.test \
+scripts/rollback_drill.sh
+```
+
+迁移前的旧 Next.js 单体镜像名为 `inkforge:<tag>`，其编排结构与 Python 三服务不同，不能通过 `INKFORGE_IMAGE_TAG` 切换。旧单体兼容性属于一次性迁移验收，必须使用提前归档的单体镜像和独立验证库执行只读检查，不能与日常 Python 版本回滚混为一谈。
 
 只有在确认数据本身损坏且已有停机窗口时，才允许把备份恢复到独立验证库。`scripts/restore_verify.sh` 会拒绝验证库地址与生产地址相同；它不是生产数据库恢复命令。
 
