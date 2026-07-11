@@ -12,6 +12,8 @@ class StrictModel(BaseModel):
 
 type ChapterStatus = Literal["drafting", "review", "completed"]
 type StoryLengthProfile = Literal["short_medium", "long_serial"]
+type StyleSourceType = Literal["manual", "agent"]
+type ReferenceType = Literal["note", "web", "book", "image", "custom"]
 type QualityCheckType = Literal["consistency", "lore_sync", "editorial", "craft"]
 type QualityCheckStatus = Literal["pending", "running", "completed", "skipped", "failed"]
 type QualityGate = Literal["pass", "revise", "rewrite"]
@@ -54,7 +56,7 @@ class StyleSummary(StrictModel):
     id: str
     name: str
     portraitMarkdown: str | None = None
-    sourceType: str
+    sourceType: StyleSourceType
 
 
 class AppliedStyleSummary(StrictModel):
@@ -327,7 +329,7 @@ class PlotProgressDto(StrictModel):
 class ReferenceDto(StrictModel):
     id: str
     title: str
-    type: str
+    type: ReferenceType
     content: str
     sourceUrl: str | None
     createdAt: datetime

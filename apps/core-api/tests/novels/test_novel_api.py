@@ -481,6 +481,56 @@ def test_workspace_openapi_lists_complete_top_level_fields_without_user_id() -> 
     assert "userId" not in str(components["WorkspaceNovel"])
 
 
+def test_openapi_publishes_exact_style_and_reference_types() -> None:
+    schemas = create_app(testing=True).openapi()["components"]["schemas"]
+    style_ref = schemas["StyleSummary"]["properties"]["sourceType"]["$ref"]
+    reference_ref = schemas["ReferenceDto"]["properties"]["type"]["$ref"]
+    assert schemas[style_ref.rsplit("/", 1)[-1]]["enum"] == ["manual", "agent"]
+    assert schemas[reference_ref.rsplit("/", 1)[-1]]["enum"] == [
+        "note",
+        "web",
+        "book",
+        "image",
+        "custom",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("model_name", "body"),
+    [
+        (
+            "StyleSummary",
+            {"id": "style-1", "name": "文风", "portraitMarkdown": None, "sourceType": "upload"},
+        ),
+        (
+            "ReferenceDto",
+            {
+                "id": "reference-1",
+                "title": "资料",
+                "type": "pdf",
+                "content": "内容",
+                "sourceUrl": None,
+                "createdAt": "2026-07-11T00:00:00Z",
+                "updatedAt": "2026-07-11T00:00:00Z",
+            },
+        ),
+    ],
+)
+def test_style_and_reference_models_reject_unknown_enum_values(
+    model_name: str, body: dict[str, object]
+) -> None:
+    from datetime import UTC, datetime
+
+    from inkforge_core.novels import schemas
+
+    if model_name == "ReferenceDto":
+        body["createdAt"] = datetime(2026, 7, 11, tzinfo=UTC)
+        body["updatedAt"] = datetime(2026, 7, 11, tzinfo=UTC)
+    model = getattr(schemas, model_name)
+    with pytest.raises(ValidationError):
+        model.model_validate(body)
+
+
 def test_public_datetime_serializes_as_utc_z() -> None:
     from datetime import UTC, datetime
 
