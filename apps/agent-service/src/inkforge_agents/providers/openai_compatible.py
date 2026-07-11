@@ -3,7 +3,13 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, cast
 
-from langchain_core.messages import AIMessage, convert_to_messages
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langchain_openai import ChatOpenAI
 
 from ..config import Settings
@@ -44,9 +50,37 @@ class OpenAICompatibleProvider:
                     for tool in request.tools
                 ]
             )
-        messages = convert_to_messages(
-            [message.model_dump(by_alias=True, exclude_none=True) for message in request.messages]
-        )
+        messages: list[BaseMessage] = []
+        for message in request.messages:
+            if message.role == "system":
+                messages.append(SystemMessage(content=message.content, name=message.name))
+            elif message.role == "user":
+                messages.append(HumanMessage(content=message.content, name=message.name))
+            elif message.role == "assistant":
+                messages.append(
+                    AIMessage(
+                        content=message.content,
+                        tool_calls=[
+                            {
+                                "id": tool_call.id,
+                                "name": tool_call.name,
+                                "args": tool_call.arguments,
+                                "type": "tool_call",
+                            }
+                            for tool_call in message.tool_calls
+                        ],
+                    )
+                )
+            elif message.tool_call_id is not None:
+                messages.append(
+                    ToolMessage(
+                        content=message.content,
+                        tool_call_id=message.tool_call_id,
+                        name=message.name,
+                    )
+                )
+            else:
+                raise ValueError("工具消息缺少 toolCallId")
         response = cast(
             AIMessage,
             await model.ainvoke(

@@ -5,13 +5,22 @@ from typing import Literal, Protocol
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, NonNegativeInt
 
 
-class ModelMessage(BaseModel):
+class ModelToolCall(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+    id: str
+    name: str
+    arguments: dict[str, JsonValue]
+
+
+class ModelMessage(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     role: Literal["system", "user", "assistant", "tool"]
     content: str
     name: str | None = None
     tool_call_id: str | None = Field(default=None, alias="toolCallId")
+    tool_calls: list[ModelToolCall] = Field(default_factory=list, alias="toolCalls")
 
 
 class ModelTool(BaseModel):
@@ -28,14 +37,6 @@ class ModelTurnRequest(BaseModel):
     messages: list[ModelMessage]
     tools: list[ModelTool]
     maxOutputTokens: int = Field(gt=0)
-
-
-class ModelToolCall(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
-
-    id: str
-    name: str
-    arguments: dict[str, JsonValue]
 
 
 class ModelUsage(BaseModel):
