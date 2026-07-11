@@ -13,9 +13,10 @@ if (!isEnabled(process.env.LANGGRAPH_STUDIO_ENABLED)) {
   process.exit(0);
 }
 
-const child = spawn("langgraphjs", ["dev", ...process.argv.slice(2)], {
+const child = spawn("uv", ["run", "langgraph", "dev", ...process.argv.slice(2)], {
   stdio: "inherit",
   shell: process.platform === "win32",
+  env: { ...process.env, PYTHONUTF8: "1" },
 });
 
 child.on("exit", (code, signal) => {

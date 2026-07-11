@@ -9,6 +9,7 @@ dev = [
     "aiosqlite>=0.21,<1",
     "fakeredis[lua]>=2.31,<3",
     "hatchling>=1.27,<2",
+    "langgraph-cli[inmem]>=0.4,<1",
     "mypy>=1.14,<2",
     "pytest>=8.3,<9",
     "pytest-asyncio>=0.25,<1",

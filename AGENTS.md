@@ -84,9 +84,9 @@ npm run studio:input # 生成 Studio 可运行的完整 GraphState 输入
 
 ### LangGraph Studio 调试
 
-- Studio 配置文件为 `langgraph.json`，图入口为 `src/agents/graph/studio-app.ts`，只导出现有 `getGraph()` 编译结果，不新增平行 Agent 编排。
+- Studio 配置文件为 `langgraph.json`，图入口为 `apps/agent-service/src/inkforge_agents/studio.py`，只导出 Python `StateGraph` 编译结果，不新增平行 Agent 编排。
 - Studio 输入可用 `npm run studio:input -- --novel-id <id> --chapter-id <id> --user-id <id> --message "..."` 生成；该脚本会创建一条调试用 `WritingTask`，并复用生产上下文聚合逻辑。
-- `npm run studio:dev` 默认不会启动 LangGraph Agent Server；需要 Studio 调试时先在 `.env` 设置 `LANGGRAPH_STUDIO_ENABLED=true`，再运行该命令。
+- `npm run studio:dev` 默认不会启动 LangGraph Agent Server；需要 Studio 调试时先在 `.env` 设置 `LANGGRAPH_STUDIO_ENABLED=true`，再由脚本通过 `uv run langgraph dev` 启动 Python 图。
 - Studio 启动后运行的是 LangGraph Agent Server，不是 Next.js 应用；它适合看节点、状态、interrupt/resume 和 LangSmith trace。
 - Studio 运行会真实执行 Graph 节点，可能创建/更新 `ReviewArtifact` 和 `WritingTask`。正式章节正文仍必须经过待审核草案和用户确认应用后才写入。
 - 写作会话恢复以 `WritingSession -> WritingTask.writingSessionId -> WritingTask.graphStateJson` 为主链路；只认显式 `writingSessionId` 绑定，禁止按小说、章节或时间窗猜测任务归属。`currentTask` 只承载非终态可继续任务，completed/error 仅作为历史摘要。`WritingMessage` 只负责用户可见聊天记录，不用于反推 LangGraph 状态。`MemorySaver` 只作为当前进程内 interrupt/resume 优化，不是生产级恢复来源；等待确认 checkpoint 默认 5 分钟 TTL，断连、异常和终态按 taskId 清理。
