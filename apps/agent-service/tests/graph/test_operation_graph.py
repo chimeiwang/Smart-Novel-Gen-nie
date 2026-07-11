@@ -93,3 +93,35 @@ async def test_operation_graph_interrupts_and_resumes_user_approval() -> None:
     completed = await graph.ainvoke(Command(resume={"decision": "approve"}), config)
     assert completed["phase"] == "completed"
     assert artifacts.actions == ["submit", "await", "apply"]
+
+
+@pytest.mark.asyncio
+async def test_new_graph_instance_resumes_from_stable_user_decision_state() -> None:
+    artifacts = ArtifactPort()
+    original = build_operation_graph(
+        OperationDependencies(agentExecutor=AgentExecutor(), artifacts=artifacts),
+        checkpointer=InMemorySaver(),
+    )
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="续写本章",
+    )
+    state["currentOperation"] = create_default_operation_for_agent("写作", "续写本章")
+    interrupted = await original.ainvoke(
+        state,
+        {"configurable": {"thread_id": "old-instance"}},
+    )
+    stable = {key: value for key, value in interrupted.items() if key != "__interrupt__"}
+    stable["resumeDecision"] = {"decision": "approve"}
+
+    replacement = build_operation_graph(
+        OperationDependencies(agentExecutor=AgentExecutor(), artifacts=artifacts)
+    )
+    completed = await replacement.ainvoke(stable)
+
+    assert completed["phase"] == "completed"
+    assert completed["artifactStatus"] == "applied"
+    assert artifacts.actions == ["submit", "await", "apply"]

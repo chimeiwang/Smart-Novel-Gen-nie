@@ -26,8 +26,10 @@ class GraphState(TypedDict, total=False):
     artifactIteration: int
     maxArtifactIterations: int
     userDecision: str | None
+    resumeDecision: dict[str, Any] | None
     errorMessage: str | None
     finalResponse: str
+    eventSequence: int
 
 
 def create_initial_state(
@@ -61,6 +63,8 @@ def create_initial_state(
         artifactIteration=0,
         maxArtifactIterations=5,
         userDecision=None,
+        resumeDecision=None,
         errorMessage=None,
         finalResponse="",
+        eventSequence=0,
     )

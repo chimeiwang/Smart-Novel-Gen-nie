@@ -1,0 +1,190 @@
+from __future__ import annotations
+
+import hashlib
+from typing import Protocol, cast
+
+import httpx
+from inkforge_contracts.jobs import AgentJobAccepted, AgentJobRequest
+from inkforge_contracts.jwt_claims import ServiceScope
+from inkforge_service_auth import ServiceTokenSigner, canonical_json_body
+from pydantic import JsonValue
+
+from .errors import ApiError
+from .writing.tasks import TaskRecord
+
+
+class AgentJobClient(Protocol):
+    async def submit(self, request: AgentJobRequest) -> AgentJobAccepted: ...
+
+
+class AgentClient:
+    def __init__(self, http: httpx.AsyncClient, signer: ServiceTokenSigner) -> None:
+        self._http = http
+        self._signer = signer
+
+    async def submit(self, request: AgentJobRequest) -> AgentJobAccepted:
+        path = "/internal/v1/runs"
+        body = canonical_json_body(request.model_dump(mode="json"))
+        signed = self._signer.sign_request(
+            body=body,
+            http_method="POST",
+            http_path=path,
+            query_string=b"",
+            idempotency_key=request.jobId,
+            scope=(ServiceScope.AGENT_RUN,),
+            task_id=request.taskId,
+            run_id=request.runId,
+            novel_id=request.novelId,
+        )
+        try:
+            response = await self._http.post(path, content=body, headers=signed.headers)
+            response.raise_for_status()
+            return AgentJobAccepted.model_validate(response.json())
+        except (httpx.HTTPError, ValueError) as exc:
+            raise ApiError(
+                status_code=503,
+                code="AGENT_RUN_SUBMIT_FAILED",
+                message="智能体运行提交失败",
+            ) from exc
+
+
+class WritingTaskAgentSubmitter:
+    def __init__(self, client: AgentJobClient) -> None:
+        self._client = client
+
+    async def submit(
+        self,
+        task: TaskRecord,
+        *,
+        resume: bool,
+        resume_input: dict[str, object] | None = None,
+    ) -> None:
+        await self._submit(
+            task,
+            resume=resume,
+            force=False,
+            resume_input=resume_input,
+        )
+
+    async def reconcile(self, task: TaskRecord) -> None:
+        await self._submit(
+            task,
+            resume=task.graph_state_json is not None,
+            force=True,
+            resume_input=None,
+        )
+
+    async def _submit(
+        self,
+        task: TaskRecord,
+        *,
+        resume: bool,
+        force: bool,
+        resume_input: dict[str, object] | None,
+    ) -> None:
+        fingerprint = task.graph_state_json or "initial"
+        digest = hashlib.sha256(f"writing:{task.id}:{resume}:{fingerprint}".encode()).hexdigest()[
+            :32
+        ]
+        await self._client.submit(
+            AgentJobRequest(
+                protocolVersion="1.0",
+                jobId=f"writing-{digest}",
+                kind="writing",
+                runId=task.id,
+                taskId=task.id,
+                novelId=task.novel_id,
+                userId=task.user_id,
+                priority=10,
+                payload={
+                    "resume": resume,
+                    "chapterId": task.chapter_id,
+                    "writingSessionId": task.writing_session_id,
+                    "resumeInput": cast(JsonValue, resume_input),
+                },
+                force=force,
+            )
+        )
+
+
+class QualityAgentSubmitter:
+    def __init__(self, client: AgentJobClient) -> None:
+        self._client = client
+
+    async def submit(
+        self,
+        *,
+        user_id: str,
+        check_id: str,
+        task_id: str | None,
+        message: str | None,
+    ) -> str:
+        run_id = f"quality-{check_id}"
+        await self._client.submit(
+            AgentJobRequest(
+                protocolVersion="1.0",
+                jobId=run_id,
+                kind="quality",
+                runId=run_id,
+                taskId=task_id or run_id,
+                novelId=f"quality:{check_id}",
+                userId=user_id,
+                priority=5,
+                payload={
+                    "checkId": check_id,
+                    "sourceTaskId": task_id,
+                    "message": message,
+                },
+            )
+        )
+        return run_id
+
+
+class PortraitAgentSubmitter:
+    def __init__(self, client: AgentJobClient) -> None:
+        self._client = client
+
+    async def submit(self, *, style_id: str, task_id: str, run_id: str) -> None:
+        await self._client.submit(
+            AgentJobRequest(
+                protocolVersion="1.0",
+                jobId=f"portrait-{task_id}",
+                kind="portrait",
+                runId=run_id,
+                taskId=task_id,
+                novelId=f"style:{style_id}",
+                userId="system",
+                priority=20,
+                payload={"styleId": style_id},
+            )
+        )
+
+
+class RagAgentSubmitter:
+    def __init__(self, client: AgentJobClient) -> None:
+        self._client = client
+
+    async def submit(
+        self,
+        novel_id: str,
+        reference_id: str,
+        content_hash: str,
+    ) -> None:
+        digest = hashlib.sha256(f"rag:{reference_id}:{content_hash}".encode()).hexdigest()[:32]
+        run_id = f"rag-{digest}"
+        await self._client.submit(
+            AgentJobRequest(
+                protocolVersion="1.0",
+                jobId=run_id,
+                kind="rag",
+                runId=run_id,
+                taskId=run_id,
+                novelId=novel_id,
+                userId="system",
+                priority=30,
+                payload={
+                    "referenceId": reference_id,
+                    "contentHash": content_hash,
+                },
+            )
+        )

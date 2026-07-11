@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class IndexSubmitter(Protocol):
-    async def submit(self, reference_id: str, content_hash: str) -> None: ...
+    async def submit(self, novel_id: str, reference_id: str, content_hash: str) -> None: ...
 
 
 class ReferenceRepositoryPort(Protocol):
@@ -64,7 +64,11 @@ class ReferenceService:
         value = await self._repository.create_reference(novel_id, user_id, request.model_dump())
         if self._submitter is not None:
             try:
-                await self._submitter.submit(str(value["id"]), str(value["contentHash"]))
+                await self._submitter.submit(
+                    novel_id,
+                    str(value["id"]),
+                    str(value["contentHash"]),
+                )
             except Exception:
                 logger.warning("参考资料索引任务提交失败", extra={"referenceId": value["id"]})
         return ReferenceMaterialResponse.model_validate(value)
@@ -88,7 +92,11 @@ class ReferenceService:
         value = await self._repository.update_reference(novel_id, user_id, reference_id, fields)
         if self._submitter is not None and {"title", "content"} & fields.keys():
             try:
-                await self._submitter.submit(reference_id, str(value["contentHash"]))
+                await self._submitter.submit(
+                    novel_id,
+                    reference_id,
+                    str(value["contentHash"]),
+                )
             except Exception:
                 logger.warning("参考资料索引任务提交失败", extra={"referenceId": reference_id})
         return ReferenceMaterialResponse.model_validate(value)
@@ -105,7 +113,7 @@ class ReferenceService:
             )
         content_hash = await self._repository.prepare_reindex(novel_id, user_id, reference_id)
         try:
-            await self._submitter.submit(reference_id, content_hash)
+            await self._submitter.submit(novel_id, reference_id, content_hash)
         except Exception:
             await self._repository.mark_index_failed(
                 novel_id, reference_id, content_hash, "索引任务提交失败"

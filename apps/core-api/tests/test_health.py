@@ -12,6 +12,21 @@ from inkforge_core.app import create_app
 from inkforge_core.http import get_request_id
 
 
+class Reconciler:
+    def __init__(self) -> None:
+        self.started = False
+        self.stopped = False
+        self.stop_event = asyncio.Event()
+
+    async def run(self) -> None:
+        self.started = True
+        await self.stop_event.wait()
+
+    def request_stop(self) -> None:
+        self.stopped = True
+        self.stop_event.set()
+
+
 @pytest.fixture
 def client() -> TestClient:
     return TestClient(create_app(testing=True))
@@ -33,6 +48,17 @@ def test_ready_reports_loaded_test_configuration(client: TestClient) -> None:
         "service": "core-api",
         "checks": {"configuration": "ok"},
     }
+
+
+def test_core_lifespan_starts_and_stops_writing_reconciler() -> None:
+    reconciler = Reconciler()
+    app = create_app(testing=True, writing_reconciler=reconciler)
+
+    with TestClient(app) as client:
+        assert client.get("/api/v1/health/live").status_code == 200
+        assert reconciler.started is True
+
+    assert reconciler.stopped is True
 
 
 def test_ready_aggregates_sync_and_async_checks_and_returns_503_on_failure() -> None:
@@ -61,9 +87,9 @@ def test_ready_aggregates_sync_and_async_checks_and_returns_503_on_failure() -> 
         },
     }
     document = app.openapi()
-    schema = document["paths"]["/api/v1/health/ready"]["get"]["responses"]["503"][
-        "content"
-    ]["application/json"]["schema"]
+    schema = document["paths"]["/api/v1/health/ready"]["get"]["responses"]["503"]["content"][
+        "application/json"
+    ]["schema"]
     assert schema == {"$ref": "#/components/schemas/ReadyHealthResponse"}
 
 
@@ -122,9 +148,7 @@ async def test_request_id_context_is_isolated_between_concurrent_asgi_requests()
     "request_id",
     [" ", "a" * 129, "contains\x00control", "contains\x1fcontrol", "contains\x7fcontrol"],
 )
-def test_invalid_request_id_is_replaced_with_uuid(
-    client: TestClient, request_id: str
-) -> None:
+def test_invalid_request_id_is_replaced_with_uuid(client: TestClient, request_id: str) -> None:
     response = client.get(
         "/api/v1/health/live",
         headers={"X-Request-ID": request_id},

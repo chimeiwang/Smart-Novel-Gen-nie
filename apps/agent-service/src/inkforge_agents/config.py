@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Environment = Literal["dev", "test", "production"]
 ModelProviderName = Literal["fake", "openai_compatible"]
@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = None
     openai_base_url: str = "https://api.deepseek.com/v1"
     openai_model: str = "deepseek-v4-flash"
+    redis_url: SecretStr | None = None
+    trusted_core_cidrs: Annotated[tuple[str, ...], NoDecode] = ()
+    core_service_public_key_path: str | None = None
+    agent_service_private_key_path: str | None = None
+    agent_service_key_id: str = "agent-service-v1"
+    core_api_url: str = "http://core-api:8000"
 
 
 def create_testing_settings() -> Settings:
@@ -30,5 +36,6 @@ def create_testing_settings() -> Settings:
             "environment": "test",
             "model_provider": "fake",
             "openai_api_key": None,
+            "trusted_core_cidrs": ("127.0.0.1/32", "::1/128"),
         }
     )

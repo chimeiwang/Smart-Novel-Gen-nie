@@ -129,7 +129,10 @@ def build_operation_graph(
             "userMessage": state["userMessage"],
         }
         return {
-            "contextMessages": build_operation_context(definition, source),
+            "contextMessages": [
+                *state.get("contextMessages", []),
+                *build_operation_context(definition, source),
+            ],
             "operationStep": "prepare_context",
             "operationStage": "准备操作上下文",
             "phase": "active",
@@ -257,9 +260,7 @@ def build_operation_graph(
         pending = state.get("pendingRevision")
         if pending and state.get("artifactIteration", 0) < state.get("maxArtifactIterations", 5):
             return (
-                "applyArtifactPatch"
-                if pending.get("revisionMode") == "patch"
-                else "reviseArtifact"
+                "applyArtifactPatch" if pending.get("revisionMode") == "patch" else "reviseArtifact"
             )
         return "markArtifactAwaitingUser"
 
@@ -354,6 +355,49 @@ def build_operation_graph(
             )
         raise ValueError("用户草案决策无效")
 
+    async def resume_user_decision(
+        state: GraphState,
+    ) -> Command[Literal["reviseArtifact", "suggestNextAction"]]:
+        artifact_id = state.get("activeArtifactId")
+        decision = state.get("resumeDecision")
+        if not artifact_id or not isinstance(decision, dict):
+            raise ValueError("稳定恢复缺少草案或用户决策")
+        selected = decision.get("decision")
+        if selected == "approve":
+            await dependencies.artifacts.apply(artifact_id)
+            return Command(
+                update={
+                    "resumeDecision": None,
+                    "userDecision": "approve",
+                    "artifactStatus": "applied",
+                },
+                goto="suggestNextAction",
+            )
+        if selected == "discard":
+            await dependencies.artifacts.discard(artifact_id)
+            return Command(
+                update={
+                    "resumeDecision": None,
+                    "userDecision": "discard",
+                    "artifactStatus": "discarded",
+                },
+                goto="suggestNextAction",
+            )
+        if selected == "revise":
+            return Command(
+                update={
+                    "resumeDecision": None,
+                    "userDecision": "revise",
+                    "pendingRevision": {
+                        "verdict": "revise",
+                        "revisionMode": "rewrite",
+                        "requiredChanges": decision.get("userMessage", "请根据用户意见继续修改。"),
+                    },
+                },
+                goto="reviseArtifact",
+            )
+        raise ValueError("稳定恢复的用户草案决策无效")
+
     async def suggest(state: GraphState) -> dict[str, Any]:
         phase = "error" if state.get("errorMessage") else "completed"
         return {
@@ -373,8 +417,16 @@ def build_operation_graph(
     builder.add_node("reviseArtifact", revise)
     builder.add_node("markArtifactAwaitingUser", mark_awaiting_user)
     builder.add_node("awaitUserDecision", await_user)
+    builder.add_node("resumeUserDecision", resume_user_decision)
     builder.add_node("suggestNextAction", suggest)
-    builder.add_edge(START, "prepareOperationContext")
+    builder.add_conditional_edges(
+        START,
+        lambda state: (
+            "resumeUserDecision"
+            if state.get("resumeDecision") and state.get("activeArtifactId")
+            else "prepareOperationContext"
+        ),
+    )
     builder.add_edge("prepareOperationContext", "executeOperation")
     builder.add_edge("executeOperation", "submitArtifactOrRespond")
     builder.add_conditional_edges("submitArtifactOrRespond", route_after_submit)

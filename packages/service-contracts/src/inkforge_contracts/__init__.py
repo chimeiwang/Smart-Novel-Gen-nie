@@ -2,6 +2,7 @@
 
 from .events import AgentEvent, CheckpointCallback, RunCompletionCallback, RunFailureCallback
 from .identity import CoreAgentId
+from .jobs import AgentJobAccepted, AgentJobCancelRequest, AgentJobRequest
 from .jwt_claims import ServiceJwtClaims, ServiceScope
 from .runs import CreativeOperationKind, RunAccepted, RunRequest, RunStatusResponse
 from .tools import ToolCallRequest, ToolCallResult
@@ -12,6 +13,9 @@ __all__ = [
     "AgentEvent",
     "CheckpointCallback",
     "CoreAgentId",
+    "AgentJobAccepted",
+    "AgentJobCancelRequest",
+    "AgentJobRequest",
     "CreativeOperationKind",
     "RunAccepted",
     "RunCompletionCallback",

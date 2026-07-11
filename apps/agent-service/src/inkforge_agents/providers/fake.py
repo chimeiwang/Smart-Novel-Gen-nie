@@ -10,6 +10,8 @@ from .base import (
 
 class FakeModelProvider:
     billable = False
+    provider_name = "fake"
+    model_name = "fake"
 
     async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
         content = "模拟模型已完成本轮处理。"

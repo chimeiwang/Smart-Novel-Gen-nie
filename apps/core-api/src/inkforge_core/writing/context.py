@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -144,6 +145,15 @@ class WritingContextRepository:
                 )
             outline_path = await self._outline_path(session, group)
             active_artifact = await self._active_artifact(session, task)
+            conversation_history = _conversation_history(task.conversationHistory)
+            latest_user_message = next(
+                (
+                    str(item["content"])
+                    for item in reversed(conversation_history)
+                    if item.get("role") == "user" and isinstance(item.get("content"), str)
+                ),
+                "",
+            )
             return {
                 "taskId": task.id,
                 "novelId": task.novelId,
@@ -160,6 +170,12 @@ class WritingContextRepository:
                 },
                 "outlinePath": outline_path,
                 "activeArtifact": active_artifact,
+                "phase": task.phase,
+                "targetWordCount": task.targetWordCount,
+                "selectedAgents": [item for item in task.selectedAgents.split(",") if item],
+                "conversationHistory": conversation_history,
+                "userMessage": latest_user_message,
+                "graphState": (json.loads(task.graphStateJson) if task.graphStateJson else None),
             }
 
     async def _chapter_groups(
@@ -269,6 +285,26 @@ def _goal_dict(goal: ChapterWritingGoal | None) -> dict[str, Any] | None:
         "wordCountMax": goal.wordCountMax,
         "specialNotes": goal.specialNotes,
     }
+
+
+def _conversation_history(serialized: str | None) -> list[dict[str, Any]]:
+    if not serialized:
+        return []
+    try:
+        value = json.loads(serialized)
+    except json.JSONDecodeError:
+        raise ApiError(
+            status_code=409,
+            code="WRITING_CONVERSATION_INVALID",
+            message="写作任务对话历史格式错误",
+        ) from None
+    if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+        raise ApiError(
+            status_code=409,
+            code="WRITING_CONVERSATION_INVALID",
+            message="写作任务对话历史格式错误",
+        )
+    return value
 
 
 def _beat_plan_dict(plan: ChapterBeatPlan | None, scenes: list[SceneBeat]) -> dict[str, Any] | None:

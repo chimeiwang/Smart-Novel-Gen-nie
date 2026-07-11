@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import cast
 
+import httpx
 from fastapi import FastAPI
 from inkforge_service_auth import RedisReplayStore
 from sqlalchemy.ext.asyncio import AsyncEngine
 
+from .agent_client import (
+    AgentClient,
+    PortraitAgentSubmitter,
+    QualityAgentSubmitter,
+    RagAgentSubmitter,
+    WritingTaskAgentSubmitter,
+)
 from .auth import router as auth_router
 from .auth.readiness import RedisReadiness
 from .auth.repository import AuthRepository
@@ -54,7 +63,11 @@ from .reviews.repository import ReviewRepository
 from .reviews.router import router as reviews_router
 from .reviews.service import ReviewService
 from .reviews.updates import AgentUpdatesExecutor
-from .service_auth import create_agent_callback_verifier, install_service_auth_error_handler
+from .service_auth import (
+    create_agent_callback_verifier,
+    create_core_request_signer,
+    install_service_auth_error_handler,
+)
 from .styles.internal_router import router as styles_internal_router
 from .styles.repository import StyleRepository
 from .styles.router import router as styles_router
@@ -62,6 +75,7 @@ from .styles.service import StyleService
 from .styles.storage import StyleStorage
 from .writing.callbacks import router as writing_callback_router
 from .writing.context import WritingContextRepository, WritingContextService
+from .writing.reconciler import WritingRunReconciler
 from .writing.repository import WritingRepository
 from .writing.router import router as writing_router
 from .writing.service import WritingService
@@ -128,14 +142,21 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
     writing_task_repository = WritingTaskRepository(session_factory)
     app.state.novel_service = NovelService(novel_repository)
     app.state.chapter_service = ChapterService(chapter_repository)
-    app.state.quality_service = QualityService(quality_repository, submitter=None)
+    agent_client = cast(AgentClient | None, getattr(app.state, "agent_client", None))
+    app.state.quality_service = QualityService(
+        quality_repository,
+        submitter=QualityAgentSubmitter(agent_client) if agent_client else None,
+    )
     app.state.lore_service = LoreService(lore_repository)
     app.state.outline_service = OutlineService(outline_repository)
-    app.state.reference_service = ReferenceService(reference_repository, submitter=None)
+    app.state.reference_service = ReferenceService(
+        reference_repository,
+        submitter=RagAgentSubmitter(agent_client) if agent_client else None,
+    )
     app.state.style_service = StyleService(
         style_repository,
         StyleStorage(app.state.settings.uploads_root),
-        submitter=None,
+        submitter=PortraitAgentSubmitter(agent_client) if agent_client else None,
     )
     grant_codec = (
         ModelGrantCodec.from_private_key_path(settings.core_service_private_key_path)
@@ -195,7 +216,18 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
     )
     app.state.writing_event_store = event_store
     app.state.writing_task_repository = writing_task_repository
-    app.state.writing_task_service = WritingTaskService(writing_task_repository, submitter=None)
+    writing_submitter = WritingTaskAgentSubmitter(agent_client) if agent_client else None
+    app.state.writing_task_service = WritingTaskService(
+        writing_task_repository,
+        submitter=writing_submitter,
+    )
+    if writing_submitter is not None and getattr(app.state, "writing_reconciler", None) is None:
+        app.state.writing_reconciler = WritingRunReconciler(
+            writing_task_repository,
+            writing_submitter,
+            batch_size=20,
+            interval_seconds=30,
+        )
     app.state.writing_callback_service = WritingCallbackService(
         writing_task_repository, event_store
     )
@@ -213,10 +245,28 @@ def _configure_rag_callback_auth(app: FastAPI, settings: Settings) -> None:
     )
 
 
+def _configure_agent_client(app: FastAPI, settings: Settings) -> None:
+    if settings.core_service_private_key_path is None or settings.agent_service_url is None:
+        return
+    signer = create_core_request_signer(
+        private_key_path=settings.core_service_private_key_path,
+        kid=settings.core_service_key_id,
+    )
+    http = httpx.AsyncClient(
+        base_url=settings.agent_service_url,
+        timeout=httpx.Timeout(10, connect=2),
+        limits=httpx.Limits(max_connections=4, max_keepalive_connections=2),
+    )
+    app.state.agent_http = http
+    app.state.agent_client = AgentClient(http, signer)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """在应用退出时释放已创建的数据库连接池。"""
 
+    reconciler = getattr(app.state, "writing_reconciler", None)
+    reconciler_task = asyncio.create_task(reconciler.run()) if reconciler is not None else None
     try:
         readiness = cast(
             DatabaseReadiness | None,
@@ -226,17 +276,37 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             await readiness.warm_up()
         yield
     finally:
+        if reconciler is not None:
+            reconciler.request_stop()
+        if reconciler_task is not None:
+            await asyncio.gather(reconciler_task, return_exceptions=True)
         auth_redis = getattr(app.state, "auth_redis", None)
         try:
             if auth_redis is not None:
                 await auth_redis.aclose()
         finally:
-            engine = cast(AsyncEngine | None, getattr(app.state, "database_engine", None))
-            if engine is not None:
-                await engine.dispose()
+            agent_http = cast(
+                httpx.AsyncClient | None,
+                getattr(app.state, "agent_http", None),
+            )
+            try:
+                if agent_http is not None:
+                    await agent_http.aclose()
+            finally:
+                engine = cast(
+                    AsyncEngine | None,
+                    getattr(app.state, "database_engine", None),
+                )
+                if engine is not None:
+                    await engine.dispose()
 
 
-def create_app(*, testing: bool = False, settings: Settings | None = None) -> FastAPI:
+def create_app(
+    *,
+    testing: bool = False,
+    settings: Settings | None = None,
+    writing_reconciler: object | None = None,
+) -> FastAPI:
     loaded_settings = settings
     if loaded_settings is None:
         loaded_settings = create_testing_settings() if testing else Settings()
@@ -252,10 +322,12 @@ def create_app(*, testing: bool = False, settings: Settings | None = None) -> Fa
         responses=PUBLIC_ERROR_RESPONSES,
     )
     app.state.settings = loaded_settings
+    app.state.writing_reconciler = writing_reconciler
     app.state.readiness_checks = {}
     register_readiness_check(app, "configuration", lambda: True)
     configure_database(app, loaded_settings)
     _configure_auth(app, loaded_settings)
+    _configure_agent_client(app, loaded_settings)
     _configure_business_services(app, loaded_settings)
     _configure_rag_callback_auth(app, loaded_settings)
     app.add_middleware(SafeUnhandledExceptionMiddleware)

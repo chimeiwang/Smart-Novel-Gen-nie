@@ -40,7 +40,13 @@ class TaskRecord:
 
 
 class WritingTaskSubmitter(Protocol):
-    async def submit(self, task: TaskRecord, *, resume: bool) -> None: ...
+    async def submit(
+        self,
+        task: TaskRecord,
+        *,
+        resume: bool,
+        resume_input: dict[str, Any] | None = None,
+    ) -> None: ...
 
 
 class WritingTaskRepositoryPort(Protocol):
@@ -49,6 +55,8 @@ class WritingTaskRepositoryPort(Protocol):
     ) -> WritingRunResponse: ...
 
     async def require_task(self, user_id: str, task_id: str) -> TaskRecord: ...
+
+    async def list_reconcilable(self, limit: int) -> list[TaskRecord]: ...
 
 
 class EventStorePort(Protocol):
@@ -140,6 +148,22 @@ class WritingTaskRepository:
             )
         return row.novelId, row.userId
 
+    async def list_reconcilable(self, limit: int) -> list[TaskRecord]:
+        async with self._session_factory() as session:
+            rows = (
+                await session.execute(
+                    select(WritingTask, Novel.userId)
+                    .join(Novel, Novel.id == WritingTask.novelId)
+                    .where(
+                        WritingTask.phase.not_in(TERMINAL_TASK_PHASES),
+                        Novel.userId.is_not(None),
+                    )
+                    .order_by(WritingTask.updatedAt, WritingTask.id)
+                    .limit(limit)
+                )
+            ).all()
+        return [_task_record(task, cast(str, owner_id)) for task, owner_id in rows]
+
     async def save_checkpoint(self, task_id: str, serialized: str, phase: str) -> None:
         async with self._session_factory() as session:
             async with session.begin():
@@ -220,10 +244,16 @@ class WritingTaskService:
             )
         response = await self._repository.create_task(user_id, request)
         task = await self._repository.require_task(user_id, response.id)
-        await self._submitter.submit(task, resume=False)
+        await self._submitter.submit(task, resume=False, resume_input=None)
         return response
 
-    async def resume(self, user_id: str, task_id: str, requested_session_id: str | None) -> None:
+    async def resume(
+        self,
+        user_id: str,
+        task_id: str,
+        requested_session_id: str | None,
+        resume_input: dict[str, Any] | None = None,
+    ) -> None:
         task = await self._repository.require_task(user_id, task_id)
         if task.phase in TERMINAL_TASK_PHASES:
             raise ApiError(
@@ -245,7 +275,11 @@ class WritingTaskService:
                 code="AGENT_RUN_UNAVAILABLE",
                 message="智能体运行队列暂时不可用",
             )
-        await self._submitter.submit(task, resume=True)
+        await self._submitter.submit(
+            task,
+            resume=True,
+            resume_input=resume_input,
+        )
 
 
 class WritingCallbackService:

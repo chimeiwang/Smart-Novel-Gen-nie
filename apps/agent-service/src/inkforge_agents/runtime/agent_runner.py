@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from ..definitions.agents import AGENT_DEFINITIONS, AgentId
 from ..tools.registry import ToolContext, ToolRegistry
 from .agent_runtime import AgentRuntime
+from .model_runtime import ModelCallContext
 from .turn_result import AgentTurnResult
 
 
@@ -54,6 +55,13 @@ class AgentRunner:
             context=request.toolContext,
             max_iterations=definition.maxIterations,
             terminal_control_tools=definition.terminalControlTools,
+            model_context=ModelCallContext(
+                userId=request.toolContext.userId,
+                novelId=request.toolContext.novelId,
+                taskId=request.toolContext.taskId,
+                runId=request.toolContext.runId,
+                agentId=request.agentId,
+            ),
         )
         payload: dict[str, Any] = result.model_dump()
         return AgentRunResult(agentId=definition.id, **payload)

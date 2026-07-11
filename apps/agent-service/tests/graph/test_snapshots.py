@@ -29,6 +29,39 @@ def test_snapshot_uses_versioned_envelope_and_round_trips_stable_state() -> None
     assert "runtime" not in rollback
 
 
+def test_snapshot_accepts_core_flat_compatibility_state() -> None:
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="继续修改",
+    )
+    state["phase"] = "waiting_user"
+    state["activeArtifactId"] = "artifact-1"
+    flat = {
+        **to_typescript_snapshot(serialize_snapshot(state)),
+        "operationMode": "operation_graph",
+        "pendingUserResponse": True,
+        "generatedContent": "",
+        "pendingUpdates": None,
+        "pendingAgentCall": None,
+        "qualityCheckId": None,
+        "artifactMode": "review_loop",
+        "reviewerAgent": None,
+        "reviewWorkerAgent": None,
+        "reviserAgent": None,
+        "pendingArtifactRevision": None,
+    }
+
+    restored = deserialize_snapshot(flat)
+
+    assert restored["taskId"] == "task-1"
+    assert flat["phase"] == "awaiting_user_review"
+    assert restored["phase"] == "waiting_user"
+    assert restored["activeArtifactId"] == "artifact-1"
+
+
 @pytest.mark.parametrize(
     "forbidden",
     ["runtime", "callbacks", "novelData", "controlEvents", "streamCallbacks"],

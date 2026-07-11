@@ -1,0 +1,106 @@
+from __future__ import annotations
+
+import json
+from dataclasses import replace
+from typing import Any
+
+import httpx
+import pytest
+from inkforge_contracts.jwt_claims import ServiceScope
+from inkforge_core.agent_client import AgentClient, WritingTaskAgentSubmitter
+from inkforge_core.writing.tasks import TaskRecord
+from inkforge_service_auth import SignedServiceRequest
+
+
+class Signer:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def sign_request(self, **kwargs: object) -> SignedServiceRequest:
+        self.calls.append(dict(kwargs))
+        return SignedServiceRequest(
+            token="signed",  # noqa: S106
+            headers={
+                "Authorization": "Bearer signed",
+                "Idempotency-Key": str(kwargs["idempotency_key"]),
+                "X-InkForge-Timestamp": "1",
+                "X-InkForge-Body-SHA256": "0" * 64,
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_agent_client_signs_exact_body_and_resource_binding() -> None:
+    signer = Signer()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/internal/v1/runs"
+        assert request.headers["authorization"] == "Bearer signed"
+        payload = json.loads(request.content)
+        return httpx.Response(
+            202,
+            json={
+                "protocolVersion": "1.0",
+                "jobId": payload["jobId"],
+                "runId": payload["runId"],
+                "taskId": payload["taskId"],
+                "status": "queued",
+            },
+        )
+
+    http = httpx.AsyncClient(
+        base_url="https://agent.example",
+        transport=httpx.MockTransport(handler),
+    )
+    client = AgentClient(http, signer)
+    submitter = WritingTaskAgentSubmitter(client)
+    task = TaskRecord(
+        id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        writing_session_id="session-1",
+        phase="idle",
+        graph_state_json=None,
+    )
+
+    await submitter.submit(task, resume=False)
+
+    assert signer.calls[0]["scope"] == (ServiceScope.AGENT_RUN,)
+    assert signer.calls[0]["task_id"] == "task-1"
+    assert signer.calls[0]["novel_id"] == "novel-1"
+    assert (
+        signer.calls[0]["body"]
+        == httpx.Request(
+            "POST", "https://agent.example/internal/v1/runs", content=signer.calls[0]["body"]
+        ).content
+    )
+    await http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_writing_job_id_is_stable_per_checkpoint_and_changes_on_resume() -> None:
+    captured: list[object] = []
+
+    class Client:
+        async def submit(self, request: object) -> object:
+            captured.append(request)
+            return object()
+
+    submitter = WritingTaskAgentSubmitter(Client())  # type: ignore[arg-type]
+    base = TaskRecord(
+        id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        writing_session_id=None,
+        phase="idle",
+        graph_state_json=None,
+    )
+    await submitter.submit(base, resume=False)
+    await submitter.submit(base, resume=False)
+    resumed = replace(base, graph_state_json='{"phase":"waiting"}')
+    await submitter.submit(resumed, resume=True)
+
+    assert captured[0].jobId == captured[1].jobId
+    assert captured[0].jobId != captured[2].jobId

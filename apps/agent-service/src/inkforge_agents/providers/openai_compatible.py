@@ -23,6 +23,7 @@ from .base import (
 
 class OpenAICompatibleProvider:
     billable = True
+    provider_name = "openai_compatible"
 
     def __init__(self, settings: Settings) -> None:
         if settings.openai_api_key is None or not settings.openai_api_key.get_secret_value():
@@ -33,6 +34,7 @@ class OpenAICompatibleProvider:
             model=settings.openai_model,
             temperature=0,
         )
+        self.model_name = settings.openai_model
 
     async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
         model: Any = self._model

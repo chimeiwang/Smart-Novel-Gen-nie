@@ -17,6 +17,19 @@ RUNTIME_ONLY_FIELDS = {
     "streamCallbacks",
     "eventCallbacks",
 }
+TYPESCRIPT_COMPATIBILITY_FIELDS = {
+    "operationMode",
+    "pendingUserResponse",
+    "generatedContent",
+    "pendingUpdates",
+    "pendingAgentCall",
+    "qualityCheckId",
+    "artifactMode",
+    "reviewerAgent",
+    "reviewWorkerAgent",
+    "reviserAgent",
+    "pendingArtifactRevision",
+}
 
 
 def serialize_snapshot(state: Mapping[str, Any]) -> dict[str, Any]:
@@ -32,12 +45,23 @@ def serialize_snapshot(state: Mapping[str, Any]) -> dict[str, Any]:
 
 def deserialize_snapshot(serialized: str | Mapping[str, Any]) -> GraphState:
     envelope = json.loads(serialized) if isinstance(serialized, str) else dict(serialized)
-    if envelope.get("version") != SNAPSHOT_VERSION or not isinstance(envelope.get("state"), dict):
-        raise ValueError("不支持的图状态快照版本")
-    state = envelope["state"]
+    if "version" in envelope or "state" in envelope:
+        if envelope.get("version") != SNAPSHOT_VERSION or not isinstance(
+            envelope.get("state"), dict
+        ):
+            raise ValueError("不支持的图状态快照版本")
+        state = envelope["state"]
+    else:
+        state = {
+            key: value
+            for key, value in envelope.items()
+            if key not in TYPESCRIPT_COMPATIBILITY_FIELDS
+        }
     forbidden = RUNTIME_ONLY_FIELDS.intersection(state)
     if forbidden:
         raise ValueError("稳定快照包含仅运行时字段")
+    if state.get("phase") == "awaiting_user_review":
+        state = {**state, "phase": "waiting_user"}
     return TypeAdapter(GraphState).validate_python(state)
 
 
@@ -51,6 +75,9 @@ def to_typescript_snapshot(serialized: str | Mapping[str, Any]) -> dict[str, Any
     )
     return {
         **state,
+        "phase": (
+            "awaiting_user_review" if state.get("phase") == "waiting_user" else state.get("phase")
+        ),
         "operationMode": "operation_graph",
         "pendingUserResponse": state.get("phase") == "waiting_user",
         "generatedContent": state.get("finalResponse", ""),

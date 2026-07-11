@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from ..providers.base import ModelMessage, ModelTurnRequest
 from ..tools.registry import ToolContext, ToolDefinition, ToolRegistry
-from .model_runtime import ModelRuntime
+from .model_runtime import ModelCallContext, ModelRuntime
 from .turn_result import (
     AgentTurnResult,
     RuntimeToolCall,
@@ -34,6 +34,7 @@ class AgentRuntime:
         max_iterations: int = 10,
         max_output_tokens: int = 8192,
         terminal_control_tools: set[str] | frozenset[str] = frozenset(),
+        model_context: ModelCallContext | None = None,
     ) -> AgentTurnResult:
         conversation = [
             message if isinstance(message, ModelMessage) else ModelMessage.model_validate(message)
@@ -52,7 +53,8 @@ class AgentRuntime:
                     messages=conversation,
                     tools=[tool.as_model_tool() for tool in exposed_tools],
                     maxOutputTokens=max_output_tokens,
-                )
+                ),
+                context=model_context,
             )
             usage = add_usage(usage, response.usage)
             if response.content:

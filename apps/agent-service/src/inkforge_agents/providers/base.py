@@ -58,5 +58,7 @@ class ModelTurnResult(BaseModel):
 
 class ModelProvider(Protocol):
     billable: bool
+    provider_name: str
+    model_name: str
 
     async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult: ...

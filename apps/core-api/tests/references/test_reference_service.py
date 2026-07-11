@@ -46,15 +46,15 @@ class RecordingRepository:
 
 class RecordingSubmitter:
     def __init__(self) -> None:
-        self.jobs: list[tuple[str, str]] = []
+        self.jobs: list[tuple[str, str, str]] = []
 
-    async def submit(self, reference_id: str, content_hash: str) -> None:
-        self.jobs.append((reference_id, content_hash))
+    async def submit(self, novel_id: str, reference_id: str, content_hash: str) -> None:
+        self.jobs.append((novel_id, reference_id, content_hash))
 
 
 class FailingSubmitter:
-    async def submit(self, reference_id: str, content_hash: str) -> None:
-        del reference_id, content_hash
+    async def submit(self, novel_id: str, reference_id: str, content_hash: str) -> None:
+        del novel_id, reference_id, content_hash
         raise RuntimeError("队列不可用")
 
 
@@ -82,7 +82,7 @@ async def test_configured_indexer_receives_saved_reference_id() -> None:
         "novel-1",
         CreateReferenceRequest(title="资料", type="book", content="正文", sourceUrl=None),
     )
-    assert submitter.jobs == [("reference-1", result.contentHash)]
+    assert submitter.jobs == [("novel-1", "reference-1", result.contentHash)]
 
 
 @pytest.mark.asyncio

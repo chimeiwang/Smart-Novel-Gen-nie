@@ -38,13 +38,10 @@ class Settings(BaseSettings):
     trusted_agent_cidrs: Annotated[
         tuple[str, ...],
         NoDecode,
-        Field(
-            validation_alias=AliasChoices(
-                "trusted_agent_cidrs", "AGENT_SERVICE_CIDRS"
-            )
-        ),
+        Field(validation_alias=AliasChoices("trusted_agent_cidrs", "AGENT_SERVICE_CIDRS")),
     ] = ()
     core_service_private_key_path: str | None = None
+    core_service_key_id: str = "core-api-v1"
     agent_service_public_key_path: str | None = None
     agent_service_url: str | None = None
     uploads_root: str = "/data/uploads"
@@ -76,8 +73,7 @@ class Settings(BaseSettings):
             not normalized
             or "\x00" in normalized
             or not (
-                PurePosixPath(normalized).is_absolute()
-                or PureWindowsPath(normalized).is_absolute()
+                PurePosixPath(normalized).is_absolute() or PureWindowsPath(normalized).is_absolute()
             )
         ):
             raise ValueError("上传根目录必须是绝对路径")
@@ -101,10 +97,7 @@ class Settings(BaseSettings):
             and self.jwt_secret.get_secret_value() == OLD_DEFAULT_JWT_SECRET
         ):
             raise ValueError("生产环境禁止使用旧默认会话签名密钥")
-        if (
-            self.jwt_secret is not None
-            and len(self.jwt_secret.get_secret_value().encode()) < 32
-        ):
+        if self.jwt_secret is not None and len(self.jwt_secret.get_secret_value().encode()) < 32:
             raise ValueError("生产环境会话签名密钥至少需要 32 个 UTF-8 字节")
         return self
 
@@ -137,6 +130,7 @@ def create_testing_settings() -> Settings:
             "trusted_proxy_cidrs": (),
             "trusted_agent_cidrs": (),
             "core_service_private_key_path": None,
+            "core_service_key_id": "core-api-v1",
             "agent_service_public_key_path": None,
             "agent_service_url": None,
             "uploads_root": "/data/uploads",

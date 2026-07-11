@@ -163,7 +163,12 @@ async def resume_writing_run(
     user: User,
     service: TaskService,
 ) -> ResumeWritingRunResponse:
-    await service.resume(user.id, task_id, body.writingSessionId)
+    await service.resume(
+        user.id,
+        task_id,
+        body.writingSessionId,
+        body.model_dump(mode="json", exclude_none=True),
+    )
     return ResumeWritingRunResponse(accepted=True, taskId=task_id)
 
 
