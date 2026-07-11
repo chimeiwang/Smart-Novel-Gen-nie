@@ -61,8 +61,8 @@ class ApiStyleService:
     async def delete_reference(self, style_id, reference_id):
         self.calls.append(("delete-ref", style_id, reference_id))
 
-    async def create_portrait(self, style_id):
-        self.calls.append(("portrait", style_id))
+    async def create_portrait(self, user_id, style_id):
+        self.calls.append(("portrait", user_id, style_id))
         return {"taskId": "task-1", "status": "pending"}
 
     async def get_portrait_task(self, task_id):

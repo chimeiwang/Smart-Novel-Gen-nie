@@ -7,6 +7,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, Send, interrupt
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..artifacts.builder import resolve_builder_artifact
 from ..artifacts.updates import extract_artifact_content
 from ..definitions.agents import AgentId
 from ..graph.context import build_operation_context
@@ -164,7 +165,7 @@ def build_operation_graph(
                 "operationStep": "direct_response",
                 "operationStage": "直接回复",
             }
-        event = _artifact_event(output.get("controlEvents", []))
+        event = _artifact_event(output.get("controlEvents", []), visible)
         if event is None:
             return {
                 "errorMessage": "主责智能体未提交待审核草案控制事件",
@@ -447,17 +448,20 @@ def _operation(state: GraphState) -> CreativeOperation:
     return CreativeOperation.model_validate(operation)
 
 
-def _artifact_event(events: object) -> dict[str, Any] | None:
+def _artifact_event(events: object, visible_content: str) -> dict[str, Any] | None:
     if not isinstance(events, list):
         return None
+    typed_events = [event for event in events if isinstance(event, dict)]
+    builder = resolve_builder_artifact(typed_events, visible_content)
+    if builder is not None:
+        return builder
     accepted = {
         "propose_updates",
-        "finish_update_builder",
         "begin_artifact_output",
         "submit_beat_plan",
     }
     return next(
-        (event for event in events if isinstance(event, dict) and event.get("type") in accepted),
+        (event for event in typed_events if event.get("type") in accepted),
         None,
     )
 
