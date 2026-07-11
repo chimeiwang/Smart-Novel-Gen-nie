@@ -116,22 +116,26 @@ class QualityAgentSubmitter:
         *,
         user_id: str,
         check_id: str,
+        novel_id: str,
+        chapter_id: str,
         task_id: str | None,
         message: str | None,
     ) -> str:
         run_id = f"quality-{check_id}"
+        billing_task_id = task_id or check_id
         await self._client.submit(
             AgentJobRequest(
                 protocolVersion="1.0",
                 jobId=run_id,
                 kind="quality",
                 runId=run_id,
-                taskId=task_id or run_id,
-                novelId=f"quality:{check_id}",
+                taskId=billing_task_id,
+                novelId=novel_id,
                 userId=user_id,
                 priority=5,
                 payload={
                     "checkId": check_id,
+                    "chapterId": chapter_id,
                     "sourceTaskId": task_id,
                     "message": message,
                 },

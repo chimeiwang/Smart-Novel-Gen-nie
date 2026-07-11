@@ -81,6 +81,22 @@ class RecordingQualityRepository:
             )
         return self.record
 
+    async def get_run_context(self, check_id, user_id, task_id, message):
+        self.authorized_task_ids.append(task_id)
+        return {
+            "checkId": check_id,
+            "novelId": self.record.novel_id,
+            "chapterId": self.record.chapter_id,
+            "chapterContent": "完整章节",
+            "message": message,
+        }
+
+    async def complete_run(self, check_id, user_id, result):
+        self.completed = (check_id, user_id, result)
+
+    async def fail_run(self, check_id, user_id):
+        self.failed = (check_id, user_id)
+
 
 def test_public_quality_status_only_accepts_pending_or_skipped() -> None:
     for status in ("running", "completed", "failed"):
@@ -178,6 +194,8 @@ async def test_run_submitter_receives_only_authorized_context() -> None:
     assert submitter.input == {
         "user_id": "cookie-user",
         "check_id": "check-1",
+        "novel_id": "novel-1",
+        "chapter_id": "chapter-1",
         "task_id": "task-existing",
         "message": "完整检查",
     }
@@ -196,6 +214,26 @@ async def test_run_rejects_task_that_does_not_match_check() -> None:
         )
     assert caught.value.status_code == 403
     assert caught.value.code == "QUALITY_TASK_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_internal_quality_context_and_result_stay_in_core() -> None:
+    repository = RecordingQualityRepository()
+    service = QualityService(repository, submitter=None)  # type: ignore[arg-type]
+
+    context = await service.get_run_context(
+        "user-1", "check-1", None, "检查一致性"
+    )
+    result = {
+        "result": "检查报告",
+        "scores": {"overall": 9},
+        "qualityGate": "pass",
+        "rewriteBrief": None,
+    }
+    await service.complete_run("user-1", "check-1", result)
+
+    assert context["chapterContent"] == "完整章节"
+    assert repository.completed == ("check-1", "user-1", result)
 
 
 @asynccontextmanager

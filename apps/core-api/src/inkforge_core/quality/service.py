@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Any, Protocol
 
 from ..errors import ApiError
 from ..novels.schemas import QualityCheckDto
@@ -33,6 +33,17 @@ class QualityRepositoryPort(Protocol):
     async def authorize_run(
         self, check_id: str, user_id: str, task_id: str | None
     ) -> QualityRecordPort: ...
+    async def get_run_context(
+        self,
+        check_id: str,
+        user_id: str,
+        task_id: str | None,
+        message: str | None,
+    ) -> dict[str, Any]: ...
+    async def complete_run(
+        self, check_id: str, user_id: str, result: dict[str, Any]
+    ) -> None: ...
+    async def fail_run(self, check_id: str, user_id: str) -> None: ...
 
 
 class QualityRunSubmitter(Protocol):
@@ -41,6 +52,8 @@ class QualityRunSubmitter(Protocol):
         *,
         user_id: str,
         check_id: str,
+        novel_id: str,
+        chapter_id: str,
         task_id: str | None,
         message: str | None,
     ) -> str: ...
@@ -84,7 +97,31 @@ class QualityService:
         task_id = await self._submitter.submit(
             user_id=user_id,
             check_id=check_id,
+            novel_id=check.novel_id,
+            chapter_id=check.chapter_id,
             task_id=request.taskId,
             message=request.message,
         )
         return RunQualityCheckResponse(accepted=True, checkId=check_id, taskId=task_id)
+
+    async def get_run_context(
+        self,
+        user_id: str,
+        check_id: str,
+        task_id: str | None,
+        message: str | None,
+    ) -> dict[str, Any]:
+        return await self._repository.get_run_context(
+            check_id, user_id, task_id, message
+        )
+
+    async def complete_run(
+        self,
+        user_id: str,
+        check_id: str,
+        result: dict[str, Any],
+    ) -> None:
+        await self._repository.complete_run(check_id, user_id, result)
+
+    async def fail_run(self, user_id: str, check_id: str) -> None:
+        await self._repository.fail_run(check_id, user_id)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import cast
+from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -90,6 +90,78 @@ class QualityRepository:
                 raise self._task_mismatch()
         return record
 
+    async def get_run_context(
+        self,
+        check_id: str,
+        user_id: str,
+        task_id: str | None,
+        message: str | None,
+    ) -> dict[str, Any]:
+        record = await self.authorize_run(check_id, user_id, task_id)
+        async with self._session_factory() as session:
+            async with session.begin():
+                chapter = await self._lock_chapter_owner_for_check(
+                    session, check_id, user_id
+                )
+                check = await self._lock_check(session, check_id)
+                if check is None:
+                    raise ApiError(
+                        status_code=404,
+                        code="QUALITY_CHECK_NOT_FOUND",
+                        message="检查项不存在",
+                    )
+                check.status = "running"
+                content = chapter.content
+        return {
+            "checkId": check_id,
+            "novelId": record.novel_id,
+            "chapterId": record.chapter_id,
+            "chapterContent": content,
+            "message": message or "检查本章一致性",
+        }
+
+    async def complete_run(
+        self,
+        check_id: str,
+        user_id: str,
+        result: dict[str, Any],
+    ) -> None:
+        scores = result.get("scores")
+        if not isinstance(scores, dict):
+            raise ValueError("质量报告缺少评分")
+        async with self._session_factory() as session:
+            async with session.begin():
+                await self._lock_chapter_owner_for_check(session, check_id, user_id)
+                check = await self._lock_check(session, check_id)
+                if check is None:
+                    raise ApiError(
+                        status_code=404,
+                        code="QUALITY_CHECK_NOT_FOUND",
+                        message="检查项不存在",
+                    )
+                check.status = "completed"
+                check.result = str(result.get("result", ""))
+                check.scoreHook = _score(scores.get("hook"))
+                check.scoreTension = _score(scores.get("tension"))
+                check.scorePayoff = _score(scores.get("payoff"))
+                check.scorePacing = _score(scores.get("pacing"))
+                check.scoreEndingHook = _score(scores.get("endingHook"))
+                check.scoreReaderPromise = _score(scores.get("readerPromise"))
+                check.scoreOverall = _score(scores.get("overall"))
+                check.qualityGate = cast(str, result.get("qualityGate"))
+                rewrite_brief = result.get("rewriteBrief")
+                check.rewriteBrief = (
+                    rewrite_brief if isinstance(rewrite_brief, str) else None
+                )
+
+    async def fail_run(self, check_id: str, user_id: str) -> None:
+        async with self._session_factory() as session:
+            async with session.begin():
+                await self._lock_chapter_owner_for_check(session, check_id, user_id)
+                check = await self._lock_check(session, check_id)
+                if check is not None:
+                    check.status = "failed"
+
     async def _lock_chapter_owner_for_check(
         self, session: AsyncSession, check_id: str, user_id: str
     ) -> Chapter:
@@ -167,3 +239,9 @@ class QualityRepository:
             code="QUALITY_TASK_MISMATCH",
             message="任务与检查项不匹配",
         )
+
+
+def _score(value: object) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return round(float(value))

@@ -45,3 +45,15 @@ async def test_portrait_task_can_authorize_authenticated_user_balance() -> None:
 
     assert context is not None
     assert context.balance_micros == 5000
+
+
+@pytest.mark.asyncio
+async def test_quality_check_can_authorize_owning_user_balance() -> None:
+    repository = BillingRepository(Factory())  # type: ignore[arg-type]
+
+    context = await repository.get_authorization_context(
+        "user-1", "check-1", "novel-1"
+    )
+
+    assert context is not None
+    assert context.balance_micros == 5000

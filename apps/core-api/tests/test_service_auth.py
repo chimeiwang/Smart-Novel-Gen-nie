@@ -42,7 +42,9 @@ def test_core_accepts_rag_write_only_from_agent_direction() -> None:
     import inkforge_core.service_auth as service_auth
 
     assert ServiceScope.RAG_INDEX_WRITE in service_auth._AGENT_TO_CORE_SCOPES
+    assert ServiceScope.QUALITY_WRITE in service_auth._AGENT_TO_CORE_SCOPES
     assert ServiceScope.RAG_INDEX_WRITE not in service_auth._CORE_TO_AGENT_SCOPES
+    assert ServiceScope.QUALITY_WRITE not in service_auth._CORE_TO_AGENT_SCOPES
 
 
 @pytest.mark.parametrize(

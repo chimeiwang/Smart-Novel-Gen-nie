@@ -8,7 +8,16 @@ from datetime import datetime
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ..db.models import CreditLedger, Novel, StylePortraitTask, TokenUsage, User, WritingTask
+from ..db.models import (
+    Chapter,
+    ChapterQualityCheck,
+    CreditLedger,
+    Novel,
+    StylePortraitTask,
+    TokenUsage,
+    User,
+    WritingTask,
+)
 from .pricing import calculate_usage_cost_micros
 
 
@@ -96,6 +105,23 @@ class BillingRepository:
                         .where(
                             User.id == user_id,
                             StylePortraitTask.styleId == style_id,
+                        )
+                    )
+                ).scalar_one_or_none()
+            elif balance is None:
+                balance = (
+                    await session.execute(
+                        select(User.creditBalanceMicros)
+                        .join(Novel, Novel.userId == User.id)
+                        .join(Chapter, Chapter.novelId == Novel.id)
+                        .join(
+                            ChapterQualityCheck,
+                            ChapterQualityCheck.chapterId == Chapter.id,
+                        )
+                        .where(
+                            User.id == user_id,
+                            Novel.id == novel_id,
+                            ChapterQualityCheck.id == task_id,
                         )
                     )
                 ).scalar_one_or_none()

@@ -38,7 +38,9 @@ def test_agent_to_core_whitelist_contains_only_rag_write_direction() -> None:
     import inkforge_agents.service_auth as service_auth
 
     assert ServiceScope.RAG_INDEX_WRITE in service_auth._AGENT_TO_CORE_SCOPES
+    assert ServiceScope.QUALITY_WRITE in service_auth._AGENT_TO_CORE_SCOPES
     assert ServiceScope.RAG_INDEX_WRITE not in service_auth._CORE_TO_AGENT_SCOPES
+    assert ServiceScope.QUALITY_WRITE not in service_auth._CORE_TO_AGENT_SCOPES
 
 
 def test_agent_wrapper_installs_service_auth_error_handler() -> None:

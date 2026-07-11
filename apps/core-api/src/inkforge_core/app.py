@@ -49,6 +49,7 @@ from .operations import router as operations_router
 from .outlines.repository import OutlineRepository
 from .outlines.router import router as outlines_router
 from .outlines.service import OutlineService
+from .quality.internal_router import router as quality_internal_router
 from .quality.repository import QualityRepository
 from .quality.router import router as quality_router
 from .quality.service import QualityService
@@ -338,6 +339,7 @@ def create_app(
     app.include_router(novels_router, prefix="/api/v1")
     app.include_router(chapters_router, prefix="/api/v1")
     app.include_router(quality_router, prefix="/api/v1")
+    app.include_router(quality_internal_router, include_in_schema=False)
     app.include_router(lore_router, prefix="/api/v1")
     app.include_router(outlines_router, prefix="/api/v1")
     app.include_router(references_router, prefix="/api/v1")

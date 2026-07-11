@@ -382,6 +382,74 @@ class CoreServiceClient:
             idempotency_key=_idempotency(resource.runId, "portrait-failure", style_id),
         )
 
+    async def get_quality_context(
+        self,
+        resource: RunResource,
+        check_id: str,
+        source_task_id: str | None,
+        message: str | None,
+    ) -> dict[str, Any]:
+        payload = {
+            "userId": resource.userId,
+            "novelId": resource.novelId,
+            "taskId": resource.taskId,
+            "runId": resource.runId,
+            "sourceTaskId": source_task_id,
+            "message": message,
+        }
+        return await self._request(
+            "POST",
+            f"/internal/v1/quality-checks/{check_id}/context",
+            payload,
+            scope=ServiceScope.QUALITY_WRITE,
+            resource=resource,
+            idempotency_key=_idempotency(resource.runId, "quality-context", check_id),
+        )
+
+    async def complete_quality(
+        self,
+        resource: RunResource,
+        check_id: str,
+        result: dict[str, Any],
+    ) -> None:
+        payload = {
+            "userId": resource.userId,
+            "novelId": resource.novelId,
+            "taskId": resource.taskId,
+            "runId": resource.runId,
+            **result,
+        }
+        await self._request(
+            "PUT",
+            f"/internal/v1/quality-checks/{check_id}/success",
+            payload,
+            scope=ServiceScope.QUALITY_WRITE,
+            resource=resource,
+            idempotency_key=_idempotency(resource.runId, "quality-success", check_id),
+        )
+
+    async def fail_quality(
+        self,
+        resource: RunResource,
+        check_id: str,
+        message: str,
+    ) -> None:
+        payload = {
+            "userId": resource.userId,
+            "novelId": resource.novelId,
+            "taskId": resource.taskId,
+            "runId": resource.runId,
+            "message": message,
+        }
+        await self._request(
+            "PUT",
+            f"/internal/v1/quality-checks/{check_id}/failure",
+            payload,
+            scope=ServiceScope.QUALITY_WRITE,
+            resource=resource,
+            idempotency_key=_idempotency(resource.runId, "quality-failure", check_id),
+        )
+
     async def _request(
         self,
         method: str,

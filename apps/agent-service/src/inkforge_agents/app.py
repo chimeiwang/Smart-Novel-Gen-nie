@@ -15,6 +15,7 @@ from .config import Settings, create_testing_settings
 from .graph.parent_graph import ParentGraphDependencies, build_parent_graph
 from .jobs.adapters import CoreArtifactPort, CoreGraphAgentExecutor, CoreToolGateway
 from .jobs.portrait import ModelPortraitGenerator, PortraitJobHandler
+from .jobs.quality import QualityJobHandler
 from .jobs.rag import OpenAIEmbeddingProvider, RagJobHandler
 from .jobs.writing import WritingJobHandler
 from .operations.graph import OperationDependencies, build_operation_graph
@@ -203,6 +204,7 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                     core,
                     ModelPortraitGenerator(model_runtime),
                 )
+                handlers["quality"] = QualityJobHandler(core, runner)
                 if (
                     settings.rag_embedding_api_key is not None
                     and settings.rag_embedding_base_url
