@@ -17,6 +17,7 @@
 | Python 静态质量 | Ruff、Mypy | 通过，最终结果以本提交验证记录为准 |
 | Python 单元与集成测试 | `uv run pytest` | 通过，最终结果以本提交验证记录为准 |
 | 数据库结构未被仓库修改 | schema 归档与只读 `schema-contract.json` | 代码层通过 |
+| 2 核 2 GB 稳定性演练入口 | `tests/architecture/test_stability_drill.py`、`scripts/stability_drill.sh` | 脚本安全约束通过；30 分钟现场结果待执行 |
 
 ## 尚未执行的生产现场证据
 

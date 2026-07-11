@@ -27,3 +27,11 @@
 ## 2 核 2 GB 观察项
 
 连续 30 分钟混合操作期间记录：容器内存峰值、OOM 次数、数据库连接数、任务失败数、CRUD 第 95 百分位延迟、SSE 首事件延迟和队列接受延迟。同一时刻只允许一个模型任务。出现 OOM、任务丢失、重复草案或重复扣费时不得切换生产流量。
+
+稳定性演练只能使用独立测试数据库和 `infra/compose.test.yaml`。准备 `.env.test` 并安装 Playwright Chromium 后执行：
+
+```bash
+ALLOW_STABILITY_DRILL=yes STABILITY_ENV_FILE=.env.test scripts/stability_drill.sh
+```
+
+脚本强制运行至少 1800 秒，串行重复完整 Playwright 场景，并把端到端日志、容器资源采样、重启次数和 OOM 结果写入 `output/stability/`。任何一次端到端失败、容器重启或 OOM 都会返回非零退出码。
