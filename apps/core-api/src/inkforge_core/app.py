@@ -12,6 +12,11 @@ from .auth import router as auth_router
 from .auth.readiness import RedisReadiness
 from .auth.repository import AuthRepository
 from .auth.service import AuthService, RedisRateLimiter
+from .billing.grants import ModelGrantCodec
+from .billing.repository import BillingRepository
+from .billing.router import internal_router as billing_internal_router
+from .billing.router import router as billing_router
+from .billing.service import BillingService
 from .chapters.repository import ChapterRepository
 from .chapters.router import router as chapters_router
 from .chapters.service import ChapterService
@@ -82,7 +87,7 @@ def _configure_auth(app: FastAPI, settings: Settings) -> None:
     )
 
 
-def _configure_business_services(app: FastAPI) -> None:
+def _configure_business_services(app: FastAPI, settings: Settings) -> None:
     """使用同一个受控会话工厂组装业务领域服务。"""
 
     session_factory = getattr(app.state, "database_session_factory", None)
@@ -95,6 +100,7 @@ def _configure_business_services(app: FastAPI) -> None:
     outline_repository = OutlineRepository(session_factory)
     reference_repository = ReferenceRepository(session_factory)
     style_repository = StyleRepository(session_factory)
+    billing_repository = BillingRepository(session_factory)
     app.state.novel_service = NovelService(novel_repository)
     app.state.chapter_service = ChapterService(chapter_repository)
     app.state.quality_service = QualityService(quality_repository, submitter=None)
@@ -106,6 +112,12 @@ def _configure_business_services(app: FastAPI) -> None:
         StyleStorage(app.state.settings.uploads_root),
         submitter=None,
     )
+    grant_codec = (
+        ModelGrantCodec.from_private_key_path(settings.core_service_private_key_path)
+        if settings.core_service_private_key_path is not None
+        else None
+    )
+    app.state.billing_service = BillingService(billing_repository, grant_codec)
 
 
 def _configure_rag_callback_auth(app: FastAPI, settings: Settings) -> None:
@@ -163,7 +175,7 @@ def create_app(*, testing: bool = False, settings: Settings | None = None) -> Fa
     register_readiness_check(app, "configuration", lambda: True)
     configure_database(app, loaded_settings)
     _configure_auth(app, loaded_settings)
-    _configure_business_services(app)
+    _configure_business_services(app, loaded_settings)
     _configure_rag_callback_auth(app, loaded_settings)
     app.add_middleware(SafeUnhandledExceptionMiddleware)
     app.add_middleware(RequestIdMiddleware)
@@ -177,7 +189,9 @@ def create_app(*, testing: bool = False, settings: Settings | None = None) -> Fa
     app.include_router(outlines_router, prefix="/api/v1")
     app.include_router(references_router, prefix="/api/v1")
     app.include_router(styles_router, prefix="/api/v1")
+    app.include_router(billing_router, prefix="/api/v1")
     app.include_router(references_internal_router, include_in_schema=False)
     app.include_router(styles_internal_router, include_in_schema=False)
+    app.include_router(billing_internal_router, include_in_schema=False)
     app.include_router(operations_router, prefix="/api/v1")
     return app

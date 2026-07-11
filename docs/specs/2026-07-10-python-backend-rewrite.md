@@ -280,9 +280,13 @@ POST /internal/v1/agent-runs/{runId}/fail
 
 - 模型调用前，智能体服务使用运行权限向核心接口服务请求计费授权。
 - 核心接口服务校验用户、任务、余额和提示词估算，返回 `requestId`、允许的模型和 `maxOutputTokens`。
+- 授权结果携带由核心接口服务签发的短期 `grantToken`，绑定用户、作品、任务、运行、智能体、提供方、模型、请求标识、最大输出量和是否计费；用量回调必须原样提交该令牌。
+- 第一版只允许显式的 `openai_compatible/deepseek-v4-flash` 和 `fake/fake` 组合，未知提供方或模型必须拒绝。`fake` 授权固定为 `billable=false`。
 - 智能体服务只能在授权有效期内发起一次模型调用。
 - 模型完成后智能体服务上报实际用量；核心接口服务在事务中扣减余额、写 CreditLedger 和 TokenUsage。
 - Core 使用 PostgreSQL advisory lock 锁定 `requestId`，并查询现有 CreditLedger，避免重试重复扣费，不新增唯一索引。
+- 同一 `requestId` 和相同用量重复回调返回原结果；载荷不同则返回冲突。余额、负数 `ai_charge` 流水和 TokenUsage 必须在同一事务中变更。
+- 非缓存输入、缓存输入和输出每 token 分别收取 1000、20 和 2000 积分微单位；真实模型预检至少保留 128 个输出 token 的可负担余额。
 - 模型调用失败且未产生用量时不扣费；出现部分用量时按供应商实际用量记录。
 - 模拟模型提供方永远不产生真实扣费。
 
