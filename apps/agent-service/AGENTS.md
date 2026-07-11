@@ -45,6 +45,7 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 - 写入类内部请求必须经过 Redis 重放保护。
 - Agent 只能生成 ReviewArtifact 或评审结果，不能直接写章节、设定、大纲或计费表。
 - 运行恢复以 Core 持久化的 `WritingTask.graphStateJson` 为权威；Redis 只承载队列、短期事件和重放保护。
+- Core 强制对账只允许修复 Redis 中缺失的 queued 索引或完全丢失的运行键；Redis 已记录为 completed、failed 或 cancelled 的运行不得被 `force` 重新打开。
 
 ## LangGraph 规则
 

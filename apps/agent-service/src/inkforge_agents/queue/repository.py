@@ -245,7 +245,7 @@ local status = redis.call('HGET', KEYS[4], ARGV[1])
 if status == 'running' then
   return 0
 end
-if (status == 'completed' or status == 'failed' or status == 'cancelled') and ARGV[4] ~= '1' then
+if status == 'completed' or status == 'failed' or status == 'cancelled' then
   return 0
 end
 if status == 'queued' and ARGV[4] ~= '1' then

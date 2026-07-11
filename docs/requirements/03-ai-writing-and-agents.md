@@ -270,4 +270,5 @@ Agent Runtime 是唯一多轮 tool-call loop。
 - 只读且并发安全的工具可以并行执行，控制工具按模型调用顺序生成结构化事件；未暴露工具、无效参数和最大轮次均明确终止，不截断用户可见文本。
 - Python LangGraph 已迁移 CreativeOperation 路由、复审 `Send` 扇出、确定性复审优先级、补丁或重写返工、最大修订次数、用户中断和 `Command` 恢复；图状态快照使用版本信封并排除运行时字段。
 - Core API 已把启动、恢复、画像、质量检查和 RAG 任务提交到 Redis 持久队列；Agent Service 消费任务并通过签名回调保存检查点、事件、草案和终态。
+- Core 对账器可以强制修复 Redis 中缺失的 queued 索引或完全丢失的运行键，但不得重新打开 Redis 已记录为 completed、failed 或 cancelled 的运行。
 - Agent Service 不连接数据库，所有读取工具和业务写入都通过 Core 内部工具网关完成。

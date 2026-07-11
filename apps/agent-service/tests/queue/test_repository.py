@@ -1,8 +1,9 @@
 from datetime import UTC, datetime, timedelta
+from typing import cast
 
 import fakeredis.aioredis
 import pytest
-from inkforge_agents.queue.repository import QueueJob, RedisRunQueue
+from inkforge_agents.queue.repository import JobStatus, QueueJob, RedisRunQueue
 
 
 def job(job_id: str, *, priority: int = 10) -> QueueJob:
@@ -76,6 +77,21 @@ async def test_force_enqueue_repairs_missing_ready_entry_without_duplicate_run()
     assert await queue.enqueue(job("lost"), force=True) is True
     claim = await queue.claim(visibility_timeout=timedelta(seconds=30))
     assert claim is not None and claim.job.jobId == "lost"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal_status", ["completed", "failed", "cancelled"])
+async def test_force_enqueue_never_reopens_terminal_job(terminal_status: str) -> None:
+    queue = RedisRunQueue(fakeredis.aioredis.FakeRedis(), prefix="test:queue")
+    terminal_job = job(terminal_status)
+    await queue.enqueue(terminal_job)
+    claim = await queue.claim(visibility_timeout=timedelta(seconds=30))
+    assert claim is not None
+    await queue.acknowledge(claim, status=cast(JobStatus, terminal_status))
+
+    assert await queue.enqueue(terminal_job, force=True) is False
+    assert await queue.status(terminal_job.jobId) == terminal_status
+    assert await queue.claim(visibility_timeout=timedelta(seconds=30)) is None
 
 
 @pytest.mark.asyncio
