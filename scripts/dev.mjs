@@ -57,19 +57,30 @@ if (missingFiles.length > 0) {
 mkdirSync(process.env.UPLOADS_ROOT, { recursive: true });
 mkdirSync(process.env.WORKFLOW_HUMAN_LOG_DIR, { recursive: true });
 
-const executable = (name) => (process.platform === "win32" ? `${name}.cmd` : name);
+const npmExecPath = process.env.npm_execpath;
+const uvicornExecutable =
+  process.platform === "win32"
+    ? path.join(root, ".venv", "Scripts", "uvicorn.exe")
+    : path.join(root, ".venv", "bin", "uvicorn");
+if (!npmExecPath || !existsSync(npmExecPath)) {
+  console.error("无法定位 npm 启动入口，请通过 npm run dev 启动项目。");
+  process.exit(1);
+}
+if (!existsSync(uvicornExecutable)) {
+  console.error("缺少项目虚拟环境，请先运行：uv sync --frozen --all-packages --group dev");
+  process.exit(1);
+}
+
 const services = [
   {
     name: "Next.js",
-    command: executable("npm"),
-    args: ["run", "dev", "--workspace", "@inkforge/web"],
+    command: process.execPath,
+    args: [npmExecPath, "run", "dev", "--workspace", "@inkforge/web"],
   },
   {
     name: "Core API",
-    command: executable("uv"),
+    command: uvicornExecutable,
     args: [
-      "run",
-      "uvicorn",
       "inkforge_core.app:create_app",
       "--factory",
       "--host",
@@ -81,10 +92,8 @@ const services = [
   },
   {
     name: "Agent Service",
-    command: executable("uv"),
+    command: uvicornExecutable,
     args: [
-      "run",
-      "uvicorn",
       "inkforge_agents.app:create_app",
       "--factory",
       "--host",

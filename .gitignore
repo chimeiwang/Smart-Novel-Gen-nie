@@ -20,6 +20,10 @@ uploads/
 
 # 本地日志文件
 logs/
+
+# 本地测试与开发输出
+output/
+
 # LangGraph API
 .langgraph_api
 

@@ -13,6 +13,9 @@ def test_root_dev_script_starts_all_three_services() -> None:
     assert "inkforge_core.app:create_app" in launcher
     assert "inkforge_agents.app:create_app" in launcher
     assert ".env.local" in launcher
+    assert "npm_execpath" in launcher
+    assert '".venv", "Scripts", "uvicorn.exe"' in launcher
+    assert 'executable("uv")' not in launcher
 
 
 def test_next_development_rewrites_api_to_core() -> None:

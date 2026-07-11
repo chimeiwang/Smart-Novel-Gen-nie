@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from ipaddress import ip_network
 from typing import Annotated, Literal
 
-from pydantic import SecretStr
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Environment = Literal["dev", "test", "production"]
@@ -32,6 +33,25 @@ class Settings(BaseSettings):
     rag_embedding_api_key: SecretStr | None = None
     rag_embedding_base_url: str | None = None
     rag_embedding_model: str | None = None
+
+    @field_validator("trusted_core_cidrs", mode="before")
+    @classmethod
+    def validate_trusted_core_cidrs(cls, value: object) -> tuple[str, ...]:
+        if value is None:
+            return ()
+        if isinstance(value, str):
+            candidates = tuple(item.strip() for item in value.split(",") if item.strip())
+        elif isinstance(value, (list, tuple)):
+            candidates = tuple(str(item).strip() for item in value if str(item).strip())
+        else:
+            raise ValueError("可信核心服务网段必须是列表或逗号分隔文本")
+        normalized: list[str] = []
+        for candidate in candidates:
+            try:
+                normalized.append(str(ip_network(candidate, strict=False)))
+            except ValueError as exc:
+                raise ValueError("可信核心服务网段无效") from exc
+        return tuple(normalized)
 
 
 def create_testing_settings() -> Settings:
