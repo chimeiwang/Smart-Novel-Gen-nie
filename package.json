@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "",
   "scripts": {
-    "dev": "npm run dev --workspace @inkforge/web",
+    "dev": "node scripts/dev.mjs",
     "build": "npm run build --workspace @inkforge/web",
     "start": "npm run start --workspace @inkforge/web",
     "lint": "npm run lint --workspace @inkforge/web",

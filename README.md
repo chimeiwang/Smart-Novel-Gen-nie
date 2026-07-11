@@ -25,6 +25,22 @@ infra                    生产镜像、Nginx 和 Compose
 
 ## 开发验证
 
+首次本地启动前准备 PostgreSQL 和 Redis，然后执行：
+
+```bash
+cp .env.local.example .env.local
+uv sync --frozen --all-packages --group dev
+uv run python scripts/generate_service_keys.py --output-dir infra/secrets
+npm install
+npm run dev
+```
+
+Windows PowerShell 使用 `Copy-Item .env.local.example .env.local`。填写 `.env.local` 中的现有 PostgreSQL 地址后，`npm run dev` 会同时启动 Next.js `43119`、Core API `8000` 和 Agent Service `8001`。本地默认使用 fake 模型，不调用外部模型，也不产生计费。
+
+本地启动不会创建数据库、执行迁移或修改 schema；PostgreSQL 必须已经具备项目当前结构。
+
+### 静态验证
+
 ```bash
 npm install
 npm run typecheck
