@@ -24,6 +24,7 @@ class ServiceScope(StrEnum):
     TOOL_READ = "tool:read"
     TOOL_WRITE = "tool:write"
     RAG_INDEX_WRITE = "rag:index:write"
+    PORTRAIT_WRITE = "portrait:write"
 
 
 WRITE_SERVICE_SCOPES = frozenset(
@@ -36,6 +37,7 @@ WRITE_SERVICE_SCOPES = frozenset(
         ServiceScope.CALLBACK_FAIL,
         ServiceScope.TOOL_WRITE,
         ServiceScope.RAG_INDEX_WRITE,
+        ServiceScope.PORTRAIT_WRITE,
     }
 )
 

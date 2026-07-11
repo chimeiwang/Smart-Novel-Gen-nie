@@ -42,6 +42,11 @@ from .references.repository import ReferenceRepository
 from .references.router import router as references_router
 from .references.service import ReferenceService
 from .service_auth import create_agent_callback_verifier, install_service_auth_error_handler
+from .styles.internal_router import router as styles_internal_router
+from .styles.repository import StyleRepository
+from .styles.router import router as styles_router
+from .styles.service import StyleService
+from .styles.storage import StyleStorage
 
 
 def _configure_auth(app: FastAPI, settings: Settings) -> None:
@@ -89,12 +94,18 @@ def _configure_business_services(app: FastAPI) -> None:
     lore_repository = LoreRepository(session_factory)
     outline_repository = OutlineRepository(session_factory)
     reference_repository = ReferenceRepository(session_factory)
+    style_repository = StyleRepository(session_factory)
     app.state.novel_service = NovelService(novel_repository)
     app.state.chapter_service = ChapterService(chapter_repository)
     app.state.quality_service = QualityService(quality_repository, submitter=None)
     app.state.lore_service = LoreService(lore_repository)
     app.state.outline_service = OutlineService(outline_repository)
     app.state.reference_service = ReferenceService(reference_repository, submitter=None)
+    app.state.style_service = StyleService(
+        style_repository,
+        StyleStorage(app.state.settings.uploads_root),
+        submitter=None,
+    )
 
 
 def _configure_rag_callback_auth(app: FastAPI, settings: Settings) -> None:
@@ -165,6 +176,8 @@ def create_app(*, testing: bool = False, settings: Settings | None = None) -> Fa
     app.include_router(lore_router, prefix="/api/v1")
     app.include_router(outlines_router, prefix="/api/v1")
     app.include_router(references_router, prefix="/api/v1")
+    app.include_router(styles_router, prefix="/api/v1")
     app.include_router(references_internal_router, include_in_schema=False)
+    app.include_router(styles_internal_router, include_in_schema=False)
     app.include_router(operations_router, prefix="/api/v1")
     return app

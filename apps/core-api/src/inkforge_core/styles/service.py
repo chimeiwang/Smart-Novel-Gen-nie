@@ -1,0 +1,209 @@
+from __future__ import annotations
+
+import logging
+from collections.abc import Mapping
+from typing import Any, Protocol
+
+from fastapi import UploadFile
+
+from ..errors import ApiError
+from .schemas import (
+    ApplyStyleRequest,
+    CreateStyleRequest,
+    PortraitAcceptedResponse,
+    PortraitFailureRequest,
+    PortraitProcessingRequest,
+    PortraitSection,
+    PortraitSuccessRequest,
+    PortraitTaskResponse,
+    StyleReferenceResponse,
+    StyleResponse,
+    UpdatePortraitSectionRequest,
+)
+from .storage import StyleStorage
+
+logger = logging.getLogger(__name__)
+
+
+class StyleRepositoryPort(Protocol):
+    async def list_styles(self) -> list[dict[str, Any]]: ...
+    async def create_style(self, name: str) -> dict[str, Any]: ...
+    async def reserve_reference(self, style_id: str) -> str: ...
+    async def create_reference(
+        self, style_id: str, reference_id: str, fields: dict[str, Any]
+    ) -> dict[str, Any]: ...
+    async def delete_reference(self, style_id: str, reference_id: str) -> str: ...
+    async def delete_style(self, style_id: str) -> list[str]: ...
+    async def create_portrait_task(self, style_id: str) -> dict[str, Any]: ...
+    async def get_portrait_task(self, task_id: str) -> dict[str, Any]: ...
+    async def transition_portrait_task(
+        self,
+        style_id: str,
+        task_id: str,
+        target: str,
+        fields: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
+    async def update_section(
+        self, style_id: str, section: PortraitSection, content: str
+    ) -> dict[str, Any]: ...
+    async def apply_style(self, novel_id: str, user_id: str, style_id: str | None) -> None: ...
+
+
+class PortraitRunSubmitter(Protocol):
+    async def submit(self, *, style_id: str, task_id: str, run_id: str) -> None: ...
+
+
+class StyleService:
+    def __init__(
+        self,
+        repository: StyleRepositoryPort,
+        storage: StyleStorage,
+        submitter: PortraitRunSubmitter | None,
+    ) -> None:
+        self._repository = repository
+        self._storage = storage
+        self._submitter = submitter
+
+    async def list_styles(self) -> list[StyleResponse]:
+        return [
+            StyleResponse.model_validate(value) for value in await self._repository.list_styles()
+        ]
+
+    async def create_style(self, request: CreateStyleRequest) -> StyleResponse:
+        name = request.name.strip()
+        if not name:
+            raise ApiError(status_code=422, code="STYLE_NAME_REQUIRED", message="文风名称不能为空")
+        return StyleResponse.model_validate(await self._repository.create_style(name))
+
+    async def upload_reference(self, style_id: str, upload: UploadFile) -> StyleReferenceResponse:
+        reference_id = await self._repository.reserve_reference(style_id)
+        stored = await self._storage.save(style_id, reference_id, upload)
+        try:
+            value = await self._repository.create_reference(
+                style_id,
+                reference_id,
+                {
+                    "filename": stored.filename,
+                    "filepath": stored.database_path,
+                    "charCount": stored.char_count,
+                    "status": "ready",
+                    "errorMessage": None,
+                },
+            )
+        except Exception:
+            self._storage.delete(stored.database_path)
+            raise
+        return StyleReferenceResponse.model_validate(value)
+
+    async def delete_reference(self, style_id: str, reference_id: str) -> None:
+        path = await self._repository.delete_reference(style_id, reference_id)
+        self._storage.delete(path)
+
+    async def delete_style(self, style_id: str) -> None:
+        paths = await self._repository.delete_style(style_id)
+        for path in paths:
+            self._storage.delete(path)
+
+    async def create_portrait(self, style_id: str) -> PortraitAcceptedResponse:
+        if self._submitter is None:
+            raise ApiError(
+                status_code=503,
+                code="PORTRAIT_SERVICE_UNAVAILABLE",
+                message="画像生成服务暂时不可用",
+            )
+        task = await self._repository.create_portrait_task(style_id)
+        task_id = str(task["id"])
+        try:
+            await self._submitter.submit(style_id=style_id, task_id=task_id, run_id=task_id)
+        except Exception:
+            logger.warning(
+                "画像任务提交失败，保留待处理任务供后续对账",
+                extra={"code": "PORTRAIT_SUBMIT_FAILED", "taskId": task_id},
+            )
+        return PortraitAcceptedResponse(taskId=task_id, status="pending")
+
+    async def get_portrait_task(self, task_id: str) -> PortraitTaskResponse:
+        return PortraitTaskResponse.model_validate(
+            await self._repository.get_portrait_task(task_id)
+        )
+
+    async def mark_processing(
+        self, style_id: str, task_id: str, request: PortraitProcessingRequest
+    ) -> PortraitTaskResponse:
+        self._require_run(task_id, request.runId)
+        return PortraitTaskResponse.model_validate(
+            await self._repository.transition_portrait_task(style_id, task_id, "processing")
+        )
+
+    async def complete_portrait(
+        self, style_id: str, task_id: str, request: PortraitSuccessRequest
+    ) -> PortraitTaskResponse:
+        self._require_run(task_id, request.runId)
+        sections = {
+            "creativeMethodology": request.creativeMethodology,
+            "uniqueMarkers": request.uniqueMarkers,
+            "generationStyle": request.generationStyle,
+            "expressionFeatures": request.expressionFeatures,
+            "styleTraits": request.styleTraits,
+        }
+        fields: dict[str, Any] = {
+            **sections,
+            "portraitMarkdown": build_portrait_markdown(sections),
+            "originalCharCount": request.originalCharCount,
+            "usedCharCount": request.usedCharCount,
+            "truncated": False,
+            "errorMessage": None,
+        }
+        return PortraitTaskResponse.model_validate(
+            await self._repository.transition_portrait_task(style_id, task_id, "success", fields)
+        )
+
+    async def fail_portrait(
+        self, style_id: str, task_id: str, request: PortraitFailureRequest
+    ) -> PortraitTaskResponse:
+        self._require_run(task_id, request.runId)
+        return PortraitTaskResponse.model_validate(
+            await self._repository.transition_portrait_task(style_id, task_id, "error")
+        )
+
+    async def update_section(
+        self,
+        style_id: str,
+        section: PortraitSection,
+        request: UpdatePortraitSectionRequest,
+    ) -> StyleResponse:
+        content = request.content.strip()
+        if not content:
+            raise ApiError(
+                status_code=422,
+                code="PORTRAIT_SECTION_REQUIRED",
+                message="画像分节内容不能为空",
+            )
+        return StyleResponse.model_validate(
+            await self._repository.update_section(style_id, section, content)
+        )
+
+    async def apply_style(self, user_id: str, novel_id: str, request: ApplyStyleRequest) -> None:
+        await self._repository.apply_style(novel_id, user_id, request.styleId)
+
+    @staticmethod
+    def _require_run(task_id: str, run_id: str) -> None:
+        if run_id != task_id:
+            raise ApiError(
+                status_code=409,
+                code="PORTRAIT_RUN_MISMATCH",
+                message="画像运行与任务不匹配",
+            )
+
+
+def build_portrait_markdown(sections: Mapping[str, str | None]) -> str | None:
+    ordered = (
+        ("创作方法论", sections.get("creativeMethodology")),
+        ("独特标记", sections.get("uniqueMarkers")),
+        ("生成风格", sections.get("generationStyle")),
+        ("表达特征", sections.get("expressionFeatures")),
+        ("风格特质", sections.get("styleTraits")),
+    )
+    if any(not value for _, value in ordered):
+        return None
+    return "\n\n".join(f"{title}\n{value}" for title, value in ordered)

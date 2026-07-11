@@ -44,6 +44,7 @@ _AGENT_TO_CORE_SCOPES = frozenset(
         ServiceScope.TOOL_READ,
         ServiceScope.TOOL_WRITE,
         ServiceScope.RAG_INDEX_WRITE,
+        ServiceScope.PORTRAIT_WRITE,
     }
 )
 _PUBLIC_MESSAGES = {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from ipaddress import ip_network
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Annotated, Literal, Self
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
@@ -46,6 +47,7 @@ class Settings(BaseSettings):
     core_service_private_key_path: str | None = None
     agent_service_public_key_path: str | None = None
     agent_service_url: str | None = None
+    uploads_root: str = "/data/uploads"
 
     @field_validator("environment", mode="before")
     @classmethod
@@ -63,6 +65,23 @@ class Settings(BaseSettings):
     @classmethod
     def validate_trusted_agent_cidrs(cls, value: object) -> tuple[str, ...]:
         return _normalize_cidrs(value, "可信智能体网段")
+
+    @field_validator("uploads_root", mode="before")
+    @classmethod
+    def validate_uploads_root(cls, value: object) -> str:
+        if not isinstance(value, str):
+            raise ValueError("上传根目录必须是绝对路径")
+        normalized = value.strip()
+        if (
+            not normalized
+            or "\x00" in normalized
+            or not (
+                PurePosixPath(normalized).is_absolute()
+                or PureWindowsPath(normalized).is_absolute()
+            )
+        ):
+            raise ValueError("上传根目录必须是绝对路径")
+        return normalized
 
     @model_validator(mode="after")
     def validate_production_configuration(self) -> Self:
@@ -120,6 +139,7 @@ def create_testing_settings() -> Settings:
             "core_service_private_key_path": None,
             "agent_service_public_key_path": None,
             "agent_service_url": None,
+            "uploads_root": "/data/uploads",
         }
     )
 
