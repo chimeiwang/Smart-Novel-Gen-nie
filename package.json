@@ -12,6 +12,8 @@
     "api:generate": "node scripts/generate_api_client.mjs",
     "api:check": "node scripts/generate_api_client.mjs --check",
     "test:web": "npm test --workspace @inkforge/web && npm test --workspace @inkforge/api-client",
+    "test:e2e": "playwright test",
+    "test:e2e:list": "playwright test --list",
     "test:python": "uv run pytest"
   },
   "keywords": [],
@@ -31,6 +33,7 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/node": "^25.5.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
