@@ -1,0 +1,73 @@
+from __future__ import annotations
+
+from collections import deque
+
+import pytest
+from inkforge_core.errors import ApiError
+from inkforge_core.lore.repository import LoreRepository
+
+
+class ScalarSession:
+    def __init__(self, values: list[str | None]) -> None:
+        self.values = deque(values)
+
+    async def scalar(self, statement):
+        del statement
+        return self.values.popleft()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kind", "field"),
+    [
+        ("characters", "factionId"),
+        ("items", "ownerId"),
+        ("locations", "parentId"),
+        ("factions", "baseId"),
+    ],
+)
+async def test_all_optional_links_reject_resources_from_another_novel(
+    kind: str, field: str
+) -> None:
+    session = ScalarSession(["novel-other"])
+    with pytest.raises(ApiError) as caught:
+        await LoreRepository(lambda: None)._validate_entity_links(  # type: ignore[arg-type]
+            session, "novel-1", kind, "entity-1", {field: "related-1"}
+        )
+    assert caught.value.code == "RELATED_RESOURCE_CROSS_NOVEL"
+
+
+@pytest.mark.asyncio
+async def test_location_rejects_itself_as_parent() -> None:
+    session = ScalarSession(["novel-1"])
+    with pytest.raises(ApiError) as caught:
+        await LoreRepository(lambda: None)._validate_entity_links(  # type: ignore[arg-type]
+            session,
+            "novel-1",
+            "locations",
+            "location-1",
+            {"parentId": "location-1"},
+        )
+    assert caught.value.code == "LOCATION_CYCLE"
+
+
+@pytest.mark.asyncio
+async def test_location_rejects_indirect_ancestor_cycle() -> None:
+    session = ScalarSession(["novel-1", "location-1"])
+    with pytest.raises(ApiError) as caught:
+        await LoreRepository(lambda: None)._validate_entity_links(  # type: ignore[arg-type]
+            session,
+            "novel-1",
+            "locations",
+            "location-1",
+            {"parentId": "location-2"},
+        )
+    assert caught.value.code == "LOCATION_CYCLE"
+
+
+@pytest.mark.asyncio
+async def test_null_owner_is_always_rejected() -> None:
+    session = ScalarSession([None])
+    with pytest.raises(ApiError) as caught:
+        await LoreRepository._require_owner(session, "novel-1", "user-1")  # type: ignore[arg-type]
+    assert caught.value.status_code == 403

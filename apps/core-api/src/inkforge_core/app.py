@@ -22,14 +22,23 @@ from .errors import (
     install_exception_handlers,
 )
 from .http import RequestIdMiddleware
+from .lore.repository import LoreRepository
+from .lore.router import router as lore_router
+from .lore.service import LoreService
 from .novels.repository import NovelRepository
 from .novels.router import router as novels_router
 from .novels.service import NovelService
 from .operations import register_readiness_check
 from .operations import router as operations_router
+from .outlines.repository import OutlineRepository
+from .outlines.router import router as outlines_router
+from .outlines.service import OutlineService
 from .quality.repository import QualityRepository
 from .quality.router import router as quality_router
 from .quality.service import QualityService
+from .references.repository import ReferenceRepository
+from .references.router import router as references_router
+from .references.service import ReferenceService
 from .service_auth import install_service_auth_error_handler
 
 
@@ -75,9 +84,15 @@ def _configure_business_services(app: FastAPI) -> None:
     novel_repository = NovelRepository(session_factory)
     chapter_repository = ChapterRepository(session_factory)
     quality_repository = QualityRepository(session_factory)
+    lore_repository = LoreRepository(session_factory)
+    outline_repository = OutlineRepository(session_factory)
+    reference_repository = ReferenceRepository(session_factory)
     app.state.novel_service = NovelService(novel_repository)
     app.state.chapter_service = ChapterService(chapter_repository)
     app.state.quality_service = QualityService(quality_repository, submitter=None)
+    app.state.lore_service = LoreService(lore_repository)
+    app.state.outline_service = OutlineService(outline_repository)
+    app.state.reference_service = ReferenceService(reference_repository, submitter=None)
 
 
 @asynccontextmanager
@@ -132,5 +147,8 @@ def create_app(*, testing: bool = False, settings: Settings | None = None) -> Fa
     app.include_router(novels_router, prefix="/api/v1")
     app.include_router(chapters_router, prefix="/api/v1")
     app.include_router(quality_router, prefix="/api/v1")
+    app.include_router(lore_router, prefix="/api/v1")
+    app.include_router(outlines_router, prefix="/api/v1")
+    app.include_router(references_router, prefix="/api/v1")
     app.include_router(operations_router, prefix="/api/v1")
     return app
