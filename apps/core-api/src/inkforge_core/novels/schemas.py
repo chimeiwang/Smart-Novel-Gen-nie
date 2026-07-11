@@ -7,13 +7,36 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, strict=True)
+
+
+type ChapterStatus = Literal["drafting", "review", "completed"]
+type StoryLengthProfile = Literal["short_medium", "long_serial"]
+type QualityCheckType = Literal["consistency", "lore_sync", "editorial", "craft"]
+type QualityCheckStatus = Literal["pending", "running", "completed", "skipped", "failed"]
+type QualityGate = Literal["pass", "revise", "rewrite"]
+type BeatPlanStatus = Literal["draft", "reviewing", "approved", "rejected", "superseded"]
+type CharacterStatus = Literal["active", "missing", "dead", "imprisoned", "unknown"]
+type RelationType = Literal[
+    "family",
+    "master_student",
+    "friend",
+    "enemy",
+    "ally",
+    "lover",
+    "rival",
+    "subordinate",
+    "acquaintance",
+    "other",
+]
+type OutlineNodeKind = Literal["stage", "plot_unit", "chapter_group"]
+type OutlineNodeStatus = Literal["planned", "in_progress", "completed", "skipped"]
 
 
 class CreateNovelRequest(StrictModel):
     name: str = Field(min_length=1)
     summary: str | None = None
-    storyLengthProfile: Literal["short_medium", "long_serial"]
+    storyLengthProfile: StoryLengthProfile
     targetTotalWordCount: int | None = Field(default=None, gt=0)
     genre: str | None = None
     protagonist: str | None = None
@@ -77,8 +100,8 @@ class ChapterProgressDto(StrictModel):
 class QualityCheckDto(StrictModel):
     id: str
     chapterId: str
-    type: str
-    status: str
+    type: QualityCheckType
+    status: QualityCheckStatus
     title: str
     summary: str | None
     result: str | None
@@ -89,7 +112,7 @@ class QualityCheckDto(StrictModel):
     scoreEndingHook: int | None
     scoreReaderPromise: int | None
     scoreOverall: int | None
-    qualityGate: str | None
+    qualityGate: QualityGate | None
     rewriteBrief: str | None
     createdAt: datetime
     updatedAt: datetime
@@ -110,7 +133,7 @@ class BeatPlanDto(StrictModel):
     id: str
     chapterId: str
     goalId: str | None
-    status: str
+    status: BeatPlanStatus
     chapterGoal: str
     mainPlotConnection: str | None
     chapterAcceptanceCriteria: str | None
@@ -126,7 +149,7 @@ class WorkspaceChapter(StrictModel):
     title: str
     content: str
     order: int
-    status: str
+    status: ChapterStatus
     completedAt: datetime | None
     createdAt: datetime
     updatedAt: datetime
@@ -159,7 +182,7 @@ class CharacterRelationDto(StrictModel):
     id: str
     characterId: str
     targetId: str
-    relationType: str
+    relationType: RelationType
     intimacy: int
     description: str | None
     startDate: str | None
@@ -190,7 +213,7 @@ class CharacterDto(StrictModel):
     powerLevel: str | None
     combatAbility: str | None
     specialSkills: str | None
-    currentStatus: str
+    currentStatus: CharacterStatus
     statusNote: str | None
     experiences: list[CharacterExperienceDto]
     outgoingRelations: list[CharacterRelationDto]
@@ -261,7 +284,7 @@ class ContentDto(StrictModel):
 
 class WritingBibleDto(StrictModel):
     id: str
-    storyLengthProfile: str
+    storyLengthProfile: StoryLengthProfile
     targetTotalWordCount: int | None
     genre: str | None
     targetReaders: str | None
@@ -279,8 +302,8 @@ class OutlineNodeDto(StrictModel):
     id: str
     title: str
     content: str | None
-    kind: str
-    status: str
+    kind: OutlineNodeKind
+    status: OutlineNodeStatus
     order: int
     parentId: str | None
     linkedChapterId: str | None

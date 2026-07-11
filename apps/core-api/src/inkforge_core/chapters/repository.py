@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
+from typing import cast
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -16,7 +18,7 @@ from ..db.models import (
 )
 from ..errors import ApiError
 from ..novels.repository import chapter_dict, utc_datetime
-from ..novels.schemas import WorkspaceChapter
+from ..novels.schemas import ChapterStatus, WorkspaceChapter
 from .service import ChapterRecordPort
 
 DEFAULT_QUALITY_TYPE = "consistency"
@@ -28,7 +30,7 @@ DEFAULT_QUALITY_SUMMARY = "最终检查正文与设定的一致性、角色 OOC�
 class ChapterRecord:
     id: str
     novel_id: str
-    status: str
+    status: ChapterStatus
     completed_at: datetime | None
 
 
@@ -129,69 +131,86 @@ class ChapterRepository:
             raise RuntimeError("章节进展更新时间缺失")
         return updated_at
 
-    async def get_consistency_status(self, chapter_id: str) -> str | None:
-        async with self._session_factory() as session:
-            value = await session.scalar(
-                select(ChapterQualityCheck.status).where(
-                    ChapterQualityCheck.chapterId == chapter_id,
-                    ChapterQualityCheck.type == DEFAULT_QUALITY_TYPE,
-                )
-            )
-        return str(value) if value is not None else None
-
-    async def set_status_with_default_check(
-        self,
-        chapter_id: str,
-        user_id: str,
-        status: str,
-        completed_at: datetime | None,
-        *,
-        create_default_check: bool,
+    async def transition_status(
+        self, chapter_id: str, user_id: str, status: ChapterStatus
     ) -> ChapterRecordPort:
         async with self._session_factory() as session:
             async with session.begin():
-                await self._require_chapter(session, chapter_id, user_id, lock=True)
-                chapter = await session.get(Chapter, chapter_id, with_for_update=True)
-                if chapter is None:
-                    raise ApiError(status_code=404, code="CHAPTER_NOT_FOUND", message="章节不存在")
-                if status == "completed":
-                    check_status = await session.scalar(
-                        select(ChapterQualityCheck.status).where(
-                            ChapterQualityCheck.chapterId == chapter_id,
-                            ChapterQualityCheck.type == DEFAULT_QUALITY_TYPE,
-                        )
+                chapter = await self._lock_chapter_owner(session, chapter_id, user_id)
+                allowed = {
+                    "drafting": {"drafting", "review"},
+                    "review": {"drafting", "review", "completed"},
+                    "completed": {"drafting", "review", "completed"},
+                }
+                if status not in allowed.get(chapter.status, set()):
+                    raise ApiError(
+                        status_code=409,
+                        code="INVALID_CHAPTER_STATUS_TRANSITION",
+                        message="章节状态不能这样切换",
                     )
-                    if check_status not in {"completed", "skipped"}:
-                        raise ApiError(
-                            status_code=409,
-                            code="QUALITY_CHECK_REQUIRED",
-                            message="一致性终检完成或跳过后，才能标记章节完成",
-                        )
-                if create_default_check:
-                    check = await session.scalar(
-                        select(ChapterQualityCheck).where(
-                            ChapterQualityCheck.chapterId == chapter_id,
-                            ChapterQualityCheck.type == DEFAULT_QUALITY_TYPE,
-                        )
+                check = await self._lock_consistency_check(session, chapter_id)
+                if status == "completed" and (
+                    check is None or check.status not in {"completed", "skipped"}
+                ):
+                    raise ApiError(
+                        status_code=409,
+                        code="QUALITY_CHECK_REQUIRED",
+                        message="一致性终检完成或跳过后，才能标记章节完成",
                     )
+                if status == "review":
                     if check is None:
-                        session.add(
-                            ChapterQualityCheck(
-                                chapterId=chapter_id,
-                                type=DEFAULT_QUALITY_TYPE,
-                                title=DEFAULT_QUALITY_TITLE,
-                                summary=DEFAULT_QUALITY_SUMMARY,
-                                status="pending",
-                            )
+                        check = ChapterQualityCheck(
+                            chapterId=chapter_id,
+                            type=DEFAULT_QUALITY_TYPE,
+                            title=DEFAULT_QUALITY_TITLE,
+                            summary=DEFAULT_QUALITY_SUMMARY,
+                            status="pending",
                         )
+                        session.add(check)
                     else:
                         check.title = DEFAULT_QUALITY_TITLE
                         check.summary = DEFAULT_QUALITY_SUMMARY
                 chapter.status = status
-                chapter.completedAt = completed_at
+                chapter.completedAt = (
+                    chapter.completedAt or datetime.now(UTC) if status == "completed" else None
+                )
                 await session.flush()
                 result = self._record(chapter)
         return result
+
+    async def _lock_consistency_check(
+        self, session: AsyncSession, chapter_id: str
+    ) -> ChapterQualityCheck | None:
+        return cast(
+            ChapterQualityCheck | None,
+            await session.scalar(
+                select(ChapterQualityCheck)
+                .where(
+                    ChapterQualityCheck.chapterId == chapter_id,
+                    ChapterQualityCheck.type == DEFAULT_QUALITY_TYPE,
+                )
+                .with_for_update()
+            ),
+        )
+
+    async def _lock_chapter_owner(
+        self, session: AsyncSession, chapter_id: str, user_id: str
+    ) -> Chapter:
+        row = (
+            await session.execute(
+                select(Chapter, Novel.userId)
+                .join(Novel, Novel.id == Chapter.novelId)
+                .where(Chapter.id == chapter_id)
+                .with_for_update(of=Chapter)
+            )
+        ).one_or_none()
+        if row is None:
+            raise ApiError(status_code=404, code="CHAPTER_NOT_FOUND", message="章节不存在")
+        chapter = cast(Chapter, row[0])
+        owner_id = cast(str | None, row[1])
+        if owner_id is None or owner_id != user_id:
+            raise ApiError(status_code=403, code="CHAPTER_FORBIDDEN", message="无权访问该章节")
+        return chapter
 
     async def _load_chapters(
         self, session: AsyncSession, chapters: list[Chapter]
@@ -241,18 +260,21 @@ class ChapterRepository:
             if plan_ids
             else []
         )
+        progress_by_chapter = {item.chapterId: item for item in progresses}
+        checks_by_chapter: dict[str, list[ChapterQualityCheck]] = defaultdict(list)
+        beats_by_plan: dict[str, list[SceneBeat]] = defaultdict(list)
+        for check in checks:
+            checks_by_chapter[check.chapterId].append(check)
+        for beat in beats:
+            beats_by_plan[beat.beatPlanId].append(beat)
         return [
             WorkspaceChapter.model_validate(
                 chapter_dict(
                     chapter,
-                    next((item for item in progresses if item.chapterId == chapter.id), None),
-                    [item for item in checks if item.chapterId == chapter.id],
+                    progress_by_chapter.get(chapter.id),
+                    checks_by_chapter[chapter.id],
                     latest.get(chapter.id),
-                    [
-                        item
-                        for item in beats
-                        if chapter.id in latest and item.beatPlanId == latest[chapter.id].id
-                    ],
+                    beats_by_plan[latest[chapter.id].id] if chapter.id in latest else [],
                 )
             )
             for chapter in chapters
@@ -289,7 +311,7 @@ class ChapterRepository:
         return ChapterRecord(
             id=chapter.id,
             novel_id=chapter.novelId,
-            status=chapter.status,
+            status=cast(ChapterStatus, chapter.status),
             completed_at=utc_datetime(chapter.completedAt),
         )
 

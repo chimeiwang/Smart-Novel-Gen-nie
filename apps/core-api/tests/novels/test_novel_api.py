@@ -87,6 +87,20 @@ def test_create_novel_request_rejects_unknown_fields() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("targetTotalWordCount", "80000"), ("name", 123)],
+)
+def test_create_novel_request_rejects_coerced_values(field: str, value: object) -> None:
+    body: dict[str, object] = {
+        "name": "作品",
+        "storyLengthProfile": "short_medium",
+        field: value,
+    }
+    with pytest.raises(ValidationError):
+        CreateNovelRequest.model_validate(body)
+
+
 class ApiNovelService:
     def __init__(self) -> None:
         self.user_id: str | None = None
@@ -141,6 +155,21 @@ async def test_novel_api_rejects_owner_and_unknown_fields() -> None:
             },
         )
 
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_novel_http_rejects_string_encoded_number() -> None:
+    async with novel_api_client(ApiNovelService()) as client:
+        response = await client.post(
+            "/api/v1/novels",
+            json={
+                "name": "作品",
+                "storyLengthProfile": "short_medium",
+                "targetTotalWordCount": "80000",
+            },
+        )
     assert response.status_code == 422
     assert response.json()["code"] == "VALIDATION_ERROR"
 

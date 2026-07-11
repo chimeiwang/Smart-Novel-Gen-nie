@@ -15,6 +15,9 @@ class QualityRecordPort(Protocol):
     def chapter_id(self) -> str: ...
 
     @property
+    def novel_id(self) -> str: ...
+
+    @property
     def type(self) -> str: ...
 
     @property
@@ -26,6 +29,9 @@ class QualityRepositoryPort(Protocol):
     async def get_check(self, check_id: str, user_id: str) -> QualityCheckDto: ...
     async def update_public_status(
         self, check_id: str, user_id: str, status: str, reset_result: bool
+    ) -> QualityCheckDto: ...
+    async def authorize_run(
+        self, check_id: str, user_id: str, task_id: str | None
     ) -> QualityRecordPort: ...
 
 
@@ -55,16 +61,14 @@ class QualityService:
     async def update_status(
         self, user_id: str, check_id: str, request: UpdateQualityCheckRequest
     ) -> QualityCheckDto:
-        await self._repository.require_check(check_id, user_id)
-        await self._repository.update_public_status(
+        return await self._repository.update_public_status(
             check_id, user_id, request.status, request.resetResult
         )
-        return await self._repository.get_check(check_id, user_id)
 
     async def run(
         self, user_id: str, check_id: str, request: RunQualityCheckRequest
     ) -> RunQualityCheckResponse:
-        check = await self._repository.require_check(check_id, user_id)
+        check = await self._repository.authorize_run(check_id, user_id, request.taskId)
         if check.type != "consistency":
             raise ApiError(
                 status_code=400,

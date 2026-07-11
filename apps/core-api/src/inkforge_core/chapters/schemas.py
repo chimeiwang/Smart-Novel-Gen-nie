@@ -1,15 +1,14 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from ..novels.schemas import WorkspaceChapter
+from ..novels.schemas import ChapterStatus, WorkspaceChapter
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
 
 class CreateChapterRequest(StrictModel):
@@ -22,7 +21,7 @@ class UpdateChapterRequest(StrictModel):
 
 
 class ChapterStatusRequest(StrictModel):
-    status: Literal["drafting", "review", "completed"]
+    status: ChapterStatus
 
 
 class ChapterProgressRequest(StrictModel):
@@ -35,7 +34,7 @@ class ChapterMutationResponse(StrictModel):
 
 class ChapterStatusResponse(StrictModel):
     id: str
-    status: str
+    status: ChapterStatus
     completedAt: datetime | None
 
 

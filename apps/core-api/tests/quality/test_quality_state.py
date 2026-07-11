@@ -21,6 +21,7 @@ from pydantic import ValidationError
 class QualityRecord:
     id: str = "check-1"
     chapter_id: str = "chapter-1"
+    novel_id: str = "novel-1"
     type: str = "consistency"
     status: str = "pending"
 
@@ -29,6 +30,7 @@ class RecordingQualityRepository:
     def __init__(self) -> None:
         self.record = QualityRecord()
         self.updated = False
+        self.authorized_task_ids: list[str | None] = []
 
     async def require_check(self, check_id: str, user_id: str):
         del check_id, user_id
@@ -65,6 +67,19 @@ class RecordingQualityRepository:
             createdAt=now,
             updatedAt=now,
         )
+
+    async def authorize_run(
+        self, check_id: str, user_id: str, task_id: str | None
+    ) -> QualityRecord:
+        del check_id, user_id
+        self.authorized_task_ids.append(task_id)
+        if task_id == "mismatch":
+            raise ApiError(
+                status_code=403,
+                code="QUALITY_TASK_MISMATCH",
+                message="任务与检查项不匹配",
+            )
+        return self.record
 
 
 def test_public_quality_status_only_accepts_pending_or_skipped() -> None:
@@ -111,6 +126,18 @@ def test_quality_requests_reject_unknown_fields() -> None:
         UpdateQualityCheckRequest.model_validate({"status": "pending", "scoreOverall": 10})
 
 
+@pytest.mark.parametrize(
+    ("request_type", "body"),
+    [
+        (UpdateQualityCheckRequest, {"status": "pending", "resetResult": "true"}),
+        (RunQualityCheckRequest, {"taskId": 123}),
+    ],
+)
+def test_quality_requests_reject_coerced_values(request_type, body) -> None:
+    with pytest.raises(ValidationError):
+        request_type.model_validate(body)
+
+
 @pytest.mark.asyncio
 async def test_public_status_update_forwards_reset_and_returns_fresh_check() -> None:
     repository = RecordingQualityRepository()
@@ -154,6 +181,21 @@ async def test_run_submitter_receives_only_authorized_context() -> None:
         "task_id": "task-existing",
         "message": "完整检查",
     }
+    assert repository.authorized_task_ids == ["task-existing"]
+
+
+@pytest.mark.asyncio
+async def test_run_rejects_task_that_does_not_match_check() -> None:
+    repository = RecordingQualityRepository()
+    service = QualityService(repository, submitter=RecordingSubmitter())  # type: ignore[arg-type]
+    with pytest.raises(ApiError) as caught:
+        await service.run(
+            "cookie-user",
+            "check-1",
+            RunQualityCheckRequest(taskId="mismatch"),
+        )
+    assert caught.value.status_code == 403
+    assert caught.value.code == "QUALITY_TASK_MISMATCH"
 
 
 @asynccontextmanager
@@ -192,3 +234,113 @@ async def test_run_api_returns_202_after_submitter_is_connected() -> None:
         response = await client.post("/api/v1/quality-checks/check-1/run", json={})
     assert response.status_code == 202
     assert response.json()["accepted"] is True
+
+
+@pytest.mark.asyncio
+async def test_quality_http_rejects_string_encoded_boolean() -> None:
+    repository = RecordingQualityRepository()
+    service = QualityService(repository, submitter=None)  # type: ignore[arg-type]
+    async with quality_api_client(service) as client:
+        response = await client.patch(
+            "/api/v1/quality-checks/check-1",
+            json={"status": "pending", "resetResult": "true"},
+        )
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
+
+
+class OneRowResult:
+    def __init__(self, row: tuple[object, ...] | None) -> None:
+        self.row = row
+
+    def one_or_none(self) -> tuple[object, ...] | None:
+        return self.row
+
+
+class TaskAuthSession:
+    def __init__(self, row: tuple[object, ...] | None) -> None:
+        self.row = row
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        del exc_type, exc, traceback
+
+    async def execute(self, statement):
+        del statement
+        return OneRowResult(self.row)
+
+
+def writing_task(*, novel_id: str = "novel-1", chapter_id: str = "chapter-1"):
+    from inkforge_core.db.models import WritingTask
+
+    now = datetime(2026, 7, 11, tzinfo=UTC)
+    return WritingTask(
+        id="task-1",
+        novelId=novel_id,
+        chapterId=chapter_id,
+        selectedAgents="[]",
+        targetWordCount=0,
+        phase="active",
+        createdAt=now,
+        updatedAt=now,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "row",
+    [
+        None,
+        pytest.param((writing_task(), "other-user"), id="其他用户"),
+        pytest.param((writing_task(novel_id="other-novel"), "user-1"), id="其他小说"),
+        pytest.param((writing_task(chapter_id="other-chapter"), "user-1"), id="其他章节"),
+    ],
+)
+async def test_repository_rejects_unmatched_quality_task(row) -> None:
+    from inkforge_core.quality.repository import QualityRepository
+
+    repository = QualityRepository(lambda: TaskAuthSession(row))  # type: ignore[arg-type]
+
+    async def require_check(session, check_id: str, user_id: str):
+        del session, check_id, user_id
+        return quality_check_model(), "novel-1"
+
+    repository._require_check = require_check  # type: ignore[method-assign]
+    with pytest.raises(ApiError) as caught:
+        await repository.authorize_run("check-1", "user-1", "task-1")
+    assert caught.value.status_code == 403
+    assert caught.value.code == "QUALITY_TASK_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_repository_accepts_task_with_same_owner_novel_and_chapter() -> None:
+    from inkforge_core.quality.repository import QualityRepository
+
+    repository = QualityRepository(  # type: ignore[arg-type]
+        lambda: TaskAuthSession((writing_task(), "user-1"))
+    )
+
+    async def require_check(session, check_id: str, user_id: str):
+        del session, check_id, user_id
+        return quality_check_model(), "novel-1"
+
+    repository._require_check = require_check  # type: ignore[method-assign]
+    result = await repository.authorize_run("check-1", "user-1", "task-1")
+    assert result.id == "check-1"
+
+
+def quality_check_model():
+    from inkforge_core.db.models import ChapterQualityCheck
+
+    now = datetime(2026, 7, 11, tzinfo=UTC)
+    return ChapterQualityCheck(
+        id="check-1",
+        chapterId="chapter-1",
+        type="consistency",
+        status="pending",
+        title="一致性终检",
+        createdAt=now,
+        updatedAt=now,
+    )

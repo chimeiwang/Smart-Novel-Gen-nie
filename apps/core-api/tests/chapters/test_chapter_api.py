@@ -67,6 +67,37 @@ class RecordingChapterRepository:
             self.has_default_check = True
         return self.chapter
 
+    async def transition_status(self, chapter_id: str, user_id: str, status: str):
+        del chapter_id, user_id
+        allowed = {
+            "drafting": {"drafting", "review"},
+            "review": {"drafting", "review", "completed"},
+            "completed": {"drafting", "review", "completed"},
+        }
+        if status not in allowed[self.chapter.status]:
+            raise ApiError(
+                status_code=409,
+                code="INVALID_CHAPTER_STATUS_TRANSITION",
+                message="章节状态不能这样切换",
+            )
+        if status == "completed" and self.consistency_status not in {
+            "completed",
+            "skipped",
+        }:
+            raise ApiError(
+                status_code=409,
+                code="QUALITY_CHECK_REQUIRED",
+                message="一致性终检完成或跳过后，才能标记章节完成",
+            )
+        if status == "review" and not self.has_default_check:
+            self.has_default_check = True
+            self.created_checks += 1
+        self.chapter.status = status
+        self.chapter.completed_at = (
+            self.chapter.completed_at or datetime.now(UTC) if status == "completed" else None
+        )
+        return self.chapter
+
 
 @pytest.mark.asyncio
 async def test_draft_title_falls_back_and_content_is_lossless() -> None:
@@ -155,6 +186,20 @@ async def test_return_to_drafting_clears_completed_at(source: str, target: str) 
 
 
 @pytest.mark.asyncio
+async def test_completed_can_return_to_review_and_repairs_default_check() -> None:
+    repository = RecordingChapterRepository()
+    repository.chapter.status = "completed"
+    repository.chapter.completed_at = datetime(2026, 7, 1, tzinfo=UTC)
+    service = ChapterService(repository)  # type: ignore[arg-type]
+    response = await service.set_status(
+        "user-1", "chapter-1", ChapterStatusRequest(status="review")
+    )
+    assert response.status == "review"
+    assert response.completedAt is None
+    assert repository.created_checks == 1
+
+
+@pytest.mark.asyncio
 async def test_skipped_consistency_check_allows_completion() -> None:
     repository = RecordingChapterRepository()
     repository.chapter.status = "review"
@@ -173,12 +218,24 @@ async def test_completed_status_is_idempotent_and_keeps_timestamp() -> None:
     repository = RecordingChapterRepository()
     repository.chapter.status = "completed"
     repository.chapter.completed_at = completed_at
+    repository.consistency_status = "completed"
     service = ChapterService(repository)  # type: ignore[arg-type]
     response = await service.set_status(
         "user-1", "chapter-1", ChapterStatusRequest(status="completed")
     )
     assert response.completedAt == completed_at
     assert repository.created_checks == 0
+
+
+@pytest.mark.asyncio
+async def test_idempotent_completed_revalidates_quality_gate() -> None:
+    repository = RecordingChapterRepository()
+    repository.chapter.status = "completed"
+    repository.chapter.completed_at = datetime(2026, 7, 10, tzinfo=UTC)
+    service = ChapterService(repository)  # type: ignore[arg-type]
+    with pytest.raises(ApiError) as caught:
+        await service.set_status("user-1", "chapter-1", ChapterStatusRequest(status="completed"))
+    assert caught.value.code == "QUALITY_CHECK_REQUIRED"
 
 
 @pytest.mark.asyncio
@@ -203,6 +260,47 @@ def test_chapter_requests_reject_unknown_fields(request_type, body) -> None:
 
     with pytest.raises(ValidationError, match="extra_forbidden"):
         request_type.model_validate(body)
+
+
+@pytest.mark.parametrize(
+    ("request_type", "body"),
+    [
+        (UpdateChapterRequest, {"title": 123, "content": "正文"}),
+        (ChapterProgressRequest, {"content": 123}),
+        (ChapterStatusRequest, {"status": 1}),
+    ],
+)
+def test_chapter_requests_reject_coerced_values(request_type, body) -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        request_type.model_validate(body)
+
+
+def test_openapi_publishes_exact_chapter_and_workspace_enums() -> None:
+    from inkforge_core.app import create_app
+
+    schemas = create_app(testing=True).openapi()["components"]["schemas"]
+    request_status_ref = schemas["ChapterStatusRequest"]["properties"]["status"]["$ref"]
+    assert schemas[request_status_ref.rsplit("/", 1)[-1]]["enum"] == [
+        "drafting",
+        "review",
+        "completed",
+    ]
+    chapter_status_ref = schemas["WorkspaceChapter"]["properties"]["status"]["$ref"]
+    quality_status_ref = schemas["QualityCheckDto"]["properties"]["status"]["$ref"]
+    assert schemas[chapter_status_ref.rsplit("/", 1)[-1]]["enum"] == [
+        "drafting",
+        "review",
+        "completed",
+    ]
+    assert schemas[quality_status_ref.rsplit("/", 1)[-1]]["enum"] == [
+        "pending",
+        "running",
+        "completed",
+        "skipped",
+        "failed",
+    ]
 
 
 def test_chapter_creation_uses_owner_lock_and_exact_numbering() -> None:

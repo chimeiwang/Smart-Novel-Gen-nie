@@ -513,6 +513,8 @@ git commit -m "功能：把认证迁移到核心接口服务"
 
 实现 `/api/v1/dashboard`、`/api/v1/novels`、`/api/v1/novels/{id}/workspace`、章节创建、更新和状态接口、章节进度、质量状态和质量运行提交。工作区响应必须包含 `src/app/workspace/[novelId]/page.tsx` 当前加载的每个字段，不得静默限制列表数量。
 
+质量运行提交在本任务只定义可注入端口。端口未接线时固定返回 503 且不得修改检查项状态；任务 15 接入智能体服务队列后，提交成功才返回 202。真实 PostgreSQL 的并发锁集成验证留到任务 18 的隔离测试数据库执行，本任务的并发测试不得连接或写入现有数据库。
+
 - [ ] **步骤 4：确认通过**
 
 运行：`uv run pytest apps/core-api/tests/novels apps/core-api/tests/chapters apps/core-api/tests/quality -v`

@@ -170,6 +170,12 @@ flowchart TD
 
 ## 一致性终检运行流程
 
+当前 Python 重构阶段由核心接口服务负责浏览器认证、检查项归属和可选 `taskId`
+绑定校验。`taskId` 必须与检查项属于同一用户、小说和章节，否则统一返回 403。
+任务 7 只定义可注入的质量运行提交端口；该端口未接线时固定返回 503，并且不得提前把
+检查项改为 `running`。任务 15 接入智能体服务队列后，提交成功才返回 202，实际报告生成
+和状态回写由后续异步流程完成，不在接口请求内同步调用模型。
+
 ~~~mermaid
 sequenceDiagram
     participant U as 用户
@@ -181,18 +187,16 @@ sequenceDiagram
     U->>UI: 点击运行一致性终检
     UI->>API: POST checkId
     API->>DB: 校验登录、检查项归属、章节归属
-    API->>DB: 标记检查项 running
-    API->>DB: 创建 WritingTask
-    API->>V: 注入轻量小说上下文并运行校验节点
-    V-->>API: 返回校验报告
-    API->>DB: 保存 ChapterQualityCheck.result
-    API->>DB: 标记 task completed
-    API-->>UI: 返回 ok、checkId、taskId
+    API->>DB: 校验可选 WritingTask 与检查项绑定
+    API->>V: 提交异步质量检查任务
+    API-->>UI: 返回 202、checkId、taskId
+    V->>DB: 通过核心接口服务回写运行状态和报告
 ~~~
 
 错误处理：
 
-- 参数不合法返回 400。
+- 请求体不符合 Pydantic 契约时，按全局错误契约返回 422。
+- 已通过请求体校验但业务类型不受支持时返回 400。
 - 未登录返回 401。
 - 越权返回 403。
 - 检查项不存在返回 404。
@@ -259,3 +263,4 @@ WorkflowStep 记录运行步骤：
 - 章节送审后能创建一致性终检。
 - 一致性终检运行报告能保存到 ChapterQualityCheck。
 - 章节完成前必须完成或跳过一致性终检。
+- 章节状态和质量检查状态写入使用相同锁顺序：先锁章节并校验所有者，再锁质量检查项。

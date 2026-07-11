@@ -8,7 +8,7 @@ from ..novels.schemas import QualityCheckDto
 
 
 class StrictModel(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True)
 
 
 class UpdateQualityCheckRequest(StrictModel):
