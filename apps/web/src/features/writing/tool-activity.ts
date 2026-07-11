@@ -1,6 +1,19 @@
-import { CONTROL_TOOL_NAMES } from "@/shared/contracts/agent-control";
-
-const CONTROL_TOOL_NAME_SET = new Set<string>(CONTROL_TOOL_NAMES);
+const CONTROL_TOOL_NAME_SET = new Set<string>([
+  "submit_quality_report",
+  "propose_updates",
+  "start_update_builder",
+  "append_update_batch",
+  "append_outline_tree",
+  "put_update_text_block",
+  "put_update_item_text_block",
+  "put_update_item_text_blocks",
+  "finish_update_builder",
+  "begin_artifact_output",
+  "show_review_artifact",
+  "submit_beat_plan",
+  "submit_validation_report",
+  "submit_evaluation",
+]);
 
 const TOOL_LABELS: Record<string, string> = {
   get_novel_info: "查询作品信息",

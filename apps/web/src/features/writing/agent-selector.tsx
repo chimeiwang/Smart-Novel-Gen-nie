@@ -2,8 +2,12 @@
 
 import { useState } from "react";
 
-import { type AgentId } from "@/agents/client";
-import { AGENT_REGISTRY, getRequiredAgents, getOptionalAgents } from "@/agents/registry";
+import {
+  type AgentId,
+  AGENT_REGISTRY,
+  getOptionalAgents,
+  getRequiredAgents,
+} from "@/features/writing/agent-registry";
 
 type AgentSelectorProps = {
   selectedAgents: AgentId[];

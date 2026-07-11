@@ -13,10 +13,12 @@
 | `requirements/03-ai-writing-and-agents.md` | AI 写作与 Agent |
 | `requirements/04-review-quality-and-workflow.md` | 草案审核、质量检查与工作流 |
 | `requirements/05-auth-billing-and-ops.md` | 认证、计费与运维 |
-| `LANGGRAPH_STUDIO.md` | LangGraph Studio 调试入口 |
+| `LANGGRAPH_STUDIO.md` | Python LangGraph Studio 调试边界 |
 | `WORKFLOW_EVENT_LOG_FORMAT.md` | 人工工作流日志格式 |
 | `BACKLOG.md` | 后续能力备忘，不代表当前承诺 |
 | `specs/` | 后续需求 spec；先写 spec，再执行修改 |
+
+Agent Service 当前架构见 `../apps/agent-service/AGENTS.md`。
 
 ## 历史归档
 

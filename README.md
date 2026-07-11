@@ -1,59 +1,48 @@
-# Smart Novel Gen
+# InkForge（墨铸）
 
-面向中文小说作者的本地创作工具，支持项目/章节管理、设定管理、文风画像、AI 续写、写作会话、质量检查、待审核草案和多 Agent 协作。
+面向中文小说作者的创作工作台，提供项目与章节管理、设定、大纲、文风画像、参考资料、AI 写作会话、质量检查、待审核草案和多 Agent 协作。
 
-## 技术栈
+## 当前技术栈
 
-- Next.js 16 + React 19 + TypeScript
-- Prisma 6 + PostgreSQL
-- LangChain / LangGraph / Zod
-- OpenAI SDK 兼容接口，默认可接入 DeepSeek
-- 原生 CSS 与 CSS 自定义属性
+- Next.js 16、React 19、TypeScript：页面、SSR/SEO 和浏览器交互。
+- FastAPI、Pydantic、SQLAlchemy 异步接口：核心业务 API。
+- LangGraph Python、LangChain Core：Agent 编排和模型运行时。
+- PostgreSQL、pgvector：现有主数据库，结构禁止在本重构中修改。
+- Redis：运行队列、SSE 短期重放、限流和服务令牌重放保护。
+- Nginx、Docker Compose：单机生产部署。
 
-## 本地启动
+## 目录
+
+```text
+apps/web                 Next.js 前端
+apps/core-api            Python 核心接口服务
+apps/agent-service       Python 智能体服务
+packages/api-client      OpenAPI 生成的前端客户端
+packages/service-auth    服务身份共享库
+packages/service-contracts 服务间 Pydantic 契约
+infra                    生产镜像、Nginx 和 Compose
+```
+
+## 开发验证
 
 ```bash
 npm install
-cp .env.example .env
-npm run db:generate
-npm run dev
+npm run typecheck
+npm run lint
+npm run test:web
+npm run build
+
+uv sync --frozen --all-packages --group dev
+uv run pytest
+uv run ruff check .
 ```
 
-默认开发端口见 `package.json` 中的脚本配置。
+## 生产部署
 
-## 环境变量
+1. 基于 `.env.example` 创建 `.env`，填写现有 PostgreSQL 地址和数据卷名称。
+2. 运行 `uv run python scripts/generate_service_keys.py --output-dir infra/secrets` 生成服务密钥。
+3. 运行 `docker compose -f infra/compose.yaml up --build -d`。
 
-请基于 `.env.example` 创建本地 `.env`。不要提交真实密钥、数据库密码或生产配置。
+Nginx 是唯一公网入口。Agent Service 不加入数据库网络，也不会接收 `DATABASE_URL`。Compose 只挂载已有 PostgreSQL 数据卷，不包含初始化 SQL 或迁移。
 
-常用变量：
-
-- `DATABASE_URL`：PostgreSQL 连接地址
-- `JWT_SECRET`：会话签名密钥
-- `OPENAI_API_KEY`：OpenAI/DeepSeek 兼容 API Key
-- `OPENAI_BASE_URL`：模型服务地址
-- `OPENAI_MODEL`：模型名称
-
-未配置真实模型 Key 时，部分 AI/Agent 能力会返回 Mock 内容或提示。
-
-## 数据库
-
-当前主数据库以 `prisma/schema.prisma` 的 PostgreSQL schema 为准。仓库中不包含本地数据库快照。
-
-```bash
-npm run db:generate
-npm run db:migrate
-```
-
-生产或 PostgreSQL 专用命令以 `package.json` 为准。
-
-## Agent 系统
-
-Agent、写作流程、质量评审、草案审核和 LangGraph 编排的详细说明见：
-
-- `DOCS.md`
-- `AGENTS.md`
-- `src/agents/AGENTS.md`
-- `docs/README.md`
-- `docs/requirements/00-overview.md`
-- `docs/requirements/03-ai-writing-and-agents.md`
-- `docs/requirements/04-review-quality-and-workflow.md`
+架构与需求入口见 `DOCS.md`、`AGENTS.md`、`apps/agent-service/AGENTS.md` 和 `docs/README.md`。

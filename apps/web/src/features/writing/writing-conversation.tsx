@@ -3,7 +3,11 @@
 import { useCallback, useOptimistic, useReducer, useRef, useState, useTransition, useEffect } from "react";
 import { createSseRequestHeaders, createSseState, parseSseFrame } from "@inkforge/api-client";
 
-import { AGENT_REGISTRY, type AgentId, type OrchestrationEvent } from "@/agents/client";
+import {
+  AGENT_REGISTRY,
+  type AgentId,
+  type OrchestrationEvent,
+} from "@/features/writing/agent-registry";
 import { browserApi } from "@/lib/api/browser";
 import { requireApiData } from "@/lib/api/response";
 import type { WritingSseEvent } from "@/shared/contracts/sse-events";

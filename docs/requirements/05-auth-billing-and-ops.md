@@ -2,286 +2,117 @@
 
 ## 目标
 
-为本地创作工具提供基础账号体系、资源归属校验、AI 使用计费、运行配置和调试观测能力。
+提供账号认证、资源归属校验、模型计费、服务间互信、可恢复运行和适合 2 核 2 GB 单机的生产部署。
 
-## 用户认证
+## 浏览器认证
 
-根路由 `/` 是公开官网首页。除 `/`、`/login`、`/_next/*`、`/api/*` 和静态资源外，普通页面路由需要有效会话；无效或缺失会话会重定向到 `/login`。
+- 首页和登录页公开，其余页面由 Next.js `proxy.ts` 检查 `inkforge-token` Cookie。
+- 注册、登录、登出和当前用户接口由 Core API 提供。
+- 用户名为 3 至 32 位小写字母、数字、下划线或短横线；密码至少 6 位。
+- 密码由 Python bcrypt 哈希，禁止保存明文。
+- 会话使用 HS256 JWT，写入 httpOnly、sameSite=lax Cookie，有效期 30 天。
+- 登录失败不区分用户名不存在和密码错误。
 
-### 注册
+## 资源授权
 
-用户可以从官网首页进入注册入口，并注册账号。
+小说、章节、写作任务、会话、消息、质量检查、参考资料、文风和 ReviewArtifact 都必须沿关系校验到当前用户。历史 `Novel.userId = null` 只允许显式兼容，不能成为新数据规则。
 
-输入：
+浏览器只能访问 `/api/v1/**`。Nginx 必须阻断公网 `/internal/**`。
 
-- 用户名；
-- 密码；
-- 确认密码。
+## 服务间互信
 
-校验规则：
+Core API 与 Agent Service 使用 Ed25519 服务令牌：
 
-- 用户名、密码、确认密码必填。
-- 用户名只能包含 3-32 位小写字母、数字、下划线或短横线。
-- 密码至少 6 位。
-- 两次密码必须一致。
-- 用户名必须唯一。
+- 令牌绑定签发者、受众、权限、任务、运行、小说、请求体摘要和查询摘要；
+- 令牌有效期短，校验时限制时钟偏差；
+- 写入类请求的 `jti` 必须通过 Redis 防重放；
+- 内部接口同时校验直接 TCP 对端网段，不信任 `X-Forwarded-For`；
+- 私钥只挂载到对应签发服务，不能写入镜像或仓库。
 
-注册成功后：
+Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过 Core 内部接口读取上下文、提交草案和回写状态。
 
-- 密码使用 bcryptjs 哈希保存。
-- 创建用户。
-- 发放注册赠送积分。
-- 写入 CreditLedger signup_bonus 流水。
-- 创建 JWT 会话并写入 httpOnly Cookie。
-- 刷新首页。
+## 积分与模型计费
 
-### 登录
+注册成功发放 1000 积分，并写入 `CreditLedger.signup_bonus`。
 
-输入：
+真实模型调用前：
 
-- 用户名；
-- 密码。
+- Core 根据用户、模型和请求估算成本；
+- 余额不足时拒绝授权；
+- Core 签发与任务、运行和请求绑定的短期模型授权。
 
-业务规则：
+调用结束后：
 
-- 用户名统一转小写。
-- 用户名或密码错误时返回统一错误。
-- 登录成功后写入 JWT Cookie，并进入工作台首页。
-- 登录时会把历史 userId 为空的孤儿小说分配给当前用户。
+- Agent 上报实际 token usage；
+- Core 在短事务中幂等扣减余额；
+- 同步写入 `CreditLedger.ai_charge` 和 `TokenUsage`；
+- 重复回调不能重复扣费。
 
-### 登出
+计费和草案应用属于关键写入，禁止放入可丢弃队列。
 
-用户可以登出。
+## 运行恢复
 
-业务规则：
+- Core 先创建并持久化 `WritingTask`，再提交 Redis 队列。
+- Agent 每个稳定步骤通过签名回调保存版本化图快照。
+- Agent 进程退出后，另一个兼容实例可以领取租约并从最后稳定检查点继续。
+- Redis 丢失时，Core 对账器重新提交数据库中非终态任务；不得重复生成草案或扣费。
+- `WritingMessage` 只保存用户可见聊天记录，不能反推图状态。
 
-- 删除会话 Cookie。
-- 刷新首页。
+## 人工日志
 
-## 会话 Cookie
+- Agent 日志写入 `/data/agent-logs` 命名卷。
+- 同一任务恢复运行追加到同一文件。
+- 保存完整模型 messages、模型正文和中文状态切换。
+- 不记录 tools schema、tool_calls、工具参数或工具结果。
+- 调试读取默认关闭；开启后仍需浏览器认证、用户归属和 `agent:debug:read` 服务权限。
 
-认证实现：
+## 生产编排
 
-- JWT 使用 jose 签发。
-- Cookie 名称为 inkforge-token。
-- Cookie 为 httpOnly。
-- sameSite 为 lax。
-- 有效期 30 天。
+`infra/compose.yaml` 包含 Nginx、Web、Core API、Agent Service、Redis 和 PostgreSQL。只有 Nginx 发布端口。
 
-## 授权边界
+网络边界：
 
-系统必须校验以下资源归属：
+- `public_net`：Nginx、Web、Core；
+- `agent_net`：Core、Agent、Redis；
+- `data_net`：Core、Redis、PostgreSQL；
+- Agent 不得加入 `data_net`。
 
-- Novel；
-- Chapter；
-- WritingTask；
-- WritingSession；
-- ChapterQualityCheck；
-- ReviewArtifact；
-- 写作消息。
+数据库约束：
 
-通用规则：
+- 只挂载现有外部 PostgreSQL 数据卷；
+- 不提供初始化 SQL；
+- 不执行迁移、建表或删表；
+- Core 启动就绪检查对现有 schema 做只读指纹校验。
 
-~~~mermaid
-flowchart TD
-    A["请求进入"] --> B["读取登录会话"]
-    B --> C{"是否登录"}
-    C -->|"否"| D["401 未登录"]
-    C -->|"是"| E["读取目标资源"]
-    E --> F{"资源是否存在"}
-    F -->|"否"| G["404 或 403"]
-    F -->|"是"| H["沿关系找到 Novel.userId"]
-    H --> I{"是否属于当前用户"}
-    I -->|"否"| J["403 无权访问"]
-    I -->|"是"| K["继续执行业务"]
-~~~
+2 核 2 GB 默认限制：
 
-历史兼容：
+- 每个 Python 服务一个 worker；
+- 同时只执行一个模型任务；
+- Redis `maxmemory` 为 64 MB，关闭 AOF；
+- 所有容器使用非 root 用户、只读根文件系统、健康检查和资源上限。
 
-- novel.userId 为空默认拒绝。
-- 本地开发可通过 ALLOW_LEGACY_NULL_USERID=true 临时放行。
-- 生产环境不应放行 userId 为空数据。
+## 常用配置
 
-## 积分与 Token 计费
-
-### 数据模型
-
-User：
-
-- creditBalanceMicros：积分余额，微积分单位。
-
-TokenUsage：
-
-- userId；
-- model；
-- promptTokens；
-- completionTokens；
-- cachedTokens；
-- totalTokens；
-- agentId；
-- novelId。
-
-CreditLedger：
-
-- userId；
-- type；
-- amountMicros；
-- balanceAfterMicros；
-- model；
-- token 明细；
-- agentId；
-- novelId；
-- requestId；
-- note。
-
-流水类型：
-
-- signup_bonus；
-- manual_recharge；
-- ai_charge；
-- ai_refund。
-
-### 注册赠送
-
-注册成功发放 1000 积分。
-
-### 模型调用前预检
-
-真实模型调用前必须：
-
-- 有 userId；
-- 查询用户积分余额；
-- 估算 prompt token 成本；
-- 根据余额计算可负担 output token；
-- 若余额不足，拒绝调用。
-
-### 模型调用后扣费
-
-调用完成后：
-
-- 根据实际 usage 计算成本；
-- 同步扣减 User.creditBalanceMicros；
-- 写入 CreditLedger ai_charge；
-- 记录 TokenUsage。
-
-计费写入属于关键写入，不能进入可丢弃的非关键队列。
-
-## 计费页面
-
-计费页需要展示：
-
-- 当前积分余额；
-- 总 Token 用量；
-- 当月 Token 用量；
-- prompt、cached、completion、total 明细。
-
-未登录时返回 0。
-
-## 环境变量
-
-常用配置：
-
-| 变量 | 用途 |
-| --- | --- |
-| DATABASE_URL | PostgreSQL 连接地址 |
-| JWT_SECRET | JWT 签名密钥 |
-| OPENAI_API_KEY | OpenAI/DeepSeek 兼容 API Key |
-| OPENAI_BASE_URL | 模型服务地址 |
-| OPENAI_MODEL | 模型名称 |
-| LANGCHAIN_API_KEY | LangSmith 可选追踪 |
-| LANGCHAIN_PROJECT | LangSmith 项目名 |
-| LANGCHAIN_TRACING_V2 | LangSmith 追踪开关 |
-| LANGGRAPH_STUDIO_ENABLED | 是否启用 LangGraph Studio 本地调试 |
-| LANGGRAPH_MEMORY_SAVER_TTL_MS | 等待确认 checkpoint TTL |
-| ALLOW_LEGACY_NULL_USERID | 本地兼容历史无归属小说 |
-| RAG_EMBEDDING_API_KEY | 参考资料 RAG embedding API Key |
-| RAG_EMBEDDING_BASE_URL | 参考资料 RAG embedding 服务地址 |
-| RAG_EMBEDDING_MODEL | 参考资料 RAG embedding 模型 |
-
-## 常用命令
-
-| 命令 | 用途 |
-| --- | --- |
-| npm run dev | 启动 Next.js 开发服务器，端口 43119 |
-| npm run build | 生产构建 |
-| npm run lint | ESLint |
-| npm run typecheck | TypeScript 检查 |
-| npm run db:generate | 生成 Prisma Client |
-| npm run db:migrate | 运行迁移 |
-| npm run studio:dev | 启动 LangGraph Studio/Agent Server 调试 |
-| npm run studio:input | 生成 Studio 输入 |
-
-## 调试与观测
-
-### Workflow event debug
-
-调试 API 和页面用于查看机器 JSONL 工作流事件。机器 JSONL 默认关闭。
-
-能力：
-
-- 按 runId 查询；
-- 按 taskId 查询；
-- 查看近期 workflow runs；
-- 在 WORKFLOW_MACHINE_EVENT_LOG_ENABLED=true 时读取 workflow event JSONL 日志。
-
-访问规则：
-
-- 必须登录。
-- 只能查看当前用户相关运行。
-
-### LangGraph Studio
-
-Studio 用于查看节点、状态、interrupt/resume 和 trace。
-
-约束：
-
-- 使用现有 compiled graph。
-- 不新增平行 Agent 编排。
-- Studio 运行会真实执行 Graph 节点，可能创建或更新 ReviewArtifact 和 WritingTask。
-
-### LangSmith
-
-LangSmith 可选启用。
-
-用途：
-
-- 追踪模型调用；
-- 追踪 operationWorkflow 节点；
-- 追踪工具调用摘要。
-
-### 日志和内存
-
-系统包含：
-
-- logger；
-- 人工工作流日志；
-- 可选 workflow JSONL logging；
-- MemorySaver checkpoint；
-- MemorySaver TTL 清理；
-- SSE 断连和异常路径清理。
-
-原则：
-
-- ReviewArtifact、WritingTask 状态和计费是关键写入，必须同步。
-- TokenUsage 和 workflow 派生 WritingMessage 可进入有界非关键写入队列。
-- MemorySaver 只做当前进程内 interrupt/resume 优化，持久恢复依赖数据库快照。
-- 人工排查优先读取 `logs/workflow-events/runs/YYYY-MM-DD/<task短号>.log`。
-
-## 安全与非功能需求
-
-- 所有外部请求参数需要校验。
-- 资源访问必须走归属校验。
-- 正式写库不能信任前端传入的章节 ID 覆盖 task.chapterId。
-- 真实模型调用必须校验余额。
-- 关键业务错误要返回明确错误信息。
-- 本地上传文件不得保存真实密钥或生产配置。
+| 变量 | 所属服务 | 用途 |
+| --- | --- | --- |
+| `DATABASE_URL` | Core | 现有 PostgreSQL 地址 |
+| `JWT_SECRET` | Core、Web | 浏览器会话签名 |
+| `REDIS_URL` | Core、Agent | 队列、事件和防重放 |
+| `OPENAI_API_KEY` | Agent | 模型服务密钥 |
+| `OPENAI_BASE_URL` | Agent | 模型服务地址 |
+| `OPENAI_MODEL` | Agent | 模型名称 |
+| `CORE_SERVICE_PRIVATE_KEY_PATH` | Core | Core 签名私钥 |
+| `AGENT_SERVICE_PUBLIC_KEY_PATH` | Core | Agent 验签公钥 |
+| `AGENT_SERVICE_PRIVATE_KEY_PATH` | Agent | Agent 签名私钥 |
+| `CORE_SERVICE_PUBLIC_KEY_PATH` | Agent | Core 验签公钥 |
+| `WORKFLOW_HUMAN_LOG_DIR` | Agent | 人工日志目录 |
 
 ## 验收标准
 
-- 用户可以注册、登录、登出。
-- 注册后获得积分流水和余额。
-- 未登录用户不能访问写作、会话、草案、质量检查等受保护接口。
-- 越权访问他人小说、任务、会话、草案会被拒绝。
-- AI 调用前余额不足会被拒绝。
-- AI 调用后能记录 TokenUsage 和 CreditLedger。
-- 开发者可以通过调试页或 Studio 排查工作流。
+- 用户可以注册、登录、登出并查看计费摘要。
+- 未登录或越权请求不能访问受保护资源。
+- Agent 不能连接数据库，内部伪造、重放、跨任务或跨小说请求会被拒绝。
+- 余额不足时模型调用不会开始；重复完成回调不会重复扣费。
+- Agent 重启后任务可以从稳定检查点恢复。
+- Nginx 是唯一公网入口，公网 `/internal/**` 返回 404。
+- 数据库结构指纹在迁移前后保持不变。

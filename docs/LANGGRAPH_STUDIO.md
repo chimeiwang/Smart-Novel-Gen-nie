@@ -1,134 +1,26 @@
-# LangGraph Studio 接入说明
+# Python LangGraph Studio 接入
 
-本文档说明 InkForge（墨铸）如何接入 LangGraph Studio 做本地可视化调试。
+LangGraph Studio 只用于查看 Python 图结构、状态、`Send`、`Command` 和 `interrupt()`，不是生产请求入口。
 
-## 启动 Studio
-
-```bash
-npm run studio:dev -- --no-browser --port 2024
-```
-
-启动成功后终端会输出：
-
-```text
-API: http://localhost:2024
-Studio UI: https://smith.langchain.com/studio?baseUrl=http://localhost:2024
-```
-
-打开 Studio UI 后选择 `novel_writer` 图。
-
-## 图入口
-
-Studio 配置文件：
+## 配置与入口
 
 ```text
 langgraph.json
+apps/agent-service/src/inkforge_agents/studio.py
 ```
 
-图导出文件：
+启动命令：
+
+```bash
+uv run langgraph dev --no-browser --port 2024
+```
+
+当前 Studio 入口导出与生产相同的父图和 Operation 图，但外部 Core API 端口使用拒绝占位实现。因此它适合结构和状态调试；需要真实数据库上下文、草案写入和完整工具调用时，应通过 Compose 中的 Core API 发起测试运行，不能绕过服务边界让 Studio 直接连接数据库。
+
+Studio 不得新增平行编排。生产图入口仍是：
 
 ```text
-src/agents/graph/studio-app.ts
+START -> initSession -> operationWorkflow 或 statusReport -> END
 ```
 
-该入口只导出 `getGraph()` 的 compiled graph，不新增平行编排。Studio 看到的是现有：
-
-```text
-START → initSession → operationWorkflow/statusReport → END
-```
-
-## 生成运行输入
-
-Studio 直接运行图时需要完整 `GraphState`。使用脚本基于真实小说和章节生成输入：
-
-```bash
-npm run studio:input -- \
-  --novel-id <novelId> \
-  --chapter-id <chapterId> \
-  --user-id <userId> \
-  --message "继续写本章"
-```
-
-脚本会：
-
-- 校验 `novel.userId` 归属。
-- 复用 `aggregateNovelContextLightweight()` 聚合上下文。
-- 创建一条调试用 `WritingTask`。
-- 输出可粘贴到 Studio 的完整 JSON state。
-
-可选参数：
-
-```bash
---target-word-count 1200
-```
-
-## 副作用边界
-
-Studio 运行会真实执行 Graph 节点，因此可能产生这些副作用：
-
-- 创建或更新 `WritingTask`。
-- 创建或更新 `ReviewArtifact`、revision、evaluation。
-- 在审核通过后进入 LangGraph `interrupt()`，等待用户决策。
-
-正式章节正文仍不会被 Agent 直接写入。正文、设定、大纲等正式落库仍必须经过：
-
-```text
-ReviewArtifact → 用户确认应用 → applyReviewArtifact()
-```
-
-## 和本地 workflow event 日志的分工
-
-LangGraph Studio 适合调试：
-
-- 图结构。
-- 节点执行路径。
-- State patch。
-- interrupt/resume。
-- LangSmith trace。
-
-人工排查直接读 `logs/workflow-events/runs/YYYY-MM-DD/<task短号>.log`：
-
-- LLM 完整请求、返回和工具执行原文。
-- LangGraph 中文状态切换，包括节点名、阶段、关键字段和枚举值。
-
-机器 JSONL 默认关闭。只有显式设置 `WORKFLOW_MACHINE_EVENT_LOG_ENABLED=true` 后，`/debug/workflow-events` 才有新的审计数据可用于回放：
-
-- Next API/SSE 端到端事件。
-- 前端实际收到的事件。
-- 本地持久化副作用。
-- 一次真实写作请求的回放审计。
-
-两者互补，不互相替代。
-
-## 常用命令
-
-```bash
-npm run studio:dev
-npm run studio:dev -- --no-browser --port 2024
-npm run studio:input -- --novel-id <id> --chapter-id <id> --user-id <id> --message "..."
-npm run studio:build
-```
-
-## LangSmith Monitoring
-
-Studio 入口 `src/agents/graph/studio-app.ts` 会在导出 graph 前初始化 LangSmith；因此 `npm run studio:dev` 不依赖 Next.js API 路由的 `initServer()`。
-
-在 `.env` 中配置：
-
-```bash
-LANGSMITH_API_KEY="your_langsmith_api_key"
-LANGSMITH_PROJECT="inkforge"
-LANGSMITH_TRACING="true"
-LANGCHAIN_API_KEY="your_langsmith_api_key"
-LANGCHAIN_PROJECT="inkforge"
-LANGCHAIN_TRACING_V2="true"
-```
-
-一次 Studio 调试运行应能在 LangSmith 中看到这些层级：
-
-- `workflow:writing-workflow` 或 Studio 图运行的顶层 trace。
-- `workflow:operation:<stage>`，例如 `operation:prepare_context`、`operation:execute_operation`、`operation:review_artifact`。
-- `llm:<callType>`，来自 `AgentRuntimeImpl` 和普通 LLM wrapper。
-- `tool:<toolName>`，来自 Agent 读取工具、proposal 工具等非 control tool 调用。
-
-如果缺少 API key 或 tracing 变量不是 `true`，系统会继续本地运行，但不会上报 LangSmith trace。
+真实运行可能产生草案和计费，应只在独立测试数据库副本上执行。正式内容仍必须经过 `ReviewArtifact -> 用户确认 -> Core API 应用`。

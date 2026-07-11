@@ -5,7 +5,10 @@ import { useState, useTransition } from "react";
 
 import { browserApi } from "@/lib/api/browser";
 import { requireApiData } from "@/lib/api/response";
-import { type AgentId, getDefaultEnabledAgents } from "@/agents/client";
+import {
+  type AgentId,
+  getDefaultEnabledAgents,
+} from "@/features/writing/agent-registry";
 import { OutlinePanel } from "@/features/outline/outline-panel";
 import { ProgressPanel } from "@/features/progress/progress-panel";
 import { ReferencePanel } from "@/features/references/reference-panel";

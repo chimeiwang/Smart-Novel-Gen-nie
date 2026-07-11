@@ -9,7 +9,7 @@ from .operations.graph import OperationDependencies
 class _UnavailableAgentExecutor:
     async def run(self, agent_id: str, state: dict[str, Any]) -> dict[str, Any]:
         del agent_id, state
-        raise RuntimeError("Studio 尚未接入任务 15 的核心接口服务客户端")
+        raise RuntimeError("Studio 结构调试入口不执行真实模型任务")
 
 
 class _UnavailableArtifactPort:

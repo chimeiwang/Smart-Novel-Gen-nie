@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
-import { type AgentId } from "@/agents/client";
+import type { AgentId } from "@/features/writing/agent-registry";
 import { getDefaultSelectedAgents } from "@/features/writing/agent-selector";
 import { WritingConversation } from "@/features/writing/writing-conversation";
 

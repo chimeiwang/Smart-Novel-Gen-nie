@@ -8,4 +8,3 @@
     "novel_writer": "./apps/agent-service/src/inkforge_agents/studio.py:graph"
   }
 }
-

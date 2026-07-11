@@ -1,61 +1,23 @@
 # 人工工作流日志格式
 
-本文件描述当前人工可读工作流日志。机器审计日志、调试 API 和旧分片 LLM 日志不属于人工主入口。
+当前实现位于 `apps/agent-service/src/inkforge_agents/observability/`。Agent Service 把日志写入 `/data/agent-logs`，Compose 使用 `agent_logs` 命名卷持久化；Core API 通过签名内部接口按用户归属读取，浏览器不能直接访问 Agent Service。
 
-铁律：日志文档必须服从当前 `src/agents/graph/workflow-event-log.ts` 和运行输出事实；若实现变化，先核对代码再修正文档。
+## 文件与追加规则
 
-## 人工入口
+文件名由运行标识的安全哈希生成，禁止把任务标识直接拼接为路径。同一任务首次执行和恢复运行追加到同一文件。没有模型调用或图状态变化的短路操作不创建空日志。
 
-```text
-logs/workflow-events/runs/YYYY-MM-DD/<task短号>.log
-```
+每个运行区块只记录：
 
-同一 `WritingTask` 的首次执行和后续 resume 追加到同一文件。审批、丢弃等既没有 LLM 调用也没有 LangGraph 状态变化的短路操作，不创建空壳人工日志。
+1. 实际发送给模型的完整 messages 和模型返回的完整正文；
+2. 中文 LangGraph 状态切换、阶段和结束状态。
 
-## 当前结构
-
-每个运行区块只保留两类记录：
-
-1. **LLM 输入与输出原文**
-   - 按 Agent 调用编号分组，例如 `A01`。
-   - 只渲染实际发送给模型的 messages 原文、模型返回的 content 原文和 token 消耗。
-   - 只包含 `REQUEST` / `RESPONSE`；不展开 tools schema、供应商 reasoning、模型 tool calls、工具参数或工具返回。
-   - 供应商没有返回 usage 时必须明确标记未知，不能伪造统计。
-
-2. **LangGraph 中文状态切换**
-   - 按状态编号排列，例如 `S001`。
-   - 记录节点名、阶段、关键字段和枚举值的中文含义。
-   - 用于确认 operationWorkflow 的真实推进顺序。
-
-人工日志不再写入：
-
-- Workflow/SSE 事件 JSON；
-- 完整 GraphState/raw patch；
-- 独立状态索引；
-- Agent 最终汇总重复层；
-- tools schema、供应商 reasoning、模型 tool calls、工具参数或工具返回；
-- token stream；
-- Runnable / callback / checkpoint metadata；
-- 需要跨文件关联的 task index 或 LLM index。
+人工日志不记录 tools schema、供应商 reasoning、模型 tool_calls、工具参数、工具返回、完整运行时对象或底层 checkpoint metadata。禁止对已记录的正文、消息或状态进行静默截断。
 
 ## 配置
 
 ```bash
-WORKFLOW_EVENT_LOG_ENABLED=true
-WORKFLOW_EVENT_LOG_DIR=/absolute/path/to/workflow-events
-WORKFLOW_MACHINE_EVENT_LOG_ENABLED=false
+WORKFLOW_HUMAN_LOG_DIR=/data/agent-logs
+WORKFLOW_EVENT_DEBUG_ENABLED=false
 ```
 
-- `WORKFLOW_EVENT_LOG_ENABLED=true`：生成人工日志。
-- `WORKFLOW_EVENT_LOG_DIR`：覆盖默认日志目录。
-- `WORKFLOW_MACHINE_EVENT_LOG_ENABLED=true`：额外生成机器 JSONL，默认关闭。
-
-`logs/app-YYYY-MM-DD.log` 只记录应用运行、错误和普通程序日志。没有 `taskId` 的独立 LLM 调用不能归入某个工作流时，才使用 `logs/llm` 兜底。
-
-## 阅读顺序
-
-1. 先看运行区块标题，确认 task 短号和时间。
-2. 再看 `Sxxx` 状态切换，确认 Graph 走到哪个阶段。
-3. 最后看对应 `Axx` Agent 调用里的 LLM 输入 messages、模型输出正文和 token 消耗。
-
-如果日志和代码行为冲突，以代码和实际日志文件为准，更新本文。
+调试读取默认关闭。开启后，用户仍必须通过 Core API 浏览器鉴权和归属校验；Core 到 Agent 的读取请求还必须具有 `agent:debug:read` 服务权限。

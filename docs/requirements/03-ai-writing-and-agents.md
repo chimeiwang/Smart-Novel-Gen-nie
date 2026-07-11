@@ -134,7 +134,7 @@ flowchart TD
 
 ### 启动写作 workflow
 
-入口：POST /api/writing/session。
+入口：`POST /api/v1/writing/runs`，成功返回 202 和任务标识。
 
 请求字段：
 
@@ -157,7 +157,7 @@ flowchart TD
 
 ### 继续写作 workflow
 
-入口：POST /api/writing/resume。
+入口：`POST /api/v1/writing/runs/{taskId}/resume`，成功返回 202。
 
 用途：
 
@@ -193,9 +193,9 @@ flowchart TD
 - WritingMessage 用于用户可见聊天记录。
 - WritingTask.graphStateJson 用于恢复 LangGraph 状态。
 - currentTask 只来自 WritingSession 显式绑定的非终态 task。
-- completed/error 任务只能作为 lastTask 历史摘要，不得成为默认 `/api/writing/resume` 句柄。
+- completed/error 任务只能作为 lastTask 历史摘要，不得成为恢复接口的默认句柄。
 - 未绑定历史 task 不能在恢复时静默绑定到当前 session。
-- MemorySaver 只提供当前进程内短时优化，不是唯一恢复来源。
+- 进程内 checkpointer 只提供短时优化，不是唯一恢复来源。
 
 ## SSE 事件
 
@@ -269,4 +269,5 @@ Agent Runtime 是唯一多轮 tool-call loop。
 - Python 智能体服务已迁移五个智能体定义、系统提示词、能力与工具白名单、严格工具参数校验和唯一多轮工具循环；模型运行时仍只负责单次供应商调用。
 - 只读且并发安全的工具可以并行执行，控制工具按模型调用顺序生成结构化事件；未暴露工具、无效参数和最大轮次均明确终止，不截断用户可见文本。
 - Python LangGraph 已迁移 CreativeOperation 路由、复审 `Send` 扇出、确定性复审优先级、补丁或重写返工、最大修订次数、用户中断和 `Command` 恢复；图状态快照使用版本信封并排除运行时字段。
-- 运行队列提交器将在任务 15 接线；未接线时启动和恢复接口明确返回 503，不创建假运行。
+- Core API 已把启动、恢复、画像、质量检查和 RAG 任务提交到 Redis 持久队列；Agent Service 消费任务并通过签名回调保存检查点、事件、草案和终态。
+- Agent Service 不连接数据库，所有读取工具和业务写入都通过 Core 内部工具网关完成。
