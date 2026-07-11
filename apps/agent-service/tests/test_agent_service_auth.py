@@ -10,6 +10,7 @@ from inkforge_agents.service_auth import (
     create_core_request_verifier,
     install_service_auth_error_handler,
 )
+from inkforge_contracts.jwt_claims import ServiceScope
 from inkforge_service_auth import ServiceAuthenticationError, ServiceAuthorizationError
 
 
@@ -31,6 +32,13 @@ def test_agent_module_does_not_expose_database_or_reverse_direction_factories() 
 
     assert not hasattr(service_auth, "DATABASE_URL")
     assert not hasattr(service_auth, "create_core_request_signer")
+
+
+def test_agent_to_core_whitelist_contains_only_rag_write_direction() -> None:
+    import inkforge_agents.service_auth as service_auth
+
+    assert ServiceScope.RAG_INDEX_WRITE in service_auth._AGENT_TO_CORE_SCOPES
+    assert ServiceScope.RAG_INDEX_WRITE not in service_auth._CORE_TO_AGENT_SCOPES
 
 
 def test_agent_wrapper_installs_service_auth_error_handler() -> None:

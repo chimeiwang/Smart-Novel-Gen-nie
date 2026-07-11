@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -48,6 +49,7 @@ def _model_dict(value: Any) -> dict[str, Any]:
     return {
         column.key: _utc(item) if isinstance(item := getattr(value, column.key), datetime) else item
         for column in value.__table__.columns
+        if column.key != "novelId"
     }
 
 
@@ -75,6 +77,8 @@ class LoreRepository:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
+                if kind == "locations":
+                    await self._lock_novel(session, novel_id)
                 await self._validate_entity_links(session, novel_id, kind, None, fields)
                 value = model(novelId=novel_id, **fields)
                 session.add(value)
@@ -94,6 +98,8 @@ class LoreRepository:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
+                if kind == "locations":
+                    await self._lock_novel(session, novel_id)
                 await self._validate_entity_links(session, novel_id, kind, entity_id, fields)
                 statement = (
                     update(model)
@@ -380,6 +386,12 @@ class LoreRepository:
             raise ApiError(status_code=403, code="NOVEL_FORBIDDEN", message="无权访问该小说")
         if owner != user_id:
             raise ApiError(status_code=403, code="NOVEL_FORBIDDEN", message="无权访问该小说")
+
+    @staticmethod
+    async def _lock_novel(session: AsyncSession, novel_id: str) -> None:
+        if session.bind is not None and session.bind.dialect.name == "postgresql":
+            key = int.from_bytes(hashlib.sha256(novel_id.encode()).digest()[:8], "big", signed=True)
+            await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})
 
     @staticmethod
     async def _require_related(

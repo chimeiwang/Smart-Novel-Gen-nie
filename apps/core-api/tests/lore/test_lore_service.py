@@ -90,3 +90,16 @@ async def test_empty_lore_update_is_rejected(kind, body) -> None:
         else:
             await service.update_entity("user-1", "novel-1", kind, "entity-1", body)
     assert caught.value.code == "EMPTY_UPDATE"
+
+
+@pytest.mark.asyncio
+async def test_writing_bible_rejects_explicit_null_profile() -> None:
+    service = LoreService(RecordingRepository())  # type: ignore[arg-type]
+    with pytest.raises(ApiError) as caught:
+        await service.upsert_content(
+            "user-1",
+            "novel-1",
+            "writing-bible",
+            WritingBibleRequest(storyLengthProfile=None),
+        )
+    assert caught.value.code == "WRITING_BIBLE_PROFILE_REQUIRED"

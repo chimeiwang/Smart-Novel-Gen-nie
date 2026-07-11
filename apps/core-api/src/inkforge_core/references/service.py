@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import logging
 from typing import Any, Protocol
 
 from ..errors import ApiError
 from .schemas import CreateReferenceRequest, ReferenceMaterialResponse, UpdateReferenceRequest
 
+logger = logging.getLogger(__name__)
+
 
 class IndexSubmitter(Protocol):
-    async def submit(self, reference_id: str) -> None: ...
+    async def submit(self, reference_id: str, content_hash: str) -> None: ...
 
 
 class ReferenceRepositoryPort(Protocol):
@@ -23,8 +26,20 @@ class ReferenceRepositoryPort(Protocol):
         self, novel_id: str, user_id: str, reference_id: str
     ) -> dict[str, Any]: ...
     async def replace_index(
-        self, novel_id: str, user_id: str, reference_id: str, embeddings: list[list[float]]
+        self,
+        novel_id: str,
+        reference_id: str,
+        expected_content_hash: str,
+        embeddings: list[list[float]],
     ) -> dict[str, Any]: ...
+    async def prepare_reindex(self, novel_id: str, user_id: str, reference_id: str) -> str: ...
+    async def mark_index_failed(
+        self,
+        novel_id: str,
+        reference_id: str,
+        expected_content_hash: str,
+        message: str,
+    ) -> None: ...
     async def search(
         self, novel_id: str, user_id: str, embedding: list[float], top_k: int
     ) -> list[dict[str, Any]]: ...
@@ -48,7 +63,10 @@ class ReferenceService:
             raise ApiError(status_code=422, code="REFERENCE_TITLE_REQUIRED", message="标题不能为空")
         value = await self._repository.create_reference(novel_id, user_id, request.model_dump())
         if self._submitter is not None:
-            await self._submitter.submit(str(value["id"]))
+            try:
+                await self._submitter.submit(str(value["id"]), str(value["contentHash"]))
+            except Exception:
+                logger.warning("参考资料索引任务提交失败", extra={"referenceId": value["id"]})
         return ReferenceMaterialResponse.model_validate(value)
 
     async def update(
@@ -69,7 +87,10 @@ class ReferenceService:
             raise ApiError(status_code=422, code="REFERENCE_TITLE_REQUIRED", message="标题不能为空")
         value = await self._repository.update_reference(novel_id, user_id, reference_id, fields)
         if self._submitter is not None and {"title", "content"} & fields.keys():
-            await self._submitter.submit(reference_id)
+            try:
+                await self._submitter.submit(reference_id, str(value["contentHash"]))
+            except Exception:
+                logger.warning("参考资料索引任务提交失败", extra={"referenceId": reference_id})
         return ReferenceMaterialResponse.model_validate(value)
 
     async def delete(self, user_id: str, novel_id: str, reference_id: str) -> None:
@@ -82,18 +103,42 @@ class ReferenceService:
                 code="RAG_INDEX_UNAVAILABLE",
                 message="检索索引服务暂时不可用",
             )
-        await self._repository.require_reference(novel_id, user_id, reference_id)
-        await self._submitter.submit(reference_id)
+        content_hash = await self._repository.prepare_reindex(novel_id, user_id, reference_id)
+        try:
+            await self._submitter.submit(reference_id, content_hash)
+        except Exception:
+            await self._repository.mark_index_failed(
+                novel_id, reference_id, content_hash, "索引任务提交失败"
+            )
+            raise ApiError(
+                status_code=503,
+                code="RAG_INDEX_SUBMIT_FAILED",
+                message="检索索引任务提交失败",
+            ) from None
 
     async def complete_index(
         self,
-        user_id: str,
         novel_id: str,
         reference_id: str,
+        expected_content_hash: str,
         embeddings: list[list[float]],
     ) -> ReferenceMaterialResponse:
-        value = await self._repository.replace_index(novel_id, user_id, reference_id, embeddings)
+        value = await self._repository.replace_index(
+            novel_id, reference_id, expected_content_hash, embeddings
+        )
         return ReferenceMaterialResponse.model_validate(value)
+
+    async def fail_index(
+        self,
+        novel_id: str,
+        reference_id: str,
+        expected_content_hash: str,
+        message: str,
+    ) -> None:
+        del message
+        await self._repository.mark_index_failed(
+            novel_id, reference_id, expected_content_hash, "索引生成失败"
+        )
 
     async def search(
         self, user_id: str, novel_id: str, embedding: list[float], top_k: int

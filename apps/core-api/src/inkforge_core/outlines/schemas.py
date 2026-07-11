@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -67,3 +68,26 @@ class UpdateForeshadowingRequest(StrictModel):
     expectedPayoff: str | None = None
     payoffAt: str | None = None
     status: Literal["active", "paid_off", "abandoned"] | None = None
+
+
+class OutlineContentResponse(OutlineContentRequest):
+    id: str
+    createdAt: datetime
+    updatedAt: datetime
+
+
+class OutlineNodeResponse(CreateOutlineNodeRequest):
+    id: str
+    createdAt: datetime
+    updatedAt: datetime
+
+
+class PlotProgressResponse(PlotProgressRequest):
+    id: str
+    updatedAt: datetime
+
+
+class ForeshadowingResponse(CreateForeshadowingRequest):
+    id: str
+    createdAt: datetime
+    updatedAt: datetime

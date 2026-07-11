@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from collections import defaultdict
 from datetime import UTC, datetime
@@ -24,6 +25,7 @@ from ..db.models import (
     Outline,
     OutlineNode,
     PlotProgress,
+    RagDocument,
     ReferenceMaterial,
     SceneBeat,
     StoryBackground,
@@ -32,6 +34,7 @@ from ..db.models import (
     WritingStyle,
 )
 from ..errors import ApiError
+from ..references.rag import public_rag_error
 from .schemas import DashboardNovel, DashboardResponse, NovelResponse, WorkspaceResponse
 from .service import NovelCreation
 
@@ -404,8 +407,13 @@ class NovelRepository:
         plot = await self._one_for_novel(session, PlotProgress, novel_id)
         references = list(
             (
-                await session.scalars(
-                    select(ReferenceMaterial)
+                await session.execute(
+                    select(ReferenceMaterial, RagDocument)
+                    .outerjoin(
+                        RagDocument,
+                        (RagDocument.sourceType == "reference_material")
+                        & (RagDocument.sourceId == ReferenceMaterial.id),
+                    )
                     .where(ReferenceMaterial.novelId == novel_id)
                     .order_by(ReferenceMaterial.updatedAt.desc(), ReferenceMaterial.id.asc())
                 )
@@ -580,10 +588,30 @@ class NovelRepository:
                 else None
             ),
             "references": [
-                model_fields(
-                    value, "id", "title", "type", "content", "sourceUrl", "createdAt", "updatedAt"
-                )
-                for value in references
+                {
+                    **model_fields(
+                        value,
+                        "id",
+                        "title",
+                        "type",
+                        "content",
+                        "sourceUrl",
+                        "createdAt",
+                        "updatedAt",
+                    ),
+                    "ragStatus": document.status if document else "disabled",
+                    "contentHash": (
+                        document.contentHash
+                        if document
+                        else hashlib.sha256(value.content.encode("utf-8")).hexdigest()
+                    ),
+                    "errorMessage": (
+                        public_rag_error(document.status, document.errorMessage)
+                        if document
+                        else None
+                    ),
+                }
+                for value, document in references
             ],
             "styles": [
                 model_fields(value, "id", "name", "portraitMarkdown", "sourceType")

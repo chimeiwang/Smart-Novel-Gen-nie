@@ -69,6 +69,16 @@ class OutlineService:
     ) -> dict[str, Any]:
         fields = body.model_dump(exclude_unset=True)
         self._require_update_fields(fields)
+        if any(
+            fields.get(field) is None
+            for field in ("title", "kind", "status", "order")
+            if field in fields
+        ):
+            raise ApiError(
+                status_code=422,
+                code="OUTLINE_FIELD_REQUIRED",
+                message="标题、类型、状态和顺序不能为 null",
+            )
         return await self._repository.update_node(novel_id, user_id, node_id, fields)
 
     async def delete_node(self, user_id: str, novel_id: str, node_id: str) -> None:

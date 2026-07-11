@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from typing import cast
 
 from fastapi import FastAPI
+from inkforge_service_auth import RedisReplayStore
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from .auth import router as auth_router
@@ -36,10 +37,11 @@ from .outlines.service import OutlineService
 from .quality.repository import QualityRepository
 from .quality.router import router as quality_router
 from .quality.service import QualityService
+from .references.internal_router import router as references_internal_router
 from .references.repository import ReferenceRepository
 from .references.router import router as references_router
 from .references.service import ReferenceService
-from .service_auth import install_service_auth_error_handler
+from .service_auth import create_agent_callback_verifier, install_service_auth_error_handler
 
 
 def _configure_auth(app: FastAPI, settings: Settings) -> None:
@@ -95,6 +97,18 @@ def _configure_business_services(app: FastAPI) -> None:
     app.state.reference_service = ReferenceService(reference_repository, submitter=None)
 
 
+def _configure_rag_callback_auth(app: FastAPI, settings: Settings) -> None:
+    """仅在 JWKS 与 Redis 都可用时装配索引回调验签器。"""
+
+    redis = getattr(app.state, "auth_redis", None)
+    if settings.agent_service_public_key_path is None or redis is None:
+        return
+    app.state.rag_callback_verifier = create_agent_callback_verifier(
+        jwks_path=settings.agent_service_public_key_path,
+        replay_store=RedisReplayStore(redis),
+    )
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """在应用退出时释放已创建的数据库连接池。"""
@@ -139,6 +153,7 @@ def create_app(*, testing: bool = False, settings: Settings | None = None) -> Fa
     configure_database(app, loaded_settings)
     _configure_auth(app, loaded_settings)
     _configure_business_services(app)
+    _configure_rag_callback_auth(app, loaded_settings)
     app.add_middleware(SafeUnhandledExceptionMiddleware)
     app.add_middleware(RequestIdMiddleware)
     install_exception_handlers(app)
@@ -150,5 +165,6 @@ def create_app(*, testing: bool = False, settings: Settings | None = None) -> Fa
     app.include_router(lore_router, prefix="/api/v1")
     app.include_router(outlines_router, prefix="/api/v1")
     app.include_router(references_router, prefix="/api/v1")
+    app.include_router(references_internal_router, prefix="/api/v1")
     app.include_router(operations_router, prefix="/api/v1")
     return app

@@ -124,6 +124,12 @@ class LoreService:
         if kind == "writing-bible":
             content: Any = request.model_dump(exclude_unset=True)
             self._require_update_fields(content)
+            if "storyLengthProfile" in content and content["storyLengthProfile"] is None:
+                raise ApiError(
+                    status_code=422,
+                    code="WRITING_BIBLE_PROFILE_REQUIRED",
+                    message="作品篇幅模式不能为 null",
+                )
         else:
             if not isinstance(request, ContentRequest):
                 raise TypeError("内容请求类型无效")

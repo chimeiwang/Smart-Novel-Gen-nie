@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from inkforge_contracts.jwt_claims import ServiceScope
 from inkforge_core.app import create_app
 from inkforge_core.service_auth import (
     create_agent_callback_verifier,
@@ -35,6 +36,13 @@ def test_core_module_does_not_expose_browser_or_reverse_direction_factories() ->
 
     assert not hasattr(service_auth, "create_browser_signer")
     assert not hasattr(service_auth, "create_agent_request_signer")
+
+
+def test_core_accepts_rag_write_only_from_agent_direction() -> None:
+    import inkforge_core.service_auth as service_auth
+
+    assert ServiceScope.RAG_INDEX_WRITE in service_auth._AGENT_TO_CORE_SCOPES
+    assert ServiceScope.RAG_INDEX_WRITE not in service_auth._CORE_TO_AGENT_SCOPES
 
 
 @pytest.mark.parametrize(

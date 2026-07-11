@@ -14,6 +14,7 @@ type ChapterStatus = Literal["drafting", "review", "completed"]
 type StoryLengthProfile = Literal["short_medium", "long_serial"]
 type StyleSourceType = Literal["manual", "agent"]
 type ReferenceType = Literal["note", "web", "book", "image", "custom"]
+type RagDocumentStatus = Literal["disabled", "ready", "failed"]
 type QualityCheckType = Literal["consistency", "lore_sync", "editorial", "craft"]
 type QualityCheckStatus = Literal["pending", "running", "completed", "skipped", "failed"]
 type QualityGate = Literal["pass", "revise", "rewrite"]
@@ -332,6 +333,9 @@ class ReferenceDto(StrictModel):
     type: ReferenceType
     content: str
     sourceUrl: str | None
+    ragStatus: RagDocumentStatus
+    contentHash: str
+    errorMessage: str | None
     createdAt: datetime
     updatedAt: datetime
 

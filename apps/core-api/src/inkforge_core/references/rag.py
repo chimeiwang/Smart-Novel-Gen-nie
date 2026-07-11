@@ -11,6 +11,8 @@ from ..errors import ApiError
 MAX_CHUNK_CHARS = 1800
 EMBEDDING_BATCH_SIZE = 10
 MAX_TOP_K = 20
+MAX_INDEX_CHUNKS = 64
+MAX_EMBEDDING_DIMENSION = 4096
 
 SEARCH_SQL = """
 SELECT
@@ -45,24 +47,46 @@ def content_sha256(content: str) -> str:
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-def normalize_embeddings(values: Sequence[Sequence[float]]) -> list[list[float]]:
+def public_rag_error(status: str | None, error_message: str | None) -> str | None:
+    if status == "ready":
+        return None
+    if status == "failed":
+        return "索引生成失败"
+    if error_message in {"检索索引服务未配置", "等待重新索引"}:
+        return error_message
+    return "检索索引暂不可用" if error_message else None
+
+
+def validate_chunk_capacity(chunks: list[str]) -> list[str]:
+    if len(chunks) > MAX_INDEX_CHUNKS or any(len(chunk) > MAX_CHUNK_CHARS for chunk in chunks):
+        raise _capacity_error()
+    return chunks
+
+
+def normalize_embeddings(values: list[list[float]]) -> list[list[float]]:
     if not values:
         raise _embedding_error()
-    normalized: list[list[float]] = []
+    if len(values) > MAX_INDEX_CHUNKS:
+        raise _capacity_error()
     dimension: int | None = None
     for value in values:
-        vector = [float(item) for item in value]
-        if not vector or any(not math.isfinite(item) for item in vector):
+        if len(value) > MAX_EMBEDDING_DIMENSION:
+            raise _capacity_error()
+        if not value or any(
+            isinstance(item, bool) or not isinstance(item, (int, float)) or not math.isfinite(item)
+            for item in value
+        ):
             raise _embedding_error()
         if dimension is None:
-            dimension = len(vector)
-        elif len(vector) != dimension:
+            dimension = len(value)
+        elif len(value) != dimension:
             raise _embedding_error()
-        normalized.append(vector)
-    return normalized
+    return values
 
 
 def vector_literal(value: Sequence[float]) -> str:
+    if not isinstance(value, list):
+        value = list(value)
     normalized = normalize_embeddings([value])[0]
     return "[" + ",".join(str(item) for item in normalized) + "]"
 
@@ -88,4 +112,12 @@ def _embedding_error() -> ApiError:
         status_code=422,
         code="EMBEDDING_INVALID",
         message="嵌入向量必须非空、维度一致且只包含有限数值",
+    )
+
+
+def _capacity_error() -> ApiError:
+    return ApiError(
+        status_code=413,
+        code="EMBEDDING_CAPACITY_EXCEEDED",
+        message="索引分块或嵌入向量维度超过允许上限",
     )

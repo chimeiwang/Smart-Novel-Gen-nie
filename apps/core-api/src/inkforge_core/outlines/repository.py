@@ -17,6 +17,8 @@ from .validation import OutlineNodeSnapshot, validate_outline_node
 def _dict(value: Any) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for column in value.__table__.columns:
+        if column.key == "novelId":
+            continue
         item = getattr(value, column.key)
         if isinstance(item, datetime):
             item = item.replace(tzinfo=UTC) if item.tzinfo is None else item.astimezone(UTC)

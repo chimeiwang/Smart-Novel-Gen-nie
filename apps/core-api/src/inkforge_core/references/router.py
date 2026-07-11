@@ -9,11 +9,11 @@ from ..auth.dependencies import get_current_user
 from ..auth.repository import AuthUser
 from ..errors import ApiError
 from .schemas import (
-    CompleteReferenceIndexRequest,
     CreateReferenceRequest,
     RagSearchRequest,
     RagSearchResult,
     ReferenceMaterialResponse,
+    ReindexAcceptedResponse,
     UpdateReferenceRequest,
 )
 from .service import ReferenceService
@@ -69,24 +69,14 @@ async def delete_reference(novel_id: str, reference_id: str, user: User, service
     return Response(status_code=204)
 
 
-@router.post("/novels/{novel_id}/references/{reference_id}/reindex", status_code=202)
+@router.post(
+    "/novels/{novel_id}/references/{reference_id}/reindex",
+    response_model=ReindexAcceptedResponse,
+    status_code=202,
+)
 async def reindex_reference(novel_id: str, reference_id: str, user: User, service: Service):
     await service.reindex(user.id, novel_id, reference_id)
-    return {"accepted": True}
-
-
-@router.put(
-    "/novels/{novel_id}/references/{reference_id}/index",
-    response_model=ReferenceMaterialResponse,
-)
-async def complete_reference_index(
-    novel_id: str,
-    reference_id: str,
-    body: CompleteReferenceIndexRequest,
-    user: User,
-    service: Service,
-):
-    return await service.complete_index(user.id, novel_id, reference_id, body.embeddings)
+    return ReindexAcceptedResponse(accepted=True)
 
 
 @router.post("/novels/{novel_id}/references/search", response_model=list[RagSearchResult])

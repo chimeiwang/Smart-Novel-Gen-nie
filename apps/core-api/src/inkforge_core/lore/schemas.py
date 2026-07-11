@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -179,3 +180,63 @@ class WritingBibleRequest(StrictModel):
     taboo: str | None = None
     comparableTitles: str | None = None
     notes: str | None = None
+
+
+class CharacterResponse(CreateCharacterRequest):
+    id: str
+    createdAt: datetime
+    updatedAt: datetime
+
+
+class ItemResponse(CreateItemRequest):
+    id: str
+    createdAt: datetime
+    updatedAt: datetime
+
+
+class LocationResponse(CreateLocationRequest):
+    id: str
+    createdAt: datetime
+    updatedAt: datetime
+
+
+class FactionResponse(CreateFactionRequest):
+    id: str
+    createdAt: datetime
+    updatedAt: datetime
+
+
+class GlossaryResponse(CreateGlossaryRequest):
+    id: str
+    createdAt: datetime
+    updatedAt: datetime
+
+
+class ExperienceResponse(StrictModel):
+    id: str
+    characterId: str
+    chapterId: str | None
+    content: str
+    order: int
+    createdAt: datetime
+    updatedAt: datetime
+
+
+class RelationResponse(RelationRequest):
+    id: str
+    createdAt: datetime
+    updatedAt: datetime
+
+
+class ContentResponse(StrictModel):
+    id: str
+    content: str | None
+    createdAt: datetime | None = None
+    updatedAt: datetime | None = None
+
+
+class WritingBibleResponse(WritingBibleRequest):
+    id: str
+    storyLengthProfile: StoryLengthProfile
+    createdAt: datetime
+    updatedAt: datetime

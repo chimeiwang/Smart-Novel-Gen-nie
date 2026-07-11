@@ -348,8 +348,13 @@ class ScalarRows:
 
 
 class WorkspaceSession:
-    def __init__(self, chapters: list[object]) -> None:
+    def __init__(
+        self,
+        chapters: list[object],
+        reference_rows: list[tuple[object, object | None]] | None = None,
+    ) -> None:
         self.chapters = chapters
+        self.reference_rows = reference_rows or []
         self.query_count = 0
 
     async def scalars(self, statement):
@@ -358,6 +363,11 @@ class WorkspaceSession:
         self.query_count += 1
         entity = statement.column_descriptions[0].get("entity")
         return ScalarRows(self.chapters if entity is Chapter else [])
+
+    async def execute(self, statement):
+        del statement
+        self.query_count += 1
+        return ScalarRows(self.reference_rows)
 
     async def scalar(self, statement):
         del statement
@@ -641,6 +651,7 @@ async def test_workspace_sets_read_only_repeatable_read_before_authorization_que
 
         async def execute(self, statement):
             self.operations.append(str(statement))
+            return ScalarRows([])
 
         async def scalar(self, statement):
             self.operations.append(f"查询:{statement}")
@@ -663,3 +674,37 @@ async def test_workspace_sets_read_only_repeatable_read_before_authorization_que
     assert response.novel.id == "novel-1"
     assert session.operations[0] == ("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
     assert session.operations[1].startswith("查询:")
+
+
+@pytest.mark.asyncio
+async def test_workspace_returns_rag_status_with_single_reference_join() -> None:
+    from inkforge_core.db.models import RagDocument, ReferenceMaterial
+    from inkforge_core.novels.repository import NovelRepository
+
+    reference = ReferenceMaterial(
+        id="reference-1",
+        novelId="novel-1",
+        title="资料",
+        type="note",
+        content="正文",
+        sourceUrl=None,
+    )
+    document = RagDocument(
+        id="document-1",
+        novelId="novel-1",
+        sourceType="reference_material",
+        sourceId="reference-1",
+        title="资料",
+        contentHash="a" * 64,
+        status="failed",
+        errorMessage="索引失败",
+    )
+    session = WorkspaceSession([], [(reference, document)])
+    workspace = await NovelRepository(lambda: None)._load_workspace(  # type: ignore[arg-type]
+        session, workspace_novel(), None
+    )
+    item = workspace["references"][0]
+    assert item["id"] == "reference-1"
+    assert item["ragStatus"] == "failed"
+    assert item["contentHash"] == "a" * 64
+    assert item["errorMessage"] == "索引生成失败"

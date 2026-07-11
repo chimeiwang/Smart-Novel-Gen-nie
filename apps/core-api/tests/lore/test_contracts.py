@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 from inkforge_core.app import create_app
+from inkforge_core.auth.dependencies import get_current_user
+from inkforge_core.auth.repository import AuthUser
 from inkforge_core.lore.schemas import (
     CreateCharacterRequest,
     CreateFactionRequest,
@@ -89,3 +93,74 @@ def test_task8_modules_contain_no_schema_mutation_or_background_tasks() -> None:
         "alembic",
     ):
         assert forbidden not in source
+
+
+def test_all_task8_success_routes_publish_explicit_response_schemas() -> None:
+    paths = create_app(testing=True).openapi()["paths"]
+    domain_markers = (
+        "/characters",
+        "/experiences",
+        "/relations",
+        "/items",
+        "/locations",
+        "/factions",
+        "/glossary",
+        "/story-background",
+        "/world-setting",
+        "/writing-bible",
+        "/story-progress",
+        "/outline",
+        "/plot-progress",
+        "/foreshadowings",
+        "/references",
+    )
+    checked = 0
+    for path, operations in paths.items():
+        if not any(marker in path for marker in domain_markers):
+            continue
+        for method, operation in operations.items():
+            if method == "delete" or operation.get("responses", {}).get("204") is not None:
+                continue
+            success = next(
+                value for code, value in operation["responses"].items() if code.startswith("2")
+            )
+            schema = success["content"]["application/json"]["schema"]
+            assert schema
+            assert schema != {}
+            checked += 1
+    assert checked >= 25
+
+
+def test_lore_success_response_is_filtered_by_declared_dto() -> None:
+    class Service:
+        async def list_entities(self, user_id, novel_id, kind):
+            del user_id, novel_id, kind
+            now = datetime(2026, 7, 11, tzinfo=UTC)
+            return [
+                {
+                    "id": "item-1",
+                    "name": "物品",
+                    "aliases": None,
+                    "type": None,
+                    "rarity": None,
+                    "effect": None,
+                    "origin": None,
+                    "description": None,
+                    "ownerId": None,
+                    "createdAt": now,
+                    "updatedAt": now,
+                }
+            ]
+
+    app = create_app(testing=True)
+    app.state.lore_service = Service()
+    app.dependency_overrides[get_current_user] = lambda: AuthUser(
+        id="user-1",
+        username="user",
+        password_hash="固定哈希",  # noqa: S106
+        credit_balance_micros=0,
+    )
+    response = TestClient(app).get("/api/v1/novels/novel-1/items")
+    assert response.status_code == 200
+    assert response.json()[0]["id"] == "item-1"
+    assert "novelId" not in response.json()[0]

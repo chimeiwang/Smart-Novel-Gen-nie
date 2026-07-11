@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from collections import deque
 
 import pytest
@@ -71,3 +72,10 @@ async def test_null_owner_is_always_rejected() -> None:
     with pytest.raises(ApiError) as caught:
         await LoreRepository._require_owner(session, "novel-1", "user-1")  # type: ignore[arg-type]
     assert caught.value.status_code == 403
+
+
+@pytest.mark.parametrize("method_name", ["create_entity", "update_entity"])
+def test_location_mutation_locks_novel_before_validating_parent_chain(method_name: str) -> None:
+    source = inspect.getsource(getattr(LoreRepository, method_name))
+    assert source.index("_lock_novel") < source.index("_validate_entity_links")
+    assert "pg_advisory_xact_lock(:key)" in inspect.getsource(LoreRepository._lock_novel)

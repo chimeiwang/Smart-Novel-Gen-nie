@@ -30,3 +30,13 @@ def test_index_replacement_uses_fixed_size_batches_and_vector_binding() -> None:
     assert "EMBEDDING_BATCH_SIZE" in source
     assert "insert(RagChunk)" in source
     assert '"embedding": normalized[index]' in source
+
+
+def test_index_callbacks_lock_both_rows_and_check_hash_before_chunk_deletion() -> None:
+    lock_source = inspect.getsource(ReferenceRepository._lock_reference_and_document)
+    replace_source = inspect.getsource(ReferenceRepository.replace_index)
+    failure_source = inspect.getsource(ReferenceRepository.mark_index_failed)
+    assert lock_source.count("with_for_update") == 2
+    assert replace_source.index("_require_current_hash") < replace_source.index("delete(RagChunk)")
+    assert "_require_current_hash" in failure_source
+    assert "_require_failure_target" in failure_source

@@ -9,6 +9,7 @@ from inkforge_core.references.rag import (
     chunk_text_losslessly,
     content_sha256,
     normalize_embeddings,
+    validate_chunk_capacity,
     validate_top_k,
     vector_literal,
 )
@@ -42,6 +43,33 @@ def test_embedding_validation_rejects_empty_nonfinite_and_mixed_dimensions() -> 
         with pytest.raises(ApiError) as caught:
             normalize_embeddings(value)
         assert caught.value.code == "EMBEDDING_INVALID"
+
+
+def test_embedding_validation_returns_original_batch_without_copy() -> None:
+    values = [[1.0, 2.0], [3.0, 4.0]]
+    assert normalize_embeddings(values) is values
+
+
+@pytest.mark.parametrize(
+    "values",
+    [
+        [[1.0] for _ in range(65)],
+        [[1.0] * 4097],
+    ],
+    ids=["分块过多", "向量过宽"],
+)
+def test_embedding_capacity_overflow_is_rejected_without_truncation(values) -> None:
+    with pytest.raises(ApiError) as caught:
+        normalize_embeddings(values)
+    assert caught.value.code == "EMBEDDING_CAPACITY_EXCEEDED"
+
+
+def test_chunk_capacity_rejects_65_chunks_without_dropping_tail() -> None:
+    chunks = [str(index) for index in range(65)]
+    with pytest.raises(ApiError) as caught:
+        validate_chunk_capacity(chunks)
+    assert caught.value.status_code == 413
+    assert chunks[-1] == "64"
 
 
 def test_empty_document_has_no_chunks_and_needs_no_embedding_vector() -> None:

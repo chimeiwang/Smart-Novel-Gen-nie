@@ -84,3 +84,20 @@ async def test_empty_outline_domain_update_is_rejected(kind, body) -> None:
         else:
             await service.update_foreshadowing("user-1", "novel-1", "f-1", body)
     assert caught.value.code == "EMPTY_UPDATE"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body",
+    [
+        UpdateOutlineNodeRequest(title=None),
+        UpdateOutlineNodeRequest(kind=None),
+        UpdateOutlineNodeRequest(status=None),
+        UpdateOutlineNodeRequest(order=None),
+    ],
+)
+async def test_outline_patch_rejects_null_for_required_fields(body) -> None:
+    service = OutlineService(Repository())  # type: ignore[arg-type]
+    with pytest.raises(ApiError) as caught:
+        await service.update_node("user-1", "novel-1", "node-1", body)
+    assert caught.value.code == "OUTLINE_FIELD_REQUIRED"

@@ -14,7 +14,9 @@ from .rag import (
     chunk_text_losslessly,
     content_sha256,
     normalize_embeddings,
+    public_rag_error,
     search_statement,
+    validate_chunk_capacity,
     validate_top_k,
     vector_literal,
 )
@@ -35,7 +37,7 @@ class ReferenceRepository:
             await self._require_owner(session, novel_id, user_id)
             rows = (
                 await session.execute(
-                    select(ReferenceMaterial, RagDocument.status)
+                    select(ReferenceMaterial, RagDocument)
                     .outerjoin(
                         RagDocument,
                         (RagDocument.sourceType == "reference_material")
@@ -46,7 +48,12 @@ class ReferenceRepository:
                 )
             ).all()
         return [
-            self._dto(reference, cast(str | None, rag_status)) for reference, rag_status in rows
+            self._dto(
+                reference,
+                document.status if isinstance(document, RagDocument) else None,
+                cast(RagDocument | None, document),
+            )
+            for reference, document in rows
         ]
 
     async def create_reference(
@@ -69,7 +76,7 @@ class ReferenceRepository:
                 )
                 session.add(document)
                 await session.flush()
-                result = self._dto(reference, document.status)
+                result = self._dto(reference, document.status, document)
         return result
 
     async def require_reference(
@@ -81,7 +88,7 @@ class ReferenceRepository:
             if reference is None:
                 raise self._not_found()
             document = await self._document(session, reference_id)
-        return self._dto(reference, document.status if document else None)
+        return self._dto(reference, document.status if document else None, document)
 
     async def update_reference(
         self,
@@ -132,7 +139,7 @@ class ReferenceRepository:
                     document.contentHash = content_sha256(reference.content)
                     document.status = "disabled"
                     document.errorMessage = "等待重新索引"
-                result = self._dto(reference, document.status)
+                result = self._dto(reference, document.status, document)
         return result
 
     async def delete_reference(self, novel_id: str, user_id: str, reference_id: str) -> None:
@@ -157,17 +164,17 @@ class ReferenceRepository:
     async def replace_index(
         self,
         novel_id: str,
-        user_id: str,
         reference_id: str,
+        expected_content_hash: str,
         embeddings: list[list[float]],
     ) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
-                await self._require_owner(session, novel_id, user_id)
-                reference = await self._find(session, novel_id, reference_id)
-                if reference is None:
-                    raise self._not_found()
-                chunks = chunk_text_losslessly(reference.content)
+                reference, document = await self._lock_reference_and_document(
+                    session, novel_id, reference_id
+                )
+                self._require_current_hash(reference, document, expected_content_hash)
+                chunks = validate_chunk_capacity(chunk_text_losslessly(reference.content))
                 if chunks:
                     normalized = normalize_embeddings(embeddings)
                 else:
@@ -183,11 +190,6 @@ class ReferenceRepository:
                         status_code=422,
                         code="EMBEDDING_COUNT_MISMATCH",
                         message="嵌入向量数量与资料分块数量不一致",
-                    )
-                document = await self._document(session, reference_id)
-                if document is None:
-                    raise ApiError(
-                        status_code=409, code="RAG_DOCUMENT_MISSING", message="检索文档不存在"
                     )
                 await session.execute(delete(RagChunk).where(RagChunk.documentId == document.id))
                 for offset in range(0, len(chunks), EMBEDDING_BATCH_SIZE):
@@ -207,23 +209,38 @@ class ReferenceRepository:
                 document.status = "ready"
                 document.errorMessage = None
                 document.contentHash = content_sha256(reference.content)
-                result = self._dto(reference, document.status)
+                result = self._dto(reference, document.status, document)
         return result
 
-    async def mark_index_failed(
-        self, novel_id: str, user_id: str, reference_id: str, message: str
-    ) -> None:
+    async def prepare_reindex(self, novel_id: str, user_id: str, reference_id: str) -> str:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
-                reference = await self._find(session, novel_id, reference_id)
-                if reference is None:
-                    raise self._not_found()
-                document = await self._document(session, reference_id)
-                if document is None:
-                    raise ApiError(
-                        status_code=409, code="RAG_DOCUMENT_MISSING", message="检索文档不存在"
-                    )
+                reference, document = await self._lock_reference_and_document(
+                    session, novel_id, reference_id
+                )
+                current_hash = content_sha256(reference.content)
+                await session.execute(delete(RagChunk).where(RagChunk.documentId == document.id))
+                document.title = reference.title
+                document.contentHash = current_hash
+                document.status = "disabled"
+                document.errorMessage = "等待重新索引"
+                return current_hash
+
+    async def mark_index_failed(
+        self,
+        novel_id: str,
+        reference_id: str,
+        expected_content_hash: str,
+        message: str,
+    ) -> None:
+        async with self._session_factory() as session:
+            async with session.begin():
+                reference, document = await self._lock_reference_and_document(
+                    session, novel_id, reference_id
+                )
+                self._require_current_hash(reference, document, expected_content_hash)
+                self._require_failure_target(document)
                 document.status = "failed"
                 document.errorMessage = message
 
@@ -284,8 +301,67 @@ class ReferenceRepository:
             ),
         )
 
+    @classmethod
+    async def _lock_reference_and_document(
+        cls, session: AsyncSession, novel_id: str, reference_id: str
+    ) -> tuple[ReferenceMaterial, RagDocument]:
+        reference = cast(
+            ReferenceMaterial | None,
+            await session.scalar(
+                select(ReferenceMaterial)
+                .where(
+                    ReferenceMaterial.id == reference_id,
+                    ReferenceMaterial.novelId == novel_id,
+                )
+                .with_for_update()
+            ),
+        )
+        if reference is None:
+            raise cls._not_found()
+        document = cast(
+            RagDocument | None,
+            await session.scalar(
+                select(RagDocument)
+                .where(
+                    RagDocument.sourceType == "reference_material",
+                    RagDocument.sourceId == reference_id,
+                    RagDocument.novelId == novel_id,
+                )
+                .with_for_update()
+            ),
+        )
+        if document is None:
+            raise ApiError(
+                status_code=409,
+                code="RAG_DOCUMENT_MISSING",
+                message="检索文档不存在",
+            )
+        return reference, document
+
+    @classmethod
+    def _require_current_hash(
+        cls,
+        reference: ReferenceMaterial,
+        document: RagDocument,
+        expected_content_hash: str,
+    ) -> None:
+        if (
+            content_sha256(reference.content) != expected_content_hash
+            or document.contentHash != expected_content_hash
+        ):
+            raise cls._stale_index()
+
+    @classmethod
+    def _require_failure_target(cls, document: RagDocument) -> None:
+        if document.status != "disabled":
+            raise cls._stale_index()
+
     @staticmethod
-    def _dto(reference: ReferenceMaterial, status: str | None) -> dict[str, Any]:
+    def _dto(
+        reference: ReferenceMaterial,
+        status: str | None,
+        document: RagDocument | None = None,
+    ) -> dict[str, Any]:
         return {
             "id": reference.id,
             "title": reference.title,
@@ -293,6 +369,10 @@ class ReferenceRepository:
             "content": reference.content,
             "sourceUrl": reference.sourceUrl,
             "ragStatus": status or "disabled",
+            "contentHash": document.contentHash if document else content_sha256(reference.content),
+            "errorMessage": (
+                public_rag_error(document.status, document.errorMessage) if document else None
+            ),
             "createdAt": _utc(reference.createdAt),
             "updatedAt": _utc(reference.updatedAt),
         }
@@ -300,3 +380,11 @@ class ReferenceRepository:
     @staticmethod
     def _not_found() -> ApiError:
         return ApiError(status_code=404, code="REFERENCE_NOT_FOUND", message="参考资料不存在")
+
+    @staticmethod
+    def _stale_index() -> ApiError:
+        return ApiError(
+            status_code=409,
+            code="RAG_INDEX_STALE",
+            message="参考资料内容已变化，拒绝写入过期索引结果",
+        )
