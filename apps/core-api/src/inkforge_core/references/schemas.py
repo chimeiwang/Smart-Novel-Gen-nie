@@ -42,7 +42,7 @@ class ReferenceMaterialResponse(StrictModel):
 
 
 class RagSearchRequest(StrictModel):
-    embedding: list[float]
+    queryEmbedding: EmbeddingVector
     topK: int = Field(default=5, gt=0, le=20)
 
 

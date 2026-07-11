@@ -146,9 +146,10 @@ class ReferenceRepository:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
-                document = await self._document(session, reference_id)
-                if document is not None:
-                    await session.execute(delete(RagDocument).where(RagDocument.id == document.id))
+                _, document = await self._lock_reference_and_document(
+                    session, novel_id, reference_id
+                )
+                await session.execute(delete(RagDocument).where(RagDocument.id == document.id))
                 outcome = cast(
                     CursorResult[Any],
                     await session.execute(

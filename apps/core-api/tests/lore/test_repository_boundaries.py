@@ -79,3 +79,11 @@ def test_location_mutation_locks_novel_before_validating_parent_chain(method_nam
     source = inspect.getsource(getattr(LoreRepository, method_name))
     assert source.index("_lock_novel") < source.index("_validate_entity_links")
     assert "pg_advisory_xact_lock(:key)" in inspect.getsource(LoreRepository._lock_novel)
+
+
+def test_location_delete_locks_novel_before_checking_children_and_deleting() -> None:
+    source = inspect.getsource(LoreRepository.delete_entity)
+    lock_index = source.index("_lock_novel")
+    assert lock_index < source.index("select(Location.id)")
+    assert lock_index < source.index("delete(model)")
+    assert "pg_advisory_xact_lock(:key)" in inspect.getsource(LoreRepository._lock_novel)

@@ -11,6 +11,7 @@ PRODUCTION_VALUES = {
     "redis_url": "redis://:redis-secret@redis:6379/0",
     "jwt_secret": "production-only-secret-at-least-32-bytes",
     "trusted_proxy_cidrs": ["172.16.0.0/12"],
+    "trusted_agent_cidrs": ["10.20.0.0/16"],
     "core_service_private_key_path": "/run/secrets/core-private.pem",
     "agent_service_public_key_path": "/run/secrets/agent-public.pem",
     "agent_service_url": "http://agent-service:8001",
@@ -21,6 +22,7 @@ CRITICAL_FIELDS = [
     "redis_url",
     "jwt_secret",
     "trusted_proxy_cidrs",
+    "trusted_agent_cidrs",
     "core_service_private_key_path",
     "agent_service_public_key_path",
     "agent_service_url",
@@ -51,6 +53,7 @@ def test_production_accepts_complete_explicit_configuration() -> None:
     assert isinstance(settings.jwt_secret, SecretStr)
     assert settings.jwt_secret.get_secret_value() == PRODUCTION_VALUES["jwt_secret"]
     assert settings.trusted_proxy_cidrs == ("172.16.0.0/12",)
+    assert settings.trusted_agent_cidrs == ("10.20.0.0/16",)
 
 
 def test_production_rejects_short_jwt_secret_without_echoing_it() -> None:
@@ -85,6 +88,21 @@ def test_invalid_trusted_proxy_cidr_is_rejected() -> None:
     with pytest.raises(ValidationError, match="可信代理网段无效"):
         Settings.model_validate(
             {"environment": "dev", "trusted_proxy_cidrs": ["不是网段"]}
+        )
+
+
+def test_trusted_agent_cidrs_load_from_required_environment_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("AGENT_SERVICE_CIDRS", "10.20.0.0/16,2001:db8:1::/48")
+    settings = Settings(environment="dev")
+    assert settings.trusted_agent_cidrs == ("10.20.0.0/16", "2001:db8:1::/48")
+
+
+def test_invalid_trusted_agent_cidr_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="可信智能体网段无效"):
+        Settings.model_validate(
+            {"environment": "dev", "trusted_agent_cidrs": ["不是网段"]}
         )
 
 
@@ -137,6 +155,7 @@ def test_testing_app_does_not_read_bad_production_environment(
     assert settings.redis_url is None
     assert settings.jwt_secret is None
     assert settings.trusted_proxy_cidrs == ()
+    assert settings.trusted_agent_cidrs == ()
     assert settings.core_service_private_key_path is None
     assert settings.agent_service_public_key_path is None
     assert settings.agent_service_url is None

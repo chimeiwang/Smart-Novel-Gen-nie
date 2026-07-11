@@ -165,6 +165,6 @@ def create_app(*, testing: bool = False, settings: Settings | None = None) -> Fa
     app.include_router(lore_router, prefix="/api/v1")
     app.include_router(outlines_router, prefix="/api/v1")
     app.include_router(references_router, prefix="/api/v1")
-    app.include_router(references_internal_router, prefix="/api/v1")
+    app.include_router(references_internal_router, include_in_schema=False)
     app.include_router(operations_router, prefix="/api/v1")
     return app

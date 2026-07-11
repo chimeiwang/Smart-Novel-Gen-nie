@@ -3,7 +3,7 @@ from __future__ import annotations
 from ipaddress import ip_network
 from typing import Annotated, Literal, Self
 
-from pydantic import SecretStr, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Environment = Literal["dev", "test", "production"]
@@ -14,6 +14,7 @@ _PRODUCTION_REQUIRED_FIELDS = (
     "redis_url",
     "jwt_secret",
     "trusted_proxy_cidrs",
+    "trusted_agent_cidrs",
     "core_service_private_key_path",
     "agent_service_public_key_path",
     "agent_service_url",
@@ -33,6 +34,15 @@ class Settings(BaseSettings):
     redis_url: SecretStr | None = None
     jwt_secret: SecretStr | None = None
     trusted_proxy_cidrs: Annotated[tuple[str, ...], NoDecode] = ()
+    trusted_agent_cidrs: Annotated[
+        tuple[str, ...],
+        NoDecode,
+        Field(
+            validation_alias=AliasChoices(
+                "trusted_agent_cidrs", "AGENT_SERVICE_CIDRS"
+            )
+        ),
+    ] = ()
     core_service_private_key_path: str | None = None
     agent_service_public_key_path: str | None = None
     agent_service_url: str | None = None
@@ -47,21 +57,12 @@ class Settings(BaseSettings):
     @field_validator("trusted_proxy_cidrs", mode="before")
     @classmethod
     def validate_trusted_proxy_cidrs(cls, value: object) -> tuple[str, ...]:
-        if value is None:
-            return ()
-        if isinstance(value, str):
-            candidates = tuple(item.strip() for item in value.split(",") if item.strip())
-        elif isinstance(value, (list, tuple)):
-            candidates = tuple(str(item).strip() for item in value if str(item).strip())
-        else:
-            raise ValueError("可信代理网段必须是列表或逗号分隔文本")
-        normalized: list[str] = []
-        for candidate in candidates:
-            try:
-                normalized.append(str(ip_network(candidate, strict=False)))
-            except ValueError as exc:
-                raise ValueError("可信代理网段无效") from exc
-        return tuple(normalized)
+        return _normalize_cidrs(value, "可信代理网段")
+
+    @field_validator("trusted_agent_cidrs", mode="before")
+    @classmethod
+    def validate_trusted_agent_cidrs(cls, value: object) -> tuple[str, ...]:
+        return _normalize_cidrs(value, "可信智能体网段")
 
     @model_validator(mode="after")
     def validate_production_configuration(self) -> Self:
@@ -89,6 +90,24 @@ class Settings(BaseSettings):
         return self
 
 
+def _normalize_cidrs(value: object, label: str) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if isinstance(value, str):
+        candidates = tuple(item.strip() for item in value.split(",") if item.strip())
+    elif isinstance(value, (list, tuple)):
+        candidates = tuple(str(item).strip() for item in value if str(item).strip())
+    else:
+        raise ValueError(f"{label}必须是列表或逗号分隔文本")
+    normalized: list[str] = []
+    for candidate in candidates:
+        try:
+            normalized.append(str(ip_network(candidate, strict=False)))
+        except ValueError as exc:
+            raise ValueError(f"{label}无效") from exc
+    return tuple(normalized)
+
+
 def create_testing_settings() -> Settings:
     return Settings.model_validate(
         {
@@ -97,6 +116,7 @@ def create_testing_settings() -> Settings:
             "redis_url": None,
             "jwt_secret": None,
             "trusted_proxy_cidrs": (),
+            "trusted_agent_cidrs": (),
             "core_service_private_key_path": None,
             "agent_service_public_key_path": None,
             "agent_service_url": None,

@@ -14,8 +14,15 @@ def test_reference_content_change_explicitly_deletes_old_chunks_and_disables_doc
 
 def test_reference_delete_explicitly_deletes_rag_document_before_source() -> None:
     source = inspect.getsource(ReferenceRepository.delete_reference)
+    assert source.index("_lock_reference_and_document") < source.index("delete(RagDocument)")
     assert source.index("delete(RagDocument)") < source.index("delete(ReferenceMaterial)")
     assert "rowcount != 1" in source
+
+
+def test_reference_and_document_lock_order_is_stable() -> None:
+    source = inspect.getsource(ReferenceRepository._lock_reference_and_document)
+    assert source.count("with_for_update") == 2
+    assert source.index("select(ReferenceMaterial)") < source.index("select(RagDocument)")
 
 
 def test_reference_source_url_is_never_fetched() -> None:

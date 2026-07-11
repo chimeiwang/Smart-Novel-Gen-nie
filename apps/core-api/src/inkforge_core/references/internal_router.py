@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from ipaddress import ip_address, ip_network
 from typing import Annotated, Protocol, cast
 
 from fastapi import APIRouter, Depends, Request, Response
 from inkforge_contracts.jwt_claims import ServiceJwtClaims, ServiceScope
 
+from ..config import Settings
 from ..errors import ApiError
 from .router import get_reference_service
 from .schemas import (
@@ -14,7 +16,11 @@ from .schemas import (
 )
 from .service import ReferenceService
 
-router = APIRouter(prefix="/internal", tags=["内部检索索引回调"])
+router = APIRouter(
+    prefix="/internal/v1",
+    tags=["内部检索索引回调"],
+    include_in_schema=False,
+)
 
 
 class RagCallbackVerifier(Protocol):
@@ -22,6 +28,26 @@ class RagCallbackVerifier(Protocol):
 
 
 def get_rag_callback_verifier(request: Request) -> RagCallbackVerifier:
+    settings = cast(Settings, request.app.state.settings)
+    if not settings.trusted_agent_cidrs:
+        raise ApiError(
+            status_code=503,
+            code="AGENT_SERVICE_NETWORK_UNAVAILABLE",
+            message="智能体服务可信网段未配置",
+        )
+    peer_host = request.client.host if request.client is not None else None
+    try:
+        peer_address = ip_address(peer_host) if peer_host is not None else None
+    except ValueError:
+        peer_address = None
+    if peer_address is None or not any(
+        peer_address in ip_network(cidr) for cidr in settings.trusted_agent_cidrs
+    ):
+        raise ApiError(
+            status_code=403,
+            code="AGENT_SERVICE_NETWORK_FORBIDDEN",
+            message="智能体服务直接对端不在可信网段内",
+        )
     verifier = cast(
         RagCallbackVerifier | None,
         getattr(request.app.state, "rag_callback_verifier", None),

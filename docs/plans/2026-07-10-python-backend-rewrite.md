@@ -406,7 +406,7 @@ git commit -m "功能：映射并守卫不可变 PostgreSQL 数据库结构"
 
 - [ ] **步骤 1：编写失败的信任边界测试**
 
-测试有效的 Ed25519 令牌只能用于预期的 `aud`、权限范围、任务、运行和小说。测试过期令牌、错误签发者、错误受众、缺少权限范围、重复使用的 `jti`、不匹配的请求体摘要，以及超出允许时钟偏差的令牌。
+测试有效的 Ed25519 令牌只能用于预期的 `aud`、权限范围、任务、运行和小说。测试过期令牌、错误签发者、错误受众、缺少权限范围、重复使用的 `jti`、不匹配的请求体摘要，以及超出允许时钟偏差的令牌。Core 的内部回调固定挂载在 `/internal/v1/**` 并从公开 OpenAPI 隐藏；生产环境必须配置合法的 `AGENT_SERVICE_CIDRS`。回调同时验证 `Request.client.host` 直接对端和服务 JWT，不读取或信任 `X-Forwarded-For`、`X-Real-IP` 等转发头。
 
 ```python
 def test_agent_token_cannot_call_another_novel(verifier, signed_token) -> None:
@@ -427,7 +427,7 @@ def test_agent_token_cannot_call_another_novel(verifier, signed_token) -> None:
 
 - [ ] **步骤 3：实现密钥加载、签名和验证**
 
-私钥只能从拒绝符号链接和非普通文件的安全文件描述符加载；POSIX 私钥必须属于当前用户且禁止组和其他用户访问。声明在 120 秒后过期。内部写入权限范围必须使用 Redis 重放保护，并将已消费 `jti` 固定保留 300 秒；幂等读取可以选择使用。请求模型进入业务服务前，必须验证 `Idempotency-Key`、`X-InkForge-Timestamp` 和 `X-InkForge-Body-SHA256`，并使用 `query_sha256` 绑定 ASGI 原始查询字符串字节。密码学、请求绑定和重放保护的通用实现集中在 `inkforge-service-auth` 工作区库；该库不监听端口、不增加部署进程，两个运行服务只通过各自模块暴露固定方向的构造函数和服务认证异常处理器。
+私钥只能从拒绝符号链接和非普通文件的安全文件描述符加载；POSIX 私钥必须属于当前用户且禁止组和其他用户访问。声明在 120 秒后过期。内部写入权限范围必须使用 Redis 重放保护，并将已消费 `jti` 固定保留 300 秒；幂等读取可以选择使用。请求模型进入业务服务前，必须验证 `Idempotency-Key`、`X-InkForge-Timestamp` 和 `X-InkForge-Body-SHA256`，并使用 `query_sha256` 绑定 ASGI 原始查询字符串字节。Core 还必须先确认 `Request.client.host` 命中 `AGENT_SERVICE_CIDRS`，且不能用任何转发头覆盖直接对端；网段校验和服务 JWT 校验缺一不可。密码学、请求绑定和重放保护的通用实现集中在 `inkforge-service-auth` 工作区库；该库不监听端口、不增加部署进程，两个运行服务只通过各自模块暴露固定方向的构造函数和服务认证异常处理器。
 
 - [ ] **步骤 4：确认通过**
 
@@ -1111,7 +1111,7 @@ Web 镜像只包含 Next.js 独立输出。Python 运行时镜像包含锁定的
 
 - [ ] **步骤 4：实现网络、密钥和资源限制**
 
-使用 `public_net`、`agent_net` 和内部 `data_net`；内存上限与规格一致。挂载现有 PostgreSQL 数据卷，不使用初始化 SQL。Nginx 为 SSE 禁用代理缓冲并阻止 `/internal/`。
+使用 `public_net`、`agent_net` 和内部 `data_net`；内存上限与规格一致。挂载现有 PostgreSQL 数据卷，不使用初始化 SQL。Nginx 为 SSE 禁用代理缓冲并阻止公网 `/internal/`。Core 与 Agent 的内部回调只使用 `/internal/v1/**`，不进入 `/api/v1` 或公开 OpenAPI；生产环境通过 `AGENT_SERVICE_CIDRS` 限制可直连 Core 的智能体服务网段。
 
 - [ ] **步骤 5：验证编排配置和健康状态**
 

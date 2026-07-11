@@ -608,6 +608,7 @@ def test_production_rejects_old_default_browser_jwt_secret() -> None:
         "redis_url": "redis://redis:6379/0",
         "jwt_secret": OLD_DEFAULT_JWT_SECRET,
         "trusted_proxy_cidrs": ["172.16.0.0/12"],
+        "trusted_agent_cidrs": ["10.20.0.0/16"],
         "core_service_private_key_path": "/run/secrets/core-private.pem",
         "agent_service_public_key_path": "/run/secrets/agent-public.pem",
         "agent_service_url": "http://agent-service:8001",

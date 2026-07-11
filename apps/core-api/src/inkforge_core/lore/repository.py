@@ -123,6 +123,7 @@ class LoreRepository:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
                 if kind == "locations":
+                    await self._lock_novel(session, novel_id)
                     child = await session.scalar(
                         select(Location.id).where(Location.parentId == entity_id).limit(1)
                     )

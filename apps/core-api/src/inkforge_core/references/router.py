@@ -81,4 +81,4 @@ async def reindex_reference(novel_id: str, reference_id: str, user: User, servic
 
 @router.post("/novels/{novel_id}/references/search", response_model=list[RagSearchResult])
 async def search_references(novel_id: str, body: RagSearchRequest, user: User, service: Service):
-    return await service.search(user.id, novel_id, body.embedding, body.topK)
+    return await service.search(user.id, novel_id, body.queryEmbedding, body.topK)

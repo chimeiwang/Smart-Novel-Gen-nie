@@ -12,9 +12,16 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from fastapi.testclient import TestClient
 from inkforge_contracts.jwt_claims import ServiceScope
 from inkforge_core.app import create_app
+from inkforge_core.config import Settings
 from inkforge_service_auth import RedisReplayStore, ServiceTokenSigner, ServiceTokenVerifier
 
 HASH = "a" * 64
+INTERNAL_SUCCESS_PATH = (
+    "/internal/v1/novels/novel-1/references/reference-1/index-success"
+)
+INTERNAL_FAILURE_PATH = (
+    "/internal/v1/novels/novel-1/references/reference-1/index-failure"
+)
 
 
 class RecordingVerifier:
@@ -71,6 +78,15 @@ def headers(body: bytes) -> dict[str, str]:
         "X-InkForge-Body-SHA256": hashlib.sha256(body).hexdigest(),
         "Content-Type": "application/json",
     }
+
+
+def internal_app():
+    return create_app(
+        settings=Settings(
+            environment="test",
+            trusted_agent_cidrs=("127.0.0.1/32",),
+        )
+    )
 
 
 def signed_auth(tmp_path, body: bytes, path: str):
@@ -143,11 +159,42 @@ def test_browser_cookie_route_cannot_write_embeddings() -> None:
     assert "/api/v1/novels/{novel_id}/references/{reference_id}/index" not in paths
 
 
-def test_internal_callback_returns_503_when_service_verifier_is_not_configured() -> None:
-    app = create_app(testing=True)
-    app.state.reference_service = RecordingService()
-    response = TestClient(app).put(
+def test_internal_callbacks_are_hidden_from_public_openapi() -> None:
+    paths = internal_app().openapi()["paths"]
+    assert not any(path.startswith("/internal/") for path in paths)
+
+
+def test_internal_callback_is_not_mounted_under_public_api_prefix() -> None:
+    app = internal_app()
+    response = TestClient(app, client=("127.0.0.1", 50000)).put(
         "/api/v1/internal/novels/novel-1/references/reference-1/index-success",
+        json={},
+    )
+    assert response.status_code == 404
+
+
+def test_internal_callback_returns_503_when_agent_network_is_not_configured() -> None:
+    app = create_app(testing=True)
+    app.state.rag_callback_verifier = RecordingVerifier()
+    app.state.reference_service = RecordingService()
+    response = TestClient(app, client=("127.0.0.1", 50000)).put(
+        INTERNAL_SUCCESS_PATH,
+        json={
+            "taskId": "task-1",
+            "runId": "run-1",
+            "expectedContentHash": HASH,
+            "embeddings": [[1.0]],
+        },
+    )
+    assert response.status_code == 503
+    assert response.json()["code"] == "AGENT_SERVICE_NETWORK_UNAVAILABLE"
+
+
+def test_internal_callback_returns_503_when_service_verifier_is_not_configured() -> None:
+    app = internal_app()
+    app.state.reference_service = RecordingService()
+    response = TestClient(app, client=("127.0.0.1", 50000)).put(
+        INTERNAL_SUCCESS_PATH,
         json={
             "taskId": "task-1",
             "runId": "run-1",
@@ -159,8 +206,26 @@ def test_internal_callback_returns_503_when_service_verifier_is_not_configured()
     assert response.json()["code"] == "RAG_CALLBACK_AUTH_UNAVAILABLE"
 
 
+def test_internal_callback_rejects_direct_peer_outside_agent_network() -> None:
+    app = internal_app()
+    app.state.rag_callback_verifier = RecordingVerifier()
+    app.state.reference_service = RecordingService()
+    response = TestClient(app, client=("198.51.100.10", 50000)).put(
+        INTERNAL_SUCCESS_PATH,
+        json={
+            "taskId": "task-1",
+            "runId": "run-1",
+            "expectedContentHash": HASH,
+            "embeddings": [[1.0]],
+        },
+        headers={"X-Forwarded-For": "127.0.0.1"},
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "AGENT_SERVICE_NETWORK_FORBIDDEN"
+
+
 def test_success_callback_binds_raw_body_path_scope_and_resources() -> None:
-    app = create_app(testing=True)
+    app = internal_app()
     verifier = RecordingVerifier()
     service = RecordingService()
     app.state.rag_callback_verifier = verifier
@@ -170,15 +235,15 @@ def test_success_callback_binds_raw_body_path_scope_and_resources() -> None:
         + HASH
         + '","embeddings":[[1.0]]}'
     ).encode()
-    response = TestClient(app).put(
-        "/api/v1/internal/novels/novel-1/references/reference-1/index-success",
+    response = TestClient(app, client=("127.0.0.1", 50000)).put(
+        INTERNAL_SUCCESS_PATH,
         content=body,
         headers=headers(body),
     )
     assert response.status_code == 200
     assert verifier.kwargs["body"] == body
     assert verifier.kwargs["http_method"] == "PUT"
-    assert verifier.kwargs["http_path"].endswith("/index-success")
+    assert verifier.kwargs["http_path"] == INTERNAL_SUCCESS_PATH
     assert verifier.kwargs["query_string"] == b""
     assert verifier.kwargs["required_scope"] is ServiceScope.RAG_INDEX_WRITE
     assert verifier.kwargs["task_id"] == "task-1"
@@ -188,7 +253,7 @@ def test_success_callback_binds_raw_body_path_scope_and_resources() -> None:
 
 
 def test_failure_callback_uses_same_signed_boundary() -> None:
-    app = create_app(testing=True)
+    app = internal_app()
     verifier = RecordingVerifier()
     service = RecordingService()
     app.state.rag_callback_verifier = verifier
@@ -198,8 +263,8 @@ def test_failure_callback_uses_same_signed_boundary() -> None:
         + HASH
         + '","message":"嵌入服务失败"}'
     ).encode()
-    response = TestClient(app).put(
-        "/api/v1/internal/novels/novel-1/references/reference-1/index-failure",
+    response = TestClient(app, client=("127.0.0.1", 50000)).put(
+        INTERNAL_FAILURE_PATH,
         content=body,
         headers=headers(body),
     )
@@ -209,10 +274,10 @@ def test_failure_callback_uses_same_signed_boundary() -> None:
 
 
 def test_real_ed25519_callback_consumes_redis_replay_token(tmp_path) -> None:
-    app = create_app(testing=True)
+    app = internal_app()
     service = RecordingService()
     app.state.reference_service = service
-    path = "/api/v1/internal/novels/novel-1/references/reference-1/index-success"
+    path = INTERNAL_SUCCESS_PATH
     body = (
         '{"taskId":"task-1","runId":"run-1","expectedContentHash":"'
         + HASH
@@ -220,7 +285,7 @@ def test_real_ed25519_callback_consumes_redis_replay_token(tmp_path) -> None:
     ).encode()
     verifier, signed_headers = signed_auth(tmp_path, body, path)
     app.state.rag_callback_verifier = verifier
-    client = TestClient(app)
+    client = TestClient(app, client=("127.0.0.1", 50000))
     first = client.put(
         path, content=body, headers={**signed_headers, "Content-Type": "application/json"}
     )
@@ -233,16 +298,16 @@ def test_real_ed25519_callback_consumes_redis_replay_token(tmp_path) -> None:
 
 
 def test_real_signed_failure_callback_rejects_body_tampering(tmp_path) -> None:
-    app = create_app(testing=True)
+    app = internal_app()
     service = RecordingService()
     app.state.reference_service = service
-    path = "/api/v1/internal/novels/novel-1/references/reference-1/index-failure"
+    path = INTERNAL_FAILURE_PATH
     body = (
         '{"taskId":"task-1","runId":"run-1","expectedContentHash":"' + HASH + '","message":"失败"}'
     ).encode()
     verifier, signed_headers = signed_auth(tmp_path, body, path)
     app.state.rag_callback_verifier = verifier
-    client = TestClient(app)
+    client = TestClient(app, client=("127.0.0.1", 50000))
     request_headers = {**signed_headers, "Content-Type": "application/json"}
     accepted = client.put(path, content=body, headers=request_headers)
     tampered = client.put(
