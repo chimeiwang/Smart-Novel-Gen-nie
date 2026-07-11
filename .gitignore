@@ -34,3 +34,4 @@ __pycache__/
 .mypy_cache/
 .coverage
 htmlcov/
+infra/secrets/
