@@ -86,3 +86,16 @@ def test_test_compose_owns_isolated_postgres() -> None:
     assert "TEST_POSTGRES_DATA_VOLUME" in source
     assert "pgvector/pgvector:pg16" in source
     assert "condition: service_healthy" in source
+
+
+def test_production_env_example_targets_host_gateway() -> None:
+    source = (ROOT / ".env.example").read_text(encoding="utf-8")
+
+    assert "@host.docker.internal:5432/" in source
+    for obsolete in (
+        "POSTGRES_USER=",
+        "POSTGRES_PASSWORD=",
+        "POSTGRES_DB=",
+        "POSTGRES_DATA_VOLUME=",
+    ):
+        assert obsolete not in source

@@ -68,20 +68,21 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 
 ## 生产编排
 
-`infra/compose.yaml` 包含 Nginx、Web、Core API、Agent Service、Redis 和 PostgreSQL。只有 Nginx 发布端口。
+`infra/compose.yaml` 包含 Nginx、Web、Core API、Agent Service 和 Redis。生产 PostgreSQL 14 继续作为宿主机服务运行，只有 Nginx 发布容器端口。
 
-生产发布由 GitHub Actions 在 Runner 上构建带提交哈希标签的 Web、Core API 和 Agent Service 三张镜像，经 SSH 加载到服务器，再以 `--no-build` 启动 `infra/compose.yaml`。2 核 2 GB 服务器不得现场安装依赖或构建镜像；缺少 `.env`、四个服务密钥或现有 PostgreSQL 数据卷时必须停止部署。
+生产发布由 GitHub Actions 在 Runner 上构建带提交哈希标签的 Web、Core API 和 Agent Service 三张镜像，经 SSH 加载到服务器，再以 `--no-build` 启动 `infra/compose.yaml`。2 核 2 GB 服务器不得现场安装依赖或构建镜像；缺少 `.env`、四个服务密钥、宿主机 PostgreSQL 连接或可恢复备份时必须停止部署。
 
 网络边界：
 
 - `public_net`：Nginx、Web、Core；
 - `agent_net`：Core、Agent、Redis；
-- `data_net`：Core、Redis、PostgreSQL；
+- `data_net`：Core、Redis；Core 通过 Docker host gateway 访问宿主机 PostgreSQL；
 - Agent 不得加入 `data_net`。
 
 数据库约束：
 
-- 只挂载现有外部 PostgreSQL 数据卷；
+- 生产 Compose 不创建 PostgreSQL 容器或数据卷，测试 Compose 使用独立测试数据库；
+- Core 通过 `host.docker.internal` 连接现有宿主机 PostgreSQL 14；
 - 不提供初始化 SQL；
 - 不执行迁移、建表或删表；
 - Core 启动就绪检查对现有 schema 做只读指纹校验。

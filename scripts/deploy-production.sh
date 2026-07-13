@@ -31,6 +31,14 @@ remote_sha="$(git rev-parse "refs/remotes/origin/$BRANCH")"
 git reset --hard "$DEPLOY_SHA"
 
 [ -f .env ] || { echo "缺少 .env" >&2; exit 1; }
+grep -q 'host.docker.internal' "$compose_file" || {
+  echo "生产编排未配置宿主机数据库网关" >&2
+  exit 1
+}
+grep -Eq '^DATABASE_URL=.*@host\.docker\.internal([:/?]|$)' .env || {
+  echo ".env 的 DATABASE_URL 未指向宿主机数据库网关" >&2
+  exit 1
+}
 for key_file in \
   core-to-agent-private.pem \
   core-to-agent-jwks.json \
@@ -48,8 +56,8 @@ do
   docker image inspect "$image" >/dev/null 2>&1 || { echo "缺少预构建镜像：$image" >&2; exit 1; }
 done
 
-docker compose --env-file .env -f "$compose_file" config >/dev/null
 export INKFORGE_IMAGE_TAG
+docker compose --env-file .env -f "$compose_file" config >/dev/null
 docker compose --env-file .env -f "$compose_file" up --no-build -d --wait
 docker compose --env-file .env -f "$compose_file" ps
 echo "生产编排已启动"

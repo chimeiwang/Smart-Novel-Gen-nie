@@ -107,4 +107,7 @@ def test_remote_deploy_requires_server_configuration_and_never_builds() -> None:
     ):
         assert contract in source
 
+    assert 'grep -q \'host.docker.internal\' "$compose_file"' in source
+    assert "host\\.docker\\.internal" in source
+
     assert "up --build" not in source

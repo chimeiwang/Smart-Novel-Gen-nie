@@ -2,25 +2,27 @@
 
 ## 前置条件
 
-- 已在独立环境验证现有 PostgreSQL 备份可恢复。
-- 已记录切换前数据库结构指纹。
-- `.env` 中的 `DATABASE_URL` 指向现有数据库，`POSTGRES_DATA_VOLUME` 指向现有数据卷。
+- 已把现有 PostgreSQL 备份恢复到独立验证库，并确认结构守卫通过。
+- 已记录切换前数据库结构指纹、公共表数量和数据量基线。
+- `.env` 中的 `DATABASE_URL` 通过 `host.docker.internal` 指向现有宿主机 PostgreSQL 14。
 - 已执行 `uv run python scripts/generate_service_keys.py --output-dir infra/secrets`。
+- 已轮换 `JWT_SECRET`；切换后旧会话失效，用户需要重新登录。
 - Agent Service 配置中不存在 `DATABASE_URL`。
 
 ## 切换步骤
 
-1. 停止旧应用写入，但保持 PostgreSQL 在线。
-2. 运行 `scripts/backup.sh`，保存数据库和上传文件备份及校验和。
-3. 运行 `scripts/schema_fingerprint.sh`，确认结构与仓库契约一致。
-4. 由 GitHub Actions 构建并上传三张带提交哈希标签的镜像，再在服务器运行 `scripts/deploy-production.sh`，以 `--no-build` 启动新编排。
-5. 运行 `scripts/compose_smoke.sh` 检查页面、Core 就绪、Agent 就绪和公网内部接口阻断。
-6. 完成注册登录、项目读取、章节保存、写作 SSE、草案应用、质量检查和计费抽样。
-7. 再次运行 `scripts/schema_fingerprint.sh`，确认切换没有改变数据库结构。
+1. 旧服务仍运行时执行在线预备备份，校验 SHA-256，并恢复到独立验证库运行结构守卫。
+2. 从临时容器通过 `host.docker.internal` 验证 PostgreSQL 网络和身份认证。
+3. 停止旧单体容器冻结写入，但保持宿主机 PostgreSQL 在线。
+4. 再次运行 `scripts/backup.sh` 生成最终备份和校验和，并记录最终数据基线。
+5. 由 GitHub Actions 构建并上传三张带提交哈希标签的镜像，再在服务器运行 `scripts/deploy-production.sh`，以 `--no-build` 启动新编排。
+6. 运行 `scripts/compose_smoke.sh` 检查页面、Core 就绪、Agent 就绪和公网内部接口阻断。
+7. 执行结构守卫和显式回滚事务内的写权限冒烟，不在生产运行会创建测试业务数据的 Playwright 流程。
+8. 再次核对数据库结构指纹、公共表数量和数据量基线，确认切换没有改变数据库结构或丢失数据。
 
 ## 回滚
 
-日常应用回滚只切换上一版 Python 三服务镜像，不恢复或覆盖数据库。`scripts/rollback_drill.sh` 只能在 `infra/compose.test.yaml` 和独立测试数据库中运行；它会检查当前与回滚版本的三张镜像，切换后执行冒烟、完整 Playwright 场景和只读数据库结构指纹检查，最后无论成功或失败都自动恢复当前镜像栈。
+首次切换失败时停止新 Compose，确认宿主机 PostgreSQL 健康，再使用原 `.env.production` 和旧镜像重新启动旧单体容器；不得自动恢复或覆盖数据库。日常应用回滚只切换上一版 Python 三服务镜像。`scripts/rollback_drill.sh` 只能在 `infra/compose.test.yaml` 和独立测试数据库中运行；它会检查当前与回滚版本的三张镜像，切换后执行冒烟、完整 Playwright 场景和只读数据库结构指纹检查，最后无论成功或失败都自动恢复当前镜像栈。
 
 ```bash
 ALLOW_ROLLBACK_DRILL=yes \
@@ -32,7 +34,7 @@ scripts/rollback_drill.sh
 
 迁移前的旧 Next.js 单体镜像名为 `inkforge:<tag>`，其编排结构与 Python 三服务不同，不能通过 `INKFORGE_IMAGE_TAG` 切换。旧单体兼容性属于一次性迁移验收，必须使用提前归档的单体镜像和独立验证库执行只读检查，不能与日常 Python 版本回滚混为一谈。
 
-只有在确认数据本身损坏且已有停机窗口时，才允许把备份恢复到独立验证库。`scripts/restore_verify.sh` 会拒绝验证库地址与生产地址相同；它不是生产数据库恢复命令。
+每次正式切换前都必须把预备备份恢复到独立验证库。只有确认生产数据本身损坏且获得单独授权后，才允许把备份恢复到生产库。`scripts/restore_verify.sh` 会拒绝验证库地址与生产地址相同；它不是生产数据库恢复命令。
 
 ## Agent 重启接管演练
 
