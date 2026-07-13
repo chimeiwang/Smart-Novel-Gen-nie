@@ -5,6 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "build.yml"
 DEPLOY_SCRIPT = ROOT / "scripts" / "deploy-production.sh"
+IMAGE_UPLOAD_SCRIPT = ROOT / "scripts" / "upload-docker-images.sh"
 API_GENERATOR = ROOT / "scripts" / "generate_api_client.mjs"
 
 
@@ -52,14 +53,45 @@ def test_deploy_builds_and_uploads_all_three_versioned_images() -> None:
         "POSTGRES_DB: inkforge",
     ):
         assert obsolete not in source
-    assert "docker save" in source
+    assert "scripts/upload-docker-images.sh" in source
+    assert "fetch-depth: 0" in source
     for image in (
         "inkforge-web:${INKFORGE_IMAGE_TAG}",
         "inkforge-core-api:${INKFORGE_IMAGE_TAG}",
         "inkforge-agent-service:${INKFORGE_IMAGE_TAG}",
     ):
-        assert image in source
+        assert image in IMAGE_UPLOAD_SCRIPT.read_text(encoding="utf-8")
+
+
+def test_image_upload_reuses_matching_server_images() -> None:
+    source = IMAGE_UPLOAD_SCRIPT.read_text(encoding="utf-8")
+
+    assert "docker image inspect --format='{{.Id}}'" in source
+    assert 'docker image inspect "$image_id"' in source
+    assert 'docker image tag "$image_id" "$image"' in source
+    assert 'images_to_upload+=("$image")' in source
+    assert 'docker save "${images_to_upload[@]}"' in source
+    assert 'if [ "${#images_to_upload[@]}" -eq 0 ]' in source
     assert "docker load" in source
+
+
+def test_image_upload_reuses_services_with_unchanged_build_inputs() -> None:
+    source = IMAGE_UPLOAD_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'git diff --quiet "$base_sha" "$DEPLOY_SHA" --' in source
+    for build_input in (
+        "apps/web",
+        "packages/api-client",
+        "apps/core-api",
+        "apps/agent-service",
+        "packages/service-auth",
+        "packages/service-contracts",
+        "package-lock.json",
+        "uv.lock",
+    ):
+        assert build_input in source
+    assert "读取服务器当前运行镜像" in source
+    assert "复用构建输入未变化的服务器镜像" in source
 
 
 def test_api_generator_selects_uv_command_for_each_platform() -> None:

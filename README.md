@@ -55,12 +55,12 @@ uv run ruff check .
 
 ## 生产部署
 
-1. 基于 `.env.example` 创建 `.env`，填写现有 PostgreSQL 地址和数据卷名称。
+1. 基于 `.env.example` 创建 `.env`，让 `DATABASE_URL` 通过 `host.docker.internal` 指向现有宿主机 PostgreSQL。
 2. 运行 `uv run python scripts/generate_service_keys.py --output-dir infra/secrets` 生成服务密钥。
 3. 运行 `docker compose -f infra/compose.yaml up --build -d`。
 
-Nginx 是唯一公网入口。Agent Service 不加入数据库网络，也不会接收 `DATABASE_URL`。Compose 只挂载已有 PostgreSQL 数据卷，不包含初始化 SQL 或迁移。
+Nginx 是唯一公网入口。Agent Service 不加入数据库网络，也不会接收 `DATABASE_URL`。生产 Compose 不定义 PostgreSQL 服务或数据卷，也不包含初始化 SQL 或迁移；原数据库继续由宿主机 PostgreSQL 管理。
 
-`main` 分支的生产发布由 GitHub Actions 在 Runner 上预构建三张镜像并通过 SSH 部署；服务器只执行 `infra/compose.yaml` 的 `--no-build` 启动。服务器必须提前准备 `.env`、`infra/secrets` 下四个服务密钥和现有 PostgreSQL 数据卷。
+`main` 分支的生产发布由 GitHub Actions 在 Runner 上预构建三张镜像并通过 SSH 部署；构建输入未变化的服务直接复用服务器已有镜像，只传输确实变化的镜像。服务器只执行 `infra/compose.yaml` 的 `--no-build` 启动，并必须提前准备可由部署用户只读访问的 `.env`、`infra/secrets` 下四个服务密钥和现有宿主机 PostgreSQL。
 
 架构与需求入口见 `DOCS.md`、`AGENTS.md`、`apps/agent-service/AGENTS.md` 和 `docs/README.md`。

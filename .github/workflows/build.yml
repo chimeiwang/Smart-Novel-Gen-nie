@@ -109,6 +109,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Build Docker images
         run: docker compose --env-file .env.example -f infra/compose.yaml build web core-api agent-service
@@ -120,18 +122,12 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
 
       - name: Upload Docker images
-        run: |
-          docker save \
-            "inkforge-web:${INKFORGE_IMAGE_TAG}" \
-            "inkforge-core-api:${INKFORGE_IMAGE_TAG}" \
-            "inkforge-agent-service:${INKFORGE_IMAGE_TAG}" | gzip | ssh \
-            -o StrictHostKeyChecking=no \
-            -o ServerAliveInterval=30 \
-            -o ServerAliveCountMax=20 \
-            -o TCPKeepAlive=yes \
-            -i ~/.ssh/deploy_key \
-            "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}" \
-            "gunzip | docker load"
+        env:
+          DEPLOY_SHA: ${{ github.sha }}
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SSH_KEY_PATH: /home/runner/.ssh/deploy_key
+        run: scripts/upload-docker-images.sh
 
       - name: Deploy over SSH
         shell: bash

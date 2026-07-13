@@ -32,19 +32,21 @@ Python 后端迁移已经删除 Prisma、根目录单体 `Dockerfile` 和 `docke
 
 ```bash
 docker compose --env-file .env.example -f infra/compose.yaml build web core-api agent-service
-docker save inkforge-web:$INKFORGE_IMAGE_TAG inkforge-core-api:$INKFORGE_IMAGE_TAG inkforge-agent-service:$INKFORGE_IMAGE_TAG
+scripts/upload-docker-images.sh
 ```
 
-镜像流经 gzip 和 SSH 传到服务器的 `docker load`，不写入仓库，不经过第三方镜像仓库。
+只有无法复用的镜像才流经 gzip 和 SSH 传到服务器的 `docker load`；镜像不写入仓库，也不经过第三方镜像仓库。
 
 ### 远程部署
 
-`scripts/deploy-production.sh` 在 `APP_DIR` 中获取指定提交，保留未跟踪的 `.env` 与 `infra/secrets`，验证 Docker Compose、配置文件和四个密钥均存在，然后以 `--no-build --wait` 启动生产编排。`INKFORGE_IMAGE_TAG` 由工作流显式传入，确保 Compose 使用刚上传的三镜像。
+`scripts/upload-docker-images.sh` 先读取服务器当前运行的三个镜像标签，并逐个比较对应 Dockerfile 的实际构建输入。构建输入未变化时只在服务器补充新提交标签；无法安全复用时再按本地镜像内容检查，最后只上传仍缺失的镜像。这样只改文档、测试或部署脚本不会重复传输三张完整镜像，服务代码变化时也只传输受影响的服务镜像。
+
+`scripts/deploy-production.sh` 在 `APP_DIR` 中获取指定提交，保留未跟踪的 `.env` 与 `infra/secrets`，验证 Docker Compose、配置文件和四个密钥均存在，然后以 `--no-build --wait` 启动生产编排。`INKFORGE_IMAGE_TAG` 由工作流显式传入，确保 Compose 使用本次发布已上传或安全复用的三张镜像。
 
 ## 错误处理
 
 - GitHub Runner 的代码检查或镜像构建失败：修复仓库内原因后重新推送。
-- SSH 连接、服务器工具、服务器配置、服务密钥、数据卷或容量不足：停止自动修复，报告 GitHub Actions 中的直接证据，等待用户处理服务器。
+- SSH 连接、服务器工具、服务器配置、服务密钥、宿主机数据库或容量不足：停止自动修复，报告 GitHub Actions 中的直接证据，等待用户处理服务器。
 - Compose 服务健康检查失败：读取对应部署日志；若原因属于镜像或仓库代码则修复，若属于服务器配置或外部数据库则停止并报告。
 
 ## 验收
