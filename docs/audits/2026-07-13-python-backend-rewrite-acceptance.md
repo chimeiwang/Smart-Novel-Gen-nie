@@ -2,7 +2,7 @@
 
 验收日期：2026-07-13
 
-验收分支：`codex/python-backend-rewrite`
+验收分支：`main`，由 `codex/python-backend-rewrite` 快进合并
 
 状态：本地代码迁移验收通过；生产 Docker 切换演练不在本轮验收范围内，仍须在独立部署环境执行。
 
@@ -21,6 +21,19 @@
 | OpenAPI 客户端漂移检查 | `npm run api:check` | 通过，无生成客户端漂移 |
 | Next.js 生产构建 | `npm run build` | 构建通过；路由清单未出现业务 API Route |
 | Playwright 本地端到端 | `$env:E2E_BASE_URL='http://127.0.0.1:43119'; npm run test:e2e` | 6 项通过，耗时 1.2 分钟 |
+
+## 合并后复验
+
+迁移分支快进合并到 `F:\code\inkForge` 的 `main` 后，在根仓库重新建立 Python 与 Node 依赖并再次执行门禁：
+
+- Python 全量测试：824 passed，3 skipped；新增的 OpenAPI 换行符架构测试包含在内。
+- Ruff、Mypy（188 个源文件）、Web 与 API Client 7 项测试、TypeScript、ESLint、OpenAPI 漂移检查和 Next.js 生产构建全部通过。
+- 从根仓库启动 Next.js、Core API 和 Agent Service，三个健康检查均为 HTTP 200。
+- 在合并后的 `main` 再次执行六个 Playwright 主流程，6 项全部通过，耗时 1.2 分钟。
+
+根仓库位于 F 盘，本机由 uv 创建的 `F:\code\inkForge\.venv\Scripts\python.exe` 在短时间内连续作为子进程启动时会被 Windows 返回 `WinError 5`。相关四个子进程用例单独执行全部通过；全量复验最终使用同一 CPython 3.12 基础解释器从 C 盘启动，显式加载根仓库 `.venv` 依赖和根仓库源码后通过。该说明只记录本机启动器行为，不把环境错误写成代码通过或代码失败。
+
+根仓库 `npm ci` 同时报告 2 个中等级依赖审计告警。本次迁移没有执行可能引入破坏性升级的 `npm audit fix --force`；该告警不属于 Python 后端迁移功能门禁，后续依赖升级需单独评估。
 
 ## 本地三服务证据
 

@@ -11,6 +11,10 @@ const target = path.join(root, "packages", "api-client", "src", "generated", "sc
 const temporary = mkdtempSync(path.join(tmpdir(), "inkforge-openapi-"));
 const openapiPath = path.join(temporary, "openapi.json");
 
+function normalizeLineEndings(value) {
+  return value.replace(/\r\n?/g, "\n");
+}
+
 try {
   execFileSync("py", ["-m", "uv", "run", "python", "scripts/export_openapi.py", "--output", openapiPath], {
     cwd: root,
@@ -25,7 +29,7 @@ try {
     } catch {
       throw new Error("生成的 API 客户端不存在，请先运行 npm run api:generate");
     }
-    if (current !== generated) {
+    if (normalizeLineEndings(current) !== normalizeLineEndings(generated)) {
       throw new Error("生成的 API 客户端与 Core OpenAPI 不一致");
     }
   } else {
