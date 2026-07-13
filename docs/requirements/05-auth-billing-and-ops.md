@@ -70,6 +70,8 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 
 `infra/compose.yaml` 包含 Nginx、Web、Core API、Agent Service、Redis 和 PostgreSQL。只有 Nginx 发布端口。
 
+生产发布由 GitHub Actions 在 Runner 上构建带提交哈希标签的 Web、Core API 和 Agent Service 三张镜像，经 SSH 加载到服务器，再以 `--no-build` 启动 `infra/compose.yaml`。2 核 2 GB 服务器不得现场安装依赖或构建镜像；缺少 `.env`、四个服务密钥或现有 PostgreSQL 数据卷时必须停止部署。
+
 网络边界：
 
 - `public_net`：Nginx、Web、Core；

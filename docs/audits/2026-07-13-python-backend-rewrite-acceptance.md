@@ -35,6 +35,16 @@
 
 根仓库 `npm ci` 同时报告 2 个中等级依赖审计告警。本次迁移没有执行可能引入破坏性升级的 `npm audit fix --force`；该告警不属于 Python 后端迁移功能门禁，后续依赖升级需单独评估。
 
+## GitHub Actions 部署链路修复复验
+
+首次推送后的 `CI and Deploy #24` 在旧的 `npm run db:generate` 步骤失败，证明 `.github/workflows/build.yml` 没有随 Prisma 和旧单体 Docker 发布物一起迁移。修复后，本地复验结果如下：
+
+- GitHub 工作流与部署脚本架构测试：4 项通过；全部架构测试：38 项通过。
+- Python 全量测试：828 passed，3 skipped；Ruff 与 Mypy（177 个源文件）通过。
+- Web 与 API Client：7 项测试通过；TypeScript、ESLint、OpenAPI 漂移检查和 Next.js 生产构建通过。
+- GitHub Actions 工作流 YAML 解析、Git Bash 部署脚本语法检查通过。
+- 本机未安装 Docker，因此提交哈希三镜像的真实构建、SSH 上传和服务器 `--no-build --wait` 启动必须以推送后的 GitHub Runner 与 Deploy Job 结果为准，不能在本地验收记录中提前声明成功。
+
 ## 本地三服务证据
 
 使用根目录 `npm run dev` 启动三个真实本地进程，并使用 `MODEL_PROVIDER=fake` 避免调用真实模型和产生模型费用。

@@ -13,7 +13,7 @@
 1. 停止旧应用写入，但保持 PostgreSQL 在线。
 2. 运行 `scripts/backup.sh`，保存数据库和上传文件备份及校验和。
 3. 运行 `scripts/schema_fingerprint.sh`，确认结构与仓库契约一致。
-4. 运行 `scripts/deploy-production.sh` 构建并启动新编排。
+4. 由 GitHub Actions 构建并上传三张带提交哈希标签的镜像，再在服务器运行 `scripts/deploy-production.sh`，以 `--no-build` 启动新编排。
 5. 运行 `scripts/compose_smoke.sh` 检查页面、Core 就绪、Agent 就绪和公网内部接口阻断。
 6. 完成注册登录、项目读取、章节保存、写作 SSE、草案应用、质量检查和计费抽样。
 7. 再次运行 `scripts/schema_fingerprint.sh`，确认切换没有改变数据库结构。

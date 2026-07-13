@@ -10,13 +10,18 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const target = path.join(root, "packages", "api-client", "src", "generated", "schema.d.ts");
 const temporary = mkdtempSync(path.join(tmpdir(), "inkforge-openapi-"));
 const openapiPath = path.join(temporary, "openapi.json");
+const uvCommand = process.platform === "win32" ? "py" : "uv";
+const uvArgs =
+  process.platform === "win32"
+    ? ["-m", "uv", "run", "python", "scripts/export_openapi.py", "--output", openapiPath]
+    : ["run", "python", "scripts/export_openapi.py", "--output", openapiPath];
 
 function normalizeLineEndings(value) {
   return value.replace(/\r\n?/g, "\n");
 }
 
 try {
-  execFileSync("py", ["-m", "uv", "run", "python", "scripts/export_openapi.py", "--output", openapiPath], {
+  execFileSync(uvCommand, uvArgs, {
     cwd: root,
     stdio: "inherit",
   });

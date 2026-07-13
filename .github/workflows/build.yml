@@ -18,8 +18,10 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      DATABASE_URL: postgresql://USER:PASSWORD@localhost:5432/novelwriter
-      JWT_SECRET: ci-placeholder
+      DATABASE_URL: postgresql+asyncpg://inkforge:ci-placeholder@localhost:5432/inkforge
+      REDIS_URL: redis://localhost:6379/0
+      JWT_SECRET: ci-placeholder-ci-placeholder-ci-placeholder
+      MODEL_PROVIDER: fake
       OPENAI_API_KEY: ""
       OPENAI_BASE_URL: https://api.deepseek.com/v1
       OPENAI_MODEL: deepseek-v4-flash
@@ -30,22 +32,50 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
 
-      - name: Install dependencies
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install Node dependencies
         run: npm ci
 
-      - name: Generate Prisma Client
-        run: npm run db:generate
+      - name: Install Python dependencies
+        run: uv sync --frozen --all-packages --group dev
+
+      - name: Check generated API client
+        run: npm run api:check
+
+      - name: Test Web and API client
+        run: npm run test:web
+
+      - name: Test Python workspace
+        run: uv run pytest
+
+      - name: Ruff
+        run: uv run ruff check .
+
+      - name: Mypy
+        run: uv run mypy apps/core-api/src apps/agent-service/src packages/service-contracts/src packages/service-auth/src
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
 
       - name: Build
         run: npm run build
@@ -56,20 +86,34 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
 
+    env:
+      INKFORGE_IMAGE_TAG: ${{ github.sha }}
+      DATABASE_URL: postgresql+asyncpg://inkforge:ci-placeholder@postgres:5432/inkforge
+      JWT_SECRET: ci-placeholder-ci-placeholder-ci-placeholder
+      POSTGRES_USER: inkforge
+      POSTGRES_PASSWORD: ci-placeholder
+      POSTGRES_DB: inkforge
+      POSTGRES_DATA_VOLUME: ci-placeholder
+
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: Build Docker image
-        run: docker build -t inkforge:latest .
+      - name: Build Docker images
+        run: docker compose -f infra/compose.yaml build web core-api agent-service
 
-      - name: Upload Docker image
+      - name: Prepare SSH
         run: |
           mkdir -p ~/.ssh
           echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
 
-          docker save inkforge:latest | gzip | ssh \
+      - name: Upload Docker images
+        run: |
+          docker save \
+            "inkforge-web:${INKFORGE_IMAGE_TAG}" \
+            "inkforge-core-api:${INKFORGE_IMAGE_TAG}" \
+            "inkforge-agent-service:${INKFORGE_IMAGE_TAG}" | gzip | ssh \
             -o StrictHostKeyChecking=no \
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=20 \
@@ -80,10 +124,6 @@ jobs:
 
       - name: Deploy over SSH
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-
           ssh \
             -o StrictHostKeyChecking=no \
             -o ServerAliveInterval=30 \
@@ -91,23 +131,5 @@ jobs:
             -o TCPKeepAlive=yes \
             -i ~/.ssh/deploy_key \
             "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}" \
-            "mkdir -p '${{ vars.APP_DIR }}'"
-
-          scp \
-            -o StrictHostKeyChecking=no \
-            -o ServerAliveInterval=30 \
-            -o ServerAliveCountMax=20 \
-            -o TCPKeepAlive=yes \
-            -i ~/.ssh/deploy_key \
-            docker-compose.yml \
-            "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ vars.APP_DIR }}/docker-compose.yml"
-
-          ssh \
-            -o StrictHostKeyChecking=no \
-            -o ServerAliveInterval=30 \
-            -o ServerAliveCountMax=20 \
-            -o TCPKeepAlive=yes \
-            -i ~/.ssh/deploy_key \
-            "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}" \
-            "APP_DIR='${{ vars.APP_DIR }}' REPO_URL='https://github.com/chimeiwang/Smart-Novel-Gen-nie.git' BRANCH='main' SKIP_DOCKER_BUILD=true bash -s" \
+            "APP_DIR='${{ vars.APP_DIR }}' REPO_URL='https://github.com/chimeiwang/Smart-Novel-Gen-nie.git' BRANCH='main' DEPLOY_SHA='${{ github.sha }}' INKFORGE_IMAGE_TAG='${INKFORGE_IMAGE_TAG}' sh -s" \
             < scripts/deploy-production.sh
