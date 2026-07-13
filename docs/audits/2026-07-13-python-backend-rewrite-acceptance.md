@@ -45,6 +45,8 @@
 - GitHub Actions 工作流 YAML 解析、Git Bash 部署脚本语法检查通过。
 - 本机未安装 Docker，因此提交哈希三镜像的真实构建、SSH 上传和服务器 `--no-build --wait` 启动必须以推送后的 GitHub Runner 与 Deploy Job 结果为准，不能在本地验收记录中提前声明成功。
 
+推送后的 `CI and Deploy #25` 已越过 OpenAPI 与 Web 测试，但 Python 测试因工作流错误地全局注入 `REDIS_URL` 而出现 3 项健康检查断言失败；其余 829 项通过。该变量会让未启动 Redis 的 Runner 把可选 Redis 检查加入响应，因此已从 CI 环境移除，并增加“CI 不得注入可选 Redis 依赖”的架构回归测试。目标工作流与相关 Core 数据库/健康检查复验为 44 passed。
+
 ## 本地三服务证据
 
 使用根目录 `npm run dev` 启动三个真实本地进程，并使用 `MODEL_PROVIDER=fake` 避免调用真实模型和产生模型费用。

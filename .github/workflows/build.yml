@@ -19,7 +19,6 @@ jobs:
 
     env:
       DATABASE_URL: postgresql+asyncpg://inkforge:ci-placeholder@localhost:5432/inkforge
-      REDIS_URL: redis://localhost:6379/0
       JWT_SECRET: ci-placeholder-ci-placeholder-ci-placeholder
       MODEL_PROVIDER: fake
       OPENAI_API_KEY: ""
