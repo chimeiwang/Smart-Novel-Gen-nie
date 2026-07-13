@@ -84,6 +84,8 @@ services:
       AGENT_SERVICE_URL: http://agent-service:8001
       UPLOADS_ROOT: /data/uploads
       WORKFLOW_EVENT_DEBUG_ENABLED: ${WORKFLOW_EVENT_DEBUG_ENABLED:-false}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - uploads:/data/uploads
       - ${SERVICE_KEYS_DIR:-./secrets}/core-to-agent-private.pem:/run/inkforge-keys/core-to-agent-private.pem:ro
@@ -95,8 +97,6 @@ services:
       - agent_net
       - data_net
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
       agent-service:
@@ -178,33 +178,6 @@ services:
     cpus: "0.10"
     mem_limit: 96m
 
-  postgres:
-    image: pgvector/pgvector:pg16
-    user: "999:999"
-    restart: unless-stopped
-    read_only: true
-    security_opt:
-      - no-new-privileges:true
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:?必须配置现有数据库用户}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?必须配置现有数据库密码}
-      POSTGRES_DB: ${POSTGRES_DB:?必须配置现有数据库名}
-      PGDATA: /var/lib/postgresql/data/pgdata
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    tmpfs:
-      - /tmp:size=16m,mode=1777
-      - /var/run/postgresql:size=8m,uid=999,gid=999
-    networks:
-      - data_net
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-    cpus: "0.35"
-    mem_limit: 384m
-
 networks:
   public_net:
     ipam:
@@ -224,6 +197,3 @@ networks:
 volumes:
   uploads:
   agent_logs:
-  postgres_data:
-    external: true
-    name: ${POSTGRES_DATA_VOLUME:?必须配置现有 PostgreSQL 数据卷名称}

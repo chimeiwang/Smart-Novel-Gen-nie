@@ -105,12 +105,6 @@ jobs:
 
     env:
       INKFORGE_IMAGE_TAG: ${{ github.sha }}
-      DATABASE_URL: postgresql+asyncpg://inkforge:ci-placeholder@postgres:5432/inkforge
-      JWT_SECRET: ci-placeholder-ci-placeholder-ci-placeholder
-      POSTGRES_USER: inkforge
-      POSTGRES_PASSWORD: ci-placeholder
-      POSTGRES_DB: inkforge
-      POSTGRES_DATA_VOLUME: ci-placeholder
 
     steps:
       - name: Checkout

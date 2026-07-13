@@ -3,6 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[2]
 COMPOSE = ROOT / "infra" / "compose.yaml"
+PRODUCTION_SERVICES = ("nginx", "web", "core-api", "agent-service", "redis")
 
 
 def _service_block(source: str, service: str) -> str:
@@ -26,7 +27,7 @@ def test_compose_keeps_database_out_of_agent_trust_boundary() -> None:
 
 def test_only_nginx_publishes_ports_and_internal_routes_are_blocked() -> None:
     source = COMPOSE.read_text(encoding="utf-8")
-    for service in ("web", "core-api", "agent-service", "redis", "postgres"):
+    for service in PRODUCTION_SERVICES[1:]:
         assert "ports:" not in _service_block(source, service)
     assert "ports:" in _service_block(source, "nginx")
 
@@ -40,7 +41,7 @@ def test_every_container_has_health_resource_and_filesystem_limits() -> None:
     source = COMPOSE.read_text(encoding="utf-8")
     total_cpus = 0.0
     total_memory_mib = 0
-    for service in ("nginx", "web", "core-api", "agent-service", "redis", "postgres"):
+    for service in PRODUCTION_SERVICES:
         block = _service_block(source, service)
         assert "healthcheck:" in block, f"{service} 缺少健康检查"
         assert "cpus:" in block, f"{service} 缺少处理器限制"
@@ -59,12 +60,29 @@ def test_every_container_has_health_resource_and_filesystem_limits() -> None:
     assert total_memory_mib <= 2048
 
 
-def test_redis_is_bounded_and_postgres_has_no_initialization_mount() -> None:
+def test_redis_is_bounded() -> None:
     source = COMPOSE.read_text(encoding="utf-8")
-    postgres = _service_block(source, "postgres")
     redis_config = (ROOT / "infra" / "redis" / "redis.conf").read_text(encoding="utf-8")
 
     assert "64mb" in redis_config.lower()
     assert re.search(r"(?m)^appendonly\s+no$", redis_config)
-    assert "/docker-entrypoint-initdb.d" not in postgres
-    assert "postgres_data" in postgres
+
+
+def test_production_compose_uses_existing_host_postgres() -> None:
+    source = COMPOSE.read_text(encoding="utf-8")
+    core = _service_block(source, "core-api")
+
+    assert "host.docker.internal:host-gateway" in core
+    assert "DATABASE_URL" in core
+    assert not re.search(r"(?m)^  postgres:$", source)
+    assert "POSTGRES_DATA_VOLUME" not in source
+    assert "postgres_data:" not in source
+
+
+def test_test_compose_owns_isolated_postgres() -> None:
+    source = (ROOT / "infra" / "compose.test.yaml").read_text(encoding="utf-8")
+
+    assert re.search(r"(?m)^  postgres:$", source)
+    assert "TEST_POSTGRES_DATA_VOLUME" in source
+    assert "pgvector/pgvector:pg16" in source
+    assert "condition: service_healthy" in source

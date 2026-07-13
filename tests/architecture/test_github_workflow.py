@@ -42,6 +42,13 @@ def test_deploy_builds_and_uploads_all_three_versioned_images() -> None:
 
     assert "docker build -t inkforge:latest ." not in source
     assert "docker compose -f infra/compose.yaml build web core-api agent-service" in source
+    for obsolete in (
+        "POSTGRES_DATA_VOLUME",
+        "POSTGRES_USER: inkforge",
+        "POSTGRES_PASSWORD: ci-placeholder",
+        "POSTGRES_DB: inkforge",
+    ):
+        assert obsolete not in source
     assert "docker save" in source
     for image in (
         "inkforge-web:${INKFORGE_IMAGE_TAG}",
