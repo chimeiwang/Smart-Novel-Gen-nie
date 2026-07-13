@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import cast
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ..db.base import utc_now
 from ..db.models import (
     Chapter,
     ChapterBeatPlan,
@@ -172,7 +173,7 @@ class ChapterRepository:
                         check.summary = DEFAULT_QUALITY_SUMMARY
                 chapter.status = status
                 chapter.completedAt = (
-                    chapter.completedAt or datetime.now(UTC) if status == "completed" else None
+                    chapter.completedAt or utc_now() if status == "completed" else None
                 )
                 await session.flush()
                 result = self._record(chapter)

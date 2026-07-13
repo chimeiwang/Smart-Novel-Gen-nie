@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
@@ -15,7 +16,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..db.base import utc_now
-from ..db.models import Chapter, Novel, WritingSession, WritingTask
+from ..db.models import Chapter, Novel, WritingMessage, WritingSession, WritingTask
 from ..errors import ApiError
 from .recovery import (
     InvalidGraphSnapshotError,
@@ -56,6 +57,16 @@ class WritingTaskRepositoryPort(Protocol):
 
     async def require_task(self, user_id: str, task_id: str) -> TaskRecord: ...
 
+    async def persist_workflow_message(
+        self,
+        task_id: str,
+        *,
+        role: str,
+        content: str,
+        event_type: str,
+        agent_id: str | None = None,
+    ) -> None: ...
+
     async def list_reconcilable(self, limit: int) -> list[TaskRecord]: ...
 
 
@@ -72,6 +83,16 @@ class EventStorePort(Protocol):
 
 
 class WritingCallbackRepositoryPort(Protocol):
+    async def persist_workflow_message(
+        self,
+        task_id: str,
+        *,
+        role: str,
+        content: str,
+        event_type: str,
+        agent_id: str | None = None,
+    ) -> None: ...
+
     async def save_checkpoint(self, task_id: str, serialized: str, phase: str) -> None: ...
 
     async def complete(self, task_id: str, result: dict[str, Any]) -> None: ...
@@ -111,6 +132,24 @@ class WritingTaskRepository:
                 )
                 session.add(task)
                 await session.flush()
+                if request.writingSessionId is not None:
+                    session.add(
+                        WritingMessage(
+                            sessionId=request.writingSessionId,
+                            role="user",
+                            content=request.userMessage,
+                            metadata_=_workflow_message_metadata(
+                                task.id,
+                                event_type="user",
+                                content=request.userMessage,
+                            ),
+                        )
+                    )
+                    await session.execute(
+                        update(WritingSession)
+                        .where(WritingSession.id == request.writingSessionId)
+                        .values(updatedAt=utc_now())
+                    )
             return _task_response(task)
 
     async def require_task(self, user_id: str, task_id: str) -> TaskRecord:
@@ -191,8 +230,9 @@ class WritingTaskRepository:
 
     async def complete(self, task_id: str, result: dict[str, Any]) -> None:
         values: dict[str, Any] = {"phase": "completed", "updatedAt": utc_now()}
-        if isinstance(result.get("finalContent"), str):
-            values["finalContent"] = result["finalContent"]
+        final_content = result.get("finalContent", result.get("finalResponse"))
+        if isinstance(final_content, str):
+            values["finalContent"] = final_content
         if result.get("agentOutputs") is not None:
             values["agentOutputs"] = json.dumps(result["agentOutputs"], ensure_ascii=False)
         async with self._session_factory() as session:
@@ -204,6 +244,52 @@ class WritingTaskRepository:
                         WritingTask.phase.not_in(TERMINAL_TASK_PHASES),
                     )
                     .values(**values)
+                )
+
+    async def persist_workflow_message(
+        self,
+        task_id: str,
+        *,
+        role: str,
+        content: str,
+        event_type: str,
+        agent_id: str | None = None,
+    ) -> None:
+        visible_content = content.strip()
+        if not visible_content:
+            return
+        async with self._session_factory() as session:
+            async with session.begin():
+                task = await session.get(WritingTask, task_id)
+                if task is None or task.writingSessionId is None:
+                    return
+                metadata = _workflow_message_metadata(
+                    task_id,
+                    event_type=event_type,
+                    content=visible_content,
+                    agent_id=agent_id,
+                )
+                existing = await session.scalar(
+                    select(WritingMessage.id).where(
+                        WritingMessage.sessionId == task.writingSessionId,
+                        WritingMessage.metadata_ == metadata,
+                    )
+                )
+                if existing is not None:
+                    return
+                session.add(
+                    WritingMessage(
+                        sessionId=task.writingSessionId,
+                        role=role,
+                        agentId=agent_id,
+                        content=visible_content,
+                        metadata_=metadata,
+                    )
+                )
+                await session.execute(
+                    update(WritingSession)
+                    .where(WritingSession.id == task.writingSessionId)
+                    .values(updatedAt=utc_now())
                 )
 
     async def fail(self, task_id: str, code: str) -> None:
@@ -275,6 +361,14 @@ class WritingTaskService:
                 code="AGENT_RUN_UNAVAILABLE",
                 message="智能体运行队列暂时不可用",
             )
+        user_message = resume_input.get("userMessage") if resume_input is not None else None
+        if isinstance(user_message, str) and user_message.strip():
+            await self._repository.persist_workflow_message(
+                task_id,
+                role="user",
+                content=user_message,
+                event_type="user",
+            )
         await self._submitter.submit(
             task,
             resume=True,
@@ -327,13 +421,25 @@ class WritingCallbackService:
         await self._repository.save_checkpoint(body.taskId, serialized, persisted_phase)
 
     async def complete(self, body: RunCompletionCallback) -> None:
+        final_response = body.result.get("finalResponse")
+        visible_response = final_response.strip() if isinstance(final_response, str) else ""
+        event_data: dict[str, Any] = {"taskId": body.taskId}
+        if visible_response:
+            event_data["finalContent"] = visible_response
         await self._append(
             body.taskId,
             body.eventId,
             body.sequence,
             "completed",
-            {"taskId": body.taskId},
+            event_data,
         )
+        if visible_response:
+            await self._repository.persist_workflow_message(
+                body.taskId,
+                role="agent",
+                content=visible_response,
+                event_type="done",
+            )
         await self._repository.complete(body.taskId, body.result)
 
     async def fail(self, body: RunFailureCallback) -> None:
@@ -447,4 +553,24 @@ def _task_response(task: WritingTask) -> WritingRunResponse:
         selectedAgents=[item for item in task.selectedAgents.split(",") if item],
         createdAt=task.createdAt,
         updatedAt=task.updatedAt,
+    )
+
+
+def _workflow_message_metadata(
+    task_id: str,
+    *,
+    event_type: str,
+    content: str,
+    agent_id: str | None = None,
+) -> str:
+    return json.dumps(
+        {
+            "source": "workflow",
+            "taskId": task_id,
+            "eventType": event_type,
+            "agentId": agent_id,
+            "contentHash": hashlib.sha256(content.strip().encode()).hexdigest()[:24],
+        },
+        ensure_ascii=False,
+        sort_keys=True,
     )

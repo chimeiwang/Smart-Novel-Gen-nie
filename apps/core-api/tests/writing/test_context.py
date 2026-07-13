@@ -7,11 +7,10 @@ from inkforge_core.writing.context import (
 )
 
 
-def test_chapter_group_must_match_current_chapter_uniquely() -> None:
+def test_chapter_group_allows_missing_but_rejects_ambiguous_mapping() -> None:
     matching = ChapterGroupSnapshot("group-1", "第一组", 1, 5, "完整章节组内容")
     assert select_unique_chapter_group(3, [matching]) == matching
-    with pytest.raises(ApiError, match="没有唯一对应的章节组"):
-        select_unique_chapter_group(3, [])
+    assert select_unique_chapter_group(3, []) is None
     with pytest.raises(ApiError, match="没有唯一对应的章节组"):
         select_unique_chapter_group(
             3,

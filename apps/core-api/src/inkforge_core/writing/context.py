@@ -34,13 +34,15 @@ class ChapterGroupSnapshot:
 
 def select_unique_chapter_group(
     chapter_order: int, groups: list[ChapterGroupSnapshot]
-) -> ChapterGroupSnapshot:
+) -> ChapterGroupSnapshot | None:
     matches = [
         group
         for group in groups
         if group.chapter_start_order <= chapter_order <= group.chapter_end_order
     ]
-    if len(matches) != 1:
+    if not matches:
+        return None
+    if len(matches) > 1:
         raise ApiError(
             status_code=409,
             code="CHAPTER_GROUP_MAPPING_CONFLICT",
@@ -143,7 +145,7 @@ class WritingContextRepository:
                         )
                     ).scalars()
                 )
-            outline_path = await self._outline_path(session, group)
+            outline_path = await self._outline_path(session, group) if group is not None else []
             active_artifact = await self._active_artifact(session, task)
             conversation_history = _conversation_history(task.conversationHistory)
             latest_user_message = next(
@@ -161,13 +163,17 @@ class WritingContextRepository:
                 "chapterOrder": chapter_order,
                 "chapterGoal": _goal_dict(goal),
                 "approvedBeatPlan": _beat_plan_dict(beat_plan, scenes),
-                "chapterGroup": {
-                    "id": group.id,
-                    "title": group.title,
-                    "chapterStartOrder": group.chapter_start_order,
-                    "chapterEndOrder": group.chapter_end_order,
-                    "content": group.content,
-                },
+                "chapterGroup": (
+                    {
+                        "id": group.id,
+                        "title": group.title,
+                        "chapterStartOrder": group.chapter_start_order,
+                        "chapterEndOrder": group.chapter_end_order,
+                        "content": group.content,
+                    }
+                    if group is not None
+                    else None
+                ),
                 "outlinePath": outline_path,
                 "activeArtifact": active_artifact,
                 "phase": task.phase,

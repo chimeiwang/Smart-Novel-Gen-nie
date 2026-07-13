@@ -236,6 +236,8 @@ async def test_quality_patch_and_completion_cannot_interleave_between_locks() ->
     assert shared.check.status == "skipped"
     assert completed.status == "completed"
     assert completed.completed_at is not None
+    assert shared.chapter.completedAt is not None
+    assert shared.chapter.completedAt.tzinfo is None
 
 
 class ScalarRows:

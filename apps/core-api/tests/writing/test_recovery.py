@@ -112,3 +112,65 @@ async def test_completed_task_cannot_resume_even_before_queue_is_connected() -> 
         await service.resume("user-1", "task-1", "session-1")
 
     assert error.value.status_code == 409
+
+
+class ResumableTaskRepository:
+    def __init__(self) -> None:
+        self.messages: list[tuple[str, str, str, str, str | None]] = []
+
+    async def require_task(self, user_id: str, task_id: str) -> TaskRecord:
+        return TaskRecord(
+            id=task_id,
+            user_id=user_id,
+            novel_id="novel-1",
+            chapter_id="chapter-1",
+            writing_session_id="session-1",
+            phase="awaiting_user_review",
+            graph_state_json=_snapshot(),
+        )
+
+    async def persist_workflow_message(
+        self,
+        task_id: str,
+        *,
+        role: str,
+        content: str,
+        event_type: str,
+        agent_id: str | None = None,
+    ) -> None:
+        self.messages.append((task_id, role, content, event_type, agent_id))
+
+
+class RecordingSubmitter:
+    def __init__(self) -> None:
+        self.resume_input: dict[str, object] | None = None
+
+    async def submit(
+        self,
+        task: TaskRecord,
+        *,
+        resume: bool,
+        resume_input: dict[str, object] | None = None,
+    ) -> None:
+        assert task.id == "task-1"
+        assert resume is True
+        self.resume_input = resume_input
+
+
+@pytest.mark.asyncio
+async def test_resume_persists_visible_user_message_before_queue_submission() -> None:
+    repository = ResumableTaskRepository()
+    submitter = RecordingSubmitter()
+    service = WritingTaskService(repository, submitter)
+
+    await service.resume(
+        "user-1",
+        "task-1",
+        "session-1",
+        {"userMessage": "请继续说明冲突设计。"},
+    )
+
+    assert repository.messages == [
+        ("task-1", "user", "请继续说明冲突设计。", "user", None)
+    ]
+    assert submitter.resume_input == {"userMessage": "请继续说明冲突设计。"}
