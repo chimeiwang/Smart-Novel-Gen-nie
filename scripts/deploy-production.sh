@@ -22,7 +22,7 @@ else
   git remote set-url origin "$REPO_URL"
 fi
 
-git fetch --depth=1 origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+git -c http.version=HTTP/1.1 fetch --depth=1 origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
 remote_sha="$(git rev-parse "refs/remotes/origin/$BRANCH")"
 [ "$remote_sha" = "$DEPLOY_SHA" ] || {
   echo "远程分支提交与部署提交不一致" >&2

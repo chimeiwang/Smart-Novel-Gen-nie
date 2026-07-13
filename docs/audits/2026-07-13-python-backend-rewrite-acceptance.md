@@ -47,6 +47,8 @@
 
 推送后的 `CI and Deploy #25` 已越过 OpenAPI 与 Web 测试，但 Python 测试因工作流错误地全局注入 `REDIS_URL` 而出现 3 项健康检查断言失败；其余 829 项通过。该变量会让未启动 Redis 的 Runner 把可选 Redis 检查加入响应，因此已从 CI 环境移除，并增加“CI 不得注入可选 Redis 依赖”的架构回归测试。目标工作流与相关 Core 数据库/健康检查复验为 44 passed。
 
+`CI and Deploy #28` 的 CI、三镜像构建和 SSH 镜像上传均成功，服务器部署在 `git fetch` 阶段因 HTTP/2 framing 错误退出。该服务器的历史部署脚本已使用 `git -c http.version=HTTP/1.1 fetch` 规避相同网络兼容问题；迁移后的脚本恢复该参数，并由部署契约测试固定。
+
 ## 本地三服务证据
 
 使用根目录 `npm run dev` 启动三个真实本地进程，并使用 `MODEL_PROVIDER=fake` 避免调用真实模型和产生模型费用。

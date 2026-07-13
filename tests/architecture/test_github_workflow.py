@@ -87,7 +87,7 @@ def test_remote_deploy_requires_server_configuration_and_never_builds() -> None:
     for contract in (
         'APP_DIR="${APP_DIR:-/srv/smart-novel-gen}"',
         'DEPLOY_SHA="${DEPLOY_SHA:?必须设置部署提交}"',
-        "git fetch",
+        "git -c http.version=HTTP/1.1 fetch",
         'git reset --hard "$DEPLOY_SHA"',
         "infra/compose.yaml",
         ".env",
