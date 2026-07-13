@@ -140,7 +140,9 @@ jobs:
             "gunzip | docker load"
 
       - name: Deploy over SSH
+        shell: bash
         run: |
+          set +e
           ssh \
             -o StrictHostKeyChecking=no \
             -o ServerAliveInterval=30 \
@@ -149,4 +151,19 @@ jobs:
             -i ~/.ssh/deploy_key \
             "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}" \
             "APP_DIR='${{ vars.APP_DIR }}' REPO_URL='https://github.com/chimeiwang/Smart-Novel-Gen-nie.git' BRANCH='main' DEPLOY_SHA='${{ github.sha }}' INKFORGE_IMAGE_TAG='${INKFORGE_IMAGE_TAG}' sh -s" \
-            < scripts/deploy-production.sh
+            < scripts/deploy-production.sh 2>&1 | tee deploy.log
+          deploy_status=${PIPESTATUS[0]}
+          if [ "$deploy_status" -ne 0 ]; then
+            {
+              echo "## 生产部署失败"
+              echo '```text'
+              tail -n 200 deploy.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            annotation="$(tail -n 80 deploy.log)"
+            annotation="${annotation//'%'/'%25'}"
+            annotation="${annotation//$'\n'/'%0A'}"
+            annotation="${annotation//$'\r'/'%0D'}"
+            echo "::error title=生产部署失败::$annotation"
+          fi
+          exit "$deploy_status"

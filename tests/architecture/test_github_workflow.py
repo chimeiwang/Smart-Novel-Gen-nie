@@ -73,6 +73,14 @@ def test_ci_does_not_inject_optional_redis_dependency() -> None:
     assert "\n      REDIS_URL:" not in source
 
 
+def test_deploy_failures_are_published_to_the_workflow_summary() -> None:
+    source = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "deploy.log" in source
+    assert "## 生产部署失败" in source
+    assert "::error title=生产部署失败::" in source
+
+
 def test_remote_deploy_requires_server_configuration_and_never_builds() -> None:
     source = DEPLOY_SCRIPT.read_text(encoding="utf-8")
 
