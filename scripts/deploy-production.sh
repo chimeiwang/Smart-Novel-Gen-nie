@@ -22,7 +22,20 @@ else
   git remote set-url origin "$REPO_URL"
 fi
 
-git -c http.version=HTTP/1.1 fetch --depth=1 origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+max_fetch_attempts="3"
+fetch_attempt="1"
+while ! git -c http.version=HTTP/1.1 fetch --depth=1 origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+do
+  if [ "$fetch_attempt" -lt "$max_fetch_attempts" ]; then
+    next_attempt=$((fetch_attempt + 1))
+    echo "Git 获取失败，等待后进行第 $next_attempt/$max_fetch_attempts 次尝试" >&2
+    sleep $((fetch_attempt * 3))
+    fetch_attempt="$next_attempt"
+  else
+    echo "Git 获取连续失败 $max_fetch_attempts 次，停止部署" >&2
+    exit 1
+  fi
+done
 remote_sha="$(git rev-parse "refs/remotes/origin/$BRANCH")"
 [ "$remote_sha" = "$DEPLOY_SHA" ] || {
   echo "远程分支提交与部署提交不一致" >&2
