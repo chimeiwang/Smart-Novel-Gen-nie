@@ -47,6 +47,16 @@ for key_file in \
 do
   [ -f "infra/secrets/$key_file" ] || { echo "缺少服务密钥：$key_file" >&2; exit 1; }
 done
+for private_key in core-to-agent-private.pem agent-to-core-private.pem
+do
+  owner="$(stat -c %u "infra/secrets/$private_key")"
+  group="$(stat -c %g "infra/secrets/$private_key")"
+  mode="$(stat -c %a "infra/secrets/$private_key")"
+  [ "$owner" = "10001" ] && [ "$group" = "10001" ] && [ "$mode" = "600" ] || {
+    echo "服务私钥必须归属容器用户 10001:10001 且权限为 600：$private_key" >&2
+    exit 1
+  }
+done
 
 for image in \
   "inkforge-web:$INKFORGE_IMAGE_TAG" \

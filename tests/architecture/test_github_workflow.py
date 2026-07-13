@@ -112,5 +112,9 @@ def test_remote_deploy_requires_server_configuration_and_never_builds() -> None:
 
     assert 'grep -q \'host.docker.internal\' "$compose_file"' in source
     assert "host\\.docker\\.internal" in source
+    assert 'stat -c %u "infra/secrets/$private_key"' in source
+    assert 'stat -c %a "infra/secrets/$private_key"' in source
+    assert '"$owner" = "10001"' in source
+    assert '"$mode" = "600"' in source
 
     assert "up --build" not in source

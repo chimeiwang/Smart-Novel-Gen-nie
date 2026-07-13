@@ -6,6 +6,7 @@
 - 已记录切换前数据库结构指纹、公共表数量和数据量基线。
 - `.env` 中的 `DATABASE_URL` 通过 `host.docker.internal` 指向现有宿主机 PostgreSQL 14。
 - 已执行 `uv run python scripts/generate_service_keys.py --output-dir infra/secrets`。
+- 两把服务私钥归属容器 UID/GID `10001:10001` 且权限为 `600`；两份 JWKS 权限为 `644`。
 - 已轮换 `JWT_SECRET`；切换后旧会话失效，用户需要重新登录。
 - Agent Service 配置中不存在 `DATABASE_URL`。
 
