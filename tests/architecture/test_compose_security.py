@@ -61,7 +61,6 @@ def test_every_container_has_health_resource_and_filesystem_limits() -> None:
 
 
 def test_redis_is_bounded() -> None:
-    source = COMPOSE.read_text(encoding="utf-8")
     redis_config = (ROOT / "infra" / "redis" / "redis.conf").read_text(encoding="utf-8")
 
     assert "64mb" in redis_config.lower()
