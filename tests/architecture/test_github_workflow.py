@@ -41,7 +41,10 @@ def test_deploy_builds_and_uploads_all_three_versioned_images() -> None:
     source = WORKFLOW.read_text(encoding="utf-8")
 
     assert "docker build -t inkforge:latest ." not in source
-    assert "docker compose -f infra/compose.yaml build web core-api agent-service" in source
+    assert (
+        "docker compose --env-file .env.example -f infra/compose.yaml "
+        "build web core-api agent-service"
+    ) in source
     for obsolete in (
         "POSTGRES_DATA_VOLUME",
         "POSTGRES_USER: inkforge",

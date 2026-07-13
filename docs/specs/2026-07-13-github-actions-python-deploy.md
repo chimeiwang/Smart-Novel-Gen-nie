@@ -31,7 +31,7 @@ Python 后端迁移已经删除 Prisma、根目录单体 `Dockerfile` 和 `docke
 部署 Job 设置 `INKFORGE_IMAGE_TAG` 为当前提交 SHA，执行：
 
 ```bash
-docker compose -f infra/compose.yaml build web core-api agent-service
+docker compose --env-file .env.example -f infra/compose.yaml build web core-api agent-service
 docker save inkforge-web:$INKFORGE_IMAGE_TAG inkforge-core-api:$INKFORGE_IMAGE_TAG inkforge-agent-service:$INKFORGE_IMAGE_TAG
 ```
 
