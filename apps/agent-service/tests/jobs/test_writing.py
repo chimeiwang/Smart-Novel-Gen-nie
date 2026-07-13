@@ -7,15 +7,19 @@ import pytest
 from inkforge_agents.graph.snapshots import serialize_snapshot, to_typescript_snapshot
 from inkforge_agents.graph.state import create_initial_state
 from inkforge_agents.jobs.writing import WritingJobHandler
+from inkforge_agents.queue.consumer import NonRetryableJobError
 from inkforge_agents.queue.repository import QueueJob
+from langgraph.types import Interrupt
 
 
 class CoreClient:
     def __init__(self, context: dict[str, Any]) -> None:
         self.context = context
         self.events: list[tuple[int, str]] = []
+        self.event_payloads: list[dict[str, Any]] = []
         self.checkpoints: list[tuple[int, dict[str, Any]]] = []
         self.completions: list[tuple[int, dict[str, Any]]] = []
+        self.failures: list[dict[str, Any]] = []
 
     async def call_tool(
         self, resource: object, agent_id: str, tool_name: str, arguments: object
@@ -28,8 +32,9 @@ class CoreClient:
     async def send_event(
         self, resource: object, *, sequence: int, event: str, data: dict[str, Any]
     ) -> None:
-        del resource, data
+        del resource
         self.events.append((sequence, event))
+        self.event_payloads.append(data)
 
     async def save_checkpoint(
         self, resource: object, *, sequence: int, checkpoint: dict[str, Any]
@@ -41,8 +46,9 @@ class CoreClient:
         del resource
         self.completions.append((sequence, result))
 
-    async def fail(self, *args: object, **kwargs: object) -> None:
-        raise AssertionError((args, kwargs))
+    async def fail(self, resource: object, **kwargs: Any) -> None:
+        del resource
+        self.failures.append(kwargs)
 
 
 class Graph:
@@ -206,3 +212,134 @@ async def test_writing_job_records_human_workflow_states() -> None:
         "chapter_id": "chapter-1",
     }
     assert workflow_log.entries[-1] == ("结束", ("task-1", "完成"))
+
+
+@pytest.mark.asyncio
+async def test_writing_job_emits_artifact_event_before_waiting_checkpoint() -> None:
+    core = CoreClient(
+        {
+            "workspace": {},
+            "planning": {
+                "taskId": "task-1",
+                "novelId": "novel-1",
+                "chapterId": "chapter-1",
+                "targetWordCount": 4000,
+                "conversationHistory": [],
+                "userMessage": "重写场景",
+                "graphState": None,
+            },
+        }
+    )
+    handler = WritingJobHandler(
+        core,
+        parent_graph=Graph(
+            {
+                "phase": "waiting_user",
+                "activeAgent": "写作",
+                "activeArtifactId": "artifact-1",
+                "__interrupt__": [{"type": "artifact_review"}],
+            }
+        ),
+        operation_graph=Graph({}),
+    )
+
+    await handler(_job())
+
+    assert core.events == [
+        (1, "agent_start"),
+        (2, "artifact_awaiting_user_approval"),
+    ]
+    assert core.event_payloads[1] == {
+        "agentId": "写作",
+        "artifactId": "artifact-1",
+    }
+    assert core.checkpoints[0][0] == 3
+    assert core.checkpoints[0][1]["eventSequence"] == 3
+    assert core.completions == []
+
+
+@pytest.mark.asyncio
+async def test_writing_job_recovers_waiting_state_from_nested_graph_interrupt() -> None:
+    core = CoreClient(
+        {
+            "workspace": {},
+            "planning": {
+                "taskId": "task-1",
+                "novelId": "novel-1",
+                "chapterId": "chapter-1",
+                "targetWordCount": 4000,
+                "conversationHistory": [],
+                "userMessage": "规划本章",
+                "graphState": None,
+            },
+        }
+    )
+    handler = WritingJobHandler(
+        core,
+        parent_graph=Graph(
+            {
+                "activeAgent": "剧情",
+                "__interrupt__": (
+                    Interrupt(
+                        {
+                            "type": "artifact_review",
+                            "artifactId": "artifact-1",
+                        }
+                    ),
+                ),
+            }
+        ),
+        operation_graph=Graph({}),
+    )
+
+    await handler(_job())
+
+    assert core.events == [
+        (1, "agent_start"),
+        (2, "artifact_awaiting_user_approval"),
+    ]
+    assert core.checkpoints[0][1]["phase"] == "awaiting_user_review"
+    assert core.checkpoints[0][1]["activeArtifactId"] == "artifact-1"
+    assert core.checkpoints[0][1]["artifactStatus"] == "awaiting_user"
+    assert core.completions == []
+
+
+@pytest.mark.asyncio
+async def test_writing_job_reports_stable_error_instead_of_completion() -> None:
+    core = CoreClient(
+        {
+            "workspace": {},
+            "planning": {
+                "taskId": "task-1",
+                "novelId": "novel-1",
+                "chapterId": "chapter-1",
+                "targetWordCount": 4000,
+                "conversationHistory": [],
+                "userMessage": "同步设定",
+                "graphState": None,
+            },
+        }
+    )
+    handler = WritingJobHandler(
+        core,
+        parent_graph=Graph(
+            {
+                "phase": "error",
+                "errorMessage": "主责智能体未提交待审核草案控制事件",
+            }
+        ),
+        operation_graph=Graph({}),
+    )
+
+    with pytest.raises(NonRetryableJobError):
+        await handler(_job())
+
+    assert core.completions == []
+    assert core.failures == [
+        {
+            "sequence": 3,
+            "code": "AGENT_RUN_FAILED",
+            "message": "主责智能体未提交待审核草案控制事件",
+            "recoverable": True,
+        }
+    ]

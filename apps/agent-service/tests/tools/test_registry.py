@@ -1,5 +1,6 @@
 import pytest
 from inkforge_agents.tools.registry import ToolContext, build_default_registry
+from inkforge_contracts.read_tools import READ_TOOL_NAMES
 
 
 def test_registry_contains_migrated_read_proposal_and_control_tools() -> None:
@@ -16,6 +17,7 @@ def test_registry_contains_migrated_read_proposal_and_control_tools() -> None:
         "begin_artifact_output",
         "submit_evaluation",
     } <= names
+    assert set(READ_TOOL_NAMES) <= names
 
 
 @pytest.mark.asyncio

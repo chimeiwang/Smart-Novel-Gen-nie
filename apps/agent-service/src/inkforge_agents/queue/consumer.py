@@ -9,6 +9,10 @@ from .repository import JobKind, QueueClaim, QueueJob, RedisRunQueue
 JobHandler = Callable[[QueueJob], Awaitable[None]]
 
 
+class NonRetryableJobError(RuntimeError):
+    retryable = False
+
+
 class QueueConsumer:
     def __init__(
         self,
@@ -53,8 +57,8 @@ class QueueConsumer:
             return True
         try:
             await self._run_with_heartbeat(claim, handler)
-        except Exception:
-            if claim.attempts >= self._max_attempts:
+        except Exception as exc:
+            if getattr(exc, "retryable", True) is False or claim.attempts >= self._max_attempts:
                 await self._queue.acknowledge(claim, status="failed")
             else:
                 await self._queue.retry(claim, delay=self._retry_delay)

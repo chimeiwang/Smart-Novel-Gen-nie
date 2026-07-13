@@ -43,7 +43,7 @@ class Billing:
         del context
         self.authorizations.append({**payload, "requestId": request_id})
         return {
-            "requestId": request_id,
+            "requestId": "grant-request-1",
             "grantToken": "grant",
             "maxOutputTokens": payload["requestedMaxOutputTokens"],
             "billable": True,
@@ -98,6 +98,7 @@ async def test_billable_runtime_authorizes_then_reports_exact_usage() -> None:
     assert billing.usages[0]["completionTokens"] == 30
     assert billing.usages[0]["totalTokens"] == 130
     assert billing.usages[0]["grantToken"] == "grant"
+    assert billing.usages[0]["requestId"] == "grant-request-1"
 
 
 @pytest.mark.asyncio

@@ -32,6 +32,7 @@ async def test_core_client_signs_tools_events_checkpoint_and_completion() -> Non
     requests: list[tuple[str, str, dict[str, object]]] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["content-type"] == "application/json"
         payload = json.loads(request.content) if request.content else {}
         requests.append((request.method, request.url.path, payload))
         if "/tools/" in request.url.path:

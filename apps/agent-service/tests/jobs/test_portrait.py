@@ -33,8 +33,12 @@ class Core:
 
 
 class Generator:
+    def __init__(self, workflow_log: WorkflowLog) -> None:
+        self._workflow_log = workflow_log
+
     async def generate(self, resource: object, source_text: str) -> dict[str, str]:
         del resource
+        assert self._workflow_log.entries[0][0] == "开始"
         assert source_text == "完整参考正文"
         return {
             "creativeMethodology": "方法",
@@ -45,10 +49,26 @@ class Generator:
         }
 
 
+class WorkflowLog:
+    def __init__(self) -> None:
+        self.entries: list[tuple[str, object]] = []
+
+    def start_run(self, **metadata: object) -> None:
+        self.entries.append(("开始", metadata))
+
+    def finish_run(self, run_id: str, status: str) -> None:
+        self.entries.append(("结束", (run_id, status)))
+
+
 @pytest.mark.asyncio
 async def test_portrait_job_uses_full_source_and_reports_all_sections() -> None:
     core = Core()
-    handler = PortraitJobHandler(core, Generator())
+    workflow_log = WorkflowLog()
+    handler = PortraitJobHandler(
+        core,
+        Generator(workflow_log),
+        workflow_log=workflow_log,
+    )
     job = QueueJob(
         jobId="portrait-task-1",
         kind="portrait",
@@ -74,3 +94,17 @@ async def test_portrait_job_uses_full_source_and_reports_all_sections() -> None:
         "usedCharCount": 6,
         "truncated": False,
     }
+    assert workflow_log.entries == [
+        (
+            "开始",
+            {
+                "run_id": "task-1",
+                "task_id": "task-1",
+                "run_kind": "文风画像",
+                "user_id": "user-1",
+                "novel_id": "style:style-1",
+                "chapter_id": None,
+            },
+        ),
+        ("结束", ("task-1", "完成")),
+    ]

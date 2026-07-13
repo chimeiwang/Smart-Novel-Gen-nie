@@ -38,6 +38,68 @@ async def test_agent_commands_map_to_default_operations(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message", "agent_id", "kind"),
+    [
+        (
+            "@剧情 请为当前章节生成一份可应用的章节计划。请拆成场景节拍，"
+            "明确每场的目标、冲突、涉及角色、伏笔、预估字数和验收标准。",
+            "剧情",
+            "plan_chapter",
+        ),
+        (
+            "@写作 请找出当前章节最需要加强的一场戏并重写，重点补足目标、阻力、"
+            "转折、代价和余波。重写内容进入待审核草案。",
+            "写作",
+            "rewrite_scene",
+        ),
+    ],
+)
+async def test_agent_command_prefers_matching_explicit_operation(
+    message: str, agent_id: str, kind: str
+) -> None:
+    result = await route_creative_operation(message)
+
+    assert result.usedCommand is True
+    assert result.operation.primaryAgent == agent_id
+    assert result.operation.kind == kind
+
+
+@pytest.mark.asyncio
+async def test_removed_sync_lore_request_falls_back_to_question() -> None:
+    message = (
+        "@设定 根据当前章节及最近几章正文，维护设定库。"
+        "请只提取明确发生的事实变化。"
+    )
+
+    result = await route_creative_operation(message)
+
+    assert result.operation.kind == "answer_question"
+    assert "已移除" in result.reasoning
+
+
+@pytest.mark.asyncio
+async def test_classifier_cannot_restore_removed_sync_lore_operation() -> None:
+    operation = CreativeOperation(
+        kind="sync_lore",
+        targetType="lore",
+        userGoal="同步设定",
+        primaryAgent="设定",
+        reviewers=["校验"],
+        outputKind="sync_proposal",
+        requiresArtifact=True,
+        requiresUserApproval=True,
+        confidence=0.9,
+        reasoning="分类器命中同步设定",
+    )
+
+    result = await route_creative_operation("整理最近正文事实", Classifier(operation))
+
+    assert result.operation.kind == "answer_question"
+    assert "已移除" in result.reasoning
+
+
+@pytest.mark.asyncio
 async def test_low_confidence_or_failed_classification_falls_back_to_question() -> None:
     low_confidence = CreativeOperation(
         kind="write_chapter",

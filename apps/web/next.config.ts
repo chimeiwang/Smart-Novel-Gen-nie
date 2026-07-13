@@ -5,6 +5,7 @@ const workspaceRoot = path.resolve(process.cwd(), "../..");
 const coreApiUrl = process.env.CORE_API_INTERNAL_URL?.replace(/\/$/, "");
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ["127.0.0.1"],
   output: "standalone",
   outputFileTracingRoot: workspaceRoot,
   turbopack: {

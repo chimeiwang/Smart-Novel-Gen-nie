@@ -186,8 +186,10 @@ class RedisWritingEventStore:
         )
 
     async def replay(self, task_id: str, last_event_id: str | None) -> list[WritingEvent]:
-        minimum = "-" if last_event_id is None else f"({last_event_id}"
+        minimum = "-" if last_event_id is None else last_event_id
         records = await self._redis.xrange(_stream_key(task_id), min=minimum, max="+")
+        if last_event_id is not None:
+            records = [item for item in records if _text(item[0]) != last_event_id]
         return [_decode_record(item_id, fields) for item_id, fields in records]
 
     async def _read_event(self, task_id: str, event_id: str) -> WritingEvent | None:
@@ -226,7 +228,12 @@ async def stream_task_events(
             for event in events:
                 yield format_sse_event(event)
                 cursor = event.id
-                if event.event in {"done", "completed", "error"}:
+                if event.event in {
+                    "done",
+                    "completed",
+                    "error",
+                    "artifact_awaiting_user_approval",
+                }:
                     return
             continue
         await asyncio.sleep(poll_interval_seconds)

@@ -33,8 +33,9 @@
 | write_chapter 生成正文草案 | 写作 | 是 | 是 |
 | rewrite_scene 改写场景草案 | 写作 | 是 | 是 |
 | review_chapter 审核章节 | 编辑 | 否 | 否 |
-| sync_lore 同步设定 | 设定 | 是 | 是 |
 | manage_foreshadowing 管理伏笔 | 剧情 | 是 | 是 |
+
+`sync_lore` 已从当前可执行操作中删除。共享类型暂时保留该标识，仅用于解析历史任务快照；前端、关键词路由和分类器不得创建新的同步设定任务。
 
 兼容规则：
 
@@ -232,6 +233,9 @@ Agent Runtime 是唯一多轮 tool-call loop。
 - 工具自身 permission.agentIds 继续做服务端校验。
 - Runtime 拒绝本轮未暴露的 tool call。
 - 只读且并发安全的工具可以并行；control 或不安全工具必须按顺序执行。
+- 更新构建器只允许在单次运行中启动一次；启动后隐藏开始工具，后续追加和完成必须沿用同一 `artifactKey`。跨一次纠正重试合并事件时，重复开始不得覆盖已经追加的更新。
+- 设定 Agent 调用 `propose_updates` 或 `finish_update_builder` 成功后立即结束本轮工具循环。
+- 同一运行内创建 ReviewArtifact 后，Agent Service 将已提交 Core 的完整草案请求注入复审上下文，reviewer 只使用评审控制工具；本地不存在该权威快照时不得猜测草案内容。
 
 控制工具示例：
 
@@ -265,10 +269,12 @@ Agent Runtime 是唯一多轮 tool-call loop。
 - Core API 已提供 `/api/v1/writing/sessions`、消息、运行启动、恢复和事件流接口。
 - 写作事件使用短期 Redis Stream 保存，支持 `Last-Event-ID` 重放、来源事件去重和序号缺口对账；没有 Redis 的测试环境使用同契约内存实现。
 - 智能体事件、检查点、完成和失败只接受可信网段内的 Ed25519 签名内部回调。
+- Agent 图返回 `phase=error` 时，Agent Service 保存错误快照并调用失败回调，不得发送完成回调。
 - 稳定快照写入 `WritingTask.graphStateJson`，并拒绝 `runtime`、回调、聚合作品数据和控制事件等仅运行时字段。
 - Python 智能体服务已迁移五个智能体定义、系统提示词、能力与工具白名单、严格工具参数校验和唯一多轮工具循环；模型运行时仍只负责单次供应商调用。
 - 只读且并发安全的工具可以并行执行，控制工具按模型调用顺序生成结构化事件；未暴露工具、无效参数和最大轮次均明确终止，不截断用户可见文本。
 - Python LangGraph 已迁移 CreativeOperation 路由、复审 `Send` 扇出、确定性复审优先级、补丁或重写返工、最大修订次数、用户中断和 `Command` 恢复；图状态快照使用版本信封并排除运行时字段。
 - Core API 已把启动、恢复、画像、质量检查和 RAG 任务提交到 Redis 持久队列；Agent Service 消费任务并通过签名回调保存检查点、事件、草案和终态。
+- 草案进入等待用户确认时，Agent Service 先发送 `artifact_awaiting_user_approval` SSE 事件，再保存带有最新事件序号的稳定快照；前端据此刷新待确认草案。
 - Core 对账器可以强制修复 Redis 中缺失的 queued 索引或完全丢失的运行键，但不得重新打开 Redis 已记录为 completed、failed 或 cancelled 的运行。
 - Agent Service 不连接数据库，所有读取工具和业务写入都通过 Core 内部工具网关完成。

@@ -401,9 +401,21 @@ export const SSE_EVENT_TYPES: SseEventType[] = [
  * 安全解析 SSE 事件。
  * 解析失败返回 null，调用方应记录日志但不应崩溃。
  */
-export function parseSseEvent(raw: unknown): WritingSseEvent | null {
+export function normalizeSseEventData(
+  raw: Record<string, unknown>,
+  eventType?: string,
+): Record<string, unknown> {
+  if (eventType && eventType !== "message") {
+    return { ...raw, type: eventType };
+  }
+  return raw;
+}
+
+export function parseSseEvent(raw: unknown, eventType?: string): WritingSseEvent | null {
   if (!raw || typeof raw !== "object") return null;
-  const result = WritingSseEventSchema.safeParse(raw);
+  const result = WritingSseEventSchema.safeParse(
+    normalizeSseEventData(raw as Record<string, unknown>, eventType),
+  );
   if (result.success) return result.data;
   return null;
 }

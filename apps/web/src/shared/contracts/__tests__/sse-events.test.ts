@@ -9,6 +9,19 @@ import assert from "node:assert/strict";
 import { parseSseEvent, SSE_EVENT_TYPES } from "../sse-events";
 
 describe("SSE event contract", () => {
+  it("uses the standard SSE event field when data omits type", () => {
+    const event = parseSseEvent(
+      {
+        agentId: "剧情",
+        artifactId: "artifact-1",
+      },
+      "artifact_awaiting_user_approval",
+    );
+
+    assert.equal(event?.type, "artifact_awaiting_user_approval");
+    assert.equal(event?.artifactId, "artifact-1");
+  });
+
   it("parses agent status tool result summaries", () => {
     const event = parseSseEvent({
       type: "agent_status",

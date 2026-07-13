@@ -1,5 +1,7 @@
 # Python 后端重构实施计划
 
+> **当前状态：**本文件记录最初的一次性实施步骤，勾选状态未随实际迁移过程更新，不得据此判断完成度或从头重复执行。2026-07-13 起，接手与剩余任务以 `docs/plans/2026-07-13-python-backend-rewrite-handoff.md` 为唯一执行入口。
+
 > **供执行智能体使用：**必须使用 `superpowers:subagent-driven-development`（推荐）或 `superpowers:executing-plans`，逐项实施本计划。步骤使用勾选框（`- [ ]`）跟踪进度。
 
 **目标：**在保留现有 PostgreSQL 数据库结构、用户工作流、搜索引擎优化前端和单命令 Docker Compose 部署的前提下，用生产级 FastAPI 核心接口服务和数据库隔离的 Python 智能体服务替换全部 Next.js 后端能力。

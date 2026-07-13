@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime
 
 import pytest
@@ -5,6 +6,7 @@ from inkforge_contracts.events import RunFailureCallback
 from inkforge_core.writing.sse import (
     EventSequenceGap,
     InMemoryWritingEventStore,
+    RedisWritingEventStore,
     format_heartbeat,
     format_sse_event,
     stream_task_events,
@@ -21,6 +23,37 @@ async def test_event_ids_are_monotonic_and_replay_starts_after_last_id() -> None
     assert first.id == "1"
     assert second.id == "2"
     assert await store.replay("task-1", "1") == [second]
+
+
+@pytest.mark.asyncio
+async def test_redis_replay_uses_compatible_inclusive_range_and_excludes_cursor() -> None:
+    class Redis:
+        async def xrange(
+            self,
+            name: str,
+            *,
+            min: str,
+            max: str,
+            count: int | None = None,
+        ) -> list[tuple[str, dict[str, str]]]:
+            del count
+            assert name == "writing:events:task-1"
+            assert min == "3201885-0"
+            assert max == "+"
+            fields = {
+                "event": "agent_start",
+                "data": '{"phase":"active"}',
+                "occurred_at": "2026-07-11T09:46:36+00:00",
+                "source_event_id": "event-1",
+                "sequence": "1",
+            }
+            return [("3201885-0", fields), ("3201886-0", fields)]
+
+    store = RedisWritingEventStore(Redis())  # type: ignore[arg-type]
+
+    events = await store.replay("task-1", "3201885-0")
+
+    assert [event.id for event in events] == ["3201886-0"]
 
 
 @pytest.mark.asyncio
@@ -87,6 +120,31 @@ async def test_stream_replays_after_last_id_and_closes_on_terminal_event() -> No
     assert len(chunks) == 1
     assert "id: 2" in chunks[0]
     assert "event: completed" in chunks[0]
+
+
+@pytest.mark.asyncio
+async def test_stream_closes_when_artifact_awaits_user_approval() -> None:
+    store = InMemoryWritingEventStore()
+    await store.append("task-1", "agent_start", {"phase": "active"})
+    await store.append(
+        "task-1",
+        "artifact_awaiting_user_approval",
+        {"agentId": "剧情", "artifactId": "artifact-1"},
+    )
+
+    stream = stream_task_events(
+        store,
+        "task-1",
+        last_event_id=None,
+        poll_interval_seconds=0.01,
+    )
+    first = await anext(stream)
+    second = await anext(stream)
+
+    assert "event: agent_start" in first
+    assert "event: artifact_awaiting_user_approval" in second
+    with pytest.raises(StopAsyncIteration):
+        await asyncio.wait_for(anext(stream), timeout=0.05)
 
 
 class FailureRepository:

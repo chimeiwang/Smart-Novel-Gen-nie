@@ -72,6 +72,28 @@ async def test_consumer_retries_recoverable_failure_then_marks_terminal_failure(
 
 
 @pytest.mark.asyncio
+async def test_consumer_does_not_retry_non_retryable_failure() -> None:
+    queue = RedisRunQueue(fakeredis.aioredis.FakeRedis(), prefix="test:queue")
+    await queue.enqueue(job("no-retry"))
+    attempts = 0
+
+    class NonRetryableJobError(RuntimeError):
+        retryable = False
+
+    async def handler(current: QueueJob) -> None:
+        nonlocal attempts
+        del current
+        attempts += 1
+        raise NonRetryableJobError("失败已上报")
+
+    consumer = QueueConsumer(queue, {"writing": handler})
+
+    assert await consumer.run_once() is True
+    assert attempts == 1
+    assert await queue.status("no-retry") == "failed"
+
+
+@pytest.mark.asyncio
 async def test_consumer_graceful_stop_does_not_cancel_active_job() -> None:
     queue = RedisRunQueue(fakeredis.aioredis.FakeRedis(), prefix="test:queue")
     await queue.enqueue(job("slow"))

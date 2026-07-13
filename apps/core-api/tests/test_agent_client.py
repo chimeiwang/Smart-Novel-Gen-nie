@@ -36,6 +36,7 @@ async def test_agent_client_signs_exact_body_and_resource_binding() -> None:
     async def handler(request: httpx.Request) -> httpx.Response:
         assert request.url.path == "/internal/v1/runs"
         assert request.headers["authorization"] == "Bearer signed"
+        assert request.headers["content-type"] == "application/json"
         payload = json.loads(request.content)
         return httpx.Response(
             202,

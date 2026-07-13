@@ -13,7 +13,7 @@ from ..definitions.agents import AgentId
 from ..graph.context import build_operation_context
 from ..graph.state import GraphState
 from .contracts import CreativeOperation
-from .definitions import OPERATION_DEFINITIONS
+from .definitions import OPERATION_DEFINITIONS, OperationDefinition
 
 
 class AgentExecutorPort(Protocol):
@@ -121,7 +121,7 @@ def build_operation_graph(
 ) -> Any:
     async def prepare(state: GraphState) -> dict[str, Any]:
         operation = _operation(state)
-        definition = OPERATION_DEFINITIONS[operation.kind]
+        definition = _operation_definition(operation)
         source = {
             "taskId": state["taskId"],
             "novelId": state["novelId"],
@@ -156,22 +156,62 @@ def build_operation_graph(
 
     async def submit_or_respond(state: GraphState) -> dict[str, Any]:
         operation = _operation(state)
-        definition = OPERATION_DEFINITIONS[operation.kind]
+        definition = _operation_definition(operation)
         output = state.get("agentOutputs", {}).get(operation.primaryAgent, {})
         visible = str(output.get("visibleContent", ""))
+        control_events = _control_events(output.get("controlEvents", []))
+        preferred_artifact_type = (
+            "submit_beat_plan" if definition.kind == "plan_chapter" else None
+        )
         if not definition.requiresArtifact:
             return {
                 "finalResponse": visible,
                 "operationStep": "direct_response",
                 "operationStage": "直接回复",
             }
-        event = _artifact_event(output.get("controlEvents", []), visible)
+        event = _artifact_event(
+            control_events,
+            visible,
+            preferred_type=preferred_artifact_type,
+        )
         if event is None:
-            return {
-                "errorMessage": "主责智能体未提交待审核草案控制事件",
-                "phase": "error",
-                "operationStep": "submit_artifact",
+            retry_state = dict(state)
+            retry_state["contextMessages"] = [
+                *state.get("contextMessages", []),
+                _artifact_retry_instruction(definition),
+            ]
+            retry_output = await dependencies.agentExecutor.run(
+                operation.primaryAgent,
+                retry_state,
+            )
+            retry_visible = str(retry_output.get("visibleContent", ""))
+            if _has_builder_events(control_events):
+                visible = "\n\n".join(part for part in (visible, retry_visible) if part)
+            else:
+                visible = retry_visible
+            control_events = [
+                *control_events,
+                *_control_events(retry_output.get("controlEvents", [])),
+            ]
+            output = {
+                **retry_output,
+                "visibleContent": visible,
+                "controlEvents": control_events,
             }
+            outputs = dict(state.get("agentOutputs", {}))
+            outputs[operation.primaryAgent] = output
+            event = _artifact_event(
+                control_events,
+                visible,
+                preferred_type=preferred_artifact_type,
+            )
+            if event is None:
+                return {
+                    "agentOutputs": outputs,
+                    "errorMessage": "主责智能体未提交待审核草案控制事件",
+                    "phase": "error",
+                    "operationStep": "submit_artifact",
+                }
         content = (
             extract_artifact_content(visible)
             if event["type"] == "begin_artifact_output"
@@ -219,7 +259,17 @@ def build_operation_graph(
         if reviewer not in {"设定", "剧情", "写作", "校验", "编辑"}:
             raise ValueError("复审智能体无效")
         reviewer_id = cast(AgentId, reviewer)
-        result = await dependencies.agentExecutor.run(reviewer_id, dict(state))
+        try:
+            result = await dependencies.agentExecutor.run(reviewer_id, dict(state))
+        except Exception:
+            review = ReviewResult(
+                reviewer=reviewer_id,
+                verdict="block",
+                summary="复审智能体暂时不可用",
+                requiredChanges="请由用户审核当前草案，或稍后重新发起复审。",
+                iteration=state.get("artifactIteration", 0),
+            )
+            return {"reviewResults": [review.model_dump()]}
         event = _evaluation_event(result.get("controlEvents", []))
         if event is None:
             review = ReviewResult(
@@ -306,6 +356,7 @@ def build_operation_graph(
             await dependencies.artifacts.mark_awaiting_user(artifact_id)
         return {
             "artifactStatus": "awaiting_user" if artifact_id else "none",
+            "phase": "waiting_user" if artifact_id else state.get("phase", "active"),
             "operationStep": "mark_awaiting_user",
             "operationStage": "等待用户决策",
         }
@@ -448,10 +499,29 @@ def _operation(state: GraphState) -> CreativeOperation:
     return CreativeOperation.model_validate(operation)
 
 
-def _artifact_event(events: object, visible_content: str) -> dict[str, Any] | None:
-    if not isinstance(events, list):
-        return None
-    typed_events = [event for event in events if isinstance(event, dict)]
+def _operation_definition(operation: CreativeOperation) -> OperationDefinition:
+    if operation.kind == "sync_lore":
+        raise ValueError("同步设定流程已移除，历史任务不能继续执行")
+    definition = OPERATION_DEFINITIONS.get(operation.kind)
+    if definition is None:
+        raise ValueError(f"不支持的创作操作：{operation.kind}")
+    return definition
+
+
+def _artifact_event(
+    events: object,
+    visible_content: str,
+    *,
+    preferred_type: str | None = None,
+) -> dict[str, Any] | None:
+    typed_events = _control_events(events)
+    if preferred_type is not None:
+        preferred = next(
+            (event for event in typed_events if event.get("type") == preferred_type),
+            None,
+        )
+        if preferred is not None:
+            return preferred
     builder = resolve_builder_artifact(typed_events, visible_content)
     if builder is not None:
         return builder
@@ -476,4 +546,43 @@ def _evaluation_event(events: object) -> dict[str, Any] | None:
             if isinstance(event, dict) and event.get("type") == "submit_evaluation"
         ),
         None,
+    )
+
+
+def _control_events(events: object) -> list[dict[str, Any]]:
+    if not isinstance(events, list):
+        return []
+    return [event for event in events if isinstance(event, dict)]
+
+
+def _has_builder_events(events: list[dict[str, Any]]) -> bool:
+    return any(
+        event.get("type")
+        in {
+            "start_update_builder",
+            "append_update_batch",
+            "append_outline_tree",
+            "put_update_text_block",
+            "put_update_item_text_block",
+            "put_update_item_text_blocks",
+            "finish_update_builder",
+        }
+        for event in events
+    )
+
+
+def _artifact_retry_instruction(definition: OperationDefinition) -> str:
+    if definition.kind == "plan_chapter":
+        tool_requirement = "调用 submit_beat_plan"
+    elif definition.artifactPolicy == "agent_updates":
+        tool_requirement = (
+            "短小更新调用 propose_updates；批量更新必须完整执行一次 "
+            "start_update_builder → 一个或多个 append/put → finish_update_builder，"
+            "全程使用同一个 artifactKey，完成后立即停止"
+        )
+    else:
+        tool_requirement = "调用 begin_artifact_output"
+    return (
+        "上一次响应缺少待审核草案控制事件。本次必须提交待审核草案控制事件："
+        f"{tool_requirement}；不能只返回普通文本。"
     )

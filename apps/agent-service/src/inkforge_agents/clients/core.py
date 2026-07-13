@@ -477,7 +477,7 @@ class CoreServiceClient:
                 method,
                 path,
                 content=body,
-                headers=signed.headers,
+                headers={**signed.headers, "Content-Type": "application/json"},
             )
             response.raise_for_status()
             if response.status_code == 204 or not response.content:

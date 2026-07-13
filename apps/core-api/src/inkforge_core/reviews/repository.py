@@ -113,6 +113,53 @@ class ReviewRepository:
             ).scalars()
             return _response(artifact, list(evaluations))
 
+    async def list_task_artifacts(
+        self,
+        user_id: str,
+        novel_id: str,
+        task_id: str,
+        status: str | None,
+        kind: str | None,
+    ) -> list[dict[str, Any]]:
+        conditions = [
+            ReviewArtifact.novelId == novel_id,
+            ReviewArtifact.taskId == task_id,
+            Novel.userId == user_id,
+        ]
+        if status is not None:
+            conditions.append(ReviewArtifact.status == status)
+        if kind is not None:
+            conditions.append(ReviewArtifact.kind == kind)
+        async with self._session_factory() as session:
+            artifacts = list(
+                (
+                    await session.scalars(
+                        select(ReviewArtifact)
+                        .join(Novel, Novel.id == ReviewArtifact.novelId)
+                        .where(*conditions)
+                        .order_by(ReviewArtifact.updatedAt.desc(), ReviewArtifact.id.desc())
+                    )
+                ).all()
+            )
+        return [
+            {
+                "id": artifact.id,
+                "novelId": artifact.novelId,
+                "chapterId": artifact.chapterId,
+                "taskId": artifact.taskId,
+                "artifactKey": artifact.artifactKey,
+                "kind": artifact.kind,
+                "status": artifact.status,
+                "title": artifact.title,
+                "summary": artifact.summary,
+                "revision": artifact.revision,
+                "updatedByAgent": artifact.updatedByAgent,
+                "reviewerAgent": artifact.reviewerAgent,
+                "updatedAt": artifact.updatedAt.isoformat(),
+            }
+            for artifact in artifacts
+        ]
+
     async def transition(self, artifact_id: str, current: str, target: str) -> None:
         values: dict[str, object] = {"status": target, "updatedAt": utc_now()}
         if target == "applied":

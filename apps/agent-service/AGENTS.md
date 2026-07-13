@@ -34,17 +34,26 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 - Agent ID 固定为：设定、剧情、写作、校验、编辑。
 - AgentRunner 只向模型暴露当前 Agent 能力白名单允许的工具。
 - ToolRegistry 再次校验 Agent 权限；未暴露工具必须拒绝执行。
+- 26 个只读工具的名称和参数模型统一定义在 `inkforge_contracts.read_tools`；Agent 与 Core 必须共同引用该契约，禁止分别维护同名参数模型。
 - 只读且并发安全的工具可以并行；控制工具按模型返回顺序执行。
 - 可见正文使用自然段文本，控制信息通过工具调用或明确产物边界提交。
 - 禁止从可见正文解析路由、评分或 JSON 控制信封。
+- 更新构建器在单次运行中只能启动一次；启动后 Runtime 不再暴露 `start_update_builder`，追加和完成必须沿用同一 `artifactKey`。重复开始事件在跨纠正重试合并时按幂等处理，不得清空已追加批次。
+- Agent 的产物提交工具必须配置为终止控制工具；`propose_updates`、`finish_update_builder` 等产物完成事件成功后应立即结束本轮工具循环。
+- `sync_lore` 已从当前可执行 Operation 和前端入口中删除；共享类型仅保留历史快照解析兼容，路由和分类器不得生成新的同步设定任务。
+- 当前运行创建草案后，`CoreArtifactPort` 保存已提交 Core 的完整请求快照；复审执行器把该快照作为权威草案上下文注入 reviewer，并使用 `control_only` 模式。没有本地快照时必须显式收敛失败，不得猜测或从正文反推草案。
+- 首版不提供跨服务草案局部 patch。复审请求局部修改时，`CoreArtifactPort.apply_patch()` 会明确拒绝该路径，工作流按完整草案重新生成；这是已接受的成本降级，不得伪装成局部修订成功，也不得绕过 ReviewArtifact 直接修改正式内容。
 
 ## 数据与信任边界
 
 - 所有业务读取和草案提交都通过 Core `/internal/v1/**`。
+- `semantic_search_references` 的查询向量由 Agent Service 复用现有 embedding 客户端生成，Core 只接收内部查询向量并在当前用户和小说范围内执行 pgvector 检索；未配置 embedding 时必须明确返回未启用。
 - 请求使用 Ed25519 短期服务令牌，绑定受众、权限、任务、运行、小说、请求体摘要和查询摘要。
 - 写入类内部请求必须经过 Redis 重放保护。
 - Agent 只能生成 ReviewArtifact 或评审结果，不能直接写章节、设定、大纲或计费表。
 - 运行恢复以 Core 持久化的 `WritingTask.graphStateJson` 为权威；Redis 只承载队列、短期事件和重放保护。
+- 图进入等待用户确认时，必须先发送 `artifact_awaiting_user_approval`，再保存包含最新事件序号的稳定快照，确保前端能刷新草案入口且恢复时不会复用旧序号。
+- 图稳定结束于 `phase=error` 时必须保存错误快照并调用 Core 失败回调，禁止用完成回调表达失败终态。
 - Core 强制对账只允许修复 Redis 中缺失的 queued 索引或完全丢失的运行键；Redis 已记录为 completed、failed 或 cancelled 的运行不得被 `force` 重新打开。
 
 ## LangGraph 规则

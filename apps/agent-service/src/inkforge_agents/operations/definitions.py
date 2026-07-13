@@ -160,17 +160,6 @@ OPERATION_DEFINITIONS: dict[CreativeOperationKind, OperationDefinition] = {
         "none",
         "生成章节审核报告。",
     ),
-    "sync_lore": _definition(
-        "sync_lore",
-        "同步设定",
-        "lore",
-        "设定",
-        ("校验",),
-        "sync_proposal",
-        "lore",
-        "agent_updates",
-        "从正文提取已发生事实并生成同步草案。",
-    ),
     "manage_foreshadowing": _definition(
         "manage_foreshadowing",
         "管理伏笔",

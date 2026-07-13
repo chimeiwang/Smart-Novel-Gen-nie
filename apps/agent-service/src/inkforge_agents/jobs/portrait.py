@@ -6,6 +6,7 @@ from ..clients.core import RunResource
 from ..providers.base import ModelMessage, ModelTurnRequest
 from ..queue.repository import QueueJob
 from ..runtime.model_runtime import ModelCallContext, ModelRuntime
+from .workflow_log import WorkflowLogPort
 
 
 class PortraitCorePort(Protocol):
@@ -39,9 +40,16 @@ class PortraitGeneratorPort(Protocol):
 
 
 class PortraitJobHandler:
-    def __init__(self, core: PortraitCorePort, generator: PortraitGeneratorPort) -> None:
+    def __init__(
+        self,
+        core: PortraitCorePort,
+        generator: PortraitGeneratorPort,
+        *,
+        workflow_log: WorkflowLogPort | None = None,
+    ) -> None:
         self._core = core
         self._generator = generator
+        self._workflow_log = workflow_log
 
     async def __call__(self, job: QueueJob) -> None:
         if job.kind != "portrait":
@@ -55,15 +63,24 @@ class PortraitJobHandler:
             taskId=job.taskId,
             runId=job.runId,
         )
-        await self._core.mark_portrait_processing(resource, style_id)
-        context = await self._core.get_portrait_context(resource, style_id)
-        source_text = context.get("sourceText")
-        original_count = context.get("originalCharCount")
-        if not isinstance(source_text, str) or not source_text:
-            raise ValueError("画像上下文缺少完整参考正文")
-        if isinstance(original_count, bool) or not isinstance(original_count, int):
-            raise ValueError("画像上下文字数无效")
+        if self._workflow_log is not None:
+            self._workflow_log.start_run(
+                run_id=job.runId,
+                task_id=job.taskId,
+                run_kind="文风画像",
+                user_id=job.userId,
+                novel_id=job.novelId,
+                chapter_id=None,
+            )
         try:
+            await self._core.mark_portrait_processing(resource, style_id)
+            context = await self._core.get_portrait_context(resource, style_id)
+            source_text = context.get("sourceText")
+            original_count = context.get("originalCharCount")
+            if not isinstance(source_text, str) or not source_text:
+                raise ValueError("画像上下文缺少完整参考正文")
+            if isinstance(original_count, bool) or not isinstance(original_count, int):
+                raise ValueError("画像上下文字数无效")
             sections = await self._generator.generate(resource, source_text)
             result: dict[str, Any] = {
                 **sections,
@@ -73,8 +90,16 @@ class PortraitJobHandler:
             }
             await self._core.complete_portrait(resource, style_id, result)
         except Exception as exc:
-            await self._core.fail_portrait(resource, style_id, str(exc))
+            try:
+                await self._core.fail_portrait(resource, style_id, str(exc))
+            finally:
+                self._finish_log(job.runId, "错误")
             raise
+        self._finish_log(job.runId, "完成")
+
+    def _finish_log(self, run_id: str, status: str) -> None:
+        if self._workflow_log is not None:
+            self._workflow_log.finish_run(run_id, status)
 
 
 class ModelPortraitGenerator:

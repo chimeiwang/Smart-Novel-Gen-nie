@@ -7,7 +7,6 @@ import os
 import shutil
 import subprocess
 import tempfile
-import uuid
 from pathlib import Path
 
 from cryptography.hazmat.primitives import serialization
@@ -19,13 +18,15 @@ GENERATED_FILENAMES = (
     "agent-to-core-private.pem",
     "agent-to-core-jwks.json",
 )
+CORE_SERVICE_KEY_ID = "core-api-v1"
+AGENT_SERVICE_KEY_ID = "agent-service-v1"
 
 
 def _base64url(value: bytes) -> str:
     return base64.urlsafe_b64encode(value).rstrip(b"=").decode("ascii")
 
 
-def _build_pair(prefix: str) -> tuple[bytes, bytes]:
+def _build_pair(kid: str) -> tuple[bytes, bytes]:
     private_key = Ed25519PrivateKey.generate()
     private_bytes = private_key.private_bytes(
         encoding=serialization.Encoding.PEM,
@@ -42,7 +43,7 @@ def _build_pair(prefix: str) -> tuple[bytes, bytes]:
                 "kty": "OKP",
                 "crv": "Ed25519",
                 "x": _base64url(public_bytes),
-                "kid": f"{prefix}-{uuid.uuid4()}",
+                "kid": kid,
                 "use": "sig",
                 "alg": "EdDSA",
             }
@@ -82,8 +83,8 @@ def generate_service_keys(output_dir: Path) -> None:
     output_dir.parent.mkdir(parents=True, exist_ok=True)
     if output_dir.exists():
         raise FileExistsError("服务密钥输出目录已存在，拒绝覆盖")
-    core_private, core_jwks = _build_pair("core")
-    agent_private, agent_jwks = _build_pair("agent")
+    core_private, core_jwks = _build_pair(CORE_SERVICE_KEY_ID)
+    agent_private, agent_jwks = _build_pair(AGENT_SERVICE_KEY_ID)
     payloads = {
         "core-to-agent-private.pem": (core_private, True),
         "core-to-agent-jwks.json": (core_jwks, False),

@@ -3,7 +3,9 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-from inkforge_agents.jobs.adapters import CoreArtifactPort, CoreToolGateway
+from inkforge_agents.jobs.adapters import CoreArtifactPort, CoreGraphAgentExecutor, CoreToolGateway
+from inkforge_agents.providers.base import ModelUsage
+from inkforge_agents.runtime.agent_runner import AgentRunRequest, AgentRunResult
 from inkforge_agents.tools.registry import ToolContext
 
 
@@ -35,6 +37,34 @@ class CoreClient:
         return {"id": "artifact-1", "revision": len(self.artifacts)}
 
 
+class RecordingRunner:
+    def __init__(self) -> None:
+        self.requests: list[AgentRunRequest] = []
+
+    async def run(self, request: AgentRunRequest) -> AgentRunResult:
+        self.requests.append(request)
+        return AgentRunResult(
+            agentId=request.agentId,
+            visibleContent="",
+            controlEvents=[],
+            toolCalls=[],
+            toolResults=[],
+            usage=ModelUsage(
+                promptTokens=0,
+                cachedTokens=0,
+                completionTokens=0,
+                totalTokens=0,
+            ),
+            finishReason="completed",
+        )
+
+
+class FakeEmbeddings:
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        assert texts == ["文字起源"]
+        return [[0.1, 0.2, 0.3]]
+
+
 @pytest.mark.asyncio
 async def test_core_tool_gateway_binds_tool_context_to_request() -> None:
     core = CoreClient()
@@ -51,6 +81,33 @@ async def test_core_tool_gateway_binds_tool_context_to_request() -> None:
 
     assert result == {"title": "林舟"}
     assert core.tools == [("设定", "get_character_detail", {"characterId": "c-1"})]
+
+
+@pytest.mark.asyncio
+async def test_semantic_search_adds_query_embedding_before_calling_core() -> None:
+    core = CoreClient()
+    gateway = CoreToolGateway(core, FakeEmbeddings())
+    context = ToolContext(
+        userId="user-1",
+        novelId="novel-1",
+        taskId="task-1",
+        runId="run-1",
+        agentId="设定",
+    )
+
+    await gateway.execute(
+        "semantic_search_references",
+        context,
+        {"query": "文字起源", "topK": 3},
+    )
+
+    assert core.tools == [
+        (
+            "设定",
+            "semantic_search_references",
+            {"query": "文字起源", "topK": 3, "query_embedding": [0.1, 0.2, 0.3]},
+        )
+    ]
 
 
 @pytest.mark.asyncio
@@ -76,9 +133,58 @@ async def test_artifact_port_creates_revision_and_marks_awaiting_user() -> None:
 
     assert artifact_id == "artifact-1"
     assert core.artifacts[0]["status"] == "under_review"
+    assert core.artifacts[0]["workflowRunId"] is None
     assert core.artifacts[0]["payload"] == {
         "kind": "chapter_draft",
         "content": "完整正文",
     }
     assert core.artifacts[1]["status"] == "awaiting_user"
     assert core.artifacts[1]["payload"] == core.artifacts[0]["payload"]
+    assert port.review_context(artifact_id)["payload"] == {
+        "kind": "chapter_draft",
+        "content": "完整正文",
+    }
+
+
+@pytest.mark.asyncio
+async def test_reviewer_receives_submitted_artifact_without_read_tools() -> None:
+    core = CoreClient()
+    artifacts = CoreArtifactPort(core)
+    artifact_id = await artifacts.submit(
+        {
+            "userId": "user-1",
+            "novelId": "novel-1",
+            "taskId": "task-1",
+            "chapterId": "chapter-1",
+            "activeAgent": "设定",
+        },
+        {
+            "type": "propose_updates",
+            "artifactKey": "task-1:sync_lore",
+            "summary": "同步设定",
+            "updates": {"storyBackground": "新增事实"},
+        },
+        "设定同步完成。",
+    )
+    runner = RecordingRunner()
+    executor = CoreGraphAgentExecutor(runner, artifacts)  # type: ignore[arg-type]
+
+    await executor.run(
+        "校验",
+        {
+            "userId": "user-1",
+            "novelId": "novel-1",
+            "taskId": "task-1",
+            "userMessage": "修改设定",
+            "contextMessages": ["核心服务权威写作上下文：完整上下文"],
+            "activeArtifactId": artifact_id,
+            "currentOperation": {
+                "kind": "revise_lore",
+                "primaryAgent": "设定",
+            },
+        },
+    )
+
+    assert runner.requests[0].toolMode == "control_only"
+    assert "当前待审核草案权威内容" in runner.requests[0].contextMessages[-1]
+    assert "新增事实" in runner.requests[0].contextMessages[-1]

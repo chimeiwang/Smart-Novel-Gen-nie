@@ -82,6 +82,10 @@ class ToolGateway:
             )
         return registration.read_only
 
+    @property
+    def registered_names(self) -> frozenset[str]:
+        return frozenset(self._tools)
+
 
 class ToolCallBody(BaseModel):
     model_config = ConfigDict(extra="forbid")

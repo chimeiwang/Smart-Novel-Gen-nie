@@ -39,7 +39,11 @@ class AgentClient:
             novel_id=request.novelId,
         )
         try:
-            response = await self._http.post(path, content=body, headers=signed.headers)
+            response = await self._http.post(
+                path,
+                content=body,
+                headers={**signed.headers, "Content-Type": "application/json"},
+            )
             response.raise_for_status()
             return AgentJobAccepted.model_validate(response.json())
         except (httpx.HTTPError, ValueError) as exc:

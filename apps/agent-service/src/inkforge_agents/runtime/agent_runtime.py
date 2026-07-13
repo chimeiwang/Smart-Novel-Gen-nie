@@ -19,6 +19,15 @@ from .turn_result import (
     empty_usage,
 )
 
+_BUILDER_CONTINUATION_TOOLS = {
+    "append_update_batch",
+    "append_outline_tree",
+    "put_update_text_block",
+    "put_update_item_text_block",
+    "put_update_item_text_blocks",
+    "finish_update_builder",
+}
+
 
 class AgentRuntime:
     def __init__(self, model_runtime: ModelRuntime, registry: ToolRegistry) -> None:
@@ -46,12 +55,18 @@ class AgentRuntime:
         tool_calls: list[RuntimeToolCall] = []
         tool_results: list[RuntimeToolResult] = []
         usage = empty_usage()
+        active_builder_key: str | None = None
 
         for _ in range(max_iterations):
+            available_tools = [
+                tool
+                for tool in exposed_tools
+                if not (active_builder_key is not None and tool.name == "start_update_builder")
+            ]
             response = await self._model_runtime.run_turn(
                 ModelTurnRequest(
                     messages=conversation,
-                    tools=[tool.as_model_tool() for tool in exposed_tools],
+                    tools=[tool.as_model_tool() for tool in available_tools],
                     maxOutputTokens=max_output_tokens,
                 ),
                 context=model_context,
@@ -156,9 +171,64 @@ class AgentRuntime:
                         "tool_validation_error",
                     )
                 if tool.toolKind == "control":
-                    normalized = {"acknowledged": True, "tool": tool.name}
-                    control_events.append({"type": tool.name, **arguments})
-                    terminal = terminal or tool.name in terminal_control_tools
+                    artifact_key = arguments.get("artifactKey")
+                    if tool.name == "start_update_builder":
+                        if active_builder_key is not None:
+                            normalized = {
+                                "acknowledged": False,
+                                "tool": tool.name,
+                                "error": (
+                                    "更新构建器已经开始，请继续追加内容或调用 "
+                                    "finish_update_builder"
+                                ),
+                                "artifactKey": active_builder_key,
+                            }
+                        else:
+                            active_builder_key = str(artifact_key)
+                            control_events.append({"type": tool.name, **arguments})
+                            normalized = {
+                                "acknowledged": True,
+                                "tool": tool.name,
+                                "builderState": "started",
+                                "artifactKey": active_builder_key,
+                                "next": "请追加更新，完成后调用 finish_update_builder",
+                            }
+                    elif tool.name in _BUILDER_CONTINUATION_TOOLS:
+                        if active_builder_key is None:
+                            normalized = {
+                                "acknowledged": False,
+                                "tool": tool.name,
+                                "error": "更新构建器尚未开始，请先调用 start_update_builder",
+                            }
+                        elif artifact_key != active_builder_key:
+                            normalized = {
+                                "acknowledged": False,
+                                "tool": tool.name,
+                                "error": "更新构建器 artifactKey 与当前草稿箱不一致",
+                                "artifactKey": active_builder_key,
+                            }
+                        else:
+                            control_events.append({"type": tool.name, **arguments})
+                            normalized = {
+                                "acknowledged": True,
+                                "tool": tool.name,
+                                "builderState": (
+                                    "finished"
+                                    if tool.name == "finish_update_builder"
+                                    else "building"
+                                ),
+                                "artifactKey": active_builder_key,
+                                "next": (
+                                    "更新构建器已完成"
+                                    if tool.name == "finish_update_builder"
+                                    else "可以继续追加，完成后调用 finish_update_builder"
+                                ),
+                            }
+                            terminal = terminal or tool.name in terminal_control_tools
+                    else:
+                        normalized = {"acknowledged": True, "tool": tool.name}
+                        control_events.append({"type": tool.name, **arguments})
+                        terminal = terminal or tool.name in terminal_control_tools
                 else:
                     try:
                         normalized = await self._registry.execute(tool.name, arguments, context)

@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
+import { AUTH_STATE_PATH } from "./tests/e2e/auth-state";
+
 export default defineConfig({
   testDir: "./tests/e2e",
   fullyParallel: false,
@@ -18,8 +20,19 @@ export default defineConfig({
   },
   projects: [
     {
-      name: "chromium",
+      name: "认证准备",
+      testMatch: /auth\.spec\.ts/,
+      retries: 0,
       use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "chromium",
+      testIgnore: /auth\.spec\.ts/,
+      dependencies: ["认证准备"],
+      use: {
+        ...devices["Desktop Chrome"],
+        storageState: AUTH_STATE_PATH,
+      },
     },
   ],
   outputDir: "output/playwright",

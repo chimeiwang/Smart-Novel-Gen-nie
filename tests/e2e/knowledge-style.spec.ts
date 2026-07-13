@@ -1,9 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-import { createNovelWithApi, openWorkspace, registerWithApi } from "./helpers";
+import { createNovelWithApi, openWorkspace } from "./helpers";
 
 test("用户可以维护设定、大纲、参考资料和文风画像", async ({ page }) => {
-  await registerWithApi(page, "knowledge");
   const identity = await createNovelWithApi(page);
   await openWorkspace(page, identity);
 
@@ -26,10 +25,12 @@ test("用户可以维护设定、大纲、参考资料和文风画像", async ({
   await expect(page.getByText("端到端资料")).toBeVisible();
 
   await page.goto("/styles");
-  await page.getByPlaceholder("文风名称").fill("端到端文风");
+  const styleName = `端到端文风-${Date.now()}`;
+  await page.getByPlaceholder("文风名称").fill(styleName);
   await page.getByRole("button", { name: "创建", exact: true }).click();
-  await expect(page.getByText("端到端文风")).toBeVisible();
-  await page.getByRole("button", { name: "展开" }).first().click();
+  await expect(page.getByText(styleName, { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "收起" }).first()).toBeVisible();
+  await expect(page.locator('input[type="file"]')).toBeVisible();
   await page.locator('input[type="file"]').setInputFiles({
     name: "e2e-style.txt",
     mimeType: "text/plain",

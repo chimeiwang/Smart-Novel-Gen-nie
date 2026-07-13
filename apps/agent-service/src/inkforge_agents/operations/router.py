@@ -47,12 +47,22 @@ async def route_creative_operation(
     user_message: str,
     classifier: OperationClassifier | None = None,
 ) -> OperationRouteResult:
+    if re.search(r"同步.{0,6}设定|维护设定库|提取.{0,12}事实变化", user_message):
+        fallback = create_fallback_operation(user_message)
+        return OperationRouteResult(fallback, False, "同步设定流程已移除，回退为普通问答。")
     command = parse_agent_command(user_message)
     if command is not None:
-        operation = normalize_operation(
-            create_default_operation_for_agent(command, user_message),
-            preserve_primary=True,
-        )
+        explicit_operation = classify_by_explicit_keywords(user_message)
+        if (
+            explicit_operation.kind != "answer_question"
+            and explicit_operation.primaryAgent == command
+        ):
+            operation = normalize_operation(explicit_operation)
+        else:
+            operation = normalize_operation(
+                create_default_operation_for_agent(command, user_message),
+                preserve_primary=True,
+            )
         return OperationRouteResult(operation, True, operation.reasoning)
     if not user_message.strip():
         fallback = create_fallback_operation(user_message)
@@ -63,6 +73,13 @@ async def route_creative_operation(
             if classifier is not None
             else classify_by_explicit_keywords(user_message)
         )
+        if operation.kind == "sync_lore":
+            fallback = create_fallback_operation(user_message)
+            return OperationRouteResult(
+                fallback,
+                False,
+                "同步设定流程已移除，回退为普通问答。",
+            )
         if operation.confidence < 0.5:
             operation = create_fallback_operation(user_message)
         else:
@@ -78,6 +95,8 @@ def normalize_operation(
     *,
     preserve_primary: bool = False,
 ) -> CreativeOperation:
+    if operation.kind == "sync_lore":
+        return create_fallback_operation(operation.userGoal)
     definition = OPERATION_DEFINITIONS[operation.kind]
     return operation.model_copy(
         update={
@@ -98,9 +117,8 @@ def normalize_operation(
 
 def classify_by_explicit_keywords(message: str) -> CreativeOperation:
     rules = [
-        (r"同步.{0,6}设定", "sync_lore"),
-        (r"伏笔", "manage_foreshadowing"),
         (r"章节计划|规划.{0,6}章节|Beat Plan", "plan_chapter"),
+        (r"伏笔", "manage_foreshadowing"),
         (r"改写|重写|润色", "rewrite_scene"),
         (r"续写|写正文|生成.{0,4}正文|写一章", "write_chapter"),
         (r"审核|评审|商业性|追读", "review_chapter"),

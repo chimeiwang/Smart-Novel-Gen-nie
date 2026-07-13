@@ -34,7 +34,6 @@ from .db.session import DatabaseReadiness, configure_database
 from .debug import router as debug_router
 from .errors import (
     PUBLIC_ERROR_RESPONSES,
-    ApiError,
     SafeUnhandledExceptionMiddleware,
     install_exception_handlers,
 )
@@ -77,6 +76,8 @@ from .styles.service import StyleService
 from .styles.storage import StyleStorage
 from .writing.callbacks import router as writing_callback_router
 from .writing.context import WritingContextRepository, WritingContextService
+from .writing.read_tool_service import WritingReadToolService
+from .writing.read_tools import ALL_AGENT_IDS, register_read_tools
 from .writing.reconciler import WritingRunReconciler
 from .writing.repository import WritingRepository
 from .writing.router import router as writing_router
@@ -151,10 +152,11 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
     )
     app.state.lore_service = LoreService(lore_repository)
     app.state.outline_service = OutlineService(outline_repository)
-    app.state.reference_service = ReferenceService(
+    reference_service = ReferenceService(
         reference_repository,
         submitter=RagAgentSubmitter(agent_client) if agent_client else None,
     )
+    app.state.reference_service = reference_service
     app.state.style_service = StyleService(
         style_repository,
         StyleStorage(app.state.settings.uploads_root),
@@ -185,32 +187,15 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
     async def get_writing_context(request: ToolRequest) -> dict[str, object]:
         return await context_service.build(request.user_id, request.task_id)
 
-    async def get_review_artifact(request: ToolRequest) -> dict[str, object]:
-        artifact_id = request.arguments.get("artifactId")
-        if not isinstance(artifact_id, str) or not artifact_id:
-            raise ApiError(
-                status_code=422,
-                code="ARTIFACT_ID_REQUIRED",
-                message="读取草案必须提供 artifactId",
-            )
-        artifact = await review_repository.require_artifact(request.user_id, artifact_id)
-        if artifact.task_id != request.task_id or artifact.novel_id != request.novel_id:
-            raise ApiError(
-                status_code=403,
-                code="ARTIFACT_TASK_MISMATCH",
-                message="待审核草案不属于当前任务",
-            )
-        return {
-            "id": artifact.id,
-            "kind": artifact.kind,
-            "status": artifact.status,
-            "revision": artifact.revision,
-            "payload": artifact.payload,
-        }
-
-    all_agents = {"设定", "剧情", "写作", "校验", "编辑"}
-    tool_gateway.register("get_writing_context", all_agents, True, get_writing_context)
-    tool_gateway.register("get_review_artifact", all_agents, True, get_review_artifact)
+    read_tool_service = WritingReadToolService(
+        context_service,
+        outline_repository,
+        review_repository,
+        reference_service,
+    )
+    app.state.writing_read_tool_service = read_tool_service
+    tool_gateway.register("get_writing_context", ALL_AGENT_IDS, True, get_writing_context)
+    register_read_tools(tool_gateway, read_tool_service)
     app.state.tool_gateway = tool_gateway
     redis = getattr(app.state, "auth_redis", None)
     event_store = (

@@ -17,6 +17,7 @@
 | `WORKFLOW_EVENT_LOG_FORMAT.md` | 人工工作流日志格式 |
 | `BACKLOG.md` | 后续能力备忘，不代表当前承诺 |
 | `specs/` | 后续需求 spec；先写 spec，再执行修改 |
+| `plans/2026-07-13-python-backend-rewrite-handoff.md` | Python 后端重构当前剩余任务与接手入口 |
 
 Agent Service 当前架构见 `../apps/agent-service/AGENTS.md`。
 

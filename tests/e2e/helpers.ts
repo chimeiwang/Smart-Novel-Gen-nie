@@ -7,22 +7,13 @@ type NovelIdentity = {
   chapterId: string;
 };
 
+type OutlineNodeIdentity = {
+  id: string;
+};
+
 export function uniqueUsername(prefix: string): string {
   const suffix = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
   return `${prefix}${suffix}`.slice(0, 32);
-}
-
-export async function registerWithApi(page: Page, prefix = "e2e"): Promise<string> {
-  const username = uniqueUsername(prefix);
-  const response = await page.request.post("/api/v1/auth/register", {
-    data: {
-      username,
-      password: E2E_PASSWORD,
-      confirmPassword: E2E_PASSWORD,
-    },
-  });
-  await expectApiOk(response, "注册测试用户");
-  return username;
 }
 
 export async function createNovelWithApi(
@@ -50,6 +41,48 @@ export async function readWorkspace(page: Page, novelId: string): Promise<Record
   const response = await page.request.get(`/api/v1/novels/${novelId}/workspace`);
   await expectApiOk(response, "读取工作区");
   return (await response.json()) as Record<string, unknown>;
+}
+
+export async function prepareWritingOutlineWithApi(
+  page: Page,
+  identity: NovelIdentity,
+): Promise<void> {
+  const createNode = async (data: Record<string, unknown>): Promise<OutlineNodeIdentity> => {
+    const response = await page.request.post(
+      `/api/v1/novels/${identity.novelId}/outline-nodes`,
+      { data },
+    );
+    await expectApiOk(response, "创建结构化大纲节点");
+    return (await response.json()) as OutlineNodeIdentity;
+  };
+
+  const stage = await createNode({
+    title: "端到端阶段",
+    kind: "stage",
+    status: "planned",
+    order: 1,
+    chapterStartOrder: 1,
+    chapterEndOrder: 1,
+  });
+  const plotUnit = await createNode({
+    title: "端到端情节单元",
+    kind: "plot_unit",
+    status: "planned",
+    order: 1,
+    parentId: stage.id,
+    chapterStartOrder: 1,
+    chapterEndOrder: 1,
+  });
+  await createNode({
+    title: "端到端章节组",
+    kind: "chapter_group",
+    status: "planned",
+    order: 1,
+    parentId: plotUnit.id,
+    linkedChapterId: identity.chapterId,
+    chapterStartOrder: 1,
+    chapterEndOrder: 1,
+  });
 }
 
 export async function expectApiOk(

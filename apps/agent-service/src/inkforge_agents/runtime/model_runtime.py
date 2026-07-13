@@ -89,16 +89,19 @@ class ModelRuntime:
         )
         granted_max = authorization.get("maxOutputTokens")
         grant_token = authorization.get("grantToken")
+        grant_request_id = authorization.get("requestId")
         if not isinstance(granted_max, int) or granted_max < request.maxOutputTokens:
             raise RuntimeError("模型授权输出上限低于本轮请求值")
         if not isinstance(grant_token, str) or not grant_token:
             raise RuntimeError("模型授权缺少 grantToken")
+        if not isinstance(grant_request_id, str) or not grant_request_id:
+            raise RuntimeError("模型授权缺少 requestId")
 
         result = await self._provider.complete_turn(request)
         await self._billing.report(
             context,
             {
-                "requestId": request_id,
+                "requestId": grant_request_id,
                 "taskId": context.taskId,
                 "runId": context.runId,
                 "novelId": context.novelId,
@@ -108,7 +111,7 @@ class ModelRuntime:
                 "completionTokens": result.usage.completionTokens,
                 "totalTokens": result.usage.totalTokens,
             },
-            request_id,
+            grant_request_id,
         )
         self._record(context, request, result)
         return result

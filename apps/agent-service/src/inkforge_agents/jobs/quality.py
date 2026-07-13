@@ -7,6 +7,7 @@ from ..clients.core import RunResource
 from ..queue.repository import QueueJob
 from ..runtime.agent_runner import AgentRunner, AgentRunRequest
 from ..tools.registry import ToolContext
+from .workflow_log import WorkflowLogPort
 
 
 class QualityCorePort(Protocol):
@@ -38,9 +39,16 @@ class RunnerPort(Protocol):
 
 
 class QualityJobHandler:
-    def __init__(self, core: QualityCorePort, runner: RunnerPort | AgentRunner) -> None:
+    def __init__(
+        self,
+        core: QualityCorePort,
+        runner: RunnerPort | AgentRunner,
+        *,
+        workflow_log: WorkflowLogPort | None = None,
+    ) -> None:
         self._core = core
         self._runner = runner
+        self._workflow_log = workflow_log
 
     async def __call__(self, job: QueueJob) -> None:
         if job.kind != "quality":
@@ -54,18 +62,27 @@ class QualityJobHandler:
             taskId=job.taskId,
             runId=job.runId,
         )
-        source_task_id = job.payload.get("sourceTaskId")
-        requested_message = job.payload.get("message")
-        context = await self._core.get_quality_context(
-            resource,
-            check_id,
-            source_task_id if isinstance(source_task_id, str) else None,
-            requested_message if isinstance(requested_message, str) else None,
-        )
-        message = context.get("message") or job.payload.get("message") or "检查本章一致性"
-        if not isinstance(message, str):
-            raise ValueError("质量检查请求无效")
+        if self._workflow_log is not None:
+            self._workflow_log.start_run(
+                run_id=job.runId,
+                task_id=job.taskId,
+                run_kind="质量检查",
+                user_id=job.userId,
+                novel_id=job.novelId,
+                chapter_id=None,
+            )
         try:
+            source_task_id = job.payload.get("sourceTaskId")
+            requested_message = job.payload.get("message")
+            context = await self._core.get_quality_context(
+                resource,
+                check_id,
+                source_task_id if isinstance(source_task_id, str) else None,
+                requested_message if isinstance(requested_message, str) else None,
+            )
+            message = context.get("message") or job.payload.get("message") or "检查本章一致性"
+            if not isinstance(message, str):
+                raise ValueError("质量检查请求无效")
             result = await self._runner.run(
                 AgentRunRequest(
                     agentId="编辑",
@@ -102,5 +119,13 @@ class QualityJobHandler:
                 },
             )
         except Exception as exc:
-            await self._core.fail_quality(resource, check_id, str(exc))
+            try:
+                await self._core.fail_quality(resource, check_id, str(exc))
+            finally:
+                self._finish_log(job.runId, "错误")
             raise
+        self._finish_log(job.runId, "完成")
+
+    def _finish_log(self, run_id: str, status: str) -> None:
+        if self._workflow_log is not None:
+            self._workflow_log.finish_run(run_id, status)

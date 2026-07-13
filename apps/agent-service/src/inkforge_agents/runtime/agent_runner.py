@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -18,6 +18,7 @@ class AgentRunRequest(BaseModel):
     userMessage: str
     contextMessages: list[str] = Field(default_factory=list)
     conversationMessages: list[dict[str, object]] = Field(default_factory=list)
+    toolMode: Literal["all", "control_only"] = "all"
     toolContext: ToolContext
 
     @model_validator(mode="after")
@@ -49,6 +50,8 @@ class AgentRunner:
             agent_id=definition.id,
             capabilities=definition.toolCapabilities,
         )
+        if request.toolMode == "control_only":
+            tools = [tool for tool in tools if tool.toolKind == "control"]
         result = await self._runtime.run(
             messages=messages,
             exposed_tools=tools,

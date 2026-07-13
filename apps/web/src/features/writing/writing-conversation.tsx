@@ -11,7 +11,7 @@ import {
 import { browserApi } from "@/lib/api/browser";
 import { requireApiData } from "@/lib/api/response";
 import type { WritingSseEvent } from "@/shared/contracts/sse-events";
-import { parseSseEvent } from "@/shared/contracts/sse-events";
+import { normalizeSseEventData, parseSseEvent } from "@/shared/contracts/sse-events";
 import type { CreativeOperation } from "@/shared/contracts/creative-operation";
 import {
   getCreativeOperationLabel,
@@ -52,7 +52,6 @@ import {
 import {
   getWritingNextActions,
   WRITING_SHORTCUT_ACTIONS,
-  WRITING_ACTION_PROMPTS,
   type WritingProductAction,
 } from "./product-actions";
 import { shouldPersistOptimisticWritingMessage } from "./message-persistence";
@@ -1854,10 +1853,6 @@ export function WritingConversation({
     if (action.prompt) await runPromptAction(action.prompt);
   };
 
-  const handleSyncRecentLore = async () => {
-    await runPromptAction(WRITING_ACTION_PROMPTS.sync_lore);
-  };
-
   const processStream = async (response: Response, scope: StreamUiScope) => {
     const reader = response.body?.getReader();
     if (!reader) throw new Error("写作事件流没有响应体");
@@ -1878,7 +1873,8 @@ export function WritingConversation({
         const parsedFrame = parseSseFrame(`${frame}\n\n`, sseState);
         if (!parsedFrame) continue;
         const parsed = parsedFrame.data;
-        const event = parseSseEvent(parsed) || (parsed as ExtendedEvent);
+        const event = parseSseEvent(parsed, parsedFrame.event)
+          || (normalizeSseEventData(parsed, parsedFrame.event) as ExtendedEvent);
         handleEvent(event, scope);
       }
     }
@@ -1887,7 +1883,11 @@ export function WritingConversation({
       const parsedFrame = parseSseFrame(`${buffer}\n\n`, sseState);
       if (parsedFrame) {
         const parsed = parsedFrame.data;
-        handleEvent(parseSseEvent(parsed) || (parsed as ExtendedEvent), scope);
+        handleEvent(
+          parseSseEvent(parsed, parsedFrame.event)
+            || (normalizeSseEventData(parsed, parsedFrame.event) as ExtendedEvent),
+          scope,
+        );
       }
     }
 
@@ -3029,7 +3029,6 @@ export function WritingConversation({
               <>
                 {hasWriter && <button onClick={() => handleSendMessage("开始生成正文")}>开始写作</button>}
                 <button onClick={() => handleSendMessage("保存讨论结果")}>保存设定</button>
-                <button onClick={handleSyncRecentLore}>同步设定</button>
               </>
             )}
           </div>

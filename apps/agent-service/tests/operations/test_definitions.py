@@ -12,7 +12,6 @@ def test_all_creative_operations_have_authoritative_definitions() -> None:
         "write_chapter",
         "rewrite_scene",
         "review_chapter",
-        "sync_lore",
         "manage_foreshadowing",
     }
     assert OPERATION_DEFINITIONS["write_chapter"].primaryAgent == "写作"

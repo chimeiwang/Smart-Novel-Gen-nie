@@ -4,7 +4,6 @@ export type WritingProductActionKind =
   | "write_draft"
   | "review_chapter"
   | "consistency_check"
-  | "sync_lore"
   | "rewrite_scene"
   | "ooc_check";
 
@@ -32,8 +31,6 @@ export const WRITING_ACTION_PROMPTS: Record<Exclude<WritingProductActionKind, "o
     "@编辑 请从网文追读角度审核当前章节，重点看钩子、爽点、节奏、章节尾钩和读者承诺是否成立，并给出可执行修改建议。",
   consistency_check:
     "@校验 请检查当前章节正文与角色设定、世界规则、大纲和伏笔是否冲突，重点指出 OOC 和逻辑断裂。",
-  sync_lore:
-    "@设定 根据当前章节及最近几章正文，维护设定库。请只提取明确发生的事实变化：优先新增角色经历和更新当前状态；不要用最近几章的临时描写覆盖角色性格、背景、外貌、身份等长期设定。",
   rewrite_scene:
     "@写作 请找出当前章节最需要加强的一场戏并重写，重点补足目标、阻力、转折、代价和余波。重写内容进入待审核草案。",
   ooc_check:
@@ -71,12 +68,6 @@ export const WRITING_SHORTCUT_ACTIONS: WritingProductAction[] = [
     description: "校验角色一致性",
     prompt: WRITING_ACTION_PROMPTS.ooc_check,
   },
-  {
-    kind: "sync_lore",
-    label: "同步设定",
-    description: "提取事实变化",
-    prompt: WRITING_ACTION_PROMPTS.sync_lore,
-  },
 ];
 
 export function getWritingNextActions(snapshot: WritingNextActionSnapshot): WritingProductAction[] {
@@ -106,10 +97,10 @@ export function getWritingNextActions(snapshot: WritingNextActionSnapshot): Writ
         });
   } else if (snapshot.chapterStatus === "completed") {
     actions.push({
-      kind: "sync_lore",
-      label: "同步设定",
-      description: "沉淀本章事实",
-      prompt: WRITING_ACTION_PROMPTS.sync_lore,
+      kind: "review_chapter",
+      label: "审核追读",
+      description: "复盘已完成章节",
+      prompt: WRITING_ACTION_PROMPTS.review_chapter,
     });
   } else if (!snapshot.hasApprovedBeatPlan) {
     actions.push({
@@ -131,15 +122,6 @@ export function getWritingNextActions(snapshot: WritingNextActionSnapshot): Writ
       label: "审核追读",
       description: "找出下一轮修改点",
       prompt: WRITING_ACTION_PROMPTS.review_chapter,
-    });
-  }
-
-  if (!actions.some((action) => action.kind === "sync_lore")) {
-    actions.push({
-      kind: "sync_lore",
-      label: "同步设定",
-      description: "更新角色经历/状态",
-      prompt: WRITING_ACTION_PROMPTS.sync_lore,
     });
   }
 

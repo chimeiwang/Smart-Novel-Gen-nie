@@ -30,6 +30,15 @@ def resolve_builder_artifact(
         if not isinstance(artifact_key, str) or not artifact_key:
             continue
         if event_type == "start_update_builder":
+            existing = builders.get(artifact_key)
+            if existing is not None:
+                if event.get("summary"):
+                    existing["summary"] = event["summary"]
+                if event.get("reviewerAgent") is not None:
+                    existing["reviewerAgent"] = event["reviewerAgent"]
+                if event.get("submitForReview") is not None:
+                    existing["submitForReview"] = event["submitForReview"]
+                continue
             builders[artifact_key] = {
                 "summary": event.get("summary"),
                 "reviewerAgent": event.get("reviewerAgent"),

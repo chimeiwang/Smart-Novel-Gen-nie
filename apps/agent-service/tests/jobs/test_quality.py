@@ -36,8 +36,12 @@ class Core:
 
 
 class Runner:
+    def __init__(self, workflow_log: WorkflowLog) -> None:
+        self._workflow_log = workflow_log
+
     async def run(self, request: object):
         del request
+        assert self._workflow_log.entries[0][0] == "开始"
 
         class Result:
             visibleContent = "一致性良好"
@@ -53,10 +57,22 @@ class Runner:
         return Result()
 
 
+class WorkflowLog:
+    def __init__(self) -> None:
+        self.entries: list[tuple[str, object]] = []
+
+    def start_run(self, **metadata: object) -> None:
+        self.entries.append(("开始", metadata))
+
+    def finish_run(self, run_id: str, status: str) -> None:
+        self.entries.append(("结束", (run_id, status)))
+
+
 @pytest.mark.asyncio
 async def test_quality_job_requires_structured_report_and_returns_visible_result() -> None:
     core = Core()
-    handler = QualityJobHandler(core, Runner())
+    workflow_log = WorkflowLog()
+    handler = QualityJobHandler(core, Runner(workflow_log), workflow_log=workflow_log)
     job = QueueJob(
         jobId="quality-check-1",
         kind="quality",
@@ -77,3 +93,17 @@ async def test_quality_job_requires_structured_report_and_returns_visible_result
         "qualityGate": "pass",
         "rewriteBrief": None,
     }
+    assert workflow_log.entries == [
+        (
+            "开始",
+            {
+                "run_id": "quality-check-1",
+                "task_id": "check-1",
+                "run_kind": "质量检查",
+                "user_id": "user-1",
+                "novel_id": "novel-1",
+                "chapter_id": None,
+            },
+        ),
+        ("结束", ("quality-check-1", "完成")),
+    ]

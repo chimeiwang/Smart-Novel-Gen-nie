@@ -47,6 +47,15 @@ def test_script_generates_two_pkcs8_private_keys_and_public_jwks(tmp_path: Path)
         assert jwks["keys"][0]["alg"] == "EdDSA"
         assert "d" not in jwks["keys"][0]
 
+    core_jwks = json.loads(
+        (output_dir / "core-to-agent-jwks.json").read_text(encoding="utf-8")
+    )
+    agent_jwks = json.loads(
+        (output_dir / "agent-to-core-jwks.json").read_text(encoding="utf-8")
+    )
+    assert core_jwks["keys"][0]["kid"] == "core-api-v1"
+    assert agent_jwks["keys"][0]["kid"] == "agent-service-v1"
+
 
 def test_script_refuses_to_overwrite_and_output_never_contains_private_material(
     tmp_path: Path,

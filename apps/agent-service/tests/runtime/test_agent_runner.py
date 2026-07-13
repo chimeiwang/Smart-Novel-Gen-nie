@@ -63,8 +63,44 @@ async def test_runner_builds_prompt_and_exposes_only_agent_tools() -> None:
     assert "propose_updates" not in tool_names
 
 
+@pytest.mark.asyncio
+async def test_runner_can_limit_operation_to_control_tools() -> None:
+    provider = CapturingProvider()
+    registry = build_default_registry()
+    runner = AgentRunner(AgentRuntime(ModelRuntime(provider), registry), registry)
+
+    await runner.run(
+        AgentRunRequest(
+            agentId="设定",
+            userMessage="同步设定",
+            contextMessages=["核心服务权威写作上下文：完整上下文"],
+            toolMode="control_only",
+            toolContext=ToolContext(
+                userId="user-1",
+                novelId="novel-1",
+                taskId="task-1",
+                runId="run-1",
+                agentId="设定",
+            ),
+        )
+    )
+
+    assert provider.request is not None
+    tool_names = {tool.name for tool in provider.request.tools}
+    assert "start_update_builder" in tool_names
+    assert "finish_update_builder" in tool_names
+    assert "get_recent_chapters" not in tool_names
+    assert "list_characters_summary" not in tool_names
+
+
 def test_all_five_agents_use_single_output_protocol() -> None:
     assert set(AGENT_DEFINITIONS) == {"设定", "剧情", "写作", "校验", "编辑"}
     assert {definition.outputMode for definition in AGENT_DEFINITIONS.values()} == {
         "paragraph_text_with_control_tools"
     }
+
+
+def test_lore_agent_stops_after_submitting_updates() -> None:
+    assert AGENT_DEFINITIONS["设定"].terminalControlTools == frozenset(
+        {"propose_updates", "finish_update_builder"}
+    )

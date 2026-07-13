@@ -8,7 +8,9 @@ from pydantic import JsonValue
 from ..clients.core import RunResource
 from ..graph.snapshots import deserialize_snapshot, serialize_snapshot, to_typescript_snapshot
 from ..graph.state import GraphState, create_initial_state
+from ..queue.consumer import NonRetryableJobError
 from ..queue.repository import QueueJob
+from .workflow_log import WorkflowLogPort
 
 
 class CoreClientPort(Protocol):
@@ -58,23 +60,6 @@ class CoreClientPort(Protocol):
 
 class GraphPort(Protocol):
     async def ainvoke(self, value: GraphState) -> dict[str, Any]: ...
-
-
-class WorkflowLogPort(Protocol):
-    def start_run(
-        self,
-        *,
-        run_id: str,
-        task_id: str,
-        run_kind: str,
-        user_id: str,
-        novel_id: str,
-        chapter_id: str | None,
-    ) -> object: ...
-
-    def record_state(self, run_id: str, node: str, changes: dict[str, Any]) -> None: ...
-
-    def finish_run(self, run_id: str, status: str) -> object: ...
 
 
 class WritingJobHandler:
@@ -132,20 +117,44 @@ class WritingJobHandler:
         except Exception as exc:
             self._record_state(job.runId, "运行异常", {"错误": str(exc) or "智能体运行失败"})
             self._finish_log(job.runId, "错误")
-            await self._core.fail(
-                resource,
-                sequence=sequence + 1,
-                code="AGENT_RUN_FAILED",
-                message=str(exc) or "智能体运行失败",
-                recoverable=True,
-            )
-            raise
+            try:
+                await self._core.fail(
+                    resource,
+                    sequence=sequence + 1,
+                    code="AGENT_RUN_FAILED",
+                    message=str(exc) or "智能体运行失败",
+                    recoverable=True,
+                )
+            finally:
+                raise NonRetryableJobError("写作运行失败已上报核心服务") from exc
 
         stable = cast(
             GraphState,
             {key: value for key, value in result.items() if key != "__interrupt__"},
         )
-        stable["eventSequence"] = sequence + 1
+        interrupt_artifact_id = _artifact_id_from_interrupt(result.get("__interrupt__"))
+        if interrupt_artifact_id is not None:
+            stable["activeArtifactId"] = interrupt_artifact_id
+            stable["artifactStatus"] = "awaiting_user"
+            stable["phase"] = "waiting_user"
+            stable["operationStep"] = "await_user_decision"
+            stable["operationStage"] = "等待用户决策"
+        waiting_for_user = "__interrupt__" in result or stable.get("phase") == "waiting_user"
+        artifact_id = stable.get("activeArtifactId")
+        checkpoint_sequence = sequence + 1
+        if waiting_for_user and isinstance(artifact_id, str) and artifact_id:
+            active_agent = stable.get("activeAgent")
+            await self._core.send_event(
+                resource,
+                sequence=checkpoint_sequence,
+                event="artifact_awaiting_user_approval",
+                data={
+                    "agentId": active_agent if isinstance(active_agent, str) else "系统",
+                    "artifactId": artifact_id,
+                },
+            )
+            checkpoint_sequence += 1
+        stable["eventSequence"] = checkpoint_sequence
         checkpoint = to_typescript_snapshot(serialize_snapshot(stable))
         self._record_state(
             job.runId,
@@ -154,10 +163,23 @@ class WritingJobHandler:
         )
         await self._core.save_checkpoint(
             resource,
-            sequence=sequence + 1,
+            sequence=checkpoint_sequence,
             checkpoint=checkpoint,
         )
-        if checkpoint.get("phase") == "awaiting_user_review" or "__interrupt__" in result:
+        if stable.get("phase") == "error":
+            message = str(stable.get("errorMessage") or "智能体运行失败")
+            self._finish_log(job.runId, "错误")
+            try:
+                await self._core.fail(
+                    resource,
+                    sequence=checkpoint_sequence + 1,
+                    code="AGENT_RUN_FAILED",
+                    message=message,
+                    recoverable=True,
+                )
+            finally:
+                raise NonRetryableJobError("写作运行失败已上报核心服务")
+        if waiting_for_user:
             self._finish_log(job.runId, "等待用户确认")
             return
         await self._core.complete(
@@ -224,3 +246,16 @@ class WritingJobHandler:
             + json.dumps(context, ensure_ascii=False, separators=(",", ":"))
         ]
         return state, self._parent_graph
+
+
+def _artifact_id_from_interrupt(interrupts: object) -> str | None:
+    if not isinstance(interrupts, (list, tuple)):
+        return None
+    for interrupt_value in interrupts:
+        value = getattr(interrupt_value, "value", interrupt_value)
+        if not isinstance(value, dict) or value.get("type") != "artifact_review":
+            continue
+        artifact_id = value.get("artifactId")
+        if isinstance(artifact_id, str) and artifact_id:
+            return artifact_id
+    return None

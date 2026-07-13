@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from pydantic import JsonValue
 
@@ -13,8 +13,13 @@ from ..tools.registry import ToolContext
 
 
 class CoreToolGateway:
-    def __init__(self, core: CoreServiceClient) -> None:
+    def __init__(
+        self,
+        core: CoreServiceClient,
+        embeddings: QueryEmbeddingPort | None = None,
+    ) -> None:
         self._core = core
+        self._embeddings = embeddings
 
     async def execute(
         self,
@@ -22,6 +27,15 @@ class CoreToolGateway:
         context: ToolContext,
         arguments: dict[str, object],
     ) -> dict[str, object]:
+        forwarded = dict(arguments)
+        if tool_name == "semantic_search_references" and self._embeddings is not None:
+            query = forwarded.get("query")
+            if not isinstance(query, str) or not query.strip():
+                raise ValueError("语义检索必须提供非空 query")
+            vectors = await self._embeddings.embed([query])
+            if len(vectors) != 1:
+                raise RuntimeError("嵌入服务返回数量与查询数量不一致")
+            forwarded["query_embedding"] = vectors[0]
         return await self._core.call_tool(
             RunResource(
                 userId=context.userId,
@@ -31,8 +45,12 @@ class CoreToolGateway:
             ),
             context.agentId,
             tool_name,
-            cast(dict[str, JsonValue], arguments),
+            cast(dict[str, JsonValue], forwarded),
         )
+
+
+class QueryEmbeddingPort(Protocol):
+    async def embed(self, texts: list[str]) -> list[list[float]]: ...
 
 
 @dataclass(slots=True)
@@ -111,6 +129,14 @@ class CoreArtifactPort:
             idempotency_key=_idempotency(record.resource.runId, payload),
         )
 
+    def review_context(self, artifact_id: str) -> dict[str, Any]:
+        record = self._require_record(artifact_id)
+        return {
+            "id": artifact_id,
+            "revision": record.revision,
+            **dict(record.request),
+        }
+
     async def _save(
         self,
         state: dict[str, Any],
@@ -127,7 +153,7 @@ class CoreArtifactPort:
             "taskId": resource.taskId,
             "novelId": resource.novelId,
             "chapterId": state.get("chapterId"),
-            "workflowRunId": resource.runId,
+            "workflowRunId": None,
             "artifactKey": event.get("artifactKey"),
             "kind": kind,
             "status": status,
@@ -169,21 +195,35 @@ class CoreGraphAgentExecutor:
             runId=_required_text(state, "taskId"),
             agentId=agent_id,
         )
+        context_messages = [str(item) for item in state.get("contextMessages", [])]
+        artifact_context: dict[str, Any] | None = None
+        artifact_id = state.get("activeArtifactId")
+        if isinstance(artifact_id, str):
+            try:
+                artifact_context = self._artifacts.review_context(artifact_id)
+            except RuntimeError:
+                artifact_context = None
+        if artifact_context is not None:
+            context_messages.append(
+                "当前待审核草案权威内容："
+                + json.dumps(artifact_context, ensure_ascii=False, separators=(",", ":"))
+                + "\n读取工具不可用，请直接审阅以上草案并调用 submit_evaluation。"
+            )
         result = await self._runner.run(
             AgentRunRequest(
                 agentId=cast(Any, agent_id),
                 userMessage=_required_text(state, "userMessage"),
-                contextMessages=[str(item) for item in state.get("contextMessages", [])],
+                contextMessages=context_messages,
                 conversationMessages=[
                     dict(item)
                     for item in state.get("conversationHistory", [])
                     if isinstance(item, dict)
                 ],
+                toolMode=("control_only" if artifact_context is not None else "all"),
                 toolContext=context,
             )
         )
         payload = result.model_dump()
-        artifact_id = state.get("activeArtifactId")
         if isinstance(artifact_id, str):
             for event in payload.get("controlEvents", []):
                 if isinstance(event, dict) and event.get("type") == "submit_evaluation":

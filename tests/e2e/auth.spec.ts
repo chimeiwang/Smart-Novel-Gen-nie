@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import { AUTH_STATE_PATH } from "./auth-state";
 import { E2E_PASSWORD, uniqueUsername } from "./helpers";
 
 test("用户可以注册、退出并重新登录", async ({ page }) => {
@@ -21,4 +22,5 @@ test("用户可以注册、退出并重新登录", async ({ page }) => {
   await page.getByLabel("密码").fill(E2E_PASSWORD);
   await page.getByRole("button", { name: "登录", exact: true }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
+  await page.context().storageState({ path: AUTH_STATE_PATH });
 });

@@ -191,12 +191,35 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
             provider = cast(ModelProvider | None, app.state.model_provider)
             queue = cast(RedisRunQueue | None, app.state.run_queue)
             if provider is not None and queue is not None and app.state.queue_consumer is None:
+                embedding_provider: OpenAIEmbeddingProvider | None = None
+                if (
+                    settings.rag_embedding_api_key is not None
+                    and settings.rag_embedding_base_url
+                    and settings.rag_embedding_model
+                ):
+                    embedding_base = settings.rag_embedding_base_url.rstrip("/")
+                    if not embedding_base.endswith("/v1"):
+                        embedding_base += "/v1"
+                    embedding_http = httpx.AsyncClient(
+                        base_url=embedding_base,
+                        headers={
+                            "Authorization": "Bearer "
+                            + settings.rag_embedding_api_key.get_secret_value()
+                        },
+                        timeout=httpx.Timeout(30, connect=3),
+                        limits=httpx.Limits(max_connections=2, max_keepalive_connections=1),
+                    )
+                    app.state.embedding_http = embedding_http
+                    embedding_provider = OpenAIEmbeddingProvider(
+                        embedding_http,
+                        model=settings.rag_embedding_model,
+                    )
                 model_runtime = ModelRuntime(
                     provider,
                     billing=CoreBillingGateway(core),
                     observer=WorkflowModelObserver(workflow_log),
                 )
-                gateway = CoreToolGateway(core)
+                gateway = CoreToolGateway(core, embedding_provider)
                 registry = build_default_registry(gateway)
                 runner = AgentRunner(AgentRuntime(model_runtime, registry), registry)
                 artifacts = CoreArtifactPort(core)
@@ -217,33 +240,15 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                 handlers["portrait"] = PortraitJobHandler(
                     core,
                     ModelPortraitGenerator(model_runtime),
+                    workflow_log=workflow_log,
                 )
-                handlers["quality"] = QualityJobHandler(core, runner)
-                if (
-                    settings.rag_embedding_api_key is not None
-                    and settings.rag_embedding_base_url
-                    and settings.rag_embedding_model
-                ):
-                    embedding_base = settings.rag_embedding_base_url.rstrip("/")
-                    if not embedding_base.endswith("/v1"):
-                        embedding_base += "/v1"
-                    embedding_http = httpx.AsyncClient(
-                        base_url=embedding_base,
-                        headers={
-                            "Authorization": "Bearer "
-                            + settings.rag_embedding_api_key.get_secret_value()
-                        },
-                        timeout=httpx.Timeout(30, connect=3),
-                        limits=httpx.Limits(max_connections=2, max_keepalive_connections=1),
-                    )
-                    app.state.embedding_http = embedding_http
-                    handlers["rag"] = RagJobHandler(
-                        core,
-                        OpenAIEmbeddingProvider(
-                            embedding_http,
-                            model=settings.rag_embedding_model,
-                        ),
-                    )
+                handlers["quality"] = QualityJobHandler(
+                    core,
+                    runner,
+                    workflow_log=workflow_log,
+                )
+                if embedding_provider is not None:
+                    handlers["rag"] = RagJobHandler(core, embedding_provider)
                 app.state.queue_consumer = QueueConsumer(queue, handlers)
     except (OSError, ValueError) as exc:
         app.state.runtime_error = str(exc)

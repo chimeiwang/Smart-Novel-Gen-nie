@@ -63,3 +63,42 @@ def test_builder_merges_outline_tree_and_full_text_block() -> None:
     ]
     assert adjustments[1]["parentKey"] == adjustments[0]["clientKey"]
     assert adjustments[2]["parentKey"] == adjustments[1]["clientKey"]
+
+
+def test_builder_treats_repeated_start_as_idempotent() -> None:
+    artifact = resolve_builder_artifact(
+        [
+            {
+                "type": "start_update_builder",
+                "artifactKey": "task-1:sync_lore",
+                "summary": "同步设定",
+            },
+            {
+                "type": "append_update_batch",
+                "artifactKey": "task-1:sync_lore",
+                "updates": {"storyBackground": "第一批事实"},
+            },
+            {
+                "type": "start_update_builder",
+                "artifactKey": "task-1:sync_lore",
+                "summary": "继续同步设定",
+            },
+            {
+                "type": "append_update_batch",
+                "artifactKey": "task-1:sync_lore",
+                "updates": {"worldSetting": "第二批事实"},
+            },
+            {
+                "type": "finish_update_builder",
+                "artifactKey": "task-1:sync_lore",
+                "summary": "同步完成",
+            },
+        ],
+        "设定同步完成。",
+    )
+
+    assert artifact is not None
+    assert artifact["updates"] == {
+        "storyBackground": "第一批事实",
+        "worldSetting": "第二批事实",
+    }

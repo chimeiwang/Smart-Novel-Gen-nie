@@ -1,89 +1,27 @@
 from __future__ import annotations
 
-from typing import Literal, Self
-
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from inkforge_contracts.read_tools import (
+    ArtifactIdArgs,
+    ArtifactListArgs,
+    CharacterNameArgs,
+    EmptyArgs,
+    FactionNameArgs,
+    ForeshadowingNameArgs,
+    ItemNameArgs,
+    KeywordArgs,
+    LocationNameArgs,
+    NovelInfoArgs,
+    OutlineNodeArgs,
+    OutlineSummaryArgs,
+    RecentChapterArgs,
+    ReferenceSearchArgs,
+    SimilarLoreArgs,
+    TermArgs,
+)
+from pydantic import BaseModel
 
 from .permissions import read_only_permission
 from .registry import ToolDefinition, ToolGateway
-
-
-class StrictArgs(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class EmptyArgs(StrictArgs):
-    pass
-
-
-class NovelInfoArgs(StrictArgs):
-    include_full_sections: bool | None = None
-
-
-class CharacterNameArgs(StrictArgs):
-    character_name: str = Field(min_length=1)
-
-
-class FactionNameArgs(StrictArgs):
-    faction_name: str = Field(min_length=1)
-
-
-class LocationNameArgs(StrictArgs):
-    location_name: str = Field(min_length=1)
-
-
-class ItemNameArgs(StrictArgs):
-    item_name: str = Field(min_length=1)
-
-
-class TermArgs(StrictArgs):
-    term: str = Field(min_length=1)
-
-
-class KeywordArgs(StrictArgs):
-    keyword: str = Field(min_length=1)
-
-
-class SimilarLoreArgs(KeywordArgs):
-    threshold: float | None = Field(default=None, ge=0, le=1)
-
-
-class OutlineSummaryArgs(StrictArgs):
-    scope: Literal["current_chapter", "tree_index"] | None = None
-    include_full_summary: bool | None = None
-
-
-class OutlineNodeArgs(StrictArgs):
-    node_id: str | None = Field(default=None, min_length=1)
-    node_title: str | None = Field(default=None, min_length=1)
-
-    @model_validator(mode="after")
-    def require_locator(self) -> Self:
-        if not self.node_id and not self.node_title:
-            raise ValueError("node_id 或 node_title 至少提供一个")
-        return self
-
-
-class ForeshadowingNameArgs(StrictArgs):
-    foreshadowing_name: str = Field(min_length=1)
-
-
-class RecentChapterArgs(StrictArgs):
-    count: int | None = Field(default=None, ge=1, le=5)
-
-
-class ArtifactListArgs(StrictArgs):
-    status: Literal["draft", "under_review", "awaiting_user", "applying", "applied"] | None = None
-    kind: str | None = None
-
-
-class ArtifactIdArgs(StrictArgs):
-    artifact_id: str = Field(min_length=1)
-
-
-class ReferenceSearchArgs(StrictArgs):
-    query: str = Field(min_length=1)
-    topK: int | None = Field(default=None, ge=1, le=20)
 
 
 def read_tools(gateway: ToolGateway) -> list[ToolDefinition]:

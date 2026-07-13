@@ -155,6 +155,68 @@ async def test_runtime_captures_control_events_in_model_order() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_constrains_update_builder_lifecycle() -> None:
+    provider = ScriptedProvider(
+        [
+            turn(
+                "开始整理",
+                (
+                    "call-1",
+                    "start_update_builder",
+                    {"artifactKey": "task-1:sync_lore", "summary": "同步设定"},
+                ),
+            ),
+            turn(
+                "重复开始",
+                (
+                    "call-2",
+                    "start_update_builder",
+                    {"artifactKey": "task-1:sync_lore", "summary": "同步设定"},
+                ),
+            ),
+            turn(
+                "整理完成",
+                (
+                    "call-3",
+                    "append_update_batch",
+                    {
+                        "artifactKey": "task-1:sync_lore",
+                        "updates": {"storyBackground": "新增事实"},
+                    },
+                ),
+                (
+                    "call-4",
+                    "finish_update_builder",
+                    {"artifactKey": "task-1:sync_lore", "summary": "同步设定"},
+                ),
+            ),
+        ]
+    )
+    registry = build_default_registry(RecordingGateway())
+    runtime = AgentRuntime(ModelRuntime(provider), registry)
+
+    result = await runtime.run(
+        messages=[{"role": "user", "content": "同步设定"}],
+        exposed_tools=registry.for_agent(
+            agent_id="设定",
+            capabilities={"control.builder"},
+        ),
+        context=context(),
+        terminal_control_tools={"finish_update_builder"},
+    )
+
+    assert "start_update_builder" not in {
+        tool.name for tool in provider.requests[1].tools
+    }
+    assert [event["type"] for event in result.controlEvents] == [
+        "start_update_builder",
+        "append_update_batch",
+        "finish_update_builder",
+    ]
+    assert result.finishReason == "terminal_control_tool"
+
+
+@pytest.mark.asyncio
 async def test_runtime_rejects_unexposed_tool_and_invalid_arguments() -> None:
     registry = build_default_registry(RecordingGateway())
     unauthorized = AgentRuntime(

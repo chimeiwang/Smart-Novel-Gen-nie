@@ -35,6 +35,7 @@ AGENT_DEFINITIONS: dict[str, AgentDefinition] = {
         description="讨论、评价、创建和维护小说设定。",
         systemPrompt=LORE_SYSTEM_PROMPT,
         toolCapabilities=AGENT_CAPABILITIES["设定"],
+        terminalControlTools=frozenset({"propose_updates", "finish_update_builder"}),
     ),
     "剧情": AgentDefinition(
         id="剧情",
