@@ -53,6 +53,7 @@ grep -Eq '^DATABASE_URL=.*@host\.docker\.internal([:/?]|$)' .env || {
   echo ".env 的 DATABASE_URL 未指向宿主机数据库网关" >&2
   exit 1
 }
+[ -x infra/secrets ] || { echo "部署用户无法检查服务密钥目录" >&2; exit 1; }
 for key_file in \
   core-to-agent-private.pem \
   core-to-agent-jwks.json \

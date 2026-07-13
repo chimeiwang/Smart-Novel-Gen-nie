@@ -145,6 +145,8 @@ def test_remote_deploy_requires_server_configuration_and_never_builds() -> None:
     assert 'grep -q \'host.docker.internal\' "$compose_file"' in source
     assert '[ -r .env ]' in source
     assert '部署用户无法读取 .env' in source
+    assert '[ -x infra/secrets ]' in source
+    assert "部署用户无法检查服务密钥目录" in source
     assert 'max_fetch_attempts="3"' in source
     assert '[ "$fetch_attempt" -lt "$max_fetch_attempts" ]' in source
     assert "Git 获取连续失败" in source
