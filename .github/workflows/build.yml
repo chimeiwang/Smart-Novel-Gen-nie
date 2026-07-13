@@ -63,7 +63,25 @@ jobs:
         run: npm run test:web
 
       - name: Test Python workspace
-        run: uv run pytest
+        shell: bash
+        run: |
+          set +e
+          uv run pytest -q 2>&1 | tee pytest.log
+          test_status=${PIPESTATUS[0]}
+          if [ "$test_status" -ne 0 ]; then
+            {
+              echo "## Python 测试失败"
+              echo '```text'
+              tail -n 200 pytest.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            annotation="$(tail -n 80 pytest.log)"
+            annotation="${annotation//'%'/'%25'}"
+            annotation="${annotation//$'\n'/'%0A'}"
+            annotation="${annotation//$'\r'/'%0D'}"
+            echo "::error title=Python 测试失败::$annotation"
+          fi
+          exit "$test_status"
 
       - name: Ruff
         run: uv run ruff check .

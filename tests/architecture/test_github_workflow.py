@@ -59,6 +59,14 @@ def test_api_generator_selects_uv_command_for_each_platform() -> None:
     assert 'execFileSync(uvCommand, uvArgs' in source
 
 
+def test_python_failures_are_published_to_the_workflow_summary() -> None:
+    source = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "pytest.log" in source
+    assert "GITHUB_STEP_SUMMARY" in source
+    assert "::error title=Python 测试失败::" in source
+
+
 def test_remote_deploy_requires_server_configuration_and_never_builds() -> None:
     source = DEPLOY_SCRIPT.read_text(encoding="utf-8")
 
