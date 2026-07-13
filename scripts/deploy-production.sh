@@ -31,6 +31,7 @@ remote_sha="$(git rev-parse "refs/remotes/origin/$BRANCH")"
 git reset --hard "$DEPLOY_SHA"
 
 [ -f .env ] || { echo "缺少 .env" >&2; exit 1; }
+[ -r .env ] || { echo "部署用户无法读取 .env" >&2; exit 1; }
 grep -q 'host.docker.internal' "$compose_file" || {
   echo "生产编排未配置宿主机数据库网关" >&2
   exit 1
