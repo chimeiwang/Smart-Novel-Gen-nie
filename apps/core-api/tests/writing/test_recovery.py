@@ -5,7 +5,6 @@ from datetime import datetime, timedelta
 
 import pytest
 from inkforge_core.errors import ApiError
-from inkforge_core.writing.records import TaskRecord
 from inkforge_core.writing.recovery import (
     InvalidGraphSnapshotError,
     TaskCandidate,
@@ -13,6 +12,7 @@ from inkforge_core.writing.recovery import (
     select_recovery_state,
     validate_resume_session_binding,
 )
+from inkforge_core.writing.schemas import ResumeWritingRunRequest, ResumeWritingRunResponse
 from inkforge_core.writing.tasks import WritingTaskService
 
 
@@ -92,86 +92,82 @@ def test_resume_requires_exact_explicit_session_binding() -> None:
         validate_resume_session_binding("session-1", "session-2")
 
 
-class TerminalTaskRepository:
-    async def require_task(self, user_id: str, task_id: str) -> TaskRecord:
-        return TaskRecord(
-            id=task_id,
-            user_id=user_id,
-            novel_id="novel-1",
-            chapter_id="chapter-1",
-            writing_session_id="session-1",
-            phase="completed",
-            graph_state_json=None,
+class TerminalCommandRepository:
+    async def create_resume_with_message(
+        self, user_id: str, task_id: str, request: ResumeWritingRunRequest
+    ) -> ResumeWritingRunResponse:
+        del user_id, task_id, request
+        raise ApiError(
+            status_code=409,
+            code="WRITING_TASK_TERMINAL",
+            message="已完成或失败的任务不能继续恢复",
         )
 
 
 @pytest.mark.asyncio
 async def test_completed_task_cannot_resume_even_before_queue_is_connected() -> None:
-    service = WritingTaskService(TerminalTaskRepository(), submitter=None)
+    service = WritingTaskService(TerminalCommandRepository(), dispatcher=None)
 
     with pytest.raises(ApiError) as error:
-        await service.resume("user-1", "task-1", "session-1")
+        await service.resume(
+            "user-1",
+            "task-1",
+            ResumeWritingRunRequest(
+                clientRequestId="request-00000001",
+                writingSessionId="session-1",
+            ),
+        )
 
     assert error.value.status_code == 409
 
 
-class ResumableTaskRepository:
+class DurableCommandRepository:
     def __init__(self) -> None:
-        self.messages: list[tuple[str, str, str, str, str | None]] = []
+        self.requests: list[ResumeWritingRunRequest] = []
 
-    async def require_task(self, user_id: str, task_id: str) -> TaskRecord:
-        return TaskRecord(
-            id=task_id,
-            user_id=user_id,
-            novel_id="novel-1",
-            chapter_id="chapter-1",
-            writing_session_id="session-1",
-            phase="awaiting_user_review",
-            graph_state_json=_snapshot(),
+    async def create_resume_with_message(
+        self, user_id: str, task_id: str, request: ResumeWritingRunRequest
+    ) -> ResumeWritingRunResponse:
+        assert user_id == "user-1"
+        assert task_id == "task-1"
+        self.requests.append(request)
+        return ResumeWritingRunResponse(
+            accepted=True,
+            taskId=task_id,
+            commandId="command-1",
+            commandStatus="pending",
         )
 
-    async def persist_workflow_message(
-        self,
-        task_id: str,
-        *,
-        role: str,
-        content: str,
-        event_type: str,
-        agent_id: str | None = None,
-    ) -> None:
-        self.messages.append((task_id, role, content, event_type, agent_id))
-
-
-class RecordingSubmitter:
+class FailingKickDispatcher:
     def __init__(self) -> None:
-        self.resume_input: dict[str, object] | None = None
+        self.kicks = 0
 
-    async def submit(
-        self,
-        task: TaskRecord,
-        *,
-        resume: bool,
-        resume_input: dict[str, object] | None = None,
-    ) -> None:
-        assert task.id == "task-1"
-        assert resume is True
-        self.resume_input = resume_input
+    async def run_once(self) -> int:
+        self.kicks += 1
+        raise RuntimeError("即时投递不可用")
 
 
 @pytest.mark.asyncio
-async def test_resume_persists_visible_user_message_before_queue_submission() -> None:
-    repository = ResumableTaskRepository()
-    submitter = RecordingSubmitter()
-    service = WritingTaskService(repository, submitter)
+async def test_resume_is_durable_when_immediate_dispatch_fails() -> None:
+    repository = DurableCommandRepository()
+    dispatcher = FailingKickDispatcher()
+    service = WritingTaskService(repository, dispatcher)
 
-    await service.resume(
+    response = await service.resume(
         "user-1",
         "task-1",
-        "session-1",
-        {"userMessage": "请继续说明冲突设计。"},
+        ResumeWritingRunRequest(
+            clientRequestId="request-00000001",
+            writingSessionId="session-1",
+            userMessage="请继续说明冲突设计。",
+        ),
     )
 
-    assert repository.messages == [
-        ("task-1", "user", "请继续说明冲突设计。", "user", None)
-    ]
-    assert submitter.resume_input == {"userMessage": "请继续说明冲突设计。"}
+    assert response.model_dump() == {
+        "accepted": True,
+        "taskId": "task-1",
+        "commandId": "command-1",
+        "commandStatus": "pending",
+    }
+    assert repository.requests[0].userMessage == "请继续说明冲突设计。"
+    assert dispatcher.kicks == 1

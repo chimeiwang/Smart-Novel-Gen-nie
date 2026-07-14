@@ -4,6 +4,8 @@ import pytest
 from inkforge_core.writing.schemas import (
     CreateMessageRequest,
     CreateWritingSessionRequest,
+    ResumeWritingRunRequest,
+    StartWritingRunRequest,
 )
 from inkforge_core.writing.service import WritingService
 from pydantic import ValidationError
@@ -35,6 +37,23 @@ def test_session_and_message_requests_are_strict() -> None:
         )
     with pytest.raises(ValidationError):
         CreateMessageRequest.model_validate({"role": "unknown", "content": "内容"})
+
+
+def test_writing_run_requests_require_stable_client_request_id() -> None:
+    start = {
+        "novelId": "novel-1",
+        "chapterId": "chapter-1",
+        "userMessage": "开始写作",
+    }
+    with pytest.raises(ValidationError):
+        StartWritingRunRequest.model_validate(start)
+    with pytest.raises(ValidationError):
+        ResumeWritingRunRequest.model_validate({"clientRequestId": "太短"})
+
+    valid = ResumeWritingRunRequest.model_validate(
+        {"clientRequestId": "request-00000001", "userMessage": "继续"}
+    )
+    assert valid.clientRequestId == "request-00000001"
 
 
 @pytest.mark.asyncio

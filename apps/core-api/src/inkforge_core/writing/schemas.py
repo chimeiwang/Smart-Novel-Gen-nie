@@ -123,12 +123,12 @@ class WritingRunResponse(WritingSchema):
     selectedAgents: list[str]
     createdAt: datetime
     updatedAt: datetime
-    commandId: str | None = None
-    commandStatus: WritingCommandStatus | None = None
+    commandId: str
+    commandStatus: WritingCommandStatus
 
 
 class ResumeWritingRunResponse(WritingSchema):
     accepted: Literal[True]
     taskId: str
-    commandId: str | None = None
-    commandStatus: WritingCommandStatus | None = None
+    commandId: str
+    commandStatus: WritingCommandStatus

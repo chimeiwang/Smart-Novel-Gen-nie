@@ -208,10 +208,6 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
     app.state.writing_task_repository = writing_task_repository
     app.state.writing_command_repository = writing_command_repository
     writing_submitter = WritingTaskAgentSubmitter(agent_client) if agent_client else None
-    app.state.writing_task_service = WritingTaskService(
-        writing_task_repository,
-        submitter=writing_submitter,
-    )
     if writing_submitter is not None and getattr(app.state, "writing_reconciler", None) is None:
         app.state.writing_reconciler = WritingRunReconciler(
             writing_task_repository,
@@ -229,6 +225,14 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
             batch_size=20,
             interval_seconds=2,
         )
+    command_dispatcher = cast(
+        WritingRunCommandDispatcher | None,
+        getattr(app.state, "writing_command_dispatcher", None),
+    )
+    app.state.writing_task_service = WritingTaskService(
+        writing_command_repository,
+        dispatcher=command_dispatcher,
+    )
     app.state.writing_callback_service = WritingCallbackService(
         writing_task_repository, event_store
     )

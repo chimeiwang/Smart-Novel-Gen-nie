@@ -163,13 +163,7 @@ async def resume_writing_run(
     user: User,
     service: TaskService,
 ) -> ResumeWritingRunResponse:
-    await service.resume(
-        user.id,
-        task_id,
-        body.writingSessionId,
-        body.model_dump(mode="json", exclude_none=True),
-    )
-    return ResumeWritingRunResponse(accepted=True, taskId=task_id)
+    return await service.resume(user.id, task_id, body)
 
 
 @router.get("/runs/{task_id}/events", response_class=StreamingResponse)

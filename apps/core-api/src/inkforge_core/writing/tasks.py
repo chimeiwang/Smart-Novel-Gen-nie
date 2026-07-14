@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import hashlib
 import json
+import logging
 from typing import Any, Protocol, cast
 
 from inkforge_contracts.events import (
@@ -15,56 +15,42 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..db.base import utc_now
-from ..db.models import (
-    Chapter,
-    Novel,
-    WritingMessage,
-    WritingRunCommand,
-    WritingSession,
-    WritingTask,
-)
+from ..db.models import Novel, WritingMessage, WritingRunCommand, WritingSession, WritingTask
 from ..errors import ApiError
+from .message_metadata import workflow_message_metadata
 from .records import TaskRecord
 from .recovery import (
     InvalidGraphSnapshotError,
     deserialize_graph_snapshot,
-    validate_resume_session_binding,
 )
-from .schemas import StartWritingRunRequest, WritingRunResponse
+from .schemas import (
+    ResumeWritingRunRequest,
+    ResumeWritingRunResponse,
+    StartWritingRunRequest,
+    WritingRunResponse,
+)
 from .sse import EventSequenceGap, WritingEvent
 
 TERMINAL_TASK_PHASES = frozenset({"completed", "error"})
 LEGACY_RECONCILABLE_PHASES = frozenset({"active", "waiting_call"})
+logger = logging.getLogger(__name__)
 
 
-class WritingTaskSubmitter(Protocol):
-    async def submit(
-        self,
-        task: TaskRecord,
-        *,
-        resume: bool,
-        resume_input: dict[str, Any] | None = None,
-    ) -> None: ...
-
-
-class WritingTaskRepositoryPort(Protocol):
-    async def create_task(
+class WritingCommandRepositoryPort(Protocol):
+    async def create_start_with_task(
         self, user_id: str, request: StartWritingRunRequest
     ) -> WritingRunResponse: ...
 
-    async def require_task(self, user_id: str, task_id: str) -> TaskRecord: ...
-
-    async def persist_workflow_message(
+    async def create_resume_with_message(
         self,
+        user_id: str,
         task_id: str,
-        *,
-        role: str,
-        content: str,
-        event_type: str,
-        agent_id: str | None = None,
-    ) -> None: ...
+        request: ResumeWritingRunRequest,
+    ) -> ResumeWritingRunResponse: ...
 
-    async def list_reconcilable(self, limit: int) -> list[TaskRecord]: ...
+
+class ImmediateCommandDispatcher(Protocol):
+    async def run_once(self) -> int: ...
 
 
 class EventStorePort(Protocol):
@@ -100,54 +86,6 @@ class WritingCallbackRepositoryPort(Protocol):
 class WritingTaskRepository:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
-
-    async def create_task(
-        self, user_id: str, request: StartWritingRunRequest
-    ) -> WritingRunResponse:
-        async with self._session_factory() as session:
-            async with session.begin():
-                await _require_chapter(session, user_id, request.novelId, request.chapterId)
-                if request.writingSessionId is not None:
-                    await _require_session_binding(
-                        session,
-                        user_id,
-                        request.writingSessionId,
-                        request.novelId,
-                        request.chapterId,
-                    )
-                task = WritingTask(
-                    novelId=request.novelId,
-                    chapterId=request.chapterId,
-                    writingSessionId=request.writingSessionId,
-                    phase="idle",
-                    targetWordCount=request.targetWordCount,
-                    selectedAgents=",".join(request.selectedAgents),
-                    conversationHistory=json.dumps(
-                        [{"role": "user", "content": request.userMessage}],
-                        ensure_ascii=False,
-                    ),
-                )
-                session.add(task)
-                await session.flush()
-                if request.writingSessionId is not None:
-                    session.add(
-                        WritingMessage(
-                            sessionId=request.writingSessionId,
-                            role="user",
-                            content=request.userMessage,
-                            metadata_=_workflow_message_metadata(
-                                task.id,
-                                event_type="user",
-                                content=request.userMessage,
-                            ),
-                        )
-                    )
-                    await session.execute(
-                        update(WritingSession)
-                        .where(WritingSession.id == request.writingSessionId)
-                        .values(updatedAt=utc_now())
-                    )
-            return _task_response(task)
 
     async def require_task(self, user_id: str, task_id: str) -> TaskRecord:
         async with self._session_factory() as session:
@@ -268,7 +206,7 @@ class WritingTaskRepository:
                 task = await session.get(WritingTask, task_id)
                 if task is None or task.writingSessionId is None:
                     return
-                metadata = _workflow_message_metadata(
+                metadata = workflow_message_metadata(
                     task_id,
                     event_type=event_type,
                     content=visible_content,
@@ -320,65 +258,36 @@ class WritingTaskRepository:
 class WritingTaskService:
     def __init__(
         self,
-        repository: WritingTaskRepositoryPort,
-        submitter: WritingTaskSubmitter | None,
+        repository: WritingCommandRepositoryPort,
+        dispatcher: ImmediateCommandDispatcher | None,
     ) -> None:
         self._repository = repository
-        self._submitter = submitter
+        self._dispatcher = dispatcher
 
     async def start(self, user_id: str, request: StartWritingRunRequest) -> WritingRunResponse:
-        if self._submitter is None:
-            raise ApiError(
-                status_code=503,
-                code="AGENT_RUN_UNAVAILABLE",
-                message="智能体运行队列暂时不可用",
-            )
-        response = await self._repository.create_task(user_id, request)
-        task = await self._repository.require_task(user_id, response.id)
-        await self._submitter.submit(task, resume=False, resume_input=None)
+        response = await self._repository.create_start_with_task(user_id, request)
+        await self._kick_dispatcher()
         return response
 
     async def resume(
         self,
         user_id: str,
         task_id: str,
-        requested_session_id: str | None,
-        resume_input: dict[str, Any] | None = None,
-    ) -> None:
-        task = await self._repository.require_task(user_id, task_id)
-        if task.phase in TERMINAL_TASK_PHASES:
-            raise ApiError(
-                status_code=409,
-                code="WRITING_TASK_TERMINAL",
-                message="已完成或失败的任务不能继续恢复",
-            )
-        try:
-            validate_resume_session_binding(requested_session_id, task.writing_session_id)
-        except ValueError as exc:
-            raise ApiError(
-                status_code=409,
-                code="WRITING_SESSION_MISMATCH",
-                message=str(exc),
-            ) from exc
-        if self._submitter is None:
-            raise ApiError(
-                status_code=503,
-                code="AGENT_RUN_UNAVAILABLE",
-                message="智能体运行队列暂时不可用",
-            )
-        user_message = resume_input.get("userMessage") if resume_input is not None else None
-        if isinstance(user_message, str) and user_message.strip():
-            await self._repository.persist_workflow_message(
-                task_id,
-                role="user",
-                content=user_message,
-                event_type="user",
-            )
-        await self._submitter.submit(
-            task,
-            resume=True,
-            resume_input=resume_input,
+        request: ResumeWritingRunRequest,
+    ) -> ResumeWritingRunResponse:
+        response = await self._repository.create_resume_with_message(
+            user_id, task_id, request
         )
+        await self._kick_dispatcher()
+        return response
+
+    async def _kick_dispatcher(self) -> None:
+        if self._dispatcher is None:
+            return
+        try:
+            await self._dispatcher.run_once()
+        except Exception:
+            logger.warning("写作命令即时投递失败，已交由后台重试")
 
 
 class WritingCallbackService:
@@ -490,51 +399,6 @@ class WritingCallbackService:
             ) from exc
 
 
-async def _require_chapter(
-    session: AsyncSession, user_id: str, novel_id: str, chapter_id: str
-) -> None:
-    found = await session.scalar(
-        select(Chapter.id)
-        .join(Novel, Novel.id == Chapter.novelId)
-        .where(
-            Chapter.id == chapter_id,
-            Chapter.novelId == novel_id,
-            Novel.userId == user_id,
-        )
-    )
-    if found is None:
-        raise ApiError(
-            status_code=404,
-            code="CHAPTER_NOT_FOUND",
-            message="章节不存在或不属于该小说",
-        )
-
-
-async def _require_session_binding(
-    session: AsyncSession,
-    user_id: str,
-    session_id: str,
-    novel_id: str,
-    chapter_id: str,
-) -> None:
-    found = await session.scalar(
-        select(WritingSession.id)
-        .join(Novel, Novel.id == WritingSession.novelId)
-        .where(
-            WritingSession.id == session_id,
-            WritingSession.novelId == novel_id,
-            WritingSession.chapterId == chapter_id,
-            Novel.userId == user_id,
-        )
-    )
-    if found is None:
-        raise ApiError(
-            status_code=409,
-            code="WRITING_SESSION_MISMATCH",
-            message="写作会话与当前小说或章节不匹配",
-        )
-
-
 def _task_record(task: WritingTask, user_id: str) -> TaskRecord:
     return TaskRecord(
         id=task.id,
@@ -544,38 +408,4 @@ def _task_record(task: WritingTask, user_id: str) -> TaskRecord:
         writing_session_id=task.writingSessionId,
         phase=task.phase,
         graph_state_json=task.graphStateJson,
-    )
-
-
-def _task_response(task: WritingTask) -> WritingRunResponse:
-    return WritingRunResponse(
-        id=task.id,
-        novelId=task.novelId,
-        chapterId=task.chapterId,
-        writingSessionId=task.writingSessionId,
-        phase=task.phase,
-        targetWordCount=task.targetWordCount,
-        selectedAgents=[item for item in task.selectedAgents.split(",") if item],
-        createdAt=task.createdAt,
-        updatedAt=task.updatedAt,
-    )
-
-
-def _workflow_message_metadata(
-    task_id: str,
-    *,
-    event_type: str,
-    content: str,
-    agent_id: str | None = None,
-) -> str:
-    return json.dumps(
-        {
-            "source": "workflow",
-            "taskId": task_id,
-            "eventType": event_type,
-            "agentId": agent_id,
-            "contentHash": hashlib.sha256(content.strip().encode()).hexdigest()[:24],
-        },
-        ensure_ascii=False,
-        sort_keys=True,
     )

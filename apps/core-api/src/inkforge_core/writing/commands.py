@@ -10,9 +10,24 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..db.base import utc_now
-from ..db.models import Novel, WritingRunCommand, WritingTask
+from ..db.models import (
+    Chapter,
+    Novel,
+    WritingMessage,
+    WritingRunCommand,
+    WritingSession,
+    WritingTask,
+)
 from ..errors import ApiError
+from .message_metadata import workflow_message_metadata
 from .records import TaskRecord
+from .recovery import validate_resume_session_binding
+from .schemas import (
+    ResumeWritingRunRequest,
+    ResumeWritingRunResponse,
+    StartWritingRunRequest,
+    WritingRunResponse,
+)
 
 WritingCommandKind = Literal["start", "resume", "artifact_decision"]
 WritingCommandStatus = Literal["pending", "submitted", "processing", "succeeded", "failed"]
@@ -49,6 +64,165 @@ class WritingRunCommandRepository:
         async with self._session_factory() as session:
             row = await self._get_by_idempotency_key(session, key)
         return _command_record(*row) if row is not None else None
+
+    async def create_start_with_task(
+        self, user_id: str, request: StartWritingRunRequest
+    ) -> WritingRunResponse:
+        key = command_idempotency_key(user_id, request.clientRequestId)
+        existing = await self._get_existing_response(user_id, request.clientRequestId)
+        if isinstance(existing, WritingRunResponse):
+            return existing
+        try:
+            async with self._session_factory() as session:
+                async with session.begin():
+                    existing_row = await self._get_by_idempotency_key(session, key)
+                    if existing_row is not None:
+                        command, task, _owner_id = existing_row
+                        return _run_response(task, command)
+                    await _require_chapter(
+                        session, user_id, request.novelId, request.chapterId
+                    )
+                    if request.writingSessionId is not None:
+                        await _require_session_binding(
+                            session,
+                            user_id,
+                            request.writingSessionId,
+                            request.novelId,
+                            request.chapterId,
+                        )
+                    task = WritingTask(
+                        novelId=request.novelId,
+                        chapterId=request.chapterId,
+                        writingSessionId=request.writingSessionId,
+                        phase="idle",
+                        targetWordCount=request.targetWordCount,
+                        selectedAgents=",".join(request.selectedAgents),
+                        conversationHistory=_dump_json(
+                            [{"role": "user", "content": request.userMessage}]
+                        ),
+                    )
+                    session.add(task)
+                    await session.flush()
+                    if request.writingSessionId is not None:
+                        session.add(
+                            WritingMessage(
+                                sessionId=request.writingSessionId,
+                                role="user",
+                                content=request.userMessage,
+                                metadata_=workflow_message_metadata(
+                                    task.id,
+                                    event_type="user",
+                                    content=request.userMessage,
+                                ),
+                            )
+                        )
+                        await _touch_writing_session(session, request.writingSessionId)
+                    command = _new_command(
+                        task,
+                        kind="start",
+                        key=key,
+                        payload={
+                            "version": 1,
+                            "resume": False,
+                            "chapterId": task.chapterId,
+                            "writingSessionId": task.writingSessionId,
+                            "resumeInput": None,
+                        },
+                    )
+                    session.add(command)
+                    await session.flush()
+                    return _run_response(task, command)
+        except IntegrityError as exc:
+            raced = await self._get_existing_response(user_id, request.clientRequestId)
+            if isinstance(raced, WritingRunResponse):
+                return raced
+            raise ApiError(
+                status_code=409,
+                code="WRITING_COMMAND_CONFLICT",
+                message="写作启动请求发生并发冲突",
+            ) from exc
+
+    async def create_resume_with_message(
+        self,
+        user_id: str,
+        task_id: str,
+        request: ResumeWritingRunRequest,
+    ) -> ResumeWritingRunResponse:
+        key = command_idempotency_key(user_id, request.clientRequestId)
+        existing = await self._get_existing_response(user_id, request.clientRequestId)
+        if isinstance(existing, ResumeWritingRunResponse):
+            return existing
+        try:
+            async with self._session_factory() as session:
+                async with session.begin():
+                    existing_row = await self._get_by_idempotency_key(session, key)
+                    if existing_row is not None:
+                        command, _task, _owner_id = existing_row
+                        return _resume_response(command)
+                    task, _owner_id = await self._require_owned_task(
+                        session, user_id, task_id
+                    )
+                    existing_row = await self._get_by_idempotency_key(session, key)
+                    if existing_row is not None:
+                        command, _task, _owner_id = existing_row
+                        return _resume_response(command)
+                    if task.phase in {"completed", "error"}:
+                        raise ApiError(
+                            status_code=409,
+                            code="WRITING_TASK_TERMINAL",
+                            message="已完成或失败的任务不能继续恢复",
+                        )
+                    try:
+                        validate_resume_session_binding(
+                            request.writingSessionId, task.writingSessionId
+                        )
+                    except ValueError as exc:
+                        raise ApiError(
+                            status_code=409,
+                            code="WRITING_SESSION_MISMATCH",
+                            message=str(exc),
+                        ) from exc
+                    await self._require_no_active_command(session, task_id)
+                    visible_message = (request.userMessage or "").strip()
+                    if visible_message and task.writingSessionId is not None:
+                        session.add(
+                            WritingMessage(
+                                sessionId=task.writingSessionId,
+                                role="user",
+                                content=visible_message,
+                                metadata_=workflow_message_metadata(
+                                    task.id,
+                                    event_type="user",
+                                    content=visible_message,
+                                ),
+                            )
+                        )
+                        await _touch_writing_session(session, task.writingSessionId)
+                    resume_input = request.model_dump(
+                        mode="json",
+                        exclude={"clientRequestId", "writingSessionId"},
+                        exclude_none=True,
+                    )
+                    command = _new_command(
+                        task,
+                        kind="resume",
+                        key=key,
+                        payload={
+                            "version": 1,
+                            "resume": True,
+                            "chapterId": task.chapterId,
+                            "writingSessionId": task.writingSessionId,
+                            "resumeInput": resume_input,
+                        },
+                    )
+                    session.add(command)
+                    await session.flush()
+                    return _resume_response(command)
+        except IntegrityError as exc:
+            raced = await self._get_existing_response(user_id, request.clientRequestId)
+            if isinstance(raced, ResumeWritingRunResponse):
+                return raced
+            raise _active_command_error(task_id) from exc
 
     async def create_resume(
         self,
@@ -92,6 +266,19 @@ class WritingRunCommandRepository:
                         return _command_record(*raced)
                     raise _active_command_error(task_id) from exc
                 return _command_record(command, task, owner_id)
+
+    async def _get_existing_response(
+        self, user_id: str, client_request_id: str
+    ) -> WritingRunResponse | ResumeWritingRunResponse | None:
+        key = command_idempotency_key(user_id, client_request_id)
+        async with self._session_factory() as session:
+            row = await self._get_by_idempotency_key(session, key)
+        if row is None:
+            return None
+        command, task, _owner_id = row
+        if command.kind == "start":
+            return _run_response(task, command)
+        return _resume_response(command)
 
     async def claim_due(self, limit: int) -> list[WritingCommandRecord]:
         if limit < 1:
@@ -271,6 +458,100 @@ def _active_command_error(task_id: str) -> ApiError:
     )
 
 
+def _new_command(
+    task: WritingTask,
+    *,
+    kind: WritingCommandKind,
+    key: str,
+    payload: dict[str, Any],
+) -> WritingRunCommand:
+    return WritingRunCommand(
+        taskId=task.id,
+        kind=kind,
+        payloadJson=_dump_json(payload),
+        idempotencyKey=key,
+        status="pending",
+        attemptCount=0,
+        nextAttemptAt=utc_now(),
+    )
+
+
+def _run_response(task: WritingTask, command: WritingRunCommand) -> WritingRunResponse:
+    return WritingRunResponse(
+        id=task.id,
+        novelId=task.novelId,
+        chapterId=task.chapterId,
+        writingSessionId=task.writingSessionId,
+        phase=task.phase,
+        targetWordCount=task.targetWordCount,
+        selectedAgents=[item for item in task.selectedAgents.split(",") if item],
+        createdAt=task.createdAt,
+        updatedAt=task.updatedAt,
+        commandId=command.id,
+        commandStatus=cast(WritingCommandStatus, command.status),
+    )
+
+
+def _resume_response(command: WritingRunCommand) -> ResumeWritingRunResponse:
+    return ResumeWritingRunResponse(
+        accepted=True,
+        taskId=command.taskId,
+        commandId=command.id,
+        commandStatus=cast(WritingCommandStatus, command.status),
+    )
+
+
+async def _require_chapter(
+    session: AsyncSession, user_id: str, novel_id: str, chapter_id: str
+) -> None:
+    found = await session.scalar(
+        select(Chapter.id)
+        .join(Novel, Novel.id == Chapter.novelId)
+        .where(
+            Chapter.id == chapter_id,
+            Chapter.novelId == novel_id,
+            Novel.userId == user_id,
+        )
+    )
+    if found is None:
+        raise ApiError(
+            status_code=404,
+            code="CHAPTER_NOT_FOUND",
+            message="章节不存在或不属于该小说",
+        )
+
+
+async def _require_session_binding(
+    session: AsyncSession,
+    user_id: str,
+    session_id: str,
+    novel_id: str,
+    chapter_id: str,
+) -> None:
+    found = await session.scalar(
+        select(WritingSession.id)
+        .join(Novel, Novel.id == WritingSession.novelId)
+        .where(
+            WritingSession.id == session_id,
+            WritingSession.novelId == novel_id,
+            WritingSession.chapterId == chapter_id,
+            Novel.userId == user_id,
+        )
+    )
+    if found is None:
+        raise ApiError(
+            status_code=409,
+            code="WRITING_SESSION_MISMATCH",
+            message="写作会话与当前小说或章节不匹配",
+        )
+
+
+async def _touch_writing_session(session: AsyncSession, session_id: str) -> None:
+    writing_session = await session.get(WritingSession, session_id)
+    if writing_session is not None:
+        writing_session.updatedAt = utc_now()
+
+
 def _validate_transition(current: WritingCommandStatus, target: WritingCommandStatus) -> None:
     allowed: dict[WritingCommandStatus, frozenset[WritingCommandStatus]] = {
         "pending": frozenset({"submitted", "processing", "succeeded", "failed"}),
@@ -327,9 +608,9 @@ def _load_json_object(value: str, *, field: str) -> dict[str, Any]:
     return cast(dict[str, Any], parsed)
 
 
-def _dump_json(value: dict[str, Any] | None) -> str:
+def _dump_json(value: Any) -> str:
     return json.dumps(
-        value or {},
+        value if value is not None else {},
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
