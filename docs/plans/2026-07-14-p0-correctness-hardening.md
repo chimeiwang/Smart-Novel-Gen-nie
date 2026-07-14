@@ -16,7 +16,7 @@
 - Modify: `apps/core-api/tests/novels/test_novel_api.py`
 - Modify: `apps/core-api/src/inkforge_core/novels/repository.py`
 
-- [ ] **Step 1: 写双用户隔离失败测试**
+- [x] **Step 1: 写双用户隔离失败测试**
 
 在现有工作区记录型 session 测试中加入用户 A 的小说、用户 A/B 的文风和“小说错误引用用户 B 文风”的场景。断言：
 
@@ -28,13 +28,13 @@ assert "WritingStyle.userId" in compiled_style_query
 
 同时覆盖兼容入口 `/api/v1/novels/{novel_id}/workspace`，响应中不得出现用户 B 的文风 ID、名称或 `portraitMarkdown`。
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
 Run: `uv run pytest apps/core-api/tests/novels/test_novel_api.py -q`
 
 Expected: FAIL；现有 `_load_workspace()` 会读取全局文风，并按主键读取错误归属的已应用文风。
 
-- [ ] **Step 3: 将 user_id 传入工作区加载边界**
+- [x] **Step 3: 将 user_id 传入工作区加载边界**
 
 把 `_load_workspace` 改为显式接收 `user_id`，所有文风查询同时限定归属：
 
@@ -58,7 +58,7 @@ styles = list(
 
 不得使用只按主键读取文风的 `session.get`。仪表盘的批量已应用文风查询也要复核并增加相同用户条件，避免形成第二条泄露路径。
 
-- [ ] **Step 4: 验证隔离与格式**
+- [x] **Step 4: 验证隔离与格式**
 
 Run: `uv run pytest apps/core-api/tests/novels/test_novel_api.py -q`
 
@@ -66,7 +66,7 @@ Run: `uv run ruff check apps/core-api/src/inkforge_core/novels apps/core-api/tes
 
 Expected: PASS。
 
-- [ ] **Step 5: 提交文风隔离修复**
+- [x] **Step 5: 提交文风隔离修复**
 
 ```bash
 git add apps/core-api/src/inkforge_core/novels/repository.py apps/core-api/tests/novels/test_novel_api.py
@@ -82,7 +82,7 @@ git commit -m "修复：隔离工作区文风读取"
 - Modify: `infra/compose.yaml`
 - Modify: `tests/architecture/test_compose_security.py`
 
-- [ ] **Step 1: 写密钥解析和 Compose 失败测试**
+- [x] **Step 1: 写密钥解析和 Compose 失败测试**
 
 测试纯函数 `resolveSessionSecret(env)`：
 
@@ -101,7 +101,7 @@ assert.equal(resolveSessionSecret({ NODE_ENV: "test" }).length > 0, true);
 
 架构测试同时断言 `web` 和 `core-api` 的环境块都包含 `JWT_SECRET: ${JWT_SECRET:?必须配置会话签名密钥}`。
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
 Run: `npm --workspace @inkforge/web test -- --test-name-pattern="会话密钥"`
 
@@ -109,7 +109,7 @@ Run: `uv run pytest tests/architecture/test_compose_security.py -q`
 
 Expected: FAIL；解析模块不存在，Web Compose 未注入密钥。
 
-- [ ] **Step 3: 实现服务端密钥解析器**
+- [x] **Step 3: 实现服务端密钥解析器**
 
 解析器返回 `Uint8Array`，使用 `TextEncoder` 计算 UTF-8 字节长度。生产环境拒绝缺失、历史默认值和小于 32 字节；测试/开发环境保留明确的测试回退。错误消息使用简体中文，不输出密钥内容。
 
@@ -130,11 +130,11 @@ export function resolveSessionSecret(env: SessionSecretEnvironment = process.env
 }
 ```
 
-- [ ] **Step 4: 把解析移动到请求边界**
+- [x] **Step 4: 把解析移动到请求边界**
 
 删除 `proxy.ts` 的模块级常量，在 `proxy()` 开始处调用解析器。这样 `/login` 健康检查也能暴露生产配置错误，而 `next build` 不会因构建期没有运行时 Secret 失败。`jwtVerify` 继续固定 `algorithms: ["HS256"]`。
 
-- [ ] **Step 5: 注入 Compose 密钥并验证**
+- [x] **Step 5: 注入 Compose 密钥并验证**
 
 在 `web.environment` 增加：
 
@@ -150,7 +150,7 @@ Run: `npm run typecheck && npm run lint`
 
 Expected: PASS。
 
-- [ ] **Step 6: 提交生产密钥修复**
+- [x] **Step 6: 提交生产密钥修复**
 
 ```bash
 git add apps/web/src/lib/auth/session-secret.ts apps/web/src/lib/api/__tests__/session-secret.test.ts apps/web/src/proxy.ts infra/compose.yaml tests/architecture/test_compose_security.py
@@ -164,7 +164,7 @@ git commit -m "修复：统一生产会话签名密钥"
 - Modify: `apps/agent-service/src/inkforge_agents/jobs/writing.py`
 - Modify: `apps/core-api/tests/writing/test_sse.py`
 
-- [ ] **Step 1: 把现有顺序测试改为正确契约**
+- [x] **Step 1: 把现有顺序测试改为正确契约**
 
 将 `test_writing_job_persists_waiting_checkpoint_before_artifact_event` 重命名为“先发布等待确认事件再保存 checkpoint”，并断言调用序列：
 
@@ -177,19 +177,19 @@ assert core.calls == [
 assert core.checkpoints[-1]["eventSequence"] == 3
 ```
 
-- [ ] **Step 2: 写故障注入失败测试**
+- [x] **Step 2: 写故障注入失败测试**
 
 Fake Core 第一次让等待确认事件成功、checkpoint 抛出异常；第二次执行同一个 job 时，事件 ID 和序号仍为 `runId/2/artifact_awaiting_user_approval`，Core 幂等接受重放，随后 checkpoint 以序号 3 成功。断言最终用户可见事件只有一条、序号无缺口。
 
 Core SSE 测试补充同一 `eventId` 的重放不会重复发布，且同一序号不同事件被拒绝。
 
-- [ ] **Step 3: 运行测试并确认 RED**
+- [x] **Step 3: 运行测试并确认 RED**
 
 Run: `uv run pytest apps/agent-service/tests/jobs/test_writing.py apps/core-api/tests/writing/test_sse.py -q`
 
 Expected: FAIL；当前实现先保存 checkpoint，再发送事件。
 
-- [ ] **Step 4: 重排稳定状态持久化**
+- [x] **Step 4: 重排稳定状态持久化**
 
 在 `WritingJobHandler.__call__` 中明确计算：
 
@@ -214,7 +214,7 @@ await self._core.save_checkpoint(
 
 终态 `complete`/`fail` 从实际 `next_sequence + 1` 继续，不得保留依赖旧 `checkpoint_sequence` 的魔法偏移。事件身份继续使用 CoreClient 现有 `_event_id(runId, sequence, kind)`，不新造随机 ID。
 
-- [ ] **Step 5: 验证重放和序号连续性**
+- [x] **Step 5: 验证重放和序号连续性**
 
 Run: `uv run pytest apps/agent-service/tests/jobs/test_writing.py apps/core-api/tests/writing/test_sse.py -q`
 
@@ -224,7 +224,7 @@ Run: `uv run mypy apps/agent-service/src apps/core-api/src`
 
 Expected: PASS。
 
-- [ ] **Step 6: 提交事件顺序修复**
+- [x] **Step 6: 提交事件顺序修复**
 
 ```bash
 git add apps/agent-service/src/inkforge_agents/jobs/writing.py apps/agent-service/tests/jobs/test_writing.py apps/core-api/tests/writing/test_sse.py
@@ -236,11 +236,11 @@ git commit -m "修复：先发布草案事件再保存快照"
 **Files:**
 - Verify only
 
-- [ ] **Step 1: 运行 P0 定向测试**
+- [x] **Step 1: 运行 P0 定向测试**
 
 Run: `uv run pytest apps/core-api/tests/novels/test_novel_api.py apps/core-api/tests/writing/test_sse.py apps/agent-service/tests/jobs/test_writing.py tests/architecture/test_compose_security.py -q`
 
-- [ ] **Step 2: 运行静态检查**
+- [x] **Step 2: 运行静态检查**
 
 Run: `uv run ruff check .`
 

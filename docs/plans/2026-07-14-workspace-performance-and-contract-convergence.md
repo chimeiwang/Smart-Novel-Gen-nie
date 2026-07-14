@@ -307,13 +307,13 @@ git commit -m "重构：收敛 HTTP 与 SSE 前端契约"
 **Files:**
 - Verify only
 
-- [ ] **Step 1: API 与契约**
+- [x] **Step 1: API 与契约**
 
 Run: `npm run api:generate && npm run api:check`
 
 Run: `uv run pytest apps/core-api/tests/novels apps/core-api/tests/writing/test_sessions.py packages/service-contracts/tests/test_writing_sse_examples.py -q`
 
-- [ ] **Step 2: 前端质量门**
+- [x] **Step 2: 前端质量门**
 
 Run: `npm --workspace @inkforge/web test`
 
@@ -321,7 +321,7 @@ Run: `npm --workspace @inkforge/api-client test`
 
 Run: `npm run typecheck && npm run lint && npm run build`
 
-- [ ] **Step 3: Python 质量门**
+- [x] **Step 3: Python 质量门**
 
 Run: `uv run ruff check .`
 
