@@ -55,6 +55,7 @@ from .quality.repository import QualityRepository
 from .quality.router import router as quality_router
 from .quality.service import QualityService
 from .references.internal_router import router as references_internal_router
+from .references.rag_dispatcher import RagIndexDispatcher
 from .references.repository import ReferenceRepository
 from .references.router import router as references_router
 from .references.service import ReferenceService
@@ -171,11 +172,23 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
         app.state.quality_dispatcher = quality_dispatcher
     app.state.lore_service = LoreService(lore_repository)
     app.state.outline_service = OutlineService(outline_repository)
+    rag_submitter = (
+        RagAgentSubmitter(agent_client)
+        if agent_client is not None and settings.rag_index_enabled
+        else None
+    )
     reference_service = ReferenceService(
         reference_repository,
-        submitter=RagAgentSubmitter(agent_client) if agent_client else None,
+        submitter=rag_submitter,
     )
     app.state.reference_service = reference_service
+    if rag_submitter is not None and getattr(app.state, "rag_dispatcher", None) is None:
+        app.state.rag_dispatcher = RagIndexDispatcher(
+            reference_repository,
+            rag_submitter,
+            batch_size=20,
+            interval_seconds=5,
+        )
     portrait_submitter = PortraitAgentSubmitter(agent_client) if agent_client else None
     app.state.style_service = StyleService(
         style_repository,
@@ -309,6 +322,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             ),
             ("portrait_dispatcher", getattr(app.state, "portrait_dispatcher", None)),
             ("quality_dispatcher", getattr(app.state, "quality_dispatcher", None)),
+            ("rag_dispatcher", getattr(app.state, "rag_dispatcher", None)),
         )
         if worker is not None
     ]

@@ -11,20 +11,33 @@ HASH = "a" * 64
 class RecordingRepository:
     def __init__(self) -> None:
         self.created = None
+        self.created_index_enabled: bool | None = None
+        self.updated_index_enabled: bool | None = None
+        self.prepared: list[tuple[str, str, str]] = []
 
-    async def create_reference(self, novel_id, user_id, fields):
+    async def create_reference(self, novel_id, user_id, fields, *, index_enabled=False):
         del novel_id, user_id
         self.created = fields
+        self.created_index_enabled = index_enabled
         return {
             "id": "reference-1",
             **fields,
             "ragStatus": "disabled",
             "contentHash": HASH,
-            "errorMessage": None,
+            "errorMessage": "等待重新索引" if index_enabled else "检索索引服务未配置",
         }
 
-    async def update_reference(self, novel_id, user_id, reference_id, fields):
+    async def update_reference(
+        self,
+        novel_id,
+        user_id,
+        reference_id,
+        fields,
+        *,
+        index_enabled=False,
+    ):
         del novel_id, user_id
+        self.updated_index_enabled = index_enabled
         return {
             "id": reference_id,
             "title": fields.get("title", "资料"),
@@ -33,11 +46,11 @@ class RecordingRepository:
             "sourceUrl": fields.get("sourceUrl"),
             "ragStatus": "disabled",
             "contentHash": HASH,
-            "errorMessage": "等待重新索引",
+            "errorMessage": "等待重新索引" if index_enabled else "检索索引服务未配置",
         }
 
     async def prepare_reindex(self, novel_id, user_id, reference_id):
-        del novel_id, user_id, reference_id
+        self.prepared.append((novel_id, user_id, reference_id))
         return HASH
 
     async def mark_index_failed(self, novel_id, reference_id, expected_content_hash, message):
@@ -77,7 +90,9 @@ async def test_unconfigured_indexer_still_saves_original_reference() -> None:
         CreateReferenceRequest(title="资料", type="note", content=source, sourceUrl=None),
     )
     assert repository.created["content"] == source
+    assert repository.created_index_enabled is False
     assert result.ragStatus == "disabled"
+    assert result.errorMessage == "检索索引服务未配置"
 
 
 @pytest.mark.asyncio
@@ -91,6 +106,7 @@ async def test_configured_indexer_receives_saved_reference_id() -> None:
         CreateReferenceRequest(title="资料", type="book", content="正文", sourceUrl=None),
     )
     assert submitter.jobs == [("user-1", "novel-1", "reference-1", result.contentHash)]
+    assert repository.created_index_enabled is True
 
 
 @pytest.mark.asyncio
@@ -118,7 +134,8 @@ async def test_create_remains_successful_when_async_submission_fails() -> None:
 
 @pytest.mark.asyncio
 async def test_update_remains_successful_when_async_submission_fails() -> None:
-    service = ReferenceService(RecordingRepository(), FailingSubmitter())  # type: ignore[arg-type]
+    repository = RecordingRepository()
+    service = ReferenceService(repository, FailingSubmitter())  # type: ignore[arg-type]
     result = await service.update(
         "user-1",
         "novel-1",
@@ -127,6 +144,7 @@ async def test_update_remains_successful_when_async_submission_fails() -> None:
     )
     assert result.content == "新正文"
     assert result.ragStatus == "disabled"
+    assert repository.updated_index_enabled is True
 
 
 @pytest.mark.asyncio
@@ -138,18 +156,14 @@ async def test_reindex_without_infrastructure_returns_503() -> None:
 
 
 @pytest.mark.asyncio
-async def test_explicit_reindex_submission_failure_is_reconciled_as_failed() -> None:
+async def test_explicit_reindex_submission_failure_keeps_persisted_retry_intent() -> None:
     repository = RecordingRepository()
     service = ReferenceService(repository, FailingSubmitter())  # type: ignore[arg-type]
     with pytest.raises(ApiError) as caught:
         await service.reindex("user-1", "novel-1", "reference-1")
     assert caught.value.status_code == 503
-    assert repository.failed == (
-        "novel-1",
-        "reference-1",
-        HASH,
-        "索引任务提交失败",
-    )
+    assert repository.prepared == [("novel-1", "user-1", "reference-1")]
+    assert not hasattr(repository, "failed")
 
 
 @pytest.mark.asyncio

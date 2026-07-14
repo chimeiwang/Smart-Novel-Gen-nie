@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     rag_embedding_api_key: SecretStr | None = None
     rag_embedding_base_url: str | None = None
     rag_embedding_model: str | None = None
+    rag_index_enabled: bool = False
 
     @field_validator("trusted_core_cidrs", mode="before")
     @classmethod

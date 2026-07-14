@@ -105,6 +105,7 @@ def create_app(
     app.state.run_queue = run_queue
     app.state.core_request_verifier = core_request_verifier
     app.state.queue_consumer = queue_consumer
+    app.state.embedding_provider = None
     app.state.runtime_error = None
     if not testing:
         _configure_runtime(app, loaded_settings)
@@ -137,6 +138,10 @@ def create_app(
                     ),
                 }
             )
+            if loaded_settings.rag_index_enabled:
+                checks["rag_indexer"] = (
+                    "ok" if app.state.embedding_provider is not None else "failed"
+                )
         ready = all(value == "ok" for value in checks.values())
         return JSONResponse(
             status_code=200 if ready else 503,
@@ -220,6 +225,7 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                         embedding_http,
                         model=settings.rag_embedding_model,
                     )
+                app.state.embedding_provider = embedding_provider
                 model_runtime = ModelRuntime(
                     provider,
                     billing=CoreBillingGateway(core),

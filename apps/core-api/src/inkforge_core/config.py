@@ -46,6 +46,7 @@ class Settings(BaseSettings):
     agent_service_url: str | None = None
     uploads_root: str = "/data/uploads"
     workflow_event_debug_enabled: bool = False
+    rag_index_enabled: bool = False
 
     @field_validator("environment", mode="before")
     @classmethod

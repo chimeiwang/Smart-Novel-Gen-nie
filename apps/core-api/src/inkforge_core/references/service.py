@@ -22,11 +22,22 @@ class IndexSubmitter(Protocol):
 
 class ReferenceRepositoryPort(Protocol):
     async def create_reference(
-        self, novel_id: str, user_id: str, fields: dict[str, Any]
+        self,
+        novel_id: str,
+        user_id: str,
+        fields: dict[str, Any],
+        *,
+        index_enabled: bool = False,
     ) -> dict[str, Any]: ...
     async def list_references(self, novel_id: str, user_id: str) -> list[dict[str, Any]]: ...
     async def update_reference(
-        self, novel_id: str, user_id: str, reference_id: str, fields: dict[str, Any]
+        self,
+        novel_id: str,
+        user_id: str,
+        reference_id: str,
+        fields: dict[str, Any],
+        *,
+        index_enabled: bool = False,
     ) -> dict[str, Any]: ...
     async def delete_reference(self, novel_id: str, user_id: str, reference_id: str) -> None: ...
     async def require_reference(
@@ -68,7 +79,12 @@ class ReferenceService:
     ) -> ReferenceMaterialResponse:
         if not request.title.strip():
             raise ApiError(status_code=422, code="REFERENCE_TITLE_REQUIRED", message="标题不能为空")
-        value = await self._repository.create_reference(novel_id, user_id, request.model_dump())
+        value = await self._repository.create_reference(
+            novel_id,
+            user_id,
+            request.model_dump(),
+            index_enabled=self._submitter is not None,
+        )
         if self._submitter is not None:
             try:
                 await self._submitter.submit(
@@ -97,7 +113,13 @@ class ReferenceService:
             )
         if "title" in fields and (fields["title"] is None or not fields["title"].strip()):
             raise ApiError(status_code=422, code="REFERENCE_TITLE_REQUIRED", message="标题不能为空")
-        value = await self._repository.update_reference(novel_id, user_id, reference_id, fields)
+        value = await self._repository.update_reference(
+            novel_id,
+            user_id,
+            reference_id,
+            fields,
+            index_enabled=self._submitter is not None,
+        )
         if self._submitter is not None and {"title", "content"} & fields.keys():
             try:
                 await self._submitter.submit(
@@ -124,9 +146,6 @@ class ReferenceService:
         try:
             await self._submitter.submit(user_id, novel_id, reference_id, content_hash)
         except Exception:
-            await self._repository.mark_index_failed(
-                novel_id, reference_id, content_hash, "索引任务提交失败"
-            )
             raise ApiError(
                 status_code=503,
                 code="RAG_INDEX_SUBMIT_FAILED",

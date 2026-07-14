@@ -84,6 +84,7 @@ services:
       AGENT_SERVICE_PUBLIC_KEY_PATH: /run/inkforge-keys/agent-to-core-jwks.json
       AGENT_SERVICE_URL: http://agent-service:8001
       UPLOADS_ROOT: /data/uploads
+      RAG_INDEX_ENABLED: ${RAG_INDEX_ENABLED:-false}
       WORKFLOW_EVENT_DEBUG_ENABLED: ${WORKFLOW_EVENT_DEBUG_ENABLED:-false}
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -136,6 +137,7 @@ services:
       RAG_EMBEDDING_API_KEY: ${RAG_EMBEDDING_API_KEY:-}
       RAG_EMBEDDING_BASE_URL: ${RAG_EMBEDDING_BASE_URL:-}
       RAG_EMBEDDING_MODEL: ${RAG_EMBEDDING_MODEL:-}
+      RAG_INDEX_ENABLED: ${RAG_INDEX_ENABLED:-false}
     volumes:
       - agent_logs:/data/agent-logs
       - ${SERVICE_KEYS_DIR:-./secrets}/core-to-agent-jwks.json:/run/inkforge-keys/core-to-agent-jwks.json:ro

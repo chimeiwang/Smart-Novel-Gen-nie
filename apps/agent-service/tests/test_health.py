@@ -95,3 +95,28 @@ def test_readiness_fails_when_queue_consumer_task_exits_unexpectedly() -> None:
 
     assert response.status_code == 503
     assert response.json()["checks"]["queue_consumer"] == "failed"
+
+
+def test_readiness_fails_when_rag_is_enabled_without_embedding_provider() -> None:
+    settings = Settings.model_validate(
+        {
+            "environment": "production",
+            "model_provider": "fake",
+            "rag_index_enabled": True,
+        }
+    )
+    consumer = Consumer()
+    app = create_app(
+        testing=True,
+        settings=settings,
+        run_queue=object(),  # type: ignore[arg-type]
+        core_request_verifier=object(),  # type: ignore[arg-type]
+        queue_consumer=consumer,
+    )
+    app.state.core_client = object()
+
+    with TestClient(app) as client:
+        response = client.get("/internal/v1/health/ready")
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["rag_indexer"] == "failed"

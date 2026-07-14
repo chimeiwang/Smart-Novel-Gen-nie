@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import delete, insert, select, update
+from sqlalchemy import and_, delete, insert, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -20,6 +20,7 @@ from .rag import (
     validate_top_k,
     vector_literal,
 )
+from .rag_dispatcher import RagDispatchRecord
 
 
 def _utc(value: datetime | None) -> datetime | None:
@@ -57,7 +58,12 @@ class ReferenceRepository:
         ]
 
     async def create_reference(
-        self, novel_id: str, user_id: str, fields: dict[str, Any]
+        self,
+        novel_id: str,
+        user_id: str,
+        fields: dict[str, Any],
+        *,
+        index_enabled: bool = False,
     ) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
@@ -72,7 +78,7 @@ class ReferenceRepository:
                     title=reference.title,
                     contentHash=content_sha256(reference.content),
                     status="disabled",
-                    errorMessage="检索索引服务未配置",
+                    errorMessage=("等待重新索引" if index_enabled else "检索索引服务未配置"),
                 )
                 session.add(document)
                 await session.flush()
@@ -96,6 +102,8 @@ class ReferenceRepository:
         user_id: str,
         reference_id: str,
         fields: dict[str, Any],
+        *,
+        index_enabled: bool = False,
     ) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
@@ -127,7 +135,9 @@ class ReferenceRepository:
                         title=reference.title,
                         contentHash=content_sha256(reference.content),
                         status="disabled",
-                        errorMessage="等待重新索引",
+                        errorMessage=(
+                            "等待重新索引" if index_enabled else "检索索引服务未配置"
+                        ),
                     )
                     session.add(document)
                     await session.flush()
@@ -138,9 +148,47 @@ class ReferenceRepository:
                     document.title = reference.title
                     document.contentHash = content_sha256(reference.content)
                     document.status = "disabled"
-                    document.errorMessage = "等待重新索引"
+                    document.errorMessage = (
+                        "等待重新索引" if index_enabled else "检索索引服务未配置"
+                    )
                 result = self._dto(reference, document.status, document)
         return result
+
+    async def list_pending_rag_documents(self, limit: int) -> list[RagDispatchRecord]:
+        async with self._session_factory() as session:
+            rows = (
+                await session.execute(
+                    select(RagDocument, ReferenceMaterial, Novel.userId)
+                    .join(
+                        ReferenceMaterial,
+                        and_(
+                            RagDocument.sourceType == "reference_material",
+                            RagDocument.sourceId == ReferenceMaterial.id,
+                        ),
+                    )
+                    .join(Novel, Novel.id == ReferenceMaterial.novelId)
+                    .where(
+                        RagDocument.status == "disabled",
+                        RagDocument.errorMessage == "等待重新索引",
+                    )
+                    .order_by(RagDocument.updatedAt.asc(), RagDocument.id.asc())
+                    .limit(limit)
+                )
+            ).all()
+        records: list[RagDispatchRecord] = []
+        for document, reference, user_id in rows:
+            current_hash = content_sha256(reference.content)
+            if document.contentHash != current_hash:
+                continue
+            records.append(
+                RagDispatchRecord(
+                    user_id=user_id,
+                    novel_id=reference.novelId,
+                    reference_id=reference.id,
+                    content_hash=current_hash,
+                )
+            )
+        return records
 
     async def delete_reference(self, novel_id: str, user_id: str, reference_id: str) -> None:
         async with self._session_factory() as session:
