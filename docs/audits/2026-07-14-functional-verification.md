@@ -103,10 +103,22 @@ npx playwright test --reporter=line
 - Mypy：182 个源码文件通过。
 - Playwright：7 passed。
 
+## 生产备份与迁移证据
+
+- 服务器预检：PostgreSQL 14.23、Docker Compose v5.1.4、git 和 sha256sum 可用；磁盘剩余 18GB；迁移前五个容器均健康。
+- 在线备份：`/srv/backups/inkforge/inkforge-20260714T070657Z`，数据库和 uploads 校验通过。
+- 停止 Nginx、Web、Core API 和 Agent Service 后生成最终备份：`/srv/backups/inkforge/inkforge-20260714T071148Z`。
+- 最终数据库 dump：4,588,995 字节，SHA-256 `04323d390f5dbefdb85fd4c5cb20f95ceec3aa8823e173db3c92b9e392aca1c8`。
+- 最终 uploads 归档：104 字节，SHA-256 `413a5196207b06999bdb810db3cc33f161ef4c493b5527eadeefc65c601ea586`。
+- `sha256sum --check`、`pg_restore --list` 和 `tar -tzf` 均通过。
+- 迁移前：用户 12、小说 37、章节 41、写作会话 140、旧文风 7、文风参考 5、画像任务 5、已应用文风小说 0。
+- 版本化 SQL 在一个事务中成功提交：旧文风三表清零，`WritingRunCommand`、`WritingStyle.userId`、`StylePortraitTask.section` 和活动命令唯一索引已创建。
+- 迁移后：用户 12、小说 37、章节 41、写作会话 140 保持不变；文风、参考和画像任务均为 0；新命令表初始为 0。
+- 本地新代码对生产数据库执行只读 schema guard：ready=true，fingerprint=`760609cdfc0b99fb0a57ecf94c292f06cddfc824694458cb2b95feaecbf39be4`，diffs=0。
+
 ## 未完成的生产步骤
 
-- 尚未对生产 PostgreSQL 和 uploads 生成本轮可恢复备份。
-- 尚未在生产执行 `20260714_durable_writing_private_styles.sql`。
+- 生产应用容器当前保持停止，等待与新 schema 匹配的镜像部署，不能用旧 Core 镜像重新启动。
 - 尚未推送本轮提交，因此 GitHub Actions、镜像发布、SSH 部署和线上感知验收仍待执行。
 - 线上浏览器验收必须使用有效 HTTPS；若服务器仍只有 HTTP，secure cookie 会阻断登录，应记录为环境阻塞而不是伪造通过。
 
