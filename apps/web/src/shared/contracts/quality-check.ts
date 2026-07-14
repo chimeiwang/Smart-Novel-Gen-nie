@@ -2,12 +2,12 @@
  * 质量检查契约（Phase 1：唯一字段来源）
  *
  * @module shared/contracts/quality-check
- * @description 质量检查相关的所有类型、schema、默认定义、映射表、DTO 转换函数。
- *  此为唯一数据源，禁止在其他文件中重复声明。
+ * @description 质量检查的界面定义、请求校验和展示辅助；公共 DTO 来自 OpenAPI 生成客户端。
  *
  * @phase Phase 1 — 质量检查契约统一
  */
 
+import type { components } from "@inkforge/api-client";
 import { z } from "zod";
 
 // ============================================
@@ -89,32 +89,8 @@ export const QUALITY_CHECK_MESSAGE_MAP: Record<QualityCheckType, string> = {
   craft: "@编辑 从作家技法和反流水账角度评审当前章节：检查每个主要场景是否有目标、阻力、转折、代价、结果和余波，并给出可执行改法。",
 };
 
-// ============================================
-// DTO Schema（前后端共享）
-// ============================================
-
-/** 前端展示用的质量检查 DTO */
-export const QualityCheckDtoSchema = z.object({
-  id: z.string(),
-  chapterId: z.string(),
-  type: QualityCheckTypeSchema,
-  status: QualityCheckStatusSchema,
-  title: z.string(),
-  summary: z.string().nullable().optional(),
-  result: z.string().nullable().optional(),
-  scoreHook: z.number().nullable().optional(),
-  scoreTension: z.number().nullable().optional(),
-  scorePayoff: z.number().nullable().optional(),
-  scorePacing: z.number().nullable().optional(),
-  scoreEndingHook: z.number().nullable().optional(),
-  scoreReaderPromise: z.number().nullable().optional(),
-  scoreOverall: z.number().nullable().optional(),
-  qualityGate: QualityGateSchema.nullable().optional(),
-  rewriteBrief: z.string().nullable().optional(),
-  createdAt: z.string().optional(),
-  updatedAt: z.string().optional(),
-});
-export type QualityCheckDto = z.infer<typeof QualityCheckDtoSchema>;
+/** 公共响应字段只由 Core OpenAPI 生成，不在前端重复声明。 */
+export type QualityCheckDto = components["schemas"]["QualityCheckDto"];
 
 // ============================================
 // API 请求 Schema
@@ -136,10 +112,6 @@ export const RunQualityCheckSchema = z.object({
 });
 export type RunQualityCheckInput = z.infer<typeof RunQualityCheckSchema>;
 
-// ============================================
-// DTO 转换函数
-// ============================================
-
 /** 评分归一化（0-10 取整） */
 export function normalizeQualityScores(
   raw: Record<string, unknown> | null | undefined
@@ -155,30 +127,4 @@ export function normalizeQualityScores(
     }
   }
   return Object.keys(result).length > 0 ? result : undefined;
-}
-
-/** Prisma ChapterQualityCheck → 前端 DTO */
-export function toQualityCheckDto(
-  check: Record<string, unknown>
-): QualityCheckDto {
-  return QualityCheckDtoSchema.parse({
-    id: check.id,
-    chapterId: check.chapterId,
-    type: check.type,
-    status: check.status,
-    title: check.title,
-    summary: check.summary ?? null,
-    result: check.result ?? null,
-    scoreHook: check.scoreHook ?? null,
-    scoreTension: check.scoreTension ?? null,
-    scorePayoff: check.scorePayoff ?? null,
-    scorePacing: check.scorePacing ?? null,
-    scoreEndingHook: check.scoreEndingHook ?? null,
-    scoreReaderPromise: check.scoreReaderPromise ?? null,
-    scoreOverall: check.scoreOverall ?? null,
-    qualityGate: check.qualityGate ?? null,
-    rewriteBrief: check.rewriteBrief ?? null,
-    createdAt: check.createdAt ? String(check.createdAt) : undefined,
-    updatedAt: check.updatedAt ? String(check.updatedAt) : undefined,
-  });
 }

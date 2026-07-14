@@ -1,0 +1,115 @@
+[
+  {
+    "event": "artifact_awaiting_user_approval",
+    "envelope": {
+      "protocolVersion": "1.0",
+      "eventId": "event-1",
+      "runId": "run-1",
+      "taskId": "task-1",
+      "sequence": 1,
+      "event": "artifact_awaiting_user_approval",
+      "data": {
+        "agentId": "剧情",
+        "artifactId": "artifact-1",
+        "artifact": {
+          "id": "artifact-1",
+          "status": "awaiting_user"
+        }
+      },
+      "occurredAt": "2026-07-14T00:00:01Z"
+    }
+  },
+  {
+    "event": "agent_status",
+    "envelope": {
+      "protocolVersion": "1.0",
+      "eventId": "event-2",
+      "runId": "run-1",
+      "taskId": "task-1",
+      "sequence": 2,
+      "event": "agent_status",
+      "data": {
+        "agentId": "编辑",
+        "status": "querying",
+        "message": "正在读取作品上下文",
+        "toolName": "get_novel_info",
+        "resultSummary": "已读取当前作品与章节",
+        "detailsHidden": true
+      },
+      "occurredAt": "2026-07-14T00:00:02Z"
+    }
+  },
+  {
+    "event": "completed",
+    "envelope": {
+      "protocolVersion": "1.0",
+      "eventId": "event-3",
+      "runId": "run-1",
+      "taskId": "task-1",
+      "sequence": 3,
+      "event": "completed",
+      "data": {
+        "taskId": "task-1",
+        "finalContent": "本次智能体运行已完成。"
+      },
+      "occurredAt": "2026-07-14T00:00:03Z"
+    }
+  },
+  {
+    "event": "error",
+    "envelope": {
+      "protocolVersion": "1.0",
+      "eventId": "event-4",
+      "runId": "run-1",
+      "taskId": "task-1",
+      "sequence": 4,
+      "event": "error",
+      "data": {
+        "message": "智能体运行失败",
+        "code": "PROVIDER_FAILED",
+        "recoverable": true
+      },
+      "occurredAt": "2026-07-14T00:00:04Z"
+    }
+  },
+  {
+    "event": "update_builder_validation_failed",
+    "envelope": {
+      "protocolVersion": "1.0",
+      "eventId": "event-5",
+      "runId": "run-1",
+      "taskId": "task-1",
+      "sequence": 5,
+      "event": "update_builder_validation_failed",
+      "data": {
+        "agentId": "剧情",
+        "artifactKey": "outline-builder-1",
+        "errors": [
+          "outlineAdjustments.0.parentKey: 找不到父节点"
+        ]
+      },
+      "occurredAt": "2026-07-14T00:00:05Z"
+    }
+  },
+  {
+    "event": "review_artifact_requested",
+    "envelope": {
+      "protocolVersion": "1.0",
+      "eventId": "event-6",
+      "runId": "run-1",
+      "taskId": "task-1",
+      "sequence": 6,
+      "event": "review_artifact_requested",
+      "data": {
+        "agentId": "剧情",
+        "artifactId": "artifact-1",
+        "artifact": {
+          "id": "artifact-1",
+          "status": "awaiting_user"
+        },
+        "reason": "草案已生成，请展示给用户确认。"
+      },
+      "occurredAt": "2026-07-14T00:00:06Z"
+    }
+  }
+]

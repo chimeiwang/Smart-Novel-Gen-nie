@@ -6,6 +6,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { parseSseEvent, SSE_EVENT_TYPES } from "../sse-events";
 
 describe("SSE event contract", () => {
@@ -93,5 +94,22 @@ describe("SSE event contract", () => {
 
     assert.equal(event?.type, "review_artifact_requested");
     assert.ok(SSE_EVENT_TYPES.includes("review_artifact_requested"));
+  });
+
+  it("parses every shared Python and TypeScript event example", async () => {
+    const fixtureUrl = new URL(
+      "../../../../../../packages/service-contracts/contracts/writing-sse-events.json",
+      import.meta.url,
+    );
+    const examples = JSON.parse(await readFile(fixtureUrl, "utf8")) as Array<{
+      event: string;
+      envelope: { data: Record<string, unknown> };
+    }>;
+
+    for (const example of examples) {
+      const parsed = parseSseEvent(example.envelope.data, example.event);
+      assert.ok(parsed, `无法解析共享事件 ${example.event}`);
+      assert.equal(parsed.type, example.event);
+    }
   });
 });

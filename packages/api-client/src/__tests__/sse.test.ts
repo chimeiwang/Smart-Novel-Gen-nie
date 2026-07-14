@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { createSseState, parseSseFrame } from "../sse";
@@ -35,4 +36,36 @@ test("序号出现缺口时明确报错", () => {
       ),
     /事件序号不连续/,
   );
+});
+
+test("共享样例能通过真实 SSE 帧解析器", async () => {
+  const fixtureUrl = new URL(
+    "../../../service-contracts/contracts/writing-sse-events.json",
+    import.meta.url,
+  );
+  const examples = JSON.parse(await readFile(fixtureUrl, "utf8")) as Array<{
+    event: string;
+    envelope: {
+      eventId: string;
+      sequence: number;
+      data: Record<string, unknown>;
+    };
+  }>;
+  const state = createSseState();
+
+  for (const example of examples) {
+    const frame = [
+      `id: ${example.envelope.eventId}`,
+      `event: ${example.event}`,
+      `data: ${JSON.stringify({ ...example.envelope.data, sequence: example.envelope.sequence })}`,
+      "",
+      "",
+    ].join("\n");
+    const parsed = parseSseFrame(frame, state);
+    assert.equal(parsed?.event, example.event);
+    assert.deepEqual(parsed?.data, {
+      ...example.envelope.data,
+      sequence: example.envelope.sequence,
+    });
+  }
 });

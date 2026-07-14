@@ -242,7 +242,7 @@ git commit -m "性能：聚合写作会话摘要查询"
 - Modify: `apps/web/src/features/workspace/*.tsx`
 - Modify: `apps/web/src/shared/contracts/__tests__/quality-check.test.ts`
 
-- [ ] **Step 1: 写类型来源检查**
+- [x] **Step 1: 写类型来源检查**
 
 本地文件导入生成客户端并派生：
 
@@ -253,11 +253,11 @@ export type QualityCheckDto = components["schemas"]["QualityCheckDto"];
 
 测试/静态搜索断言不再存在同名 Zod DTO schema、手工 converter 或页面强制断言。
 
-- [ ] **Step 2: 删除重复转换层**
+- [x] **Step 2: 删除重复转换层**
 
 保留 UI 标签、颜色和展示辅助函数；删除公共字段的第二份定义。修正调用点直接接受生成类型，不使用 `as QualityCheckDto`。
 
-- [ ] **Step 3: 验证**
+- [x] **Step 3: 验证**
 
 Run: `npm --workspace @inkforge/web test`
 
@@ -273,25 +273,25 @@ Expected: PASS。
 - Modify: `packages/api-client/src/__tests__/sse.test.ts`
 - Modify: `packages/api-client/package.json`
 
-- [ ] **Step 1: 新增共享机器可读样例**
+- [x] **Step 1: 新增共享机器可读样例**
 
 样例至少包含：`artifact_awaiting_user_approval`、Agent 状态、完成、失败、更新构建器、ReviewArtifact 请求。每条包含 SSE event 名称和完整 Pydantic `AgentEvent` 信封，ID/序号保持稳定且载荷使用真实字段名。
 
-- [ ] **Step 2: 写双语言失败测试**
+- [x] **Step 2: 写双语言失败测试**
 
 Python 读取 JSON 并逐条 `AgentEvent.model_validate()`，同时验证 Core 接受的事件名。TypeScript 从同一路径读取 JSON，把信封 `data` 交给真实 `parseSseEvent`，断言解析后的关键字段。
 
-- [ ] **Step 3: 运行测试并确认 RED**
+- [x] **Step 3: 运行测试并确认 RED**
 
 Run: `uv run pytest packages/service-contracts/tests/test_writing_sse_examples.py -q`
 
 Run: `npm --workspace @inkforge/api-client test`
 
-- [ ] **Step 4: 只修正生产解析器的真实漂移**
+- [x] **Step 4: 只修正生产解析器的真实漂移**
 
 如果共享样例暴露事件名或载荷漂移，先以 Pydantic/现有 Core 发布契约为权威修正 TypeScript；不得为了让测试通过忽略未知关键事件。
 
-- [ ] **Step 5: 验证并提交契约收敛**
+- [x] **Step 5: 验证并提交契约收敛**
 
 Run: `uv run pytest packages/service-contracts/tests/test_writing_sse_examples.py apps/core-api/tests/writing/test_sse.py -q`
 
