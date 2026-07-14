@@ -65,6 +65,8 @@ def test_redis_is_bounded() -> None:
 
     assert "64mb" in redis_config.lower()
     assert re.search(r"(?m)^appendonly\s+no$", redis_config)
+    assert re.search(r"(?m)^maxmemory-policy\s+noeviction$", redis_config)
+    assert "allkeys-lru" not in redis_config
 
 
 def test_web_and_core_require_the_same_production_jwt_secret() -> None:

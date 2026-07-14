@@ -48,6 +48,7 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 
 - 所有业务读取和草案提交都通过 Core `/internal/v1/**`。
 - `semantic_search_references` 的查询向量由 Agent Service 复用现有 embedding 客户端生成，Core 只接收内部查询向量并在当前用户和小说范围内执行 pgvector 检索；未配置 embedding 时必须明确返回未启用。
+- 只有 Core 与 Agent 同时设置 `RAG_INDEX_ENABLED=true` 且 Agent 已配置完整 embedding 客户端时才允许启用索引；启用后 embedding 不可用必须使就绪检查失败，不能静默降级为已就绪。
 - 请求使用 Ed25519 短期服务令牌，绑定受众、权限、任务、运行、小说、请求体摘要和查询摘要。
 - 写入类内部请求必须经过 Redis 重放保护。
 - Agent 只能生成 ReviewArtifact 或评审结果，不能直接写章节、设定、大纲或计费表。
@@ -55,6 +56,7 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 - 图进入等待用户确认时，必须先发送 `artifact_awaiting_user_approval`，再保存包含最新事件序号的稳定快照，确保前端能刷新草案入口且恢复时不会复用旧序号。
 - 图稳定结束于 `phase=error` 时必须保存错误快照并调用 Core 失败回调，禁止用完成回调表达失败终态。
 - Core 强制对账只允许修复 Redis 中缺失的 queued 索引或完全丢失的运行键；Redis 已记录为 completed、failed 或 cancelled 的运行不得被 `force` 重新打开。
+- 队列消费者必须由生命周期任务监督器托管；基础设施异常按退避策略重试，消费者协程意外结束必须使就绪检查失败并触发重启，不能只凭消费者对象存在判断健康。
 
 ## LangGraph 规则
 

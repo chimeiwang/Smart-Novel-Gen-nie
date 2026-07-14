@@ -283,7 +283,7 @@ Agent Runtime 是唯一多轮 tool-call loop。
 - Python 智能体服务已迁移五个智能体定义、系统提示词、能力与工具白名单、严格工具参数校验和唯一多轮工具循环；模型运行时仍只负责单次供应商调用。
 - 只读且并发安全的工具可以并行执行，控制工具按模型调用顺序生成结构化事件；未暴露工具、无效参数和最大轮次均明确终止，不截断用户可见文本。
 - Python LangGraph 已迁移 CreativeOperation 路由、复审 `Send` 扇出、确定性复审优先级、补丁或重写返工、最大修订次数、用户中断和 `Command` 恢复；图状态快照使用版本信封并排除运行时字段。
-- Core API 已把写作启动、恢复和草案决定先保存为 PostgreSQL 持久命令，再由 dispatcher 提交到 Redis 队列；画像、质量检查和 RAG 任务仍使用各自队列入口。Agent Service 消费任务并通过签名回调保存检查点、事件、草案和终态。
+- Core API 已把写作启动、恢复和草案决定先保存为 PostgreSQL 持久命令，再由 dispatcher 提交到 Redis 队列。文风画像以 `StylePortraitTask`、质量检查以 `WorkflowRun(kind=quality_check)`、资料索引以 `RagDocument` 的待重建状态作为持久事实；各自 dispatcher 使用稳定任务标识补投，Redis 只承载可重建的投递状态。Agent Service 消费任务并通过签名回调保存检查点、事件、草案和终态。
 - 草案进入等待用户确认时，Agent Service 先发送 `artifact_awaiting_user_approval` SSE 事件，再保存带有最新事件序号的稳定快照；前端据此刷新待确认草案。
 - Core 对账器可以强制修复 Redis 中缺失的 queued 索引或完全丢失的运行键，但不得重新打开 Redis 已记录为 completed、failed 或 cancelled 的运行。
 - Agent Service 不连接数据库，所有读取工具和业务写入都通过 Core 内部工具网关完成。

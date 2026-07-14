@@ -57,6 +57,8 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 - Agent 每个稳定步骤通过签名回调保存版本化图快照。
 - Agent 进程退出后，另一个兼容实例可以领取租约并从最后稳定检查点继续。
 - Redis 丢失时，dispatcher 补投活动命令；旧任务对账器只处理没有活动命令的 active 或 waiting_call 任务，不重新投递 awaiting_user_review。
+- 文风画像、质量检查和 RAG 索引分别从 `StylePortraitTask`、`WorkflowRun(kind=quality_check)` 和 `RagDocument` 恢复投递；进程内任务或 Redis 状态都不是这些工作的唯一事实来源。
+- Core 的命令、旧任务对账、画像、质量检查和 RAG dispatcher，以及 Agent 的队列消费者，都由生命周期任务监督器管理；后台协程异常退出后必须退避重启，就绪检查必须检查实际运行的 `Task`，不能只检查对象是否存在。
 - `WritingMessage` 只保存用户可见聊天记录，不能反推图状态。
 
 ## 版本化数据迁移
@@ -96,8 +98,10 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 
 - 每个 Python 服务一个 worker；
 - 同时只执行一个模型任务；
-- Redis `maxmemory` 为 64 MB，关闭 AOF；
+- Redis `maxmemory` 为 64 MB，关闭 AOF，并使用 `maxmemory-policy noeviction`；内存耗尽时必须明确拒绝新写入，不能淘汰队列、事件或防重放键；
 - 所有容器使用非 root 用户、只读根文件系统、健康检查和资源上限。
+
+运维必须监控 Redis `used_memory`、`evicted_keys` 和写入被拒绝数量。`evicted_keys` 应持续为 0；内存接近上限或出现写入拒绝时先停止接收新的模型任务并扩容或清理可确认过期的数据，不能临时切回淘汰策略。
 
 ## 常用配置
 
@@ -106,6 +110,7 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 | `DATABASE_URL` | Core | 现有 PostgreSQL 地址 |
 | `JWT_SECRET` | Core、Web | 浏览器会话签名 |
 | `REDIS_URL` | Core、Agent | 队列、事件和防重放 |
+| `RAG_INDEX_ENABLED` | Core、Agent | 同时启用资料索引投递和 embedding 就绪校验；两端必须使用相同值 |
 | `OPENAI_API_KEY` | Agent | 模型服务密钥 |
 | `OPENAI_BASE_URL` | Agent | 模型服务地址 |
 | `OPENAI_MODEL` | Agent | 模型名称 |

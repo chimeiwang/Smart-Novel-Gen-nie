@@ -175,7 +175,7 @@ flowchart TD
 
 ## 一致性终检运行流程
 
-Core API 负责浏览器认证、检查项归属和可选 `taskId` 绑定校验。`taskId` 必须与检查项属于同一用户、小说和章节，否则返回 403。任务成功进入 Redis 队列后接口才返回 202；Agent Service 异步生成报告，并通过签名内部回调更新状态。提交失败时不得提前把检查项改为 `running`。
+Core API 负责浏览器认证、检查项归属和可选 `taskId` 绑定校验。`taskId` 必须与检查项属于同一用户、小说和章节，否则返回 403。Core 先把本次检查完整输入保存到独立的 `WorkflowRun(kind=quality_check)`，再使用该运行 ID 作为稳定队列标识投递；Redis 暂时不可用时由 dispatcher 补投，不得丢失已受理任务，也不得与同一检查项的其他运行混淆。Agent Service 异步生成报告，并通过签名内部回调同时结算检查项和对应运行终态。
 
 ~~~mermaid
 sequenceDiagram
@@ -202,6 +202,7 @@ sequenceDiagram
 - 越权返回 403。
 - 检查项不存在返回 404。
 - Agent 无报告或保存失败时，检查项标记 failed，任务标记 error。
+- 内部回调必须校验用户、小说、检查项和运行的绑定关系，不得使用另一次运行的结果覆盖当前检查。
 
 ## Beat Plan
 
