@@ -11,6 +11,7 @@ from ..errors import ApiError
 from .schemas import (
     ApplyStyleRequest,
     CreateStyleRequest,
+    FullPortraitSuccessRequest,
     PortraitAcceptedResponse,
     PortraitFailureRequest,
     PortraitProcessingRequest,
@@ -35,7 +36,12 @@ class StyleRepositoryPort(Protocol):
     ) -> dict[str, Any]: ...
     async def delete_reference(self, user_id: str, style_id: str, reference_id: str) -> str: ...
     async def delete_style(self, user_id: str, style_id: str) -> list[str]: ...
-    async def create_portrait_task(self, user_id: str, style_id: str) -> dict[str, Any]: ...
+    async def create_portrait_task(
+        self,
+        user_id: str,
+        style_id: str,
+        section: PortraitSection | None,
+    ) -> dict[str, Any]: ...
     async def get_portrait_sources(
         self, style_id: str, task_id: str
     ) -> list[dict[str, Any]]: ...
@@ -46,6 +52,9 @@ class StyleRepositoryPort(Protocol):
         task_id: str,
         target: str,
         fields: dict[str, Any] | None = None,
+        *,
+        expected_section: PortraitSection | None = None,
+        validate_section: bool = False,
     ) -> dict[str, Any]: ...
     async def update_section(
         self, user_id: str, style_id: str, section: PortraitSection, content: str
@@ -61,6 +70,7 @@ class PortraitRunSubmitter(Protocol):
         style_id: str,
         task_id: str,
         run_id: str,
+        section: PortraitSection | None,
     ) -> None: ...
 
 
@@ -119,14 +129,19 @@ class StyleService:
         for path in paths:
             self._storage.delete(path)
 
-    async def create_portrait(self, user_id: str, style_id: str) -> PortraitAcceptedResponse:
+    async def create_portrait(
+        self,
+        user_id: str,
+        style_id: str,
+        section: PortraitSection | None = None,
+    ) -> PortraitAcceptedResponse:
         if self._submitter is None:
             raise ApiError(
                 status_code=503,
                 code="PORTRAIT_SERVICE_UNAVAILABLE",
                 message="画像生成服务暂时不可用",
             )
-        task = await self._repository.create_portrait_task(user_id, style_id)
+        task = await self._repository.create_portrait_task(user_id, style_id, section)
         task_id = str(task["id"])
         try:
             await self._submitter.submit(
@@ -134,6 +149,7 @@ class StyleService:
                 style_id=style_id,
                 task_id=task_id,
                 run_id=task_id,
+                section=section,
             )
         except Exception:
             logger.warning(
@@ -192,23 +208,41 @@ class StyleService:
         self, style_id: str, task_id: str, request: PortraitSuccessRequest
     ) -> PortraitTaskResponse:
         self._require_run(task_id, request.runId)
-        sections = {
-            "creativeMethodology": request.creativeMethodology,
-            "uniqueMarkers": request.uniqueMarkers,
-            "generationStyle": request.generationStyle,
-            "expressionFeatures": request.expressionFeatures,
-            "styleTraits": request.styleTraits,
-        }
-        fields: dict[str, Any] = {
-            **sections,
-            "portraitMarkdown": build_portrait_markdown(sections),
-            "originalCharCount": request.originalCharCount,
-            "usedCharCount": request.usedCharCount,
-            "truncated": False,
-            "errorMessage": None,
-        }
+        if isinstance(request, FullPortraitSuccessRequest):
+            sections = {
+                "creativeMethodology": request.creativeMethodology,
+                "uniqueMarkers": request.uniqueMarkers,
+                "generationStyle": request.generationStyle,
+                "expressionFeatures": request.expressionFeatures,
+                "styleTraits": request.styleTraits,
+            }
+            expected_section: PortraitSection | None = None
+            fields: dict[str, Any] = {
+                **sections,
+                "portraitMarkdown": build_portrait_markdown(sections),
+                "originalCharCount": request.originalCharCount,
+                "usedCharCount": request.usedCharCount,
+                "truncated": False,
+                "errorMessage": None,
+            }
+        else:
+            expected_section = request.section
+            fields = {
+                request.section: request.content,
+                "originalCharCount": request.originalCharCount,
+                "usedCharCount": request.usedCharCount,
+                "truncated": False,
+                "errorMessage": None,
+            }
         return PortraitTaskResponse.model_validate(
-            await self._repository.transition_portrait_task(style_id, task_id, "success", fields)
+            await self._repository.transition_portrait_task(
+                style_id,
+                task_id,
+                "success",
+                fields,
+                expected_section=expected_section,
+                validate_section=True,
+            )
         )
 
     async def fail_portrait(

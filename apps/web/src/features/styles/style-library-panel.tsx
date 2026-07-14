@@ -170,32 +170,45 @@ export function StyleLibraryPanel({ styles: initialStyles }: StyleLibraryPanelPr
     if (expandedStyleId === styleId) setExpandedStyleId(null);
   };
 
-  // Python 服务按完整画像生成，五个维度共享同一个持久任务。
-  const generateSection = async (styleId: string, _section: SectionKey) => {
+  const generatePortrait = async (styleId: string, section: SectionKey | null) => {
     const currentStyle = styles.find((style) => style.id === styleId);
-    const setAllSectionStates = (
+    const setGenerationState = (
       status: SectionState["status"],
       style: StyleItem | undefined = currentStyle,
       error?: string,
     ) => {
-      setSectionStates((previous) => ({
-        ...previous,
-        [styleId]: Object.fromEntries(SECTIONS.map(({ key }) => [
-          key,
-          { status, content: style?.[key] ?? "", error },
-        ])) as Record<SectionKey, SectionState>,
-      }));
+      setSectionStates((previous) => {
+        const current = (previous[styleId] ?? {}) as Record<SectionKey, SectionState>;
+        const targets = section === null ? SECTIONS.map(({ key }) => key) : [section];
+        const updated = { ...current };
+        for (const key of targets) {
+          updated[key] = {
+            status,
+            content: style?.[key] ?? current[key]?.content ?? "",
+            error,
+          };
+        }
+        return { ...previous, [styleId]: updated };
+      });
     };
 
-    setAllSectionStates("generating");
+    setGenerationState("generating");
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
 
     try {
-      const accepted = requireApiData(await browserApi.POST(
-        "/api/v1/styles/{style_id}/portrait",
-        { params: { path: { style_id: styleId } }, signal: abortController.signal },
-      ));
+      const accepted = section === null
+        ? requireApiData(await browserApi.POST(
+          "/api/v1/styles/{style_id}/portrait",
+          { params: { path: { style_id: styleId } }, signal: abortController.signal },
+        ))
+        : requireApiData(await browserApi.POST(
+          "/api/v1/styles/{style_id}/sections/{section}/portrait",
+          {
+            params: { path: { style_id: styleId, section } },
+            signal: abortController.signal,
+          },
+        ));
 
       while (true) {
         await new Promise((resolve) => window.setTimeout(resolve, 1000));
@@ -211,18 +224,26 @@ export function StyleLibraryPanel({ styles: initialStyles }: StyleLibraryPanelPr
       const refreshedStyle = refreshedStyles.find((style) => style.id === styleId);
       if (!refreshedStyle) throw new Error("画像生成完成，但文风不存在");
       setStyles(refreshedStyles);
-      setAllSectionStates("done", refreshedStyle);
+      setGenerationState("done", refreshedStyle);
     } catch (error) {
       if (error instanceof Error && error.name === "AbortError") {
-        setAllSectionStates("idle");
+        setGenerationState("idle");
       } else {
-        setAllSectionStates("error", currentStyle, error instanceof Error ? error.message : "生成失败");
+        setGenerationState(
+          "error",
+          currentStyle,
+          error instanceof Error ? error.message : "生成失败",
+        );
       }
     }
   };
 
+  const generateSection = async (styleId: string, section: SectionKey) => {
+    await generatePortrait(styleId, section);
+  };
+
   const generateAllSections = async (styleId: string) => {
-    await generateSection(styleId, "creativeMethodology");
+    await generatePortrait(styleId, null);
   };
 
   // 停止生成

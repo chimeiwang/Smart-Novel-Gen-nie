@@ -39,6 +39,7 @@ class RecordingStyleService:
         return {
             "id": task_id,
             "styleId": style_id,
+            "section": None,
             "status": "processing",
             "errorMessage": None,
             "createdAt": datetime(2026, 7, 11, tzinfo=UTC),

@@ -35,7 +35,10 @@ class PortraitCorePort(Protocol):
 
 class PortraitGeneratorPort(Protocol):
     async def generate(
-        self, resource: RunResource, source_text: str
+        self,
+        resource: RunResource,
+        source_text: str,
+        section: str | None = None,
     ) -> dict[str, str]: ...
 
 
@@ -57,6 +60,9 @@ class PortraitJobHandler:
         style_id = job.payload.get("styleId")
         if not isinstance(style_id, str) or not style_id:
             raise ValueError("画像任务缺少文风标识")
+        section = job.payload.get("section")
+        if section is not None and section not in ModelPortraitGenerator._SECTIONS:
+            raise ValueError("画像任务分节无效")
         resource = RunResource(
             userId=job.userId,
             novelId=job.novelId,
@@ -81,13 +87,24 @@ class PortraitJobHandler:
                 raise ValueError("画像上下文缺少完整参考正文")
             if isinstance(original_count, bool) or not isinstance(original_count, int):
                 raise ValueError("画像上下文字数无效")
-            sections = await self._generator.generate(resource, source_text)
-            result: dict[str, Any] = {
-                **sections,
-                "originalCharCount": original_count,
-                "usedCharCount": original_count,
-                "truncated": False,
-            }
+            sections = await self._generator.generate(resource, source_text, section)
+            if section is None:
+                result: dict[str, Any] = {
+                    "mode": "full",
+                    **sections,
+                    "originalCharCount": original_count,
+                    "usedCharCount": original_count,
+                    "truncated": False,
+                }
+            else:
+                result = {
+                    "mode": "section",
+                    "section": section,
+                    "content": sections[section],
+                    "originalCharCount": original_count,
+                    "usedCharCount": original_count,
+                    "truncated": False,
+                }
             await self._core.complete_portrait(resource, style_id, result)
         except Exception as exc:
             try:
@@ -114,9 +131,19 @@ class ModelPortraitGenerator:
     def __init__(self, runtime: ModelRuntime) -> None:
         self._runtime = runtime
 
-    async def generate(self, resource: RunResource, source_text: str) -> dict[str, str]:
+    async def generate(
+        self,
+        resource: RunResource,
+        source_text: str,
+        section: str | None = None,
+    ) -> dict[str, str]:
         result: dict[str, str] = {}
-        for section, instruction in self._SECTIONS.items():
+        selected = (
+            self._SECTIONS.items()
+            if section is None
+            else ((section, self._SECTIONS[section]),)
+        )
+        for section_name, instruction in selected:
             response = await self._runtime.run_turn(
                 ModelTurnRequest(
                     messages=[
@@ -146,5 +173,5 @@ class ModelPortraitGenerator:
             content = response.content.strip()
             if not content:
                 raise RuntimeError("画像模型返回空内容")
-            result[section] = content
+            result[section_name] = content
         return result

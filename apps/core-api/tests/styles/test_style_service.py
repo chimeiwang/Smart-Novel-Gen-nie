@@ -9,10 +9,11 @@ import pytest
 from inkforge_core.errors import ApiError
 from inkforge_core.styles.schemas import (
     ApplyStyleRequest,
+    FullPortraitSuccessRequest,
     PortraitFailureRequest,
     PortraitProcessingRequest,
     PortraitSection,
-    PortraitSuccessRequest,
+    SectionPortraitSuccessRequest,
     UpdatePortraitSectionRequest,
 )
 from inkforge_core.styles.service import StyleService
@@ -103,7 +104,7 @@ class MemoryRepository:
         self.owners.pop(style_id)
         return [value["filepath"] for value in style["references"]]
 
-    async def create_portrait_task(self, user_id, style_id):
+    async def create_portrait_task(self, user_id, style_id, section):
         style = self.require_owned(user_id, style_id)
         if not any(value["status"] == "ready" for value in style["references"]):
             raise ApiError(
@@ -114,6 +115,7 @@ class MemoryRepository:
         task = {
             "id": "task-1",
             "styleId": style_id,
+            "section": section,
             "status": "pending",
             "errorMessage": None,
             "createdAt": NOW,
@@ -132,10 +134,25 @@ class MemoryRepository:
         self.require_owned(user_id, task["styleId"])
         return task
 
-    async def transition_portrait_task(self, style_id, task_id, target, fields=None):
+    async def transition_portrait_task(
+        self,
+        style_id,
+        task_id,
+        target,
+        fields=None,
+        *,
+        expected_section=None,
+        validate_section=False,
+    ):
         task = self.tasks[task_id]
         if task["styleId"] != style_id:
             raise ApiError(status_code=409, code="PORTRAIT_TASK_MISMATCH", message="画像任务不匹配")
+        if validate_section and task["section"] != expected_section:
+            raise ApiError(
+                status_code=409,
+                code="PORTRAIT_TASK_SECTION_MISMATCH",
+                message="画像任务分节不匹配",
+            )
         current = task["status"]
         allowed = (
             current == "pending"
@@ -152,6 +169,12 @@ class MemoryRepository:
         task["status"] = target
         if target == "success":
             self.styles[style_id].update(fields or {})
+            if expected_section is not None:
+                from inkforge_core.styles.service import build_portrait_markdown
+
+                self.styles[style_id]["portraitMarkdown"] = build_portrait_markdown(
+                    {key: self.styles[style_id][key] for key in SECTIONS}
+                )
         elif target == "error":
             task["errorMessage"] = "画像生成失败"
             self.styles[style_id]["errorMessage"] = "画像生成失败"
@@ -214,8 +237,9 @@ def test_section_and_callback_models_are_strict() -> None:
     with pytest.raises(ValidationError):
         PortraitProcessingRequest.model_validate({"runId": "run", "status": "done"})
     with pytest.raises(ValidationError):
-        PortraitSuccessRequest.model_validate(
+        FullPortraitSuccessRequest.model_validate(
             {
+                "mode": "full",
                 "runId": "run",
                 **SECTIONS,
                 "originalCharCount": 5,
@@ -285,6 +309,7 @@ async def test_second_user_cannot_read_or_mutate_private_style(tmp_path: Path) -
     repository.tasks["task-1"] = {
         "id": "task-1",
         "styleId": "style-1",
+        "section": None,
         "status": "pending",
         "errorMessage": None,
         "createdAt": NOW,
@@ -344,6 +369,7 @@ async def test_portrait_rejects_existing_active_task(tmp_path: Path, active_stat
     repository.tasks["old-task"] = {
         "id": "old-task",
         "styleId": "style-1",
+        "section": None,
         "status": active_status,
         "errorMessage": None,
         "createdAt": NOW,
@@ -372,6 +398,7 @@ async def test_submit_failure_keeps_pending_task_and_returns_reconcilable_id(
             "style_id": "style-1",
             "task_id": "task-1",
             "run_id": "task-1",
+            "section": None,
         }
     ]
 
@@ -386,7 +413,8 @@ async def test_portrait_state_machine_and_success_are_idempotent(tmp_path: Path)
     processing = PortraitProcessingRequest(runId="task-1")
     await style_service.mark_processing("style-1", "task-1", processing)
     await style_service.mark_processing("style-1", "task-1", processing)
-    success = PortraitSuccessRequest(
+    success = FullPortraitSuccessRequest(
+        mode="full",
         runId="task-1",
         **SECTIONS,
         originalCharCount=2,
@@ -405,6 +433,83 @@ async def test_portrait_state_machine_and_success_are_idempotent(tmp_path: Path)
         await style_service.fail_portrait(
             "style-1", "task-1", PortraitFailureRequest(runId="task-1", message="供应商密钥泄漏")
         )
+
+
+@pytest.mark.asyncio
+async def test_section_portrait_updates_only_requested_section(tmp_path: Path) -> None:
+    repository = MemoryRepository()
+    repository.styles["style-1"].update(SECTIONS)
+    submitter = RecordingSubmitter()
+    style_service = service(tmp_path, repository, submitter)
+    await style_service.upload_reference("user-1", "style-1", upload("甲 乙"))
+
+    task = await style_service.create_portrait(
+        "user-1",
+        "style-1",
+        section="uniqueMarkers",
+    )
+    await style_service.mark_processing(
+        "style-1",
+        task.taskId,
+        PortraitProcessingRequest(runId=task.taskId),
+    )
+    await style_service.complete_portrait(
+        "style-1",
+        task.taskId,
+        SectionPortraitSuccessRequest(
+            mode="section",
+            runId=task.taskId,
+            section="uniqueMarkers",
+            content="新标记",
+            originalCharCount=2,
+            usedCharCount=2,
+            truncated=False,
+        ),
+    )
+
+    style = repository.styles["style-1"]
+    assert style["uniqueMarkers"] == "新标记"
+    assert style["creativeMethodology"] == "方法"
+    assert repository.tasks[task.taskId]["section"] == "uniqueMarkers"
+    assert submitter.calls[-1]["section"] == "uniqueMarkers"
+    assert style["portraitMarkdown"] == (
+        "创作方法论\n方法\n\n独特标记\n新标记\n\n生成风格\n生成\n\n"
+        "表达特征\n表达\n\n风格特质\n特质"
+    )
+
+
+@pytest.mark.asyncio
+async def test_portrait_success_mode_must_match_persisted_task_section(tmp_path: Path) -> None:
+    repository = MemoryRepository()
+    style_service = service(tmp_path, repository, RecordingSubmitter())
+    await style_service.upload_reference("user-1", "style-1", upload("甲 乙"))
+    task = await style_service.create_portrait(
+        "user-1",
+        "style-1",
+        section="uniqueMarkers",
+    )
+    await style_service.mark_processing(
+        "style-1",
+        task.taskId,
+        PortraitProcessingRequest(runId=task.taskId),
+    )
+
+    with pytest.raises(ApiError) as caught:
+        await style_service.complete_portrait(
+            "style-1",
+            task.taskId,
+            FullPortraitSuccessRequest(
+                mode="full",
+                runId=task.taskId,
+                **SECTIONS,
+                originalCharCount=2,
+                usedCharCount=2,
+                truncated=False,
+            ),
+        )
+
+    assert caught.value.code == "PORTRAIT_TASK_SECTION_MISMATCH"
+    assert repository.tasks[task.taskId]["status"] == "processing"
 
 
 @pytest.mark.asyncio
@@ -451,6 +556,7 @@ async def test_failure_stores_controlled_message_not_provider_text(tmp_path: Pat
     repository.tasks["task-1"] = {
         "id": "task-1",
         "styleId": "style-1",
+        "section": None,
         "status": "processing",
         "errorMessage": None,
         "createdAt": NOW,

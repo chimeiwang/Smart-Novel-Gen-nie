@@ -61,8 +61,8 @@ class ApiStyleService:
     async def delete_reference(self, user_id, style_id, reference_id):
         self.calls.append(("delete-ref", user_id, style_id, reference_id))
 
-    async def create_portrait(self, user_id, style_id):
-        self.calls.append(("portrait", user_id, style_id))
+    async def create_portrait(self, user_id, style_id, section=None):
+        self.calls.append(("portrait", user_id, style_id, section))
         return {"taskId": "task-1", "status": "pending"}
 
     async def get_portrait_task(self, user_id, task_id):
@@ -70,6 +70,7 @@ class ApiStyleService:
         return {
             "id": task_id,
             "styleId": "style-1",
+            "section": None,
             "status": "pending",
             "errorMessage": None,
             "createdAt": NOW,
@@ -114,6 +115,11 @@ async def client(
         ),
         ("DELETE", "/api/v1/styles/style-1/references/ref-1", {}),
         ("POST", "/api/v1/styles/style-1/portrait", {}),
+        (
+            "POST",
+            "/api/v1/styles/style-1/sections/uniqueMarkers/portrait",
+            {},
+        ),
         ("GET", "/api/v1/portrait-tasks/task-1", {}),
         (
             "PATCH",
@@ -149,6 +155,11 @@ async def test_public_style_route_matrix_and_multipart_upload() -> None:
         ).status_code == 201
         assert (await value.delete("/api/v1/styles/style-1/references/ref-1")).status_code == 204
         assert (await value.post("/api/v1/styles/style-1/portrait")).status_code == 202
+        assert (
+            await value.post(
+                "/api/v1/styles/style-1/sections/uniqueMarkers/portrait"
+            )
+        ).status_code == 202
         assert (await value.get("/api/v1/portrait-tasks/task-1")).status_code == 200
         assert (
             await value.patch(
@@ -167,6 +178,8 @@ async def test_public_style_route_matrix_and_multipart_upload() -> None:
     assert ("delete-ref", "cookie-user", "style-1", "ref-1") in service.calls
     assert ("get-task", "cookie-user", "task-1") in service.calls
     assert ("section", "cookie-user", "style-1", "styleTraits", "特质") in service.calls
+    assert ("portrait", "cookie-user", "style-1", None) in service.calls
+    assert ("portrait", "cookie-user", "style-1", "uniqueMarkers") in service.calls
 
 
 def test_openapi_publishes_strict_dtos_and_hides_internal_callbacks() -> None:
@@ -175,6 +188,7 @@ def test_openapi_publishes_strict_dtos_and_hides_internal_callbacks() -> None:
     assert "/api/v1/styles" in paths
     assert "/api/v1/styles/{style_id}/references" in paths
     assert "/api/v1/styles/{style_id}/portrait" in paths
+    assert "/api/v1/styles/{style_id}/sections/{section}/portrait" in paths
     assert "/api/v1/portrait-tasks/{task_id}" in paths
     assert "/api/v1/novels/{novel_id}/applied-style" in paths
     assert not any(path.startswith("/internal/") for path in paths)

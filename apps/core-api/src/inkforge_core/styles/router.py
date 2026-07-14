@@ -90,6 +90,20 @@ async def create_portrait(style_id: str, user: User, service: Service) -> Portra
     return await service.create_portrait(user.id, style_id)
 
 
+@router.post(
+    "/styles/{style_id}/sections/{section}/portrait",
+    response_model=PortraitAcceptedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def create_section_portrait(
+    style_id: str,
+    section: PortraitSection,
+    user: User,
+    service: Service,
+) -> PortraitAcceptedResponse:
+    return await service.create_portrait(user.id, style_id, section)
+
+
 @router.get("/portrait-tasks/{task_id}", response_model=PortraitTaskResponse)
 async def get_portrait_task(task_id: str, user: User, service: Service) -> PortraitTaskResponse:
     return await service.get_portrait_task(user.id, task_id)

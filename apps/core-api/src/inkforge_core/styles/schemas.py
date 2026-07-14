@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -46,6 +46,7 @@ class StyleReferenceResponse(StrictModel):
 class PortraitTaskResponse(StrictModel):
     id: str
     styleId: str
+    section: PortraitSection | None
     status: PortraitTaskStatus
     errorMessage: str | None
     createdAt: datetime
@@ -81,7 +82,8 @@ class PortraitProcessingRequest(StrictModel):
     runId: str = Field(min_length=1, max_length=256)
 
 
-class PortraitSuccessRequest(StrictModel):
+class FullPortraitSuccessRequest(StrictModel):
+    mode: Literal["full"]
     runId: str = Field(min_length=1, max_length=256)
     creativeMethodology: str = Field(min_length=1)
     uniqueMarkers: str = Field(min_length=1)
@@ -91,6 +93,22 @@ class PortraitSuccessRequest(StrictModel):
     originalCharCount: int = Field(ge=0)
     usedCharCount: int = Field(ge=0)
     truncated: Literal[False]
+
+
+class SectionPortraitSuccessRequest(StrictModel):
+    mode: Literal["section"]
+    runId: str = Field(min_length=1, max_length=256)
+    section: PortraitSection
+    content: str = Field(min_length=1)
+    originalCharCount: int = Field(ge=0)
+    usedCharCount: int = Field(ge=0)
+    truncated: Literal[False]
+
+
+PortraitSuccessRequest = Annotated[
+    FullPortraitSuccessRequest | SectionPortraitSuccessRequest,
+    Field(discriminator="mode"),
+]
 
 
 class PortraitFailureRequest(StrictModel):

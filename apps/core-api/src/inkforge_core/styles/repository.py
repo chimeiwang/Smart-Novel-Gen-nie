@@ -124,7 +124,12 @@ class StyleRepository:
                 await session.delete(style)
         return paths
 
-    async def create_portrait_task(self, user_id: str, style_id: str) -> dict[str, Any]:
+    async def create_portrait_task(
+        self,
+        user_id: str,
+        style_id: str,
+        section: PortraitSection | None,
+    ) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
                 style = await self._lock_owned_style(session, user_id, style_id)
@@ -156,7 +161,12 @@ class StyleRepository:
                         code="PORTRAIT_TASK_ACTIVE",
                         message="该文风已有画像任务正在执行",
                     )
-                task = StylePortraitTask(styleId=style.id, status="pending", errorMessage=None)
+                task = StylePortraitTask(
+                    styleId=style.id,
+                    section=section,
+                    status="pending",
+                    errorMessage=None,
+                )
                 style.errorMessage = None
                 session.add(task)
                 await session.flush()
@@ -220,6 +230,9 @@ class StyleRepository:
         task_id: str,
         target: str,
         fields: dict[str, Any] | None = None,
+        *,
+        expected_section: PortraitSection | None = None,
+        validate_section: bool = False,
     ) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
@@ -239,6 +252,12 @@ class StyleRepository:
                         code="PORTRAIT_TASK_MISMATCH",
                         message="画像任务与文风不匹配",
                     )
+                if validate_section and task.section != expected_section:
+                    raise ApiError(
+                        status_code=409,
+                        code="PORTRAIT_TASK_SECTION_MISMATCH",
+                        message="画像任务分节与完成结果不匹配",
+                    )
                 style = await self._lock_style(session, style_id)
                 if task.status == target and target in {"processing", "success", "error"}:
                     return self._task_dto(task)
@@ -257,6 +276,16 @@ class StyleRepository:
                 if target == "success":
                     for name, value in (fields or {}).items():
                         setattr(style, name, value)
+                    if expected_section is not None:
+                        style.portraitMarkdown = build_portrait_markdown(
+                            {
+                                "creativeMethodology": style.creativeMethodology,
+                                "uniqueMarkers": style.uniqueMarkers,
+                                "generationStyle": style.generationStyle,
+                                "expressionFeatures": style.expressionFeatures,
+                                "styleTraits": style.styleTraits,
+                            }
+                        )
                     task.errorMessage = None
                     style.errorMessage = None
                 elif target == "error":
@@ -394,6 +423,7 @@ class StyleRepository:
         return {
             "id": task.id,
             "styleId": task.styleId,
+            "section": task.section,
             "status": task.status,
             "errorMessage": task.errorMessage,
             "createdAt": _utc(task.createdAt),

@@ -218,6 +218,7 @@ class PortraitAgentSubmitter:
         style_id: str,
         task_id: str,
         run_id: str,
+        section: str | None,
     ) -> None:
         await self._client.submit(
             AgentJobRequest(
@@ -229,7 +230,7 @@ class PortraitAgentSubmitter:
                 novelId=f"style:{style_id}",
                 userId=user_id,
                 priority=20,
-                payload={"styleId": style_id},
+                payload={"styleId": style_id, "section": section},
             )
         )
 
