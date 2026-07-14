@@ -117,6 +117,54 @@ async def test_consumer_graceful_stop_does_not_cancel_active_job() -> None:
 
 
 @pytest.mark.asyncio
+async def test_consumer_cancels_handler_when_heartbeat_infrastructure_fails() -> None:
+    inner = RedisRunQueue(fakeredis.aioredis.FakeRedis(), prefix="test:queue")
+    await inner.enqueue(job("heartbeat"))
+    release = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    class HeartbeatFailureQueue:
+        async def recover_expired(self):
+            return await inner.recover_expired()
+
+        async def claim(self, *, visibility_timeout):
+            return await inner.claim(visibility_timeout=visibility_timeout)
+
+        async def acknowledge(self, *args, **kwargs):
+            return await inner.acknowledge(*args, **kwargs)
+
+        async def retry(self, *args, **kwargs):
+            return await inner.retry(*args, **kwargs)
+
+        async def extend(self, *args, **kwargs):
+            del args, kwargs
+            raise ConnectionError("模拟 Redis 续租失败")
+
+    async def handler(current: QueueJob) -> None:
+        assert current.jobId == "heartbeat"
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    consumer = QueueConsumer(
+        HeartbeatFailureQueue(),  # type: ignore[arg-type]
+        {"writing": handler},
+        visibility_timeout=timedelta(milliseconds=30),
+        retry_delay=timedelta(0),
+    )
+
+    assert await consumer.run_once() is True
+    was_cancelled = cancelled.is_set()
+    release.set()
+    await asyncio.sleep(0)
+
+    assert was_cancelled is True
+    assert await inner.status("heartbeat") == "queued"
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("failure_method", ["recover_expired", "claim"])
 async def test_consumer_recovers_after_one_queue_infrastructure_failure(
     failure_method: str,

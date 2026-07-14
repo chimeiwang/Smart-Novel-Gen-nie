@@ -107,16 +107,20 @@ class QueueConsumer:
     ) -> None:
         task: asyncio.Future[None] = asyncio.ensure_future(handler(claim.job))
         heartbeat_seconds = max(self._visibility_timeout.total_seconds() / 3, 0.05)
-        while not task.done():
-            done, _ = await asyncio.wait({task}, timeout=heartbeat_seconds)
-            if done:
-                break
-            extended = await self._queue.extend(
-                claim,
-                visibility_timeout=self._visibility_timeout,
-            )
-            if not extended:
+        try:
+            while not task.done():
+                done, _ = await asyncio.wait({task}, timeout=heartbeat_seconds)
+                if done:
+                    break
+                extended = await self._queue.extend(
+                    claim,
+                    visibility_timeout=self._visibility_timeout,
+                )
+                if not extended:
+                    raise RuntimeError("任务租约已失效")
+            await task
+        except BaseException:
+            if not task.done():
                 task.cancel()
-                await asyncio.gather(task, return_exceptions=True)
-                raise RuntimeError("任务租约已失效")
-        await task
+            await asyncio.gather(task, return_exceptions=True)
+            raise
