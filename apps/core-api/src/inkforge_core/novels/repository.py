@@ -207,7 +207,20 @@ class NovelRepository:
                 session, Chapter, Chapter.novelId, novel_ids, Chapter.order.asc(), Chapter.id.asc()
             )
             style_ids = [novel.appliedStyleId for novel in novels if novel.appliedStyleId]
-            styles = await self._for_ids(session, WritingStyle, WritingStyle.id, style_ids)
+            styles = (
+                list(
+                    (
+                        await session.scalars(
+                            select(WritingStyle).where(
+                                WritingStyle.id.in_(style_ids),
+                                WritingStyle.userId == user_id,
+                            )
+                        )
+                    ).all()
+                )
+                if style_ids
+                else []
+            )
         chapter_ids: dict[str, list[str]] = defaultdict(list)
         for chapter in chapters:
             chapter_ids[chapter.novelId].append(chapter.id)
@@ -262,13 +275,24 @@ class NovelRepository:
                         text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
                     )
                 novel = await self._require_owner(session, novel_id, user_id)
-                workspace = await self._load_workspace(session, novel, chapter_id)
+                workspace = await self._load_workspace(
+                    session,
+                    novel,
+                    chapter_id,
+                    user_id=user_id,
+                )
         return WorkspaceResponse.model_validate(workspace)
 
     async def _load_workspace(
-        self, session: AsyncSession, novel: Novel, requested_chapter_id: str | None
+        self,
+        session: AsyncSession,
+        novel: Novel,
+        requested_chapter_id: str | None,
+        *,
+        user_id: str | None = None,
     ) -> dict[str, Any]:
         novel_id = novel.id
+        owner_id = user_id or novel.userId
         chapters = list(
             (
                 await session.scalars(
@@ -420,14 +444,21 @@ class NovelRepository:
             ).all()
         )
         applied_style = (
-            await session.get(WritingStyle, novel.appliedStyleId) if novel.appliedStyleId else None
+            await session.scalar(
+                select(WritingStyle).where(
+                    WritingStyle.id == novel.appliedStyleId,
+                    WritingStyle.userId == owner_id,
+                )
+            )
+            if novel.appliedStyleId
+            else None
         )
         styles = list(
             (
                 await session.scalars(
-                    select(WritingStyle).order_by(
-                        WritingStyle.updatedAt.desc(), WritingStyle.id.asc()
-                    )
+                    select(WritingStyle)
+                    .where(WritingStyle.userId == owner_id)
+                    .order_by(WritingStyle.updatedAt.desc(), WritingStyle.id.asc())
                 )
             ).all()
         )

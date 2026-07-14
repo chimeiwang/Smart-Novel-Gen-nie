@@ -433,6 +433,83 @@ async def test_workspace_query_count_does_not_grow_with_chapter_count() -> None:
 
 
 @pytest.mark.asyncio
+async def test_workspace_only_returns_owned_styles_and_hides_foreign_applied_style() -> None:
+    from datetime import UTC, datetime
+
+    from inkforge_core.db.models import WritingStyle
+    from inkforge_core.novels.repository import NovelRepository
+
+    now = datetime(2026, 7, 14, tzinfo=UTC)
+    owned = WritingStyle(
+        id="style-owned",
+        userId="user-1",
+        name="我的文风",
+        portraitMarkdown="我的画像",
+        sourceType="manual",
+        createdAt=now,
+        updatedAt=now,
+    )
+    foreign = WritingStyle(
+        id="style-foreign",
+        userId="user-2",
+        name="他人文风",
+        portraitMarkdown="不应泄露的画像",
+        sourceType="manual",
+        createdAt=now,
+        updatedAt=now,
+    )
+    novel = workspace_novel()
+    novel.appliedStyleId = foreign.id
+
+    class StyleIsolationSession(WorkspaceSession):
+        def __init__(self) -> None:
+            super().__init__([])
+            self.style_statements: list[str] = []
+
+        async def scalars(self, statement):
+            entity = statement.column_descriptions[0].get("entity")
+            if entity is WritingStyle:
+                source = str(statement)
+                self.style_statements.append(source)
+                values = [owned] if '"WritingStyle"."userId"' in source else [owned, foreign]
+                return ScalarRows(values)
+            return await super().scalars(statement)
+
+        async def scalar(self, statement):
+            entity = statement.column_descriptions[0].get("entity")
+            if entity is WritingStyle:
+                source = str(statement)
+                self.style_statements.append(source)
+                return None if '"WritingStyle"."userId"' in source else foreign
+            return await super().scalar(statement)
+
+        async def get(self, model, identity):
+            if model is WritingStyle and identity == foreign.id:
+                return foreign
+            return await super().get(model, identity)
+
+    session = StyleIsolationSession()
+    workspace = await NovelRepository(lambda: None)._load_workspace(  # type: ignore[arg-type]
+        session,
+        novel,
+        None,
+        user_id="user-1",
+    )
+
+    assert workspace["novel"]["appliedStyle"] is None
+    assert workspace["styles"] == [
+        {
+            "id": "style-owned",
+            "name": "我的文风",
+            "portraitMarkdown": "我的画像",
+            "sourceType": "manual",
+        }
+    ]
+    assert session.style_statements
+    assert all('"WritingStyle"."userId"' in value for value in session.style_statements)
+
+
+@pytest.mark.asyncio
 async def test_workspace_preserves_long_chapter_content_and_all_chapters() -> None:
     from inkforge_core.novels.repository import NovelRepository
 
