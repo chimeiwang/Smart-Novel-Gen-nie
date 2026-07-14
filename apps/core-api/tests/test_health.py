@@ -72,6 +72,29 @@ def test_core_lifespan_starts_and_stops_command_dispatcher() -> None:
     assert dispatcher.stopped is True
 
 
+def test_core_readiness_fails_when_registered_background_task_exits() -> None:
+    class CrashedWorker:
+        async def run(self) -> None:
+            raise RuntimeError("模拟后台任务意外退出")
+
+        def request_stop(self) -> None:
+            pass
+
+    app = create_app(testing=True, writing_reconciler=CrashedWorker())
+
+    with TestClient(app) as client:
+        import time
+
+        deadline = time.monotonic() + 1
+        registry = app.state.background_task_registry
+        while registry.is_ready() and time.monotonic() < deadline:
+            time.sleep(0.001)
+        response = client.get("/api/v1/health/ready")
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["background_tasks"] == "failed"
+
+
 def test_ready_aggregates_sync_and_async_checks_and_returns_503_on_failure() -> None:
     app = create_app(testing=True)
 

@@ -114,3 +114,56 @@ async def test_consumer_graceful_stop_does_not_cancel_active_job() -> None:
     release.set()
     await task
     assert await queue.status("slow") == "completed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_method", ["recover_expired", "claim"])
+async def test_consumer_recovers_after_one_queue_infrastructure_failure(
+    failure_method: str,
+) -> None:
+    inner = RedisRunQueue(fakeredis.aioredis.FakeRedis(), prefix="test:queue")
+    await inner.enqueue(job("recover"))
+    handled = asyncio.Event()
+
+    class FlakyQueue:
+        def __init__(self) -> None:
+            self.failed = False
+
+        async def recover_expired(self):
+            if failure_method == "recover_expired" and not self.failed:
+                self.failed = True
+                raise ConnectionError("模拟 Redis 恢复租约失败")
+            return await inner.recover_expired()
+
+        async def claim(self, *, visibility_timeout):
+            if failure_method == "claim" and not self.failed:
+                self.failed = True
+                raise ConnectionError("模拟 Redis 领取失败")
+            return await inner.claim(visibility_timeout=visibility_timeout)
+
+        async def acknowledge(self, *args, **kwargs):
+            return await inner.acknowledge(*args, **kwargs)
+
+        async def retry(self, *args, **kwargs):
+            return await inner.retry(*args, **kwargs)
+
+        async def extend(self, *args, **kwargs):
+            return await inner.extend(*args, **kwargs)
+
+    async def handler(current: QueueJob) -> None:
+        assert current.jobId == "recover"
+        handled.set()
+
+    consumer = QueueConsumer(
+        FlakyQueue(),  # type: ignore[arg-type]
+        {"writing": handler},
+        poll_interval=0.001,
+        infrastructure_retry_base=0.001,
+        infrastructure_retry_max=0.002,
+    )
+    task = asyncio.create_task(consumer.run())
+    await asyncio.wait_for(handled.wait(), timeout=1)
+    consumer.request_stop()
+    await task
+
+    assert await inner.status("recover") == "completed"

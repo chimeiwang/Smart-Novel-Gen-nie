@@ -52,7 +52,10 @@ class WritingRunReconciler:
 
     async def run(self) -> None:
         while not self._stop.is_set():
-            await self.run_once()
+            try:
+                await self.run_once()
+            except Exception:
+                logger.exception("写作运行后台领取失败，等待下次重试")
             try:
                 await asyncio.wait_for(
                     self._stop.wait(),

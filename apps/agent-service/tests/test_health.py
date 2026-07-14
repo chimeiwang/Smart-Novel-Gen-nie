@@ -60,3 +60,38 @@ def test_app_lifespan_starts_and_stops_single_queue_consumer() -> None:
         assert consumer.started is True
 
     assert consumer.stopped is True
+
+
+def test_readiness_fails_when_queue_consumer_task_exits_unexpectedly() -> None:
+    class CrashedConsumer:
+        async def run(self) -> None:
+            raise RuntimeError("模拟消费者意外退出")
+
+        def request_stop(self) -> None:
+            pass
+
+    settings = Settings.model_validate(
+        {
+            "environment": "production",
+            "model_provider": "fake",
+        }
+    )
+    app = create_app(
+        testing=True,
+        settings=settings,
+        run_queue=object(),  # type: ignore[arg-type]
+        core_request_verifier=object(),  # type: ignore[arg-type]
+        queue_consumer=CrashedConsumer(),
+    )
+    app.state.core_client = object()
+
+    with TestClient(app) as client:
+        import time
+
+        deadline = time.monotonic() + 1
+        while not app.state.consumer_task.done() and time.monotonic() < deadline:
+            time.sleep(0.001)
+        response = client.get("/internal/v1/health/ready")
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["queue_consumer"] == "failed"

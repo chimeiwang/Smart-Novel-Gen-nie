@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from inkforge_core.db.models import WritingTask
 from inkforge_core.writing.reconciler import WritingRunReconciler
@@ -55,6 +57,56 @@ async def test_reconciler_continues_after_one_submission_failure() -> None:
 
     assert await reconciler.run_once() == 1
     assert submitter.tasks == ["good"]
+
+
+@pytest.mark.asyncio
+async def test_reconciler_loop_recovers_after_one_repository_failure() -> None:
+    expected = TaskRecord(
+        "recovered",
+        "user-1",
+        "novel-1",
+        "chapter-1",
+        None,
+        "idle",
+        None,
+    )
+
+    class FlakyRepository:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def list_reconcilable(self, limit: int) -> list[TaskRecord]:
+            assert limit == 10
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("模拟数据库领取失败")
+            return [expected]
+
+    class StoppingSubmitter(Submitter):
+        def __init__(self) -> None:
+            super().__init__()
+            self.completed = asyncio.Event()
+
+        async def reconcile(self, task: TaskRecord) -> None:
+            await super().reconcile(task)
+            self.completed.set()
+
+    repository = FlakyRepository()
+    submitter = StoppingSubmitter()
+    reconciler = WritingRunReconciler(
+        repository,
+        submitter,
+        batch_size=10,
+        interval_seconds=0.001,
+    )
+
+    task = asyncio.create_task(reconciler.run())
+    await asyncio.wait_for(submitter.completed.wait(), timeout=1)
+    reconciler.request_stop()
+    await task
+
+    assert repository.calls >= 2
+    assert submitter.tasks == ["recovered"]
 
 
 class EmptyRows:

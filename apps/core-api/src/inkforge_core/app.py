@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import cast
@@ -46,6 +45,7 @@ from .novels.router import router as novels_router
 from .novels.service import NovelService
 from .operations import register_readiness_check
 from .operations import router as operations_router
+from .operations.background import BackgroundTaskRegistry, BackgroundWorker
 from .outlines.repository import OutlineRepository
 from .outlines.router import router as outlines_router
 from .outlines.service import OutlineService
@@ -277,14 +277,22 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """在应用退出时释放已创建的数据库连接池。"""
 
     workers = [
-        worker
-        for worker in (
-            getattr(app.state, "writing_reconciler", None),
-            getattr(app.state, "writing_command_dispatcher", None),
+        (name, cast(BackgroundWorker, worker))
+        for name, worker in (
+            ("writing_reconciler", getattr(app.state, "writing_reconciler", None)),
+            (
+                "writing_command_dispatcher",
+                getattr(app.state, "writing_command_dispatcher", None),
+            ),
         )
         if worker is not None
     ]
-    worker_tasks = [asyncio.create_task(worker.run()) for worker in workers]
+    registry = BackgroundTaskRegistry()
+    app.state.background_task_registry = registry
+    for name, worker in workers:
+        registry.start(name, worker)
+    if workers:
+        register_readiness_check(app, "background_tasks", registry.is_ready)
     try:
         readiness = cast(
             DatabaseReadiness | None,
@@ -294,10 +302,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             await readiness.warm_up()
         yield
     finally:
-        for worker in workers:
-            worker.request_stop()
-        if worker_tasks:
-            await asyncio.gather(*worker_tasks, return_exceptions=True)
+        await registry.stop_all()
         auth_redis = getattr(app.state, "auth_redis", None)
         try:
             if auth_redis is not None:

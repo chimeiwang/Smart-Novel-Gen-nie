@@ -128,7 +128,13 @@ def create_app(
                     "core_client": (
                         "ok" if getattr(app.state, "core_client", None) is not None else "failed"
                     ),
-                    "queue_consumer": ("ok" if app.state.queue_consumer is not None else "failed"),
+                    "queue_consumer": (
+                        "ok"
+                        if app.state.queue_consumer is not None
+                        and getattr(app.state, "consumer_task", None) is not None
+                        and not app.state.consumer_task.done()
+                        else "failed"
+                    ),
                 }
             )
         ready = all(value == "ok" for value in checks.values())
