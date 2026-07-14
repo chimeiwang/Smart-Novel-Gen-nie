@@ -6,12 +6,11 @@ import { parseSseFrame } from "@inkforge/api-client";
 import {
   AGENT_REGISTRY,
   type AgentId,
-  type OrchestrationEvent,
 } from "@/features/writing/agent-registry";
 import { browserApi } from "@/lib/api/browser";
 import { requireApiData } from "@/lib/api/response";
 import type { WritingSseEvent } from "@/shared/contracts/sse-events";
-import { normalizeSseEventData, parseSseEvent } from "@/shared/contracts/sse-events";
+import { parseSseEvent } from "@/shared/contracts/sse-events";
 import type { CreativeOperation } from "@/shared/contracts/creative-operation";
 import {
   getCreativeOperationLabel,
@@ -281,6 +280,58 @@ function getReviewArtifactActionButtonLabel(action: ReviewArtifactActionState | 
   return action.status === "succeeded" ? "已开始返工" : "准备返工...";
 }
 
+type QuickReviewActionsProps = {
+  artifact: ReviewArtifactData;
+  action: ReviewArtifactActionState | null;
+  editedContent?: string;
+  isSending: boolean;
+  onDecision: (
+    artifact: ReviewArtifactData,
+    decision: ReviewArtifactDecision,
+    userMessage?: string,
+    editedContent?: string,
+  ) => Promise<void>;
+  onRevise: () => void;
+};
+
+function QuickReviewActions({
+  artifact,
+  action,
+  editedContent,
+  isSending,
+  onDecision,
+  onRevise,
+}: QuickReviewActionsProps) {
+  const actionLocked = isReviewArtifactActionLocked(action);
+  const isApplyDisabled = isSending ||
+    actionLocked ||
+    Boolean(artifact.optimisticStatus) ||
+    (editedContent !== undefined && !editedContent.trim());
+
+  return (
+    <>
+      <button
+        disabled={isApplyDisabled}
+        onClick={() => void onDecision(artifact, "approve", undefined, editedContent)}
+      >
+        {getReviewArtifactActionButtonLabel(action, "approve") ?? (artifact.optimisticStatus === "applying" ? "应用中..." : "应用到项目")}
+      </button>
+      <button
+        disabled={isSending || actionLocked || Boolean(artifact.optimisticStatus)}
+        onClick={onRevise}
+      >
+        {getReviewArtifactActionButtonLabel(action, "revise") ?? (artifact.optimisticStatus === "revising" ? "准备返工..." : "继续修改")}
+      </button>
+      <button
+        disabled={isSending || actionLocked || Boolean(artifact.optimisticStatus)}
+        onClick={() => void onDecision(artifact, "discard")}
+      >
+        {getReviewArtifactActionButtonLabel(action, "discard") ?? (artifact.optimisticStatus === "discarding" ? "丢弃中..." : "丢弃变更")}
+      </button>
+    </>
+  );
+}
+
 type UpdateDiffItem = {
   section: string;
   action: string;
@@ -326,9 +377,6 @@ type FlowLogEntry = {
   content: string;
   duration?: number;
 };
-
-/** SSE 事件类型从共享契约导入 + Agent 客户端事件 */
-type ExtendedEvent = WritingSseEvent | OrchestrationEvent;
 
 type StreamUiScope =
   | { mode: "session"; sessionId: string }
@@ -1207,7 +1255,7 @@ export function WritingConversation({
     return () => window.clearTimeout(timer);
   }, [refreshAwaitingReviewArtifact]);
 
-  const handleDetachedArtifactEvent = useCallback((event: ExtendedEvent, artifactId: string) => {
+  const handleDetachedArtifactEvent = useCallback((event: WritingSseEvent, artifactId: string) => {
     switch (event.type) {
       case "user_input_required":
       case "artifact_submitted":
@@ -1300,7 +1348,7 @@ export function WritingConversation({
     }
   }, [loadReviewArtifacts, loadSessions, onComplete, scheduleReviewArtifactModalClose, updateDetachedReviewArtifact, updateReviewArtifactAction]);
 
-  const handleEvent = useCallback((event: ExtendedEvent, scope: StreamUiScope) => {
+  const handleEvent = useCallback((event: WritingSseEvent, scope: StreamUiScope) => {
     if (scope.mode === "session" && !isCurrentSessionStream(currentSessionIdRef.current, scope.sessionId)) {
       return;
     }
@@ -1511,13 +1559,6 @@ export function WritingConversation({
             content: formatOperationLog(event.operation),
           });
         }
-        break;
-
-      case "host_intent":
-        addFlowLog({
-          type: "intent",
-          content: `主持人意图: ${event.intent?.action ?? "unknown"}${event.intent?.reason ? ` - ${event.intent.reason}` : ""}`,
-        });
         break;
 
       case "user_input_required":
@@ -1747,7 +1788,7 @@ export function WritingConversation({
         break;
 
       default:
-        console.debug("[SSE] 未处理的事件类型:", (event as ExtendedEvent).type, event);
+        console.debug("[SSE] 未处理的事件类型:", (event as { type: string }).type, event);
         break;
     }
   }, [messages.length, addActivityEntry, addMessage, addFlowLog, applyAgentLiveAction, attachActivityRoundToMessage, clearAgentLiveRuns, discardActivityRound, finishActivityRound, formatOperationLog, getAgentName, handleDetachedArtifactEvent, loadSessions, loadReviewArtifacts, onComplete, refreshAwaitingReviewArtifact, scheduleReviewArtifactModalClose, setActiveReviewArtifact, setCurrentOperation, setCurrentOperationStage, setPhase, setTaskId, setWorkflowReviewArtifact, startActivityRound, updateReviewArtifactAction]);
@@ -1918,8 +1959,11 @@ export function WritingConversation({
         if (!parsedFrame) continue;
         eventCursorsRef.current.update(streamTaskId, parsedFrame.id);
         const parsed = parsedFrame.data;
-        const event = parseSseEvent(parsed, parsedFrame.event)
-          || (normalizeSseEventData(parsed, parsedFrame.event) as ExtendedEvent);
+        const event = parseSseEvent(parsed, parsedFrame.event);
+        if (!event) {
+          console.warn("[SSE] 忽略不符合契约的事件:", parsedFrame.event ?? "message");
+          continue;
+        }
         handleEvent(event, scope);
       }
     }
@@ -1929,11 +1973,12 @@ export function WritingConversation({
       if (parsedFrame) {
         eventCursorsRef.current.update(streamTaskId, parsedFrame.id);
         const parsed = parsedFrame.data;
-        handleEvent(
-          parseSseEvent(parsed, parsedFrame.event)
-            || (normalizeSseEventData(parsed, parsedFrame.event) as ExtendedEvent),
-          scope,
-        );
+        const event = parseSseEvent(parsed, parsedFrame.event);
+        if (event) {
+          handleEvent(event, scope);
+        } else {
+          console.warn("[SSE] 忽略不符合契约的事件:", parsedFrame.event ?? "message");
+        }
       }
     }
 
@@ -2693,44 +2738,6 @@ export function WritingConversation({
     );
   };
 
-  const renderQuickReviewActions = (artifact: ReviewArtifactData) => {
-    const localDraftForApply = getLocalReviewDraftForApply(artifact);
-    const action = getReviewArtifactAction(artifact.id);
-    const actionLocked = isReviewArtifactActionLocked(action);
-    const isApplyDisabled = isSending ||
-      actionLocked ||
-      Boolean(artifact.optimisticStatus) ||
-      (localDraftForApply !== undefined && !localDraftForApply.trim());
-
-    return (
-      <>
-        <button
-          disabled={isApplyDisabled}
-          onClick={() => handleArtifactDecision(
-            artifact,
-            "approve",
-            undefined,
-            localDraftForApply
-          )}
-        >
-          {getReviewArtifactActionButtonLabel(action, "approve") ?? (artifact.optimisticStatus === "applying" ? "应用中..." : "应用到项目")}
-        </button>
-        <button
-          disabled={isSending || actionLocked || Boolean(artifact.optimisticStatus)}
-          onClick={focusChatForArtifactRevision}
-        >
-          {getReviewArtifactActionButtonLabel(action, "revise") ?? (artifact.optimisticStatus === "revising" ? "准备返工..." : "继续修改")}
-        </button>
-        <button
-          disabled={isSending || actionLocked || Boolean(artifact.optimisticStatus)}
-          onClick={() => handleArtifactDecision(artifact, "discard")}
-        >
-          {getReviewArtifactActionButtonLabel(action, "discard") ?? (artifact.optimisticStatus === "discarding" ? "丢弃中..." : "丢弃变更")}
-        </button>
-      </>
-    );
-  };
-
   const liveAgentRuns = listAgentLiveRuns(agentLiveRuns);
 
   const currentSession = sessions.find(s => s.id === currentSessionId);
@@ -3034,7 +3041,14 @@ export function WritingConversation({
         {phase !== "idle" && phase !== "completed" && (
           <div className="quick-actions">
             {phase === "recording" && workflowReviewArtifact?.status === "awaiting_user" ? (
-              renderQuickReviewActions(workflowReviewArtifact)
+              <QuickReviewActions
+                artifact={workflowReviewArtifact}
+                action={getReviewArtifactAction(workflowReviewArtifact.id)}
+                editedContent={getLocalReviewDraftForApply(workflowReviewArtifact)}
+                isSending={isSending}
+                onDecision={handleArtifactDecision}
+                onRevise={focusChatForArtifactRevision}
+              />
             ) : phase === "reviewing" ? (
               <>
                 <button onClick={() => handleSendMessage("确认保存")}>确认保存</button>

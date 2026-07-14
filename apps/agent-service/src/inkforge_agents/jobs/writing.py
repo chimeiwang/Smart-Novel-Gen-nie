@@ -110,7 +110,7 @@ class WritingJobHandler:
             resource,
             sequence=sequence,
             event="agent_start",
-            data={"phase": "active"},
+            data={"agentId": "写作", "agentName": "作家"},
         )
         try:
             result = await graph.ainvoke(state)

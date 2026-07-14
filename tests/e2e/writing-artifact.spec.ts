@@ -8,6 +8,17 @@ import {
 } from "./helpers";
 
 test("模拟模型可以完成写作会话和草案应用", async ({ page }) => {
+  const reactKeyWarnings: string[] = [];
+  page.on("console", (message) => {
+    const text = message.text();
+    if (
+      (message.type() === "warning" || message.type() === "error") &&
+      /unique["']? key|same key|each child in a list/i.test(text)
+    ) {
+      reactKeyWarnings.push(text);
+    }
+  });
+
   const identity = await createNovelWithApi(page);
   await prepareWritingOutlineWithApi(page, identity);
   await openWorkspace(page, identity);
@@ -54,16 +65,19 @@ test("模拟模型可以完成写作会话和草案应用", async ({ page }) => 
   }, { timeout: 30_000 }).toContain("模拟模型生成的完整章节正文");
 
   await page.reload();
-  const completedSessionResponse = await page.request.get(
-    `/api/v1/writing/sessions/${sessions[0].id}`,
-  );
-  expect(completedSessionResponse.ok()).toBe(true);
-  const completedSession = (await completedSessionResponse.json()) as {
-    currentTask: null;
-    lastTask: { phase: string } | null;
-  };
-  expect(completedSession.currentTask).toBeNull();
-  expect(completedSession.lastTask?.phase).toBe("completed");
+  await expect.poll(async () => {
+    const response = await page.request.get(`/api/v1/writing/sessions/${sessions[0].id}`);
+    expect(response.ok()).toBe(true);
+    const sessionState = (await response.json()) as {
+      currentTask: { phase: string } | null;
+      lastTask: { phase: string } | null;
+    };
+    return {
+      currentPhase: sessionState.currentTask?.phase ?? null,
+      lastPhase: sessionState.lastTask?.phase ?? null,
+    };
+  }, { timeout: 30_000 }).toEqual({ currentPhase: null, lastPhase: "completed" });
+  expect(reactKeyWarnings).toEqual([]);
 });
 
 test("用户可以丢弃待确认草案", async ({ page }) => {

@@ -123,6 +123,7 @@ async def test_new_writing_job_runs_parent_graph_and_persists_completion() -> No
     assert parent.inputs[0]["conversationHistory"] == [{"role": "user", "content": "续写本章"}]
     assert operation.inputs == []
     assert core.events == [(1, "agent_start")]
+    assert core.event_payloads[0] == {"agentId": "写作", "agentName": "作家"}
     assert core.checkpoints[0][0] == 2
     assert core.checkpoints[0][1]["eventSequence"] == 2
     assert core.completions == [(3, {"finalResponse": "已完成"})]

@@ -20,10 +20,3 @@ export function getDefaultEnabledAgents(): CoreAgentId[] {
 }
 
 export type AgentId = CoreAgentId;
-export type OrchestrationEvent = {
-  type: "host_intent";
-  intent: {
-    action: string;
-    reason?: string;
-  };
-};

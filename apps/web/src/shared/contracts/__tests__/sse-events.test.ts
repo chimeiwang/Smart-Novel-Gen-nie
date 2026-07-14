@@ -36,6 +36,17 @@ describe("SSE event contract", () => {
     assert.equal(event?.resultSummary, "作品《遗产猎人》 · 当前章《第一章 遗孤与遗产》");
   });
 
+  it("rejects malformed agent start events", () => {
+    assert.equal(parseSseEvent({ phase: "active" }, "agent_start"), null);
+    assert.equal(
+      parseSseEvent(
+        { agentId: "写作", agentName: "作家" },
+        "agent_start",
+      )?.type,
+      "agent_start",
+    );
+  });
+
   it("parses update builder status events", () => {
     const started = parseSseEvent({
       type: "update_builder_started",

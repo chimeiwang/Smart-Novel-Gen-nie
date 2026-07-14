@@ -280,7 +280,7 @@ def test_signer_cannot_accept_or_expose_an_in_memory_private_key(tmp_path: Path)
     signer = _standalone_signer(tmp_path)
     with pytest.raises(TypeError):
         ServiceTokenSigner(
-            private_key=Ed25519PrivateKey.generate(),
+            private_key=Ed25519PrivateKey.generate(),  # type: ignore[call-arg]  # 故意验证非法参数
             issuer="core-api",
             subject="core-api",
             audience="agent-service",
@@ -463,7 +463,12 @@ async def test_resource_binding_mismatch_is_forbidden(
     signer, verifier, redis = _build_auth(tmp_path)
     body, signed = _issue(signer)
     with pytest.raises(ServiceAuthorizationError) as captured:
-        await _verify(verifier, signed, body, **{field: value})
+        if field == "task_id":
+            await _verify(verifier, signed, body, task_id=value)
+        elif field == "run_id":
+            await _verify(verifier, signed, body, run_id=value)
+        else:
+            await _verify(verifier, signed, body, novel_id=value)
     assert captured.value.code == "SERVICE_RESOURCE_MISMATCH"
     assert field in str(captured.value)
     assert redis.calls == []
@@ -488,12 +493,56 @@ async def test_request_binding_mismatch_precedes_resource_and_replay(
 ) -> None:
     signer, verifier, redis = _build_auth(tmp_path)
     body, signed = _issue(signer)
-    request_body = value if override == "body" else body
-    kwargs = {"novel_id": "novel-2"}
-    if override != "body":
-        kwargs[override] = value
     with pytest.raises(ServiceRequestBindingError):
-        await _verify(verifier, signed, request_body, **kwargs)
+        if override == "body":
+            assert isinstance(value, bytes)
+            await _verify(verifier, signed, value, novel_id="novel-2")
+        elif override == "http_method":
+            assert isinstance(value, str)
+            await _verify(
+                verifier,
+                signed,
+                body,
+                novel_id="novel-2",
+                http_method=value,
+            )
+        elif override == "http_path":
+            assert isinstance(value, str)
+            await _verify(
+                verifier,
+                signed,
+                body,
+                novel_id="novel-2",
+                http_path=value,
+            )
+        elif override == "idempotency_key":
+            assert isinstance(value, str)
+            await _verify(
+                verifier,
+                signed,
+                body,
+                novel_id="novel-2",
+                idempotency_key=value,
+            )
+        elif override == "request_timestamp":
+            assert isinstance(value, str)
+            await _verify(
+                verifier,
+                signed,
+                body,
+                novel_id="novel-2",
+                request_timestamp=value,
+            )
+        else:
+            assert override == "body_sha256"
+            assert isinstance(value, str)
+            await _verify(
+                verifier,
+                signed,
+                body,
+                novel_id="novel-2",
+                body_sha256=value,
+            )
     assert redis.calls == []
 
 
@@ -729,7 +778,9 @@ def test_verifier_only_loads_jwks_and_rejects_unknown_replay_policy(tmp_path: Pa
     _, jwks_path, private_key = _write_key_pair(tmp_path, "core", "core-v1")
     with pytest.raises(TypeError):
         ServiceTokenVerifier(
-            public_keys={"core-v1": private_key.public_key()},
+            public_keys={  # type: ignore[call-arg]  # 故意验证非法参数
+                "core-v1": private_key.public_key()
+            },
             expected_issuer="core-api",
             expected_subject="core-api",
             audience="agent-service",
