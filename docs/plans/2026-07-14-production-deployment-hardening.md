@@ -232,4 +232,4 @@ Run: `docker compose -f infra/compose.yaml config --quiet`
 
 Expected: 所有可用检查 PASS；生产路径没有动态信任主机、自动迁移、卷删除或取消运行中的部署。
 
-验证记录：`tests/architecture` 共 59 项通过，两个部署 shell 通过语法检查；当前 Windows 环境未安装 Docker，因此按计划跳过 `docker compose config --quiet` 实机解析。
+验证记录：`tests/architecture` 共 60 项通过，两个部署 shell 通过语法检查；当前 Windows 环境未安装 Docker，因此按计划跳过 `docker compose config --quiet` 实机解析。
