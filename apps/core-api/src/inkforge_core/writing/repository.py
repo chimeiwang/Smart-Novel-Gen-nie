@@ -41,29 +41,74 @@ class WritingRepository:
             statement = select(WritingSession).where(WritingSession.novelId == novel_id)
             if chapter_id is not None:
                 statement = statement.where(WritingSession.chapterId == chapter_id)
-            records = (
-                await session.execute(statement.order_by(WritingSession.updatedAt.desc()))
-            ).scalars()
+            records = list(
+                (
+                    await session.execute(
+                        statement.order_by(
+                            WritingSession.updatedAt.desc(), WritingSession.id.asc()
+                        )
+                    )
+                ).scalars()
+            )
+            session_ids = [record.id for record in records]
+            counts_by_session: dict[str, int] = {}
+            last_by_session: dict[str, dict[str, str | None]] = {}
+            if session_ids:
+                count_rows = (
+                    await session.execute(
+                        select(
+                            WritingMessage.sessionId.label("sessionId"),
+                            func.count().label("messageCount"),
+                        )
+                        .where(WritingMessage.sessionId.in_(session_ids))
+                        .group_by(WritingMessage.sessionId)
+                    )
+                ).all()
+                counts_by_session = {
+                    row.sessionId: int(row.messageCount) for row in count_rows
+                }
+                ranked_messages = (
+                    select(
+                        WritingMessage.sessionId.label("sessionId"),
+                        WritingMessage.content.label("content"),
+                        WritingMessage.role.label("role"),
+                        WritingMessage.agentId.label("agentId"),
+                        func.row_number()
+                        .over(
+                            partition_by=WritingMessage.sessionId,
+                            order_by=(
+                                WritingMessage.createdAt.desc(),
+                                WritingMessage.id.desc(),
+                            ),
+                        )
+                        .label("messageRank"),
+                    )
+                    .where(WritingMessage.sessionId.in_(session_ids))
+                    .subquery()
+                )
+                last_rows = (
+                    await session.execute(
+                        select(
+                            ranked_messages.c.sessionId,
+                            ranked_messages.c.content,
+                            ranked_messages.c.role,
+                            ranked_messages.c.agentId,
+                        ).where(ranked_messages.c.messageRank == 1)
+                    )
+                ).all()
+                last_by_session = {
+                    row.sessionId: {
+                        "content": row.content,
+                        "role": row.role,
+                        "agentId": row.agentId,
+                    }
+                    for row in last_rows
+                }
             result: list[dict[str, object]] = []
             for record in records:
-                count = await session.scalar(
-                    select(func.count()).where(WritingMessage.sessionId == record.id)
-                )
-                last = (
-                    await session.execute(
-                        select(WritingMessage)
-                        .where(WritingMessage.sessionId == record.id)
-                        .order_by(WritingMessage.createdAt.desc(), WritingMessage.id.desc())
-                        .limit(1)
-                    )
-                ).scalar_one_or_none()
                 value = _session_dict(record)
-                value["messageCount"] = int(count or 0)
-                value["lastMessage"] = (
-                    None
-                    if last is None
-                    else {"content": last.content, "role": last.role, "agentId": last.agentId}
-                )
+                value["messageCount"] = counts_by_session.get(record.id, 0)
+                value["lastMessage"] = last_by_session.get(record.id)
                 result.append(value)
             return result
 

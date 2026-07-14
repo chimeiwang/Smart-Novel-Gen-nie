@@ -209,23 +209,23 @@ git commit -m "性能：按需加载工作区侧栏数据"
 - Modify: `apps/core-api/src/inkforge_core/writing/repository.py`
 - Modify: `apps/core-api/tests/writing/test_sessions.py`
 
-- [ ] **Step 1: 写多会话查询计数失败测试**
+- [x] **Step 1: 写多会话查询计数失败测试**
 
 创建至少 3 个会话、不同数量消息和相同时间戳的边界数据。监听 SQL 执行次数，断言列表查询次数不随会话数增加；同时断言 `messageCount`、最后消息摘要和排序稳定。
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
 Run: `uv run pytest apps/core-api/tests/writing/test_sessions.py -q`
 
 Expected: FAIL；当前每条会话分别查询 count 和 last message。
 
-- [ ] **Step 3: 用聚合与窗口函数一次返回摘要**
+- [x] **Step 3: 用聚合与窗口函数一次返回摘要**
 
 构造消息聚合子查询和 `row_number() over(partition_by=sessionId order_by=createdAt desc, id desc)` 最后消息子查询，再 left join WritingSession。Python `for record` 只做 DTO 映射，不再执行 SQL。
 
 目标 SQL 次数为固定 1 次；若 SQLAlchemy 方言兼容测试需要拆成 2 次批量查询，也必须固定且与 N 无关，并在测试中锁定。
 
-- [ ] **Step 4: 验证并提交**
+- [x] **Step 4: 验证并提交**
 
 Run: `uv run pytest apps/core-api/tests/writing/test_sessions.py -q`
 
