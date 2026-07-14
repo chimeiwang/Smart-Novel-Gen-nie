@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, cast
 
+from inkforge_contracts.jobs import AgentJobStatus
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
@@ -211,6 +212,36 @@ class StyleRepository:
             )
             for task, user_id in rows
         ]
+
+    async def mark_portrait_dispatch_terminal(
+        self,
+        style_id: str,
+        task_id: str,
+        agent_status: AgentJobStatus,
+    ) -> None:
+        if agent_status in {"queued", "running"}:
+            return
+        async with self._session_factory() as session:
+            async with session.begin():
+                task = cast(
+                    StylePortraitTask | None,
+                    await session.scalar(
+                        select(StylePortraitTask)
+                        .where(StylePortraitTask.id == task_id)
+                        .with_for_update()
+                    ),
+                )
+                if (
+                    task is None
+                    or task.styleId != style_id
+                    or task.status not in {"pending", "processing"}
+                ):
+                    return
+                style = await self._lock_style(session, style_id)
+                message = f"智能体画像任务已终止：{agent_status}"
+                task.status = "error"
+                task.errorMessage = message
+                style.errorMessage = message
 
     async def get_portrait_sources(
         self, style_id: str, task_id: str

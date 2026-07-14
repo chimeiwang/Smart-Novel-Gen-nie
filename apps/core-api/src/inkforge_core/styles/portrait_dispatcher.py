@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
+from inkforge_contracts.jobs import AgentJobStatus
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,6 +28,13 @@ class PortraitDispatchRepository(Protocol):
         stale_before: datetime,
     ) -> list[PortraitDispatchRecord]: ...
 
+    async def mark_portrait_dispatch_terminal(
+        self,
+        style_id: str,
+        task_id: str,
+        agent_status: AgentJobStatus,
+    ) -> None: ...
+
 
 class PortraitDispatchSubmitter(Protocol):
     async def submit(
@@ -36,7 +45,7 @@ class PortraitDispatchSubmitter(Protocol):
         task_id: str,
         run_id: str,
         section: str | None,
-    ) -> None: ...
+    ) -> AgentJobStatus: ...
 
 
 class PortraitTaskDispatcher:
@@ -76,13 +85,19 @@ class PortraitTaskDispatcher:
         )
         for record in records:
             try:
-                await self._submitter.submit(
+                agent_status = await self._submitter.submit(
                     user_id=record.user_id,
                     style_id=record.style_id,
                     task_id=record.task_id,
                     run_id=record.task_id,
                     section=record.section,
                 )
+                if agent_status not in {"queued", "running"}:
+                    await self._repository.mark_portrait_dispatch_terminal(
+                        record.style_id,
+                        record.task_id,
+                        agent_status,
+                    )
                 completed += 1
             except Exception as exc:
                 logger.warning(

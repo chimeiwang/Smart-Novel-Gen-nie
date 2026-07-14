@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, cast
 
+from inkforge_contracts.jobs import AgentJobStatus
 from sqlalchemy import and_, delete, insert, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -293,6 +294,27 @@ class ReferenceRepository:
                 document.status = "failed"
                 document.errorMessage = message
 
+    async def mark_rag_dispatch_terminal(
+        self,
+        novel_id: str,
+        reference_id: str,
+        content_hash: str,
+        agent_status: AgentJobStatus,
+    ) -> None:
+        if agent_status in {"queued", "running"}:
+            return
+        async with self._session_factory() as session:
+            async with session.begin():
+                reference, document = await self._lock_reference_and_document(
+                    session, novel_id, reference_id
+                )
+                if not self._matches_pending_dispatch(
+                    reference, document, content_hash
+                ):
+                    return
+                document.status = "failed"
+                document.errorMessage = f"智能体索引任务已终止：{agent_status}"
+
     async def search(
         self, novel_id: str, user_id: str, embedding: list[float], top_k: int
     ) -> list[dict[str, Any]]:
@@ -404,6 +426,19 @@ class ReferenceRepository:
     def _require_failure_target(cls, document: RagDocument) -> None:
         if document.status != "disabled":
             raise cls._stale_index()
+
+    @staticmethod
+    def _matches_pending_dispatch(
+        reference: ReferenceMaterial,
+        document: RagDocument,
+        expected_content_hash: str,
+    ) -> bool:
+        return (
+            content_sha256(reference.content) == expected_content_hash
+            and document.contentHash == expected_content_hash
+            and document.status == "disabled"
+            and document.errorMessage == "等待重新索引"
+        )
 
     @staticmethod
     def _dto(

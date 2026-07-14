@@ -48,6 +48,7 @@ Core 的写作对账器采用与现有命令 dispatcher 一致的循环级异常
 - 创建任务事务提交后，即使首次提交 Agent 失败，也保留 `pending`；
 - 新增画像对账器查询当前用户归属完整、状态为 `pending` 的任务，并使用 `portrait-{taskId}` 稳定 job ID 补投；
 - 对账器也检查长期停留在 `processing` 的任务，但只在 Redis 中对应运行键完全丢失时恢复，不能并发启动第二份模型任务；
+- Agent 对重复 job ID 返回实际 `queued/running/completed/failed/cancelled` 状态；若 Redis 已是终态而 PostgreSQL 任务仍为 `pending/processing`，对账器把该任务幂等收敛为 `error`，不得继续空转，也不得重开已终态 job；
 - 初次提交失败仍返回持久任务 ID，前端可以查询其状态；
 - 删除文风后，外键级联删除对应任务，对账器不能复活已删除任务。
 
@@ -64,6 +65,8 @@ Core 的写作对账器采用与现有命令 dispatcher 一致的循环级异常
 5. Agent 完成或失败回调同时收敛检查项和 WorkflowRun；
 6. Core 重启或 Redis 丢失后重新投递仍为 pending/running 且没有队列运行键的 WorkflowRun。
 
+重复提交命中 Redis 终态 job 时，dispatcher 必须使用 Agent 返回的实际终态把仍为活动态的 WorkflowRun 和检查项幂等收敛为失败；若回调已经先完成，收敛操作保持无副作用，不能覆盖已经落库的终态。
+
 同一个检查项允许用户在前一次运行终态后再次运行；创建运行的事务必须锁定检查项并拒绝已有 `pending/running` 运行，新的 WorkflowRun 和 job ID 不能复用旧的 completed Redis job。延迟到达的旧运行 context 请求必须拒绝执行；旧运行终态回调可以幂等收敛自身 WorkflowRun，但只有该检查项最新运行可以更新公共 ChapterQualityCheck，不能用旧结果覆盖新结果。
 
 ### 4. RAG 持久恢复
@@ -74,6 +77,7 @@ Core 的写作对账器采用与现有命令 dispatcher 一致的循环级异常
 - job ID 继续由 `referenceId + contentHash` 生成，同一内容版本幂等；
 - 对账器只补投当前哈希仍匹配、状态为 `disabled` 且明确标记等待索引的文档；
 - 内容已变化的旧任务由现有哈希校验拒绝，不能覆盖新索引；
+- 重复提交命中 Redis 终态 job 时，仅当资料与文档的当前内容哈希仍等于该 job 的哈希、且文档仍在“等待重新索引”状态，才把文档幂等收敛为 `failed`；旧内容版本不得覆盖新版本状态；
 - 未配置 embedding 的文档保持明确的“服务未配置”，不进入忙循环；
 - 完成和失败回调继续把状态收敛到 `ready` 或 `failed`。
 
@@ -102,5 +106,6 @@ maxmemory-policy noeviction
 - 画像首次提交失败后，对账器能用同一任务 ID 补投，且不会因活动任务约束永久卡死。
 - 质量检查的完整请求输入先持久化；Redis 丢失后能用新 WorkflowRun 的稳定 job ID恢复；重复运行同一检查项会创建不同运行。
 - RAG 只补投当前哈希对应的等待记录，不补投未配置或已过期内容。
+- 重复提交已终态 Agent job 时，画像、质量检查和 RAG 的 PostgreSQL 活动态都能幂等结束；已经成功回调或内容哈希已经变化时不被旧 job 覆盖。
 - 架构测试断言 Redis 使用 `noeviction`，并继续禁止 Agent 数据库依赖。
 - 全量 Python 测试、Ruff 和 Mypy 通过。

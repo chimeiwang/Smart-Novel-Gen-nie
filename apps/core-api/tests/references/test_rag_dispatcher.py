@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from inkforge_contracts.jobs import AgentJobStatus
 from inkforge_core.references.rag_dispatcher import RagDispatchRecord, RagIndexDispatcher
 
 HASH = "a" * 64
@@ -21,15 +22,30 @@ class Repository:
     def __init__(self, records: list[RagDispatchRecord]) -> None:
         self.records = records
         self.claimed = asyncio.Event()
+        self.terminals: list[tuple[str, str, str, AgentJobStatus]] = []
 
     async def list_pending_rag_documents(self, limit: int) -> list[RagDispatchRecord]:
         self.claimed.set()
         return self.records[:limit]
 
+    async def mark_rag_dispatch_terminal(
+        self,
+        novel_id: str,
+        reference_id: str,
+        content_hash: str,
+        agent_status: AgentJobStatus,
+    ) -> None:
+        self.terminals.append((novel_id, reference_id, content_hash, agent_status))
+
 
 class Submitter:
-    def __init__(self, failing_reference_id: str | None = None) -> None:
+    def __init__(
+        self,
+        failing_reference_id: str | None = None,
+        statuses: dict[str, AgentJobStatus] | None = None,
+    ) -> None:
         self.failing_reference_id = failing_reference_id
+        self.statuses = statuses or {}
         self.calls: list[tuple[str, str, str, str]] = []
 
     async def submit(
@@ -38,10 +54,11 @@ class Submitter:
         novel_id: str,
         reference_id: str,
         content_hash: str,
-    ) -> None:
+    ) -> AgentJobStatus:
         self.calls.append((user_id, novel_id, reference_id, content_hash))
         if reference_id == self.failing_reference_id:
             raise RuntimeError("模拟索引投递失败")
+        return self.statuses.get(reference_id, "queued")
 
 
 @pytest.mark.asyncio
@@ -62,6 +79,18 @@ async def test_rag_dispatcher_isolates_one_submission_failure() -> None:
 
     assert await dispatcher.run_once() == 1
     assert [value[2] for value in submitter.calls] == ["bad", "good"]
+
+
+@pytest.mark.asyncio
+async def test_rag_dispatcher_converges_existing_terminal_job() -> None:
+    repository = Repository([record("terminal")])
+    submitter = Submitter(statuses={"terminal": "cancelled"})
+    dispatcher = RagIndexDispatcher(repository, submitter)
+
+    assert await dispatcher.run_once() == 1
+    assert repository.terminals == [
+        ("novel-1", "terminal", HASH, "cancelled")
+    ]
 
 
 @pytest.mark.asyncio

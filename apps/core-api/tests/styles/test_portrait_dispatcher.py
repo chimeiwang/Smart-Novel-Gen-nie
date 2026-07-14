@@ -4,6 +4,7 @@ import asyncio
 from datetime import UTC, datetime
 
 import pytest
+from inkforge_contracts.jobs import AgentJobStatus
 from inkforge_core.styles.portrait_dispatcher import (
     PortraitDispatchRecord,
     PortraitTaskDispatcher,
@@ -14,6 +15,7 @@ class Repository:
     def __init__(self, records: list[PortraitDispatchRecord]) -> None:
         self.records = records
         self.calls: list[tuple[int, datetime]] = []
+        self.terminals: list[tuple[str, str, AgentJobStatus]] = []
 
     async def list_reconcilable_portrait_tasks(
         self,
@@ -23,18 +25,33 @@ class Repository:
         self.calls.append((limit, stale_before))
         return self.records[:limit]
 
+    async def mark_portrait_dispatch_terminal(
+        self,
+        style_id: str,
+        task_id: str,
+        agent_status: AgentJobStatus,
+    ) -> None:
+        self.terminals.append((style_id, task_id, agent_status))
+
 
 class Submitter:
-    def __init__(self, *, failing_task_id: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        failing_task_id: str | None = None,
+        statuses: dict[str, AgentJobStatus] | None = None,
+    ) -> None:
         self.failing_task_id = failing_task_id
+        self.statuses = statuses or {}
         self.calls: list[dict[str, object]] = []
         self.submitted = asyncio.Event()
 
-    async def submit(self, **kwargs: object) -> None:
+    async def submit(self, **kwargs: object) -> AgentJobStatus:
         self.calls.append(kwargs)
         self.submitted.set()
         if kwargs["task_id"] == self.failing_task_id:
             raise RuntimeError("模拟画像投递失败")
+        return self.statuses.get(str(kwargs["task_id"]), "queued")
 
 
 def record(task_id: str, status: str = "pending") -> PortraitDispatchRecord:
@@ -81,6 +98,16 @@ async def test_portrait_dispatcher_isolates_one_submission_failure() -> None:
 
     assert await dispatcher.run_once() == 1
     assert [value["task_id"] for value in submitter.calls] == ["bad", "good"]
+
+
+@pytest.mark.asyncio
+async def test_portrait_dispatcher_converges_existing_terminal_job() -> None:
+    repository = Repository([record("terminal")])
+    submitter = Submitter(statuses={"terminal": "failed"})
+    dispatcher = PortraitTaskDispatcher(repository, submitter)
+
+    assert await dispatcher.run_once() == 1
+    assert repository.terminals == [("style-1", "terminal", "failed")]
 
 
 @pytest.mark.asyncio

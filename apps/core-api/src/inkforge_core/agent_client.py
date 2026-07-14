@@ -5,7 +5,7 @@ from typing import Protocol, cast
 from urllib.parse import urlencode
 
 import httpx
-from inkforge_contracts.jobs import AgentJobAccepted, AgentJobRequest
+from inkforge_contracts.jobs import AgentJobAccepted, AgentJobRequest, AgentJobStatus
 from inkforge_contracts.jwt_claims import ServiceScope
 from inkforge_service_auth import ServiceTokenSigner, canonical_json_body
 from pydantic import JsonValue
@@ -184,9 +184,9 @@ class QualityAgentSubmitter:
         chapter_id: str,
         source_task_id: str | None,
         message: str | None,
-    ) -> None:
+    ) -> AgentJobStatus:
         billing_task_id = source_task_id or run_id
-        await self._client.submit(
+        accepted = await self._client.submit(
             AgentJobRequest(
                 protocolVersion="1.0",
                 jobId=f"quality-{run_id}",
@@ -204,6 +204,7 @@ class QualityAgentSubmitter:
                 },
             )
         )
+        return accepted.status
 
 
 class PortraitAgentSubmitter:
@@ -218,8 +219,8 @@ class PortraitAgentSubmitter:
         task_id: str,
         run_id: str,
         section: str | None,
-    ) -> None:
-        await self._client.submit(
+    ) -> AgentJobStatus:
+        accepted = await self._client.submit(
             AgentJobRequest(
                 protocolVersion="1.0",
                 jobId=f"portrait-{task_id}",
@@ -232,6 +233,7 @@ class PortraitAgentSubmitter:
                 payload={"styleId": style_id, "section": section},
             )
         )
+        return accepted.status
 
 
 class RagAgentSubmitter:
@@ -244,10 +246,10 @@ class RagAgentSubmitter:
         novel_id: str,
         reference_id: str,
         content_hash: str,
-    ) -> None:
+    ) -> AgentJobStatus:
         digest = hashlib.sha256(f"rag:{reference_id}:{content_hash}".encode()).hexdigest()[:32]
         run_id = f"rag-{digest}"
-        await self._client.submit(
+        accepted = await self._client.submit(
             AgentJobRequest(
                 protocolVersion="1.0",
                 jobId=run_id,
@@ -263,3 +265,4 @@ class RagAgentSubmitter:
                 },
             )
         )
+        return accepted.status

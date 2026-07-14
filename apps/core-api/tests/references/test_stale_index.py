@@ -60,3 +60,62 @@ def test_old_failure_callback_cannot_overwrite_terminal_index_state(status: str)
     with pytest.raises(ApiError) as caught:
         ReferenceRepository._require_failure_target(document(content_sha256("正文"), status))
     assert caught.value.code == "RAG_INDEX_STALE"
+
+
+def test_dispatch_terminal_only_matches_current_waiting_content() -> None:
+    current_hash = content_sha256("当前正文")
+    waiting = document(current_hash)
+    waiting.errorMessage = "等待重新索引"
+
+    assert ReferenceRepository._matches_pending_dispatch(
+        reference(), waiting, current_hash
+    )
+
+
+@pytest.mark.parametrize(
+    (
+        "reference_content",
+        "document_hash",
+        "expected_hash",
+        "status",
+        "error_message",
+    ),
+    [
+        (
+            "新正文",
+            content_sha256("旧正文"),
+            content_sha256("旧正文"),
+            "disabled",
+            "等待重新索引",
+        ),
+        (
+            "当前正文",
+            content_sha256("当前正文"),
+            content_sha256("当前正文"),
+            "ready",
+            None,
+        ),
+        (
+            "当前正文",
+            content_sha256("当前正文"),
+            content_sha256("当前正文"),
+            "disabled",
+            "检索索引服务未配置",
+        ),
+    ],
+)
+def test_dispatch_terminal_ignores_stale_or_non_waiting_content(
+    reference_content: str,
+    document_hash: str,
+    expected_hash: str,
+    status: str,
+    error_message: str | None,
+) -> None:
+    value = document(document_hash, status)
+    value.errorMessage = error_message
+
+    assert not ReferenceRepository._matches_pending_dispatch(
+        reference(reference_content),
+        value,
+        expected_hash,
+    )

@@ -58,6 +58,7 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 - Agent 进程退出后，另一个兼容实例可以领取租约并从最后稳定检查点继续。
 - Redis 丢失时，dispatcher 补投活动命令；旧任务对账器只处理没有活动命令的 active 或 waiting_call 任务，不重新投递 awaiting_user_review。
 - 文风画像、质量检查和 RAG 索引分别从 `StylePortraitTask`、`WorkflowRun(kind=quality_check)` 和 `RagDocument` 恢复投递；进程内任务或 Redis 状态都不是这些工作的唯一事实来源。
+- Agent 对重复稳定 job ID 返回 Redis 中的实际任务状态。Core dispatcher 遇到 `completed/failed/cancelled` 时必须幂等结束仍处于 PostgreSQL 活动态的画像、质量检查或 RAG 记录，不能把终态 job 当作已重新排队；已经完成的业务记录和 RAG 的新内容版本不得被旧 job 覆盖。
 - Core 的命令、旧任务对账、画像、质量检查和 RAG dispatcher，以及 Agent 的队列消费者，都由生命周期任务监督器管理；后台协程异常退出后必须退避重启，就绪检查必须检查实际运行的 `Task`，不能只检查对象是否存在。
 - `WritingMessage` 只保存用户可见聊天记录，不能反推图状态。
 

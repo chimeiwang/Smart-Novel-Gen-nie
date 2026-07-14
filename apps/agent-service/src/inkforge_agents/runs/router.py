@@ -112,11 +112,14 @@ async def submit_run(
         ),
         force=body.force,
     )
+    queue_status = "queued" if queued else await queue.status(body.jobId)
+    if queue_status is None:
+        raise HTTPException(status_code=503, detail="智能体运行队列状态不一致")
     return AgentJobAccepted(
         jobId=body.jobId,
         runId=body.runId,
         taskId=body.taskId,
-        status="queued" if queued else "duplicate",
+        status=queue_status,
     )
 
 

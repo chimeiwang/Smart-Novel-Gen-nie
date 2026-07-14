@@ -152,6 +152,37 @@ async def test_old_terminal_callback_cannot_overwrite_success() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dispatch_terminal_does_not_overwrite_successful_portrait() -> None:
+    task, style = task_and_style("success")
+    session = TransitionSession(task, style)
+    repository = StyleRepository(lambda: session)  # type: ignore[arg-type]
+
+    await repository.mark_portrait_dispatch_terminal(
+        "style-1", "task-1", "failed"
+    )
+
+    assert task.status == "success"
+    assert task.errorMessage is None
+    assert style.errorMessage is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["pending", "processing"])
+async def test_dispatch_terminal_ends_active_portrait(status: str) -> None:
+    task, style = task_and_style(status)
+    session = TransitionSession(task, style)
+    repository = StyleRepository(lambda: session)  # type: ignore[arg-type]
+
+    await repository.mark_portrait_dispatch_terminal(
+        "style-1", "task-1", "cancelled"
+    )
+
+    assert task.status == "error"
+    assert task.errorMessage == "智能体画像任务已终止：cancelled"
+    assert style.errorMessage == task.errorMessage
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("current", "target"),
     [

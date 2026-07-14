@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any, Protocol
 
 from fastapi import UploadFile
+from inkforge_contracts.jobs import AgentJobStatus
 
 from ..errors import ApiError
 from .schemas import (
@@ -71,7 +72,7 @@ class PortraitRunSubmitter(Protocol):
         task_id: str,
         run_id: str,
         section: PortraitSection | None,
-    ) -> None: ...
+    ) -> AgentJobStatus: ...
 
 
 class StyleService:

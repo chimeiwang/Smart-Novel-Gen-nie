@@ -3,6 +3,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Protocol
 
+from inkforge_contracts.jobs import AgentJobStatus
+
 from ..errors import ApiError
 from .rag import chunk_text_losslessly, validate_chunk_capacity
 from .schemas import CreateReferenceRequest, ReferenceMaterialResponse, UpdateReferenceRequest
@@ -17,7 +19,7 @@ class IndexSubmitter(Protocol):
         novel_id: str,
         reference_id: str,
         content_hash: str,
-    ) -> None: ...
+    ) -> AgentJobStatus: ...
 
 
 class ReferenceRepositoryPort(Protocol):

@@ -6,10 +6,13 @@ from typing import Any
 
 import httpx
 import pytest
+from inkforge_contracts.jobs import AgentJobAccepted, AgentJobRequest
 from inkforge_contracts.jwt_claims import ServiceScope
 from inkforge_core.agent_client import (
     AgentClient,
+    PortraitAgentSubmitter,
     QualityAgentSubmitter,
+    RagAgentSubmitter,
     WritingTaskAgentSubmitter,
 )
 from inkforge_core.writing.commands import WritingCommandRecord
@@ -151,12 +154,17 @@ async def test_quality_job_id_uses_unique_workflow_run_id() -> None:
     captured: list[object] = []
 
     class Client:
-        async def submit(self, request: object) -> object:
+        async def submit(self, request: AgentJobRequest) -> AgentJobAccepted:
             captured.append(request)
-            return object()
+            return AgentJobAccepted(
+                jobId=request.jobId,
+                runId=request.runId,
+                taskId=request.taskId,
+                status="failed",
+            )
 
     submitter = QualityAgentSubmitter(Client())  # type: ignore[arg-type]
-    await submitter.submit(
+    first_status = await submitter.submit(
         run_id="run-1",
         user_id="user-1",
         check_id="check-1",
@@ -165,7 +173,7 @@ async def test_quality_job_id_uses_unique_workflow_run_id() -> None:
         source_task_id="source-task-1",
         message="检查时间线",
     )
-    await submitter.submit(
+    second_status = await submitter.submit(
         run_id="run-2",
         user_id="user-1",
         check_id="check-1",
@@ -181,6 +189,38 @@ async def test_quality_job_id_uses_unique_workflow_run_id() -> None:
     assert captured[1].jobId == "quality-run-2"
     assert captured[1].runId == "run-2"
     assert captured[1].taskId == "run-2"
+    assert first_status == second_status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_portrait_and_rag_submitters_propagate_agent_job_status() -> None:
+    class Client:
+        async def submit(self, request: AgentJobRequest) -> AgentJobAccepted:
+            return AgentJobAccepted(
+                jobId=request.jobId,
+                runId=request.runId,
+                taskId=request.taskId,
+                status="cancelled",
+            )
+
+    client = Client()
+    portrait = PortraitAgentSubmitter(client)
+    rag = RagAgentSubmitter(client)
+
+    assert (
+        await portrait.submit(
+            user_id="user-1",
+            style_id="style-1",
+            task_id="task-1",
+            run_id="task-1",
+            section=None,
+        )
+        == "cancelled"
+    )
+    assert (
+        await rag.submit("user-1", "novel-1", "reference-1", "a" * 64)
+        == "cancelled"
+    )
 
 
 @pytest.mark.asyncio

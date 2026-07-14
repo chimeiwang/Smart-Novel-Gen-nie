@@ -5,6 +5,8 @@ import logging
 from dataclasses import dataclass
 from typing import Protocol
 
+from inkforge_contracts.jobs import AgentJobStatus
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,6 +35,15 @@ class QualityDispatchRepository(Protocol):
         error_code: str,
     ) -> None: ...
 
+    async def fail_run(
+        self,
+        check_id: str,
+        user_id: str,
+        *,
+        run_id: str,
+        novel_id: str,
+    ) -> None: ...
+
 
 class QualityDispatchSubmitter(Protocol):
     async def submit(
@@ -45,7 +56,7 @@ class QualityDispatchSubmitter(Protocol):
         chapter_id: str,
         source_task_id: str | None,
         message: str | None,
-    ) -> None: ...
+    ) -> AgentJobStatus: ...
 
 
 class QualityRunDispatcher:
@@ -70,7 +81,7 @@ class QualityRunDispatcher:
 
     async def dispatch(self, record: QualityDispatchRecord) -> bool:
         try:
-            await self._submitter.submit(
+            agent_status = await self._submitter.submit(
                 run_id=record.run_id,
                 user_id=record.user_id,
                 check_id=record.check_id,
@@ -79,7 +90,15 @@ class QualityRunDispatcher:
                 source_task_id=record.source_task_id,
                 message=record.message,
             )
-            await self._repository.mark_quality_run_running(record.run_id)
+            if agent_status in {"queued", "running"}:
+                await self._repository.mark_quality_run_running(record.run_id)
+            else:
+                await self._repository.fail_run(
+                    record.check_id,
+                    record.user_id,
+                    run_id=record.run_id,
+                    novel_id=record.novel_id,
+                )
             return True
         except Exception as exc:
             error_code = type(exc).__name__

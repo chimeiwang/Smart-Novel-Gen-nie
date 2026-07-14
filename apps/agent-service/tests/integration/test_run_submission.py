@@ -69,3 +69,32 @@ def test_run_submission_rejects_missing_bearer_before_queue_write() -> None:
     ).post("/internal/v1/runs", json=body())
 
     assert response.status_code == 401
+
+
+def test_duplicate_run_submission_returns_existing_terminal_status() -> None:
+    queue = RedisRunQueue(fakeredis.aioredis.FakeRedis(), prefix="test:runs")
+    client = TestClient(
+        create_app(testing=True, run_queue=queue, core_request_verifier=Verifier()),
+        client=("127.0.0.1", 50000),
+    )
+    headers = {
+        "Authorization": "Bearer signed",
+        "Idempotency-Key": "job-1",
+        "X-InkForge-Timestamp": "1",
+        "X-InkForge-Body-SHA256": "0" * 64,
+    }
+
+    with client:
+        assert client.post("/internal/v1/runs", json=body(), headers=headers).status_code == 202
+        claim = client.portal.call(
+            lambda: queue.claim(visibility_timeout=timedelta(seconds=30))
+        )
+        assert claim is not None
+        assert client.portal.call(
+            lambda: queue.acknowledge(claim, status="failed")
+        )
+
+        response = client.post("/internal/v1/runs", json=body(), headers=headers)
+
+    assert response.status_code == 202
+    assert response.json()["status"] == "failed"

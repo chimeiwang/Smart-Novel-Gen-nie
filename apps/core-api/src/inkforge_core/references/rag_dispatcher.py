@@ -5,6 +5,8 @@ import logging
 from dataclasses import dataclass
 from typing import Protocol
 
+from inkforge_contracts.jobs import AgentJobStatus
+
 logger = logging.getLogger(__name__)
 
 
@@ -22,6 +24,14 @@ class RagDispatchRepository(Protocol):
         limit: int,
     ) -> list[RagDispatchRecord]: ...
 
+    async def mark_rag_dispatch_terminal(
+        self,
+        novel_id: str,
+        reference_id: str,
+        content_hash: str,
+        agent_status: AgentJobStatus,
+    ) -> None: ...
+
 
 class RagDispatchSubmitter(Protocol):
     async def submit(
@@ -30,7 +40,7 @@ class RagDispatchSubmitter(Protocol):
         novel_id: str,
         reference_id: str,
         content_hash: str,
-    ) -> None: ...
+    ) -> AgentJobStatus: ...
 
 
 class RagIndexDispatcher:
@@ -58,12 +68,19 @@ class RagIndexDispatcher:
         records = await self._repository.list_pending_rag_documents(self._batch_size)
         for record in records:
             try:
-                await self._submitter.submit(
+                agent_status = await self._submitter.submit(
                     record.user_id,
                     record.novel_id,
                     record.reference_id,
                     record.content_hash,
                 )
+                if agent_status not in {"queued", "running"}:
+                    await self._repository.mark_rag_dispatch_terminal(
+                        record.novel_id,
+                        record.reference_id,
+                        record.content_hash,
+                        agent_status,
+                    )
                 completed += 1
             except Exception as exc:
                 logger.warning(

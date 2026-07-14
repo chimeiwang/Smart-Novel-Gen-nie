@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+from inkforge_contracts.jobs import AgentJobStatus
 from inkforge_core.quality.dispatcher import QualityDispatchRecord, QualityRunDispatcher
 
 
@@ -23,6 +24,7 @@ class Repository:
         self.records = records
         self.running: list[str] = []
         self.failures: list[tuple[str, str]] = []
+        self.terminals: list[tuple[str, str, str, str]] = []
         self.claimed = asyncio.Event()
 
     async def list_dispatchable_quality_runs(self, limit: int) -> list[QualityDispatchRecord]:
@@ -35,16 +37,32 @@ class Repository:
     async def record_quality_dispatch_failure(self, run_id: str, error_code: str) -> None:
         self.failures.append((run_id, error_code))
 
+    async def fail_run(
+        self,
+        check_id: str,
+        user_id: str,
+        *,
+        run_id: str,
+        novel_id: str,
+    ) -> None:
+        self.terminals.append((check_id, user_id, run_id, novel_id))
+
 
 class Submitter:
-    def __init__(self, failing_run_id: str | None = None) -> None:
+    def __init__(
+        self,
+        failing_run_id: str | None = None,
+        statuses: dict[str, AgentJobStatus] | None = None,
+    ) -> None:
         self.failing_run_id = failing_run_id
+        self.statuses = statuses or {}
         self.calls: list[dict[str, object]] = []
 
-    async def submit(self, **kwargs: object) -> None:
+    async def submit(self, **kwargs: object) -> AgentJobStatus:
         self.calls.append(kwargs)
         if kwargs["run_id"] == self.failing_run_id:
             raise RuntimeError("模拟质量检查投递失败")
+        return self.statuses.get(str(kwargs["run_id"]), "queued")
 
 
 @pytest.mark.asyncio
@@ -77,6 +95,19 @@ async def test_dispatcher_leaves_failed_run_recoverable_and_continues_batch() ->
     assert await dispatcher.run_once() == 1
     assert repository.running == ["good"]
     assert repository.failures == [("bad", "RuntimeError")]
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_converges_existing_terminal_job_without_marking_running() -> None:
+    repository = Repository([record("terminal")])
+    submitter = Submitter(statuses={"terminal": "completed"})
+    dispatcher = QualityRunDispatcher(repository, submitter)
+
+    assert await dispatcher.run_once() == 1
+    assert repository.running == []
+    assert repository.terminals == [
+        ("check-1", "user-1", "terminal", "novel-1")
+    ]
 
 
 @pytest.mark.asyncio

@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue
 from .identity import Identifier
 
 AgentJobKind = Literal["writing", "portrait", "rag", "quality"]
+AgentJobStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
 
 
 class AgentJobRequest(BaseModel):
@@ -31,7 +32,7 @@ class AgentJobAccepted(BaseModel):
     jobId: Identifier
     runId: Identifier
     taskId: Identifier
-    status: Literal["queued", "duplicate"]
+    status: AgentJobStatus
 
 
 class AgentJobCancelRequest(BaseModel):
