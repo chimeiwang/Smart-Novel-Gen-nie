@@ -67,7 +67,7 @@ npx playwright test --reporter=line
 - 冷启动前：awaiting_user_review 任务 26，活动命令 0。
 - 冷启动并等待 dispatcher/对账器运行后：awaiting_user_review 任务仍为 26，活动命令仍为 0；无决定草案没有被重新投递。
 - 远程 Redis 是共享服务器，本地验收没有重启 Redis 进程，只重置 DB15。pending 命令补投、稳定 job ID、终态不重开和 Redis 丢失对账由 dispatcher、reconciler 和队列自动化测试覆盖。
-- 全量验收结束后已停止本地三服务，并把 Redis DB15 从 25 个测试键清理为 0；隔离克隆数据库暂时保留到生产迁移完成，便于复核结构和回归证据。
+- 全量验收结束后已停止本地三服务，并把 Redis DB15 从 25 个测试键清理为 0；生产部署稳定后已确认当前生产库为 `novelwriter`，并删除本次精确隔离克隆库 `inkforge_local_20260713232736`。
 
 ## 已发现并修复的硬故障
 
@@ -116,11 +116,22 @@ npx playwright test --reporter=line
 - 迁移后：用户 12、小说 37、章节 41、写作会话 140 保持不变；文风、参考和画像任务均为 0；新命令表初始为 0。
 - 本地新代码对生产数据库执行只读 schema guard：ready=true，fingerprint=`760609cdfc0b99fb0a57ecf94c292f06cddfc824694458cb2b95feaecbf39be4`，diffs=0。
 
-## 未完成的生产步骤
+## 生产部署与线上感知结果
 
-- 生产应用容器当前保持停止，等待与新 schema 匹配的镜像部署，不能用旧 Core 镜像重新启动。
-- 尚未推送本轮提交，因此 GitHub Actions、镜像发布、SSH 部署和线上感知验收仍待执行。
-- 线上浏览器验收必须使用有效 HTTPS；若服务器仍只有 HTTP，secure cookie 会阻断登录，应记录为环境阻塞而不是伪造通过。
+- 推送提交：`ab8e81fa9a005c519c973da7714ef28dd1c0dbdc`。
+- GitHub Actions：[CI and Deploy #37](https://github.com/chimeiwang/Smart-Novel-Gen-nie/actions/runs/29313903737)；ci 和 deploy 均为 success。
+- 服务器仓库 HEAD 与部署提交一致；Web、Core API、Agent Service 三张镜像标签均为完整提交 SHA。
+- Nginx、Web、Core API、Agent Service、Redis 五个容器全部 running/healthy。
+- Core ready：configuration、database、database_schema、redis 均为 ok。
+- Agent ready：model_provider、run_queue、service_auth、core_client、queue_consumer 均为 ok。
+- 公网 `/login` 返回 200；公网 `/internal/v1/health/ready` 返回 404，内部边界未暴露。
+- 生产数据复核：用户 12、小说 37、章节 41、写作会话 140、文风 0、命令 0。
+
+### 环境阻塞
+
+- 服务器仅开放 HTTP 80，HTTPS 443 未开放；生产 secure cookie 无法在当前公网入口完成可靠浏览器登录。
+- 按验收约定停止在线写入型测试，没有在线创建账号、私有文风、单节画像或真实模型写作任务。
+- 双用户隔离、真实单节更新和草案批准/丢弃已在隔离环境与自动化测试通过；真实 provider 的文学质量和实际 token 计费仍未在线验证。
 
 ## 质量边界
 

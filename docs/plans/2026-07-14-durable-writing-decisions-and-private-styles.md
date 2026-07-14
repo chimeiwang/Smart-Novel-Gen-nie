@@ -619,7 +619,7 @@ Commit: `git commit -m "修复：清理类型门禁与写作列表警告" -- pac
 - Modify: `docs/audits/2026-07-14-functional-verification.md`
 - Modify: `docs/superpowers/plans/2026-07-14-comprehensive-functional-verification.md`
 
-- [ ] **Step 1: 生成并校验 OpenAPI 客户端**
+- [x] **Step 1: 生成并校验 OpenAPI 客户端**
 
 Run: `npm run api:generate`
 
@@ -627,11 +627,11 @@ Run: `npm run api:check`
 
 Expected: decision 202、`clientRequestId`、命令状态、私有文风和单节画像路径均出现在生成类型中。
 
-- [ ] **Step 2: 更新当前需求事实**
+- [x] **Step 2: 更新当前需求事实**
 
 明确 PostgreSQL schema 变更是用户批准的单次例外；写作采用持久化命令；文风按用户私有；单节生成是真实单节任务。删除“前端两步决定+恢复”和“文风全局可写”的旧描述。
 
-- [ ] **Step 3: 运行全量门禁**
+- [x] **Step 3: 运行全量门禁**
 
 ```powershell
 $env:E2E_BASE_URL='http://127.0.0.1:43119'; npx playwright test
@@ -647,11 +647,11 @@ npm run build
 
 Expected: 全部通过；不接受仅重跑失败测试替代全量门禁。
 
-- [ ] **Step 4: 重启三服务和 Redis 恢复验收**
+- [x] **Step 4: 重启三服务和 Redis 恢复验收**
 
 验证 pending 命令可补投、awaiting_user_review 无决定时不被重投、批准/丢弃后刷新保持 completed、第二用户看不到第一用户文风、单节任务只改变一个字段。
 
-- [ ] **Step 5: 更新审计并提交**
+- [x] **Step 5: 更新审计并提交**
 
 Commit: `git commit -m "文档：完成持久化命令与私有文风验收" -- packages/api-client/src/generated/schema.d.ts docs/requirements docs/audits/2026-07-14-functional-verification.md docs/superpowers/plans/2026-07-14-comprehensive-functional-verification.md`
 
@@ -660,22 +660,22 @@ Commit: `git commit -m "文档：完成持久化命令与私有文风验收" -- 
 **Files:**
 - Modify only if required by verified deployment evidence: `.github/workflows/**`, `scripts/deploy-production.sh`, `docs/audits/2026-07-14-functional-verification.md`
 
-- [ ] **Step 1: 备份 PostgreSQL 与 uploads 并校验备份可读**
+- [x] **Step 1: 备份 PostgreSQL 与 uploads 并校验备份可读**
 
 运行现有 `scripts/backup.sh`，记录备份路径、大小和校验和；未得到可恢复备份时停止，不执行迁移。
 
-- [ ] **Step 2: 记录生产文风清理计数并执行 SQL**
+- [x] **Step 2: 记录生产文风清理计数并执行 SQL**
 
 先只读查询 `Novel.appliedStyleId`、三张文风表行数和参考文件路径，再用 `psql -v ON_ERROR_STOP=1` 执行版本化迁移。迁移后运行 schema guard；任何不一致立即停止部署并按设计文档恢复备份。
 
-- [ ] **Step 3: 推送代码并观察 GitHub Actions**
+- [x] **Step 3: 推送代码并观察 GitHub Actions**
 
 只推送所有本地门禁已通过的提交。检查构建、镜像发布和 SSH 部署日志；若服务器缺少备份、数据库权限、HTTPS 或必需密钥，按用户要求停止并明确报告。
 
-- [ ] **Step 4: 线上感知验收**
+- [x] **Step 4: 线上感知验收**
 
 在有效 HTTPS 可用时验证登录、创建私有文风、双用户隔离、单节生成、写作草案批准与刷新恢复；验证公网 `/internal/**` 仍为 404。若仍只有 HTTP，记录 secure cookie 阻塞并停止浏览器登录验收。
 
-- [ ] **Step 5: 完成审计与最终提交**
+- [x] **Step 5: 完成审计与最终提交**
 
 审计列出迁移计数、备份证据、Actions 运行链接、三服务健康、通过/未测项和环境阻塞。不得把 fake provider 或 disabled embedding 记作真实模型质量通过。
