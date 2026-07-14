@@ -177,19 +177,19 @@ class QualityAgentSubmitter:
     async def submit(
         self,
         *,
+        run_id: str,
         user_id: str,
         check_id: str,
         novel_id: str,
         chapter_id: str,
-        task_id: str | None,
+        source_task_id: str | None,
         message: str | None,
-    ) -> str:
-        run_id = f"quality-{check_id}"
-        billing_task_id = task_id or check_id
+    ) -> None:
+        billing_task_id = source_task_id or run_id
         await self._client.submit(
             AgentJobRequest(
                 protocolVersion="1.0",
-                jobId=run_id,
+                jobId=f"quality-{run_id}",
                 kind="quality",
                 runId=run_id,
                 taskId=billing_task_id,
@@ -199,12 +199,11 @@ class QualityAgentSubmitter:
                 payload={
                     "checkId": check_id,
                     "chapterId": chapter_id,
-                    "sourceTaskId": task_id,
+                    "sourceTaskId": source_task_id,
                     "message": message,
                 },
             )
         )
-        return run_id
 
 
 class PortraitAgentSubmitter:

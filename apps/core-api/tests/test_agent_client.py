@@ -7,7 +7,11 @@ from typing import Any
 import httpx
 import pytest
 from inkforge_contracts.jwt_claims import ServiceScope
-from inkforge_core.agent_client import AgentClient, WritingTaskAgentSubmitter
+from inkforge_core.agent_client import (
+    AgentClient,
+    QualityAgentSubmitter,
+    WritingTaskAgentSubmitter,
+)
 from inkforge_core.writing.commands import WritingCommandRecord
 from inkforge_core.writing.records import TaskRecord
 from inkforge_service_auth import SignedServiceRequest
@@ -140,6 +144,43 @@ async def test_writing_command_uses_command_id_as_job_id() -> None:
 
     assert captured[0].jobId == "command-stable"
     assert captured[0].payload == command.payload
+
+
+@pytest.mark.asyncio
+async def test_quality_job_id_uses_unique_workflow_run_id() -> None:
+    captured: list[object] = []
+
+    class Client:
+        async def submit(self, request: object) -> object:
+            captured.append(request)
+            return object()
+
+    submitter = QualityAgentSubmitter(Client())  # type: ignore[arg-type]
+    await submitter.submit(
+        run_id="run-1",
+        user_id="user-1",
+        check_id="check-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        source_task_id="source-task-1",
+        message="检查时间线",
+    )
+    await submitter.submit(
+        run_id="run-2",
+        user_id="user-1",
+        check_id="check-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        source_task_id=None,
+        message=None,
+    )
+
+    assert captured[0].jobId == "quality-run-1"
+    assert captured[0].runId == "run-1"
+    assert captured[0].taskId == "source-task-1"
+    assert captured[1].jobId == "quality-run-2"
+    assert captured[1].runId == "run-2"
+    assert captured[1].taskId == "run-2"
 
 
 @pytest.mark.asyncio

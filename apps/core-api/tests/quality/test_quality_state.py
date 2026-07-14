@@ -12,6 +12,7 @@ from inkforge_core.auth.dependencies import get_current_user
 from inkforge_core.auth.repository import AuthUser
 from inkforge_core.errors import ApiError
 from inkforge_core.novels.schemas import QualityCheckDto
+from inkforge_core.quality.dispatcher import QualityDispatchRecord
 from inkforge_core.quality.schemas import RunQualityCheckRequest, UpdateQualityCheckRequest
 from inkforge_core.quality.service import QualityService
 from pydantic import ValidationError
@@ -31,6 +32,7 @@ class RecordingQualityRepository:
         self.record = QualityRecord()
         self.updated = False
         self.authorized_task_ids: list[str | None] = []
+        self.created_runs: list[QualityDispatchRecord] = []
 
     async def require_check(self, check_id: str, user_id: str):
         del check_id, user_id
@@ -80,6 +82,37 @@ class RecordingQualityRepository:
                 message="任务与检查项不匹配",
             )
         return self.record
+
+    async def create_run(
+        self,
+        check_id: str,
+        user_id: str,
+        task_id: str | None,
+        message: str | None,
+    ) -> QualityDispatchRecord:
+        await self.authorize_run(check_id, user_id, task_id)
+        import json
+
+        run = QualityDispatchRecord(
+            run_id=f"quality-run-{len(self.created_runs) + 1}",
+            check_id=check_id,
+            user_id=user_id,
+            novel_id=self.record.novel_id,
+            chapter_id=self.record.chapter_id,
+            source_task_id=task_id,
+            message=message,
+        )
+        self.created_runs.append(run)
+        self.last_input_json = json.dumps(
+            {
+                "checkId": check_id,
+                "sourceTaskId": task_id,
+                "message": message,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return run
 
     async def get_run_context(self, check_id, user_id, task_id, message):
         self.authorized_task_ids.append(task_id)
@@ -167,20 +200,20 @@ async def test_public_status_update_forwards_reset_and_returns_fresh_check() -> 
     assert response.status == "skipped"
 
 
-class RecordingSubmitter:
+class RecordingDispatcher:
     def __init__(self) -> None:
-        self.input: dict[str, str | None] | None = None
+        self.records: list[QualityDispatchRecord] = []
 
-    async def submit(self, **kwargs: str | None) -> str:
-        self.input = kwargs
-        return "task-created"
+    async def dispatch(self, record: QualityDispatchRecord) -> bool:
+        self.records.append(record)
+        return True
 
 
 @pytest.mark.asyncio
 async def test_run_submitter_receives_only_authorized_context() -> None:
     repository = RecordingQualityRepository()
-    submitter = RecordingSubmitter()
-    service = QualityService(repository, submitter=submitter)  # type: ignore[arg-type]
+    dispatcher = RecordingDispatcher()
+    service = QualityService(repository, dispatcher=dispatcher)  # type: ignore[arg-type]
     response = await service.run(
         "cookie-user",
         "check-1",
@@ -189,23 +222,38 @@ async def test_run_submitter_receives_only_authorized_context() -> None:
     assert response.model_dump() == {
         "accepted": True,
         "checkId": "check-1",
-        "taskId": "task-created",
+        "taskId": "quality-run-1",
     }
-    assert submitter.input == {
-        "user_id": "cookie-user",
-        "check_id": "check-1",
-        "novel_id": "novel-1",
-        "chapter_id": "chapter-1",
-        "task_id": "task-existing",
-        "message": "完整检查",
-    }
-    assert repository.authorized_task_ids == ["task-existing"]
+    assert dispatcher.records == [repository.created_runs[0]]
+    assert dispatcher.records[0].source_task_id == "task-existing"
+    assert dispatcher.records[0].message == "完整检查"
+    assert repository.last_input_json == (
+        '{"checkId":"check-1","sourceTaskId":"task-existing","message":"完整检查"}'
+    )
+    assert repository.authorized_task_ids == ["task-existing", "task-existing"]
+
+
+@pytest.mark.asyncio
+async def test_repeated_quality_runs_create_distinct_persisted_run_ids() -> None:
+    repository = RecordingQualityRepository()
+    dispatcher = RecordingDispatcher()
+    service = QualityService(repository, dispatcher=dispatcher)  # type: ignore[arg-type]
+
+    first = await service.run("user-1", "check-1", RunQualityCheckRequest())
+    second = await service.run("user-1", "check-1", RunQualityCheckRequest())
+
+    assert first.taskId == "quality-run-1"
+    assert second.taskId == "quality-run-2"
+    assert [record.run_id for record in dispatcher.records] == [
+        "quality-run-1",
+        "quality-run-2",
+    ]
 
 
 @pytest.mark.asyncio
 async def test_run_rejects_task_that_does_not_match_check() -> None:
     repository = RecordingQualityRepository()
-    service = QualityService(repository, submitter=RecordingSubmitter())  # type: ignore[arg-type]
+    service = QualityService(repository, dispatcher=RecordingDispatcher())  # type: ignore[arg-type]
     with pytest.raises(ApiError) as caught:
         await service.run(
             "cookie-user",
@@ -267,7 +315,7 @@ async def test_run_api_returns_503_and_keeps_pending_when_submitter_missing() ->
 @pytest.mark.asyncio
 async def test_run_api_returns_202_after_submitter_is_connected() -> None:
     repository = RecordingQualityRepository()
-    service = QualityService(repository, submitter=RecordingSubmitter())  # type: ignore[arg-type]
+    service = QualityService(repository, dispatcher=RecordingDispatcher())  # type: ignore[arg-type]
     async with quality_api_client(service) as client:
         response = await client.post("/api/v1/quality-checks/check-1/run", json={})
     assert response.status_code == 202

@@ -49,6 +49,7 @@ from .operations.background import BackgroundTaskRegistry, BackgroundWorker
 from .outlines.repository import OutlineRepository
 from .outlines.router import router as outlines_router
 from .outlines.service import OutlineService
+from .quality.dispatcher import QualityRunDispatcher
 from .quality.internal_router import router as quality_internal_router
 from .quality.repository import QualityRepository
 from .quality.router import router as quality_router
@@ -151,10 +152,23 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
     app.state.novel_service = NovelService(novel_repository)
     app.state.chapter_service = ChapterService(chapter_repository)
     agent_client = cast(AgentClient | None, getattr(app.state, "agent_client", None))
+    quality_submitter = QualityAgentSubmitter(agent_client) if agent_client else None
+    quality_dispatcher = (
+        QualityRunDispatcher(
+            quality_repository,
+            quality_submitter,
+            batch_size=20,
+            interval_seconds=5,
+        )
+        if quality_submitter is not None
+        else None
+    )
     app.state.quality_service = QualityService(
         quality_repository,
-        submitter=QualityAgentSubmitter(agent_client) if agent_client else None,
+        dispatcher=quality_dispatcher,
     )
+    if quality_dispatcher is not None and getattr(app.state, "quality_dispatcher", None) is None:
+        app.state.quality_dispatcher = quality_dispatcher
     app.state.lore_service = LoreService(lore_repository)
     app.state.outline_service = OutlineService(outline_repository)
     reference_service = ReferenceService(
@@ -294,6 +308,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
                 getattr(app.state, "writing_command_dispatcher", None),
             ),
             ("portrait_dispatcher", getattr(app.state, "portrait_dispatcher", None)),
+            ("quality_dispatcher", getattr(app.state, "quality_dispatcher", None)),
         )
         if worker is not None
     ]

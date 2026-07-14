@@ -85,7 +85,11 @@ async def get_quality_context(
         novel_id=body.novelId,
     )
     context = await service.get_run_context(
-        body.userId, check_id, body.sourceTaskId, body.message
+        body.userId,
+        check_id,
+        body.sourceTaskId,
+        body.message,
+        body.runId,
     )
     _require_novel(context, body.novelId)
     return QualityRunContextResponse.model_validate(context)
@@ -107,12 +111,12 @@ async def complete_quality(
         run_id=body.runId,
         novel_id=body.novelId,
     )
-    context = await service.get_run_context(body.userId, check_id, None, None)
-    _require_novel(context, body.novelId)
     await service.complete_run(
         body.userId,
         check_id,
         body.model_dump(exclude={"userId", "novelId", "taskId", "runId"}),
+        run_id=body.runId,
+        novel_id=body.novelId,
     )
     return Response(status_code=204)
 
@@ -133,7 +137,10 @@ async def fail_quality(
         run_id=body.runId,
         novel_id=body.novelId,
     )
-    context = await service.get_run_context(body.userId, check_id, None, None)
-    _require_novel(context, body.novelId)
-    await service.fail_run(body.userId, check_id)
+    await service.fail_run(
+        body.userId,
+        check_id,
+        run_id=body.runId,
+        novel_id=body.novelId,
+    )
     return Response(status_code=204)

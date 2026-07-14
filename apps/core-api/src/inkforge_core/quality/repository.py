@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ..db.models import Chapter, ChapterQualityCheck, Novel, WritingTask
+from ..db.models import Chapter, ChapterQualityCheck, Novel, WorkflowRun, WritingTask
 from ..errors import ApiError
 from ..novels.repository import quality_check_dict
 from ..novels.schemas import QualityCheckDto
+from .dispatcher import QualityDispatchRecord
 from .service import QualityRecordPort
 
 
@@ -69,26 +71,91 @@ class QualityRepository:
         async with self._session_factory() as session:
             check, novel_id = await self._require_check(session, check_id, user_id)
             record = self._record(check, novel_id)
-            if task_id is None:
-                return record
-            row = (
-                await session.execute(
-                    select(WritingTask, Novel.userId)
-                    .join(Novel, Novel.id == WritingTask.novelId)
-                    .where(WritingTask.id == task_id)
-                )
-            ).one_or_none()
-            if row is None:
-                raise self._task_mismatch()
-            task, owner_id = row
-            if (
-                owner_id is None
-                or owner_id != user_id
-                or task.novelId != record.novel_id
-                or task.chapterId != record.chapter_id
-            ):
-                raise self._task_mismatch()
+            await self._validate_task_binding(session, record, user_id, task_id)
         return record
+
+    async def create_run(
+        self,
+        check_id: str,
+        user_id: str,
+        task_id: str | None,
+        message: str | None,
+    ) -> QualityDispatchRecord:
+        async with self._session_factory() as session:
+            async with session.begin():
+                check, novel_id = await self._require_check(session, check_id, user_id)
+                record = self._record(check, novel_id)
+                await self._validate_task_binding(session, record, user_id, task_id)
+                run = WorkflowRun(
+                    chapterId=record.chapter_id,
+                    novelId=record.novel_id,
+                    userId=user_id,
+                    kind="quality_check",
+                    status="pending",
+                    sourceType="quality_check",
+                    sourceId=check_id,
+                    input=json.dumps(
+                        {
+                            "checkId": check_id,
+                            "sourceTaskId": task_id,
+                            "message": message,
+                        },
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    ),
+                )
+                session.add(run)
+                await session.flush()
+                result = self._dispatch_record(run)
+        return result
+
+    async def list_dispatchable_quality_runs(
+        self,
+        limit: int,
+    ) -> list[QualityDispatchRecord]:
+        async with self._session_factory() as session:
+            async with session.begin():
+                runs = list(
+                    (
+                        await session.scalars(
+                            select(WorkflowRun)
+                            .where(
+                                WorkflowRun.kind == "quality_check",
+                                WorkflowRun.status.in_(("pending", "running")),
+                            )
+                            .order_by(WorkflowRun.updatedAt.asc(), WorkflowRun.id.asc())
+                            .limit(limit)
+                            .with_for_update(skip_locked=True)
+                        )
+                    ).all()
+                )
+                records: list[QualityDispatchRecord] = []
+                for run in runs:
+                    try:
+                        records.append(self._dispatch_record(run))
+                    except ValueError:
+                        run.status = "failed"
+                        run.errorMessage = "QUALITY_RUN_INPUT_INVALID"
+        return records
+
+    async def mark_quality_run_running(self, run_id: str) -> None:
+        async with self._session_factory() as session:
+            async with session.begin():
+                run = await self._lock_quality_run(session, run_id)
+                if run.status in {"pending", "running"}:
+                    run.status = "running"
+                    run.errorMessage = None
+
+    async def record_quality_dispatch_failure(
+        self,
+        run_id: str,
+        error_code: str,
+    ) -> None:
+        async with self._session_factory() as session:
+            async with session.begin():
+                run = await self._lock_quality_run(session, run_id)
+                if run.status in {"pending", "running"}:
+                    run.errorMessage = error_code
 
     async def get_run_context(
         self,
@@ -96,7 +163,30 @@ class QualityRepository:
         user_id: str,
         task_id: str | None,
         message: str | None,
+        run_id: str | None = None,
     ) -> dict[str, Any]:
+        if run_id is not None:
+            async with self._session_factory() as session:
+                async with session.begin():
+                    run = await self._require_bound_quality_run(
+                        session,
+                        run_id,
+                        check_id,
+                        user_id,
+                        expected_novel_id=None,
+                    )
+                    durable = self._dispatch_record(run)
+                    if (
+                        durable.source_task_id != task_id
+                        or durable.message != message
+                    ):
+                        raise ApiError(
+                            status_code=409,
+                            code="QUALITY_RUN_INPUT_MISMATCH",
+                            message="质量检查运行输入与持久记录不匹配",
+                        )
+            task_id = durable.source_task_id
+            message = durable.message
         record = await self.authorize_run(check_id, user_id, task_id)
         async with self._session_factory() as session:
             async with session.begin():
@@ -125,6 +215,9 @@ class QualityRepository:
         check_id: str,
         user_id: str,
         result: dict[str, Any],
+        *,
+        run_id: str | None = None,
+        novel_id: str | None = None,
     ) -> None:
         scores = result.get("scores")
         if not isinstance(scores, dict):
@@ -132,6 +225,17 @@ class QualityRepository:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._lock_chapter_owner_for_check(session, check_id, user_id)
+                workflow_run = (
+                    await self._require_bound_quality_run(
+                        session,
+                        run_id,
+                        check_id,
+                        user_id,
+                        expected_novel_id=novel_id,
+                    )
+                    if run_id is not None
+                    else None
+                )
                 check = await self._lock_check(session, check_id)
                 if check is None:
                     raise ApiError(
@@ -153,14 +257,143 @@ class QualityRepository:
                 check.rewriteBrief = (
                     rewrite_brief if isinstance(rewrite_brief, str) else None
                 )
+                if workflow_run is not None:
+                    workflow_run.status = "completed"
+                    workflow_run.output = json.dumps(
+                        result,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                    workflow_run.errorMessage = None
 
-    async def fail_run(self, check_id: str, user_id: str) -> None:
+    async def fail_run(
+        self,
+        check_id: str,
+        user_id: str,
+        *,
+        run_id: str | None = None,
+        novel_id: str | None = None,
+    ) -> None:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._lock_chapter_owner_for_check(session, check_id, user_id)
+                workflow_run = (
+                    await self._require_bound_quality_run(
+                        session,
+                        run_id,
+                        check_id,
+                        user_id,
+                        expected_novel_id=novel_id,
+                    )
+                    if run_id is not None
+                    else None
+                )
                 check = await self._lock_check(session, check_id)
                 if check is not None:
                     check.status = "failed"
+                if workflow_run is not None:
+                    workflow_run.status = "failed"
+                    workflow_run.errorMessage = "QUALITY_RUN_FAILED"
+
+    async def _validate_task_binding(
+        self,
+        session: AsyncSession,
+        record: QualityRecord,
+        user_id: str,
+        task_id: str | None,
+    ) -> None:
+        if task_id is None:
+            return
+        row = (
+            await session.execute(
+                select(WritingTask, Novel.userId)
+                .join(Novel, Novel.id == WritingTask.novelId)
+                .where(WritingTask.id == task_id)
+            )
+        ).one_or_none()
+        if row is None:
+            raise self._task_mismatch()
+        task, owner_id = row
+        if (
+            owner_id is None
+            or owner_id != user_id
+            or task.novelId != record.novel_id
+            or task.chapterId != record.chapter_id
+        ):
+            raise self._task_mismatch()
+
+    async def _lock_quality_run(
+        self,
+        session: AsyncSession,
+        run_id: str,
+    ) -> WorkflowRun:
+        run = cast(
+            WorkflowRun | None,
+            await session.scalar(
+                select(WorkflowRun)
+                .where(
+                    WorkflowRun.id == run_id,
+                    WorkflowRun.kind == "quality_check",
+                )
+                .with_for_update()
+            ),
+        )
+        if run is None:
+            raise ApiError(
+                status_code=404,
+                code="QUALITY_RUN_NOT_FOUND",
+                message="质量检查运行不存在",
+            )
+        return run
+
+    async def _require_bound_quality_run(
+        self,
+        session: AsyncSession,
+        run_id: str,
+        check_id: str,
+        user_id: str,
+        *,
+        expected_novel_id: str | None,
+    ) -> WorkflowRun:
+        run = await self._lock_quality_run(session, run_id)
+        if (
+            run.userId != user_id
+            or run.sourceId != check_id
+            or (expected_novel_id is not None and run.novelId != expected_novel_id)
+        ):
+            raise ApiError(
+                status_code=403,
+                code="QUALITY_RUN_MISMATCH",
+                message="质量检查运行资源绑定不匹配",
+            )
+        self._dispatch_record(run)
+        return run
+
+    @staticmethod
+    def _dispatch_record(run: WorkflowRun) -> QualityDispatchRecord:
+        try:
+            payload = json.loads(run.input or "")
+        except json.JSONDecodeError as exc:
+            raise ValueError("质量检查运行输入无效") from exc
+        if not isinstance(payload, dict) or payload.get("checkId") != run.sourceId:
+            raise ValueError("质量检查运行输入无效")
+        source_task_id = payload.get("sourceTaskId")
+        message = payload.get("message")
+        if source_task_id is not None and not isinstance(source_task_id, str):
+            raise ValueError("质量检查源任务无效")
+        if message is not None and not isinstance(message, str):
+            raise ValueError("质量检查消息无效")
+        if run.userId is None or run.sourceId is None:
+            raise ValueError("质量检查运行归属无效")
+        return QualityDispatchRecord(
+            run_id=run.id,
+            check_id=run.sourceId,
+            user_id=run.userId,
+            novel_id=run.novelId,
+            chapter_id=run.chapterId,
+            source_task_id=source_task_id,
+            message=message,
+        )
 
     async def _lock_chapter_owner_for_check(
         self, session: AsyncSession, check_id: str, user_id: str
