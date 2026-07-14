@@ -18,7 +18,7 @@
 - Modify: `.github/workflows/build.yml`
 - Modify: `scripts/upload-docker-images.sh`
 
-- [ ] **Step 1: 写静态安全失败测试**
+- [x] **Step 1: 写静态安全失败测试**
 
 断言 workflow 和脚本中完全不存在 `StrictHostKeyChecking=no`，并存在：
 
@@ -31,13 +31,13 @@ UserKnownHostsFile=
 
 断言 deploy job 的 concurrency group 为 `production` 且 `cancel-in-progress: false`；不得再由 workflow 顶层 `cancel-in-progress: true` 取消运行中的生产部署。
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
 Run: `uv run pytest tests/architecture/test_github_workflow.py tests/architecture/test_deploy_scripts.py -q`
 
 Expected: FAIL；当前存在禁用主机校验且生产运行可被取消。
 
-- [ ] **Step 3: 在 Prepare SSH 写入预置公钥**
+- [x] **Step 3: 在 Prepare SSH 写入预置公钥**
 
 workflow 从 production environment secret 写入 `~/.ssh/known_hosts`，先校验非空，再 `chmod 600`。只通过环境变量传递文件路径，不输出 Secret 内容：
 
@@ -50,7 +50,7 @@ run: |
   chmod 600 "$SSH_KNOWN_HOSTS_FILE"
 ```
 
-- [ ] **Step 4: 加固上传脚本**
+- [x] **Step 4: 加固上传脚本**
 
 `upload-docker-images.sh` 在任何网络调用前要求 `SSH_KNOWN_HOSTS_FILE` 已设置、可读且非空。统一数组：
 
@@ -60,11 +60,11 @@ ssh_options="-o StrictHostKeyChecking=yes -o UserKnownHostsFile=$SSH_KNOWN_HOSTS
 
 所有 `ssh`/`scp` 使用同一组选项；不得调用 `ssh-keyscan` 动态信任目标。
 
-- [ ] **Step 5: 调整部署并发**
+- [x] **Step 5: 调整部署并发**
 
 普通 CI 可保留自己的可取消组，但 deploy job 必须用独立 `production` 组排队，不能中断已开始的远端切换或回滚。
 
-- [ ] **Step 6: 验证并提交 SSH 修复**
+- [x] **Step 6: 验证并提交 SSH 修复**
 
 Run: `uv run pytest tests/architecture/test_github_workflow.py tests/architecture/test_deploy_scripts.py -q`
 

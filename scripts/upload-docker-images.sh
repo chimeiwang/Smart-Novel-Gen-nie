@@ -4,11 +4,22 @@ set -euo pipefail
 : "${SERVER_HOST:?必须设置服务器地址}"
 : "${SERVER_USER:?必须设置服务器用户}"
 : "${SSH_KEY_PATH:?必须设置 SSH 私钥路径}"
+: "${SSH_KNOWN_HOSTS_FILE:?必须设置 known_hosts 文件路径}"
 : "${INKFORGE_IMAGE_TAG:?必须设置镜像标签}"
 : "${DEPLOY_SHA:?必须设置部署提交}"
 
+[ -r "$SSH_KNOWN_HOSTS_FILE" ] || {
+  echo "known_hosts 文件不可读：$SSH_KNOWN_HOSTS_FILE" >&2
+  exit 1
+}
+[ -s "$SSH_KNOWN_HOSTS_FILE" ] || {
+  echo "known_hosts 文件为空：$SSH_KNOWN_HOSTS_FILE" >&2
+  exit 1
+}
+
 ssh_options=(
-  -o StrictHostKeyChecking=no
+  -o StrictHostKeyChecking=yes
+  -o "UserKnownHostsFile=$SSH_KNOWN_HOSTS_FILE"
   -o ServerAliveInterval=30
   -o ServerAliveCountMax=20
   -o TCPKeepAlive=yes

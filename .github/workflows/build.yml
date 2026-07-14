@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: production-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -102,6 +102,9 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: production
+    concurrency:
+      group: production
+      cancel-in-progress: false
 
     env:
       INKFORGE_IMAGE_TAG: ${{ github.sha }}
@@ -116,10 +119,16 @@ jobs:
         run: docker compose --env-file .env.example -f infra/compose.yaml build web core-api agent-service
 
       - name: Prepare SSH
+        env:
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+          SSH_KNOWN_HOSTS_FILE: /home/runner/.ssh/known_hosts
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/deploy_key
+          printf '%s\n' "${{ secrets.SERVER_SSH_KEY }}" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
+          test -n "$DEPLOY_SSH_KNOWN_HOSTS"
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > "$SSH_KNOWN_HOSTS_FILE"
+          chmod 600 "$SSH_KNOWN_HOSTS_FILE"
 
       - name: Upload Docker images
         env:
@@ -127,19 +136,25 @@ jobs:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
           SSH_KEY_PATH: /home/runner/.ssh/deploy_key
+          SSH_KNOWN_HOSTS_FILE: /home/runner/.ssh/known_hosts
         run: scripts/upload-docker-images.sh
 
       - name: Deploy over SSH
         shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SSH_KNOWN_HOSTS_FILE: /home/runner/.ssh/known_hosts
         run: |
           set +e
           ssh \
-            -o StrictHostKeyChecking=no \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$SSH_KNOWN_HOSTS_FILE" \
             -o ServerAliveInterval=30 \
             -o ServerAliveCountMax=20 \
             -o TCPKeepAlive=yes \
             -i ~/.ssh/deploy_key \
-            "${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}" \
+            "${SERVER_USER}@${SERVER_HOST}" \
             "APP_DIR='${{ vars.APP_DIR }}' REPO_URL='https://github.com/chimeiwang/Smart-Novel-Gen-nie.git' BRANCH='main' DEPLOY_SHA='${{ github.sha }}' INKFORGE_IMAGE_TAG='${INKFORGE_IMAGE_TAG}' sh -s" \
             < scripts/deploy-production.sh 2>&1 | tee deploy.log
           deploy_status=${PIPESTATUS[0]}

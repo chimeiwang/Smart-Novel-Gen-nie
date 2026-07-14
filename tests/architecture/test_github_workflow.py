@@ -123,6 +123,17 @@ def test_deploy_failures_are_published_to_the_workflow_summary() -> None:
     assert "::error title=生产部署失败::" in source
 
 
+def test_production_deploy_uses_pinned_ssh_host_identity_and_non_cancelled_queue() -> None:
+    source = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "StrictHostKeyChecking=no" not in source
+    assert "DEPLOY_SSH_KNOWN_HOSTS" in source
+    assert "SSH_KNOWN_HOSTS_FILE" in source
+    assert "StrictHostKeyChecking=yes" in source
+    assert "UserKnownHostsFile=" in source
+    assert 'group: production\n      cancel-in-progress: false' in source
+
+
 def test_remote_deploy_requires_server_configuration_and_never_builds() -> None:
     source = DEPLOY_SCRIPT.read_text(encoding="utf-8")
 
