@@ -13,12 +13,13 @@ type StylePanelProps = {
   styles: Array<{
     id: string;
     name: string;
-    portraitMarkdown: string | null;
+    portraitMarkdown?: string | null;
     sourceType: string;
   }>;
+  onChanged?: () => void;
 };
 
-export function StylePanel({ novelId, appliedStyleId, styles }: StylePanelProps) {
+export function StylePanel({ novelId, appliedStyleId, styles, onChanged }: StylePanelProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
@@ -29,6 +30,7 @@ export function StylePanel({ novelId, appliedStyleId, styles }: StylePanelProps)
         body: { styleId },
       }));
 
+      onChanged?.();
       router.refresh();
     });
   };

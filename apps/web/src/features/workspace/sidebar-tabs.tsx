@@ -1,192 +1,37 @@
 "use client";
 
+import type { components } from "@inkforge/api-client";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState, useSyncExternalStore, useTransition } from "react";
 
-import { browserApi } from "@/lib/api/browser";
-import { requireApiData } from "@/lib/api/response";
+import { Modal } from "@/components/modal";
 import { ChapterList } from "@/features/chapters/chapter-list";
 import { LorePanel } from "@/features/lore/lore-panel";
 import { OutlinePanel } from "@/features/outline/outline-panel";
 import { ProgressPanel } from "@/features/progress/progress-panel";
 import { ReferencePanel } from "@/features/references/reference-panel";
 import { StylePanel } from "@/features/styles/style-panel";
-import { Modal } from "@/components/modal";
+import { browserApi } from "@/lib/api/browser";
+import { requireApiData } from "@/lib/api/response";
 import {
   STORY_LENGTH_PROFILE_CONFIG,
   normalizeStoryLengthProfile,
   type StoryLengthProfile,
 } from "@/shared/contracts/story-length-profile";
+import {
+  DeferredWorkspaceLoader,
+  groupForTab,
+  type DeferredGroupState,
+} from "./deferred-workspace";
 
-type SidebarTabKey =
-  | "chapters"
-  | "lore"
-  | "style"
-  | "progress"
-  | "storyProgress"
-  | "storyBackground"
-  | "worldSetting"
-  | "outline"
-  | "reference";
-
-// 角色状态枚举
-type CharacterStatus = "active" | "missing" | "dead" | "imprisoned" | "unknown";
-
-// 关系类型枚举
-type RelationType = "family" | "master_student" | "friend" | "enemy" | "ally" | "lover" | "rival" | "subordinate" | "acquaintance" | "other";
+type SidebarTabKey = "chapters" | "lore" | "style" | "reference";
+type PlanningData = components["schemas"]["WorkspacePlanningResponse"];
 
 type SidebarTabsProps = {
   novelId: string;
   activeChapterId: string;
-  chapters: Array<{
-    id: string;
-    title: string;
-    order: number;
-    updatedAt: string;
-    status?: string;
-    wordCount?: number;
-    approvedBeatPlan?: {
-      sceneCount: number;
-      totalEstimatedWords: number;
-    } | null;
-  }>;
-  characters: Array<{
-    id: string;
-    name: string;
-    aliases: string | null;
-    gender: string | null;
-    age: string | null;
-    appearance: string | null;
-    personality: string | null;
-    identity: string | null;
-    background: string | null;
-    coreDesire: string | null;
-    behaviorBoundaries: string | null;
-    speechStyle: string | null;
-    relationshipPrinciples: string | null;
-    shortTermGoal: string | null;
-    factionId: string | null;
-    faction: { id: string; name: string } | null;
-    // 新增：实力相关
-    powerLevel: string | null;
-    combatAbility: string | null;
-    specialSkills: string | null;
-    // 新增：当前状态
-    currentStatus: CharacterStatus;
-    statusNote: string | null;
-    // 角色关系
-    outgoingRelations: Array<{
-      id: string;
-      targetId: string;
-      target: { id: string; name: string };
-      relationType: RelationType;
-      intimacy: number;
-      description: string | null;
-      startDate: string | null;
-      endDate: string | null;
-    }>;
-    incomingRelations: Array<{
-      id: string;
-      characterId: string;
-      character: { id: string; name: string };
-      relationType: RelationType;
-      intimacy: number;
-      description: string | null;
-    }>;
-    experiences: Array<{
-      id: string;
-      chapterId: string | null;
-      content: string;
-      order: number;
-    }>;
-  }>;
-  items: Array<{
-    id: string;
-    name: string;
-    aliases: string | null;
-    type: string | null;
-    rarity: string | null;
-    effect: string | null;
-    origin: string | null;
-    description: string | null;
-    ownerId: string | null;
-    owner: { id: string; name: string } | null;
-  }>;
-  locations: Array<{
-    id: string;
-    name: string;
-    aliases: string | null;
-    type: string | null;
-    parentId: string | null;
-    climate: string | null;
-    culture: string | null;
-    description: string | null;
-  }>;
-  factions: Array<{
-    id: string;
-    name: string;
-    aliases: string | null;
-    type: string | null;
-    baseId: string | null;
-    description: string | null;
-  }>;
-  glossaries: Array<{
-    id: string;
-    term: string;
-    definition: string;
-    category: string | null;
-  }>;
-  // 文风相关
+  chapters: components["schemas"]["WorkspaceChapterSummary"][];
   appliedStyleId: string | null;
-  styles: Array<{
-    id: string;
-    name: string;
-    portraitMarkdown: string | null;
-    sourceType: string;
-  }>;
-  // 进度相关
-  progress: {
-    currentStage: string;
-    currentGoal: string | null;
-    currentConflict: string | null;
-    nextMilestone: string | null;
-  } | null;
-  storyProgress: string | null;
-  storyBackground: string | null;
-  worldSetting: string | null;
-  writingBible: {
-    storyLengthProfile: string;
-    targetTotalWordCount: number | null;
-    genre: string | null;
-    targetReaders: string | null;
-    coreSellingPoint: string | null;
-    readerPromise: string | null;
-    appealModel: string | null;
-    taboo: string | null;
-    comparableTitles: string | null;
-    notes: string | null;
-  } | null;
-  outline: {
-    content: string;
-  } | null;
-  outlineNodes: Array<{
-    id: string;
-    title: string;
-    content: string | null;
-    kind: "stage" | "plot_unit" | "chapter_group";
-    status: "planned" | "in_progress" | "completed" | "skipped";
-    order: number;
-    parentId: string | null;
-    estimatedWordCount: number | null;
-    actualWordCount: number | null;
-  }>;
-  references: Array<{
-    id: string;
-    title: string;
-    type: string;
-    content: string;
-    sourceUrl: string | null;
-  }>;
 };
 
 const TAB_ITEMS: Array<{ key: SidebarTabKey; label: string }> = [
@@ -196,10 +41,12 @@ const TAB_ITEMS: Array<{ key: SidebarTabKey; label: string }> = [
   { key: "reference", label: "资料" },
 ];
 
-function toWritingBibleForm(writingBible: SidebarTabsProps["writingBible"]) {
+function toWritingBibleForm(writingBible: PlanningData["writingBible"]) {
   return {
     storyLengthProfile: normalizeStoryLengthProfile(writingBible?.storyLengthProfile),
-    targetTotalWordCount: writingBible?.targetTotalWordCount ? String(writingBible.targetTotalWordCount) : "",
+    targetTotalWordCount: writingBible?.targetTotalWordCount
+      ? String(writingBible.targetTotalWordCount)
+      : "",
     genre: writingBible?.genre ?? "",
     targetReaders: writingBible?.targetReaders ?? "",
     coreSellingPoint: writingBible?.coreSellingPoint ?? "",
@@ -211,47 +58,85 @@ function toWritingBibleForm(writingBible: SidebarTabsProps["writingBible"]) {
   };
 }
 
+function DeferredStatusPanel({
+  state,
+  onRetry,
+}: {
+  state: DeferredGroupState<unknown>;
+  onRetry: () => void;
+}) {
+  if (state.status === "error") {
+    return (
+      <div className="empty stack">
+        <span>{state.error ?? "加载失败，请稍后重试"}</span>
+        <button className="button secondary" type="button" onClick={onRetry}>
+          重试
+        </button>
+      </div>
+    );
+  }
+  return <div className="empty">加载中...</div>;
+}
+
 export function SidebarTabs({
   novelId,
   activeChapterId,
   chapters,
-  characters,
-  items,
-  locations,
-  factions,
-  glossaries,
   appliedStyleId,
-  styles,
-  progress,
-  storyProgress,
-  storyBackground,
-  worldSetting,
-  writingBible,
-  outline,
-  outlineNodes,
-  references,
 }: SidebarTabsProps) {
   const [activeTab, setActiveTab] = useState<SidebarTabKey>("chapters");
   const [pending, startTransition] = useTransition();
   const router = useRouter();
+  const [loader] = useState(() => new DeferredWorkspaceLoader({
+    lore: async () => requireApiData(await browserApi.GET(
+      "/api/v1/novels/{novel_id}/workspace/lore",
+      { params: { path: { novel_id: novelId } } },
+    )),
+    planning: async () => requireApiData(await browserApi.GET(
+      "/api/v1/novels/{novel_id}/workspace/planning",
+      { params: { path: { novel_id: novelId } } },
+    )),
+    resources: async () => requireApiData(await browserApi.GET(
+      "/api/v1/novels/{novel_id}/workspace/resources",
+      { params: { path: { novel_id: novelId } } },
+    )),
+  }));
+  const deferred = useSyncExternalStore(
+    loader.subscribe,
+    loader.snapshot,
+    loader.snapshot,
+  );
+  const loadGroup = (group: NonNullable<ReturnType<typeof groupForTab>>) => {
+    void loader.load(group).catch(() => undefined);
+  };
+  const refreshGroup = (group: NonNullable<ReturnType<typeof groupForTab>>) => {
+    void loader.refresh(group).catch(() => undefined);
+  };
 
   // 弹窗状态：进度、故事进展、故事背景、世界设定、大纲
-  const [modalKey, setModalKey] = useState<"progress" | "storyProgress" | "storyBackground" | "worldSetting" | "writingBible" | "outline" | null>(null);
-
-  // 故事进展编辑状态
+  const [modalKey, setModalKey] = useState<
+    "progress" | "storyProgress" | "storyBackground" | "worldSetting" | "writingBible" | "outline" | null
+  >(null);
   const [storyProgressDraft, setStoryProgressDraft] = useState<string | null>(null);
-
-  // 故事背景编辑状态
   const [storyBackgroundDraft, setStoryBackgroundDraft] = useState<string | null>(null);
-
-  // 世界设定编辑状态
   const [worldSettingDraft, setWorldSettingDraft] = useState<string | null>(null);
-  const [writingBibleDraft, setWritingBibleDraft] = useState<ReturnType<typeof toWritingBibleForm> | null>(null);
+  const [writingBibleDraft, setWritingBibleDraft] = useState<
+    ReturnType<typeof toWritingBibleForm> | null
+  >(null);
 
-  const storyProgressContent = storyProgressDraft ?? storyProgress ?? "";
-  const storyBackgroundContent = storyBackgroundDraft ?? storyBackground ?? "";
-  const worldSettingContent = worldSettingDraft ?? worldSetting ?? "";
-  const writingBibleForm = writingBibleDraft ?? toWritingBibleForm(writingBible);
+  const planning = deferred.planning.data;
+  const storyProgressContent = storyProgressDraft ?? planning?.storyProgress ?? "";
+  const storyBackgroundContent =
+    storyBackgroundDraft ?? planning?.storyBackground?.content ?? "";
+  const worldSettingContent = worldSettingDraft ?? planning?.worldSetting?.content ?? "";
+  const writingBibleForm =
+    writingBibleDraft ?? toWritingBibleForm(planning?.writingBible ?? null);
+  const planningFallback = (
+    <DeferredStatusPanel
+      state={deferred.planning}
+      onRetry={() => loadGroup("planning")}
+    />
+  );
 
   const openModal = (key: NonNullable<typeof modalKey>) => {
     if (key === "storyProgress") setStoryProgressDraft(null);
@@ -259,6 +144,7 @@ export function SidebarTabs({
     if (key === "worldSetting") setWorldSettingDraft(null);
     if (key === "writingBible") setWritingBibleDraft(null);
     setModalKey(key);
+    loadGroup("planning");
   };
 
   const handleSaveStoryProgress = () => {
@@ -268,6 +154,7 @@ export function SidebarTabs({
         body: { content: storyProgressContent },
       }));
       setStoryProgressDraft(null);
+      refreshGroup("planning");
       router.refresh();
     });
   };
@@ -279,6 +166,7 @@ export function SidebarTabs({
         body: { content: storyBackgroundContent },
       }));
       setStoryBackgroundDraft(null);
+      refreshGroup("planning");
       router.refresh();
     });
   };
@@ -290,6 +178,7 @@ export function SidebarTabs({
         body: { content: worldSettingContent },
       }));
       setWorldSettingDraft(null);
+      refreshGroup("planning");
       router.refresh();
     });
   };
@@ -304,6 +193,7 @@ export function SidebarTabs({
         },
       }));
       setWritingBibleDraft(null);
+      refreshGroup("planning");
       router.refresh();
     });
   };
@@ -332,7 +222,11 @@ export function SidebarTabs({
               key={tab.key}
               className={`tab-button ${activeTab === tab.key ? "active" : ""}`}
               type="button"
-              onClick={() => setActiveTab(tab.key)}
+              onClick={() => {
+                setActiveTab(tab.key);
+                const group = groupForTab(tab.key);
+                if (group) loadGroup(group);
+              }}
             >
               {tab.label}
             </button>
@@ -350,26 +244,53 @@ export function SidebarTabs({
         ) : null}
 
         {activeTab === "lore" ? (
-          <LorePanel
-            novelId={novelId}
-            characters={characters}
-            items={items}
-            locations={locations}
-            factions={factions}
-            glossaries={glossaries}
-          />
+          deferred.lore.status === "success" && deferred.lore.data ? (
+            <LorePanel
+              novelId={novelId}
+              characters={deferred.lore.data.characters}
+              items={deferred.lore.data.items}
+              locations={deferred.lore.data.locations}
+              factions={deferred.lore.data.factions}
+              glossaries={deferred.lore.data.glossaries}
+              onChanged={() => refreshGroup("lore")}
+            />
+          ) : (
+            <DeferredStatusPanel
+              state={deferred.lore}
+              onRetry={() => loadGroup("lore")}
+            />
+          )
         ) : null}
 
         {activeTab === "style" ? (
-          <StylePanel
-            novelId={novelId}
-            appliedStyleId={appliedStyleId}
-            styles={styles}
-          />
+          deferred.resources.status === "success" && deferred.resources.data ? (
+            <StylePanel
+              novelId={novelId}
+              appliedStyleId={deferred.resources.data.appliedStyle?.id ?? appliedStyleId}
+              styles={deferred.resources.data.styles}
+              onChanged={() => refreshGroup("resources")}
+            />
+          ) : (
+            <DeferredStatusPanel
+              state={deferred.resources}
+              onRetry={() => loadGroup("resources")}
+            />
+          )
         ) : null}
 
         {activeTab === "reference" ? (
-          <ReferencePanel novelId={novelId} references={references} />
+          deferred.resources.status === "success" && deferred.resources.data ? (
+            <ReferencePanel
+              novelId={novelId}
+              references={deferred.resources.data.references}
+              onChanged={() => refreshGroup("resources")}
+            />
+          ) : (
+            <DeferredStatusPanel
+              state={deferred.resources}
+              onRetry={() => loadGroup("resources")}
+            />
+          )
         ) : null}
       </div>
 
@@ -385,11 +306,17 @@ export function SidebarTabs({
       </div>
 
       <Modal title="剧情进度" open={modalKey === "progress"} onClose={() => setModalKey(null)}>
-        <ProgressPanel novelId={novelId} progress={progress} />
+        {planning ? (
+          <ProgressPanel
+            novelId={novelId}
+            progress={planning.plotProgress}
+            onChanged={() => refreshGroup("planning")}
+          />
+        ) : planningFallback}
       </Modal>
 
       <Modal title="故事进展" description="记录故事整体进展" open={modalKey === "storyProgress"} onClose={() => setModalKey(null)}>
-        <div className="stack">
+        {planning ? <div className="stack">
           <textarea
             className="textarea modal-textarea"
             value={storyProgressContent}
@@ -402,11 +329,11 @@ export function SidebarTabs({
               {pending ? "保存中..." : "保存"}
             </button>
           </div>
-        </div>
+        </div> : planningFallback}
       </Modal>
 
       <Modal title="故事背景" description="描述故事的基础背景" open={modalKey === "storyBackground"} onClose={() => setModalKey(null)}>
-        <div className="stack">
+        {planning ? <div className="stack">
           <textarea
             className="textarea modal-textarea"
             value={storyBackgroundContent}
@@ -418,11 +345,11 @@ export function SidebarTabs({
               {pending ? "保存中..." : "保存"}
             </button>
           </div>
-        </div>
+        </div> : planningFallback}
       </Modal>
 
       <Modal title="世界设定" description="描述世界的设定" open={modalKey === "worldSetting"} onClose={() => setModalKey(null)}>
-        <div className="stack">
+        {planning ? <div className="stack">
           <textarea
             className="textarea modal-textarea"
             value={worldSettingContent}
@@ -434,11 +361,11 @@ export function SidebarTabs({
               {pending ? "保存中..." : "保存"}
             </button>
           </div>
-        </div>
+        </div> : planningFallback}
       </Modal>
 
       <Modal title="作品圣经" description="记录商业定位、读者承诺和写作禁忌" open={modalKey === "writingBible"} onClose={() => setModalKey(null)}>
-        <div className="stack">
+        {planning ? <div className="stack">
           <div className="stack">
             <span className="label">创作模式</span>
             <div className="story-profile-grid">
@@ -553,11 +480,18 @@ export function SidebarTabs({
               {pending ? "保存中..." : "保存"}
             </button>
           </div>
-        </div>
+        </div> : planningFallback}
       </Modal>
 
       <Modal title="大纲" description="写下故事的主要脉络，智能写作时会参考这里" open={modalKey === "outline"} onClose={() => setModalKey(null)}>
-        <OutlinePanel novelId={novelId} outline={outline} outlineNodes={outlineNodes} />
+        {planning ? (
+          <OutlinePanel
+            novelId={novelId}
+            outline={planning.outline}
+            outlineNodes={planning.outlineNodes}
+            onChanged={() => refreshGroup("planning")}
+          />
+        ) : planningFallback}
       </Modal>
 
     </div>

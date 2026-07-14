@@ -27,6 +27,7 @@ type OutlinePanelProps = {
     content: string;
   } | null;
   outlineNodes?: OutlineNodeDto[];
+  onChanged?: () => void;
 };
 
 type NodeFormState = {
@@ -94,7 +95,12 @@ function nodeToForm(node: OutlineNodeDto): NodeFormState {
   };
 }
 
-export function OutlinePanel({ novelId, outline, outlineNodes = [] }: OutlinePanelProps) {
+export function OutlinePanel({
+  novelId,
+  outline,
+  outlineNodes = [],
+  onChanged,
+}: OutlinePanelProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [contentDraft, setContentDraft] = useState<string | null>(null);
@@ -160,6 +166,7 @@ export function OutlinePanel({ novelId, outline, outlineNodes = [] }: OutlinePan
         setMessage(successMessage);
         setContentDraft(null);
         setFormDraft(null);
+        onChanged?.();
         router.refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : "操作失败");

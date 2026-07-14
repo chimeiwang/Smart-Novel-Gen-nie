@@ -15,9 +15,10 @@ type ReferencePanelProps = {
     content: string;
     sourceUrl: string | null;
   }>;
+  onChanged?: () => void;
 };
 
-export function ReferencePanel({ novelId, references }: ReferencePanelProps) {
+export function ReferencePanel({ novelId, references, onChanged }: ReferencePanelProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [title, setTitle] = useState("");
@@ -36,6 +37,7 @@ export function ReferencePanel({ novelId, references }: ReferencePanelProps) {
       setType("note");
       setContent("");
       setSourceUrl("");
+      onChanged?.();
       router.refresh();
     });
   };

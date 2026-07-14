@@ -14,9 +14,10 @@ type ProgressPanelProps = {
     currentConflict: string | null;
     nextMilestone: string | null;
   } | null;
+  onChanged?: () => void;
 };
 
-export function ProgressPanel({ novelId, progress }: ProgressPanelProps) {
+export function ProgressPanel({ novelId, progress, onChanged }: ProgressPanelProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [draft, setDraft] = useState<ProgressPanelProps["progress"] | null>(null);
@@ -44,6 +45,7 @@ export function ProgressPanel({ novelId, progress }: ProgressPanelProps) {
       }));
 
       setDraft(null);
+      onChanged?.();
       router.refresh();
     });
   };

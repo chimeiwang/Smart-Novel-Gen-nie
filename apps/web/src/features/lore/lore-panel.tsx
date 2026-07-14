@@ -1,5 +1,6 @@
 "use client";
 
+import type { components } from "@inkforge/api-client";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { Form, Input, Select, InputNumber, Button, Space, Divider, Popconfirm, Card, Empty, Row, Col } from "antd";
@@ -40,93 +41,12 @@ const RELATION_LABELS: Record<RelationType, string> = {
 
 type LorePanelProps = {
   novelId: string;
-  characters: Array<{
-    id: string;
-    name: string;
-    aliases: string | null;
-    gender: string | null;
-    age: string | null;
-    appearance: string | null;
-    personality: string | null;
-    identity: string | null;
-    background: string | null;
-    coreDesire: string | null;
-    behaviorBoundaries: string | null;
-    speechStyle: string | null;
-    relationshipPrinciples: string | null;
-    shortTermGoal: string | null;
-    factionId: string | null;
-    faction: { id: string; name: string } | null;
-    // 新增：实力相关
-    powerLevel: string | null;
-    combatAbility: string | null;
-    specialSkills: string | null;
-    // 新增：当前状态
-    currentStatus: CharacterStatus;
-    statusNote: string | null;
-    // 角色经历
-    experiences: Array<{
-      id: string;
-      chapterId: string | null;
-      content: string;
-      order: number;
-    }>;
-    // 角色关系
-    outgoingRelations: Array<{
-      id: string;
-      targetId: string;
-      target: { id: string; name: string };
-      relationType: RelationType;
-      intimacy: number;
-      description: string | null;
-      startDate: string | null;
-      endDate: string | null;
-    }>;
-    incomingRelations: Array<{
-      id: string;
-      characterId: string;
-      character: { id: string; name: string };
-      relationType: RelationType;
-      intimacy: number;
-      description: string | null;
-    }>;
-  }>;
-  items: Array<{
-    id: string;
-    name: string;
-    aliases: string | null;
-    type: string | null;
-    rarity: string | null;
-    effect: string | null;
-    origin: string | null;
-    description: string | null;
-    ownerId: string | null;
-    owner: { id: string; name: string } | null;
-  }>;
-  locations: Array<{
-    id: string;
-    name: string;
-    aliases: string | null;
-    type: string | null;
-    parentId: string | null;
-    climate: string | null;
-    culture: string | null;
-    description: string | null;
-  }>;
-  factions: Array<{
-    id: string;
-    name: string;
-    aliases: string | null;
-    type: string | null;
-    baseId: string | null;
-    description: string | null;
-  }>;
-  glossaries: Array<{
-    id: string;
-    term: string;
-    definition: string;
-    category: string | null;
-  }>;
+  characters: components["schemas"]["CharacterDto"][];
+  items: components["schemas"]["ItemDto"][];
+  locations: components["schemas"]["LocationDto"][];
+  factions: components["schemas"]["FactionDto"][];
+  glossaries: components["schemas"]["GlossaryDto"][];
+  onChanged?: () => void;
 };
 
 export function LorePanel({
@@ -136,6 +56,7 @@ export function LorePanel({
   locations,
   factions,
   glossaries,
+  onChanged,
 }: LorePanelProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -415,6 +336,7 @@ export function LorePanel({
         }));
       }
       closeModal();
+      onChanged?.();
       router.refresh();
     });
   };
@@ -566,6 +488,7 @@ export function LorePanel({
         }
       }
       closeModal();
+      onChanged?.();
       router.refresh();
     });
   };

@@ -129,7 +129,7 @@ git commit -m "性能：拆分工作区首屏与延迟查询"
 - Modify: `apps/web/src/features/workspace/smart-writing-panel.tsx`
 - Modify: `apps/web/src/features/workspace/workspace-shell.tsx`
 
-- [ ] **Step 1: 生成并检查 OpenAPI 客户端**
+- [x] **Step 1: 生成并检查 OpenAPI 客户端**
 
 Run: `npm run api:generate`
 
@@ -137,15 +137,15 @@ Run: `npm run api:check`
 
 Expected: PASS；生成文件包含四个新路径和顶层响应 schema。禁止手写对应 TypeScript DTO。
 
-- [ ] **Step 2: 写 SSR 数据边界测试或静态契约断言**
+- [x] **Step 2: 写 SSR 数据边界测试或静态契约断言**
 
 断言工作区页面只调用 `/workspace/bootstrap`，不再调用旧 `/workspace`，且传给客户端的首屏 props 不含延迟分组数据。
 
-- [ ] **Step 3: 切换页面请求**
+- [x] **Step 3: 切换页面请求**
 
 页面保留 SSR、SEO 和当前 `chapterId` 查询语义，只替换为生成客户端的 bootstrap 路径。现有编辑器仍使用 `textarea`、1.2 秒自动保存和 `countTextLength()`，不改变视觉布局。
 
-- [ ] **Step 4: 类型检查**
+- [x] **Step 4: 类型检查**
 
 Run: `npm run typecheck`
 
@@ -160,7 +160,7 @@ Expected: PASS；不得用 `as unknown as` 绕过新生成契约。
 - Modify: `apps/web/src/features/workspace/workspace-shell.tsx`
 - Modify: `apps/web/package.json`
 
-- [ ] **Step 1: 写状态机失败测试**
+- [x] **Step 1: 写状态机失败测试**
 
 将分组映射写成无 React 依赖的可测模块：
 
@@ -172,7 +172,7 @@ assert.equal(groupForTab("references"), "resources");
 
 测试同组多个 tab 只触发一次请求；失败状态保留错误并允许 retry；成功数据被缓存；一个分组失败不清空 bootstrap 或其他已加载组。
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
 在 `apps/web/package.json` 的 test 命令加入 `src/features/workspace/__tests__/*.test.ts` 后运行：
 
@@ -180,15 +180,15 @@ Run: `npm --workspace @inkforge/web test`
 
 Expected: FAIL；延迟加载模块不存在。
 
-- [ ] **Step 3: 实现三组独立状态**
+- [x] **Step 3: 实现三组独立状态**
 
 每组状态为 `idle/loading/success/error`，缓存请求 Promise 防止快速切 tab 产生重复并发。只有用户首次打开相应 tab 时调用真实 API；retry 清除该组失败状态后重试。错误文案使用现有面板文字样式和简体中文，不引入新 CSS 体系。
 
-- [ ] **Step 4: 接入 SidebarTabs**
+- [x] **Step 4: 接入 SidebarTabs**
 
 `SidebarTabs` 不再要求 SSR 一次性传入所有 lore/planning/resources props。加载中、失败、重试只占用面板内容区；编辑成功后局部更新/失效对应组，不重新请求 bootstrap 或无关组。
 
-- [ ] **Step 5: 验证 Web 行为**
+- [x] **Step 5: 验证 Web 行为**
 
 Run: `npm --workspace @inkforge/web test`
 
@@ -196,7 +196,7 @@ Run: `npm run typecheck && npm run lint`
 
 Expected: PASS。
 
-- [ ] **Step 6: 提交 Web 延迟加载**
+- [x] **Step 6: 提交 Web 延迟加载**
 
 ```bash
 git add apps/web/src/app/workspace apps/web/src/features/workspace apps/web/package.json
