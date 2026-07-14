@@ -27,19 +27,19 @@ logger = logging.getLogger(__name__)
 
 
 class StyleRepositoryPort(Protocol):
-    async def list_styles(self) -> list[dict[str, Any]]: ...
-    async def create_style(self, name: str) -> dict[str, Any]: ...
-    async def reserve_reference(self, style_id: str) -> str: ...
+    async def list_styles(self, user_id: str) -> list[dict[str, Any]]: ...
+    async def create_style(self, user_id: str, name: str) -> dict[str, Any]: ...
+    async def reserve_reference(self, user_id: str, style_id: str) -> str: ...
     async def create_reference(
-        self, style_id: str, reference_id: str, fields: dict[str, Any]
+        self, user_id: str, style_id: str, reference_id: str, fields: dict[str, Any]
     ) -> dict[str, Any]: ...
-    async def delete_reference(self, style_id: str, reference_id: str) -> str: ...
-    async def delete_style(self, style_id: str) -> list[str]: ...
-    async def create_portrait_task(self, style_id: str) -> dict[str, Any]: ...
+    async def delete_reference(self, user_id: str, style_id: str, reference_id: str) -> str: ...
+    async def delete_style(self, user_id: str, style_id: str) -> list[str]: ...
+    async def create_portrait_task(self, user_id: str, style_id: str) -> dict[str, Any]: ...
     async def get_portrait_sources(
         self, style_id: str, task_id: str
     ) -> list[dict[str, Any]]: ...
-    async def get_portrait_task(self, task_id: str) -> dict[str, Any]: ...
+    async def get_portrait_task(self, user_id: str, task_id: str) -> dict[str, Any]: ...
     async def transition_portrait_task(
         self,
         style_id: str,
@@ -48,7 +48,7 @@ class StyleRepositoryPort(Protocol):
         fields: dict[str, Any] | None = None,
     ) -> dict[str, Any]: ...
     async def update_section(
-        self, style_id: str, section: PortraitSection, content: str
+        self, user_id: str, style_id: str, section: PortraitSection, content: str
     ) -> dict[str, Any]: ...
     async def apply_style(self, novel_id: str, user_id: str, style_id: str | None) -> None: ...
 
@@ -75,22 +75,26 @@ class StyleService:
         self._storage = storage
         self._submitter = submitter
 
-    async def list_styles(self) -> list[StyleResponse]:
+    async def list_styles(self, user_id: str) -> list[StyleResponse]:
         return [
-            StyleResponse.model_validate(value) for value in await self._repository.list_styles()
+            StyleResponse.model_validate(value)
+            for value in await self._repository.list_styles(user_id)
         ]
 
-    async def create_style(self, request: CreateStyleRequest) -> StyleResponse:
+    async def create_style(self, user_id: str, request: CreateStyleRequest) -> StyleResponse:
         name = request.name.strip()
         if not name:
             raise ApiError(status_code=422, code="STYLE_NAME_REQUIRED", message="文风名称不能为空")
-        return StyleResponse.model_validate(await self._repository.create_style(name))
+        return StyleResponse.model_validate(await self._repository.create_style(user_id, name))
 
-    async def upload_reference(self, style_id: str, upload: UploadFile) -> StyleReferenceResponse:
-        reference_id = await self._repository.reserve_reference(style_id)
+    async def upload_reference(
+        self, user_id: str, style_id: str, upload: UploadFile
+    ) -> StyleReferenceResponse:
+        reference_id = await self._repository.reserve_reference(user_id, style_id)
         stored = await self._storage.save(style_id, reference_id, upload)
         try:
             value = await self._repository.create_reference(
+                user_id,
                 style_id,
                 reference_id,
                 {
@@ -106,12 +110,12 @@ class StyleService:
             raise
         return StyleReferenceResponse.model_validate(value)
 
-    async def delete_reference(self, style_id: str, reference_id: str) -> None:
-        path = await self._repository.delete_reference(style_id, reference_id)
+    async def delete_reference(self, user_id: str, style_id: str, reference_id: str) -> None:
+        path = await self._repository.delete_reference(user_id, style_id, reference_id)
         self._storage.delete(path)
 
-    async def delete_style(self, style_id: str) -> None:
-        paths = await self._repository.delete_style(style_id)
+    async def delete_style(self, user_id: str, style_id: str) -> None:
+        paths = await self._repository.delete_style(user_id, style_id)
         for path in paths:
             self._storage.delete(path)
 
@@ -122,7 +126,7 @@ class StyleService:
                 code="PORTRAIT_SERVICE_UNAVAILABLE",
                 message="画像生成服务暂时不可用",
             )
-        task = await self._repository.create_portrait_task(style_id)
+        task = await self._repository.create_portrait_task(user_id, style_id)
         task_id = str(task["id"])
         try:
             await self._submitter.submit(
@@ -171,9 +175,9 @@ class StyleService:
             "originalCharCount": original_count,
         }
 
-    async def get_portrait_task(self, task_id: str) -> PortraitTaskResponse:
+    async def get_portrait_task(self, user_id: str, task_id: str) -> PortraitTaskResponse:
         return PortraitTaskResponse.model_validate(
-            await self._repository.get_portrait_task(task_id)
+            await self._repository.get_portrait_task(user_id, task_id)
         )
 
     async def mark_processing(
@@ -217,6 +221,7 @@ class StyleService:
 
     async def update_section(
         self,
+        user_id: str,
         style_id: str,
         section: PortraitSection,
         request: UpdatePortraitSectionRequest,
@@ -229,7 +234,7 @@ class StyleService:
                 message="画像分节内容不能为空",
             )
         return StyleResponse.model_validate(
-            await self._repository.update_section(style_id, section, content)
+            await self._repository.update_section(user_id, style_id, section, content)
         )
 
     async def apply_style(self, user_id: str, novel_id: str, request: ApplyStyleRequest) -> None:

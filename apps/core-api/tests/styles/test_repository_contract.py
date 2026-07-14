@@ -13,7 +13,7 @@ from inkforge_core.styles.repository import StyleRepository
 ROOT = Path(__file__).parents[2] / "src" / "inkforge_core"
 
 
-def test_shared_style_repository_does_not_invent_owner_scope() -> None:
+def test_private_style_repository_requires_owner_scope() -> None:
     signatures = {
         name: inspect.signature(getattr(StyleRepository, name))
         for name in (
@@ -27,7 +27,7 @@ def test_shared_style_repository_does_not_invent_owner_scope() -> None:
             "update_section",
         )
     }
-    assert all("user_id" not in signature.parameters for signature in signatures.values())
+    assert all("user_id" in signature.parameters for signature in signatures.values())
     assert "user_id" in inspect.signature(StyleRepository.apply_style).parameters
 
 

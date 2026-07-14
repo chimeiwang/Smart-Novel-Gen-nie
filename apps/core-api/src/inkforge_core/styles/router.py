@@ -39,20 +39,17 @@ Service = Annotated[StyleService, Depends(get_style_service)]
 
 @router.get("/styles", response_model=list[StyleResponse])
 async def list_styles(user: User, service: Service) -> list[StyleResponse]:
-    del user
-    return await service.list_styles()
+    return await service.list_styles(user.id)
 
 
 @router.post("/styles", response_model=StyleResponse, status_code=status.HTTP_201_CREATED)
 async def create_style(body: CreateStyleRequest, user: User, service: Service) -> StyleResponse:
-    del user
-    return await service.create_style(body)
+    return await service.create_style(user.id, body)
 
 
 @router.delete("/styles/{style_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_style(style_id: str, user: User, service: Service) -> Response:
-    del user
-    await service.delete_style(style_id)
+    await service.delete_style(user.id, style_id)
     return Response(status_code=204)
 
 
@@ -67,8 +64,7 @@ async def upload_reference(
     service: Service,
     file: Annotated[UploadFile, File()],
 ) -> StyleReferenceResponse:
-    del user
-    return await service.upload_reference(style_id, file)
+    return await service.upload_reference(user.id, style_id, file)
 
 
 @router.delete(
@@ -81,8 +77,7 @@ async def delete_reference(
     user: User,
     service: Service,
 ) -> Response:
-    del user
-    await service.delete_reference(style_id, reference_id)
+    await service.delete_reference(user.id, style_id, reference_id)
     return Response(status_code=204)
 
 
@@ -97,8 +92,7 @@ async def create_portrait(style_id: str, user: User, service: Service) -> Portra
 
 @router.get("/portrait-tasks/{task_id}", response_model=PortraitTaskResponse)
 async def get_portrait_task(task_id: str, user: User, service: Service) -> PortraitTaskResponse:
-    del user
-    return await service.get_portrait_task(task_id)
+    return await service.get_portrait_task(user.id, task_id)
 
 
 @router.patch(
@@ -112,8 +106,7 @@ async def update_section(
     user: User,
     service: Service,
 ) -> StyleResponse:
-    del user
-    return await service.update_section(style_id, section, body)
+    return await service.update_section(user.id, style_id, section, body)
 
 
 @router.patch(

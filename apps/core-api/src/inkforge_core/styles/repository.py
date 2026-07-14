@@ -22,12 +22,13 @@ class StyleRepository:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
 
-    async def list_styles(self) -> list[dict[str, Any]]:
+    async def list_styles(self, user_id: str) -> list[dict[str, Any]]:
         async with self._session_factory() as session:
             styles = list(
                 (
                     await session.scalars(
                         select(WritingStyle)
+                        .where(WritingStyle.userId == user_id)
                         .options(
                             selectinload(WritingStyle.references),
                             selectinload(WritingStyle.tasks),
@@ -38,20 +39,25 @@ class StyleRepository:
             )
         return [self._style_dto(style) for style in styles]
 
-    async def create_style(self, name: str) -> dict[str, Any]:
+    async def create_style(self, user_id: str, name: str) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
-                style = WritingStyle(name=name, sourceType="agent")
+                style = WritingStyle(userId=user_id, name=name, sourceType="agent")
                 session.add(style)
                 await session.flush()
                 await session.refresh(style, attribute_names=["references", "tasks"])
                 result = self._style_dto(style)
         return result
 
-    async def reserve_reference(self, style_id: str) -> str:
+    async def reserve_reference(self, user_id: str, style_id: str) -> str:
         async with self._session_factory() as session:
             if (
-                await session.scalar(select(WritingStyle.id).where(WritingStyle.id == style_id))
+                await session.scalar(
+                    select(WritingStyle.id).where(
+                        WritingStyle.id == style_id,
+                        WritingStyle.userId == user_id,
+                    )
+                )
                 is None
             ):
                 raise self._style_not_found()
@@ -59,13 +65,14 @@ class StyleRepository:
 
     async def create_reference(
         self,
+        user_id: str,
         style_id: str,
         reference_id: str,
         fields: dict[str, Any],
     ) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
-                style = await self._lock_style(session, style_id)
+                style = await self._lock_owned_style(session, user_id, style_id)
                 reference = StyleReference(
                     id=reference_id,
                     styleId=style.id,
@@ -76,10 +83,10 @@ class StyleRepository:
                 result = self._reference_dto(reference)
         return result
 
-    async def delete_reference(self, style_id: str, reference_id: str) -> str:
+    async def delete_reference(self, user_id: str, style_id: str, reference_id: str) -> str:
         async with self._session_factory() as session:
             async with session.begin():
-                await self._lock_style(session, style_id)
+                await self._lock_owned_style(session, user_id, style_id)
                 reference = cast(
                     StyleReference | None,
                     await session.scalar(
@@ -101,10 +108,10 @@ class StyleRepository:
                 await session.delete(reference)
         return filepath
 
-    async def delete_style(self, style_id: str) -> list[str]:
+    async def delete_style(self, user_id: str, style_id: str) -> list[str]:
         async with self._session_factory() as session:
             async with session.begin():
-                style = await self._lock_style(session, style_id)
+                style = await self._lock_owned_style(session, user_id, style_id)
                 paths = list(
                     (
                         await session.scalars(
@@ -117,10 +124,10 @@ class StyleRepository:
                 await session.delete(style)
         return paths
 
-    async def create_portrait_task(self, style_id: str) -> dict[str, Any]:
+    async def create_portrait_task(self, user_id: str, style_id: str) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
-                style = await self._lock_style(session, style_id)
+                style = await self._lock_owned_style(session, user_id, style_id)
                 ready_reference = await session.scalar(
                     select(StyleReference.id)
                     .where(
@@ -193,9 +200,16 @@ class StyleRepository:
             for reference in references
         ]
 
-    async def get_portrait_task(self, task_id: str) -> dict[str, Any]:
+    async def get_portrait_task(self, user_id: str, task_id: str) -> dict[str, Any]:
         async with self._session_factory() as session:
-            task = await session.get(StylePortraitTask, task_id)
+            task = await session.scalar(
+                select(StylePortraitTask)
+                .join(WritingStyle, WritingStyle.id == StylePortraitTask.styleId)
+                .where(
+                    StylePortraitTask.id == task_id,
+                    WritingStyle.userId == user_id,
+                )
+            )
             if task is None:
                 raise self._task_not_found()
             return self._task_dto(task)
@@ -254,13 +268,14 @@ class StyleRepository:
 
     async def update_section(
         self,
+        user_id: str,
         style_id: str,
         section: PortraitSection,
         content: str,
     ) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
-                style = await self._lock_style(session, style_id)
+                style = await self._lock_owned_style(session, user_id, style_id)
                 setattr(style, section, content)
                 sections = {
                     "creativeMethodology": style.creativeMethodology,
@@ -298,7 +313,7 @@ class StyleRepository:
                         message="小说不存在",
                     )
                 if style_id is not None:
-                    style = await self._lock_style(session, style_id)
+                    style = await self._lock_owned_style(session, user_id, style_id)
                     if not style.portraitMarkdown:
                         raise ApiError(
                             status_code=409,
@@ -306,6 +321,27 @@ class StyleRepository:
                             message="文风画像尚未完整生成",
                         )
                 novel.appliedStyleId = style_id
+
+    @staticmethod
+    async def _lock_owned_style(
+        session: AsyncSession,
+        user_id: str,
+        style_id: str,
+    ) -> WritingStyle:
+        style = cast(
+            WritingStyle | None,
+            await session.scalar(
+                select(WritingStyle)
+                .where(
+                    WritingStyle.id == style_id,
+                    WritingStyle.userId == user_id,
+                )
+                .with_for_update()
+            ),
+        )
+        if style is None:
+            raise StyleRepository._style_not_found()
+        return style
 
     @staticmethod
     async def _lock_style(session: AsyncSession, style_id: str) -> WritingStyle:

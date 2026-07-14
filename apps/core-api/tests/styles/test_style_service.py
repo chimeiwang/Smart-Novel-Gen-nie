@@ -49,24 +49,35 @@ class MemoryRepository:
                 "tasks": [],
             }
         }
+        self.owners = {"style-1": "user-1"}
         self.tasks: dict[str, dict[str, object]] = {}
         self.applied: tuple[str, str, str | None] | None = None
         self.deleted_paths: list[str] = []
         self.fail_reference_create = False
 
-    async def list_styles(self):
-        return list(self.styles.values())
+    def require_owned(self, user_id, style_id):
+        if self.owners.get(style_id) != user_id:
+            raise ApiError(status_code=404, code="STYLE_NOT_FOUND", message="文风不存在")
+        return self.styles[style_id]
 
-    async def create_style(self, name):
+    async def list_styles(self, user_id):
+        return [
+            style
+            for style_id, style in self.styles.items()
+            if self.owners.get(style_id) == user_id
+        ]
+
+    async def create_style(self, user_id, name):
         del name
+        self.owners["style-1"] = user_id
         return self.styles["style-1"]
 
-    async def reserve_reference(self, style_id):
-        if style_id not in self.styles:
-            raise ApiError(status_code=404, code="STYLE_NOT_FOUND", message="文风不存在")
+    async def reserve_reference(self, user_id, style_id):
+        self.require_owned(user_id, style_id)
         return "ref-1"
 
-    async def create_reference(self, style_id, reference_id, fields):
+    async def create_reference(self, user_id, style_id, reference_id, fields):
+        self.require_owned(user_id, style_id)
         if self.fail_reference_create:
             raise RuntimeError("数据库失败")
         value = {
@@ -78,19 +89,22 @@ class MemoryRepository:
         self.styles[style_id]["references"].append(value)
         return {key: item for key, item in value.items() if key != "filepath"}
 
-    async def delete_reference(self, style_id, reference_id):
+    async def delete_reference(self, user_id, style_id, reference_id):
+        self.require_owned(user_id, style_id)
         references = self.styles[style_id]["references"]
         for index, value in enumerate(references):
             if value["id"] == reference_id:
                 return references.pop(index)["filepath"]
         raise ApiError(status_code=404, code="STYLE_REFERENCE_NOT_FOUND", message="参考资料不存在")
 
-    async def delete_style(self, style_id):
-        style = self.styles.pop(style_id)
+    async def delete_style(self, user_id, style_id):
+        style = self.require_owned(user_id, style_id)
+        self.styles.pop(style_id)
+        self.owners.pop(style_id)
         return [value["filepath"] for value in style["references"]]
 
-    async def create_portrait_task(self, style_id):
-        style = self.styles[style_id]
+    async def create_portrait_task(self, user_id, style_id):
+        style = self.require_owned(user_id, style_id)
         if not any(value["status"] == "ready" for value in style["references"]):
             raise ApiError(
                 status_code=409, code="STYLE_REFERENCE_REQUIRED", message="请先上传参考资料"
@@ -109,12 +123,14 @@ class MemoryRepository:
         style["tasks"].append(task)
         return task
 
-    async def get_portrait_task(self, task_id):
+    async def get_portrait_task(self, user_id, task_id):
         if task_id not in self.tasks:
             raise ApiError(
                 status_code=404, code="PORTRAIT_TASK_NOT_FOUND", message="画像任务不存在"
             )
-        return self.tasks[task_id]
+        task = self.tasks[task_id]
+        self.require_owned(user_id, task["styleId"])
+        return task
 
     async def transition_portrait_task(self, style_id, task_id, target, fields=None):
         task = self.tasks[task_id]
@@ -149,19 +165,22 @@ class MemoryRepository:
             if value["status"] == "ready"
         ]
 
-    async def update_section(self, style_id, section, content):
-        self.styles[style_id][section] = content
+    async def update_section(self, user_id, style_id, section, content):
+        style = self.require_owned(user_id, style_id)
+        style[section] = content
         from inkforge_core.styles.service import build_portrait_markdown
 
-        self.styles[style_id]["portraitMarkdown"] = build_portrait_markdown(
-            {key: self.styles[style_id][key] for key in SECTIONS}
+        style["portraitMarkdown"] = build_portrait_markdown(
+            {key: style[key] for key in SECTIONS}
         )
-        return self.styles[style_id]
+        return style
 
     async def apply_style(self, novel_id, user_id, style_id):
-        if user_id != "owner":
+        if user_id != "user-1":
             raise ApiError(status_code=404, code="NOVEL_NOT_FOUND", message="小说不存在")
-        if style_id is not None and not self.styles[style_id]["portraitMarkdown"]:
+        if style_id is not None:
+            style = self.require_owned(user_id, style_id)
+        if style_id is not None and not style["portraitMarkdown"]:
             raise ApiError(
                 status_code=409, code="STYLE_PORTRAIT_INCOMPLETE", message="文风画像不完整"
             )
@@ -227,18 +246,18 @@ async def test_upload_db_failure_removes_written_file(tmp_path: Path) -> None:
     repository = MemoryRepository()
     repository.fail_reference_create = True
     with pytest.raises(RuntimeError):
-        await service(tmp_path, repository).upload_reference("style-1", upload())
+        await service(tmp_path, repository).upload_reference("user-1", "style-1", upload())
     assert not await asyncio.to_thread(lambda: list(tmp_path.rglob("*.txt")))
 
 
 @pytest.mark.asyncio
 async def test_delete_commits_repository_before_best_effort_file_cleanup(tmp_path: Path) -> None:
     repository = MemoryRepository()
-    await service(tmp_path, repository).upload_reference("style-1", upload())
+    await service(tmp_path, repository).upload_reference("user-1", "style-1", upload())
     stored_path = repository.styles["style-1"]["references"][0]["filepath"]
     target = StyleStorage(tmp_path).resolve(stored_path)
     assert target.exists()
-    await service(tmp_path, repository).delete_reference("style-1", "ref-1")
+    await service(tmp_path, repository).delete_reference("user-1", "style-1", "ref-1")
     assert repository.styles["style-1"]["references"] == []
     assert not target.exists()
 
@@ -249,21 +268,57 @@ async def test_delete_style_commits_cascade_before_refusing_outside_cleanup(
 ) -> None:
     repository = MemoryRepository()
     style_service = service(tmp_path, repository)
-    await style_service.upload_reference("style-1", upload())
+    await style_service.upload_reference("user-1", "style-1", upload())
     outside = tmp_path.parent / f"{tmp_path.name}-outside.txt"
     outside.write_text("keep", encoding="utf-8")
     repository.styles["style-1"]["references"].append(
         {"filepath": str(outside), "status": "ready"}
     )
-    await style_service.delete_style("style-1")
+    await style_service.delete_style("user-1", "style-1")
     assert "style-1" not in repository.styles
     assert outside.exists()
 
 
 @pytest.mark.asyncio
+async def test_second_user_cannot_read_or_mutate_private_style(tmp_path: Path) -> None:
+    repository = MemoryRepository()
+    repository.tasks["task-1"] = {
+        "id": "task-1",
+        "styleId": "style-1",
+        "status": "pending",
+        "errorMessage": None,
+        "createdAt": NOW,
+        "updatedAt": NOW,
+    }
+    style_service = service(tmp_path, repository, RecordingSubmitter())
+
+    assert await style_service.list_styles("user-2") == []
+    operations = (
+        style_service.upload_reference("user-2", "style-1", upload()),
+        style_service.delete_reference("user-2", "style-1", "ref-1"),
+        style_service.delete_style("user-2", "style-1"),
+        style_service.create_portrait("user-2", "style-1"),
+        style_service.get_portrait_task("user-2", "task-1"),
+        style_service.update_section(
+            "user-2",
+            "style-1",
+            "styleTraits",
+            UpdatePortraitSectionRequest(content="越权修改"),
+        ),
+    )
+    for operation in operations:
+        with pytest.raises(ApiError) as caught:
+            await operation
+        assert caught.value.status_code == 404
+
+    assert "style-1" in repository.styles
+    assert repository.styles["style-1"]["styleTraits"] is None
+
+
+@pytest.mark.asyncio
 async def test_create_portrait_requires_submitter_without_creating_task(tmp_path: Path) -> None:
     repository = MemoryRepository()
-    await service(tmp_path, repository).upload_reference("style-1", upload())
+    await service(tmp_path, repository).upload_reference("user-1", "style-1", upload())
     with pytest.raises(ApiError) as caught:
         await service(tmp_path, repository, None).create_portrait("user-1", "style-1")
     assert caught.value.status_code == 503
@@ -285,7 +340,7 @@ async def test_portrait_requires_ready_reference(tmp_path: Path) -> None:
 async def test_portrait_rejects_existing_active_task(tmp_path: Path, active_status: str) -> None:
     repository = MemoryRepository()
     style_service = service(tmp_path, repository, RecordingSubmitter())
-    await style_service.upload_reference("style-1", upload())
+    await style_service.upload_reference("user-1", "style-1", upload())
     repository.tasks["old-task"] = {
         "id": "old-task",
         "styleId": "style-1",
@@ -306,7 +361,7 @@ async def test_submit_failure_keeps_pending_task_and_returns_reconcilable_id(
     repository = MemoryRepository()
     failing = RecordingSubmitter(failure=True)
     style_service = service(tmp_path, repository, failing)
-    await style_service.upload_reference("style-1", upload())
+    await style_service.upload_reference("user-1", "style-1", upload())
     result = await style_service.create_portrait("user-1", "style-1")
     assert result.taskId == "task-1"
     assert result.status == "pending"
@@ -326,7 +381,7 @@ async def test_portrait_state_machine_and_success_are_idempotent(tmp_path: Path)
     repository = MemoryRepository()
     submitter = RecordingSubmitter()
     style_service = service(tmp_path, repository, submitter)
-    await style_service.upload_reference("style-1", upload("甲 乙"))
+    await style_service.upload_reference("user-1", "style-1", upload("甲 乙"))
     await style_service.create_portrait("user-1", "style-1")
     processing = PortraitProcessingRequest(runId="task-1")
     await style_service.mark_processing("style-1", "task-1", processing)
@@ -359,7 +414,7 @@ async def test_portrait_context_reads_all_reference_files_without_truncation(
     repository = MemoryRepository()
     style_service = service(tmp_path, repository, RecordingSubmitter())
     source = "甲" * 5000
-    await style_service.upload_reference("style-1", upload(source, "长篇.txt"))
+    await style_service.upload_reference("user-1", "style-1", upload(source, "长篇.txt"))
     await style_service.create_portrait("user-1", "style-1")
 
     context = await style_service.get_portrait_context("style-1", "task-1")
@@ -414,11 +469,14 @@ async def test_manual_section_rebuilds_only_when_all_five_are_present(tmp_path: 
     style_service = service(tmp_path, repository)
     for section, content in list(SECTIONS.items())[:-1]:
         response = await style_service.update_section(
-            "style-1", section, UpdatePortraitSectionRequest(content=content)
+            "user-1", "style-1", section, UpdatePortraitSectionRequest(content=content)
         )
         assert response.portraitMarkdown is None
     response = await style_service.update_section(
-        "style-1", "styleTraits", UpdatePortraitSectionRequest(content="特质" * 5000)
+        "user-1",
+        "style-1",
+        "styleTraits",
+        UpdatePortraitSectionRequest(content="特质" * 5000),
     )
     assert response.portraitMarkdown is not None
     assert response.portraitMarkdown.endswith("特质" * 5000)
@@ -431,9 +489,9 @@ async def test_apply_rechecks_novel_owner_and_requires_complete_portrait(tmp_pat
     with pytest.raises(ApiError):
         await style_service.apply_style("attacker", "novel-1", ApplyStyleRequest(styleId=None))
     with pytest.raises(ApiError) as caught:
-        await style_service.apply_style("owner", "novel-1", ApplyStyleRequest(styleId="style-1"))
+        await style_service.apply_style("user-1", "novel-1", ApplyStyleRequest(styleId="style-1"))
     assert caught.value.code == "STYLE_PORTRAIT_INCOMPLETE"
     repository.styles["style-1"]["portraitMarkdown"] = "完整画像"
-    await style_service.apply_style("owner", "novel-1", ApplyStyleRequest(styleId="style-1"))
-    await style_service.apply_style("owner", "novel-1", ApplyStyleRequest(styleId=None))
-    assert repository.applied == ("novel-1", "owner", None)
+    await style_service.apply_style("user-1", "novel-1", ApplyStyleRequest(styleId="style-1"))
+    await style_service.apply_style("user-1", "novel-1", ApplyStyleRequest(styleId=None))
+    assert repository.applied == ("novel-1", "user-1", None)
