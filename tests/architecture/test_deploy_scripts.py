@@ -63,6 +63,7 @@ def _run_deploy(
     previous_state: str,
     new_status: int = 0,
     rollback_status: int = 0,
+    schema_verify_status: int = 0,
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     app_dir = tmp_path / "app"
     bin_dir = tmp_path / "bin"
@@ -119,6 +120,7 @@ def _run_deploy(
         "FAKE_PREVIOUS_STATE": previous_state,
         "FAKE_NEW_UP_STATUS": str(new_status),
         "FAKE_ROLLBACK_UP_STATUS": str(rollback_status),
+        "FAKE_SCHEMA_VERIFY_STATUS": str(schema_verify_status),
     }
     result = subprocess.run(  # noqa: S603 - 仅执行仓库内固定脚本和测试夹具
         [
@@ -213,3 +215,20 @@ def test_failed_rollback_reports_both_failures_without_success(
     assert "新版本部署失败" in result.stderr
     assert "自动回滚也失败" in result.stderr
     assert "生产编排已启动" not in result.stdout
+
+
+def test_failed_rollback_schema_verification_is_not_masked_by_smoke(
+    tmp_path: Path,
+) -> None:
+    result, log = _run_deploy(
+        tmp_path,
+        previous_state="valid",
+        new_status=23,
+        rollback_status=0,
+        schema_verify_status=25,
+    )
+
+    assert result.returncode == 23
+    assert log.count(" up --no-build -d --wait") == 2
+    assert "自动回滚也失败（退出码：25）" in result.stderr
+    assert "旧版本已恢复" not in result.stdout

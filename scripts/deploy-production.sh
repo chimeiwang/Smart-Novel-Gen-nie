@@ -21,9 +21,9 @@ find_service_container() {
 }
 
 verify_stack() {
-  compose ps
+  compose ps &&
   compose exec -T core-api python -c \
-    'import asyncio, os; from inkforge_core.db.schema_guard import verify_live_schema; from inkforge_core.db.session import SCHEMA_CONTRACT_PATH; result = asyncio.run(verify_live_schema(os.environ["DATABASE_URL"], SCHEMA_CONTRACT_PATH)); print(result.fingerprint); raise SystemExit(0 if result.ready else 1)'
+    'import asyncio, os; from inkforge_core.db.schema_guard import verify_live_schema; from inkforge_core.db.session import SCHEMA_CONTRACT_PATH; result = asyncio.run(verify_live_schema(os.environ["DATABASE_URL"], SCHEMA_CONTRACT_PATH)); print(result.fingerprint); raise SystemExit(0 if result.ready else 1)' &&
   COMPOSE_ENV_FILE=.env COMPOSE_OVERRIDE_FILE= sh scripts/compose_smoke.sh
 }
 

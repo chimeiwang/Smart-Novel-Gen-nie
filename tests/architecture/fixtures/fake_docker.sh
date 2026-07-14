@@ -14,6 +14,7 @@ if [ "${1:-}" = "compose" ]; then
       exit "${FAKE_ROLLBACK_UP_STATUS:-0}"
       ;;
     *" ps "*) exit 0 ;;
+    *" exec -T core-api python -c "*) exit "${FAKE_SCHEMA_VERIFY_STATUS:-0}" ;;
     *" exec "*) exit "${FAKE_VERIFY_STATUS:-0}" ;;
   esac
 fi
