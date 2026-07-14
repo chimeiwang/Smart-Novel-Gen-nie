@@ -222,13 +222,13 @@
       "version": "0.8.0"
     }
   ],
-  "fingerprint": "ced767c021554043f41130281bad10f994d4abd01d947c49247b45d1f0f3889e",
+  "fingerprint": "760609cdfc0b99fb0a57ecf94c292f06cddfc824694458cb2b95feaecbf39be4",
   "schema": "public",
   "source": {
     "product": "PostgreSQL",
     "serverVersion": "14.23 (Ubuntu 14.23-0ubuntu0.22.04.1)",
     "serverVersionNum": 140023,
-    "sourceId": "d33459248991cfb51af4d8800bb9b9dfaa61d5f8d084ce7afab22ac81a3a36ab"
+    "sourceId": "9f54e2b9dde0f7e6dfdf3c57ceb419d331443b16b48a61fd259511f01b0e0249"
   },
   "tables": [
     {
@@ -5770,6 +5770,13 @@
           "udtName": "text"
         },
         {
+          "default": null,
+          "formatType": "text",
+          "name": "section",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
           "default": "'pending'::text",
           "formatType": "text",
           "name": "status",
@@ -7428,6 +7435,270 @@
         {
           "default": null,
           "formatType": "text",
+          "name": "artifactId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "0",
+          "formatType": "integer",
+          "name": "attemptCount",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "completedAt",
+          "nullable": true,
+          "udtName": "timestamp"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "decision",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "idempotencyKey",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "kind",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "lastError",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "nextAttemptAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "payloadJson",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "resultJson",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "'pending'::text",
+          "formatType": "text",
+          "name": "status",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "submittedAt",
+          "nullable": true,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "taskId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "taskId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "WritingRunCommand_taskId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "WritingTask",
+          "validated": true
+        }
+      ],
+      "indexes": [
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "taskId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
+          ],
+          "method": "btree",
+          "name": "WritingRunCommand_active_task_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": "(status = ANY (ARRAY['pending'::text, 'submitted'::text, 'processing'::text]))",
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "status",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "nextAttemptAt",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "timestamp_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "WritingRunCommand_due_idx",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": false,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "idempotencyKey",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
+          ],
+          "method": "btree",
+          "name": "WritingRunCommand_idempotencyKey_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
+          ],
+          "method": "btree",
+          "name": "WritingRunCommand_pkey",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        }
+      ],
+      "name": "WritingRunCommand",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "WritingRunCommand_pkey",
+        "validated": true
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
           "name": "chapterId",
           "nullable": false,
           "udtName": "text"
@@ -7709,9 +7980,34 @@
           "name": "usedCharCount",
           "nullable": false,
           "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "userId",
+          "nullable": false,
+          "udtName": "text"
         }
       ],
-      "foreignKeys": [],
+      "foreignKeys": [
+        {
+          "columns": [
+            "userId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "WritingStyle_userId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "User",
+          "validated": true
+        }
+      ],
       "indexes": [
         {
           "includeColumns": [],
@@ -7737,6 +8033,44 @@
           "ready": true,
           "tablespace": null,
           "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "userId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "createdAt",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "timestamp_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "WritingStyle_userId_createdAt_idx",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": false,
           "valid": true
         }
       ],

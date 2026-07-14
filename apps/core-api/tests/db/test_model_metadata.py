@@ -44,6 +44,7 @@ EXPECTED_MODEL_TABLES = {
     "WritingStyle",
     "StyleReference",
     "StylePortraitTask",
+    "WritingRunCommand",
     "Foreshadowing",
     "OutlineNode",
     "CharacterStateChange",
@@ -192,7 +193,7 @@ def test_timestamp_text_bigint_and_vector_types_preserve_existing_storage() -> N
     ]
     bigint_columns = [column for column in columns if isinstance(column.type, BigInteger)]
 
-    assert len(timestamp_columns) == 70
+    assert len(timestamp_columns) == 75
     assert all(column.type.precision == 3 for column in timestamp_columns)
     assert all(column.type.timezone is False for column in timestamp_columns)
     assert {(column.table.name, column.name) for column in bigint_columns} == {
@@ -268,7 +269,14 @@ def test_primary_keys_foreign_keys_and_indexes_match_the_frozen_contract() -> No
             assert (postgresql_options["ops"] or {}) == {}
             assert (postgresql_options["with"] or {}) == {}
             assert postgresql_options["tablespace"] is expected["tablespace"] is None
-            assert postgresql_options["where"] is expected["predicate"] is None
+            if expected["predicate"] is None:
+                assert postgresql_options["where"] is None
+            else:
+                predicate = str(postgresql_options["where"])
+                assert '"status"' in predicate
+                assert all(
+                    value in predicate for value in ("pending", "submitted", "processing")
+                )
             assert expected["includeColumns"] == []
             assert expected["options"] == []
             assert expected["nullsNotDistinct"] is False
@@ -301,6 +309,22 @@ def test_association_table_and_writing_message_reserved_attribute_are_exact() ->
     assert faction_territories.primary_key.name == "_FactionTerritories_AB_pkey"
     assert {index.name for index in faction_territories.indexes} == {"_FactionTerritories_B_index"}
     assert WritingMessage.metadata_.property.columns[0].name == "metadata"
+
+
+def test_writing_command_and_private_style_metadata() -> None:
+    from inkforge_core.db import models
+
+    assert hasattr(models, "WritingRunCommand")
+    command = models.WritingRunCommand.__table__
+    style = models.WritingStyle.__table__
+    portrait = models.StylePortraitTask.__table__
+
+    assert "WritingRunCommand_idempotencyKey_key" in {
+        index.name for index in command.indexes if index.unique
+    }
+    assert style.c.userId.nullable is False
+    assert next(iter(style.c.userId.foreign_keys)).target_fullname == "public.User.id"
+    assert portrait.c.section.nullable is True
 
 
 def test_application_defaults_generate_compatible_ids_and_utc_naive_milliseconds() -> None:
@@ -652,7 +676,7 @@ def test_mappers_cover_every_real_foreign_key_without_logical_id_relationships()
     mapped_models = [getattr(models, name) for name in EXPECTED_MODEL_TABLES]
     relationship_count = sum(len(inspect(model).relationships) for model in mapped_models)
 
-    assert relationship_count == 110
+    assert relationship_count == 114
     assert set(inspect(models.CharacterRelation).relationships.keys()) == {"character", "target"}
     assert inspect(models.Location).relationships["parent"].remote_side == {
         models.Location.__table__.c.id
@@ -700,7 +724,7 @@ def test_parent_relationship_delete_policy_matches_every_real_foreign_key() -> N
                 assert "delete" not in relation.cascade, (model_name, relation.key)
             assert "delete-orphan" not in relation.cascade, (model_name, relation.key)
 
-    assert parent_relationships == 54
+    assert parent_relationships == 56
 
 
 def _sqlite_uow_engine(*tables: Any) -> Any:

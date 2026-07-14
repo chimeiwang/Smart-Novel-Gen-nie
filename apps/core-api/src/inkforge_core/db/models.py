@@ -1821,6 +1821,7 @@ class StylePortraitTask(Base):
     )
     errorMessage: Mapped[str | None] = mapped_column(Text, nullable=True)
     id: Mapped[str] = mapped_column(Text, nullable=False, default=generate_id)
+    section: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[str] = mapped_column(
         Text, nullable=False, server_default=text("'pending'::text")
     )
@@ -1969,6 +1970,12 @@ class User(Base):
         passive_deletes=True,
         back_populates="user",
         foreign_keys=lambda: [TokenUsage.userId],
+    )
+    writingStyles: Mapped[list[WritingStyle]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
+        back_populates="user",
+        foreign_keys=lambda: [WritingStyle.userId],
     )
 
     __table_args__ = (
@@ -2403,6 +2410,16 @@ class WritingStyle(Base):
         TIMESTAMP(precision=3, timezone=False), nullable=False, default=utc_now, onupdate=utc_now
     )
     usedCharCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    userId: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.User.id",
+            name="WritingStyle_userId_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        nullable=False,
+    )
 
     novels: Mapped[list[Novel]] = relationship(
         passive_deletes=True,
@@ -2421,12 +2438,17 @@ class WritingStyle(Base):
         back_populates="style",
         foreign_keys=lambda: [StyleReference.styleId],
     )
+    user: Mapped[User] = relationship(
+        back_populates="writingStyles",
+        foreign_keys=lambda: [WritingStyle.userId],
+    )
 
     __table_args__ = (
         PrimaryKeyConstraint(
             "id",
             name="WritingStyle_pkey",
         ),
+        Index("WritingStyle_userId_createdAt_idx", "userId", "createdAt"),
         {"schema": "public"},
     )
 
@@ -2503,6 +2525,12 @@ class WritingTask(Base):
         back_populates="task",
         foreign_keys=lambda: [ReviewArtifact.taskId],
     )
+    commands: Mapped[list[WritingRunCommand]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
+        back_populates="task",
+        foreign_keys=lambda: [WritingRunCommand.taskId],
+    )
     chapter: Mapped[Chapter] = relationship(
         back_populates="writingTasks",
         foreign_keys=lambda: [WritingTask.chapterId],
@@ -2524,5 +2552,70 @@ class WritingTask(Base):
         Index("WritingTask_chapterId_idx", "chapterId"),
         Index("WritingTask_novelId_idx", "novelId"),
         Index("WritingTask_writingSessionId_idx", "writingSessionId"),
+        {"schema": "public"},
+    )
+
+
+class WritingRunCommand(Base):
+    __tablename__ = "WritingRunCommand"
+    artifactId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attemptCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    completedAt: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=True
+    )
+    createdAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    decision: Mapped[str | None] = mapped_column(Text, nullable=True)
+    id: Mapped[str] = mapped_column(Text, nullable=False, default=generate_id)
+    idempotencyKey: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    lastError: Mapped[str | None] = mapped_column(Text, nullable=True)
+    nextAttemptAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    payloadJson: Mapped[str] = mapped_column(Text, nullable=False)
+    resultJson: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'pending'::text")
+    )
+    submittedAt: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=True
+    )
+    taskId: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.WritingTask.id",
+            name="WritingRunCommand_taskId_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        nullable=False,
+    )
+    updatedAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    task: Mapped[WritingTask] = relationship(
+        back_populates="commands",
+        foreign_keys=lambda: [WritingRunCommand.taskId],
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="WritingRunCommand_pkey"),
+        Index("WritingRunCommand_idempotencyKey_key", "idempotencyKey", unique=True),
+        Index("WritingRunCommand_due_idx", "status", "nextAttemptAt"),
+        Index(
+            "WritingRunCommand_active_task_key",
+            "taskId",
+            unique=True,
+            postgresql_where=text("\"status\" IN ('pending', 'submitted', 'processing')"),
+        ),
         {"schema": "public"},
     )

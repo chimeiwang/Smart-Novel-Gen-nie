@@ -340,6 +340,7 @@ def test_checked_in_contract_preserves_all_live_public_tables_without_secrets() 
         "WritingSession",
         "WritingStyle",
         "WritingTask",
+        "WritingRunCommand",
         "_FactionTerritories",
         "_prisma_migrations",
     }
