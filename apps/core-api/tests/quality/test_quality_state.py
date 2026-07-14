@@ -33,6 +33,7 @@ class RecordingQualityRepository:
         self.updated = False
         self.authorized_task_ids: list[str | None] = []
         self.created_runs: list[QualityDispatchRecord] = []
+        self.active_run_id: str | None = None
 
     async def require_check(self, check_id: str, user_id: str):
         del check_id, user_id
@@ -91,6 +92,12 @@ class RecordingQualityRepository:
         message: str | None,
     ) -> QualityDispatchRecord:
         await self.authorize_run(check_id, user_id, task_id)
+        if self.active_run_id is not None:
+            raise ApiError(
+                status_code=409,
+                code="QUALITY_RUN_ACTIVE",
+                message="质量检查已有运行中的任务",
+            )
         import json
 
         run = QualityDispatchRecord(
@@ -103,6 +110,7 @@ class RecordingQualityRepository:
             message=message,
         )
         self.created_runs.append(run)
+        self.active_run_id = run.run_id
         self.last_input_json = json.dumps(
             {
                 "checkId": check_id,
@@ -240,6 +248,12 @@ async def test_repeated_quality_runs_create_distinct_persisted_run_ids() -> None
     service = QualityService(repository, dispatcher=dispatcher)  # type: ignore[arg-type]
 
     first = await service.run("user-1", "check-1", RunQualityCheckRequest())
+    with pytest.raises(ApiError) as caught:
+        await service.run("user-1", "check-1", RunQualityCheckRequest())
+    assert caught.value.status_code == 409
+    assert caught.value.code == "QUALITY_RUN_ACTIVE"
+
+    repository.active_run_id = None
     second = await service.run("user-1", "check-1", RunQualityCheckRequest())
 
     assert first.taskId == "quality-run-1"
@@ -430,3 +444,204 @@ def quality_check_model():
         createdAt=now,
         updatedAt=now,
     )
+
+
+class QualityRunSession:
+    def __init__(self, scalar_result: object | None) -> None:
+        self.scalar_result = scalar_result
+        self.added: list[object] = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        del exc_type, exc, traceback
+
+    def begin(self):
+        return self
+
+    async def scalar(self, statement):
+        del statement
+        return self.scalar_result
+
+    def add(self, value: object) -> None:
+        self.added.append(value)
+
+    async def flush(self) -> None:
+        for value in self.added:
+            if getattr(value, "id", None) is None:
+                value.id = "quality-run-new"
+
+
+def chapter_model():
+    from inkforge_core.db.models import Chapter
+
+    now = datetime(2026, 7, 11, tzinfo=UTC)
+    return Chapter(
+        id="chapter-1",
+        novelId="novel-1",
+        order=1,
+        status="drafting",
+        title="第一章",
+        content="完整章节",
+        createdAt=now,
+        updatedAt=now,
+    )
+
+
+def quality_run_model(*, run_id: str, status: str):
+    from inkforge_core.db.models import WorkflowRun
+
+    now = datetime(2026, 7, 11, tzinfo=UTC)
+    return WorkflowRun(
+        id=run_id,
+        chapterId="chapter-1",
+        novelId="novel-1",
+        userId="user-1",
+        kind="quality_check",
+        status=status,
+        sourceType="quality_check",
+        sourceId="check-1",
+        input=(
+            '{"checkId":"check-1","sourceTaskId":null,"message":null}'
+        ),
+        createdAt=now,
+        updatedAt=now,
+    )
+
+
+def quality_repository_with_locked_records(session: QualityRunSession):
+    from inkforge_core.quality.repository import QualityRepository
+
+    repository = QualityRepository(lambda: session)  # type: ignore[arg-type]
+    chapter = chapter_model()
+    check = quality_check_model()
+
+    async def require_check(current_session, check_id: str, user_id: str):
+        del current_session, check_id, user_id
+        return check, chapter.novelId
+
+    async def lock_chapter(current_session, check_id: str, user_id: str):
+        del current_session, check_id, user_id
+        return chapter
+
+    async def lock_check(current_session, check_id: str):
+        del current_session, check_id
+        return check
+
+    async def validate_task(current_session, record, user_id: str, task_id: str | None):
+        del current_session, record, user_id, task_id
+
+    repository._require_check = require_check  # type: ignore[method-assign]
+    repository._lock_chapter_owner_for_check = lock_chapter  # type: ignore[method-assign]
+    repository._lock_check = lock_check  # type: ignore[method-assign]
+    repository._validate_task_binding = validate_task  # type: ignore[method-assign]
+    return repository, chapter, check
+
+
+@pytest.mark.asyncio
+async def test_repository_rejects_second_active_quality_run_atomically() -> None:
+    active = quality_run_model(run_id="quality-run-active", status="running")
+    session = QualityRunSession(active)
+    repository, _, _ = quality_repository_with_locked_records(session)
+
+    with pytest.raises(ApiError) as caught:
+        await repository.create_run("check-1", "user-1", None, None)
+
+    assert caught.value.status_code == 409
+    assert caught.value.code == "QUALITY_RUN_ACTIVE"
+    assert session.added == []
+
+
+@pytest.mark.asyncio
+async def test_repository_allows_new_quality_run_after_terminal_state() -> None:
+    session = QualityRunSession(None)
+    repository, _, _ = quality_repository_with_locked_records(session)
+
+    created = await repository.create_run("check-1", "user-1", None, None)
+
+    assert created.run_id
+    assert len(session.added) == 1
+
+
+@pytest.mark.asyncio
+async def test_stale_quality_success_only_settles_its_own_workflow_run() -> None:
+    session = QualityRunSession("quality-run-new")
+    repository, _, check = quality_repository_with_locked_records(session)
+    stale = quality_run_model(run_id="quality-run-old", status="running")
+    check.status = "completed"
+    check.result = "新运行结果"
+
+    async def require_bound(*args, **kwargs):
+        del args, kwargs
+        return stale
+
+    repository._require_bound_quality_run = require_bound  # type: ignore[method-assign]
+    await repository.complete_run(
+        "check-1",
+        "user-1",
+        {"result": "旧运行结果", "scores": {"overall": 1}},
+        run_id=stale.id,
+        novel_id="novel-1",
+    )
+
+    assert stale.status == "completed"
+    assert check.status == "completed"
+    assert check.result == "新运行结果"
+
+
+@pytest.mark.asyncio
+async def test_stale_quality_failure_does_not_fail_latest_check() -> None:
+    session = QualityRunSession("quality-run-new")
+    repository, _, check = quality_repository_with_locked_records(session)
+    stale = quality_run_model(run_id="quality-run-old", status="running")
+    check.status = "completed"
+    check.result = "新运行结果"
+
+    async def require_bound(*args, **kwargs):
+        del args, kwargs
+        return stale
+
+    repository._require_bound_quality_run = require_bound  # type: ignore[method-assign]
+    await repository.fail_run(
+        "check-1",
+        "user-1",
+        run_id=stale.id,
+        novel_id="novel-1",
+    )
+
+    assert stale.status == "failed"
+    assert check.status == "completed"
+    assert check.result == "新运行结果"
+
+
+@pytest.mark.asyncio
+async def test_stale_quality_run_cannot_reopen_context() -> None:
+    session = QualityRunSession("quality-run-new")
+    repository, _, check = quality_repository_with_locked_records(session)
+    stale = quality_run_model(run_id="quality-run-old", status="failed")
+    check.status = "completed"
+
+    async def require_bound(*args, **kwargs):
+        del args, kwargs
+        return stale
+
+    async def authorize(*args, **kwargs):
+        del args, kwargs
+        return QualityRecord(status=check.status)
+
+    repository._require_bound_quality_run = require_bound  # type: ignore[method-assign]
+    repository.authorize_run = authorize  # type: ignore[method-assign]
+
+    with pytest.raises(ApiError) as caught:
+        await repository.get_run_context(
+            "check-1",
+            "user-1",
+            None,
+            None,
+            stale.id,
+        )
+
+    assert caught.value.status_code == 409
+    assert caught.value.code == "QUALITY_RUN_NOT_ACTIVE"
+    assert check.status == "completed"

@@ -175,7 +175,7 @@ flowchart TD
 
 ## 一致性终检运行流程
 
-Core API 负责浏览器认证、检查项归属和可选 `taskId` 绑定校验。`taskId` 必须与检查项属于同一用户、小说和章节，否则返回 403。Core 先把本次检查完整输入保存到独立的 `WorkflowRun(kind=quality_check)`，再使用该运行 ID 作为稳定队列标识投递；Redis 暂时不可用时由 dispatcher 补投，不得丢失已受理任务，也不得与同一检查项的其他运行混淆。Agent Service 异步生成报告，并通过签名内部回调同时结算检查项和对应运行终态。
+Core API 负责浏览器认证、检查项归属和可选 `taskId` 绑定校验。`taskId` 必须与检查项属于同一用户、小说和章节，否则返回 403。Core 先把本次检查完整输入保存到独立的 `WorkflowRun(kind=quality_check)`，再使用该运行 ID 作为稳定队列标识投递；同一检查项已有 `pending/running` 运行时返回 409，只有前一次运行终态后才能创建新运行。Redis 暂时不可用时由 dispatcher 补投，不得丢失已受理任务，也不得与同一检查项的其他运行混淆。Agent Service 异步生成报告，并通过签名内部回调同时结算对应运行终态；只有该检查项的最新运行可以更新公共检查结果，旧运行延迟回调不得覆盖新结果。
 
 ~~~mermaid
 sequenceDiagram

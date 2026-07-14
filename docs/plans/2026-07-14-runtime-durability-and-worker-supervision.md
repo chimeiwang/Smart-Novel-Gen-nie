@@ -179,7 +179,7 @@ Expected: PASS。
 {"checkId":"check-1","sourceTaskId":"task-1","message":"重点检查时间线"}
 ```
 
-同一检查项前一次完成后再次运行，断言得到不同 WorkflowRun ID 和 `quality-{runId}` job ID，不复用旧 completed job。
+同一检查项存在 `pending/running` WorkflowRun 时再次提交返回 409；前一次终态后再次运行得到不同 WorkflowRun ID 和 `quality-{runId}` job ID，不复用旧 completed job。增加旧运行延迟 context/终态回调测试，断言旧运行不能覆盖最新检查结果。
 
 - [x] **Step 2: 写 Redis 丢失恢复和回调收敛测试**
 

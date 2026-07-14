@@ -83,9 +83,25 @@ class QualityRepository:
     ) -> QualityDispatchRecord:
         async with self._session_factory() as session:
             async with session.begin():
-                check, novel_id = await self._require_check(session, check_id, user_id)
-                record = self._record(check, novel_id)
+                chapter = await self._lock_chapter_owner_for_check(
+                    session, check_id, user_id
+                )
+                check = await self._lock_check(session, check_id)
+                if check is None:
+                    raise ApiError(
+                        status_code=404,
+                        code="QUALITY_CHECK_NOT_FOUND",
+                        message="检查项不存在",
+                    )
+                record = self._record(check, chapter.novelId)
                 await self._validate_task_binding(session, record, user_id, task_id)
+                active_run = await self._find_active_quality_run(session, check_id)
+                if active_run is not None:
+                    raise ApiError(
+                        status_code=409,
+                        code="QUALITY_RUN_ACTIVE",
+                        message="质量检查已有运行中的任务",
+                    )
                 run = WorkflowRun(
                     chapterId=record.chapter_id,
                     novelId=record.novel_id,
@@ -168,6 +184,9 @@ class QualityRepository:
         if run_id is not None:
             async with self._session_factory() as session:
                 async with session.begin():
+                    chapter = await self._lock_chapter_owner_for_check(
+                        session, check_id, user_id
+                    )
                     run = await self._require_bound_quality_run(
                         session,
                         run_id,
@@ -185,9 +204,38 @@ class QualityRepository:
                             code="QUALITY_RUN_INPUT_MISMATCH",
                             message="质量检查运行输入与持久记录不匹配",
                         )
-            task_id = durable.source_task_id
-            message = durable.message
-        record = await self.authorize_run(check_id, user_id, task_id)
+                    check = await self._lock_check(session, check_id)
+                    if check is None:
+                        raise ApiError(
+                            status_code=404,
+                            code="QUALITY_CHECK_NOT_FOUND",
+                            message="检查项不存在",
+                        )
+                    if run.status not in {"pending", "running"} or not (
+                        await self._is_latest_quality_run(session, run)
+                    ):
+                        raise ApiError(
+                            status_code=409,
+                            code="QUALITY_RUN_NOT_ACTIVE",
+                            message="质量检查运行已不是当前活动任务",
+                        )
+                    record = self._record(check, chapter.novelId)
+                    await self._validate_task_binding(
+                        session,
+                        record,
+                        user_id,
+                        durable.source_task_id,
+                    )
+                    check.status = "running"
+                    content = chapter.content
+            return {
+                "checkId": check_id,
+                "novelId": record.novel_id,
+                "chapterId": record.chapter_id,
+                "chapterContent": content,
+                "message": durable.message or "检查本章一致性",
+            }
+        authorized_record = await self.authorize_run(check_id, user_id, task_id)
         async with self._session_factory() as session:
             async with session.begin():
                 chapter = await self._lock_chapter_owner_for_check(
@@ -204,8 +252,8 @@ class QualityRepository:
                 content = chapter.content
         return {
             "checkId": check_id,
-            "novelId": record.novel_id,
-            "chapterId": record.chapter_id,
+            "novelId": authorized_record.novel_id,
+            "chapterId": authorized_record.chapter_id,
             "chapterContent": content,
             "message": message or "检查本章一致性",
         }
@@ -243,6 +291,25 @@ class QualityRepository:
                         code="QUALITY_CHECK_NOT_FOUND",
                         message="检查项不存在",
                     )
+                if workflow_run is not None and workflow_run.status in {
+                    "completed",
+                    "failed",
+                    "cancelled",
+                }:
+                    return
+                is_latest = workflow_run is None or await self._is_latest_quality_run(
+                    session, workflow_run
+                )
+                if workflow_run is not None:
+                    workflow_run.status = "completed"
+                    workflow_run.output = json.dumps(
+                        result,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                    )
+                    workflow_run.errorMessage = None
+                if not is_latest:
+                    return
                 check.status = "completed"
                 check.result = str(result.get("result", ""))
                 check.scoreHook = _score(scores.get("hook"))
@@ -257,14 +324,6 @@ class QualityRepository:
                 check.rewriteBrief = (
                     rewrite_brief if isinstance(rewrite_brief, str) else None
                 )
-                if workflow_run is not None:
-                    workflow_run.status = "completed"
-                    workflow_run.output = json.dumps(
-                        result,
-                        ensure_ascii=False,
-                        separators=(",", ":"),
-                    )
-                    workflow_run.errorMessage = None
 
     async def fail_run(
         self,
@@ -289,11 +348,26 @@ class QualityRepository:
                     else None
                 )
                 check = await self._lock_check(session, check_id)
-                if check is not None:
-                    check.status = "failed"
+                if check is None:
+                    raise ApiError(
+                        status_code=404,
+                        code="QUALITY_CHECK_NOT_FOUND",
+                        message="检查项不存在",
+                    )
+                if workflow_run is not None and workflow_run.status in {
+                    "completed",
+                    "failed",
+                    "cancelled",
+                }:
+                    return
+                is_latest = workflow_run is None or await self._is_latest_quality_run(
+                    session, workflow_run
+                )
                 if workflow_run is not None:
                     workflow_run.status = "failed"
                     workflow_run.errorMessage = "QUALITY_RUN_FAILED"
+                if is_latest:
+                    check.status = "failed"
 
     async def _validate_task_binding(
         self,
@@ -345,6 +419,41 @@ class QualityRepository:
                 message="质量检查运行不存在",
             )
         return run
+
+    async def _find_active_quality_run(
+        self,
+        session: AsyncSession,
+        check_id: str,
+    ) -> WorkflowRun | None:
+        return cast(
+            WorkflowRun | None,
+            await session.scalar(
+                select(WorkflowRun)
+                .where(
+                    WorkflowRun.kind == "quality_check",
+                    WorkflowRun.sourceId == check_id,
+                    WorkflowRun.status.in_(("pending", "running")),
+                )
+                .order_by(WorkflowRun.createdAt.asc(), WorkflowRun.id.asc())
+                .limit(1)
+            ),
+        )
+
+    async def _is_latest_quality_run(
+        self,
+        session: AsyncSession,
+        run: WorkflowRun,
+    ) -> bool:
+        latest_run_id = await session.scalar(
+            select(WorkflowRun.id)
+            .where(
+                WorkflowRun.kind == "quality_check",
+                WorkflowRun.sourceId == run.sourceId,
+            )
+            .order_by(WorkflowRun.createdAt.desc(), WorkflowRun.id.desc())
+            .limit(1)
+        )
+        return latest_run_id == run.id
 
     async def _require_bound_quality_run(
         self,

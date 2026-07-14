@@ -64,7 +64,7 @@ Core 的写作对账器采用与现有命令 dispatcher 一致的循环级异常
 5. Agent 完成或失败回调同时收敛检查项和 WorkflowRun；
 6. Core 重启或 Redis 丢失后重新投递仍为 pending/running 且没有队列运行键的 WorkflowRun。
 
-同一个检查项允许用户在前一次运行终态后再次运行；新的 WorkflowRun 和 job ID 不能复用旧的 completed Redis job。
+同一个检查项允许用户在前一次运行终态后再次运行；创建运行的事务必须锁定检查项并拒绝已有 `pending/running` 运行，新的 WorkflowRun 和 job ID 不能复用旧的 completed Redis job。延迟到达的旧运行 context 请求必须拒绝执行；旧运行终态回调可以幂等收敛自身 WorkflowRun，但只有该检查项最新运行可以更新公共 ChapterQualityCheck，不能用旧结果覆盖新结果。
 
 ### 4. RAG 持久恢复
 
