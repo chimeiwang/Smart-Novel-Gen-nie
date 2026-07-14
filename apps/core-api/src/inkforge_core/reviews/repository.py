@@ -87,6 +87,20 @@ class ReviewRepository:
 
     async def get_task_artifact(self, user_id: str, task_id: str) -> ReviewArtifactResponse | None:
         async with self._session_factory() as session:
+            owned_task_id = await session.scalar(
+                select(WritingTask.id)
+                .join(Novel, Novel.id == WritingTask.novelId)
+                .where(
+                    WritingTask.id == task_id,
+                    Novel.userId == user_id,
+                )
+            )
+            if owned_task_id is None:
+                raise ApiError(
+                    status_code=404,
+                    code="WRITING_TASK_NOT_FOUND",
+                    message="写作任务不存在",
+                )
             artifact = (
                 await session.execute(
                     select(ReviewArtifact)

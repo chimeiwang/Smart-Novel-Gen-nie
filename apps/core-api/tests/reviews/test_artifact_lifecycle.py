@@ -1,9 +1,57 @@
 import pytest
+from inkforge_core.errors import ApiError
 from inkforge_core.reviews.apply import resolve_apply_target
 from inkforge_core.reviews.diff import ArtifactPatchError, apply_text_replace_patch
+from inkforge_core.reviews.repository import ReviewRepository
 from inkforge_core.reviews.schemas import CreateArtifactRequest, assert_status_transition
 from inkforge_core.reviews.updates import filter_agent_updates_by_selection
 from pydantic import ValidationError
+
+
+class TaskArtifactResult:
+    def scalar_one_or_none(self):
+        return None
+
+
+class TaskArtifactSession:
+    def __init__(self, owned_task: object | None) -> None:
+        self.owned_task = owned_task
+        self.statements: list[str] = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        del exc_type, exc, traceback
+
+    async def scalar(self, statement):
+        self.statements.append(str(statement))
+        return self.owned_task
+
+    async def execute(self, statement):
+        self.statements.append(str(statement))
+        return TaskArtifactResult()
+
+
+@pytest.mark.asyncio
+async def test_foreign_task_artifact_is_not_disclosed() -> None:
+    session = TaskArtifactSession(owned_task=None)
+    repository = ReviewRepository(lambda: session)  # type: ignore[arg-type]
+
+    with pytest.raises(ApiError) as caught:
+        await repository.get_task_artifact("other-user", "task-1")
+
+    assert caught.value.status_code == 404
+    assert caught.value.code == "WRITING_TASK_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_owned_task_without_artifact_returns_none() -> None:
+    session = TaskArtifactSession(owned_task="task-1")
+    repository = ReviewRepository(lambda: session)  # type: ignore[arg-type]
+
+    assert await repository.get_task_artifact("owner", "task-1") is None
+    assert '"WritingTask"' in session.statements[0]
 
 
 def test_artifact_status_transition_rejects_skipping_user_confirmation() -> None:
