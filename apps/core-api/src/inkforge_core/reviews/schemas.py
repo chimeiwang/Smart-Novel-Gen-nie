@@ -76,6 +76,7 @@ class ArtifactSelectionRef(ReviewSchema):
 
 
 class ReviewArtifactDecisionRequest(ReviewSchema):
+    clientRequestId: str = Field(min_length=16, max_length=128)
     decision: Literal["approve", "discard", "revise"]
     editedContent: str | None = None
     selectedUpdateRefs: list[ArtifactSelectionRef] | None = None
@@ -85,6 +86,16 @@ class ReviewArtifactDecisionRequest(ReviewSchema):
 class ArtifactDecisionResponse(ReviewSchema):
     artifactId: str
     decision: Literal["approve", "discard", "revise"]
+    savedCount: int = 0
+    deleted: bool = False
+
+
+class ArtifactDecisionAcceptedResponse(ReviewSchema):
+    artifactId: str
+    taskId: str
+    commandId: str
+    decision: Literal["approve", "discard", "revise"]
+    status: Literal["pending", "submitted", "processing", "succeeded", "failed"]
     savedCount: int = 0
     deleted: bool = False
 

@@ -267,6 +267,56 @@ class WritingRunCommandRepository:
                     raise _active_command_error(task_id) from exc
                 return _command_record(command, task, owner_id)
 
+    async def require_owned_task(self, user_id: str, task_id: str) -> TaskRecord:
+        async with self._session_factory() as session:
+            task, owner_id = await self._require_owned_task(session, user_id, task_id)
+        return _task_record(task, owner_id)
+
+    async def create_artifact_decision(
+        self,
+        *,
+        command_id: str,
+        user_id: str,
+        task_id: str,
+        artifact_id: str,
+        decision: Literal["approve", "discard", "revise"],
+        client_request_id: str,
+        payload: dict[str, Any],
+        result: dict[str, Any],
+    ) -> WritingCommandRecord:
+        key = command_idempotency_key(user_id, client_request_id)
+        async with self._session_factory() as session:
+            async with session.begin():
+                existing = await self._get_by_idempotency_key(session, key)
+                if existing is not None:
+                    return _command_record(*existing)
+                task, owner_id = await self._require_owned_task(
+                    session, user_id, task_id
+                )
+                if task.phase in {"completed", "error"}:
+                    raise ApiError(
+                        status_code=409,
+                        code="WRITING_TASK_TERMINAL",
+                        message="终态写作任务不能受理草案决定",
+                    )
+                await self._require_no_active_command(session, task_id)
+                command = WritingRunCommand(
+                    id=command_id,
+                    taskId=task_id,
+                    kind="artifact_decision",
+                    artifactId=artifact_id,
+                    decision=decision,
+                    payloadJson=_dump_json(payload),
+                    resultJson=_dump_json(result),
+                    idempotencyKey=key,
+                    status="pending",
+                    attemptCount=0,
+                    nextAttemptAt=utc_now(),
+                )
+                session.add(command)
+                await session.flush()
+                return _command_record(command, task, owner_id)
+
     async def _get_existing_response(
         self, user_id: str, client_request_id: str
     ) -> WritingRunResponse | ResumeWritingRunResponse | None:
@@ -579,15 +629,7 @@ def _command_record(
     )
     return WritingCommandRecord(
         id=command.id,
-        task=TaskRecord(
-            id=task.id,
-            user_id=user_id,
-            novel_id=task.novelId,
-            chapter_id=task.chapterId,
-            writing_session_id=task.writingSessionId,
-            phase=task.phase,
-            graph_state_json=task.graphStateJson,
-        ),
+        task=_task_record(task, user_id),
         kind=cast(WritingCommandKind, command.kind),
         payload=payload,
         status=cast(WritingCommandStatus, command.status),
@@ -595,6 +637,18 @@ def _command_record(
         artifact_id=command.artifactId,
         decision=command.decision,
         result=result,
+    )
+
+
+def _task_record(task: WritingTask, user_id: str) -> TaskRecord:
+    return TaskRecord(
+        id=task.id,
+        user_id=user_id,
+        novel_id=task.novelId,
+        chapter_id=task.chapterId,
+        writing_session_id=task.writingSessionId,
+        phase=task.phase,
+        graph_state_json=task.graphStateJson,
     )
 
 

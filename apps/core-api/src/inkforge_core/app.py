@@ -58,6 +58,7 @@ from .references.repository import ReferenceRepository
 from .references.router import router as references_router
 from .references.service import ReferenceService
 from .reviews.apply import FormalArtifactApplier
+from .reviews.decision_orchestrator import ReviewDecisionOrchestrator
 from .reviews.formal_writes import FormalWriteRepository
 from .reviews.internal_router import router as reviews_internal_router
 from .reviews.repository import ReviewRepository
@@ -231,6 +232,11 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
     )
     app.state.writing_task_service = WritingTaskService(
         writing_command_repository,
+        dispatcher=command_dispatcher,
+    )
+    app.state.review_decision_orchestrator = ReviewDecisionOrchestrator(
+        session_factory,
+        command_lookup=writing_command_repository,
         dispatcher=command_dispatcher,
     )
     app.state.writing_callback_service = WritingCallbackService(
