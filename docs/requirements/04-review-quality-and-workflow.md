@@ -64,11 +64,13 @@ flowchart TD
     F -->|"revise rewrite"| I["主责 Agent 返工生成新 revision"]
     I --> E
     F -->|"block"| D
-    D --> J{"用户决策"}
-    J -->|"approve"| K["applyReviewArtifact"]
-    J -->|"revise"| L["继续修改同一草案"]
-    J -->|"discard"| M["删除草案"]
-    K --> N["正式落库并标记 applied"]
+    D --> J{"用户提交单一决定请求"}
+    J -->|"approve"| K["事务内正式落库、标记 applied、创建命令"]
+    J -->|"revise"| L["事务内退回 draft、创建命令"]
+    J -->|"discard"| M["事务内删除草案、创建命令"]
+    K --> N["Agent 持久恢复并收敛任务终态"]
+    L --> N
+    M --> N
 ~~~
 
 ## 用户决策
@@ -79,6 +81,8 @@ flowchart TD
 - revise：继续修改；
 - discard：丢弃。
 
+公开入口是 `POST /api/v1/review-artifacts/{artifactId}/decision`。请求必须携带 clientRequestId，Core 先按该标识检查幂等结果，再在一个数据库事务中完成正式写入或草案变化并创建 `artifact_decision` 命令，成功返回 202。前端随后只连接该任务 SSE，不再额外调用恢复接口。
+
 前端需求：
 
 - 聊天流显示草案卡片。
@@ -86,6 +90,7 @@ flowchart TD
 - 文本草案可在弹窗内本地编辑，点击应用时提交 editedContent。
 - agent_updates 草案支持勾选部分 section/item 后应用。
 - 应用、丢弃或修改过程中需要展示 pending、success、error 状态。
+- 刷新或断流后以任务、命令和草案的持久状态为准，不得依赖前端乐观状态伪造完成。
 
 ## 草案应用目标
 
@@ -264,6 +269,8 @@ WorkflowStep 记录运行步骤：
 ## Python 重构阶段实现
 
 - Core API 已接管 ReviewArtifact 查询、物理丢弃、状态条件更新、修订记录和复审结论幂等写入。
+- 草案决定由 Core 事务编排器统一受理；正式数据、草案和持久命令任一写入失败时必须整体回滚。
+- Agent 从稳定决定恢复时只推进 LangGraph 状态，不能第二次应用或删除已经由 Core 事务处理的草案。
 - Agent 创建或修订草案、提交复审结论必须使用签名内部接口，并绑定同一用户、小说、任务和运行。
 - 草案完成复审并进入 `awaiting_user` 后，Agent Service 必须发送草案等待确认事件，前端再通过 Core 查询权威草案内容，不能依赖进程内状态猜测。
 - 首版跨服务复审不承诺局部草案 patch；需要修改时退化为完整草案重新生成。该降级必须明确记录并保留原有审核边界，不能把完整返工描述为局部修订，也不能因此直接写正式小说数据。

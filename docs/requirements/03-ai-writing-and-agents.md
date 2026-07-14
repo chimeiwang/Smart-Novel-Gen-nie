@@ -135,10 +135,11 @@ flowchart TD
 
 ### 启动写作 workflow
 
-入口：`POST /api/v1/writing/runs`，成功返回 202 和任务标识。
+入口：`POST /api/v1/writing/runs`，成功返回 202，以及任务标识、命令标识和命令状态。
 
 请求字段：
 
+- clientRequestId；
 - novelId；
 - chapterId；
 - writingSessionId；
@@ -155,6 +156,8 @@ flowchart TD
 - 默认 targetWordCount 为 4000。
 - selectedAgents 为空时使用默认 Agent 列表。
 - selectedAgents 会持久化到 WritingTask，但入口仍以 CreativeOperation 决定主责 Agent，不允许退回“只按用户选择 Agent 编排流程”的旧模式。
+- Core 在同一数据库事务中保存 `WritingTask` 和 `WritingRunCommand`，再尝试投递；Redis 暂时不可用时请求仍以 pending 命令被可靠受理。
+- 同一用户重复提交相同 clientRequestId 必须返回原命令，不得创建重复任务。
 
 ### 继续写作 workflow
 
@@ -163,17 +166,22 @@ flowchart TD
 用途：
 
 - 继续普通聊天；
-- 审批草案；
-- 丢弃草案；
-- 继续修改草案；
 - 回复章节目标确认。
 
 业务规则：
 
 - taskId 必填。
+- clientRequestId 必填，用于幂等受理。
 - 用户必须登录。
 - task 必须属于当前用户。
 - 如果传 writingSessionId，必须与任务已绑定会话一致；未绑定历史任务不能在恢复时静默绑定到当前会话，只能在不携带 writingSessionId 的项目待办入口中单独处理。
+- 草案批准、丢弃和返工由 `POST /api/v1/review-artifacts/{artifactId}/decision` 单独受理；前端不能再先决定、再调用 resume。
+
+### 持久化命令
+
+启动、普通恢复和草案决定都先写入 PostgreSQL `WritingRunCommand`。命令状态为 pending、submitted、processing、succeeded 或 failed；同一任务同一时刻最多存在一条活动命令。dispatcher 使用命令 ID 作为稳定队列 job ID，失败后按退避时间补投，Core 重启后也能继续处理到期命令。
+
+草案决定接口把正式数据变更、草案状态或删除以及 `artifact_decision` 命令放在同一外层事务中。接口成功返回 202 后，前端只连接返回 taskId 的 SSE，Agent 恢复负责推进图状态和终态回调，不得再次应用或删除正式草案。
 
 ## 会话恢复
 
@@ -220,6 +228,7 @@ flowchart TD
 - 显示 Agent 开始、状态、工具摘要、流式正文和完成状态。
 - 不把 Agent 聊天正文当 Markdown 解析，按普通段落文本渲染。
 - 草案事件只刷新聊天流草案卡片；审核弹窗由用户主动打开。
+- 前端按任务保存最后一个事件 ID，重连时发送 `Last-Event-ID`，并拒绝不符合共享事件契约的载荷。
 - 断流后应能从会话和任务状态恢复待审核草案。
 
 ## 工具调用边界
@@ -274,7 +283,7 @@ Agent Runtime 是唯一多轮 tool-call loop。
 - Python 智能体服务已迁移五个智能体定义、系统提示词、能力与工具白名单、严格工具参数校验和唯一多轮工具循环；模型运行时仍只负责单次供应商调用。
 - 只读且并发安全的工具可以并行执行，控制工具按模型调用顺序生成结构化事件；未暴露工具、无效参数和最大轮次均明确终止，不截断用户可见文本。
 - Python LangGraph 已迁移 CreativeOperation 路由、复审 `Send` 扇出、确定性复审优先级、补丁或重写返工、最大修订次数、用户中断和 `Command` 恢复；图状态快照使用版本信封并排除运行时字段。
-- Core API 已把启动、恢复、画像、质量检查和 RAG 任务提交到 Redis 持久队列；Agent Service 消费任务并通过签名回调保存检查点、事件、草案和终态。
+- Core API 已把写作启动、恢复和草案决定先保存为 PostgreSQL 持久命令，再由 dispatcher 提交到 Redis 队列；画像、质量检查和 RAG 任务仍使用各自队列入口。Agent Service 消费任务并通过签名回调保存检查点、事件、草案和终态。
 - 草案进入等待用户确认时，Agent Service 先发送 `artifact_awaiting_user_approval` SSE 事件，再保存带有最新事件序号的稳定快照；前端据此刷新待确认草案。
 - Core 对账器可以强制修复 Redis 中缺失的 queued 索引或完全丢失的运行键，但不得重新打开 Redis 已记录为 completed、failed 或 cancelled 的运行。
 - Agent Service 不连接数据库，所有读取工具和业务写入都通过 Core 内部工具网关完成。

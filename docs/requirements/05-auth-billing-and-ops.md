@@ -8,7 +8,7 @@
 
 - 首页和登录页公开，其余页面由 Next.js `proxy.ts` 检查 `inkforge-token` Cookie。
 - 注册、登录、登出和当前用户接口由 Core API 提供。
-- 用户名为 3 至 32 位小写字母、数字、下划线或短横线；密码至少 6 位。
+- 用户名输入先去除首尾空白并转为小写，再按 3 至 32 位小写字母、数字、下划线或短横线校验和存储；密码至少 6 位。
 - 密码由 Python bcrypt 哈希，禁止保存明文。
 - 会话使用 HS256 JWT，写入 httpOnly、sameSite=lax Cookie，有效期 30 天。
 - 登录失败不区分用户名不存在和密码错误。
@@ -52,11 +52,16 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 
 ## 运行恢复
 
-- Core 先创建并持久化 `WritingTask`，再提交 Redis 队列。
+- Core 在同一 PostgreSQL 事务中创建 `WritingTask` 和 `WritingRunCommand`；普通恢复和草案决定也先保存命令事实，再尝试提交 Redis 队列。
+- 命令 dispatcher 使用命令 ID 作为稳定 job ID，并对 pending 到期命令退避补投；Redis 短时不可用不会丢失已经返回 202 的请求。
 - Agent 每个稳定步骤通过签名回调保存版本化图快照。
 - Agent 进程退出后，另一个兼容实例可以领取租约并从最后稳定检查点继续。
-- Redis 丢失时，Core 对账器重新提交数据库中非终态任务；不得重复生成草案或扣费。
+- Redis 丢失时，dispatcher 补投活动命令；旧任务对账器只处理没有活动命令的 active 或 waiting_call 任务，不重新投递 awaiting_user_review。
 - `WritingMessage` 只保存用户可见聊天记录，不能反推图状态。
+
+## 版本化数据迁移
+
+2026-07-14 的 PostgreSQL schema 变更是用户明确批准的单次例外：新增 `WritingRunCommand`，为 `WritingStyle` 增加强制 `userId`，并为 `StylePortraitTask` 增加可空 `section`。迁移执行前必须完成可恢复备份；按已批准方案清空旧文风、文风参考和画像任务数据，同时保留用户、小说、章节、会话及其他正式数据。应用启动不得自动修改 schema。
 
 ## 人工日志
 

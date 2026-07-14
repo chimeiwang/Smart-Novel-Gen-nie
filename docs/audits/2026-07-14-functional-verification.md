@@ -1,90 +1,115 @@
-# Python 三服务功能验收记录
+# Python 三服务迁移与功能验收记录
 
 ## 验收范围
 
 - 本地服务：Next.js `43119`、Core API `8000`、Agent Service `8001`。
-- 本地数据：从最终备份恢复的隔离数据库 `inkforge_acceptance_20260714_001219`。
-- 本地队列与短期事件：最终验收使用远程 Redis 隔离库 DB15。
-- 模型：本地使用 `fake` provider，只判断协议、状态和数据边界，不评价生成质量。
-- PostgreSQL schema：未修改。
+- 本地数据：生产数据备份的隔离克隆库 `inkforge_local_20260713232736`；生产数据库未执行本轮迁移。
+- 队列与短期事件：远程 Redis 的测试专用 DB15；生产 DB0 未清理、未写入验收键。
+- 模型：本地使用 `fake` provider，只验证协议、状态、权限和正式数据边界，不评价文学质量。
+- PostgreSQL schema：仅在隔离克隆库执行用户批准的单次版本化迁移，新增持久命令、文风归属和单节画像字段。
 
-## 本地验收结果
+## 当前迁移结果
 
-### 三服务基线
+### 持久化写作命令
 
-- Web `/login`：HTTP 200。
-- Core `/api/v1/health/ready`：configuration、database、database_schema、redis 均为 `ok`。
-- Agent `/internal/v1/health/ready`：model_provider 为 `ok`。
+- 写作启动、普通恢复和草案决定先写入 PostgreSQL `WritingRunCommand`，再由 dispatcher 投递 Redis。
+- clientRequestId 形成用户级幂等键；同一任务同一时刻只允许一条 pending、submitted 或 processing 命令。
+- dispatcher 使用命令 ID 作为稳定 job ID，支持到期命令领取、退避重试和 Core 重启后补投。
+- 旧任务对账器只处理没有活动命令的 active 或 waiting_call，不重新打开 awaiting_user_review。
+- 完成、失败和等待用户确认回调会结束对应命令；终态数据库事务提交后才追加 SSE 终态事件。
 
-### Playwright 主流程
+### 草案决定与恢复
+
+- `POST /api/v1/review-artifacts/{artifactId}/decision` 是前端唯一草案决定入口，成功返回 202。
+- Core 在同一外层事务中完成正式数据写入或草案删除/返工，并创建 `artifact_decision` 命令；任一步失败整体回滚。
+- 前端不再先决定再调用 resume，只连接返回 taskId 的 SSE。
+- Agent 持久恢复只推进图状态，不重复应用或删除已由 Core 处理的草案。
+- 已应用或已删除草案只有在存在匹配的活动决定命令时，才允许稳定快照继续恢复；其他不一致仍返回 409。
+
+### SSE 与前端状态
+
+- 前端按 taskId 保存 Last-Event-ID，断线重连可继续消费缺失事件并忽略重复序号。
+- `agent_start` 现在发送合法的 agentId 和 agentName；前端拒绝不符合共享 Zod 契约的 SSE 载荷。
+- 草案应用、丢弃和普通问答都以持久任务终态为准；测试使用轮询等待异步终态，不以正式正文先写入替代任务完成。
+- Playwright 监听 React 控制台，写作主流程没有 `unique key` 或同类列表 key 警告。
+
+### 私有文风与单节画像
+
+- `WritingStyle.userId` 非空并外键到 User；文风、参考资料、画像任务、编辑、应用和删除全部按当前用户过滤。
+- 旧文风、文风参考和画像任务按已批准方案在迁移中清空；用户、小说、章节、会话和其他正式数据保留。
+- `StylePortraitTask.section` 区分整套任务和单节任务。
+- 单节入口只调用目标维度，成功回调只更新目标字段，其他四个画像字段保持不变。
+
+## 本地端到端结果
 
 完整回归命令：
 
 ```powershell
 $env:E2E_BASE_URL='http://127.0.0.1:43119'
-npx playwright test
+npx playwright test --reporter=line
 ```
 
-结果：7 passed，包含原 6 条主流程和新增的普通问答恢复回归。
+结果：`7 passed (2.0m)`。
 
 1. 注册、退出并重新登录。
-2. 创建小说并自动保存章节。
-3. 维护设定、大纲、参考资料和文风画像。
-4. 运行质量检查并查看模拟模型零扣费摘要。
-5. 生成、恢复并应用待确认正文草案。
-6. 丢弃待确认正文草案，正式正文保持不变。
-7. 普通问答完成后，刷新并重新进入会话可以恢复用户与 Agent 双方消息。
+2. 维护设定、大纲、参考资料和文风画像。
+3. 创建小说并自动保存章节。
+4. 运行质量检查并查看 fake provider 零扣费摘要。
+5. 生成、刷新恢复并应用待确认正文草案，任务最终 completed。
+6. 丢弃待确认正文草案，正式正文保持不变，任务最终 completed。
+7. 普通问答完成后，刷新并重新进入会话可恢复用户与 Agent 双方消息。
 
-### 补充产品边界
+全量执行前发现 DB15 累积注册限流键，页面明确返回“请求过于频繁”；清空测试专用 DB15 后从头执行并全部通过。一次 7 分钟工具窗口造成 Playwright 输出管道 EPIPE，该次结果作废；延长工具窗口后获得上述有效结果。
 
-- `/`、`/login` 未登录可访问；`/dashboard`、`/styles`、`/billing`、`/workspace/*` 未登录均以 307 跳转 `/login`。
-- 新增章节顺序为 2；章节正文保存后读取一致，字数为 210。
-- 从 drafting 直接完成返回 409；进入 review 后、终检仍 pending 时完成返回 409；一致性终检 completed 后可以完成章节。
-- 当前用户与计费摘要返回 200，初始余额为 1000 积分；未登录访问计费摘要返回 401。
-- 另一用户读取测试用户的小说、章节、写作会话和任务事件均返回 403。
-- 待确认草案重新进入会话后可恢复；应用前正式正文为空。
+## 冷启动与恢复证据
+
+- 停止三服务并完成生产构建后，重新启动 Next.js、Core API 和 Agent Service；`/login`、Core ready、Agent ready 均返回 200。
+- 冷启动前：awaiting_user_review 任务 26，活动命令 0。
+- 冷启动并等待 dispatcher/对账器运行后：awaiting_user_review 任务仍为 26，活动命令仍为 0；无决定草案没有被重新投递。
+- 远程 Redis 是共享服务器，本地验收没有重启 Redis 进程，只重置 DB15。pending 命令补投、稳定 job ID、终态不重开和 Redis 丢失对账由 dispatcher、reconciler 和队列自动化测试覆盖。
+- 全量验收结束后已停止本地三服务，并把 Redis DB15 从 25 个测试键清理为 0；隔离克隆数据库暂时保留到生产迁移完成，便于复核结构和回归证据。
 
 ## 已发现并修复的硬故障
 
-### 1. 写作会话刷新后丢失消息
+### 草案批准或丢弃后任务无法完成
 
-- 现象：写作任务和草案可以生成，但 `WritingSession.messages` 为空；普通问答完成后也没有 Agent 回复记录。
-- 根因：旧 workflow 的可见消息持久化在 Python 迁移时遗漏；Core 只保存任务快照，完成回调也丢弃了 `finalResponse`。
-- 修复：Core 在任务启动时原子保存用户消息；恢复任务时保存后续用户消息；完成回调把可见回复写入 `WritingMessage` 并通过 completed SSE 返回；重复回调使用稳定元数据去重。
-- 回归：新增会话消息恢复 Playwright 流程；完成回调和恢复消息单元测试完成红绿验证。
+- 现象：正式正文已经应用，但任务仍停在 awaiting_user_review；丢弃后待确认数量不归零。
+- 根因：Core 已事务性应用或删除草案，Agent 获取上下文时仍把终态或已删除草案判为快照冲突；通过后又会重复调用 apply/discard。
+- 修复：仅在匹配活动决定命令存在时允许终态草案快照恢复；Agent 的持久决定分支只更新图状态，不重复正式写入。
+- 回归：应用、丢弃和普通问答三条 Playwright 流程通过，相关 Core/Agent 单元测试通过。
 
-### 2. 无大纲小说的普通问答无法运行
+### React 列表 key 警告
 
-- 现象：普通问题在意图分类前读取上下文，因没有章节组大纲返回 409，任务被队列反复重试。
-- 根因：写作上下文错误地把“缺少章节组”与“章节组重叠冲突”视为同一种硬错误。
-- 修复：没有章节组时返回可选规划上下文；多个章节组同时命中时仍返回 409，保留歧义保护。
-- 回归：上下文选择测试和普通问答端到端恢复流程通过。
+- 现象：写作 Agent 活动卡片显示 `undefined正在接手...`，控制台报告列表缺少唯一 key。
+- 根因：Agent 发送的 agent_start 只有 phase；前端解析失败后又强制类型转换，绕过共享契约。
+- 修复：后端发送 `agentId=写作`、`agentName=作家`；前端删除未使用的 host_intent 兼容旁路，只处理契约校验成功的事件。
+- 回归：SSE 契约测试和 Playwright 控制台断言通过。
 
-### 3. 一致性终检完成后章节完成返回 500
+### 写作会话消息与上下文历史问题
 
-- 现象：质量检查已为 completed，但章节从 review 切换到 completed 返回 500。
-- 根因：PostgreSQL 列为 `TIMESTAMP WITHOUT TIME ZONE`，仓储写入了带 UTC 时区的 `datetime`，asyncpg 拒绝绑定。
-- 修复：统一使用项目的毫秒级无时区 `utc_now()`。
-- 回归：章节状态原子测试先失败后通过，25 条章节测试通过；同一隔离数据库真实状态转换成功。
+- 用户消息在启动/恢复时持久化，完成回调保存可见 Agent 回复并按稳定元数据去重。
+- 没有章节组时允许普通问答继续；多个章节组同时命中仍返回 409，保留歧义保护。
+- 章节完成时间统一使用数据库兼容的无时区 UTC 时间。
 
-## 环境观察
+## 全量门禁证据
 
-- 第一次隔离启动因 PowerShell `UriBuilder` 不支持 `redis://`，Core 回退到 `.env.local` 的生产 DB0；本次误写入的 6 个精确测试限流键已删除，随后通过 DB0 为 0、DB15 出现测试键确认隔离生效。
-- 本机连接服务器 Redis 时出现过两次 1 秒连接超时，Core 按 fail-closed 规则返回 503；失败请求没有增加限流计数。
-- 生产 Core 与 Redis 在同一服务器网络内。该观察不作为产品逻辑故障，但线上验收仍需确认认证流程没有 503。
-- 本地 `fake` provider 输出固定文本，无法形成 Agent 文学质量结论；没有把该限制作为阻断项。
-
-## 本地门禁证据
-
-- Python：840 passed，1 skipped；1 条第三方 Starlette/httpx 弃用警告。
-- Ruff：通过。
-- Mypy：177 个源文件通过。
-- API 客户端生成检查：通过。
-- Web 与 API 客户端测试：7 条通过。
+- API 客户端生成与 `npm run api:check`：通过。
+- Web 测试：56 passed；API client 测试：2 passed。
 - TypeScript：通过。
 - ESLint：通过。
-- Next.js 生产构建：通过。
+- Next.js 生产构建：通过，7 个动态页面路由生成成功。
+- Python：872 passed，1 skipped；1 条第三方 Starlette/httpx 弃用警告。
+- Ruff：通过。
+- Mypy：182 个源码文件通过。
+- Playwright：7 passed。
 
-## 线上验收
+## 未完成的生产步骤
 
-待修复提交部署成功后填写。
+- 尚未对生产 PostgreSQL 和 uploads 生成本轮可恢复备份。
+- 尚未在生产执行 `20260714_durable_writing_private_styles.sql`。
+- 尚未推送本轮提交，因此 GitHub Actions、镜像发布、SSH 部署和线上感知验收仍待执行。
+- 线上浏览器验收必须使用有效 HTTPS；若服务器仍只有 HTTP，secure cookie 会阻断登录，应记录为环境阻塞而不是伪造通过。
+
+## 质量边界
+
+本地 fake provider 输出是固定文本，只能证明调用、状态、权限、SSE 和正式数据边界正确。真实模型的文学质量、画像质量和 token 计费必须在线上真实 provider 环境另行观察，不能把本次 fake 结果记作质量通过。
