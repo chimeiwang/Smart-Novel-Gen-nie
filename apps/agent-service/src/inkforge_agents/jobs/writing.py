@@ -141,9 +141,21 @@ class WritingJobHandler:
             stable["operationStage"] = "等待用户决策"
         waiting_for_user = "__interrupt__" in result or stable.get("phase") == "waiting_user"
         artifact_id = stable.get("activeArtifactId")
-        checkpoint_sequence = sequence + 1
+        next_sequence = sequence + 1
         has_review_event = waiting_for_user and isinstance(artifact_id, str) and bool(artifact_id)
-        stable["eventSequence"] = checkpoint_sequence + (1 if has_review_event else 0)
+        if has_review_event:
+            active_agent = stable.get("activeAgent")
+            await self._core.send_event(
+                resource,
+                sequence=next_sequence,
+                event="artifact_awaiting_user_approval",
+                data={
+                    "agentId": active_agent if isinstance(active_agent, str) else "系统",
+                    "artifactId": artifact_id,
+                },
+            )
+            next_sequence += 1
+        stable["eventSequence"] = next_sequence
         checkpoint = to_typescript_snapshot(serialize_snapshot(stable))
         self._record_state(
             job.runId,
@@ -152,27 +164,16 @@ class WritingJobHandler:
         )
         await self._core.save_checkpoint(
             resource,
-            sequence=checkpoint_sequence,
+            sequence=next_sequence,
             checkpoint=checkpoint,
         )
-        if has_review_event:
-            active_agent = stable.get("activeAgent")
-            await self._core.send_event(
-                resource,
-                sequence=checkpoint_sequence + 1,
-                event="artifact_awaiting_user_approval",
-                data={
-                    "agentId": active_agent if isinstance(active_agent, str) else "系统",
-                    "artifactId": artifact_id,
-                },
-            )
         if stable.get("phase") == "error":
             message = str(stable.get("errorMessage") or "智能体运行失败")
             self._finish_log(job.runId, "错误")
             try:
                 await self._core.fail(
                     resource,
-                    sequence=checkpoint_sequence + 1,
+                    sequence=next_sequence + 1,
                     code="AGENT_RUN_FAILED",
                     message=message,
                     recoverable=True,
@@ -184,7 +185,7 @@ class WritingJobHandler:
             return
         await self._core.complete(
             resource,
-            sequence=sequence + 2,
+            sequence=next_sequence + 1,
             result={"finalResponse": str(stable.get("finalResponse", ""))},
         )
         self._finish_log(job.runId, "完成")

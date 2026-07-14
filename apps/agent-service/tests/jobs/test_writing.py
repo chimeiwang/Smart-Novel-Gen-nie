@@ -219,7 +219,7 @@ async def test_writing_job_records_human_workflow_states() -> None:
 
 
 @pytest.mark.asyncio
-async def test_writing_job_persists_waiting_checkpoint_before_artifact_event() -> None:
+async def test_writing_job_publishes_artifact_event_before_waiting_checkpoint() -> None:
     core = CoreClient(
         {
             "workspace": {},
@@ -251,18 +251,18 @@ async def test_writing_job_persists_waiting_checkpoint_before_artifact_event() -
 
     assert core.events == [
         (1, "agent_start"),
-        (3, "artifact_awaiting_user_approval"),
+        (2, "artifact_awaiting_user_approval"),
     ]
     assert core.event_payloads[1] == {
         "agentId": "写作",
         "artifactId": "artifact-1",
     }
-    assert core.checkpoints[0][0] == 2
+    assert core.checkpoints[0][0] == 3
     assert core.checkpoints[0][1]["eventSequence"] == 3
     assert core.operations == [
         ("agent_start", 1),
-        ("checkpoint", 2),
-        ("artifact_awaiting_user_approval", 3),
+        ("artifact_awaiting_user_approval", 2),
+        ("checkpoint", 3),
     ]
     assert core.completions == []
 
@@ -305,12 +305,96 @@ async def test_writing_job_recovers_waiting_state_from_nested_graph_interrupt() 
 
     assert core.events == [
         (1, "agent_start"),
-        (3, "artifact_awaiting_user_approval"),
+        (2, "artifact_awaiting_user_approval"),
     ]
     assert core.checkpoints[0][1]["phase"] == "awaiting_user_review"
     assert core.checkpoints[0][1]["activeArtifactId"] == "artifact-1"
     assert core.checkpoints[0][1]["artifactStatus"] == "awaiting_user"
     assert core.completions == []
+
+
+@pytest.mark.asyncio
+async def test_writing_job_replays_artifact_event_before_recovering_failed_checkpoint() -> None:
+    class CheckpointFailureCore(CoreClient):
+        def __init__(self, context: dict[str, Any]) -> None:
+            super().__init__(context)
+            self.checkpoint_attempts = 0
+
+        async def send_event(
+            self,
+            resource: object,
+            *,
+            sequence: int,
+            event: str,
+            data: dict[str, Any],
+        ) -> None:
+            del resource
+            identity = (sequence, event)
+            if identity not in self.events:
+                self.events.append(identity)
+                self.event_payloads.append(data)
+            self.operations.append((event, sequence))
+
+        async def save_checkpoint(
+            self,
+            resource: object,
+            *,
+            sequence: int,
+            checkpoint: dict[str, Any],
+        ) -> None:
+            self.checkpoint_attempts += 1
+            if self.checkpoint_attempts == 1:
+                raise RuntimeError("模拟 checkpoint 持久化失败")
+            await super().save_checkpoint(
+                resource,
+                sequence=sequence,
+                checkpoint=checkpoint,
+            )
+
+    core = CheckpointFailureCore(
+        {
+            "workspace": {},
+            "planning": {
+                "taskId": "task-1",
+                "novelId": "novel-1",
+                "chapterId": "chapter-1",
+                "targetWordCount": 4000,
+                "conversationHistory": [],
+                "userMessage": "重写场景",
+                "graphState": None,
+            },
+        }
+    )
+    handler = WritingJobHandler(
+        core,
+        parent_graph=Graph(
+            {
+                "phase": "waiting_user",
+                "activeAgent": "写作",
+                "activeArtifactId": "artifact-1",
+                "__interrupt__": [{"type": "artifact_review"}],
+            }
+        ),
+        operation_graph=Graph({}),
+    )
+
+    with pytest.raises(RuntimeError, match="checkpoint 持久化失败"):
+        await handler(_job())
+    await handler(_job())
+
+    assert core.events == [
+        (1, "agent_start"),
+        (2, "artifact_awaiting_user_approval"),
+    ]
+    assert core.operations == [
+        ("agent_start", 1),
+        ("artifact_awaiting_user_approval", 2),
+        ("agent_start", 1),
+        ("artifact_awaiting_user_approval", 2),
+        ("checkpoint", 3),
+    ]
+    assert core.checkpoints == [(3, core.checkpoints[0][1])]
+    assert core.checkpoints[0][1]["eventSequence"] == 3
 
 
 @pytest.mark.asyncio
