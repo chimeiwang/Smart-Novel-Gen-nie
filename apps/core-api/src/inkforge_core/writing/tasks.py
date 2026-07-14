@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
 from inkforge_contracts.events import (
@@ -18,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ..db.base import utc_now
 from ..db.models import Chapter, Novel, WritingMessage, WritingSession, WritingTask
 from ..errors import ApiError
+from .records import TaskRecord
 from .recovery import (
     InvalidGraphSnapshotError,
     deserialize_graph_snapshot,
@@ -27,17 +27,6 @@ from .schemas import StartWritingRunRequest, WritingRunResponse
 from .sse import EventSequenceGap, WritingEvent
 
 TERMINAL_TASK_PHASES = frozenset({"completed", "error"})
-
-
-@dataclass(frozen=True, slots=True)
-class TaskRecord:
-    id: str
-    user_id: str
-    novel_id: str
-    chapter_id: str
-    writing_session_id: str | None
-    phase: str
-    graph_state_json: str | None
 
 
 class WritingTaskSubmitter(Protocol):

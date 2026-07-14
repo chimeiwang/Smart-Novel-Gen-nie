@@ -6,6 +6,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, JsonValue
 
 CoreAgentId = Literal["设定", "剧情", "写作", "校验", "编辑"]
+WritingCommandStatus = Literal[
+    "pending", "submitted", "processing", "succeeded", "failed"
+]
 
 
 def _default_agents() -> list[CoreAgentId]:
@@ -93,6 +96,7 @@ class DeleteWritingSessionResponse(WritingSchema):
 
 
 class StartWritingRunRequest(WritingSchema):
+    clientRequestId: str = Field(min_length=16, max_length=128)
     novelId: str = Field(min_length=1, max_length=256)
     chapterId: str = Field(min_length=1, max_length=256)
     writingSessionId: str | None = Field(default=None, min_length=1, max_length=256)
@@ -102,6 +106,7 @@ class StartWritingRunRequest(WritingSchema):
 
 
 class ResumeWritingRunRequest(WritingSchema):
+    clientRequestId: str = Field(min_length=16, max_length=128)
     writingSessionId: str | None = Field(default=None, min_length=1, max_length=256)
     userMessage: str | None = None
     artifactId: str | None = Field(default=None, min_length=1, max_length=256)
@@ -118,8 +123,12 @@ class WritingRunResponse(WritingSchema):
     selectedAgents: list[str]
     createdAt: datetime
     updatedAt: datetime
+    commandId: str | None = None
+    commandStatus: WritingCommandStatus | None = None
 
 
 class ResumeWritingRunResponse(WritingSchema):
     accepted: Literal[True]
     taskId: str
+    commandId: str | None = None
+    commandStatus: WritingCommandStatus | None = None
