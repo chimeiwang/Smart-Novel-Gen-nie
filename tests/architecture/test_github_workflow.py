@@ -125,12 +125,20 @@ def test_deploy_failures_are_published_to_the_workflow_summary() -> None:
 
 def test_production_deploy_uses_pinned_ssh_host_identity_and_non_cancelled_queue() -> None:
     source = WORKFLOW.read_text(encoding="utf-8")
+    workflow_header = source.split("\njobs:", maxsplit=1)[0]
 
     assert "StrictHostKeyChecking=no" not in source
     assert "DEPLOY_SSH_KNOWN_HOSTS" in source
     assert "SSH_KNOWN_HOSTS_FILE" in source
     assert "StrictHostKeyChecking=yes" in source
     assert "UserKnownHostsFile=" in source
+    assert "\nconcurrency:" not in workflow_header
+    assert (
+        "  ci:\n"
+        "    concurrency:\n"
+        "      group: ci-${{ github.workflow }}-${{ github.ref }}\n"
+        "      cancel-in-progress: true"
+    ) in source
     assert 'group: production\n      cancel-in-progress: false' in source
 
 
