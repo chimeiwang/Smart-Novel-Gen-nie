@@ -71,6 +71,7 @@ from .service_auth import (
     install_service_auth_error_handler,
 )
 from .styles.internal_router import router as styles_internal_router
+from .styles.portrait_dispatcher import PortraitTaskDispatcher
 from .styles.repository import StyleRepository
 from .styles.router import router as styles_router
 from .styles.service import StyleService
@@ -161,11 +162,19 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
         submitter=RagAgentSubmitter(agent_client) if agent_client else None,
     )
     app.state.reference_service = reference_service
+    portrait_submitter = PortraitAgentSubmitter(agent_client) if agent_client else None
     app.state.style_service = StyleService(
         style_repository,
         StyleStorage(app.state.settings.uploads_root),
-        submitter=PortraitAgentSubmitter(agent_client) if agent_client else None,
+        submitter=portrait_submitter,
     )
+    if portrait_submitter is not None and getattr(app.state, "portrait_dispatcher", None) is None:
+        app.state.portrait_dispatcher = PortraitTaskDispatcher(
+            style_repository,
+            portrait_submitter,
+            batch_size=20,
+            interval_seconds=5,
+        )
     grant_codec = (
         ModelGrantCodec.from_private_key_path(settings.core_service_private_key_path)
         if settings.core_service_private_key_path is not None
@@ -284,6 +293,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
                 "writing_command_dispatcher",
                 getattr(app.state, "writing_command_dispatcher", None),
             ),
+            ("portrait_dispatcher", getattr(app.state, "portrait_dispatcher", None)),
         )
         if worker is not None
     ]

@@ -3,13 +3,14 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from ..db.base import generate_id
 from ..db.models import Novel, StylePortraitTask, StyleReference, WritingStyle
 from ..errors import ApiError
+from .portrait_dispatcher import PortraitDispatchRecord
 from .schemas import PortraitSection
 from .service import build_portrait_markdown
 
@@ -172,6 +173,44 @@ class StyleRepository:
                 await session.flush()
                 result = self._task_dto(task)
         return result
+
+    async def list_reconcilable_portrait_tasks(
+        self,
+        limit: int,
+        stale_before: datetime,
+    ) -> list[PortraitDispatchRecord]:
+        async with self._session_factory() as session:
+            rows = (
+                await session.execute(
+                    select(StylePortraitTask, WritingStyle.userId)
+                    .join(WritingStyle, WritingStyle.id == StylePortraitTask.styleId)
+                    .where(
+                        or_(
+                            StylePortraitTask.status == "pending",
+                            and_(
+                                StylePortraitTask.status == "processing",
+                                StylePortraitTask.updatedAt <= stale_before,
+                            ),
+                        )
+                    )
+                    .order_by(
+                        StylePortraitTask.updatedAt.asc(),
+                        StylePortraitTask.id.asc(),
+                    )
+                    .limit(limit)
+                )
+            ).all()
+        return [
+            PortraitDispatchRecord(
+                task_id=task.id,
+                style_id=task.styleId,
+                user_id=user_id,
+                section=task.section,
+                status=task.status,
+                updated_at=_utc(task.updatedAt),
+            )
+            for task, user_id in rows
+        ]
 
     async def get_portrait_sources(
         self, style_id: str, task_id: str
