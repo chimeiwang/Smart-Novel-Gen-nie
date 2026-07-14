@@ -172,18 +172,18 @@ git commit -m "修复：生产部署失败时自动回滚"
 ### Task 4: 同步部署运维文档和完整架构门禁
 
 **Files:**
-- Modify: `docs/requirements/05-deployment-and-operations.md`
+- Modify: `docs/requirements/05-auth-billing-and-ops.md`
 - Modify: `DOCS.md`
 - Modify: `.env.example`
 - Modify: `tests/architecture/test_compose_security.py`
 
-- [ ] **Step 1: 文档化操作契约**
+- [x] **Step 1: 文档化操作契约**
 
 记录 `DEPLOY_SSH_KNOWN_HOSTS` 必须由管理员在线下比对公钥后配置；说明生产并发排队、上一 tag 捕获条件、首次部署不自动回滚、成功/失败回滚的报警含义。不得建议 `ssh-keyscan` 直接信任远端。
 
 `.env.example` 只说明变量用途，不放真实主机键或 Secret。
 
-- [ ] **Step 2: 增加危险命令禁用断言**
+- [x] **Step 2: 增加危险命令禁用断言**
 
 架构测试断言生产部署脚本不包含：
 
@@ -196,7 +196,7 @@ docker volume rm
 StrictHostKeyChecking=no
 ```
 
-- [ ] **Step 3: 运行部署完整验证**
+- [x] **Step 3: 运行部署完整验证**
 
 Run: `uv run pytest tests/architecture/test_github_workflow.py tests/architecture/test_deploy_scripts.py tests/architecture/test_compose_security.py -q`
 
@@ -204,10 +204,10 @@ Run: `uv run ruff check tests/architecture`
 
 Expected: PASS。
 
-- [ ] **Step 4: 提交文档**
+- [x] **Step 4: 提交文档**
 
 ```bash
-git add docs/requirements/05-deployment-and-operations.md DOCS.md .env.example tests/architecture/test_compose_security.py
+git add docs/requirements/05-auth-billing-and-ops.md DOCS.md .env.example tests/architecture/test_compose_security.py
 git commit -m "文档：补充生产 SSH 与回滚运维规则"
 ```
 

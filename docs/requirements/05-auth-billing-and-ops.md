@@ -79,6 +79,20 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 
 生产发布由 GitHub Actions 在 Runner 上构建带提交哈希标签的 Web、Core API 和 Agent Service 三张镜像，经 SSH 加载到服务器，再以 `--no-build` 启动 `infra/compose.yaml`。2 核 2 GB 服务器不得现场安装依赖或构建镜像；缺少 `.env`、四个服务密钥、宿主机 PostgreSQL 连接或可恢复备份时必须停止部署。
 
+生产 SSH 必须严格校验管理员离线核对过的主机公钥：
+
+- GitHub `production` environment 必须配置 `DEPLOY_SSH_KNOWN_HOSTS` Secret；内容由管理员通过可信渠道取得并在线下比对，不能在部署时使用 `ssh-keyscan` 动态信任远端；
+- workflow 把该 Secret 写入权限为 600 的临时 `known_hosts` 文件，所有 SSH、SCP 和上传脚本统一使用 `StrictHostKeyChecking=yes`；
+- Secret 或文件缺失、不可读、为空时，必须在首次网络连接前停止部署；日志不得输出主机键、SSH 私钥、`.env` 或服务密钥内容。
+
+生产 deploy job 使用独立 `production` 并发组，后续版本必须排队，不能取消正在执行的版本切换或自动回滚。部署脚本在切换前按 Compose project/service label 读取 `web`、`core-api` 和 `agent-service` 当前运行镜像：
+
+- 三个服务均不存在时视为首次部署；新版本失败时明确报告没有可回滚版本，不伪造恢复成功；
+- 只存在部分服务、镜像仓库不符合约定、三服务标签不一致或旧镜像任一缺失时，在启动新容器前停止部署并要求人工检查；
+- 三服务标签一致且旧镜像均存在时，才把该标签作为自动回滚目标。
+
+新版本 `compose up --no-build -d --wait`、只读 schema 指纹检查或生产 smoke 任一失败时，脚本自动用上一标签恢复三个服务，并再次执行 Compose 状态、schema 指纹和 smoke 检查。日志出现“新版本部署失败，旧版本已恢复”表示服务已恢复但本次发布仍失败，CI 必须保持非零；出现“自动回滚也失败”表示新旧版本均未通过验收，必须立即人工处理。回滚不得执行 `down -v`、删除卷或镜像、重写 `.env`、现场构建或数据库迁移。
+
 网络边界：
 
 - `public_net`：Nginx、Web、Core；
@@ -120,6 +134,8 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 | `CORE_SERVICE_PUBLIC_KEY_PATH` | Agent | Core 验签公钥 |
 | `WORKFLOW_HUMAN_LOG_DIR` | Agent | 人工日志目录 |
 
+`DEPLOY_SSH_KNOWN_HOSTS` 属于 GitHub `production` environment Secret，不是应用容器环境变量；只用于为发布流程生成严格校验的临时 `known_hosts` 文件。
+
 ## 验收标准
 
 - 用户可以注册、登录、登出并查看计费摘要。
@@ -129,3 +145,5 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 - Agent 重启后任务可以从稳定检查点恢复。
 - Nginx 是唯一公网入口，公网 `/internal/**` 返回 404。
 - 数据库结构指纹在迁移前后保持不变。
+- 生产 SSH 只信任离线核验的主机公钥，运行中的部署不会被后续提交取消。
+- 新版本失败时可恢复到经验证的上一镜像；回滚成功仍保留发布失败状态。

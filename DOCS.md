@@ -21,6 +21,7 @@
 - FastAPI Agent Service 负责 LangGraph、模型和工具执行，不连接数据库。
 - Core 与 Agent 使用版本化 Pydantic 契约和 Ed25519 服务身份通信。
 - 生产由 `infra/compose.yaml` 编排，Nginx 是唯一公网入口。
+- 生产 SSH 只信任管理员离线核验的主机公钥；部署串行排队，新版本失败时由 `scripts/deploy-production.sh` 尝试恢复经验证的上一镜像。
 - PostgreSQL schema 不允许在本重构中修改；当前结构由只读 `schema-contract.json` 守卫。
 
 ## 文档类型
@@ -53,3 +54,4 @@
 - Agent 架构：`apps/agent-service/AGENTS.md`
 - 当前需求：`docs/requirements/00-overview.md`
 - 生产部署：`infra/compose.yaml`
+- 生产发布入口：`.github/workflows/build.yml`、`scripts/deploy-production.sh`

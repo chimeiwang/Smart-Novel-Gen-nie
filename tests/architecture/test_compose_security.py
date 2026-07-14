@@ -3,6 +3,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).parents[2]
 COMPOSE = ROOT / "infra" / "compose.yaml"
+DEPLOYMENT_FILES = (
+    ROOT / ".github" / "workflows" / "build.yml",
+    ROOT / "scripts" / "deploy-production.sh",
+    ROOT / "scripts" / "upload-docker-images.sh",
+)
 PRODUCTION_SERVICES = ("nginx", "web", "core-api", "agent-service", "redis")
 
 
@@ -108,3 +113,18 @@ def test_production_env_example_targets_host_gateway() -> None:
         "POSTGRES_DATA_VOLUME=",
     ):
         assert obsolete not in source
+
+
+def test_production_deployment_forbids_dynamic_trust_and_destructive_commands() -> None:
+    source = "\n".join(path.read_text(encoding="utf-8") for path in DEPLOYMENT_FILES).lower()
+
+    for forbidden in (
+        "stricthostkeychecking=no",
+        "ssh-keyscan",
+        "down -v",
+        "docker compose build",
+        "alembic upgrade",
+        "prisma migrate",
+        "docker volume rm",
+    ):
+        assert forbidden not in source
