@@ -67,6 +67,14 @@ def test_redis_is_bounded() -> None:
     assert re.search(r"(?m)^appendonly\s+no$", redis_config)
 
 
+def test_web_and_core_require_the_same_production_jwt_secret() -> None:
+    source = COMPOSE.read_text(encoding="utf-8")
+    expected = "JWT_SECRET: ${JWT_SECRET:?必须配置会话签名密钥}"
+
+    assert expected in _service_block(source, "web")
+    assert expected in _service_block(source, "core-api")
+
+
 def test_production_compose_uses_existing_host_postgres() -> None:
     source = COMPOSE.read_text(encoding="utf-8")
     core = _service_block(source, "core-api")

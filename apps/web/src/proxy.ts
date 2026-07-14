@@ -8,13 +8,12 @@
 import { jwtVerify } from "jose";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { resolveSessionSecret } from "./lib/auth/session-secret";
 
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET ?? "inkforge-default-secret-change-me",
-);
 const COOKIE_NAME = "inkforge-token";
 
 export async function proxy(request: NextRequest) {
+  const jwtSecret = resolveSessionSecret();
   const { pathname } = request.nextUrl;
 
   if (pathname === "/") {
@@ -25,7 +24,7 @@ export async function proxy(request: NextRequest) {
     const token = request.cookies.get(COOKIE_NAME)?.value;
     if (token) {
       try {
-        await jwtVerify(token, JWT_SECRET, { algorithms: ["HS256"] });
+        await jwtVerify(token, jwtSecret, { algorithms: ["HS256"] });
         return NextResponse.redirect(new URL("/dashboard", request.url));
       } catch {
         // 无效令牌按未登录处理。
@@ -48,7 +47,7 @@ export async function proxy(request: NextRequest) {
   }
 
   try {
-    await jwtVerify(token, JWT_SECRET, { algorithms: ["HS256"] });
+    await jwtVerify(token, jwtSecret, { algorithms: ["HS256"] });
     return NextResponse.next();
   } catch {
     const response = NextResponse.redirect(new URL("/login", request.url));
