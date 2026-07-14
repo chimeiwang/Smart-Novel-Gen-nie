@@ -1148,15 +1148,24 @@ export interface components {
             /** Styleid */
             styleId: string | null;
         };
-        /** ArtifactDecisionResponse */
-        ArtifactDecisionResponse: {
+        /** ArtifactDecisionAcceptedResponse */
+        ArtifactDecisionAcceptedResponse: {
             /** Artifactid */
             artifactId: string;
+            /** Taskid */
+            taskId: string;
+            /** Commandid */
+            commandId: string;
             /**
              * Decision
              * @enum {string}
              */
             decision: "approve" | "discard" | "revise";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "submitted" | "processing" | "succeeded" | "failed";
             /**
              * Savedcount
              * @default 0
@@ -2594,6 +2603,8 @@ export interface components {
         RelationType: "family" | "master_student" | "friend" | "enemy" | "ally" | "lover" | "rival" | "subordinate" | "acquaintance" | "other";
         /** ResumeWritingRunRequest */
         ResumeWritingRunRequest: {
+            /** Clientrequestid */
+            clientRequestId: string;
             /** Writingsessionid */
             writingSessionId?: string | null;
             /** Usermessage */
@@ -2612,9 +2623,18 @@ export interface components {
             accepted: true;
             /** Taskid */
             taskId: string;
+            /** Commandid */
+            commandId: string;
+            /**
+             * Commandstatus
+             * @enum {string}
+             */
+            commandStatus: "pending" | "submitted" | "processing" | "succeeded" | "failed";
         };
         /** ReviewArtifactDecisionRequest */
         ReviewArtifactDecisionRequest: {
+            /** Clientrequestid */
+            clientRequestId: string;
             /**
              * Decision
              * @enum {string}
@@ -2718,6 +2738,8 @@ export interface components {
         };
         /** StartWritingRunRequest */
         StartWritingRunRequest: {
+            /** Clientrequestid */
+            clientRequestId: string;
             /** Novelid */
             novelId: string;
             /** Chapterid */
@@ -3268,6 +3290,13 @@ export interface components {
              * Format: date-time
              */
             updatedAt: string;
+            /** Commandid */
+            commandId: string;
+            /**
+             * Commandstatus
+             * @enum {string}
+             */
+            commandStatus: "pending" | "submitted" | "processing" | "succeeded" | "failed";
         };
         /** WritingSessionDetail */
         WritingSessionDetail: {
@@ -13568,12 +13597,12 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            200: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ArtifactDecisionResponse"];
+                    "application/json": components["schemas"]["ArtifactDecisionAcceptedResponse"];
                 };
             };
             /** @description 统一错误响应 */

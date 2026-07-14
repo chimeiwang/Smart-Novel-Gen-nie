@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useOptimistic, useReducer, useRef, useState, useTransition, useEffect } from "react";
-import { createSseRequestHeaders, createSseState, parseSseFrame } from "@inkforge/api-client";
+import { parseSseFrame } from "@inkforge/api-client";
 
 import {
   AGENT_REGISTRY,
@@ -57,6 +57,10 @@ import {
 import { shouldPersistOptimisticWritingMessage } from "./message-persistence";
 import { createAsyncActionGuard } from "./send-guard";
 import {
+  createWritingEventCursors,
+  type WritingEventCursors,
+} from "./writing-event-cursor";
+import {
   createEmptySessionWorkspace,
   isCurrentSessionStream,
   reduceSessionWorkspace,
@@ -94,12 +98,12 @@ type WritingConversationProps = {
 
 async function openWritingRunEvents(
   taskId: string,
+  cursors: WritingEventCursors,
   signal?: AbortSignal,
-  lastEventId?: string | null,
 ): Promise<Response> {
   const response = await fetch(`/api/v1/writing/runs/${encodeURIComponent(taskId)}/events`, {
     credentials: "include",
-    headers: createSseRequestHeaders(createSseState({ lastEventId })),
+    headers: cursors.headers(taskId),
     signal,
   });
   if (response.ok) return response;
@@ -638,6 +642,7 @@ export function WritingConversation({
   // 中断控制
   const abortRef = useRef<AbortController | null>(null);
   const sendGuardRef = useRef(createAsyncActionGuard());
+  const eventCursorsRef = useRef(createWritingEventCursors());
 
   const [cursorPosition, setCursorPosition] = useState(0);
   const [showFlowLog, setShowFlowLog] = useState(false);
@@ -1688,6 +1693,28 @@ export function WritingConversation({
       case "done":
         finishActivityRound("done");
         clearAgentLiveRuns();
+        if (reviewArtifactActionRef.current?.status === "pending") {
+          const completedAction = reviewArtifactActionRef.current;
+          updateReviewArtifactAction({
+            ...completedAction,
+            status: "succeeded",
+            message: getReviewArtifactActionMessage(
+              completedAction.decision,
+              "succeeded",
+            ),
+          });
+          setActiveReviewArtifact(null);
+          setReviewArtifacts((previous) => previous.filter(
+            (artifact) => artifact.id !== completedAction.artifactId,
+          ));
+          setMessages((previous) => clearReviewArtifactFromMessages(
+            previous,
+            completedAction.artifactId,
+          ));
+          void loadReviewArtifacts();
+          scheduleReviewArtifactModalClose();
+          onComplete?.();
+        }
         setPhase(resolveTerminalStreamPhase<WritingPhase>({
           visibleArtifactStatus: activeReviewArtifactRef.current?.status ?? null,
           completedPhase: "completed",
@@ -1749,6 +1776,7 @@ export function WritingConversation({
     try {
       const run = requireApiData(await browserApi.POST("/api/v1/writing/runs", {
         body: {
+          clientRequestId: crypto.randomUUID(),
           novelId,
           chapterId,
           targetWordCount,
@@ -1758,8 +1786,8 @@ export function WritingConversation({
         },
       }));
       setTaskId(run.id);
-      const response = await openWritingRunEvents(run.id);
-      await processStream(response, { mode: "session", sessionId: sessionIdForRequest });
+      const response = await openWritingRunEvents(run.id, eventCursorsRef.current);
+      await processStream(run.id, response, { mode: "session", sessionId: sessionIdForRequest });
     } catch (err) {
       setError(err instanceof Error ? err.message : "未知错误");
       setPhase("error");
@@ -1808,14 +1836,26 @@ export function WritingConversation({
           "/api/v1/writing/runs/{task_id}/resume",
           {
             params: { path: { task_id: taskId } },
-            body: { writingSessionId: currentSessionId ?? null, userMessage: message },
+            body: {
+              clientRequestId: crypto.randomUUID(),
+              writingSessionId: currentSessionId ?? null,
+              userMessage: message,
+            },
             signal: controller.signal,
           },
         ));
-        const response = await openWritingRunEvents(accepted.taskId, controller.signal);
+        const response = await openWritingRunEvents(
+          accepted.taskId,
+          eventCursorsRef.current,
+          controller.signal,
+        );
         const sessionIdForRequest = currentSessionIdRef.current;
         if (!sessionIdForRequest) throw new Error("当前写作会话不存在");
-        await processStream(response, { mode: "session", sessionId: sessionIdForRequest });
+        await processStream(
+          accepted.taskId,
+          response,
+          { mode: "session", sessionId: sessionIdForRequest },
+        );
       } catch (err) {
         if ((err as Error).name === "AbortError") return;
         setError(err instanceof Error ? err.message : "发送失败");
@@ -1853,13 +1893,17 @@ export function WritingConversation({
     if (action.prompt) await runPromptAction(action.prompt);
   };
 
-  const processStream = async (response: Response, scope: StreamUiScope) => {
+  const processStream = async (
+    streamTaskId: string,
+    response: Response,
+    scope: StreamUiScope,
+  ) => {
     const reader = response.body?.getReader();
     if (!reader) throw new Error("写作事件流没有响应体");
 
     const decoder = new TextDecoder();
     let buffer = "";
-    const sseState = createSseState();
+    const sseState = eventCursorsRef.current.state(streamTaskId);
 
     while (true) {
       const { done, value } = await reader.read();
@@ -1872,6 +1916,7 @@ export function WritingConversation({
       for (const frame of frames) {
         const parsedFrame = parseSseFrame(`${frame}\n\n`, sseState);
         if (!parsedFrame) continue;
+        eventCursorsRef.current.update(streamTaskId, parsedFrame.id);
         const parsed = parsedFrame.data;
         const event = parseSseEvent(parsed, parsedFrame.event)
           || (normalizeSseEventData(parsed, parsedFrame.event) as ExtendedEvent);
@@ -1882,6 +1927,7 @@ export function WritingConversation({
     if (buffer.trim()) {
       const parsedFrame = parseSseFrame(`${buffer}\n\n`, sseState);
       if (parsedFrame) {
+        eventCursorsRef.current.update(streamTaskId, parsedFrame.id);
         const parsed = parsedFrame.data;
         handleEvent(
           parseSseEvent(parsed, parsedFrame.event)
@@ -1903,23 +1949,12 @@ export function WritingConversation({
   const handleAcceptContent = () => {
     const artifact = activeReviewArtifactRef.current;
     if (!artifact) return;
-
-    startTransition(async () => {
-      try {
-        const result = requireApiData(await browserApi.POST(
-          "/api/v1/review-artifacts/{artifact_id}/decision",
-          {
-            params: { path: { artifact_id: artifact.id } },
-            body: { decision: "approve" },
-          },
-        ));
-        addMessage({ role: "system", content: `内容已采纳，已写入 ${result.savedCount} 项变更` });
-        onComplete?.();
-        setPhase("completed");
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "采纳内容失败");
-      }
-    });
+    void handleArtifactDecision(
+      artifact,
+      "approve",
+      undefined,
+      generatedContent || undefined,
+    );
   };
 
   const handleChapterTargetDecision = async (decision: "current_chapter" | "next_chapter") => {
@@ -1933,16 +1968,24 @@ export function WritingConversation({
         {
           params: { path: { task_id: currentTaskId } },
           body: {
+            clientRequestId: crypto.randomUUID(),
             writingSessionId: currentSessionId ?? null,
             userMessage: decision === "current_chapter" ? "使用当前章节" : "新建下一章",
           },
         },
       ));
-      const response = await openWritingRunEvents(accepted.taskId);
+      const response = await openWritingRunEvents(
+        accepted.taskId,
+        eventCursorsRef.current,
+      );
 
       const sessionIdForRequest = currentSessionIdRef.current;
       if (!sessionIdForRequest) throw new Error("当前写作会话不存在");
-      await processStream(response, { mode: "session", sessionId: sessionIdForRequest });
+      await processStream(
+        accepted.taskId,
+        response,
+        { mode: "session", sessionId: sessionIdForRequest },
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "恢复写作目标确认失败");
       setPhase("error");
@@ -2515,13 +2558,13 @@ export function WritingConversation({
     );
   };
 
-  const handleArtifactDecision = async (
+  async function handleArtifactDecision(
     artifact: ReviewArtifactData,
     decision: ReviewArtifactDecision,
     userMessage?: string,
     editedContent?: string,
     selectedUpdateRefs?: AgentUpdateSelectionRef[]
-  ) => {
+  ) {
     const guarded = runSendAction(async () => {
       const currentUiTaskId = taskIdRef.current ?? taskId;
       const isVisibleSessionArtifact = activeReviewArtifactRef.current?.id === artifact.id;
@@ -2560,55 +2603,27 @@ export function WritingConversation({
         addOptimisticReviewArtifactDecision({ artifactId: artifact.id, decision });
       });
       try {
-        if (decision === "revise") {
-          const accepted = requireApiData(await browserApi.POST(
-            "/api/v1/writing/runs/{task_id}/resume",
-            {
-              params: { path: { task_id: currentTaskId } },
-              body: {
-                writingSessionId: currentTaskId === currentUiTaskId ? currentSessionId ?? null : null,
-                artifactId: artifact.id,
-                decision,
-                userMessage: userMessage ?? "继续修改待确认变更",
-              },
+        const accepted = requireApiData(await browserApi.POST(
+          "/api/v1/review-artifacts/{artifact_id}/decision",
+          {
+            params: { path: { artifact_id: artifact.id } },
+            body: {
+              clientRequestId: crypto.randomUUID(),
+              decision,
+              editedContent: decision === "approve" ? editedContent ?? null : null,
+              selectedUpdateRefs: decision === "approve" ? selectedUpdateRefs ?? null : null,
+              userMessage: userMessage ?? (decision === "revise" ? "继续修改待确认变更" : null),
             },
-          ));
-          const response = await openWritingRunEvents(accepted.taskId);
-          const streamScope: StreamUiScope = isCurrentSessionArtifact && currentSessionIdRef.current
-            ? { mode: "session", sessionId: currentSessionIdRef.current }
-            : { mode: "artifact", artifactId: artifact.id };
-          await processStream(response, streamScope);
-        } else {
-          requireApiData(await browserApi.POST(
-            "/api/v1/review-artifacts/{artifact_id}/decision",
-            {
-              params: { path: { artifact_id: artifact.id } },
-              body: {
-                decision,
-                editedContent: decision === "approve" ? editedContent ?? null : null,
-                selectedUpdateRefs: decision === "approve" ? selectedUpdateRefs ?? null : null,
-                userMessage: userMessage ?? null,
-              },
-            },
-          ));
-          updateReviewArtifactAction({
-            artifactId: artifact.id,
-            decision,
-            status: "succeeded",
-            message: getReviewArtifactActionMessage(decision, "succeeded"),
-          });
-          setActiveReviewArtifact(null);
-          setReviewArtifacts((previous) => previous.filter((item) => item.id !== artifact.id));
-          setMessages((previous) => clearReviewArtifactFromMessages(previous, artifact.id));
-          setPhase("completed");
-          addFlowLog({
-            type: "phase",
-            content: decision === "approve" ? "待确认变更已应用到正式库" : "已丢弃待确认变更",
-          });
-          await Promise.all([loadSessions(), loadReviewArtifacts()]);
-          onComplete?.();
-          scheduleReviewArtifactModalClose();
-        }
+          },
+        ));
+        const response = await openWritingRunEvents(
+          accepted.taskId,
+          eventCursorsRef.current,
+        );
+        const streamScope: StreamUiScope = isCurrentSessionArtifact && currentSessionIdRef.current
+          ? { mode: "session", sessionId: currentSessionIdRef.current }
+          : { mode: "artifact", artifactId: artifact.id };
+        await processStream(accepted.taskId, response, streamScope);
       } catch (err) {
         const message = err instanceof Error ? err.message : "处理待确认变更失败";
         updateReviewArtifactAction({
@@ -2625,7 +2640,7 @@ export function WritingConversation({
       }
     });
     await guarded;
-  };
+  }
 
   const getActivityRoundTitle = (round: ToolActivityRound) => {
     const completionStatus = round.completionStatus === "error" ? "error" : "done";

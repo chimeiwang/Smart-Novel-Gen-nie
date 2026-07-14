@@ -151,7 +151,7 @@ class FailureRepository:
     def __init__(self) -> None:
         self.code: str | None = None
 
-    async def fail(self, task_id: str, code: str) -> None:
+    async def fail_with_command(self, task_id: str, code: str) -> None:
         assert task_id == "task-1"
         self.code = code
 
@@ -204,13 +204,17 @@ class CompletionRepository:
     ) -> None:
         self.messages.append((task_id, role, content, event_type, agent_id))
 
-    async def complete(self, task_id: str, result: dict[str, object]) -> None:
+    async def complete_with_message_and_command(
+        self, task_id: str, result: dict[str, object], visible_response: str
+    ) -> None:
         self.completed = (task_id, result)
+        if visible_response:
+            self.messages.append((task_id, "agent", visible_response, "done", None))
 
     async def save_checkpoint(self, task_id: str, serialized: str, phase: str) -> None:
         raise AssertionError((task_id, serialized, phase))
 
-    async def fail(self, task_id: str, code: str) -> None:
+    async def fail_with_command(self, task_id: str, code: str) -> None:
         raise AssertionError((task_id, code))
 
 
@@ -241,3 +245,35 @@ async def test_completion_callback_persists_and_streams_visible_agent_response()
         "task-1",
         {"finalResponse": "这是本轮可见回复。"},
     )
+
+
+@pytest.mark.asyncio
+async def test_completed_event_is_appended_after_durable_state() -> None:
+    order: list[str] = []
+
+    class OrderedRepository(CompletionRepository):
+        async def complete_with_message_and_command(
+            self, task_id: str, result: dict[str, object], visible_response: str
+        ) -> None:
+            del task_id, result, visible_response
+            order.extend(["message", "task", "command"])
+
+    class OrderedEventStore(InMemoryWritingEventStore):
+        async def append_agent_event(self, *args, **kwargs):
+            order.append("event")
+            return await super().append_agent_event(*args, **kwargs)
+
+    service = WritingCallbackService(OrderedRepository(), OrderedEventStore())
+    await service.complete(
+        RunCompletionCallback(
+            protocolVersion="1.0",
+            eventId="event-1",
+            runId="run-1",
+            taskId="task-1",
+            sequence=1,
+            result={"finalResponse": "完成"},
+            occurredAt=datetime.now(UTC),
+        )
+    )
+
+    assert order == ["message", "task", "command", "event"]

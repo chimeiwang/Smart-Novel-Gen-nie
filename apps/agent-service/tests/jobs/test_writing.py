@@ -20,6 +20,7 @@ class CoreClient:
         self.checkpoints: list[tuple[int, dict[str, Any]]] = []
         self.completions: list[tuple[int, dict[str, Any]]] = []
         self.failures: list[dict[str, Any]] = []
+        self.operations: list[tuple[str, int]] = []
 
     async def call_tool(
         self, resource: object, agent_id: str, tool_name: str, arguments: object
@@ -35,12 +36,14 @@ class CoreClient:
         del resource
         self.events.append((sequence, event))
         self.event_payloads.append(data)
+        self.operations.append((event, sequence))
 
     async def save_checkpoint(
         self, resource: object, *, sequence: int, checkpoint: dict[str, Any]
     ) -> None:
         del resource
         self.checkpoints.append((sequence, checkpoint))
+        self.operations.append(("checkpoint", sequence))
 
     async def complete(self, resource: object, *, sequence: int, result: dict[str, Any]) -> None:
         del resource
@@ -215,7 +218,7 @@ async def test_writing_job_records_human_workflow_states() -> None:
 
 
 @pytest.mark.asyncio
-async def test_writing_job_emits_artifact_event_before_waiting_checkpoint() -> None:
+async def test_writing_job_persists_waiting_checkpoint_before_artifact_event() -> None:
     core = CoreClient(
         {
             "workspace": {},
@@ -247,14 +250,19 @@ async def test_writing_job_emits_artifact_event_before_waiting_checkpoint() -> N
 
     assert core.events == [
         (1, "agent_start"),
-        (2, "artifact_awaiting_user_approval"),
+        (3, "artifact_awaiting_user_approval"),
     ]
     assert core.event_payloads[1] == {
         "agentId": "写作",
         "artifactId": "artifact-1",
     }
-    assert core.checkpoints[0][0] == 3
+    assert core.checkpoints[0][0] == 2
     assert core.checkpoints[0][1]["eventSequence"] == 3
+    assert core.operations == [
+        ("agent_start", 1),
+        ("checkpoint", 2),
+        ("artifact_awaiting_user_approval", 3),
+    ]
     assert core.completions == []
 
 
@@ -296,7 +304,7 @@ async def test_writing_job_recovers_waiting_state_from_nested_graph_interrupt() 
 
     assert core.events == [
         (1, "agent_start"),
-        (2, "artifact_awaiting_user_approval"),
+        (3, "artifact_awaiting_user_approval"),
     ]
     assert core.checkpoints[0][1]["phase"] == "awaiting_user_review"
     assert core.checkpoints[0][1]["activeArtifactId"] == "artifact-1"

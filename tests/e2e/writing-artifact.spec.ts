@@ -52,6 +52,18 @@ test("模拟模型可以完成写作会话和草案应用", async ({ page }) => 
     const chapters = workspace.chapters as Array<{ id: string; content: string }>;
     return chapters.find((chapter) => chapter.id === identity.chapterId)?.content;
   }, { timeout: 30_000 }).toContain("模拟模型生成的完整章节正文");
+
+  await page.reload();
+  const completedSessionResponse = await page.request.get(
+    `/api/v1/writing/sessions/${sessions[0].id}`,
+  );
+  expect(completedSessionResponse.ok()).toBe(true);
+  const completedSession = (await completedSessionResponse.json()) as {
+    currentTask: null;
+    lastTask: { phase: string } | null;
+  };
+  expect(completedSession.currentTask).toBeNull();
+  expect(completedSession.lastTask?.phase).toBe("completed");
 });
 
 test("用户可以丢弃待确认草案", async ({ page }) => {
@@ -64,6 +76,19 @@ test("用户可以丢弃待确认草案", async ({ page }) => {
   });
   await page.getByRole("button", { name: "丢弃变更" }).first().click();
   await expect(page.getByRole("button", { name: "待确认 0" })).toBeVisible();
+
+  await page.reload();
+  const sessionsResponse = await page.request.get(
+    `/api/v1/writing/sessions?novelId=${identity.novelId}&chapterId=${identity.chapterId}`,
+  );
+  const sessions = (await sessionsResponse.json()) as Array<{ id: string }>;
+  const sessionResponse = await page.request.get(`/api/v1/writing/sessions/${sessions[0].id}`);
+  const session = (await sessionResponse.json()) as {
+    currentTask: null;
+    lastTask: { phase: string } | null;
+  };
+  expect(session.currentTask).toBeNull();
+  expect(session.lastTask?.phase).toBe("completed");
 
   const workspace = await readWorkspace(page, identity.novelId);
   const chapters = workspace.chapters as Array<{ id: string; content: string }>;
