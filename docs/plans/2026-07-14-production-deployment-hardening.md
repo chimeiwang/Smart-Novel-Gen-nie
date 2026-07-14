@@ -80,7 +80,7 @@ git commit -m "安全：严格校验生产 SSH 主机身份"
 - Modify: `tests/architecture/test_deploy_scripts.py`
 - Create: `tests/architecture/fixtures/fake_docker.sh`
 
-- [ ] **Step 1: 写镜像捕获失败测试**
+- [x] **Step 1: 写镜像捕获失败测试**
 
 shell 夹具模拟 `docker ps --filter label=com.docker.compose.project=inkforge --filter label=com.docker.compose.service=web`（以及另外两个服务）和 `docker inspect`。覆盖：
 
@@ -92,17 +92,17 @@ shell 夹具模拟 `docker ps --filter label=com.docker.compose.project=inkforge
 
 测试不得依赖真实 Docker daemon。
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
 Run: `uv run pytest tests/architecture/test_deploy_scripts.py -q -k "previous or image or first"`
 
-- [ ] **Step 3: 实现只读镜像发现函数**
+- [x] **Step 3: 实现只读镜像发现函数**
 
 脚本通过 Compose project/service label 查找容器 ID，再用 `.Config.Image` 读取完整镜像名。解析 web、core-api、agent-service 的 `${repository}:${tag}`，只接受三者都有且 tag 相同的状态。
 
 首次部署定义为三个服务都没有容器；不能把“部分缺失”猜成首次部署。发现旧 tag 后逐一 `docker image inspect` 验证旧镜像仍存在。
 
-- [ ] **Step 4: 保持切换前无副作用**
+- [x] **Step 4: 保持切换前无副作用**
 
 在旧状态验证完成前，不得修改 `.env`、启动/停止容器、删除镜像或调用 compose。输出只包含服务名/tag/错误码，不输出环境文件内容。
 
@@ -113,7 +113,7 @@ Run: `uv run pytest tests/architecture/test_deploy_scripts.py -q -k "previous or
 - Modify: `tests/architecture/test_deploy_scripts.py`
 - Modify: `tests/architecture/fixtures/fake_docker.sh`
 
-- [ ] **Step 1: 写成功回滚故障注入测试**
+- [x] **Step 1: 写成功回滚故障注入测试**
 
 Fake docker 让新 tag 的第一次 `docker compose up --no-build -d --wait` 返回非零，旧 tag 的第二次调用成功。断言：
 
@@ -122,22 +122,22 @@ Fake docker 让新 tag 的第一次 `docker compose up --no-build -d --wait` 返
 - 脚本最终仍返回非零；
 - 日志包含“新版本失败、旧版本已恢复”，不报告部署成功。
 
-- [ ] **Step 2: 写回滚也失败的测试**
+- [x] **Step 2: 写回滚也失败的测试**
 
 让两次 compose up 都失败，断言新部署错误和回滚错误都可见、最终非零，并且没有 `down -v`、现场 build、数据库迁移、卷删除或 `.env` 重写。
 
-- [ ] **Step 3: 运行测试并确认 RED**
+- [x] **Step 3: 运行测试并确认 RED**
 
 Run: `uv run pytest tests/architecture/test_deploy_scripts.py -q -k rollback`
 
-- [ ] **Step 4: 实现保留原错误的 trap**
+- [x] **Step 4: 实现保留原错误的 trap**
 
-在新版本 `compose up` 前注册 `trap 'rollback "$?"' ERR`。rollback 立即保存原退出码并临时关闭递归 trap：
+在新版本 `compose up` 前注册失败 trap。由于部署脚本承诺兼容 POSIX `/bin/sh`，而 `ERR` 不是 POSIX 信号，实际使用仅覆盖版本切换区间的 `EXIT` trap，并在成功后解除。rollback 立即保存原退出码并临时关闭递归 trap：
 
 ```sh
 rollback() {
   original_status="$1"
-  trap - ERR
+  trap - EXIT
   set +e
   export INKFORGE_IMAGE_TAG="$previous_tag"
   docker compose -f "$COMPOSE_FILE" up --no-build -d --wait
@@ -154,11 +154,11 @@ rollback() {
 
 回滚成功也必须以原失败码退出。首次部署没有 previous tag 时只报告新版本失败，不伪造回滚。
 
-- [ ] **Step 5: 成功路径解除 trap**
+- [x] **Step 5: 成功路径解除 trap**
 
-新版本 compose health、只读 schema 指纹和 smoke 全部成功后才 `trap - ERR` 并报告完成。smoke 中任何失败都触发同一回滚。
+新版本 compose health、只读 schema 指纹和 smoke 全部成功后才 `trap - EXIT` 并报告完成。smoke 中任何失败都触发同一回滚。
 
-- [ ] **Step 6: 验证并提交自动回滚**
+- [x] **Step 6: 验证并提交自动回滚**
 
 Run: `uv run pytest tests/architecture/test_deploy_scripts.py -q`
 

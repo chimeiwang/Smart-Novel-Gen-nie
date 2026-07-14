@@ -8,8 +8,26 @@ DEPLOY_SHA="${DEPLOY_SHA:?必须设置部署提交}"
 INKFORGE_IMAGE_TAG="${INKFORGE_IMAGE_TAG:?必须设置镜像标签}"
 compose_file="infra/compose.yaml"
 
+compose() {
+  docker compose --env-file .env -f "$compose_file" "$@"
+}
+
+find_service_container() {
+  service="$1"
+  docker ps -q \
+    --filter "label=com.docker.compose.project=inkforge" \
+    --filter "label=com.docker.compose.service=$service" \
+    | head -n 1
+}
+
+verify_stack() {
+  compose ps
+  compose exec -T core-api python -c \
+    'import asyncio, os; from inkforge_core.db.schema_guard import verify_live_schema; from inkforge_core.db.session import SCHEMA_CONTRACT_PATH; result = asyncio.run(verify_live_schema(os.environ["DATABASE_URL"], SCHEMA_CONTRACT_PATH)); print(result.fingerprint); raise SystemExit(0 if result.ready else 1)'
+  COMPOSE_ENV_FILE=.env COMPOSE_OVERRIDE_FILE= sh scripts/compose_smoke.sh
+}
+
 command -v docker >/dev/null 2>&1 || { echo "缺少 docker 命令" >&2; exit 1; }
-docker compose version >/dev/null 2>&1 || { echo "缺少 docker compose" >&2; exit 1; }
 command -v git >/dev/null 2>&1 || { echo "缺少 git 命令" >&2; exit 1; }
 
 mkdir -p "$APP_DIR"
@@ -81,8 +99,88 @@ do
   docker image inspect "$image" >/dev/null 2>&1 || { echo "缺少预构建镜像：$image" >&2; exit 1; }
 done
 
+web_container="$(find_service_container web)"
+core_container="$(find_service_container core-api)"
+agent_container="$(find_service_container agent-service)"
+
+existing_service_count="0"
+[ -n "$web_container" ] && existing_service_count=$((existing_service_count + 1))
+[ -n "$core_container" ] && existing_service_count=$((existing_service_count + 1))
+[ -n "$agent_container" ] && existing_service_count=$((existing_service_count + 1))
+
+previous_tag=""
+if [ "$existing_service_count" -eq 0 ]; then
+  echo "未发现现有生产容器，本次按首次部署处理"
+elif [ "$existing_service_count" -ne 3 ]; then
+  echo "现有生产服务不完整，停止部署并等待人工检查" >&2
+  exit 1
+else
+  web_image="$(docker inspect --format '{{.Config.Image}}' "$web_container")"
+  core_image="$(docker inspect --format '{{.Config.Image}}' "$core_container")"
+  agent_image="$(docker inspect --format '{{.Config.Image}}' "$agent_container")"
+
+  case "$web_image" in
+    inkforge-web:*) web_tag="${web_image#inkforge-web:}" ;;
+    *) echo "web 容器镜像仓库不符合生产约定" >&2; exit 1 ;;
+  esac
+  case "$core_image" in
+    inkforge-core-api:*) core_tag="${core_image#inkforge-core-api:}" ;;
+    *) echo "core-api 容器镜像仓库不符合生产约定" >&2; exit 1 ;;
+  esac
+  case "$agent_image" in
+    inkforge-agent-service:*) agent_tag="${agent_image#inkforge-agent-service:}" ;;
+    *) echo "agent-service 容器镜像仓库不符合生产约定" >&2; exit 1 ;;
+  esac
+
+  [ -n "$web_tag" ] && [ "$web_tag" = "$core_tag" ] && [ "$web_tag" = "$agent_tag" ] || {
+    echo "现有生产服务镜像标签不一致，停止部署并等待人工检查" >&2
+    exit 1
+  }
+  for image in "$web_image" "$core_image" "$agent_image"
+  do
+    docker image inspect "$image" >/dev/null 2>&1 || {
+      echo "现有生产镜像已缺失，无法保证自动回滚：$image" >&2
+      exit 1
+    }
+  done
+  previous_tag="$web_tag"
+  echo "已确认可回滚的上一生产镜像标签：$previous_tag"
+fi
+
+docker compose version >/dev/null 2>&1 || { echo "缺少 docker compose" >&2; exit 1; }
 export INKFORGE_IMAGE_TAG
-docker compose --env-file .env -f "$compose_file" config >/dev/null
-docker compose --env-file .env -f "$compose_file" up --no-build -d --wait
-docker compose --env-file .env -f "$compose_file" ps
+compose config >/dev/null
+
+rollback() {
+  original_status="$1"
+  trap - EXIT
+  set +e
+  echo "新版本部署失败（退出码：$original_status）" >&2
+
+  if [ -z "$previous_tag" ]; then
+    echo "本次为首次部署，没有可自动恢复的上一版本" >&2
+    exit "$original_status"
+  fi
+
+  INKFORGE_IMAGE_TAG="$previous_tag"
+  export INKFORGE_IMAGE_TAG
+  compose up --no-build -d --wait
+  rollback_status="$?"
+  if [ "$rollback_status" -eq 0 ]; then
+    verify_stack
+    rollback_status="$?"
+  fi
+
+  if [ "$rollback_status" -eq 0 ]; then
+    echo "新版本部署失败，旧版本已恢复"
+  else
+    echo "新版本部署失败，自动回滚也失败（退出码：$rollback_status）" >&2
+  fi
+  exit "$original_status"
+}
+
+trap 'rollback "$?"' EXIT
+compose up --no-build -d --wait
+verify_stack
+trap - EXIT
 echo "生产编排已启动"
