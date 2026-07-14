@@ -92,9 +92,14 @@ async def test_writing_job_id_is_stable_per_checkpoint_and_changes_on_resume() -
     captured: list[object] = []
 
     class Client:
-        async def submit(self, request: object) -> object:
+        async def submit(self, request: AgentJobRequest) -> AgentJobAccepted:
             captured.append(request)
-            return object()
+            return AgentJobAccepted(
+                jobId=request.jobId,
+                runId=request.runId,
+                taskId=request.taskId,
+                status="queued",
+            )
 
     submitter = WritingTaskAgentSubmitter(Client())  # type: ignore[arg-type]
     base = TaskRecord(
@@ -120,9 +125,14 @@ async def test_writing_command_uses_command_id_as_job_id() -> None:
     captured: list[object] = []
 
     class Client:
-        async def submit(self, request: object) -> object:
+        async def submit(self, request: AgentJobRequest) -> AgentJobAccepted:
             captured.append(request)
-            return object()
+            return AgentJobAccepted(
+                jobId=request.jobId,
+                runId=request.runId,
+                taskId=request.taskId,
+                status="completed",
+            )
 
     submitter = WritingTaskAgentSubmitter(Client())  # type: ignore[arg-type]
     task = TaskRecord(
@@ -143,10 +153,11 @@ async def test_writing_command_uses_command_id_as_job_id() -> None:
         attempt_count=0,
     )
 
-    await submitter.submit_command(command)
+    status = await submitter.submit_command(command)
 
     assert captured[0].jobId == "command-stable"
     assert captured[0].payload == command.payload
+    assert status == "completed"
 
 
 @pytest.mark.asyncio

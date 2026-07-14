@@ -106,24 +106,24 @@ class WritingTaskAgentSubmitter:
         *,
         resume: bool,
         resume_input: dict[str, object] | None = None,
-    ) -> None:
-        await self._submit(
+    ) -> AgentJobStatus:
+        return await self._submit(
             task,
             resume=resume,
             force=False,
             resume_input=resume_input,
         )
 
-    async def reconcile(self, task: TaskRecord) -> None:
-        await self._submit(
+    async def reconcile(self, task: TaskRecord) -> AgentJobStatus:
+        return await self._submit(
             task,
             resume=task.graph_state_json is not None,
             force=True,
             resume_input=None,
         )
 
-    async def submit_command(self, command: WritingCommandRecord) -> None:
-        await self._client.submit(
+    async def submit_command(self, command: WritingCommandRecord) -> AgentJobStatus:
+        accepted = await self._client.submit(
             AgentJobRequest(
                 protocolVersion="1.0",
                 jobId=command.id,
@@ -136,6 +136,7 @@ class WritingTaskAgentSubmitter:
                 payload=cast(dict[str, JsonValue], command.payload),
             )
         )
+        return accepted.status
 
     async def _submit(
         self,
@@ -144,8 +145,8 @@ class WritingTaskAgentSubmitter:
         resume: bool,
         force: bool,
         resume_input: dict[str, object] | None,
-    ) -> None:
-        await self._client.submit(
+    ) -> AgentJobStatus:
+        accepted = await self._client.submit(
             AgentJobRequest(
                 protocolVersion="1.0",
                 jobId=build_writing_job_id(
@@ -168,6 +169,7 @@ class WritingTaskAgentSubmitter:
                 force=force,
             )
         )
+        return accepted.status
 
 
 class QualityAgentSubmitter:

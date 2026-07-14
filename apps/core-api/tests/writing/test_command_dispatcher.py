@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import datetime
 
 import pytest
+from inkforge_contracts.jobs import AgentJobStatus
 from inkforge_core.writing.command_dispatcher import WritingRunCommandDispatcher
 from inkforge_core.writing.commands import WritingCommandRecord
 from inkforge_core.writing.records import TaskRecord
@@ -31,14 +33,28 @@ class Repository:
     def __init__(self, commands: list[WritingCommandRecord]) -> None:
         self.commands = commands
         self.submitted_ids: list[str] = []
+        self.terminal_ids: list[tuple[str, AgentJobStatus]] = []
         self.failed_attempts: list[tuple[str, str]] = []
 
-    async def claim_due(self, limit: int) -> list[WritingCommandRecord]:
+    async def claim_due(
+        self,
+        limit: int,
+        active_stale_before: datetime,
+    ) -> list[WritingCommandRecord]:
+        del active_stale_before
         return self.commands[:limit]
 
-    async def mark_submitted(self, command_id: str) -> WritingCommandRecord:
+    async def mark_agent_active(self, command_id: str) -> WritingCommandRecord:
         self.submitted_ids.append(command_id)
         return replace(self.commands[0], status="submitted")
+
+    async def settle_dispatch_terminal(
+        self,
+        command_id: str,
+        agent_status: AgentJobStatus,
+    ) -> WritingCommandRecord:
+        self.terminal_ids.append((command_id, agent_status))
+        return replace(self.commands[0], status="failed")
 
     async def record_dispatch_failure(
         self, command_id: str, error_code: str
@@ -48,11 +64,16 @@ class Repository:
 
 
 class RecordingSubmitter:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        statuses: dict[str, AgentJobStatus] | None = None,
+    ) -> None:
         self.job_ids: list[str] = []
+        self.statuses = statuses or {}
 
-    async def submit_command(self, value: WritingCommandRecord) -> None:
+    async def submit_command(self, value: WritingCommandRecord) -> AgentJobStatus:
         self.job_ids.append(value.id)
+        return self.statuses.get(value.id, "queued")
 
 
 @pytest.mark.asyncio
@@ -60,7 +81,7 @@ async def test_dispatch_failure_keeps_command_pending() -> None:
     repository = Repository([command()])
 
     class FailingSubmitter:
-        async def submit_command(self, value: WritingCommandRecord) -> None:
+        async def submit_command(self, value: WritingCommandRecord) -> AgentJobStatus:
             del value
             raise RuntimeError("Redis 暂时不可用，且这段详情不能持久化")
 
@@ -84,14 +105,27 @@ async def test_dispatch_uses_command_id_as_stable_job_id() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["completed", "failed", "cancelled"])
+async def test_dispatch_converges_existing_terminal_job(status: AgentJobStatus) -> None:
+    repository = Repository([command("command-terminal")])
+    submitter = RecordingSubmitter({"command-terminal": status})
+
+    completed = await WritingRunCommandDispatcher(repository, submitter).run_once()
+
+    assert completed == 1
+    assert repository.submitted_ids == []
+    assert repository.terminal_ids == [("command-terminal", status)]
+
+
+@pytest.mark.asyncio
 async def test_dispatch_continues_after_one_command_fails() -> None:
     repository = Repository([command("bad"), command("good")])
 
     class PartialSubmitter(RecordingSubmitter):
-        async def submit_command(self, value: WritingCommandRecord) -> None:
+        async def submit_command(self, value: WritingCommandRecord) -> AgentJobStatus:
             if value.id == "bad":
                 raise TimeoutError
-            await super().submit_command(value)
+            return await super().submit_command(value)
 
     submitter = PartialSubmitter()
     dispatcher = WritingRunCommandDispatcher(repository, submitter)

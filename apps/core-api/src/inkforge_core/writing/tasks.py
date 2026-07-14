@@ -10,6 +10,7 @@ from inkforge_contracts.events import (
     RunCompletionCallback,
     RunFailureCallback,
 )
+from inkforge_contracts.jobs import AgentJobStatus
 from sqlalchemy import exists, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -140,6 +141,42 @@ class WritingTaskRepository:
             ).all()
         return [_task_record(task, cast(str, owner_id)) for task, owner_id in rows]
 
+    async def settle_reconciliation_terminal(
+        self,
+        expected: TaskRecord,
+        agent_status: AgentJobStatus,
+    ) -> None:
+        if agent_status in {"queued", "running"}:
+            raise ValueError("活动 Agent job 不能按终态收敛")
+        async with self._session_factory() as session:
+            async with session.begin():
+                task = await session.get(
+                    WritingTask,
+                    expected.id,
+                    with_for_update=True,
+                )
+                if (
+                    task is None
+                    or task.phase != expected.phase
+                    or task.graphStateJson != expected.graph_state_json
+                    or task.phase not in LEGACY_RECONCILABLE_PHASES
+                ):
+                    return
+                active_command_id = await session.scalar(
+                    select(WritingRunCommand.id).where(
+                        WritingRunCommand.taskId == task.id,
+                        WritingRunCommand.status.in_(
+                            ("pending", "submitted", "processing")
+                        ),
+                    )
+                )
+                if active_command_id is not None:
+                    return
+                mark_task_failed_state(
+                    task,
+                    f"AGENT_JOB_TERMINAL_{agent_status.upper()}",
+                )
+
     async def save_checkpoint(self, task_id: str, serialized: str, phase: str) -> None:
         async with self._session_factory() as session:
             async with session.begin():
@@ -245,20 +282,7 @@ class WritingTaskRepository:
                 task = await session.get(WritingTask, task_id, with_for_update=True)
                 if task is None:
                     return
-                if task.phase not in TERMINAL_TASK_PHASES:
-                    snapshot: dict[str, Any] = {}
-                    if task.graphStateJson:
-                        try:
-                            value = json.loads(task.graphStateJson)
-                            if isinstance(value, dict):
-                                snapshot = value
-                        except json.JSONDecodeError:
-                            snapshot = {}
-                    if snapshot:
-                        snapshot["errorMessage"] = f"智能体运行失败：{code}"
-                        task.graphStateJson = json.dumps(snapshot, ensure_ascii=False)
-                    task.phase = "error"
-                    task.updatedAt = utc_now()
+                mark_task_failed_state(task, code)
                 await _transition_active_command(
                     session,
                     task_id,
@@ -485,6 +509,24 @@ async def _transition_active_command(
             sort_keys=True,
             separators=(",", ":"),
         )
+
+
+def mark_task_failed_state(task: WritingTask, code: str) -> None:
+    if task.phase in TERMINAL_TASK_PHASES:
+        return
+    snapshot: dict[str, Any] = {}
+    if task.graphStateJson:
+        try:
+            value = json.loads(task.graphStateJson)
+            if isinstance(value, dict):
+                snapshot = value
+        except json.JSONDecodeError:
+            snapshot = {}
+    if snapshot:
+        snapshot["errorMessage"] = f"智能体运行失败：{code}"
+        task.graphStateJson = json.dumps(snapshot, ensure_ascii=False)
+    task.phase = "error"
+    task.updatedAt = utc_now()
 
 
 def _task_record(task: WritingTask, user_id: str) -> TaskRecord:

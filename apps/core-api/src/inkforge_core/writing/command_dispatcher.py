@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
+
+from inkforge_contracts.jobs import AgentJobStatus
 
 from .commands import WritingCommandRecord
 
@@ -10,9 +13,19 @@ logger = logging.getLogger(__name__)
 
 
 class CommandDispatchRepository(Protocol):
-    async def claim_due(self, limit: int) -> list[WritingCommandRecord]: ...
+    async def claim_due(
+        self,
+        limit: int,
+        active_stale_before: datetime,
+    ) -> list[WritingCommandRecord]: ...
 
-    async def mark_submitted(self, command_id: str) -> WritingCommandRecord: ...
+    async def mark_agent_active(self, command_id: str) -> WritingCommandRecord: ...
+
+    async def settle_dispatch_terminal(
+        self,
+        command_id: str,
+        agent_status: AgentJobStatus,
+    ) -> WritingCommandRecord: ...
 
     async def record_dispatch_failure(
         self, command_id: str, error_code: str
@@ -20,7 +33,9 @@ class CommandDispatchRepository(Protocol):
 
 
 class CommandSubmitter(Protocol):
-    async def submit_command(self, command: WritingCommandRecord) -> None: ...
+    async def submit_command(
+        self, command: WritingCommandRecord
+    ) -> AgentJobStatus: ...
 
 
 class WritingRunCommandDispatcher:
@@ -31,13 +46,19 @@ class WritingRunCommandDispatcher:
         *,
         batch_size: int = 20,
         interval_seconds: float = 2,
+        active_stale_after: timedelta = timedelta(minutes=10),
     ) -> None:
-        if batch_size < 1 or interval_seconds <= 0:
+        if (
+            batch_size < 1
+            or interval_seconds <= 0
+            or active_stale_after <= timedelta(0)
+        ):
             raise ValueError("写作命令投递配置无效")
         self._repository = repository
         self._submitter = submitter
         self._batch_size = batch_size
         self._interval_seconds = interval_seconds
+        self._active_stale_after = active_stale_after
         self._stop = asyncio.Event()
 
     def request_stop(self) -> None:
@@ -45,11 +66,23 @@ class WritingRunCommandDispatcher:
 
     async def run_once(self) -> int:
         completed = 0
-        commands = await self._repository.claim_due(self._batch_size)
+        active_stale_before = (
+            datetime.now(UTC).replace(tzinfo=None) - self._active_stale_after
+        )
+        commands = await self._repository.claim_due(
+            self._batch_size,
+            active_stale_before,
+        )
         for command in commands:
             try:
-                await self._submitter.submit_command(command)
-                await self._repository.mark_submitted(command.id)
+                agent_status = await self._submitter.submit_command(command)
+                if agent_status in {"queued", "running"}:
+                    await self._repository.mark_agent_active(command.id)
+                else:
+                    await self._repository.settle_dispatch_terminal(
+                        command.id,
+                        agent_status,
+                    )
                 completed += 1
             except Exception as exc:
                 error_code = type(exc).__name__

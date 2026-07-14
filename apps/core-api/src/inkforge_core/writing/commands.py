@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any, Literal, cast
 
-from sqlalchemy import select
+from inkforge_contracts.jobs import AgentJobStatus
+from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -28,6 +29,7 @@ from .schemas import (
     StartWritingRunRequest,
     WritingRunResponse,
 )
+from .tasks import mark_task_failed_state
 
 WritingCommandKind = Literal["start", "resume", "artifact_decision"]
 WritingCommandStatus = Literal["pending", "submitted", "processing", "succeeded", "failed"]
@@ -330,7 +332,11 @@ class WritingRunCommandRepository:
             return _run_response(task, command)
         return _resume_response(command)
 
-    async def claim_due(self, limit: int) -> list[WritingCommandRecord]:
+    async def claim_due(
+        self,
+        limit: int,
+        active_stale_before: datetime,
+    ) -> list[WritingCommandRecord]:
         if limit < 1:
             raise ValueError("命令领取数量必须大于零")
         now = utc_now()
@@ -342,8 +348,19 @@ class WritingRunCommandRepository:
                         .join(WritingTask, WritingTask.id == WritingRunCommand.taskId)
                         .join(Novel, Novel.id == WritingTask.novelId)
                         .where(
-                            WritingRunCommand.status == "pending",
-                            WritingRunCommand.nextAttemptAt <= now,
+                            or_(
+                                and_(
+                                    WritingRunCommand.status == "pending",
+                                    WritingRunCommand.nextAttemptAt <= now,
+                                ),
+                                and_(
+                                    WritingRunCommand.status.in_(
+                                        ("submitted", "processing")
+                                    ),
+                                    WritingRunCommand.updatedAt
+                                    <= active_stale_before,
+                                ),
+                            ),
                             Novel.userId.is_not(None),
                         )
                         .order_by(
@@ -360,8 +377,80 @@ class WritingRunCommandRepository:
                     for command, task, owner_id in rows
                 ]
 
+    async def mark_agent_active(self, command_id: str) -> WritingCommandRecord:
+        async with self._session_factory() as session:
+            async with session.begin():
+                row = await self._get_by_id(session, command_id, for_update=True)
+                if row is None:
+                    raise ApiError(
+                        status_code=404,
+                        code="WRITING_COMMAND_NOT_FOUND",
+                        message="写作命令不存在",
+                    )
+                command, task, owner_id = row
+                if command.status in TERMINAL_COMMAND_STATUSES:
+                    return _command_record(command, task, owner_id)
+                now = utc_now()
+                if command.status == "pending":
+                    command.status = "submitted"
+                    command.submittedAt = command.submittedAt or now
+                command.lastError = None
+                command.updatedAt = now
+                await session.flush()
+                return _command_record(command, task, owner_id)
+
+    async def settle_dispatch_terminal(
+        self,
+        command_id: str,
+        agent_status: AgentJobStatus,
+    ) -> WritingCommandRecord:
+        if agent_status in {"queued", "running"}:
+            raise ValueError("活动 Agent job 不能按终态收敛")
+        async with self._session_factory() as session:
+            async with session.begin():
+                task_locked_row = await self._get_by_id(
+                    session,
+                    command_id,
+                    for_update=True,
+                    lock_task=True,
+                )
+                if task_locked_row is None:
+                    raise ApiError(
+                        status_code=404,
+                        code="WRITING_COMMAND_NOT_FOUND",
+                        message="写作命令不存在",
+                    )
+                row = await self._get_by_id(
+                    session,
+                    command_id,
+                    for_update=True,
+                )
+                if row is None:
+                    raise ApiError(
+                        status_code=404,
+                        code="WRITING_COMMAND_NOT_FOUND",
+                        message="写作命令不存在",
+                    )
+                command, task, owner_id = row
+                if command.status in TERMINAL_COMMAND_STATUSES:
+                    return _command_record(command, task, owner_id)
+                code = f"AGENT_JOB_TERMINAL_{agent_status.upper()}"
+                now = utc_now()
+                command.status = "succeeded" if task.phase == "completed" else "failed"
+                command.completedAt = now
+                command.updatedAt = now
+                command.lastError = None if task.phase == "completed" else code
+                if command.resultJson is None:
+                    command.resultJson = _dump_json(
+                        {"code": code, "agentStatus": agent_status}
+                    )
+                if task.phase not in {"completed", "error"}:
+                    mark_task_failed_state(task, code)
+                await session.flush()
+                return _command_record(command, task, owner_id)
+
     async def mark_submitted(self, command_id: str) -> WritingCommandRecord:
-        return await self._transition(command_id, "submitted")
+        return await self.mark_agent_active(command_id)
 
     async def mark_processing(self, command_id: str) -> WritingCommandRecord:
         return await self._transition(command_id, "processing")
@@ -389,7 +478,7 @@ class WritingRunCommandRepository:
                         message="写作命令不存在",
                     )
                 command, task, owner_id = row
-                if command.status != "pending":
+                if command.status in TERMINAL_COMMAND_STATUSES:
                     return _command_record(command, task, owner_id)
                 attempt_count = command.attemptCount + 1
                 delay_seconds = min(60, 2**attempt_count)
@@ -454,7 +543,12 @@ class WritingRunCommandRepository:
         return cast(tuple[WritingRunCommand, WritingTask, str] | None, row)
 
     async def _get_by_id(
-        self, session: AsyncSession, command_id: str, *, for_update: bool
+        self,
+        session: AsyncSession,
+        command_id: str,
+        *,
+        for_update: bool,
+        lock_task: bool = False,
     ) -> tuple[WritingRunCommand, WritingTask, str] | None:
         statement = (
             select(WritingRunCommand, WritingTask, Novel.userId)
@@ -463,7 +557,9 @@ class WritingRunCommandRepository:
             .where(WritingRunCommand.id == command_id)
         )
         if for_update:
-            statement = statement.with_for_update(of=WritingRunCommand)
+            statement = statement.with_for_update(
+                of=WritingTask if lock_task else WritingRunCommand
+            )
         row = (await session.execute(statement)).one_or_none()
         return cast(tuple[WritingRunCommand, WritingTask, str] | None, row)
 

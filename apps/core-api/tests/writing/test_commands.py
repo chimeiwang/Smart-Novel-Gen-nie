@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -178,13 +179,105 @@ async def test_claim_due_uses_skip_locked_and_returns_task_context() -> None:
         SessionFactory([session])
     )
 
-    records = await repository.claim_due(limit=10)
+    stale_before = utc_now() - timedelta(minutes=10)
+    records = await repository.claim_due(
+        limit=10,
+        active_stale_before=stale_before,
+    )
 
     assert [record.id for record in records] == ["command-1"]
     assert records[0].task.user_id == "user-1"
     rendered = str(session.statements[0].compile(dialect=postgresql.dialect()))
     assert "FOR UPDATE" in rendered
     assert "SKIP LOCKED" in rendered
+    params = session.statements[0].compile(dialect=postgresql.dialect()).params
+    assert any(
+        isinstance(value, list) and set(value) == {"submitted", "processing"}
+        for value in params.values()
+    )
+    assert stale_before in params.values()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["pending", "submitted", "processing"])
+async def test_agent_terminal_settles_active_command_and_task(status: str) -> None:
+    model = command(status=status)
+    owned_task = task()
+    owned_task.graphStateJson = '{"phase":"active"}'
+    row = (model, owned_task, "user-1")
+    session = CommandSession([RowResult(row), RowResult(row)])
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    record = await repository.settle_dispatch_terminal("command-1", "failed")
+
+    assert record.status == "failed"
+    assert model.lastError == "AGENT_JOB_TERMINAL_FAILED"
+    assert owned_task.phase == "error"
+    assert json.loads(owned_task.graphStateJson or "{}")["errorMessage"] == (
+        "智能体运行失败：AGENT_JOB_TERMINAL_FAILED"
+    )
+    rendered = [
+        str(statement.compile(dialect=postgresql.dialect()))
+        for statement in session.statements
+    ]
+    assert 'FOR UPDATE OF "WritingTask"' in rendered[0]
+    assert 'FOR UPDATE OF "WritingRunCommand"' in rendered[1]
+
+
+@pytest.mark.asyncio
+async def test_agent_terminal_does_not_overwrite_succeeded_command_or_completed_task() -> None:
+    model = command(status="succeeded")
+    owned_task = task()
+    owned_task.phase = "completed"
+    row = (model, owned_task, "user-1")
+    session = CommandSession([RowResult(row), RowResult(row)])
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    record = await repository.settle_dispatch_terminal("command-1", "failed")
+
+    assert record.status == "succeeded"
+    assert owned_task.phase == "completed"
+
+
+@pytest.mark.asyncio
+async def test_agent_terminal_closes_active_command_for_completed_task() -> None:
+    model = command(status="processing")
+    owned_task = task()
+    owned_task.phase = "completed"
+    row = (model, owned_task, "user-1")
+    session = CommandSession([RowResult(row), RowResult(row)])
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    record = await repository.settle_dispatch_terminal("command-1", "failed")
+
+    assert record.status == "succeeded"
+    assert model.lastError is None
+    assert owned_task.phase == "completed"
+
+
+@pytest.mark.asyncio
+async def test_agent_terminal_preserves_artifact_decision_idempotency_result() -> None:
+    model = command(status="submitted")
+    model.kind = "artifact_decision"
+    model.resultJson = '{"artifactId":"artifact-1","accepted":true}'
+    owned_task = task()
+    row = (model, owned_task, "user-1")
+    session = CommandSession([RowResult(row), RowResult(row)])
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    record = await repository.settle_dispatch_terminal("command-1", "cancelled")
+
+    assert record.status == "failed"
+    assert record.result == {"artifactId": "artifact-1", "accepted": True}
+    assert model.resultJson == '{"artifactId":"artifact-1","accepted":true}'
 
 
 @pytest.mark.asyncio
@@ -231,6 +324,26 @@ async def test_dispatch_failure_records_only_error_code_and_backs_off() -> None:
     assert model.lastError == "AgentRunSubmitFailed"
     assert model.nextAttemptAt > previous_attempt
     assert model.nextAttemptAt <= previous_attempt + timedelta(seconds=3)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["submitted", "processing"])
+async def test_active_command_dispatch_failure_refreshes_reconciliation_age(
+    status: str,
+) -> None:
+    model = command(status=status)
+    previous_updated_at = model.updatedAt
+    session = CommandSession([RowResult((model, task(), "user-1"))])
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    record = await repository.record_dispatch_failure("command-1", "AgentUnavailable")
+
+    assert record.status == status
+    assert record.attempt_count == 1
+    assert model.lastError == "AgentUnavailable"
+    assert model.updatedAt >= previous_updated_at
 
 
 def test_command_idempotency_key_is_user_scoped() -> None:

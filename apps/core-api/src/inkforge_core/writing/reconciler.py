@@ -4,6 +4,8 @@ import asyncio
 import logging
 from typing import Protocol
 
+from inkforge_contracts.jobs import AgentJobStatus
+
 from .records import TaskRecord
 
 logger = logging.getLogger(__name__)
@@ -12,9 +14,15 @@ logger = logging.getLogger(__name__)
 class ReconciliationRepository(Protocol):
     async def list_reconcilable(self, limit: int) -> list[TaskRecord]: ...
 
+    async def settle_reconciliation_terminal(
+        self,
+        task: TaskRecord,
+        agent_status: AgentJobStatus,
+    ) -> None: ...
+
 
 class ReconciliationSubmitter(Protocol):
-    async def reconcile(self, task: TaskRecord) -> None: ...
+    async def reconcile(self, task: TaskRecord) -> AgentJobStatus: ...
 
 
 class WritingRunReconciler:
@@ -41,7 +49,12 @@ class WritingRunReconciler:
         completed = 0
         for task in await self._repository.list_reconcilable(self._batch_size):
             try:
-                await self._submitter.reconcile(task)
+                agent_status = await self._submitter.reconcile(task)
+                if agent_status not in {"queued", "running"}:
+                    await self._repository.settle_reconciliation_terminal(
+                        task,
+                        agent_status,
+                    )
                 completed += 1
             except Exception:
                 logger.warning(
