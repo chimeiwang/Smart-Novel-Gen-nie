@@ -416,7 +416,6 @@ def build_operation_graph(
             raise ValueError("稳定恢复缺少草案或用户决策")
         selected = decision.get("decision")
         if selected == "approve":
-            await dependencies.artifacts.apply(artifact_id)
             return Command(
                 update={
                     "resumeDecision": None,
@@ -426,7 +425,6 @@ def build_operation_graph(
                 goto="suggestNextAction",
             )
         if selected == "discard":
-            await dependencies.artifacts.discard(artifact_id)
             return Command(
                 update={
                     "resumeDecision": None,

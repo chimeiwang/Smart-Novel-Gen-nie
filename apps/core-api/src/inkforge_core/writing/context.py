@@ -16,6 +16,7 @@ from ..db.models import (
     OutlineNode,
     ReviewArtifact,
     SceneBeat,
+    WritingRunCommand,
     WritingTask,
 )
 from ..errors import ApiError
@@ -260,22 +261,36 @@ class WritingContextRepository:
                 ReviewArtifact.id == snapshot.active_artifact_id,
                 ReviewArtifact.taskId == task.id,
                 ReviewArtifact.novelId == task.novelId,
-                ReviewArtifact.status.in_(("draft", "under_review", "awaiting_user", "applying")),
             )
         )
-        if artifact is None:
-            raise ApiError(
-                status_code=409,
-                code="ACTIVE_ARTIFACT_MISMATCH",
-                message="稳定快照引用的待审核草案与任务不匹配",
+        if artifact is not None and artifact.status in {
+            "draft",
+            "under_review",
+            "awaiting_user",
+            "applying",
+        }:
+            return {
+                "id": artifact.id,
+                "kind": artifact.kind,
+                "status": artifact.status,
+                "revision": artifact.revision,
+                "payload": artifact.payloadJson,
+            }
+        active_decision_command = await session.scalar(
+            select(WritingRunCommand.id).where(
+                WritingRunCommand.taskId == task.id,
+                WritingRunCommand.artifactId == snapshot.active_artifact_id,
+                WritingRunCommand.kind == "artifact_decision",
+                WritingRunCommand.status.in_(("pending", "submitted", "processing")),
             )
-        return {
-            "id": artifact.id,
-            "kind": artifact.kind,
-            "status": artifact.status,
-            "revision": artifact.revision,
-            "payload": artifact.payloadJson,
-        }
+        )
+        if active_decision_command is not None:
+            return None
+        raise ApiError(
+            status_code=409,
+            code="ACTIVE_ARTIFACT_MISMATCH",
+            message="稳定快照引用的待审核草案与任务不匹配",
+        )
 
 
 def _goal_dict(goal: ChapterWritingGoal | None) -> dict[str, Any] | None:

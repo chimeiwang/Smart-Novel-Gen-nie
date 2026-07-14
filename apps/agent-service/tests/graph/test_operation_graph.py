@@ -131,7 +131,32 @@ async def test_new_graph_instance_resumes_from_stable_user_decision_state() -> N
 
     assert completed["phase"] == "completed"
     assert completed["artifactStatus"] == "applied"
-    assert artifacts.actions == ["submit", "await", "apply"]
+    assert artifacts.actions == ["submit", "await"]
+
+
+@pytest.mark.asyncio
+async def test_stable_discard_decision_does_not_delete_artifact_twice() -> None:
+    artifacts = ArtifactPort()
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="续写本章",
+    )
+    state["currentOperation"] = create_default_operation_for_agent("写作", "续写本章")
+    state["activeArtifactId"] = "artifact-1"
+    state["artifactStatus"] = "awaiting_user"
+    state["resumeDecision"] = {"decision": "discard", "artifactId": "artifact-1"}
+
+    graph = build_operation_graph(
+        OperationDependencies(agentExecutor=AgentExecutor(), artifacts=artifacts)
+    )
+    completed = await graph.ainvoke(state)
+
+    assert completed["phase"] == "completed"
+    assert completed["artifactStatus"] == "discarded"
+    assert artifacts.actions == []
 
 
 class RetryArtifactExecutor:

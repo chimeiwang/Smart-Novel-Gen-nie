@@ -1,10 +1,16 @@
+import json
+from typing import Any, cast
+
 import pytest
+from inkforge_core.db.models import ReviewArtifact, WritingRunCommand, WritingTask
 from inkforge_core.errors import ApiError
 from inkforge_core.writing.context import (
     ChapterGroupSnapshot,
+    WritingContextRepository,
     WritingContextService,
     select_unique_chapter_group,
 )
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def test_chapter_group_allows_missing_but_rejects_ambiguous_mapping() -> None:
@@ -50,3 +56,88 @@ async def test_context_combines_complete_workspace_and_current_planning_scope() 
     assert context["workspace"]["novel"]["name"] == "作品"
     assert context["planning"]["approvedBeatPlan"]["chapterGoal"] == "按计划推进"
     assert context["planning"]["chapterGroup"]["content"] == "完整章节组内容"
+
+
+class FakeScalarSession:
+    def __init__(self, responses: list[object | None]) -> None:
+        self._responses = iter(responses)
+
+    async def scalar(self, statement: object) -> object | None:
+        del statement
+        return next(self._responses)
+
+
+def _task_with_active_artifact(artifact_id: str = "artifact-1") -> WritingTask:
+    return WritingTask(
+        id="task-1",
+        novelId="novel-1",
+        chapterId="chapter-1",
+        graphStateJson=json.dumps(
+            {
+                "taskId": "task-1",
+                "userId": "user-1",
+                "novelId": "novel-1",
+                "chapterId": "chapter-1",
+                "targetWordCount": 3000,
+                "conversationHistory": [],
+                "activeArtifactId": artifact_id,
+            }
+        ),
+    )
+
+
+def _active_decision_command() -> WritingRunCommand:
+    return WritingRunCommand(
+        id="command-1",
+        taskId="task-1",
+        artifactId="artifact-1",
+        kind="artifact_decision",
+        status="submitted",
+        idempotencyKey="user-1:request-1",
+        payloadJson="{}",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "artifact",
+    [
+        ReviewArtifact(
+            id="artifact-1",
+            taskId="task-1",
+            novelId="novel-1",
+            status="applied",
+        ),
+        None,
+    ],
+)
+async def test_context_allows_resolved_artifact_during_active_decision_command(
+    artifact: ReviewArtifact | None,
+) -> None:
+    repository = WritingContextRepository(cast(Any, None))
+    session = cast(
+        AsyncSession,
+        FakeScalarSession([artifact, _active_decision_command()]),
+    )
+
+    active_artifact = await repository._active_artifact(
+        session,
+        _task_with_active_artifact(),
+    )
+
+    assert active_artifact is None
+
+
+@pytest.mark.asyncio
+async def test_context_rejects_resolved_artifact_without_active_decision_command() -> None:
+    repository = WritingContextRepository(cast(Any, None))
+    artifact = ReviewArtifact(
+        id="artifact-1",
+        taskId="task-1",
+        novelId="novel-1",
+        status="applied",
+    )
+    session = cast(AsyncSession, FakeScalarSession([artifact, None]))
+
+    with pytest.raises(ApiError, match="待审核草案与任务不匹配"):
+        await repository._active_artifact(session, _task_with_active_artifact())
