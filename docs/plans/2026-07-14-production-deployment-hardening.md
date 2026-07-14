@@ -216,13 +216,13 @@ git commit -m "文档：补充生产 SSH 与回滚运维规则"
 **Files:**
 - Verify only
 
-- [ ] **Step 1: 静态与夹具测试**
+- [x] **Step 1: 静态与夹具测试**
 
 Run: `uv run pytest tests/architecture -q`
 
 Run: `sh -n scripts/deploy-production.sh scripts/upload-docker-images.sh`
 
-- [ ] **Step 2: Compose 安全验证**
+- [x] **Step 2: Compose 安全验证**
 
 Run: `uv run pytest tests/architecture/test_compose_security.py -q`
 
@@ -231,3 +231,5 @@ Run: `uv run pytest tests/architecture/test_compose_security.py -q`
 Run: `docker compose -f infra/compose.yaml config --quiet`
 
 Expected: 所有可用检查 PASS；生产路径没有动态信任主机、自动迁移、卷删除或取消运行中的部署。
+
+验证记录：`tests/architecture` 共 59 项通过，两个部署 shell 通过语法检查；当前 Windows 环境未安装 Docker，因此按计划跳过 `docker compose config --quiet` 实机解析。
