@@ -11,8 +11,9 @@ from inkforge_service_auth import ServiceTokenSigner, canonical_json_body
 from pydantic import JsonValue
 
 from .errors import ApiError
+from .writing.commands import WritingCommandRecord
 from .writing.job_identity import build_writing_job_id
-from .writing.tasks import TaskRecord
+from .writing.records import TaskRecord
 
 
 class AgentJobClient(Protocol):
@@ -119,6 +120,21 @@ class WritingTaskAgentSubmitter:
             resume=task.graph_state_json is not None,
             force=True,
             resume_input=None,
+        )
+
+    async def submit_command(self, command: WritingCommandRecord) -> None:
+        await self._client.submit(
+            AgentJobRequest(
+                protocolVersion="1.0",
+                jobId=command.id,
+                kind="writing",
+                runId=command.task.id,
+                taskId=command.task.id,
+                novelId=command.task.novel_id,
+                userId=command.task.user_id,
+                priority=10,
+                payload=cast(dict[str, JsonValue], command.payload),
+            )
         )
 
     async def _submit(

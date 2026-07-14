@@ -8,7 +8,8 @@ import httpx
 import pytest
 from inkforge_contracts.jwt_claims import ServiceScope
 from inkforge_core.agent_client import AgentClient, WritingTaskAgentSubmitter
-from inkforge_core.writing.tasks import TaskRecord
+from inkforge_core.writing.commands import WritingCommandRecord
+from inkforge_core.writing.records import TaskRecord
 from inkforge_service_auth import SignedServiceRequest
 
 
@@ -105,6 +106,40 @@ async def test_writing_job_id_is_stable_per_checkpoint_and_changes_on_resume() -
 
     assert captured[0].jobId == captured[1].jobId
     assert captured[0].jobId != captured[2].jobId
+
+
+@pytest.mark.asyncio
+async def test_writing_command_uses_command_id_as_job_id() -> None:
+    captured: list[object] = []
+
+    class Client:
+        async def submit(self, request: object) -> object:
+            captured.append(request)
+            return object()
+
+    submitter = WritingTaskAgentSubmitter(Client())  # type: ignore[arg-type]
+    task = TaskRecord(
+        id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        writing_session_id="session-1",
+        phase="active",
+        graph_state_json=None,
+    )
+    command = WritingCommandRecord(
+        id="command-stable",
+        task=task,
+        kind="resume",
+        payload={"resume": True, "chapterId": "chapter-1"},
+        status="pending",
+        attempt_count=0,
+    )
+
+    await submitter.submit_command(command)
+
+    assert captured[0].jobId == "command-stable"
+    assert captured[0].payload == command.payload
 
 
 @pytest.mark.asyncio

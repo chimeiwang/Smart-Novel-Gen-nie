@@ -213,6 +213,26 @@ async def test_command_status_transitions_are_idempotent() -> None:
     assert model.resultJson == '{"accepted":true}'
 
 
+@pytest.mark.asyncio
+async def test_dispatch_failure_records_only_error_code_and_backs_off() -> None:
+    model = command()
+    previous_attempt = model.nextAttemptAt
+    session = CommandSession([RowResult((model, task(), "user-1"))])
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    record = await repository.record_dispatch_failure(
+        "command-1", "AgentRunSubmitFailed"
+    )
+
+    assert record.status == "pending"
+    assert record.attempt_count == 1
+    assert model.lastError == "AgentRunSubmitFailed"
+    assert model.nextAttemptAt > previous_attempt
+    assert model.nextAttemptAt <= previous_attempt + timedelta(seconds=3)
+
+
 def test_command_idempotency_key_is_user_scoped() -> None:
     assert command_idempotency_key("user-1", "request-1") == "user-1:request-1"
     assert command_idempotency_key("user-2", "request-1") != command_idempotency_key(

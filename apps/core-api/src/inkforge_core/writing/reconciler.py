@@ -4,7 +4,7 @@ import asyncio
 import logging
 from typing import Protocol
 
-from .tasks import TaskRecord
+from .records import TaskRecord
 
 logger = logging.getLogger(__name__)
 

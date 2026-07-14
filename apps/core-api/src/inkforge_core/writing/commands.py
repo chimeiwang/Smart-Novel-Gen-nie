@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import Any, Literal, cast
 
 from sqlalchemy import select
@@ -137,6 +138,31 @@ class WritingRunCommandRepository:
         self, command_id: str, result: dict[str, Any] | None = None
     ) -> WritingCommandRecord:
         return await self._transition(command_id, "failed", result=result)
+
+    async def record_dispatch_failure(
+        self, command_id: str, error_code: str
+    ) -> WritingCommandRecord:
+        async with self._session_factory() as session:
+            async with session.begin():
+                row = await self._get_by_id(session, command_id, for_update=True)
+                if row is None:
+                    raise ApiError(
+                        status_code=404,
+                        code="WRITING_COMMAND_NOT_FOUND",
+                        message="写作命令不存在",
+                    )
+                command, task, owner_id = row
+                if command.status != "pending":
+                    return _command_record(command, task, owner_id)
+                attempt_count = command.attemptCount + 1
+                delay_seconds = min(60, 2**attempt_count)
+                now = utc_now()
+                command.attemptCount = attempt_count
+                command.nextAttemptAt = now + timedelta(seconds=delay_seconds)
+                command.lastError = error_code[:128]
+                command.updatedAt = now
+                await session.flush()
+                return _command_record(command, task, owner_id)
 
     async def _transition(
         self,

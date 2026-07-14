@@ -61,6 +61,17 @@ def test_core_lifespan_starts_and_stops_writing_reconciler() -> None:
     assert reconciler.stopped is True
 
 
+def test_core_lifespan_starts_and_stops_command_dispatcher() -> None:
+    dispatcher = Reconciler()
+    app = create_app(testing=True, writing_command_dispatcher=dispatcher)
+
+    with TestClient(app) as client:
+        assert client.get("/api/v1/health/live").status_code == 200
+        assert dispatcher.started is True
+
+    assert dispatcher.stopped is True
+
+
 def test_ready_aggregates_sync_and_async_checks_and_returns_503_on_failure() -> None:
     app = create_app(testing=True)
 

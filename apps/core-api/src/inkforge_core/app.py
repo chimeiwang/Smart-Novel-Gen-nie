@@ -75,6 +75,8 @@ from .styles.router import router as styles_router
 from .styles.service import StyleService
 from .styles.storage import StyleStorage
 from .writing.callbacks import router as writing_callback_router
+from .writing.command_dispatcher import WritingRunCommandDispatcher
+from .writing.commands import WritingRunCommandRepository
 from .writing.context import WritingContextRepository, WritingContextService
 from .writing.read_tool_service import WritingReadToolService
 from .writing.read_tools import ALL_AGENT_IDS, register_read_tools
@@ -143,6 +145,7 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
     review_repository = ReviewRepository(session_factory)
     context_repository = WritingContextRepository(session_factory)
     writing_task_repository = WritingTaskRepository(session_factory)
+    writing_command_repository = WritingRunCommandRepository(session_factory)
     app.state.novel_service = NovelService(novel_repository)
     app.state.chapter_service = ChapterService(chapter_repository)
     agent_client = cast(AgentClient | None, getattr(app.state, "agent_client", None))
@@ -203,6 +206,7 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
     )
     app.state.writing_event_store = event_store
     app.state.writing_task_repository = writing_task_repository
+    app.state.writing_command_repository = writing_command_repository
     writing_submitter = WritingTaskAgentSubmitter(agent_client) if agent_client else None
     app.state.writing_task_service = WritingTaskService(
         writing_task_repository,
@@ -214,6 +218,16 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
             writing_submitter,
             batch_size=20,
             interval_seconds=30,
+        )
+    if (
+        writing_submitter is not None
+        and getattr(app.state, "writing_command_dispatcher", None) is None
+    ):
+        app.state.writing_command_dispatcher = WritingRunCommandDispatcher(
+            writing_command_repository,
+            writing_submitter,
+            batch_size=20,
+            interval_seconds=2,
         )
     app.state.writing_callback_service = WritingCallbackService(
         writing_task_repository, event_store
@@ -252,8 +266,15 @@ def _configure_agent_client(app: FastAPI, settings: Settings) -> None:
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     """在应用退出时释放已创建的数据库连接池。"""
 
-    reconciler = getattr(app.state, "writing_reconciler", None)
-    reconciler_task = asyncio.create_task(reconciler.run()) if reconciler is not None else None
+    workers = [
+        worker
+        for worker in (
+            getattr(app.state, "writing_reconciler", None),
+            getattr(app.state, "writing_command_dispatcher", None),
+        )
+        if worker is not None
+    ]
+    worker_tasks = [asyncio.create_task(worker.run()) for worker in workers]
     try:
         readiness = cast(
             DatabaseReadiness | None,
@@ -263,10 +284,10 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             await readiness.warm_up()
         yield
     finally:
-        if reconciler is not None:
-            reconciler.request_stop()
-        if reconciler_task is not None:
-            await asyncio.gather(reconciler_task, return_exceptions=True)
+        for worker in workers:
+            worker.request_stop()
+        if worker_tasks:
+            await asyncio.gather(*worker_tasks, return_exceptions=True)
         auth_redis = getattr(app.state, "auth_redis", None)
         try:
             if auth_redis is not None:
@@ -293,6 +314,7 @@ def create_app(
     testing: bool = False,
     settings: Settings | None = None,
     writing_reconciler: object | None = None,
+    writing_command_dispatcher: object | None = None,
 ) -> FastAPI:
     loaded_settings = settings
     if loaded_settings is None:
@@ -310,6 +332,7 @@ def create_app(
     )
     app.state.settings = loaded_settings
     app.state.writing_reconciler = writing_reconciler
+    app.state.writing_command_dispatcher = writing_command_dispatcher
     app.state.readiness_checks = {}
     register_readiness_check(app, "configuration", lambda: True)
     configure_database(app, loaded_settings)

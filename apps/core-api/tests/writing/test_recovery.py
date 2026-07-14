@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 
 import pytest
 from inkforge_core.errors import ApiError
+from inkforge_core.writing.records import TaskRecord
 from inkforge_core.writing.recovery import (
     InvalidGraphSnapshotError,
     TaskCandidate,
@@ -12,7 +13,7 @@ from inkforge_core.writing.recovery import (
     select_recovery_state,
     validate_resume_session_binding,
 )
-from inkforge_core.writing.tasks import TaskRecord, WritingTaskService
+from inkforge_core.writing.tasks import WritingTaskService
 
 
 def _snapshot(**overrides: object) -> str:

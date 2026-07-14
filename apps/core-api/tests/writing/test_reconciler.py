@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import pytest
+from inkforge_core.db.models import WritingTask
 from inkforge_core.writing.reconciler import WritingRunReconciler
-from inkforge_core.writing.tasks import TaskRecord
+from inkforge_core.writing.records import TaskRecord
+from inkforge_core.writing.tasks import WritingTaskRepository
+from sqlalchemy.dialects import postgresql
 
 
 class Repository:
@@ -52,3 +55,44 @@ async def test_reconciler_continues_after_one_submission_failure() -> None:
 
     assert await reconciler.run_once() == 1
     assert submitter.tasks == ["good"]
+
+
+class EmptyRows:
+    def all(self) -> list[object]:
+        return []
+
+
+class QuerySession:
+    def __init__(self) -> None:
+        self.statement: object | None = None
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        del exc_type, exc, traceback
+
+    async def execute(self, statement):
+        self.statement = statement
+        return EmptyRows()
+
+
+@pytest.mark.asyncio
+async def test_legacy_reconciliation_excludes_review_waiting_and_active_commands() -> None:
+    session = QuerySession()
+    repository = WritingTaskRepository(lambda: session)  # type: ignore[arg-type]
+
+    assert await repository.list_reconcilable(10) == []
+
+    assert session.statement is not None
+    compiled = session.statement.compile(dialect=postgresql.dialect())
+    sql = str(compiled)
+    phase_values = next(
+        value
+        for key, value in compiled.params.items()
+        if key.startswith("phase_") and isinstance(value, list)
+    )
+    assert set(phase_values) == {"active", "waiting_call"}
+    assert "NOT (EXISTS" in sql
+    assert '"WritingRunCommand"' in sql
+    assert WritingTask.__tablename__ in sql

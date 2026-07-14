@@ -10,12 +10,19 @@ from inkforge_contracts.events import (
     RunCompletionCallback,
     RunFailureCallback,
 )
-from sqlalchemy import select, update
+from sqlalchemy import exists, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..db.base import utc_now
-from ..db.models import Chapter, Novel, WritingMessage, WritingSession, WritingTask
+from ..db.models import (
+    Chapter,
+    Novel,
+    WritingMessage,
+    WritingRunCommand,
+    WritingSession,
+    WritingTask,
+)
 from ..errors import ApiError
 from .records import TaskRecord
 from .recovery import (
@@ -27,6 +34,7 @@ from .schemas import StartWritingRunRequest, WritingRunResponse
 from .sse import EventSequenceGap, WritingEvent
 
 TERMINAL_TASK_PHASES = frozenset({"completed", "error"})
+LEGACY_RECONCILABLE_PHASES = frozenset({"active", "waiting_call"})
 
 
 class WritingTaskSubmitter(Protocol):
@@ -183,8 +191,16 @@ class WritingTaskRepository:
                     select(WritingTask, Novel.userId)
                     .join(Novel, Novel.id == WritingTask.novelId)
                     .where(
-                        WritingTask.phase.not_in(TERMINAL_TASK_PHASES),
+                        WritingTask.phase.in_(LEGACY_RECONCILABLE_PHASES),
                         Novel.userId.is_not(None),
+                        ~exists(
+                            select(WritingRunCommand.id).where(
+                                WritingRunCommand.taskId == WritingTask.id,
+                                WritingRunCommand.status.in_(
+                                    ("pending", "submitted", "processing")
+                                ),
+                            )
+                        ),
                     )
                     .order_by(WritingTask.updatedAt, WritingTask.id)
                     .limit(limit)
