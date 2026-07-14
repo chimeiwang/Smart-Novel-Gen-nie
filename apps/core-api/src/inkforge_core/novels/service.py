@@ -9,6 +9,10 @@ from .schemas import (
     CreateNovelResponse,
     DashboardResponse,
     NovelResponse,
+    WorkspaceBootstrapResponse,
+    WorkspaceLoreResponse,
+    WorkspacePlanningResponse,
+    WorkspaceResourcesResponse,
     WorkspaceResponse,
 )
 
@@ -40,6 +44,18 @@ class NovelRepositoryPort(Protocol):
     async def get_workspace(
         self, novel_id: str, user_id: str, chapter_id: str | None
     ) -> WorkspaceResponse: ...
+    async def get_workspace_bootstrap(
+        self, novel_id: str, user_id: str, chapter_id: str | None
+    ) -> WorkspaceBootstrapResponse: ...
+    async def get_workspace_lore(
+        self, novel_id: str, user_id: str
+    ) -> WorkspaceLoreResponse: ...
+    async def get_workspace_planning(
+        self, novel_id: str, user_id: str
+    ) -> WorkspacePlanningResponse: ...
+    async def get_workspace_resources(
+        self, novel_id: str, user_id: str
+    ) -> WorkspaceResourcesResponse: ...
 
 
 def _clean_optional(value: str | None) -> str | None:
@@ -110,3 +126,23 @@ class NovelService:
         self, user_id: str, novel_id: str, chapter_id: str | None
     ) -> WorkspaceResponse:
         return await self._repository.get_workspace(novel_id, user_id, chapter_id)
+
+    async def get_workspace_bootstrap(
+        self, user_id: str, novel_id: str, chapter_id: str | None
+    ) -> WorkspaceBootstrapResponse:
+        return await self._repository.get_workspace_bootstrap(novel_id, user_id, chapter_id)
+
+    async def get_workspace_lore(
+        self, user_id: str, novel_id: str
+    ) -> WorkspaceLoreResponse:
+        return await self._repository.get_workspace_lore(novel_id, user_id)
+
+    async def get_workspace_planning(
+        self, user_id: str, novel_id: str
+    ) -> WorkspacePlanningResponse:
+        return await self._repository.get_workspace_planning(novel_id, user_id)
+
+    async def get_workspace_resources(
+        self, user_id: str, novel_id: str
+    ) -> WorkspaceResourcesResponse:
+        return await self._repository.get_workspace_resources(novel_id, user_id)

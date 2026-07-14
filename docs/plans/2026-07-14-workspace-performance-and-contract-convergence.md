@@ -18,7 +18,7 @@
 - Modify: `apps/core-api/src/inkforge_core/novels/router.py`
 - Modify: `apps/core-api/tests/novels/test_novel_api.py`
 
-- [ ] **Step 1: 写四个接口的契约失败测试**
+- [x] **Step 1: 写四个接口的契约失败测试**
 
 分别覆盖认证、小说归属、404 隐藏存在性、`chapterId` 选择和响应字段。接口固定为：
 
@@ -31,13 +31,13 @@ GET /api/v1/novels/{novel_id}/workspace/resources
 
 bootstrap 只包含小说摘要、章节导航、当前章节完整编辑数据和 `currentChapterId`；其他响应严格按规格分组。测试还断言旧 `/workspace` 继续可用。
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
 Run: `uv run pytest apps/core-api/tests/novels/test_novel_api.py -q`
 
 Expected: FAIL；新 schema 和路由不存在。
 
-- [ ] **Step 3: 新增 Pydantic 契约**
+- [x] **Step 3: 新增 Pydantic 契约**
 
 复用现有叶子 DTO，新增顶层：
 
@@ -69,11 +69,11 @@ class WorkspaceResourcesResponse(ApiSchema):
 
 不要复制已有 `QualityCheckDto`、章节、文风、引用等叶子定义。
 
-- [ ] **Step 4: 扩展 service/router**
+- [x] **Step 4: 扩展 service/router**
 
 service protocol 和实现分别调用 repository 的四个方法。路由顺序保证 `/workspace/{group}` 不被其他动态路由误匹配；全部继续依赖浏览器认证用户。
 
-- [ ] **Step 5: 验证 API 层**
+- [x] **Step 5: 验证 API 层**
 
 Run: `uv run pytest apps/core-api/tests/novels/test_novel_api.py -q`
 
@@ -87,7 +87,7 @@ Expected: PASS。
 - Modify: `apps/core-api/src/inkforge_core/novels/repository.py`
 - Modify: `apps/core-api/tests/novels/test_novel_api.py`
 
-- [ ] **Step 1: 写查询边界失败测试**
+- [x] **Step 1: 写查询边界失败测试**
 
 扩展现有记录型 session，为 SQL 中出现的模型分类计数。断言：
 
@@ -97,23 +97,23 @@ Expected: PASS。
 - resources 查询引用和当前用户文风，并包含 `WritingStyle.userId == user_id`；
 - 不允许新方法先调用 `_load_workspace()` 再丢弃字段。
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
 Run: `uv run pytest apps/core-api/tests/novels/test_novel_api.py -q -k "bootstrap or lore or planning or resources or query"`
 
-- [ ] **Step 3: 提取共享的小型装配函数**
+- [x] **Step 3: 提取共享的小型装配函数**
 
 把章节相关读取抽成 `_load_chapter_workspace()`，角色关系抽成 `_load_lore()`，规划抽成 `_load_planning()`，引用/文风抽成 `_load_resources(session, novel, user_id)`。旧 `_load_workspace()` 组合这些函数，保持兼容响应；新接口只调用对应函数。
 
 每个公开方法都在现有 repeatable-read 只读事务中先 `_require_owner()`，错误归属统一 404。文风归属规则与 P0 修复保持一致。
 
-- [ ] **Step 4: 验证查询边界**
+- [x] **Step 4: 验证查询边界**
 
 Run: `uv run pytest apps/core-api/tests/novels/test_novel_api.py -q`
 
 Expected: PASS；记录型 session 证明 bootstrap 没有延迟分组查询。
 
-- [ ] **Step 5: 提交 Core 工作区拆分**
+- [x] **Step 5: 提交 Core 工作区拆分**
 
 ```bash
 git add apps/core-api/src/inkforge_core/novels apps/core-api/tests/novels/test_novel_api.py

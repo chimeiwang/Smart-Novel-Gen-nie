@@ -6,7 +6,7 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any, TypeVar, cast
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..db.models import (
@@ -35,7 +35,16 @@ from ..db.models import (
 )
 from ..errors import ApiError
 from ..references.rag import public_rag_error
-from .schemas import DashboardNovel, DashboardResponse, NovelResponse, WorkspaceResponse
+from .schemas import (
+    DashboardNovel,
+    DashboardResponse,
+    NovelResponse,
+    WorkspaceBootstrapResponse,
+    WorkspaceLoreResponse,
+    WorkspacePlanningResponse,
+    WorkspaceResourcesResponse,
+    WorkspaceResponse,
+)
 from .service import NovelCreation
 
 T = TypeVar("T")
@@ -269,11 +278,7 @@ class NovelRepository:
     ) -> WorkspaceResponse:
         async with self._session_factory() as session:
             async with session.begin():
-                bind = session.get_bind()
-                if bind.dialect.name == "postgresql":
-                    await session.execute(
-                        text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-                    )
+                await self._set_repeatable_read(session)
                 novel = await self._require_owner(session, novel_id, user_id)
                 workspace = await self._load_workspace(
                     session,
@@ -283,6 +288,56 @@ class NovelRepository:
                 )
         return WorkspaceResponse.model_validate(workspace)
 
+    async def get_workspace_bootstrap(
+        self, novel_id: str, user_id: str, chapter_id: str | None
+    ) -> WorkspaceBootstrapResponse:
+        async with self._session_factory() as session:
+            async with session.begin():
+                await self._set_repeatable_read(session)
+                novel = await self._require_owner(
+                    session, novel_id, user_id, hide_forbidden=True
+                )
+                workspace = await self._load_workspace_bootstrap(
+                    session, novel, chapter_id, user_id=user_id
+                )
+        return WorkspaceBootstrapResponse.model_validate(workspace)
+
+    async def get_workspace_lore(
+        self, novel_id: str, user_id: str
+    ) -> WorkspaceLoreResponse:
+        async with self._session_factory() as session:
+            async with session.begin():
+                await self._set_repeatable_read(session)
+                novel = await self._require_owner(
+                    session, novel_id, user_id, hide_forbidden=True
+                )
+                workspace = await self._load_lore(session, novel)
+        return WorkspaceLoreResponse.model_validate(workspace)
+
+    async def get_workspace_planning(
+        self, novel_id: str, user_id: str
+    ) -> WorkspacePlanningResponse:
+        async with self._session_factory() as session:
+            async with session.begin():
+                await self._set_repeatable_read(session)
+                novel = await self._require_owner(
+                    session, novel_id, user_id, hide_forbidden=True
+                )
+                workspace = await self._load_planning(session, novel)
+        return WorkspacePlanningResponse.model_validate(workspace)
+
+    async def get_workspace_resources(
+        self, novel_id: str, user_id: str
+    ) -> WorkspaceResourcesResponse:
+        async with self._session_factory() as session:
+            async with session.begin():
+                await self._set_repeatable_read(session)
+                novel = await self._require_owner(
+                    session, novel_id, user_id, hide_forbidden=True
+                )
+                workspace = await self._load_resources(session, novel, user_id=user_id)
+        return WorkspaceResourcesResponse.model_validate(workspace)
+
     async def _load_workspace(
         self,
         session: AsyncSession,
@@ -291,26 +346,148 @@ class NovelRepository:
         *,
         user_id: str | None = None,
     ) -> dict[str, Any]:
-        novel_id = novel.id
-        owner_id = user_id or novel.userId
-        chapters = list(
-            (
-                await session.scalars(
-                    select(Chapter)
+        owner_id = cast(str, user_id or novel.userId)
+        chapter_data = await self._load_chapter_workspace(
+            session, novel.id, requested_chapter_id, include_all_details=True
+        )
+        lore = await self._load_lore(session, novel)
+        planning = await self._load_planning(session, novel)
+        resources = await self._load_resources(session, novel, user_id=owner_id)
+        return {
+            "novel": {
+                **self._novel_dict(novel),
+                "appliedStyle": resources["appliedStyle"],
+            },
+            "chapters": chapter_data["allChapters"],
+            "currentChapterId": chapter_data["currentChapterId"],
+            **lore,
+            "storyBackground": planning["storyBackground"],
+            "worldSetting": planning["worldSetting"],
+            "writingBible": planning["writingBible"],
+            "outline": planning["outline"],
+            "outlineNodes": planning["outlineNodes"],
+            "plotProgress": planning["plotProgress"],
+            "references": resources["references"],
+            "styles": resources["styles"],
+        }
+
+    async def _load_workspace_bootstrap(
+        self,
+        session: AsyncSession,
+        novel: Novel,
+        requested_chapter_id: str | None,
+        *,
+        user_id: str,
+    ) -> dict[str, Any]:
+        chapter_data = await self._load_chapter_workspace(
+            session, novel.id, requested_chapter_id, include_all_details=False
+        )
+        applied_style = await self._load_applied_style(session, novel, user_id)
+        return {
+            "novel": {
+                **self._novel_dict(novel),
+                "appliedStyle": (
+                    {"id": applied_style.id, "name": applied_style.name}
+                    if applied_style
+                    else None
+                ),
+            },
+            "chapters": chapter_data["chapters"],
+            "currentChapter": chapter_data["currentChapter"],
+            "currentChapterId": chapter_data["currentChapterId"],
+        }
+
+    async def _load_chapter_workspace(
+        self,
+        session: AsyncSession,
+        novel_id: str,
+        requested_chapter_id: str | None,
+        *,
+        include_all_details: bool,
+    ) -> dict[str, Any]:
+        full_chapters: list[Chapter] = []
+        chapter_meta: list[dict[str, Any]]
+        if include_all_details:
+            full_chapters = list(
+                (
+                    await session.scalars(
+                        select(Chapter)
+                        .where(Chapter.novelId == novel_id)
+                        .order_by(Chapter.order.asc(), Chapter.id.asc())
+                    )
+                ).all()
+            )
+            chapter_meta = [
+                {
+                    "id": chapter.id,
+                    "title": chapter.title,
+                    "order": chapter.order,
+                    "status": chapter.status,
+                    "updatedAt": utc_datetime(chapter.updatedAt),
+                    "wordCount": count_text_length(chapter.content),
+                }
+                for chapter in full_chapters
+            ]
+        else:
+            word_count = func.length(
+                func.regexp_replace(Chapter.content, r"\s", "", "g")
+            ).label("wordCount")
+            rows = (
+                await session.execute(
+                    select(
+                        Chapter.id.label("id"),
+                        Chapter.title.label("title"),
+                        Chapter.order.label("order"),
+                        Chapter.status.label("status"),
+                        Chapter.updatedAt.label("updatedAt"),
+                        word_count,
+                    )
                     .where(Chapter.novelId == novel_id)
                     .order_by(Chapter.order.asc(), Chapter.id.asc())
                 )
             ).all()
-        )
-        chapter_ids = [chapter.id for chapter in chapters]
+            chapter_meta = [
+                {
+                    "id": row.id,
+                    "title": row.title,
+                    "order": row.order,
+                    "status": row.status,
+                    "updatedAt": utc_datetime(row.updatedAt),
+                    "wordCount": row.wordCount or 0,
+                }
+                for row in rows
+            ]
+
+        valid_ids = {value["id"] for value in chapter_meta}
+        current_id = requested_chapter_id if requested_chapter_id in valid_ids else None
+        if current_id is None:
+            drafting = [value for value in chapter_meta if value["status"] == "drafting"]
+            selected = drafting[-1] if drafting else (chapter_meta[-1] if chapter_meta else None)
+            current_id = selected["id"] if selected else None
+
+        if include_all_details:
+            detail_chapters = full_chapters
+        elif current_id is not None:
+            current = await session.scalar(
+                select(Chapter).where(
+                    Chapter.id == current_id,
+                    Chapter.novelId == novel_id,
+                )
+            )
+            detail_chapters = [current] if current is not None else []
+        else:
+            detail_chapters = []
+
+        chapter_ids = [value["id"] for value in chapter_meta]
+        detail_ids = [chapter.id for chapter in detail_chapters]
         progresses = await self._for_ids(
-            session, ChapterProgress, ChapterProgress.chapterId, chapter_ids
+            session, ChapterProgress, ChapterProgress.chapterId, detail_ids
         )
         checks = await self._for_ids(
             session,
             ChapterQualityCheck,
             ChapterQualityCheck.chapterId,
-            chapter_ids,
+            detail_ids,
             ChapterQualityCheck.createdAt.asc(),
             ChapterQualityCheck.id.asc(),
         )
@@ -343,6 +520,50 @@ class NovelRepository:
             SceneBeat.id.asc(),
         )
 
+        progresses_by_chapter = {value.chapterId: value for value in progresses}
+        checks_by_chapter: dict[str, list[ChapterQualityCheck]] = defaultdict(list)
+        for check in checks:
+            checks_by_chapter[check.chapterId].append(check)
+        beats_by_plan: dict[str, list[SceneBeat]] = defaultdict(list)
+        for beat in scene_beats:
+            beats_by_plan[beat.beatPlanId].append(beat)
+
+        chapter_values = [
+            chapter_dict(
+                chapter,
+                progresses_by_chapter.get(chapter.id),
+                checks_by_chapter[chapter.id],
+                latest_plans.get(chapter.id),
+                beats_by_plan[latest_plans[chapter.id].id] if chapter.id in latest_plans else [],
+            )
+            for chapter in detail_chapters
+        ]
+        chapter_by_id = {value["id"]: value for value in chapter_values}
+        summaries = []
+        for value in chapter_meta:
+            summary_plan = latest_plans.get(cast(str, value["id"]))
+            summaries.append(
+                {
+                    **value,
+                    "approvedBeatPlan": (
+                        {
+                            "sceneCount": len(beats_by_plan[summary_plan.id]),
+                            "totalEstimatedWords": summary_plan.totalEstimatedWords,
+                        }
+                        if summary_plan
+                        else None
+                    ),
+                }
+            )
+        return {
+            "chapters": summaries,
+            "currentChapter": chapter_by_id.get(current_id),
+            "currentChapterId": current_id,
+            "allChapters": chapter_values,
+        }
+
+    async def _load_lore(self, session: AsyncSession, novel: Novel) -> dict[str, Any]:
+        novel_id = novel.id
         characters = list(
             (
                 await session.scalars(
@@ -413,80 +634,6 @@ class NovelRepository:
                 )
             ).all()
         )
-        background = await self._one_for_novel(session, StoryBackground, novel_id)
-        world = await self._one_for_novel(session, WorldSetting, novel_id)
-        bible = await self._one_for_novel(session, WritingBible, novel_id)
-        outline = await self._one_for_novel(session, Outline, novel_id)
-        nodes = list(
-            (
-                await session.scalars(
-                    select(OutlineNode)
-                    .where(OutlineNode.novelId == novel_id)
-                    .order_by(
-                        OutlineNode.order.asc(), OutlineNode.title.asc(), OutlineNode.id.asc()
-                    )
-                )
-            ).all()
-        )
-        plot = await self._one_for_novel(session, PlotProgress, novel_id)
-        references = list(
-            (
-                await session.execute(
-                    select(ReferenceMaterial, RagDocument)
-                    .outerjoin(
-                        RagDocument,
-                        (RagDocument.sourceType == "reference_material")
-                        & (RagDocument.sourceId == ReferenceMaterial.id),
-                    )
-                    .where(ReferenceMaterial.novelId == novel_id)
-                    .order_by(ReferenceMaterial.updatedAt.desc(), ReferenceMaterial.id.asc())
-                )
-            ).all()
-        )
-        applied_style = (
-            await session.scalar(
-                select(WritingStyle).where(
-                    WritingStyle.id == novel.appliedStyleId,
-                    WritingStyle.userId == owner_id,
-                )
-            )
-            if novel.appliedStyleId
-            else None
-        )
-        styles = list(
-            (
-                await session.scalars(
-                    select(WritingStyle)
-                    .where(WritingStyle.userId == owner_id)
-                    .order_by(WritingStyle.updatedAt.desc(), WritingStyle.id.asc())
-                )
-            ).all()
-        )
-
-        progresses_by_chapter = {value.chapterId: value for value in progresses}
-        checks_by_chapter: dict[str, list[ChapterQualityCheck]] = defaultdict(list)
-        for check in checks:
-            checks_by_chapter[check.chapterId].append(check)
-        beats_by_plan: dict[str, list[SceneBeat]] = defaultdict(list)
-        for beat in scene_beats:
-            beats_by_plan[beat.beatPlanId].append(beat)
-        chapter_values = [
-            chapter_dict(
-                chapter,
-                progresses_by_chapter.get(chapter.id),
-                checks_by_chapter[chapter.id],
-                latest_plans.get(chapter.id),
-                beats_by_plan[latest_plans[chapter.id].id] if chapter.id in latest_plans else [],
-            )
-            for chapter in chapters
-        ]
-        valid_ids = {chapter.id for chapter in chapters}
-        current_id = requested_chapter_id if requested_chapter_id in valid_ids else None
-        if current_id is None:
-            drafting = [chapter for chapter in chapters if chapter.status == "drafting"]
-            selected = drafting[-1] if drafting else (chapters[-1] if chapters else None)
-            current_id = selected.id if selected else None
-
         faction_by_id = {faction.id: faction for faction in factions}
         character_by_id = {character.id: character for character in characters}
         experiences_by_character: dict[str, list[CharacterExperience]] = defaultdict(list)
@@ -497,16 +644,7 @@ class NovelRepository:
         for relation in relations:
             outgoing[relation.characterId].append(relation)
             incoming[relation.targetId].append(relation)
-
         return {
-            "novel": {
-                **self._novel_dict(novel),
-                "appliedStyle": (
-                    {"id": applied_style.id, "name": applied_style.name} if applied_style else None
-                ),
-            },
-            "chapters": chapter_values,
-            "currentChapterId": current_id,
             "characters": [
                 self._character_dict(
                     character,
@@ -581,6 +719,28 @@ class NovelRepository:
                 )
                 for value in glossaries
             ],
+        }
+
+    async def _load_planning(self, session: AsyncSession, novel: Novel) -> dict[str, Any]:
+        novel_id = novel.id
+        background = await self._one_for_novel(session, StoryBackground, novel_id)
+        world = await self._one_for_novel(session, WorldSetting, novel_id)
+        bible = await self._one_for_novel(session, WritingBible, novel_id)
+        outline = await self._one_for_novel(session, Outline, novel_id)
+        nodes = list(
+            (
+                await session.scalars(
+                    select(OutlineNode)
+                    .where(OutlineNode.novelId == novel_id)
+                    .order_by(
+                        OutlineNode.order.asc(), OutlineNode.title.asc(), OutlineNode.id.asc()
+                    )
+                )
+            ).all()
+        )
+        plot = await self._one_for_novel(session, PlotProgress, novel_id)
+        return {
+            "storyProgress": novel.storyProgress,
             "storyBackground": self._content_dict(background),
             "worldSetting": self._content_dict(world),
             "writingBible": self._bible_dict(bible),
@@ -618,6 +778,40 @@ class NovelRepository:
                 if plot
                 else None
             ),
+        }
+
+    async def _load_resources(
+        self,
+        session: AsyncSession,
+        novel: Novel,
+        *,
+        user_id: str,
+    ) -> dict[str, Any]:
+        references = list(
+            (
+                await session.execute(
+                    select(ReferenceMaterial, RagDocument)
+                    .outerjoin(
+                        RagDocument,
+                        (RagDocument.sourceType == "reference_material")
+                        & (RagDocument.sourceId == ReferenceMaterial.id),
+                    )
+                    .where(ReferenceMaterial.novelId == novel.id)
+                    .order_by(ReferenceMaterial.updatedAt.desc(), ReferenceMaterial.id.asc())
+                )
+            ).all()
+        )
+        applied_style = await self._load_applied_style(session, novel, user_id)
+        styles = list(
+            (
+                await session.scalars(
+                    select(WritingStyle)
+                    .where(WritingStyle.userId == user_id)
+                    .order_by(WritingStyle.updatedAt.desc(), WritingStyle.id.asc())
+                )
+            ).all()
+        )
+        return {
             "references": [
                 {
                     **model_fields(
@@ -648,11 +842,49 @@ class NovelRepository:
                 model_fields(value, "id", "name", "portraitMarkdown", "sourceType")
                 for value in styles
             ],
+            "appliedStyle": (
+                {"id": applied_style.id, "name": applied_style.name}
+                if applied_style
+                else None
+            ),
         }
 
-    async def _require_owner(self, session: AsyncSession, novel_id: str, user_id: str) -> Novel:
+    @staticmethod
+    async def _load_applied_style(
+        session: AsyncSession,
+        novel: Novel,
+        user_id: str,
+    ) -> WritingStyle | None:
+        if novel.appliedStyleId is None:
+            return None
+        return cast(
+            WritingStyle | None,
+            await session.scalar(
+                select(WritingStyle).where(
+                    WritingStyle.id == novel.appliedStyleId,
+                    WritingStyle.userId == user_id,
+                )
+            ),
+        )
+
+    @staticmethod
+    async def _set_repeatable_read(session: AsyncSession) -> None:
+        bind = session.get_bind()
+        if bind.dialect.name == "postgresql":
+            await session.execute(
+                text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            )
+
+    async def _require_owner(
+        self,
+        session: AsyncSession,
+        novel_id: str,
+        user_id: str,
+        *,
+        hide_forbidden: bool = False,
+    ) -> Novel:
         novel = await session.scalar(select(Novel).where(Novel.id == novel_id))
-        if novel is None:
+        if novel is None or (hide_forbidden and novel.userId != user_id):
             raise ApiError(status_code=404, code="NOVEL_NOT_FOUND", message="小说不存在")
         if novel.userId is None or novel.userId != user_id:
             raise ApiError(status_code=403, code="NOVEL_FORBIDDEN", message="无权访问该小说")

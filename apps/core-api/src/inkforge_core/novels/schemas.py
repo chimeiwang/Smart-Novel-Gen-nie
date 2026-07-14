@@ -344,6 +344,52 @@ class WorkspaceNovel(NovelResponse):
     appliedStyle: AppliedStyleSummary | None
 
 
+class ApprovedBeatPlanSummary(StrictModel):
+    sceneCount: int
+    totalEstimatedWords: int
+
+
+class WorkspaceChapterSummary(StrictModel):
+    id: str
+    title: str
+    order: int
+    status: ChapterStatus
+    updatedAt: datetime
+    wordCount: int
+    approvedBeatPlan: ApprovedBeatPlanSummary | None
+
+
+class WorkspaceBootstrapResponse(StrictModel):
+    novel: WorkspaceNovel
+    chapters: list[WorkspaceChapterSummary]
+    currentChapter: WorkspaceChapter | None
+    currentChapterId: str | None
+
+
+class WorkspaceLoreResponse(StrictModel):
+    characters: list[CharacterDto]
+    items: list[ItemDto]
+    locations: list[LocationDto]
+    factions: list[FactionDto]
+    glossaries: list[GlossaryDto]
+
+
+class WorkspacePlanningResponse(StrictModel):
+    storyProgress: str | None
+    storyBackground: ContentDto | None
+    worldSetting: ContentDto | None
+    writingBible: WritingBibleDto | None
+    outline: ContentDto | None
+    outlineNodes: list[OutlineNodeDto]
+    plotProgress: PlotProgressDto | None
+
+
+class WorkspaceResourcesResponse(StrictModel):
+    references: list[ReferenceDto]
+    styles: list[StyleSummary]
+    appliedStyle: AppliedStyleSummary | None
+
+
 class WorkspaceResponse(StrictModel):
     novel: WorkspaceNovel
     chapters: list[WorkspaceChapter]

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import httpx
@@ -104,6 +105,7 @@ def test_create_novel_request_rejects_coerced_values(field: str, value: object) 
 class ApiNovelService:
     def __init__(self) -> None:
         self.user_id: str | None = None
+        self.workspace_calls: list[tuple[str, str, str | None]] = []
 
     async def create_novel(self, user_id: str, body: CreateNovelRequest):
         self.user_id = user_id
@@ -111,6 +113,53 @@ class ApiNovelService:
         from inkforge_core.novels.schemas import CreateNovelResponse
 
         return CreateNovelResponse(novelId="novel-1", chapterId="chapter-1")
+
+    async def get_workspace_bootstrap(
+        self, user_id: str, novel_id: str, chapter_id: str | None
+    ):
+        self.workspace_calls.append(("bootstrap", user_id, chapter_id))
+        now = datetime(2026, 7, 14, tzinfo=UTC)
+        return {
+            "novel": {
+                "id": novel_id,
+                "name": "作品",
+                "summary": None,
+                "storyProgress": None,
+                "appliedStyleId": None,
+                "createdAt": now,
+                "updatedAt": now,
+                "appliedStyle": None,
+            },
+            "chapters": [],
+            "currentChapter": None,
+            "currentChapterId": None,
+        }
+
+    async def get_workspace_lore(self, user_id: str, novel_id: str):
+        self.workspace_calls.append(("lore", user_id, None))
+        return {
+            "characters": [],
+            "items": [],
+            "locations": [],
+            "factions": [],
+            "glossaries": [],
+        }
+
+    async def get_workspace_planning(self, user_id: str, novel_id: str):
+        self.workspace_calls.append(("planning", user_id, None))
+        return {
+            "storyProgress": None,
+            "storyBackground": None,
+            "worldSetting": None,
+            "writingBible": None,
+            "outline": None,
+            "outlineNodes": [],
+            "plotProgress": None,
+        }
+
+    async def get_workspace_resources(self, user_id: str, novel_id: str):
+        self.workspace_calls.append(("resources", user_id, None))
+        return {"references": [], "styles": [], "appliedStyle": None}
 
 
 @asynccontextmanager
@@ -177,10 +226,71 @@ async def test_novel_http_rejects_string_encoded_number() -> None:
 def test_domain_openapi_has_routes_and_does_not_publish_owner_input() -> None:
     schema = create_app(testing=True).openapi()
     assert "/api/v1/novels/{novel_id}/workspace" in schema["paths"]
+    assert "/api/v1/novels/{novel_id}/workspace/bootstrap" in schema["paths"]
+    assert "/api/v1/novels/{novel_id}/workspace/lore" in schema["paths"]
+    assert "/api/v1/novels/{novel_id}/workspace/planning" in schema["paths"]
+    assert "/api/v1/novels/{novel_id}/workspace/resources" in schema["paths"]
     assert "/api/v1/chapters/{chapter_id}/progress" in schema["paths"]
     assert "/api/v1/quality-checks/{check_id}/run" in schema["paths"]
     properties = schema["components"]["schemas"]["CreateNovelRequest"]["properties"]
     assert "userId" not in properties
+
+
+@pytest.mark.asyncio
+async def test_workspace_group_routes_use_cookie_owner_and_preserve_chapter_selection() -> None:
+    service = ApiNovelService()
+    async with novel_api_client(service) as client:
+        bootstrap = await client.get(
+            "/api/v1/novels/novel-1/workspace/bootstrap",
+            params={"chapterId": "chapter-2"},
+        )
+        lore = await client.get("/api/v1/novels/novel-1/workspace/lore")
+        planning = await client.get("/api/v1/novels/novel-1/workspace/planning")
+        resources = await client.get("/api/v1/novels/novel-1/workspace/resources")
+
+    assert [response.status_code for response in (bootstrap, lore, planning, resources)] == [
+        200,
+        200,
+        200,
+        200,
+    ]
+    assert service.workspace_calls == [
+        ("bootstrap", "cookie-user", "chapter-2"),
+        ("lore", "cookie-user", None),
+        ("planning", "cookie-user", None),
+        ("resources", "cookie-user", None),
+    ]
+
+
+def test_workspace_group_openapi_has_strict_response_boundaries() -> None:
+    schemas = create_app(testing=True).openapi()["components"]["schemas"]
+    assert set(schemas["WorkspaceBootstrapResponse"]["properties"]) == {
+        "novel",
+        "chapters",
+        "currentChapter",
+        "currentChapterId",
+    }
+    assert set(schemas["WorkspaceLoreResponse"]["properties"]) == {
+        "characters",
+        "items",
+        "locations",
+        "factions",
+        "glossaries",
+    }
+    assert set(schemas["WorkspacePlanningResponse"]["properties"]) == {
+        "storyProgress",
+        "storyBackground",
+        "worldSetting",
+        "writingBible",
+        "outline",
+        "outlineNodes",
+        "plotProgress",
+    }
+    assert set(schemas["WorkspaceResourcesResponse"]["properties"]) == {
+        "references",
+        "styles",
+        "appliedStyle",
+    }
 
 
 @pytest.mark.parametrize("profile", ["short", "serial", "LONG_SERIAL", ""])
@@ -380,6 +490,25 @@ class WorkspaceSession:
         return None
 
 
+class QueryBoundarySession(WorkspaceSession):
+    def __init__(self) -> None:
+        super().__init__([])
+        self.statements: list[str] = []
+
+    async def scalars(self, statement):
+        self.statements.append(str(statement))
+        return await super().scalars(statement)
+
+    async def execute(self, statement):
+        self.statements.append(str(statement))
+        self.query_count += 1
+        return ScalarRows([])
+
+    async def scalar(self, statement):
+        self.statements.append(str(statement))
+        return await super().scalar(statement)
+
+
 def workspace_novel():
     from datetime import UTC, datetime
 
@@ -430,6 +559,61 @@ async def test_workspace_query_count_does_not_grow_with_chapter_count() -> None:
     await repository._load_workspace(small, workspace_novel(), None)
     await repository._load_workspace(large, workspace_novel(), None)
     assert small.query_count == large.query_count
+
+
+@pytest.mark.asyncio
+async def test_workspace_bootstrap_does_not_query_deferred_groups() -> None:
+    from inkforge_core.novels.repository import NovelRepository
+
+    session = QueryBoundarySession()
+    result = await NovelRepository(lambda: None)._load_workspace_bootstrap(  # type: ignore[arg-type]
+        session,
+        workspace_novel(),
+        None,
+        user_id="user-1",
+    )
+
+    source = "\n".join(session.statements)
+    for table in (
+        "Character",
+        "Item",
+        "Location",
+        "Faction",
+        "Glossary",
+        "StoryBackground",
+        "WorldSetting",
+        "WritingBible",
+        "Outline",
+        "OutlineNode",
+        "PlotProgress",
+        "ReferenceMaterial",
+        "RagDocument",
+    ):
+        assert table not in source
+    assert set(result) == {"novel", "chapters", "currentChapter", "currentChapterId"}
+
+
+@pytest.mark.asyncio
+async def test_workspace_deferred_group_queries_are_isolated() -> None:
+    from inkforge_core.novels.repository import NovelRepository
+
+    repository = NovelRepository(lambda: None)  # type: ignore[arg-type]
+    expectations = {
+        "_load_lore": ("Character", "StoryBackground", "ReferenceMaterial"),
+        "_load_planning": ("StoryBackground", "Character", "ReferenceMaterial"),
+        "_load_resources": ("ReferenceMaterial", "Character", "StoryBackground"),
+    }
+    for method_name, (required, forbidden_a, forbidden_b) in expectations.items():
+        session = QueryBoundarySession()
+        method = getattr(repository, method_name)
+        if method_name == "_load_resources":
+            await method(session, workspace_novel(), user_id="user-1")
+        else:
+            await method(session, workspace_novel())
+        source = "\n".join(session.statements)
+        assert required in source
+        assert forbidden_a not in source
+        assert forbidden_b not in source
 
 
 @pytest.mark.asyncio

@@ -12,6 +12,10 @@ from .schemas import (
     CreateNovelResponse,
     DashboardResponse,
     NovelResponse,
+    WorkspaceBootstrapResponse,
+    WorkspaceLoreResponse,
+    WorkspacePlanningResponse,
+    WorkspaceResourcesResponse,
     WorkspaceResponse,
 )
 from .service import NovelService
@@ -70,3 +74,49 @@ async def get_workspace(
     chapter_id: Annotated[str | None, Query(alias="chapterId")] = None,
 ) -> WorkspaceResponse:
     return await service.get_workspace(user.id, novel_id, chapter_id)
+
+
+@router.get(
+    "/novels/{novel_id}/workspace/bootstrap",
+    response_model=WorkspaceBootstrapResponse,
+)
+async def get_workspace_bootstrap(
+    novel_id: str,
+    user: Annotated[AuthUser, Depends(get_current_user)],
+    service: Annotated[NovelService, Depends(get_novel_service)],
+    chapter_id: Annotated[str | None, Query(alias="chapterId")] = None,
+) -> WorkspaceBootstrapResponse:
+    return await service.get_workspace_bootstrap(user.id, novel_id, chapter_id)
+
+
+@router.get("/novels/{novel_id}/workspace/lore", response_model=WorkspaceLoreResponse)
+async def get_workspace_lore(
+    novel_id: str,
+    user: Annotated[AuthUser, Depends(get_current_user)],
+    service: Annotated[NovelService, Depends(get_novel_service)],
+) -> WorkspaceLoreResponse:
+    return await service.get_workspace_lore(user.id, novel_id)
+
+
+@router.get(
+    "/novels/{novel_id}/workspace/planning",
+    response_model=WorkspacePlanningResponse,
+)
+async def get_workspace_planning(
+    novel_id: str,
+    user: Annotated[AuthUser, Depends(get_current_user)],
+    service: Annotated[NovelService, Depends(get_novel_service)],
+) -> WorkspacePlanningResponse:
+    return await service.get_workspace_planning(user.id, novel_id)
+
+
+@router.get(
+    "/novels/{novel_id}/workspace/resources",
+    response_model=WorkspaceResourcesResponse,
+)
+async def get_workspace_resources(
+    novel_id: str,
+    user: Annotated[AuthUser, Depends(get_current_user)],
+    service: Annotated[NovelService, Depends(get_novel_service)],
+) -> WorkspaceResourcesResponse:
+    return await service.get_workspace_resources(user.id, novel_id)
