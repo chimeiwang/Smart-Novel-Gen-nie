@@ -259,7 +259,7 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                     runner,
                     workflow_log=workflow_log,
                 )
-                if embedding_provider is not None:
+                if settings.rag_index_enabled and embedding_provider is not None:
                     handlers["rag"] = RagJobHandler(core, embedding_provider)
                 app.state.queue_consumer = QueueConsumer(queue, handlers)
     except (OSError, ValueError) as exc:

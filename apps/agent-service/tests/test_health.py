@@ -1,3 +1,7 @@
+from pathlib import Path
+
+import inkforge_agents.app as app_module
+import pytest
 from fastapi.testclient import TestClient
 from inkforge_agents.app import create_app
 from inkforge_agents.config import Settings
@@ -120,3 +124,38 @@ def test_readiness_fails_when_rag_is_enabled_without_embedding_provider() -> Non
 
     assert response.status_code == 503
     assert response.json()["checks"]["rag_indexer"] == "failed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("rag_enabled", "handler_expected"), [(False, False), (True, True)])
+async def test_rag_handler_requires_agent_side_feature_flag(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    rag_enabled: bool,
+    handler_expected: bool,
+) -> None:
+    monkeypatch.setattr(
+        app_module,
+        "create_agent_callback_signer",
+        lambda **_kwargs: object(),
+    )
+    settings = Settings.model_validate(
+        {
+            "environment": "test",
+            "model_provider": "fake",
+            "agent_service_private_key_path": "unused.pem",
+            "workflow_human_log_dir": str(tmp_path),
+            "rag_embedding_api_key": "test-key",
+            "rag_embedding_base_url": "https://embedding.example/v1",
+            "rag_embedding_model": "test-embedding",
+            "rag_index_enabled": rag_enabled,
+        }
+    )
+    app = create_app(settings=settings, run_queue=object())  # type: ignore[arg-type]
+
+    try:
+        assert app.state.embedding_provider is not None
+        assert ("rag" in app.state.queue_consumer._handlers) is handler_expected
+    finally:
+        await app.state.core_http.aclose()
+        await app.state.embedding_http.aclose()
