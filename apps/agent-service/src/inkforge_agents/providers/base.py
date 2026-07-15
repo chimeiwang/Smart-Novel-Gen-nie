@@ -4,6 +4,14 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, NonNegativeInt
 
+ModelFinishReason = Literal[
+    "stop",
+    "tool_calls",
+    "length",
+    "content_filter",
+    "unknown",
+]
+
 
 class ModelToolCall(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -54,6 +62,8 @@ class ModelTurnResult(BaseModel):
     content: str
     toolCalls: list[ModelToolCall]
     usage: ModelUsage
+    finishReason: ModelFinishReason
+    rawFinishReason: str | None = None
 
 
 class ModelProvider(Protocol):

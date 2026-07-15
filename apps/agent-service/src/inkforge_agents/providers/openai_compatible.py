@@ -14,11 +14,32 @@ from langchain_openai import ChatOpenAI
 
 from ..config import Settings
 from .base import (
+    ModelFinishReason,
     ModelToolCall,
     ModelTurnRequest,
     ModelTurnResult,
     ModelUsage,
 )
+
+
+def normalize_finish_reason(value: object) -> ModelFinishReason:
+    if not isinstance(value, str):
+        return "unknown"
+    aliases: dict[str, ModelFinishReason] = {
+        "stop": "stop",
+        "tool_calls": "tool_calls",
+        "function_call": "tool_calls",
+        "length": "length",
+        "max_tokens": "length",
+        "content_filter": "content_filter",
+    }
+    return aliases.get(value, "unknown")
+
+
+def _raw_finish_reason(value: object) -> str | None:
+    if value is None:
+        return None
+    return value if isinstance(value, str) else str(value)
 
 
 class OpenAICompatibleProvider:
@@ -106,9 +127,12 @@ class OpenAICompatibleProvider:
             )
             for tool_call in response.tool_calls
         ]
+        provider_finish_reason = response.response_metadata.get("finish_reason")
         return ModelTurnResult(
             content=response.content,
             toolCalls=tool_calls,
+            finishReason=normalize_finish_reason(provider_finish_reason),
+            rawFinishReason=_raw_finish_reason(provider_finish_reason),
             usage=ModelUsage(
                 promptTokens=prompt_tokens,
                 cachedTokens=int(input_details.get("cache_read", 0)),

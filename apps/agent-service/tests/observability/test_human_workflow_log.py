@@ -24,6 +24,8 @@ def test_human_log_keeps_complete_messages_and_resume_in_same_file(tmp_path: Pat
         "写作",
         [{"role": "user", "content": content}],
         content,
+        "length",
+        "max_tokens",
     )
     first_path = log.finish_run("task-123456789", "等待用户确认")
 
@@ -44,6 +46,8 @@ def test_human_log_keeps_complete_messages_and_resume_in_same_file(tmp_path: Pat
     assert "R02 恢复运行" in written
     assert "S001 状态切换" in written
     assert "A01 智能体：写作" in written
+    assert "完成原因：length" in written
+    assert "供应商原始原因：max_tokens" in written
     assert "结束状态：完成" in written
 
 

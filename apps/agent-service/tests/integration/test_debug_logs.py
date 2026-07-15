@@ -42,6 +42,8 @@ def test_signed_debug_api_filters_user_and_returns_complete_content(tmp_path: Pa
         "写作",
         [{"role": "user", "content": "完整请求"}],
         "完整响应",
+        "stop",
+        "stop",
     )
     workflow_log.finish_run("run-1", "完成")
     verifier = Verifier()

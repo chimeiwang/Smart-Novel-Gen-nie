@@ -95,11 +95,27 @@ class ToolRegistry:
     ) -> dict[str, Any]:
         tool = self.require(name)
         validated = tool.validate(arguments)
+        return await self.execute_validated(tool, validated, context)
+
+    async def execute_validated(
+        self,
+        tool: ToolDefinition,
+        arguments: dict[str, Any],
+        context: ToolContext,
+    ) -> dict[str, Any]:
+        registered = self.require(tool.name)
+        if registered is not tool:
+            raise ValueError("工具定义与注册表不一致")
+        if not tool.permission.allows(
+            context.agentId,
+            {tool.permission.capability},
+        ):
+            raise PermissionError(f"当前智能体无权执行工具：{tool.name}")
         if tool.toolKind == "control":
             raise ValueError("控制工具只能由智能体运行时捕获")
         if tool.handler is None:
-            raise RuntimeError(f"工具缺少执行器：{name}")
-        return await tool.handler(validated, context)
+            raise RuntimeError(f"工具缺少执行器：{tool.name}")
+        return await tool.handler(arguments, context)
 
 
 class _UnavailableGateway:

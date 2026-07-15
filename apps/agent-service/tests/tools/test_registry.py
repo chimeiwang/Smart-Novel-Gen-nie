@@ -1,6 +1,46 @@
 import pytest
-from inkforge_agents.tools.registry import ToolContext, build_default_registry
+from inkforge_agents.tools.permissions import read_only_permission
+from inkforge_agents.tools.registry import (
+    ToolContext,
+    ToolDefinition,
+    ToolRegistry,
+    build_default_registry,
+)
 from inkforge_contracts.read_tools import READ_TOOL_NAMES
+from pydantic import BaseModel, ConfigDict
+
+
+class EmptyArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+async def execute_empty(
+    arguments: dict[str, object],
+    context: ToolContext,
+) -> dict[str, object]:
+    del arguments, context
+    return {"ok": True}
+
+
+def restricted_tool() -> ToolDefinition:
+    return ToolDefinition(
+        name="restricted_read",
+        description="受限只读工具",
+        argumentsModel=EmptyArgs,
+        permission=read_only_permission("restricted.read", {"设定"}),
+        toolKind="read",
+        handler=execute_empty,
+    )
+
+
+def tool_context(agent_id: str) -> ToolContext:
+    return ToolContext(
+        userId="user-1",
+        novelId="novel-1",
+        taskId="task-1",
+        runId="run-1",
+        agentId=agent_id,
+    )
 
 
 def test_registry_contains_migrated_read_proposal_and_control_tools() -> None:
@@ -41,3 +81,28 @@ async def test_registry_refuses_control_tool_direct_execution() -> None:
             },
             context,
         )
+
+
+@pytest.mark.asyncio
+async def test_execute_validated_requires_the_registered_tool_definition() -> None:
+    registry = ToolRegistry()
+    registered = restricted_tool()
+    registry.register(registered)
+    same_name_but_unregistered = restricted_tool()
+
+    with pytest.raises(ValueError, match="工具定义与注册表不一致"):
+        await registry.execute_validated(
+            same_name_but_unregistered,
+            {},
+            tool_context("设定"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_execute_validated_rechecks_agent_restriction() -> None:
+    registry = ToolRegistry()
+    tool = restricted_tool()
+    registry.register(tool)
+
+    with pytest.raises(PermissionError, match="当前智能体无权执行工具"):
+        await registry.execute_validated(tool, {}, tool_context("写作"))

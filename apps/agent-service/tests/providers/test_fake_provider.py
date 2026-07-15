@@ -24,6 +24,8 @@ async def test_fake_provider_returns_deterministic_text_tool_call_and_usage() ->
     assert first == second
     assert first.content == "模拟模型已完成本轮处理。"
     assert first.toolCalls[0].name == "submit_evaluation"
+    assert first.finishReason == "tool_calls"
+    assert first.rawFinishReason == "tool_calls"
     assert first.usage.totalTokens == first.usage.promptTokens + first.usage.completionTokens
     assert provider.billable is False
 
@@ -39,6 +41,8 @@ async def test_fake_provider_without_tools_returns_full_visible_text() -> None:
     )
 
     assert result.toolCalls == []
+    assert result.finishReason == "stop"
+    assert result.rawFinishReason == "stop"
     assert result.content == "模拟模型已完成本轮处理。"
 
 
@@ -67,6 +71,7 @@ async def test_fake_provider_finishes_after_tool_result() -> None:
     )
 
     assert result.toolCalls == []
+    assert result.finishReason == "stop"
 
 
 @pytest.mark.asyncio

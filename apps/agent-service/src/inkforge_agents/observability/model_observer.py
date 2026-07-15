@@ -19,10 +19,14 @@ class WorkflowModelObserver:
         context: ModelContext,
         messages: list[dict[str, str]],
         output: str,
+        finish_reason: str,
+        raw_finish_reason: str | None,
     ) -> None:
         self._workflow_log.record_model_call(
             context.runId,
             context.agentId,
             messages,
             output,
+            finish_reason,
+            raw_finish_reason,
         )

@@ -40,6 +40,8 @@ class ModelCallObserver(Protocol):
         context: ModelCallContext,
         messages: list[dict[str, str]],
         output: str,
+        finish_reason: str,
+        raw_finish_reason: str | None,
     ) -> None: ...
 
 
@@ -131,6 +133,8 @@ class ModelRuntime:
                 for message in request.messages
             ],
             result.content,
+            result.finishReason,
+            result.rawFinishReason,
         )
 
 

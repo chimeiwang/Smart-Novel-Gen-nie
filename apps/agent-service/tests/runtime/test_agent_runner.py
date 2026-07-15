@@ -20,6 +20,8 @@ class CapturingProvider:
         return ModelTurnResult(
             content="已完成",
             toolCalls=[],
+            finishReason="stop",
+            rawFinishReason="stop",
             usage=ModelUsage(
                 promptTokens=1,
                 cachedTokens=0,

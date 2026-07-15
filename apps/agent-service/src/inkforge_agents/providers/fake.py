@@ -22,6 +22,8 @@ class FakeModelProvider:
         return ModelTurnResult(
             content=content,
             toolCalls=tool_calls,
+            finishReason="tool_calls" if tool_calls else "stop",
+            rawFinishReason="tool_calls" if tool_calls else "stop",
             usage=ModelUsage(
                 promptTokens=prompt_tokens,
                 cachedTokens=0,
