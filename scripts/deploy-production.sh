@@ -12,6 +12,10 @@ compose() {
   docker compose --env-file .env -f "$compose_file" "$@"
 }
 
+refresh_nginx() {
+  compose up --no-build -d --wait --no-deps --force-recreate nginx
+}
+
 find_service_container() {
   service="$1"
   docker ps -q \
@@ -167,6 +171,10 @@ rollback() {
   compose up --no-build -d --wait
   rollback_status="$?"
   if [ "$rollback_status" -eq 0 ]; then
+    refresh_nginx
+    rollback_status="$?"
+  fi
+  if [ "$rollback_status" -eq 0 ]; then
     verify_stack
     rollback_status="$?"
   fi
@@ -181,6 +189,7 @@ rollback() {
 
 trap 'rollback "$?"' EXIT
 compose up --no-build -d --wait
+refresh_nginx
 verify_stack
 trap - EXIT
 echo "生产编排已启动"

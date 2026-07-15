@@ -14,7 +14,47 @@ if [ "${1:-}" = "compose" ]; then
       exit "${FAKE_ROLLBACK_UP_STATUS:-0}"
       ;;
     *" ps "*) exit 0 ;;
+    *" port nginx 8080 "*) printf '%s\n' "${FAKE_NGINX_BINDING:-0.0.0.0:80}"; exit 0 ;;
     *" exec -T core-api python -c "*) exit "${FAKE_SCHEMA_VERIFY_STATUS:-0}" ;;
+    *" exec -T agent-service "*)
+      if [ -n "${FAKE_AGENT_READY_COUNTER:-}" ]; then
+        count=0
+        if [ -f "$FAKE_AGENT_READY_COUNTER" ]; then
+          count="$(cat "$FAKE_AGENT_READY_COUNTER")"
+        fi
+        count=$((count + 1))
+        printf '%s\n' "$count" > "$FAKE_AGENT_READY_COUNTER"
+        if [ -n "${FAKE_AGENT_READY_SEQUENCE:-}" ]; then
+          state="$FAKE_AGENT_READY_SEQUENCE"
+          sequence_index="$count"
+          while [ "$sequence_index" -gt 1 ]; do
+            case "$state" in
+              *,*) state="${state#*,}" ;;
+              *) state=""; break ;;
+            esac
+            sequence_index=$((sequence_index - 1))
+          done
+          state="${state%%,*}"
+        elif [ "$count" -lt "${FAKE_AGENT_READY_AFTER:-1}" ]; then
+          state="not_ready"
+        else
+          state="ready"
+        fi
+        case "$state" in
+          ready) ;;
+          not_ready)
+            printf '%s\n' '{"status":"not_ready","backgroundTasks":{"code":"BACKGROUND_TASK_BACKOFF"},"sensitiveToken":"fixture-sensitive-token"}' >&2
+            printf '%s\n' 'INKFORGE_AGENT_READINESS_DIAGNOSTIC={"status":"not_ready","backgroundTasks":{"code":"BACKGROUND_TASK_BACKOFF"}}' >&2
+            exit 1
+            ;;
+          *)
+            printf 'FAKE_AGENT_READY_SEQUENCE 状态无效: %s\n' "$state" >&2
+            exit 2
+            ;;
+        esac
+      fi
+      exit "${FAKE_VERIFY_STATUS:-0}"
+      ;;
     *" exec "*) exit "${FAKE_VERIFY_STATUS:-0}" ;;
   esac
 fi

@@ -64,6 +64,7 @@ def _run_deploy(
     new_status: int = 0,
     rollback_status: int = 0,
     schema_verify_status: int = 0,
+    agent_ready_sequence: str = "",
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     app_dir = tmp_path / "app"
     bin_dir = tmp_path / "bin"
@@ -88,6 +89,7 @@ def _run_deploy(
         (app_dir / "infra" / "secrets" / key_file).write_text("fixture", encoding="utf-8")
     shutil.copy2(ROOT / "scripts" / "compose_smoke.sh", app_dir / "scripts")
     (app_dir / "scripts" / "compose_smoke.sh").chmod(0o755)
+    shutil.copy2(ROOT / "scripts" / "agent_readiness_probe.py", app_dir / "scripts")
     shutil.copy2(FAKE_DOCKER, bin_dir / "docker")
     (bin_dir / "docker").chmod(0o755)
     _write_executable(
@@ -110,6 +112,7 @@ def _run_deploy(
         "esac\n",
     )
     log_path = tmp_path / "docker.log"
+    agent_counter_path = tmp_path / "agent-ready-counter"
     env = {
         **os.environ,
         "APP_DIR": _posix_path(app_dir),
@@ -121,6 +124,11 @@ def _run_deploy(
         "FAKE_NEW_UP_STATUS": str(new_status),
         "FAKE_ROLLBACK_UP_STATUS": str(rollback_status),
         "FAKE_SCHEMA_VERIFY_STATUS": str(schema_verify_status),
+        "FAKE_AGENT_READY_COUNTER": _posix_path(agent_counter_path),
+        "FAKE_AGENT_READY_SEQUENCE": agent_ready_sequence,
+        "SMOKE_AGENT_MAX_ATTEMPTS": "1",
+        "SMOKE_AGENT_REQUIRED_SUCCESSES": "1",
+        "SMOKE_AGENT_POLL_SECONDS": "0",
     }
     result = subprocess.run(  # noqa: S603 - 仅执行仓库内固定脚本和测试夹具
         [
@@ -142,6 +150,37 @@ def _run_deploy(
     return result, log_path.read_text(encoding="utf-8") if log_path.exists() else ""
 
 
+def _full_stack_up_lines(log: str) -> list[str]:
+    return [
+        line
+        for line in log.splitlines()
+        if line.endswith(" up --no-build -d --wait")
+    ]
+
+
+def _nginx_refresh_lines(log: str) -> list[str]:
+    return [
+        line
+        for line in log.splitlines()
+        if line.endswith(
+            " up --no-build -d --wait --no-deps --force-recreate nginx"
+        )
+    ]
+
+
+def _deployment_up_events(log: str) -> list[tuple[str, str]]:
+    events: list[tuple[str, str]] = []
+    for line in log.splitlines():
+        tag = line.split("|", 1)[0]
+        if line.endswith(" up --no-build -d --wait"):
+            events.append((tag, "全栈"))
+        elif line.endswith(
+            " up --no-build -d --wait --no-deps --force-recreate nginx"
+        ):
+            events.append((tag, "Nginx"))
+    return events
+
+
 @pytest.mark.parametrize(
     ("state", "expected_status", "expected_up_count"),
     [
@@ -161,7 +200,19 @@ def test_previous_image_state_is_validated_before_switch(
     result, log = _run_deploy(tmp_path, previous_state=state)
 
     assert (result.returncode == 0) is (expected_status == 0), result.stderr
-    assert log.count(" up --no-build -d --wait") == expected_up_count
+    assert len(_full_stack_up_lines(log)) == expected_up_count
+
+
+def test_successful_deployment_refreshes_nginx_with_new_tag(tmp_path: Path) -> None:
+    result, log = _run_deploy(tmp_path, previous_state="valid")
+
+    assert result.returncode == 0, result.stderr
+    refresh_lines = _nginx_refresh_lines(log)
+    assert [line.split("|", 1)[0] for line in refresh_lines] == ["tag=new-tag"]
+    assert _deployment_up_events(log) == [
+        ("tag=new-tag", "全栈"),
+        ("tag=new-tag", "Nginx"),
+    ]
 
 
 def test_failed_new_version_restores_previous_version_and_keeps_failure(
@@ -175,7 +226,7 @@ def test_failed_new_version_restores_previous_version_and_keeps_failure(
     )
 
     assert result.returncode != 0
-    up_lines = [line for line in log.splitlines() if " up --no-build -d --wait" in line]
+    up_lines = _full_stack_up_lines(log)
     assert [line.split("|", 1)[0] for line in up_lines] == [
         "tag=new-tag",
         "tag=previous-tag",
@@ -194,7 +245,7 @@ def test_failed_first_deployment_does_not_fabricate_rollback(tmp_path: Path) -> 
     )
 
     assert result.returncode == 23
-    assert log.count(" up --no-build -d --wait") == 1
+    assert len(_full_stack_up_lines(log)) == 1
     assert "本次为首次部署，没有可自动恢复的上一版本" in result.stderr
     assert "旧版本已恢复" not in result.stdout
     assert "生产编排已启动" not in result.stdout
@@ -211,7 +262,7 @@ def test_failed_rollback_reports_both_failures_without_success(
     )
 
     assert result.returncode != 0
-    assert log.count(" up --no-build -d --wait") == 2
+    assert len(_full_stack_up_lines(log)) == 2
     assert "新版本部署失败" in result.stderr
     assert "自动回滚也失败" in result.stderr
     assert "生产编排已启动" not in result.stdout
@@ -229,6 +280,33 @@ def test_failed_rollback_schema_verification_is_not_masked_by_smoke(
     )
 
     assert result.returncode == 23
-    assert log.count(" up --no-build -d --wait") == 2
+    assert len(_full_stack_up_lines(log)) == 2
     assert "自动回滚也失败（退出码：25）" in result.stderr
     assert "旧版本已恢复" not in result.stdout
+
+
+def test_smoke_failure_refreshes_nginx_for_new_and_rollback_tags(
+    tmp_path: Path,
+) -> None:
+    result, log = _run_deploy(
+        tmp_path,
+        previous_state="valid",
+        agent_ready_sequence="not_ready,ready",
+    )
+
+    assert result.returncode != 0
+    assert [line.split("|", 1)[0] for line in _full_stack_up_lines(log)] == [
+        "tag=new-tag",
+        "tag=previous-tag",
+    ]
+    assert [line.split("|", 1)[0] for line in _nginx_refresh_lines(log)] == [
+        "tag=new-tag",
+        "tag=previous-tag",
+    ]
+    assert _deployment_up_events(log) == [
+        ("tag=new-tag", "全栈"),
+        ("tag=new-tag", "Nginx"),
+        ("tag=previous-tag", "全栈"),
+        ("tag=previous-tag", "Nginx"),
+    ]
+    assert "新版本部署失败，旧版本已恢复" in result.stdout
