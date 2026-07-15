@@ -137,6 +137,7 @@ class AuthService:
         rate_limiter: RedisRateLimiter,
         jwt_secret: str,
         environment: str,
+        cookie_secure: bool,
     ) -> None:
         if not jwt_secret.strip():
             raise ValueError("会话签名密钥不能为空")
@@ -148,6 +149,7 @@ class AuthService:
         self._rate_limiter = rate_limiter
         self._jwt_secret = jwt_secret
         self.environment = environment
+        self.cookie_secure = cookie_secure
 
     async def register(
         self,

@@ -55,7 +55,7 @@ async def logout(
     response.delete_cookie(
         key=COOKIE_NAME,
         path="/",
-        secure=service.environment == "production",
+        secure=service.cookie_secure,
         httponly=True,
         samesite="lax",
     )
@@ -72,7 +72,7 @@ def _set_session_cookie(response: Response, service: AuthService, user_id: str) 
         value=service.create_session_token(user_id),
         max_age=SESSION_MAX_AGE_SECONDS,
         httponly=True,
-        secure=service.environment == "production",
+        secure=service.cookie_secure,
         samesite="lax",
         path="/",
     )

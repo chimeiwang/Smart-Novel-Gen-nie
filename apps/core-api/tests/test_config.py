@@ -56,6 +56,12 @@ def test_production_accepts_complete_explicit_configuration() -> None:
     assert settings.trusted_agent_cidrs == ("10.20.0.0/16",)
 
 
+def test_session_cookie_secure_requires_explicit_insecure_http_override() -> None:
+    assert production_settings().session_cookie_secure is True
+    assert production_settings(allow_insecure_http_auth=True).session_cookie_secure is False
+    assert Settings(environment="dev").session_cookie_secure is False
+
+
 def test_production_rejects_short_jwt_secret_without_echoing_it() -> None:
     short_jwt_key = "不可用于生产"
     with pytest.raises(ValidationError) as caught:

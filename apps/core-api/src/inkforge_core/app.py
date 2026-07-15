@@ -128,6 +128,7 @@ def _configure_auth(app: FastAPI, settings: Settings) -> None:
         rate_limiter=RedisRateLimiter(redis),
         jwt_secret=configured_secret,
         environment=settings.environment,
+        cookie_secure=settings.session_cookie_secure,
     )
 
 

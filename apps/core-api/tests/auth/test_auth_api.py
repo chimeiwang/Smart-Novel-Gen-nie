@@ -115,6 +115,7 @@ def build_service(
     redis: FakeRedis | None = None,
     jwt_key: str = TEST_JWT_KEY,
     environment: str = "test",
+    cookie_secure: bool = False,
 ) -> AuthService:
     limiter = RedisRateLimiter(redis or FakeRedis(), key_prefix="测试:认证:")
     return AuthService(
@@ -122,6 +123,7 @@ def build_service(
         rate_limiter=limiter,
         jwt_secret=jwt_key,
         environment=environment,
+        cookie_secure=cookie_secure,
     )
 
 
@@ -403,20 +405,30 @@ async def test_cookie_security_attributes_follow_environment() -> None:
         development = await client.post(
             "/api/v1/auth/login", json={"username": "alice", "password": "123456"}
         )
-    async with auth_client(build_service(repository, environment="production")) as (_, client):
+    async with auth_client(
+        build_service(repository, environment="production", cookie_secure=True)
+    ) as (_, client):
         production = await client.post(
+            "/api/v1/auth/login", json={"username": "alice", "password": "123456"}
+        )
+    async with auth_client(
+        build_service(repository, environment="production", cookie_secure=False)
+    ) as (_, client):
+        insecure_production = await client.post(
             "/api/v1/auth/login", json={"username": "alice", "password": "123456"}
         )
 
     development_cookie = development.headers["set-cookie"]
     production_cookie = production.headers["set-cookie"]
-    for value in (development_cookie, production_cookie):
+    insecure_production_cookie = insecure_production.headers["set-cookie"]
+    for value in (development_cookie, production_cookie, insecure_production_cookie):
         assert "HttpOnly" in value
         assert "Path=/" in value
         assert "SameSite=lax" in value
         assert "Max-Age=2592000" in value
     assert "Secure" not in development_cookie
     assert "Secure" in production_cookie
+    assert "Secure" not in insecure_production_cookie
 
 
 @pytest.mark.asyncio
@@ -454,7 +466,9 @@ async def test_me_rejects_missing_and_invalid_cookie() -> None:
 
 @pytest.mark.asyncio
 async def test_logout_is_idempotent_and_clears_cookie_on_same_path() -> None:
-    async with auth_client(build_service(empty_repository())) as (_, client):
+    async with auth_client(
+        build_service(empty_repository(), environment="production", cookie_secure=False)
+    ) as (_, client):
         client.cookies.set("inkforge-token", "invalid-token")
         response = await client.post("/api/v1/auth/logout")
 
@@ -463,6 +477,7 @@ async def test_logout_is_idempotent_and_clears_cookie_on_same_path() -> None:
     assert cookie.startswith("inkforge-token=")
     assert "Path=/" in cookie
     assert "Max-Age=0" in cookie
+    assert "Secure" not in cookie
 
 
 @pytest.mark.asyncio
@@ -625,6 +640,7 @@ def test_auth_service_rejects_blank_key_in_all_environments() -> None:
             rate_limiter=RedisRateLimiter(FakeRedis()),
             jwt_secret=blank_jwt_key,
             environment="test",
+            cookie_secure=False,
         )
     with pytest.raises(ValueError, match="禁止使用旧默认"):
         AuthService(
@@ -632,6 +648,7 @@ def test_auth_service_rejects_blank_key_in_all_environments() -> None:
             rate_limiter=RedisRateLimiter(FakeRedis()),
             jwt_secret=OLD_DEFAULT_JWT_SECRET,
             environment="production",
+            cookie_secure=True,
         )
 
 

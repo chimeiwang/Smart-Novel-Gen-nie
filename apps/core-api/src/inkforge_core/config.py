@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     )
 
     environment: Environment = "dev"
+    allow_insecure_http_auth: bool = False
     database_url: SecretStr | None = None
     redis_url: SecretStr | None = None
     jwt_secret: SecretStr | None = None
@@ -47,6 +48,10 @@ class Settings(BaseSettings):
     uploads_root: str = "/data/uploads"
     workflow_event_debug_enabled: bool = False
     rag_index_enabled: bool = False
+
+    @property
+    def session_cookie_secure(self) -> bool:
+        return self.environment == "production" and not self.allow_insecure_http_auth
 
     @field_validator("environment", mode="before")
     @classmethod
