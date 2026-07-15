@@ -74,6 +74,7 @@ services:
       - no-new-privileges:true
     environment:
       ENVIRONMENT: production
+      ALLOW_INSECURE_HTTP_AUTH: ${ALLOW_INSECURE_HTTP_AUTH:-false}
       DATABASE_URL: ${DATABASE_URL:?必须配置现有 PostgreSQL 数据库地址}
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET: ${JWT_SECRET:?必须配置会话签名密钥}
