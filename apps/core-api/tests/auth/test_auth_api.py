@@ -440,6 +440,7 @@ async def test_cookie_security_attributes_follow_environment() -> None:
     assert "HttpOnly" in insecure_production_registration_cookie
     assert "SameSite=lax" in insecure_production_registration_cookie
     assert "Path=/" in insecure_production_registration_cookie
+    assert "Max-Age=2592000" in insecure_production_registration_cookie
 
 
 @pytest.mark.asyncio
