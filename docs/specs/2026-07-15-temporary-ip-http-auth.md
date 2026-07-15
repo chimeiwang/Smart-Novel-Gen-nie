@@ -24,3 +24,8 @@
 3. 非生产环境维持既有非 `Secure` 行为。
 4. 生产 Compose 向 Core API 注入 `ALLOW_INSECURE_HTTP_AUTH: ${ALLOW_INSECURE_HTTP_AUTH:-false}`。
 5. 部署后，线上登录响应不再含 `Secure`，浏览器可进入 `/dashboard`；恢复 HTTPS 后把 `.env` 改回 `false` 并再次部署。
+
+## 部署兼容
+
+- 生产部署脚本中的 Git 命令必须仅对当前 `APP_DIR` 声明 `safe.directory`，以兼容仓库文件由不同运维用户创建的服务器。
+- 不得写入任何用户的全局 Git 配置，也不得放宽 SSH 主机密钥校验。

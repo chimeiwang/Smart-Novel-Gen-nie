@@ -24,6 +24,10 @@ find_service_container() {
     | head -n 1
 }
 
+safe_git() {
+  git -c safe.directory="$APP_DIR" "$@"
+}
+
 verify_stack() {
   compose ps &&
   compose exec -T core-api python -c \
@@ -38,15 +42,15 @@ mkdir -p "$APP_DIR"
 cd "$APP_DIR"
 
 if [ ! -d .git ]; then
-  git init -b "$BRANCH"
-  git remote add origin "$REPO_URL"
+  safe_git init -b "$BRANCH"
+  safe_git remote add origin "$REPO_URL"
 else
-  git remote set-url origin "$REPO_URL"
+  safe_git remote set-url origin "$REPO_URL"
 fi
 
 max_fetch_attempts="3"
 fetch_attempt="1"
-while ! git -c http.version=HTTP/1.1 fetch --depth=1 origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+while ! safe_git -c http.version=HTTP/1.1 fetch --depth=1 origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
 do
   if [ "$fetch_attempt" -lt "$max_fetch_attempts" ]; then
     next_attempt=$((fetch_attempt + 1))
@@ -58,12 +62,12 @@ do
     exit 1
   fi
 done
-remote_sha="$(git rev-parse "refs/remotes/origin/$BRANCH")"
+remote_sha="$(safe_git rev-parse "refs/remotes/origin/$BRANCH")"
 [ "$remote_sha" = "$DEPLOY_SHA" ] || {
   echo "远程分支提交与部署提交不一致" >&2
   exit 1
 }
-git reset --hard "$DEPLOY_SHA"
+safe_git reset --hard "$DEPLOY_SHA"
 
 [ -f .env ] || { echo "缺少 .env" >&2; exit 1; }
 [ -r .env ] || { echo "部署用户无法读取 .env" >&2; exit 1; }

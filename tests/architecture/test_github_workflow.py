@@ -148,8 +148,8 @@ def test_remote_deploy_requires_server_configuration_and_never_builds() -> None:
     for contract in (
         'APP_DIR="${APP_DIR:-/srv/smart-novel-gen}"',
         'DEPLOY_SHA="${DEPLOY_SHA:?必须设置部署提交}"',
-        "git -c http.version=HTTP/1.1 fetch",
-        'git reset --hard "$DEPLOY_SHA"',
+        'safe_git -c http.version=HTTP/1.1 fetch',
+        'safe_git reset --hard "$DEPLOY_SHA"',
         "infra/compose.yaml",
         ".env",
         "core-to-agent-private.pem",
@@ -176,3 +176,10 @@ def test_remote_deploy_requires_server_configuration_and_never_builds() -> None:
     assert '"$mode" = "600"' in source
 
     assert "up --build" not in source
+
+
+def test_remote_deploy_allows_only_its_app_directory_for_git_operations() -> None:
+    source = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'git -c safe.directory="$APP_DIR" "$@"' in source
+    assert 'safe_git reset --hard "$DEPLOY_SHA"' in source

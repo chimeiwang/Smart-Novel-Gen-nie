@@ -95,6 +95,7 @@ def _run_deploy(
     _write_executable(
         bin_dir / "git",
         "#!/bin/sh\n"
+        "while [ \"${1:-}\" = \"-c\" ]; do shift 2; done\n"
         "if [ \"${1:-}\" = \"rev-parse\" ]; then printf '%s\\n' \"$DEPLOY_SHA\"; fi\n"
         "exit 0\n",
     )
