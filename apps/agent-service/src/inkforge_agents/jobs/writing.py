@@ -84,6 +84,7 @@ class WritingJobHandler:
             novelId=job.novelId,
             taskId=job.taskId,
             runId=job.runId,
+            jobId=job.jobId,
         )
         if self._workflow_log is not None:
             self._workflow_log.start_run(
@@ -99,7 +100,18 @@ class WritingJobHandler:
                 ),
             )
         context = await self._core.call_tool(resource, "写作", "get_writing_context", {})
-        state, graph = self._prepare_state(job, context)
+        current_job_state = _current_job_snapshot(job, context)
+        if current_job_state is not None and await self._settle_recovered_state(
+            resource,
+            job.runId,
+            current_job_state,
+        ):
+            return
+        state, graph = self._prepare_state(
+            job,
+            context,
+            current_job_state=current_job_state,
+        )
         self._record_state(
             job.runId,
             "准备运行",
@@ -117,16 +129,14 @@ class WritingJobHandler:
         except Exception as exc:
             self._record_state(job.runId, "运行异常", {"错误": str(exc) or "智能体运行失败"})
             self._finish_log(job.runId, "错误")
-            try:
-                await self._core.fail(
-                    resource,
-                    sequence=sequence + 1,
-                    code="AGENT_RUN_FAILED",
-                    message=str(exc) or "智能体运行失败",
-                    recoverable=True,
-                )
-            finally:
-                raise NonRetryableJobError("写作运行失败已上报核心服务") from exc
+            await self._core.fail(
+                resource,
+                sequence=sequence + 1,
+                code="AGENT_RUN_FAILED",
+                message=str(exc) or "智能体运行失败",
+                recoverable=True,
+            )
+            raise NonRetryableJobError("写作运行失败已上报核心服务") from exc
 
         stable = cast(
             GraphState,
@@ -170,16 +180,14 @@ class WritingJobHandler:
         if stable.get("phase") == "error":
             message = str(stable.get("errorMessage") or "智能体运行失败")
             self._finish_log(job.runId, "错误")
-            try:
-                await self._core.fail(
-                    resource,
-                    sequence=next_sequence + 1,
-                    code="AGENT_RUN_FAILED",
-                    message=message,
-                    recoverable=True,
-                )
-            finally:
-                raise NonRetryableJobError("写作运行失败已上报核心服务")
+            await self._core.fail(
+                resource,
+                sequence=next_sequence + 1,
+                code="AGENT_RUN_FAILED",
+                message=message,
+                recoverable=True,
+            )
+            raise NonRetryableJobError("写作运行失败已上报核心服务")
         if waiting_for_user:
             self._finish_log(job.runId, "等待用户确认")
             return
@@ -198,15 +206,53 @@ class WritingJobHandler:
         if self._workflow_log is not None:
             self._workflow_log.finish_run(run_id, status)
 
+    async def _settle_recovered_state(
+        self,
+        resource: RunResource,
+        run_id: str,
+        state: GraphState,
+    ) -> bool:
+        phase = state.get("phase")
+        sequence = int(state.get("eventSequence", 0)) + 1
+        if phase == "completed":
+            self._record_state(run_id, "重放完成回调", {"阶段": phase})
+            await self._core.complete(
+                resource,
+                sequence=sequence,
+                result={"finalResponse": str(state.get("finalResponse", ""))},
+            )
+            self._finish_log(run_id, "完成")
+            return True
+        if phase == "error":
+            message = str(state.get("errorMessage") or "智能体运行失败")
+            self._record_state(run_id, "重放失败回调", {"阶段": phase})
+            await self._core.fail(
+                resource,
+                sequence=sequence,
+                code="AGENT_RUN_FAILED",
+                message=message,
+                recoverable=True,
+            )
+            self._finish_log(run_id, "错误")
+            raise NonRetryableJobError("写作运行失败已上报核心服务")
+        if phase == "waiting_user":
+            self._finish_log(run_id, "等待用户确认")
+            return True
+        return False
+
     def _prepare_state(
         self,
         job: QueueJob,
         context: dict[str, Any],
+        *,
+        current_job_state: GraphState | None = None,
     ) -> tuple[GraphState, GraphPort]:
         planning = context.get("planning")
         if not isinstance(planning, dict):
             raise ValueError("核心服务缺少写作规划上下文")
         snapshot = planning.get("graphState")
+        if current_job_state is not None:
+            return current_job_state, self._operation_graph
         is_resume = job.payload.get("resume") is True
         if is_resume:
             if not isinstance(snapshot, dict):
@@ -247,6 +293,19 @@ class WritingJobHandler:
             + json.dumps(context, ensure_ascii=False, separators=(",", ":"))
         ]
         return state, self._parent_graph
+
+
+def _current_job_snapshot(
+    job: QueueJob,
+    context: dict[str, Any],
+) -> GraphState | None:
+    planning = context.get("planning")
+    if not isinstance(planning, dict):
+        return None
+    snapshot = planning.get("graphState")
+    if not isinstance(snapshot, dict) or snapshot.get("callbackJobId") != job.jobId:
+        return None
+    return deserialize_snapshot(snapshot)
 
 
 def _artifact_id_from_interrupt(interrupts: object) -> str | None:

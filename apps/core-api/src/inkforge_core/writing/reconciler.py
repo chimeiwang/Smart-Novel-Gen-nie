@@ -4,8 +4,7 @@ import asyncio
 import logging
 from typing import Protocol
 
-from inkforge_contracts.jobs import AgentJobStatus
-
+from ..operations.transient_errors import is_transient_infrastructure_error
 from .records import TaskRecord
 
 logger = logging.getLogger(__name__)
@@ -14,22 +13,18 @@ logger = logging.getLogger(__name__)
 class ReconciliationRepository(Protocol):
     async def list_reconcilable(self, limit: int) -> list[TaskRecord]: ...
 
-    async def settle_reconciliation_terminal(
-        self,
-        task: TaskRecord,
-        agent_status: AgentJobStatus,
-    ) -> None: ...
+    async def create_reconciliation_command(self, task: TaskRecord) -> bool: ...
 
 
-class ReconciliationSubmitter(Protocol):
-    async def reconcile(self, task: TaskRecord) -> AgentJobStatus: ...
+class ImmediateCommandDispatcher(Protocol):
+    async def run_once(self) -> int: ...
 
 
 class WritingRunReconciler:
     def __init__(
         self,
         repository: ReconciliationRepository,
-        submitter: ReconciliationSubmitter,
+        dispatcher: ImmediateCommandDispatcher,
         *,
         batch_size: int = 50,
         interval_seconds: float = 30,
@@ -37,7 +32,7 @@ class WritingRunReconciler:
         if batch_size < 1 or interval_seconds <= 0:
             raise ValueError("运行对账配置无效")
         self._repository = repository
-        self._submitter = submitter
+        self._dispatcher = dispatcher
         self._batch_size = batch_size
         self._interval_seconds = interval_seconds
         self._stop = asyncio.Event()
@@ -46,29 +41,33 @@ class WritingRunReconciler:
         self._stop.set()
 
     async def run_once(self) -> int:
-        completed = 0
+        created = 0
         for task in await self._repository.list_reconcilable(self._batch_size):
             try:
-                agent_status = await self._submitter.reconcile(task)
-                if agent_status not in {"queued", "running"}:
-                    await self._repository.settle_reconciliation_terminal(
-                        task,
-                        agent_status,
-                    )
-                completed += 1
-            except Exception:
+                if await self._repository.create_reconciliation_command(task):
+                    created += 1
+            except Exception as exc:
+                if not is_transient_infrastructure_error(exc):
+                    raise
                 logger.warning(
-                    "写作运行对账提交失败",
-                    extra={"taskId": task.id},
+                    "写作运行对账命令创建失败",
+                    extra={"taskId": task.id, "errorCode": type(exc).__name__},
                 )
-        return completed
+        if created:
+            await self._dispatcher.run_once()
+        return created
 
     async def run(self) -> None:
         while not self._stop.is_set():
             try:
                 await self.run_once()
-            except Exception:
-                logger.exception("写作运行后台领取失败，等待下次重试")
+            except Exception as exc:
+                if not is_transient_infrastructure_error(exc):
+                    raise
+                logger.warning(
+                    "写作运行后台领取暂时失败，等待下次重试",
+                    extra={"errorCode": type(exc).__name__},
+                )
             try:
                 await asyncio.wait_for(
                     self._stop.wait(),

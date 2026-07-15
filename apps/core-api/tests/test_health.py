@@ -87,12 +87,52 @@ def test_core_readiness_fails_when_registered_background_task_exits() -> None:
 
         deadline = time.monotonic() + 1
         registry = app.state.background_task_registry
-        while registry.is_ready() and time.monotonic() < deadline:
+        while (
+            registry.error_code("writing_reconciler")
+            != "BACKGROUND_TASK_BACKOFF"
+            and time.monotonic() < deadline
+        ):
             time.sleep(0.001)
         response = client.get("/api/v1/health/ready")
 
     assert response.status_code == 503
     assert response.json()["checks"]["background_tasks"] == "failed"
+    assert response.json()["backgroundTasks"] == {
+        "writing_reconciler": "BACKGROUND_TASK_BACKOFF"
+    }
+
+
+def test_core_readiness_recovers_after_background_worker_restarts() -> None:
+    class FlakyWorker:
+        def __init__(self) -> None:
+            self.starts = 0
+            self.stopped = False
+            self.stop_event = asyncio.Event()
+
+        async def run(self) -> None:
+            self.starts += 1
+            if self.starts == 1:
+                raise RuntimeError("模拟首次崩溃")
+            await self.stop_event.wait()
+
+        def request_stop(self) -> None:
+            self.stopped = True
+            self.stop_event.set()
+
+    import time
+
+    worker = FlakyWorker()
+    app = create_app(testing=True, writing_reconciler=worker)
+
+    with TestClient(app) as client:
+        deadline = time.monotonic() + 2
+        while worker.starts < 2 and time.monotonic() < deadline:
+            time.sleep(0.005)
+        response = client.get("/api/v1/health/ready")
+
+    assert worker.starts == 2
+    assert response.status_code == 200
+    assert response.json()["checks"]["background_tasks"] == "ok"
 
 
 def test_ready_aggregates_sync_and_async_checks_and_returns_503_on_failure() -> None:

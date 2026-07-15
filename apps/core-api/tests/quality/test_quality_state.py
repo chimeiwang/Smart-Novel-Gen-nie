@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -481,7 +483,7 @@ def chapter_model():
         id="chapter-1",
         novelId="novel-1",
         order=1,
-        status="drafting",
+        status="review",
         title="第一章",
         content="完整章节",
         createdAt=now,
@@ -502,8 +504,19 @@ def quality_run_model(*, run_id: str, status: str):
         status=status,
         sourceType="quality_check",
         sourceId="check-1",
-        input=(
-            '{"checkId":"check-1","sourceTaskId":null,"message":null}'
+        input=json.dumps(
+            {
+                "checkId": "check-1",
+                "sourceTaskId": None,
+                "message": None,
+                "chapterContent": "完整章节",
+                "chapterContentSha256": hashlib.sha256(
+                    "完整章节".encode()
+                ).hexdigest(),
+                "sourceUpdatedAt": "2026-07-11T00:00:00+00:00",
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
         ),
         createdAt=now,
         updatedAt=now,
@@ -565,6 +578,131 @@ async def test_repository_allows_new_quality_run_after_terminal_state() -> None:
 
 
 @pytest.mark.asyncio
+async def test_repository_marks_public_check_running_when_run_is_accepted() -> None:
+    session = QualityRunSession(None)
+    repository, _, check = quality_repository_with_locked_records(session)
+
+    await repository.create_run("check-1", "user-1", None, None)
+
+    assert check.status == "running"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("chapter_status", ["drafting", "completed"])
+async def test_repository_only_allows_quality_run_for_review_chapter(
+    chapter_status: str,
+) -> None:
+    session = QualityRunSession(None)
+    repository, chapter, check = quality_repository_with_locked_records(session)
+    chapter.status = chapter_status
+
+    with pytest.raises(ApiError) as caught:
+        await repository.create_run("check-1", "user-1", None, None)
+
+    assert caught.value.status_code == 409
+    assert caught.value.code == "QUALITY_CHECK_CHAPTER_NOT_IN_REVIEW"
+    assert check.status == "pending"
+    assert session.added == []
+
+
+@pytest.mark.asyncio
+async def test_public_status_update_rejects_active_quality_run() -> None:
+    active = quality_run_model(run_id="quality-run-active", status="running")
+    session = QualityRunSession(active)
+    repository, _, check = quality_repository_with_locked_records(session)
+
+    with pytest.raises(ApiError) as caught:
+        await repository.update_public_status(
+            "check-1",
+            "user-1",
+            "skipped",
+            False,
+        )
+
+    assert caught.value.status_code == 409
+    assert caught.value.code == "QUALITY_RUN_ACTIVE"
+    assert check.status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_completed_chapter_rejects_quality_check_reset() -> None:
+    session = QualityRunSession(None)
+    repository, chapter, check = quality_repository_with_locked_records(session)
+    chapter.status = "completed"
+    check.status = "skipped"
+
+    with pytest.raises(ApiError) as caught:
+        await repository.update_public_status(
+            "check-1",
+            "user-1",
+            "pending",
+            True,
+        )
+
+    assert caught.value.status_code == 409
+    assert caught.value.code == "QUALITY_CHECK_CHAPTER_COMPLETED"
+    assert check.status == "skipped"
+
+
+@pytest.mark.asyncio
+async def test_quality_run_persists_complete_chapter_snapshot_and_hash() -> None:
+    session = QualityRunSession(None)
+    repository, chapter, _ = quality_repository_with_locked_records(session)
+
+    await repository.create_run("check-1", "user-1", None, "检查当前正文")
+
+    run = session.added[0]
+    payload = json.loads(run.input)
+    assert payload["chapterContent"] == chapter.content
+    assert payload["chapterContentSha256"] == hashlib.sha256(
+        chapter.content.encode("utf-8")
+    ).hexdigest()
+    assert payload["sourceUpdatedAt"] == "2026-07-11T00:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_quality_context_uses_persisted_snapshot_instead_of_live_content() -> None:
+    session = QualityRunSession("quality-run-1")
+    repository, chapter, _ = quality_repository_with_locked_records(session)
+    run = quality_run_model(run_id="quality-run-1", status="running")
+    original = "发起检查时的正文"
+    run.input = json.dumps(
+        {
+            "checkId": "check-1",
+            "sourceTaskId": None,
+            "message": None,
+            "chapterContent": original,
+            "chapterContentSha256": hashlib.sha256(original.encode("utf-8")).hexdigest(),
+            "sourceUpdatedAt": "2026-07-11T00:00:00+00:00",
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    chapter.content = "上下文读取前已变化的正文"
+
+    async def require_bound(*args, **kwargs):
+        del args, kwargs
+        return run
+
+    async def is_latest(*args, **kwargs):
+        del args, kwargs
+        return True
+
+    repository._require_bound_quality_run = require_bound  # type: ignore[method-assign]
+    repository._is_latest_quality_run = is_latest  # type: ignore[method-assign]
+
+    context = await repository.get_run_context(
+        "check-1",
+        "user-1",
+        None,
+        None,
+        run.id,
+    )
+
+    assert context["chapterContent"] == original
+
+
+@pytest.mark.asyncio
 async def test_stale_quality_success_only_settles_its_own_workflow_run() -> None:
     session = QualityRunSession("quality-run-new")
     repository, _, check = quality_repository_with_locked_records(session)
@@ -613,6 +751,97 @@ async def test_stale_quality_failure_does_not_fail_latest_check() -> None:
     assert stale.status == "failed"
     assert check.status == "completed"
     assert check.result == "新运行结果"
+
+
+@pytest.mark.asyncio
+async def test_changed_content_cancels_quality_success_without_completing_check() -> None:
+    session = QualityRunSession("quality-run-current")
+    repository, chapter, check = quality_repository_with_locked_records(session)
+    run = quality_run_model(run_id="quality-run-current", status="running")
+    source = chapter.content
+    run.input = json.dumps(
+        {
+            "checkId": "check-1",
+            "sourceTaskId": None,
+            "message": None,
+            "chapterContent": source,
+            "chapterContentSha256": hashlib.sha256(source.encode("utf-8")).hexdigest(),
+            "sourceUpdatedAt": "2026-07-11T00:00:00+00:00",
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    chapter.content = "运行期间修改后的正文"
+    check.status = "pending"
+    check.result = None
+
+    async def require_bound(*args, **kwargs):
+        del args, kwargs
+        return run
+
+    async def is_latest(*args, **kwargs):
+        del args, kwargs
+        return True
+
+    repository._require_bound_quality_run = require_bound  # type: ignore[method-assign]
+    repository._is_latest_quality_run = is_latest  # type: ignore[method-assign]
+
+    await repository.complete_run(
+        "check-1",
+        "user-1",
+        {"result": "旧正文报告", "scores": {"overall": 9}},
+        run_id=run.id,
+        novel_id="novel-1",
+    )
+
+    assert run.status == "cancelled"
+    assert run.errorMessage == "QUALITY_SOURCE_CHANGED"
+    assert check.status == "pending"
+    assert check.result is None
+
+
+@pytest.mark.asyncio
+async def test_changed_content_cancels_quality_failure_without_failing_check() -> None:
+    session = QualityRunSession("quality-run-current")
+    repository, chapter, check = quality_repository_with_locked_records(session)
+    run = quality_run_model(run_id="quality-run-current", status="running")
+    source = chapter.content
+    run.input = json.dumps(
+        {
+            "checkId": "check-1",
+            "sourceTaskId": None,
+            "message": None,
+            "chapterContent": source,
+            "chapterContentSha256": hashlib.sha256(source.encode("utf-8")).hexdigest(),
+            "sourceUpdatedAt": "2026-07-11T00:00:00+00:00",
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    chapter.content = "运行期间修改后的正文"
+    check.status = "pending"
+
+    async def require_bound(*args, **kwargs):
+        del args, kwargs
+        return run
+
+    async def is_latest(*args, **kwargs):
+        del args, kwargs
+        return True
+
+    repository._require_bound_quality_run = require_bound  # type: ignore[method-assign]
+    repository._is_latest_quality_run = is_latest  # type: ignore[method-assign]
+
+    await repository.fail_run(
+        "check-1",
+        "user-1",
+        run_id=run.id,
+        novel_id="novel-1",
+    )
+
+    assert run.status == "cancelled"
+    assert run.errorMessage == "QUALITY_SOURCE_CHANGED"
+    assert check.status == "pending"
 
 
 @pytest.mark.asyncio

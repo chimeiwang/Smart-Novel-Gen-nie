@@ -61,7 +61,7 @@ class Submitter:
     async def submit(self, **kwargs: object) -> AgentJobStatus:
         self.calls.append(kwargs)
         if kwargs["run_id"] == self.failing_run_id:
-            raise RuntimeError("模拟质量检查投递失败")
+            raise ConnectionError("质量检查提交暂时失败")
         return self.statuses.get(str(kwargs["run_id"]), "queued")
 
 
@@ -94,7 +94,24 @@ async def test_dispatcher_leaves_failed_run_recoverable_and_continues_batch() ->
 
     assert await dispatcher.run_once() == 1
     assert repository.running == ["good"]
-    assert repository.failures == [("bad", "RuntimeError")]
+    assert repository.failures == [("bad", "ConnectionError")]
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_records_then_propagates_deterministic_error() -> None:
+    repository = Repository([record("invalid")])
+
+    class InvalidSubmitter(Submitter):
+        async def submit(self, **kwargs: object) -> AgentJobStatus:
+            del kwargs
+            raise TypeError("质量检查提交契约错误")
+
+    dispatcher = QualityRunDispatcher(repository, InvalidSubmitter())
+
+    with pytest.raises(TypeError, match="质量检查提交契约错误"):
+        await dispatcher.run_once()
+
+    assert repository.failures == [("invalid", "TypeError")]
 
 
 @pytest.mark.asyncio
@@ -123,7 +140,7 @@ async def test_dispatcher_loop_recovers_after_repository_failure() -> None:
         ) -> list[QualityDispatchRecord]:
             if not self.failed:
                 self.failed = True
-                raise RuntimeError("模拟质量运行领取失败")
+                raise ConnectionError("质量检查领取暂时失败")
             return await super().list_dispatchable_quality_runs(limit)
 
     repository = FlakyRepository()
@@ -140,3 +157,23 @@ async def test_dispatcher_loop_recovers_after_repository_failure() -> None:
     await task
 
     assert repository.running == ["recovered"]
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_loop_propagates_unknown_repository_error() -> None:
+    class InvalidRepository(Repository):
+        async def list_dispatchable_quality_runs(
+            self,
+            limit: int,
+        ) -> list[QualityDispatchRecord]:
+            del limit
+            raise RuntimeError("未知领取错误")
+
+    dispatcher = QualityRunDispatcher(
+        InvalidRepository([]),
+        Submitter(),
+        interval_seconds=0.001,
+    )
+
+    with pytest.raises(RuntimeError, match="未知领取错误"):
+        await asyncio.wait_for(dispatcher.run(), timeout=0.02)

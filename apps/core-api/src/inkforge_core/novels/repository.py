@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import re
 from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any, TypeVar, cast
@@ -48,6 +47,12 @@ from .schemas import (
 from .service import NovelCreation
 
 T = TypeVar("T")
+IGNORED_TEXT_CHARACTERS = (
+    "\u0009\u000a\u000b\u000c\u000d\u0020\u0085\u00a0\u1680"
+    "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
+    "\u2028\u2029\u202f\u205f\u3000\ufeff"
+)
+_TEXT_LENGTH_TRANSLATION = str.maketrans("", "", IGNORED_TEXT_CHARACTERS)
 
 
 def utc_datetime(value: datetime | None) -> datetime | None:
@@ -59,7 +64,16 @@ def utc_datetime(value: datetime | None) -> datetime | None:
 
 
 def count_text_length(value: str) -> int:
-    return len(re.sub(r"\s", "", value))
+    return len(value.translate(_TEXT_LENGTH_TRANSLATION))
+
+
+def beat_plan_chapter_ids(
+    *,
+    include_all_details: bool,
+    chapter_ids: list[str],
+    detail_ids: list[str],
+) -> list[str]:
+    return chapter_ids if include_all_details else detail_ids
 
 
 def model_fields(value: Any, *names: str) -> dict[str, Any]:
@@ -430,7 +444,7 @@ class NovelRepository:
             ]
         else:
             word_count = func.length(
-                func.regexp_replace(Chapter.content, r"\s", "", "g")
+                func.translate(Chapter.content, IGNORED_TEXT_CHARACTERS, "")
             ).label("wordCount")
             rows = (
                 await session.execute(
@@ -480,6 +494,11 @@ class NovelRepository:
 
         chapter_ids = [value["id"] for value in chapter_meta]
         detail_ids = [chapter.id for chapter in detail_chapters]
+        plan_chapter_ids = beat_plan_chapter_ids(
+            include_all_details=include_all_details,
+            chapter_ids=chapter_ids,
+            detail_ids=detail_ids,
+        )
         progresses = await self._for_ids(
             session, ChapterProgress, ChapterProgress.chapterId, detail_ids
         )
@@ -497,14 +516,14 @@ class NovelRepository:
                     await session.scalars(
                         select(ChapterBeatPlan)
                         .where(
-                            ChapterBeatPlan.chapterId.in_(chapter_ids),
+                            ChapterBeatPlan.chapterId.in_(plan_chapter_ids),
                             ChapterBeatPlan.status == "approved",
                         )
                         .order_by(ChapterBeatPlan.updatedAt.desc(), ChapterBeatPlan.id.asc())
                     )
                 ).all()
             )
-            if chapter_ids
+            if plan_chapter_ids
             else []
         )
         latest_plans: dict[str, ChapterBeatPlan] = {}

@@ -128,6 +128,7 @@ services:
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.deepseek.com/v1}
       OPENAI_MODEL: ${OPENAI_MODEL:-deepseek-v4-flash}
       REDIS_URL: redis://redis:6379/0
+      QUEUE_TERMINAL_RETENTION_DAYS: ${QUEUE_TERMINAL_RETENTION_DAYS:-7}
       TRUSTED_CORE_CIDRS: 172.29.0.0/24
       CORE_SERVICE_PUBLIC_KEY_PATH: /run/inkforge-keys/core-to-agent-jwks.json
       AGENT_SERVICE_PRIVATE_KEY_PATH: /run/inkforge-keys/agent-to-core-private.pem

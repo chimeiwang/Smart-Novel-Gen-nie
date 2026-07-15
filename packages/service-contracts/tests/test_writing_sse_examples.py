@@ -22,6 +22,8 @@ def test_shared_writing_sse_examples_are_valid_agent_event_envelopes() -> None:
     assert {item["event"] for item in examples} == REQUIRED_EVENTS
     for item in examples:
         envelope = AgentEvent.model_validate(item["envelope"])
+        assert envelope.protocolVersion == "1.1"
+        assert envelope.jobId == "job-1"
         assert envelope.event == item["event"]
         assert envelope.sequence > 0
         assert "type" not in envelope.data

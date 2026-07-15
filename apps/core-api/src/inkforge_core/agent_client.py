@@ -134,6 +134,7 @@ class WritingTaskAgentSubmitter:
                 userId=command.task.user_id,
                 priority=10,
                 payload=cast(dict[str, JsonValue], command.payload),
+                force=command.payload.get("force") is True,
             )
         )
         return accepted.status

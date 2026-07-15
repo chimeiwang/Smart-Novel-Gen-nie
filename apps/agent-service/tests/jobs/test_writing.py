@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from inkforge_agents.clients.core import CoreServiceError
 from inkforge_agents.graph.snapshots import serialize_snapshot, to_typescript_snapshot
 from inkforge_agents.graph.state import create_initial_state
 from inkforge_agents.jobs.writing import WritingJobHandler
@@ -21,11 +22,16 @@ class CoreClient:
         self.completions: list[tuple[int, dict[str, Any]]] = []
         self.failures: list[dict[str, Any]] = []
         self.operations: list[tuple[str, int]] = []
+        self.resource_job_ids: list[str] = []
+
+    def _record_resource(self, resource: Any) -> None:
+        self.resource_job_ids.append(str(resource.jobId))
 
     async def call_tool(
         self, resource: object, agent_id: str, tool_name: str, arguments: object
     ) -> dict[str, Any]:
-        del resource, arguments
+        self._record_resource(resource)
+        del arguments
         assert agent_id == "写作"
         assert tool_name == "get_writing_context"
         return self.context
@@ -33,7 +39,7 @@ class CoreClient:
     async def send_event(
         self, resource: object, *, sequence: int, event: str, data: dict[str, Any]
     ) -> None:
-        del resource
+        self._record_resource(resource)
         self.events.append((sequence, event))
         self.event_payloads.append(data)
         self.operations.append((event, sequence))
@@ -41,16 +47,16 @@ class CoreClient:
     async def save_checkpoint(
         self, resource: object, *, sequence: int, checkpoint: dict[str, Any]
     ) -> None:
-        del resource
+        self._record_resource(resource)
         self.checkpoints.append((sequence, checkpoint))
         self.operations.append(("checkpoint", sequence))
 
     async def complete(self, resource: object, *, sequence: int, result: dict[str, Any]) -> None:
-        del resource
+        self._record_resource(resource)
         self.completions.append((sequence, result))
 
     async def fail(self, resource: object, **kwargs: Any) -> None:
-        del resource
+        self._record_resource(resource)
         self.failures.append(kwargs)
 
 
@@ -127,6 +133,7 @@ async def test_new_writing_job_runs_parent_graph_and_persists_completion() -> No
     assert core.checkpoints[0][0] == 2
     assert core.checkpoints[0][1]["eventSequence"] == 2
     assert core.completions == [(3, {"finalResponse": "已完成"})]
+    assert core.resource_job_ids == ["job-1", "job-1", "job-1", "job-1"]
 
 
 @pytest.mark.asyncio
@@ -435,4 +442,92 @@ async def test_writing_job_reports_stable_error_instead_of_completion() -> None:
             "message": "主责智能体未提交待审核草案控制事件",
             "recoverable": True,
         }
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_mode", ["graph_exception", "stable_error"])
+async def test_writing_job_keeps_failure_callback_transport_errors_retryable(
+    failure_mode: str,
+) -> None:
+    class FailingCallbackCore(CoreClient):
+        async def fail(self, resource: object, **kwargs: Any) -> None:
+            del resource, kwargs
+            raise CoreServiceError("核心服务暂时不可用", recoverable=True)
+
+    class RaisingGraph(Graph):
+        async def ainvoke(self, value: dict[str, Any]) -> dict[str, Any]:
+            self.inputs.append(value)
+            raise RuntimeError("图执行失败")
+
+    core = FailingCallbackCore(
+        {
+            "workspace": {},
+            "planning": {
+                "taskId": "task-1",
+                "novelId": "novel-1",
+                "chapterId": "chapter-1",
+                "targetWordCount": 4000,
+                "conversationHistory": [],
+                "userMessage": "继续写作",
+                "graphState": None,
+            },
+        }
+    )
+    parent: Graph = (
+        RaisingGraph({})
+        if failure_mode == "graph_exception"
+        else Graph({"phase": "error", "errorMessage": "稳定错误"})
+    )
+    handler = WritingJobHandler(
+        core,
+        parent_graph=parent,
+        operation_graph=Graph({}),
+    )
+
+    with pytest.raises(CoreServiceError, match="核心服务暂时不可用") as caught:
+        await handler(_job())
+
+    assert caught.value.recoverable is True
+
+
+@pytest.mark.asyncio
+async def test_initial_job_retry_replays_its_terminal_checkpoint_without_rerunning_graph() -> None:
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="初始请求",
+    )
+    state["phase"] = "completed"
+    state["finalResponse"] = "首次执行已经完成的正文"
+    state["eventSequence"] = 2
+    snapshot = to_typescript_snapshot(serialize_snapshot(state))
+    snapshot["callbackJobId"] = "job-1"
+    core = CoreClient(
+        {
+            "workspace": {},
+            "planning": {
+                "taskId": "task-1",
+                "novelId": "novel-1",
+                "chapterId": "chapter-1",
+                "targetWordCount": 4000,
+                "conversationHistory": [],
+                "userMessage": "初始请求",
+                "graphState": snapshot,
+            },
+        }
+    )
+    parent = Graph({"phase": "completed", "finalResponse": "不应重新生成"})
+    operation = Graph({"phase": "completed", "finalResponse": "不应重新恢复"})
+    handler = WritingJobHandler(core, parent_graph=parent, operation_graph=operation)
+
+    await handler(_job())
+
+    assert parent.inputs == []
+    assert operation.inputs == []
+    assert core.events == []
+    assert core.completions == [
+        (3, {"finalResponse": "首次执行已经完成的正文"})
     ]

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
 from inkforge_contracts.events import (
@@ -12,12 +13,12 @@ from inkforge_contracts.events import (
 )
 from inkforge_contracts.jobs import AgentJobStatus
 from sqlalchemy import exists, select, update
-from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..db.base import utc_now
 from ..db.models import Novel, WritingMessage, WritingRunCommand, WritingSession, WritingTask
 from ..errors import ApiError
+from .job_identity import build_writing_job_id
 from .message_metadata import workflow_message_metadata
 from .records import TaskRecord
 from .recovery import (
@@ -34,6 +35,13 @@ from .sse import EventSequenceGap, WritingEvent
 
 TERMINAL_TASK_PHASES = frozenset({"completed", "error"})
 LEGACY_RECONCILABLE_PHASES = frozenset({"active", "waiting_call"})
+ACTIVE_CALLBACK_COMMAND_STATUSES = frozenset({"pending", "submitted", "processing"})
+CALLBACK_JOB_ID_FIELD = "callbackJobId"
+JOB_MISMATCH_CODE = "WRITING_JOB_MISMATCH"
+SEQUENCE_STALE_CODE = "WRITING_CALLBACK_SEQUENCE_STALE"
+ALREADY_APPLIED_CODE = "WRITING_CALLBACK_ALREADY_APPLIED"
+STATE_NOOP_CODE = "WRITING_CALLBACK_STATE_NOOP"
+CHECKPOINT_CONFLICT_CODE = "WRITING_CHECKPOINT_CONFLICT"
 logger = logging.getLogger(__name__)
 
 
@@ -55,6 +63,16 @@ class ImmediateCommandDispatcher(Protocol):
 
 
 class EventStorePort(Protocol):
+    async def validate_agent_event(
+        self,
+        task_id: str,
+        *,
+        source_event_id: str,
+        sequence: int,
+        durable_baseline: int,
+        allow_rebase: bool,
+    ) -> bool: ...
+
     async def append_agent_event(
         self,
         task_id: str,
@@ -63,19 +81,62 @@ class EventStorePort(Protocol):
         sequence: int,
         event: str,
         data: dict[str, Any],
+        durable_baseline: int,
+        allow_rebase: bool,
     ) -> WritingEvent: ...
 
 
-class WritingCallbackRepositoryPort(Protocol):
-    async def mark_command_processing(self, task_id: str) -> None: ...
+@dataclass(frozen=True, slots=True)
+class CallbackAcceptance:
+    accepted: bool
+    persisted_sequence: int
+    already_applied: bool = False
+    rejection_code: str | None = None
 
-    async def save_checkpoint(self, task_id: str, serialized: str, phase: str) -> None: ...
+
+@dataclass(frozen=True, slots=True)
+class _CallbackTarget:
+    task: WritingTask
+    command: WritingRunCommand | None
+    already_applied: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _CallbackPreparation:
+    should_publish: bool
+    durable_baseline: int
+
+
+class WritingCallbackRepositoryPort(Protocol):
+    async def authorize_callback(
+        self, task_id: str, job_id: str
+    ) -> CallbackAcceptance: ...
+
+    async def mark_command_processing(
+        self, task_id: str, job_id: str, sequence: int
+    ) -> CallbackAcceptance: ...
+
+    async def save_checkpoint(
+        self,
+        task_id: str,
+        job_id: str,
+        serialized: str,
+        phase: str,
+        sequence: int,
+    ) -> CallbackAcceptance: ...
 
     async def complete_with_message_and_command(
-        self, task_id: str, result: dict[str, Any], visible_response: str
-    ) -> None: ...
+        self,
+        task_id: str,
+        job_id: str,
+        result: dict[str, Any],
+        visible_response: str,
+        sequence: int,
+    ) -> CallbackAcceptance: ...
 
-    async def fail_with_command(self, task_id: str, code: str) -> None: ...
+    async def fail_with_command(
+        self, task_id: str, job_id: str, code: str, sequence: int
+    ) -> CallbackAcceptance: ...
 
 
 class WritingTaskRepository:
@@ -141,6 +202,70 @@ class WritingTaskRepository:
             ).all()
         return [_task_record(task, cast(str, owner_id)) for task, owner_id in rows]
 
+    async def create_reconciliation_command(self, expected: TaskRecord) -> bool:
+        async with self._session_factory() as session:
+            async with session.begin():
+                task = await session.get(
+                    WritingTask,
+                    expected.id,
+                    with_for_update=True,
+                )
+                if (
+                    task is None
+                    or task.phase != expected.phase
+                    or task.graphStateJson != expected.graph_state_json
+                    or task.phase not in LEGACY_RECONCILABLE_PHASES
+                ):
+                    return False
+                active_command_id = await session.scalar(
+                    select(WritingRunCommand.id).where(
+                        WritingRunCommand.taskId == task.id,
+                        WritingRunCommand.status.in_(ACTIVE_CALLBACK_COMMAND_STATUSES),
+                    )
+                )
+                if active_command_id is not None:
+                    return False
+                resume = task.graphStateJson is not None
+                command_id = build_writing_job_id(
+                    task.id,
+                    resume=resume,
+                    graph_state_json=task.graphStateJson,
+                )
+                existing = await session.get(
+                    WritingRunCommand,
+                    command_id,
+                    with_for_update=True,
+                )
+                if existing is not None:
+                    return False
+                payload = {
+                    "version": 1,
+                    "resume": resume,
+                    "chapterId": task.chapterId,
+                    "writingSessionId": task.writingSessionId,
+                    "resumeInput": None,
+                    "force": True,
+                }
+                session.add(
+                    WritingRunCommand(
+                        id=command_id,
+                        taskId=task.id,
+                        kind="resume" if resume else "start",
+                        payloadJson=json.dumps(
+                            payload,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
+                        idempotencyKey=f"reconcile:{command_id}",
+                        status="pending",
+                        attemptCount=0,
+                        nextAttemptAt=utc_now(),
+                    )
+                )
+                await session.flush()
+                return True
+
     async def settle_reconciliation_terminal(
         self,
         expected: TaskRecord,
@@ -177,44 +302,101 @@ class WritingTaskRepository:
                     f"AGENT_JOB_TERMINAL_{agent_status.upper()}",
                 )
 
-    async def save_checkpoint(self, task_id: str, serialized: str, phase: str) -> None:
+    async def authorize_callback(
+        self, task_id: str, job_id: str
+    ) -> CallbackAcceptance:
         async with self._session_factory() as session:
             async with session.begin():
-                outcome = cast(
-                    CursorResult[Any],
-                    await session.execute(
-                        update(WritingTask)
-                        .where(
-                            WritingTask.id == task_id,
-                            WritingTask.phase.not_in(TERMINAL_TASK_PHASES),
-                        )
-                        .values(
-                            graphStateJson=serialized,
-                            phase=phase,
-                            updatedAt=utc_now(),
-                        )
-                    ),
-                )
-                if outcome.rowcount != 1:
-                    raise ApiError(
-                        status_code=409,
-                        code="WRITING_TASK_TERMINAL",
-                        message="终态写作任务不能更新检查点",
+                target = await _lock_callback_target(session, task_id, job_id)
+                if target is None:
+                    return CallbackAcceptance(
+                        False, 0, rejection_code=JOB_MISMATCH_CODE
                     )
-                await _transition_active_command(
-                    session,
-                    task_id,
+                return CallbackAcceptance(
+                    True,
+                    _persisted_event_sequence(target.task),
+                    already_applied=target.already_applied,
+                )
+
+    async def save_checkpoint(
+        self,
+        task_id: str,
+        job_id: str,
+        serialized: str,
+        phase: str,
+        sequence: int,
+    ) -> CallbackAcceptance:
+        async with self._session_factory() as session:
+            async with session.begin():
+                target = await _lock_callback_target(session, task_id, job_id)
+                if target is None:
+                    return CallbackAcceptance(
+                        False, 0, rejection_code=JOB_MISMATCH_CODE
+                    )
+                persisted_sequence = _persisted_event_sequence(target.task)
+                if sequence < persisted_sequence:
+                    return CallbackAcceptance(
+                        False,
+                        persisted_sequence,
+                        rejection_code=SEQUENCE_STALE_CODE,
+                    )
+                if sequence == persisted_sequence:
+                    identical = target.task.graphStateJson == serialized
+                    return CallbackAcceptance(
+                        identical,
+                        persisted_sequence,
+                        already_applied=identical,
+                        rejection_code=None if identical else CHECKPOINT_CONFLICT_CODE,
+                    )
+                if target.already_applied or target.task.phase in TERMINAL_TASK_PHASES:
+                    return CallbackAcceptance(
+                        False,
+                        persisted_sequence,
+                        rejection_code=ALREADY_APPLIED_CODE,
+                    )
+                target.task.graphStateJson = serialized
+                target.task.phase = phase
+                target.task.updatedAt = utc_now()
+                _transition_callback_command(
+                    target.command,
                     "succeeded" if phase == "awaiting_user_review" else "processing",
                 )
+                return CallbackAcceptance(True, persisted_sequence)
 
-    async def mark_command_processing(self, task_id: str) -> None:
+    async def mark_command_processing(
+        self, task_id: str, job_id: str, sequence: int
+    ) -> CallbackAcceptance:
         async with self._session_factory() as session:
             async with session.begin():
-                await _transition_active_command(session, task_id, "processing")
+                target = await _lock_callback_target(session, task_id, job_id)
+                if target is None:
+                    return CallbackAcceptance(
+                        False, 0, rejection_code=JOB_MISMATCH_CODE
+                    )
+                persisted_sequence = _persisted_event_sequence(target.task)
+                if sequence <= persisted_sequence:
+                    return CallbackAcceptance(
+                        False,
+                        persisted_sequence,
+                        rejection_code=SEQUENCE_STALE_CODE,
+                    )
+                if target.already_applied:
+                    return CallbackAcceptance(
+                        False,
+                        persisted_sequence,
+                        rejection_code=ALREADY_APPLIED_CODE,
+                    )
+                _transition_callback_command(target.command, "processing")
+                return CallbackAcceptance(True, persisted_sequence)
 
     async def complete_with_message_and_command(
-        self, task_id: str, result: dict[str, Any], visible_response: str
-    ) -> None:
+        self,
+        task_id: str,
+        job_id: str,
+        result: dict[str, Any],
+        visible_response: str,
+        sequence: int,
+    ) -> CallbackAcceptance:
         values: dict[str, Any] = {"phase": "completed", "updatedAt": utc_now()}
         final_content = result.get("finalContent", result.get("finalResponse"))
         if isinstance(final_content, str):
@@ -225,12 +407,54 @@ class WritingTaskRepository:
             )
         async with self._session_factory() as session:
             async with session.begin():
-                task = await session.get(WritingTask, task_id, with_for_update=True)
-                if task is None:
-                    raise ApiError(
-                        status_code=404,
-                        code="WRITING_TASK_NOT_FOUND",
-                        message="写作任务不存在",
+                target = await _lock_callback_target(session, task_id, job_id)
+                if target is None:
+                    return CallbackAcceptance(
+                        False, 0, rejection_code=JOB_MISMATCH_CODE
+                    )
+                task = target.task
+                persisted_sequence = _persisted_event_sequence(task)
+                if sequence <= persisted_sequence:
+                    return CallbackAcceptance(
+                        False,
+                        persisted_sequence,
+                        rejection_code=SEQUENCE_STALE_CODE,
+                    )
+                if target.command is None and task.phase in TERMINAL_TASK_PHASES:
+                    if task.phase != "completed":
+                        return CallbackAcceptance(
+                            False,
+                            persisted_sequence,
+                            rejection_code=STATE_NOOP_CODE,
+                        )
+                    if visible_response:
+                        await _persist_workflow_message(
+                            session,
+                            task,
+                            role="agent",
+                            content=visible_response,
+                            event_type="done",
+                        )
+                    for name, value in values.items():
+                        if name != "phase":
+                            setattr(task, name, value)
+                    return CallbackAcceptance(True, persisted_sequence)
+                if target.already_applied:
+                    accepted = (
+                        target.command is not None
+                        and target.command.status == "succeeded"
+                    )
+                    return CallbackAcceptance(
+                        accepted,
+                        persisted_sequence,
+                        already_applied=accepted,
+                        rejection_code=None if accepted else STATE_NOOP_CODE,
+                    )
+                if task.phase == "error":
+                    return CallbackAcceptance(
+                        False,
+                        persisted_sequence,
+                        rejection_code=STATE_NOOP_CODE,
                     )
                 if visible_response:
                     await _persist_workflow_message(
@@ -240,15 +464,11 @@ class WritingTaskRepository:
                         content=visible_response,
                         event_type="done",
                     )
-                if task.phase not in TERMINAL_TASK_PHASES:
-                    for name, value in values.items():
+                for name, value in values.items():
+                    if name != "phase" or task.phase not in TERMINAL_TASK_PHASES:
                         setattr(task, name, value)
-                await _transition_active_command(
-                    session,
-                    task_id,
-                    "succeeded",
-                    result=result,
-                )
+                _transition_callback_command(target.command, "succeeded", result=result)
+                return CallbackAcceptance(True, persisted_sequence)
 
     async def persist_workflow_message(
         self,
@@ -276,19 +496,51 @@ class WritingTaskRepository:
                     agent_id=agent_id,
                 )
 
-    async def fail_with_command(self, task_id: str, code: str) -> None:
+    async def fail_with_command(
+        self, task_id: str, job_id: str, code: str, sequence: int
+    ) -> CallbackAcceptance:
         async with self._session_factory() as session:
             async with session.begin():
-                task = await session.get(WritingTask, task_id, with_for_update=True)
-                if task is None:
-                    return
-                mark_task_failed_state(task, code)
-                await _transition_active_command(
-                    session,
-                    task_id,
+                target = await _lock_callback_target(session, task_id, job_id)
+                if target is None:
+                    return CallbackAcceptance(
+                        False, 0, rejection_code=JOB_MISMATCH_CODE
+                    )
+                persisted_sequence = _persisted_event_sequence(target.task)
+                if sequence <= persisted_sequence:
+                    return CallbackAcceptance(
+                        False,
+                        persisted_sequence,
+                        rejection_code=SEQUENCE_STALE_CODE,
+                    )
+                if (
+                    target.command is None
+                    and target.task.phase in TERMINAL_TASK_PHASES
+                ):
+                    accepted = target.task.phase == "error"
+                    return CallbackAcceptance(
+                        accepted,
+                        persisted_sequence,
+                        already_applied=accepted,
+                        rejection_code=None if accepted else STATE_NOOP_CODE,
+                    )
+                if target.already_applied:
+                    accepted = (
+                        target.command is not None and target.command.status == "failed"
+                    )
+                    return CallbackAcceptance(
+                        accepted,
+                        persisted_sequence,
+                        already_applied=accepted,
+                        rejection_code=None if accepted else STATE_NOOP_CODE,
+                    )
+                mark_task_failed_state(target.task, code)
+                _transition_callback_command(
+                    target.command,
                     "failed",
                     result={"code": code},
                 )
+                return CallbackAcceptance(True, persisted_sequence)
 
 
 class WritingTaskService:
@@ -334,19 +586,42 @@ class WritingCallbackService:
         self._events = event_store
 
     async def accept_event(self, body: AgentEvent) -> None:
-        await self._repository.mark_command_processing(body.taskId)
-        await self._append(
-            body.taskId,
-            body.eventId,
-            body.sequence,
-            body.event,
-            body.data,
+        preparation = await self._prepare_callback(
+            task_id=body.taskId,
+            job_id=body.jobId,
+            event_id=body.eventId,
+            sequence=body.sequence,
+            ignore_when_already_applied=True,
         )
+        if preparation is None:
+            return
+        acceptance = await self._repository.mark_command_processing(
+            body.taskId, body.jobId, body.sequence
+        )
+        if not acceptance.accepted:
+            _log_callback_outcome(
+                acceptance.rejection_code or STATE_NOOP_CODE,
+                body.taskId,
+                body.jobId,
+                body.eventId,
+            )
+            return
+        if preparation.should_publish:
+            await self._append(
+                body.taskId,
+                body.eventId,
+                body.sequence,
+                body.event,
+                body.data,
+                durable_baseline=preparation.durable_baseline,
+            )
 
     async def save_checkpoint(
         self, body: CheckpointCallback, *, user_id: str, novel_id: str
     ) -> None:
-        serialized = json.dumps(body.checkpoint, ensure_ascii=False)
+        checkpoint = dict(body.checkpoint)
+        checkpoint[CALLBACK_JOB_ID_FIELD] = body.jobId
+        serialized = json.dumps(checkpoint, ensure_ascii=False)
         try:
             deserialize_graph_snapshot(
                 serialized,
@@ -360,16 +635,48 @@ class WritingCallbackService:
                 code="WRITING_SNAPSHOT_INVALID",
                 message=str(exc),
             ) from exc
-        phase = body.checkpoint.get("phase")
+        checkpoint_sequence = _checkpoint_event_sequence(checkpoint)
+        if checkpoint_sequence != body.sequence:
+            raise ApiError(
+                status_code=409,
+                code="WRITING_CHECKPOINT_SEQUENCE_MISMATCH",
+                message="检查点事件序号与回调序号不一致",
+            )
+        phase = checkpoint.get("phase")
         persisted_phase = phase if isinstance(phase, str) else "active"
-        await self._repository.save_checkpoint(body.taskId, serialized, persisted_phase)
-        await self._append(
-            body.taskId,
-            body.eventId,
-            body.sequence,
-            "checkpoint",
-            {"phase": body.checkpoint.get("phase")},
+        preparation = await self._prepare_callback(
+            task_id=body.taskId,
+            job_id=body.jobId,
+            event_id=body.eventId,
+            sequence=body.sequence,
+            allow_persisted_equal=True,
         )
+        if preparation is None:
+            return
+        acceptance = await self._repository.save_checkpoint(
+            body.taskId,
+            body.jobId,
+            serialized,
+            persisted_phase,
+            body.sequence,
+        )
+        if not acceptance.accepted:
+            _log_callback_outcome(
+                acceptance.rejection_code or STATE_NOOP_CODE,
+                body.taskId,
+                body.jobId,
+                body.eventId,
+            )
+            return
+        if preparation.should_publish:
+            await self._append(
+                body.taskId,
+                body.eventId,
+                body.sequence,
+                "checkpoint",
+                {"phase": checkpoint.get("phase")},
+                durable_baseline=preparation.durable_baseline,
+            )
 
     async def complete(self, body: RunCompletionCallback) -> None:
         final_response = body.result.get("finalResponse")
@@ -377,30 +684,149 @@ class WritingCallbackService:
         event_data: dict[str, Any] = {"taskId": body.taskId}
         if visible_response:
             event_data["finalContent"] = visible_response
-        await self._repository.complete_with_message_and_command(
-            body.taskId, body.result, visible_response
+        preparation = await self._prepare_callback(
+            task_id=body.taskId,
+            job_id=body.jobId,
+            event_id=body.eventId,
+            sequence=body.sequence,
         )
-        await self._append(
+        if preparation is None:
+            return
+        acceptance = await self._repository.complete_with_message_and_command(
             body.taskId,
-            body.eventId,
+            body.jobId,
+            body.result,
+            visible_response,
             body.sequence,
-            "completed",
-            event_data,
         )
+        if not acceptance.accepted:
+            _log_callback_outcome(
+                acceptance.rejection_code or STATE_NOOP_CODE,
+                body.taskId,
+                body.jobId,
+                body.eventId,
+            )
+            return
+        if preparation.should_publish:
+            await self._append(
+                body.taskId,
+                body.eventId,
+                body.sequence,
+                "completed",
+                event_data,
+                durable_baseline=preparation.durable_baseline,
+            )
 
     async def fail(self, body: RunFailureCallback) -> None:
-        await self._repository.fail_with_command(body.taskId, body.code)
-        await self._append(
-            body.taskId,
-            body.eventId,
-            body.sequence,
-            "error",
-            {
-                "message": "智能体运行失败",
-                "code": body.code,
-                "recoverable": body.recoverable,
-            },
+        preparation = await self._prepare_callback(
+            task_id=body.taskId,
+            job_id=body.jobId,
+            event_id=body.eventId,
+            sequence=body.sequence,
         )
+        if preparation is None:
+            return
+        acceptance = await self._repository.fail_with_command(
+            body.taskId, body.jobId, body.code, body.sequence
+        )
+        if not acceptance.accepted:
+            _log_callback_outcome(
+                acceptance.rejection_code or STATE_NOOP_CODE,
+                body.taskId,
+                body.jobId,
+                body.eventId,
+            )
+            return
+        if preparation.should_publish:
+            await self._append(
+                body.taskId,
+                body.eventId,
+                body.sequence,
+                "error",
+                {
+                    "message": "智能体运行失败",
+                    "code": body.code,
+                    "recoverable": body.recoverable,
+                },
+                durable_baseline=preparation.durable_baseline,
+            )
+
+    async def _prepare_callback(
+        self,
+        *,
+        task_id: str,
+        job_id: str,
+        event_id: str,
+        sequence: int,
+        allow_persisted_equal: bool = False,
+        ignore_when_already_applied: bool = False,
+    ) -> _CallbackPreparation | None:
+        authorization = await self._repository.authorize_callback(task_id, job_id)
+        if not authorization.accepted:
+            _log_callback_outcome(
+                authorization.rejection_code or JOB_MISMATCH_CODE,
+                task_id,
+                job_id,
+                event_id,
+            )
+            return None
+        if ignore_when_already_applied and authorization.already_applied:
+            _log_callback_outcome(
+                ALREADY_APPLIED_CODE,
+                task_id,
+                job_id,
+                event_id,
+            )
+            return None
+        if sequence < authorization.persisted_sequence:
+            _log_callback_outcome(
+                SEQUENCE_STALE_CODE,
+                task_id,
+                job_id,
+                event_id,
+            )
+            return None
+        if sequence == authorization.persisted_sequence:
+            if not allow_persisted_equal:
+                _log_callback_outcome(
+                    SEQUENCE_STALE_CODE,
+                    task_id,
+                    job_id,
+                    event_id,
+                )
+                return None
+            durable_baseline = max(0, sequence - 1)
+        else:
+            durable_baseline = authorization.persisted_sequence
+        should_publish = await self._validate_event_sequence(
+            task_id,
+            event_id,
+            sequence,
+            durable_baseline=durable_baseline,
+        )
+        return _CallbackPreparation(
+            should_publish=should_publish,
+            durable_baseline=durable_baseline,
+        )
+
+    async def _validate_event_sequence(
+        self,
+        task_id: str,
+        event_id: str,
+        sequence: int,
+        *,
+        durable_baseline: int,
+    ) -> bool:
+        try:
+            return await self._events.validate_agent_event(
+                task_id,
+                source_event_id=event_id,
+                sequence=sequence,
+                durable_baseline=durable_baseline,
+                allow_rebase=True,
+            )
+        except EventSequenceGap as exc:
+            raise _event_sequence_gap_error(exc) from exc
 
     async def _append(
         self,
@@ -409,6 +835,8 @@ class WritingCallbackService:
         sequence: int,
         event: str,
         data: dict[str, Any],
+        *,
+        durable_baseline: int,
     ) -> None:
         try:
             await self._events.append_agent_event(
@@ -417,18 +845,149 @@ class WritingCallbackService:
                 sequence=sequence,
                 event=event,
                 data=data,
+                durable_baseline=durable_baseline,
+                allow_rebase=True,
             )
         except EventSequenceGap as exc:
-            raise ApiError(
-                status_code=409,
-                code="AGENT_EVENT_SEQUENCE_GAP",
-                message="智能体事件序号不连续，需要状态对账",
-                details={
-                    "expectedSequence": exc.expected_sequence,
-                    "receivedSequence": exc.received_sequence,
-                    "recoverable": True,
-                },
-            ) from exc
+            raise _event_sequence_gap_error(exc) from exc
+
+
+def _event_sequence_gap_error(exc: EventSequenceGap) -> ApiError:
+    return ApiError(
+        status_code=409,
+        code="AGENT_EVENT_SEQUENCE_GAP",
+        message="智能体事件序号不连续，需要状态对账",
+        details={
+            "expectedSequence": exc.expected_sequence,
+            "receivedSequence": exc.received_sequence,
+            "recoverable": True,
+        },
+    )
+
+
+def _checkpoint_event_sequence(checkpoint: dict[str, Any]) -> int:
+    value = checkpoint.get("eventSequence")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ApiError(
+            status_code=409,
+            code="WRITING_CHECKPOINT_SEQUENCE_INVALID",
+            message="检查点缺少有效事件序号",
+        )
+    return value
+
+
+def _persisted_event_sequence(task: WritingTask) -> int:
+    if task.graphStateJson is None:
+        return 0
+    try:
+        snapshot = json.loads(task.graphStateJson)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ApiError(
+            status_code=409,
+            code="WRITING_SNAPSHOT_INVALID",
+            message="持久写作快照不是有效 JSON",
+        ) from exc
+    if not isinstance(snapshot, dict):
+        raise ApiError(
+            status_code=409,
+            code="WRITING_SNAPSHOT_INVALID",
+            message="持久写作快照格式无效",
+        )
+    value = snapshot.get("eventSequence", 0)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ApiError(
+            status_code=409,
+            code="WRITING_SNAPSHOT_INVALID",
+            message="持久写作快照事件序号无效",
+        )
+    return cast(int, value)
+
+
+async def _lock_callback_target(
+    session: AsyncSession,
+    task_id: str,
+    job_id: str,
+) -> _CallbackTarget | None:
+    task = await session.get(WritingTask, task_id, with_for_update=True)
+    if task is None:
+        return None
+    command = await session.get(WritingRunCommand, job_id, with_for_update=True)
+    active_command_id = await session.scalar(
+        select(WritingRunCommand.id)
+        .where(
+            WritingRunCommand.taskId == task_id,
+            WritingRunCommand.status.in_(ACTIVE_CALLBACK_COMMAND_STATUSES),
+        )
+        .with_for_update()
+    )
+    if active_command_id is not None and active_command_id != job_id:
+        return None
+    latest_command_id = active_command_id
+    if latest_command_id is None:
+        latest_command_id = await session.scalar(
+            select(WritingRunCommand.id)
+            .where(WritingRunCommand.taskId == task_id)
+            .order_by(
+                WritingRunCommand.createdAt.desc(),
+                WritingRunCommand.id.desc(),
+            )
+            .limit(1)
+            .with_for_update()
+        )
+    if command is not None:
+        if command.taskId != task_id or latest_command_id != job_id:
+            return None
+        return _CallbackTarget(
+            task=task,
+            command=command,
+            already_applied=command.status not in ACTIVE_CALLBACK_COMMAND_STATUSES,
+        )
+    if latest_command_id is not None:
+        return None
+    if job_id != _legacy_callback_job_id(task):
+        return None
+    return _CallbackTarget(
+        task=task,
+        command=None,
+        already_applied=task.phase in TERMINAL_TASK_PHASES,
+    )
+
+
+def _legacy_callback_job_id(task: WritingTask) -> str:
+    if task.graphStateJson is None:
+        return build_writing_job_id(
+            task.id,
+            resume=False,
+            graph_state_json=None,
+        )
+    try:
+        snapshot = json.loads(task.graphStateJson)
+    except (json.JSONDecodeError, TypeError):
+        snapshot = None
+    if isinstance(snapshot, dict):
+        callback_job_id = snapshot.get(CALLBACK_JOB_ID_FIELD)
+        if isinstance(callback_job_id, str) and callback_job_id.strip():
+            return callback_job_id
+    return build_writing_job_id(
+        task.id,
+        resume=True,
+        graph_state_json=task.graphStateJson,
+    )
+
+
+def _log_callback_outcome(
+    code: str,
+    task_id: str,
+    job_id: str,
+    event_id: str,
+) -> None:
+    logger.warning(
+        "%s task_id=%s job_id=%s event_id=%s",
+        code,
+        task_id,
+        job_id,
+        event_id,
+    )
 
 
 async def _persist_workflow_message(
@@ -473,21 +1032,12 @@ async def _persist_workflow_message(
     )
 
 
-async def _transition_active_command(
-    session: AsyncSession,
-    task_id: str,
+def _transition_callback_command(
+    command: WritingRunCommand | None,
     target: str,
     *,
     result: dict[str, Any] | None = None,
 ) -> None:
-    command = await session.scalar(
-        select(WritingRunCommand)
-        .where(
-            WritingRunCommand.taskId == task_id,
-            WritingRunCommand.status.in_(("pending", "submitted", "processing")),
-        )
-        .with_for_update()
-    )
     if command is None:
         return
     now = utc_now()

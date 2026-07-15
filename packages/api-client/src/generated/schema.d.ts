@@ -1403,6 +1403,11 @@ export interface components {
         /** ChapterStatusRequest */
         ChapterStatusRequest: {
             status: components["schemas"]["ChapterStatus"];
+            /**
+             * Expectedupdatedat
+             * Format: date-time
+             */
+            expectedUpdatedAt: string;
         };
         /** ChapterStatusResponse */
         ChapterStatusResponse: {
@@ -1411,6 +1416,11 @@ export interface components {
             status: components["schemas"]["ChapterStatus"];
             /** Completedat */
             completedAt: string | null;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
         };
         /** CharacterDto */
         CharacterDto: {
@@ -2546,6 +2556,10 @@ export interface components {
             checks: {
                 [key: string]: "ok" | "failed";
             };
+            /** Backgroundtasks */
+            backgroundTasks?: {
+                [key: string]: string;
+            } | null;
         };
         /** ReferenceDto */
         ReferenceDto: {
@@ -2950,6 +2964,11 @@ export interface components {
             title: string;
             /** Content */
             content: string;
+            /**
+             * Expectedupdatedat
+             * Format: date-time
+             */
+            expectedUpdatedAt: string;
         };
         /** UpdateCharacterRequest */
         UpdateCharacterRequest: {

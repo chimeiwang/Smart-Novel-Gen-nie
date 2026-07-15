@@ -6,6 +6,10 @@ from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ..chapters.content_state import (
+    lock_consistency_check,
+    replace_chapter_content,
+)
 from ..db.models import (
     Chapter,
     ChapterBeatPlan,
@@ -73,7 +77,7 @@ class FormalWriteRepository:
                         select(Chapter).where(
                             Chapter.id == requested_id,
                             Chapter.novelId == artifact.novel_id,
-                        )
+                        ).with_for_update()
                     )
                     if existing_chapter is None:
                         raise ApiError(
@@ -81,9 +85,28 @@ class FormalWriteRepository:
                             code="CHAPTER_NOT_FOUND",
                             message="正文草案目标章节不存在",
                         )
-                    existing_chapter.content = content
+                    check = await lock_consistency_check(session, existing_chapter.id)
+                    if check is None:
+                        check = ChapterQualityCheck(
+                            chapterId=existing_chapter.id,
+                            type="consistency",
+                            title="一致性终检",
+                            status="pending",
+                        )
+                        session.add(check)
+                    await replace_chapter_content(
+                        session,
+                        existing_chapter,
+                        check,
+                        content,
+                        reopen=True,
+                    )
                     chapter_id = existing_chapter.id
-                await _ensure_consistency_check(session, chapter_id)
+                if not (
+                    isinstance(target, dict)
+                    and target.get("mode") == "existing_chapter"
+                ):
+                    await _ensure_consistency_check(session, chapter_id)
         return 1
 
     async def apply_beat_plan(

@@ -83,13 +83,30 @@ async def test_dispatch_failure_keeps_command_pending() -> None:
     class FailingSubmitter:
         async def submit_command(self, value: WritingCommandRecord) -> AgentJobStatus:
             del value
-            raise RuntimeError("Redis 暂时不可用，且这段详情不能持久化")
+            raise ConnectionError("Agent Service 暂时不可用")
 
     dispatcher = WritingRunCommandDispatcher(repository, FailingSubmitter())
 
     assert await dispatcher.run_once() == 0
     assert repository.submitted_ids == []
-    assert repository.failed_attempts == [("command-1", "RuntimeError")]
+    assert repository.failed_attempts == [("command-1", "ConnectionError")]
+
+
+@pytest.mark.asyncio
+async def test_dispatch_records_then_propagates_deterministic_error() -> None:
+    repository = Repository([command()])
+
+    class InvalidSubmitter:
+        async def submit_command(self, value: WritingCommandRecord) -> AgentJobStatus:
+            del value
+            raise TypeError("提交调用契约错误")
+
+    dispatcher = WritingRunCommandDispatcher(repository, InvalidSubmitter())
+
+    with pytest.raises(TypeError, match="提交调用契约错误"):
+        await dispatcher.run_once()
+
+    assert repository.failed_attempts == [("command-1", "TypeError")]
 
 
 @pytest.mark.asyncio

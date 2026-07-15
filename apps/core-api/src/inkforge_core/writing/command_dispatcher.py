@@ -7,6 +7,7 @@ from typing import Protocol
 
 from inkforge_contracts.jobs import AgentJobStatus
 
+from ..operations.transient_errors import is_transient_infrastructure_error
 from .commands import WritingCommandRecord
 
 logger = logging.getLogger(__name__)
@@ -93,6 +94,9 @@ class WritingRunCommandDispatcher:
                         "记录写作命令投递失败状态时发生异常",
                         extra={"commandId": command.id, "taskId": command.task.id},
                     )
+                    raise
+                if not is_transient_infrastructure_error(exc):
+                    raise
                 logger.warning(
                     "写作命令投递失败，等待后台重试",
                     extra={
@@ -107,8 +111,13 @@ class WritingRunCommandDispatcher:
         while not self._stop.is_set():
             try:
                 await self.run_once()
-            except Exception:
-                logger.exception("写作命令后台领取失败，等待下次重试")
+            except Exception as exc:
+                if not is_transient_infrastructure_error(exc):
+                    raise
+                logger.warning(
+                    "写作命令后台领取暂时失败，等待下次重试",
+                    extra={"errorCode": type(exc).__name__},
+                )
             try:
                 await asyncio.wait_for(
                     self._stop.wait(),

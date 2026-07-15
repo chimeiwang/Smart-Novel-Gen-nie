@@ -509,6 +509,39 @@ class QueryBoundarySession(WorkspaceSession):
         return await super().scalar(statement)
 
 
+def test_bootstrap_beat_plan_scope_only_uses_current_chapter() -> None:
+    from inkforge_core.novels.repository import beat_plan_chapter_ids
+
+    chapter_ids = ["chapter-1", "chapter-2", "chapter-3"]
+    assert beat_plan_chapter_ids(
+        include_all_details=False,
+        chapter_ids=chapter_ids,
+        detail_ids=["chapter-2"],
+    ) == ["chapter-2"]
+    assert beat_plan_chapter_ids(
+        include_all_details=True,
+        chapter_ids=chapter_ids,
+        detail_ids=["chapter-2"],
+    ) == chapter_ids
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("甲 乙\n丙", 3),
+        ("\u3000甲\t乙", 2),
+        ("甲\u00a0乙", 2),
+        ("甲\ufeff乙", 2),
+        ("\u0085甲", 1),
+        ("😀", 1),
+    ],
+)
+def test_count_text_length_uses_shared_unicode_rule(value: str, expected: int) -> None:
+    from inkforge_core.novels.repository import count_text_length
+
+    assert count_text_length(value) == expected
+
+
 def workspace_novel():
     from datetime import UTC, datetime
 

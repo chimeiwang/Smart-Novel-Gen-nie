@@ -6,6 +6,7 @@ import { useState } from "react";
 import type { AgentId } from "@/features/writing/agent-registry";
 import { getDefaultSelectedAgents } from "@/features/writing/agent-selector";
 import { WritingConversation } from "@/features/writing/writing-conversation";
+import { dispatchWorkspaceInvalidation } from "./workspace-invalidation";
 
 type SmartWritingPanelProps = {
   novelId: string;
@@ -45,7 +46,10 @@ export function SmartWritingPanel({
           chapterContext={currentChapter}
           selectedAgents={selectedAgents}
           targetWordCount={targetWordCount}
-          onComplete={() => router.refresh()}
+          onComplete={() => {
+            dispatchWorkspaceInvalidation(novelId, ["lore", "planning", "resources"]);
+            router.refresh();
+          }}
         />
       ) : (
         <div className="empty-chat">

@@ -7,6 +7,8 @@ from typing import Protocol
 
 from inkforge_contracts.jobs import AgentJobStatus
 
+from ..operations.transient_errors import is_transient_infrastructure_error
+
 logger = logging.getLogger(__name__)
 
 
@@ -83,6 +85,8 @@ class RagIndexDispatcher:
                     )
                 completed += 1
             except Exception as exc:
+                if not is_transient_infrastructure_error(exc):
+                    raise
                 logger.warning(
                     "检索索引投递失败，等待后台重试",
                     extra={
@@ -96,8 +100,13 @@ class RagIndexDispatcher:
         while not self._stop.is_set():
             try:
                 await self.run_once()
-            except Exception:
-                logger.exception("检索索引后台领取失败，等待下次重试")
+            except Exception as exc:
+                if not is_transient_infrastructure_error(exc):
+                    raise
+                logger.warning(
+                    "检索索引后台领取暂时失败，等待下次重试",
+                    extra={"errorCode": type(exc).__name__},
+                )
             try:
                 await asyncio.wait_for(
                     self._stop.wait(),

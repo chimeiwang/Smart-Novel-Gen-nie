@@ -2,8 +2,9 @@
   {
     "event": "artifact_awaiting_user_approval",
     "envelope": {
-      "protocolVersion": "1.0",
+      "protocolVersion": "1.1",
       "eventId": "event-1",
+      "jobId": "job-1",
       "runId": "run-1",
       "taskId": "task-1",
       "sequence": 1,
@@ -22,8 +23,9 @@
   {
     "event": "agent_status",
     "envelope": {
-      "protocolVersion": "1.0",
+      "protocolVersion": "1.1",
       "eventId": "event-2",
+      "jobId": "job-1",
       "runId": "run-1",
       "taskId": "task-1",
       "sequence": 2,
@@ -42,8 +44,9 @@
   {
     "event": "completed",
     "envelope": {
-      "protocolVersion": "1.0",
+      "protocolVersion": "1.1",
       "eventId": "event-3",
+      "jobId": "job-1",
       "runId": "run-1",
       "taskId": "task-1",
       "sequence": 3,
@@ -58,8 +61,9 @@
   {
     "event": "error",
     "envelope": {
-      "protocolVersion": "1.0",
+      "protocolVersion": "1.1",
       "eventId": "event-4",
+      "jobId": "job-1",
       "runId": "run-1",
       "taskId": "task-1",
       "sequence": 4,
@@ -75,8 +79,9 @@
   {
     "event": "update_builder_validation_failed",
     "envelope": {
-      "protocolVersion": "1.0",
+      "protocolVersion": "1.1",
       "eventId": "event-5",
+      "jobId": "job-1",
       "runId": "run-1",
       "taskId": "task-1",
       "sequence": 5,
@@ -94,8 +99,9 @@
   {
     "event": "review_artifact_requested",
     "envelope": {
-      "protocolVersion": "1.0",
+      "protocolVersion": "1.1",
       "eventId": "event-6",
+      "jobId": "job-1",
       "runId": "run-1",
       "taskId": "task-1",
       "sequence": 6,

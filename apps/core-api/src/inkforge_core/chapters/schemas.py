@@ -18,10 +18,12 @@ class CreateChapterRequest(StrictModel):
 class UpdateChapterRequest(StrictModel):
     title: str
     content: str
+    expectedUpdatedAt: datetime
 
 
 class ChapterStatusRequest(StrictModel):
     status: ChapterStatus
+    expectedUpdatedAt: datetime
 
 
 class ChapterProgressRequest(StrictModel):
@@ -36,6 +38,7 @@ class ChapterStatusResponse(StrictModel):
     id: str
     status: ChapterStatus
     completedAt: datetime | None
+    updatedAt: datetime
 
 
 class CreateChapterResponse(StrictModel):

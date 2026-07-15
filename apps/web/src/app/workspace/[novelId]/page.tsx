@@ -21,17 +21,23 @@ export default async function WorkspacePage({
   const { novelId } = await params;
   const { chapterId } = await searchParams;
   let workspace: components["schemas"]["WorkspaceBootstrapResponse"];
+  let currentUser: components["schemas"]["UserResponse"];
   try {
     const client = await createServerApiClient();
-    workspace = requireApiData(await client.GET(
-      "/api/v1/novels/{novel_id}/workspace/bootstrap",
-      {
-        params: {
-          path: { novel_id: novelId },
-          query: { chapterId },
+    const [workspaceResult, currentUserResult] = await Promise.all([
+      client.GET(
+        "/api/v1/novels/{novel_id}/workspace/bootstrap",
+        {
+          params: {
+            path: { novel_id: novelId },
+            query: { chapterId },
+          },
         },
-      },
-    ));
+      ),
+      client.GET("/api/v1/auth/me"),
+    ]);
+    workspace = requireApiData(workspaceResult);
+    currentUser = requireApiData(currentUserResult);
   } catch (error) {
     if (error instanceof CoreApiPageError && error.status === 401) redirect("/login");
     if (error instanceof CoreApiPageError && error.status === 404) notFound();
@@ -80,13 +86,16 @@ export default async function WorkspacePage({
         />
 
         <ChapterEditor
-          key={currentChapter.id}
+          key={`${currentChapter.id}:${currentChapter.updatedAt}`}
+          userId={currentUser.id}
+          novelId={novel.id}
           chapter={{
             id: currentChapter.id,
             title: currentChapter.title,
             content: currentChapter.content,
             status: currentChapter.status,
             completedAt: currentChapter.completedAt,
+            updatedAt: currentChapter.updatedAt,
           }}
           chapterProgress={currentChapter.progress?.content ?? null}
           qualityChecks={currentChapter.qualityChecks.filter(

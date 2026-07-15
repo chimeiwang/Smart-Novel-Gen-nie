@@ -19,6 +19,7 @@ class ChapterRecord:
     novel_id: str = "novel-1"
     status: str = "drafting"
     completed_at: datetime | None = None
+    updated_at: datetime = datetime(2026, 7, 11, tzinfo=UTC)
 
 
 class RecordingChapterRepository:
@@ -35,8 +36,15 @@ class RecordingChapterRepository:
         del chapter_id, user_id, lock
         return self.chapter
 
-    async def update_draft(self, chapter_id: str, user_id: str, title: str, content: str):
-        del chapter_id, user_id
+    async def update_draft(
+        self,
+        chapter_id: str,
+        user_id: str,
+        title: str,
+        content: str,
+        expected_updated_at: datetime,
+    ):
+        del chapter_id, user_id, expected_updated_at
         self.saved_title = title
         self.saved_content = content
         return datetime(2026, 7, 11, tzinfo=UTC)
@@ -67,8 +75,14 @@ class RecordingChapterRepository:
             self.has_default_check = True
         return self.chapter
 
-    async def transition_status(self, chapter_id: str, user_id: str, status: str):
-        del chapter_id, user_id
+    async def transition_status(
+        self,
+        chapter_id: str,
+        user_id: str,
+        status: str,
+        expected_updated_at: datetime,
+    ):
+        del chapter_id, user_id, expected_updated_at
         allowed = {
             "drafting": {"drafting", "review"},
             "review": {"drafting", "review", "completed"},
@@ -108,7 +122,11 @@ async def test_draft_title_falls_back_and_content_is_lossless() -> None:
     response = await service.update_chapter(
         "user-1",
         "chapter-1",
-        UpdateChapterRequest(title="   ", content=content),
+        UpdateChapterRequest(
+            title="   ",
+            content=content,
+            expectedUpdatedAt=datetime(2026, 7, 11, tzinfo=UTC),
+        ),
     )
 
     assert repository.saved_title == "未命名章节"
@@ -116,13 +134,37 @@ async def test_draft_title_falls_back_and_content_is_lossless() -> None:
     assert response.updatedAt == datetime(2026, 7, 11, tzinfo=UTC)
 
 
+def test_chapter_mutations_require_expected_updated_at() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        UpdateChapterRequest(title="标题", content="正文")
+    with pytest.raises(ValidationError):
+        ChapterStatusRequest(status="review")
+
+    expected = datetime(2026, 7, 11, tzinfo=UTC)
+    update = UpdateChapterRequest(
+        title="标题",
+        content="正文",
+        expectedUpdatedAt=expected,
+    )
+    status = ChapterStatusRequest(status="review", expectedUpdatedAt=expected)
+
+    assert update.expectedUpdatedAt == expected
+    assert status.expectedUpdatedAt == expected
+
+
 @pytest.mark.asyncio
 async def test_review_creates_default_consistency_check_and_is_idempotent() -> None:
     repository = RecordingChapterRepository()
     service = ChapterService(repository)  # type: ignore[arg-type]
 
-    await service.set_status("user-1", "chapter-1", ChapterStatusRequest(status="review"))
-    await service.set_status("user-1", "chapter-1", ChapterStatusRequest(status="review"))
+    request = ChapterStatusRequest(
+        status="review",
+        expectedUpdatedAt=repository.chapter.updated_at,
+    )
+    await service.set_status("user-1", "chapter-1", request)
+    await service.set_status("user-1", "chapter-1", request)
 
     assert repository.created_checks == 1
 
@@ -132,7 +174,14 @@ async def test_repeated_review_repairs_missing_default_check() -> None:
     repository = RecordingChapterRepository()
     repository.chapter.status = "review"
     service = ChapterService(repository)  # type: ignore[arg-type]
-    await service.set_status("user-1", "chapter-1", ChapterStatusRequest(status="review"))
+    await service.set_status(
+        "user-1",
+        "chapter-1",
+        ChapterStatusRequest(
+            status="review",
+            expectedUpdatedAt=repository.chapter.updated_at,
+        ),
+    )
     assert repository.created_checks == 1
 
 
@@ -143,12 +192,24 @@ async def test_completed_requires_finished_consistency_check() -> None:
     service = ChapterService(repository)  # type: ignore[arg-type]
 
     with pytest.raises(ApiError, match="一致性终检") as caught:
-        await service.set_status("user-1", "chapter-1", ChapterStatusRequest(status="completed"))
+        await service.set_status(
+            "user-1",
+            "chapter-1",
+            ChapterStatusRequest(
+                status="completed",
+                expectedUpdatedAt=repository.chapter.updated_at,
+            ),
+        )
 
     assert caught.value.status_code == 409
     repository.consistency_status = "completed"
     completed = await service.set_status(
-        "user-1", "chapter-1", ChapterStatusRequest(status="completed")
+        "user-1",
+        "chapter-1",
+        ChapterStatusRequest(
+            status="completed",
+            expectedUpdatedAt=repository.chapter.updated_at,
+        ),
     )
     assert completed.status == "completed"
     assert completed.completedAt is not None
@@ -160,7 +221,14 @@ async def test_illegal_status_transition_is_rejected() -> None:
     service = ChapterService(repository)  # type: ignore[arg-type]
 
     with pytest.raises(ApiError, match="状态") as caught:
-        await service.set_status("user-1", "chapter-1", ChapterStatusRequest(status="completed"))
+        await service.set_status(
+            "user-1",
+            "chapter-1",
+            ChapterStatusRequest(
+                status="completed",
+                expectedUpdatedAt=repository.chapter.updated_at,
+            ),
+        )
 
     assert caught.value.status_code == 409
 
@@ -179,7 +247,10 @@ async def test_return_to_drafting_clears_completed_at(source: str, target: str) 
     response = await service.set_status(
         "user-1",
         "chapter-1",
-        ChapterStatusRequest(status=target),  # type: ignore[arg-type]
+        ChapterStatusRequest(
+            status=target,  # type: ignore[arg-type]
+            expectedUpdatedAt=repository.chapter.updated_at,
+        ),
     )
     assert response.status == "drafting"
     assert response.completedAt is None
@@ -192,7 +263,12 @@ async def test_completed_can_return_to_review_and_repairs_default_check() -> Non
     repository.chapter.completed_at = datetime(2026, 7, 1, tzinfo=UTC)
     service = ChapterService(repository)  # type: ignore[arg-type]
     response = await service.set_status(
-        "user-1", "chapter-1", ChapterStatusRequest(status="review")
+        "user-1",
+        "chapter-1",
+        ChapterStatusRequest(
+            status="review",
+            expectedUpdatedAt=repository.chapter.updated_at,
+        ),
     )
     assert response.status == "review"
     assert response.completedAt is None
@@ -206,7 +282,12 @@ async def test_skipped_consistency_check_allows_completion() -> None:
     repository.consistency_status = "skipped"
     service = ChapterService(repository)  # type: ignore[arg-type]
     response = await service.set_status(
-        "user-1", "chapter-1", ChapterStatusRequest(status="completed")
+        "user-1",
+        "chapter-1",
+        ChapterStatusRequest(
+            status="completed",
+            expectedUpdatedAt=repository.chapter.updated_at,
+        ),
     )
     assert response.status == "completed"
     assert response.completedAt is not None
@@ -221,7 +302,12 @@ async def test_completed_status_is_idempotent_and_keeps_timestamp() -> None:
     repository.consistency_status = "completed"
     service = ChapterService(repository)  # type: ignore[arg-type]
     response = await service.set_status(
-        "user-1", "chapter-1", ChapterStatusRequest(status="completed")
+        "user-1",
+        "chapter-1",
+        ChapterStatusRequest(
+            status="completed",
+            expectedUpdatedAt=repository.chapter.updated_at,
+        ),
     )
     assert response.completedAt == completed_at
     assert repository.created_checks == 0
@@ -234,7 +320,14 @@ async def test_idempotent_completed_revalidates_quality_gate() -> None:
     repository.chapter.completed_at = datetime(2026, 7, 10, tzinfo=UTC)
     service = ChapterService(repository)  # type: ignore[arg-type]
     with pytest.raises(ApiError) as caught:
-        await service.set_status("user-1", "chapter-1", ChapterStatusRequest(status="completed"))
+        await service.set_status(
+            "user-1",
+            "chapter-1",
+            ChapterStatusRequest(
+                status="completed",
+                expectedUpdatedAt=repository.chapter.updated_at,
+            ),
+        )
     assert caught.value.code == "QUALITY_CHECK_REQUIRED"
 
 
@@ -250,9 +343,24 @@ async def test_chapter_progress_is_saved_without_truncation() -> None:
 @pytest.mark.parametrize(
     ("request_type", "body"),
     [
-        (UpdateChapterRequest, {"title": "标题", "content": "正文", "novelId": "越权"}),
+        (
+            UpdateChapterRequest,
+            {
+                "title": "标题",
+                "content": "正文",
+                "expectedUpdatedAt": datetime(2026, 7, 11, tzinfo=UTC),
+                "novelId": "越权",
+            },
+        ),
         (ChapterProgressRequest, {"content": "进展", "userId": "越权"}),
-        (ChapterStatusRequest, {"status": "review", "completedAt": "越权"}),
+        (
+            ChapterStatusRequest,
+            {
+                "status": "review",
+                "expectedUpdatedAt": datetime(2026, 7, 11, tzinfo=UTC),
+                "completedAt": "越权",
+            },
+        ),
     ],
 )
 def test_chapter_requests_reject_unknown_fields(request_type, body) -> None:
@@ -265,9 +373,19 @@ def test_chapter_requests_reject_unknown_fields(request_type, body) -> None:
 @pytest.mark.parametrize(
     ("request_type", "body"),
     [
-        (UpdateChapterRequest, {"title": 123, "content": "正文"}),
+        (
+            UpdateChapterRequest,
+            {
+                "title": 123,
+                "content": "正文",
+                "expectedUpdatedAt": datetime(2026, 7, 11, tzinfo=UTC),
+            },
+        ),
         (ChapterProgressRequest, {"content": 123}),
-        (ChapterStatusRequest, {"status": 1}),
+        (
+            ChapterStatusRequest,
+            {"status": 1, "expectedUpdatedAt": datetime(2026, 7, 11, tzinfo=UTC)},
+        ),
     ],
 )
 def test_chapter_requests_reject_coerced_values(request_type, body) -> None:

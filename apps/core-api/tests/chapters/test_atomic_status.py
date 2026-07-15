@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from inkforge_core.chapters.repository import ChapterRepository
 from inkforge_core.db.models import Chapter, ChapterQualityCheck
+from inkforge_core.errors import ApiError
 from inkforge_core.quality.repository import QualityRepository
 
 
@@ -89,12 +90,246 @@ class RecordingChapterRepository(ChapterRepository):
         return self._check_value
 
 
+class DraftMutationSession(RecordingSession):
+    def __init__(
+        self,
+        chapter_value: Chapter,
+        check_value: ChapterQualityCheck | None = None,
+    ) -> None:
+        super().__init__([])
+        self.chapter_value = chapter_value
+        self.check_value = check_value
+        self.executed: list[object] = []
+
+    async def execute(self, statement):
+        self.executed.append(statement)
+        return None
+
+
+class DraftMutationRepository(ChapterRepository):
+    def __init__(self, session: DraftMutationSession) -> None:
+        super().__init__(lambda: session)  # type: ignore[arg-type]
+        self.session = session
+
+    async def _lock_chapter_owner(self, session, chapter_id: str, user_id: str):
+        del session, chapter_id, user_id
+        return self.session.chapter_value
+
+    async def _lock_consistency_check(self, session, chapter_id: str):
+        del session, chapter_id
+        return self.session.check_value
+
+
+@pytest.mark.asyncio
+async def test_draft_update_rejects_stale_version_without_overwriting() -> None:
+    current = chapter("drafting")
+    current.title = "服务器标题"
+    current.content = "服务器正文"
+    current.updatedAt = datetime(2026, 7, 11, 0, 0, 1, tzinfo=UTC)
+    repository = DraftMutationRepository(DraftMutationSession(current))
+
+    with pytest.raises(ApiError) as caught:
+        await repository.update_draft(
+            "chapter-1",
+            "user-1",
+            "本地标题",
+            "本地正文",
+            datetime(2026, 7, 11, tzinfo=UTC),
+        )
+
+    assert caught.value.code == "CHAPTER_VERSION_CONFLICT"
+    assert current.title == "服务器标题"
+    assert current.content == "服务器正文"
+
+
+@pytest.mark.asyncio
+async def test_draft_update_treats_same_content_with_stale_version_as_idempotent() -> None:
+    current = chapter("drafting")
+    current.title = "已保存标题"
+    current.content = "已保存正文"
+    current.updatedAt = datetime(2026, 7, 11, 0, 0, 1, tzinfo=UTC)
+    repository = DraftMutationRepository(DraftMutationSession(current))
+
+    updated_at = await repository.update_draft(
+        "chapter-1",
+        "user-1",
+        current.title,
+        current.content,
+        datetime(2026, 7, 11, tzinfo=UTC),
+    )
+
+    assert updated_at == current.updatedAt
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["review", "completed"])
+async def test_draft_update_rejects_non_drafting_chapter(status: str) -> None:
+    current = chapter(status)
+    repository = DraftMutationRepository(DraftMutationSession(current))
+
+    with pytest.raises(ApiError) as caught:
+        await repository.update_draft(
+            "chapter-1",
+            "user-1",
+            "新标题",
+            "新正文",
+            current.updatedAt.replace(tzinfo=UTC),
+        )
+
+    assert caught.value.code == "CHAPTER_NOT_EDITABLE"
+    assert current.content == "正文"
+
+
+@pytest.mark.asyncio
+async def test_draft_update_advances_version_beyond_future_timestamp() -> None:
+    current = chapter("drafting")
+    current.updatedAt = datetime(2099, 1, 1)
+    expected = current.updatedAt.replace(tzinfo=UTC)
+    repository = DraftMutationRepository(DraftMutationSession(current))
+
+    updated_at = await repository.update_draft(
+        "chapter-1",
+        "user-1",
+        "新标题",
+        "新正文",
+        expected,
+    )
+
+    assert updated_at == expected + timedelta(milliseconds=1)
+
+
+@pytest.mark.asyncio
+async def test_status_transition_rejects_stale_version() -> None:
+    current = chapter("drafting")
+    current.updatedAt = datetime(2026, 7, 11, 0, 0, 1)
+    repository = DraftMutationRepository(DraftMutationSession(current))
+
+    with pytest.raises(ApiError) as caught:
+        await repository.transition_status(
+            "chapter-1",
+            "user-1",
+            "review",
+            datetime(2026, 7, 11, tzinfo=UTC),
+        )
+
+    assert caught.value.code == "CHAPTER_VERSION_CONFLICT"
+    assert current.status == "drafting"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["completed", "skipped", "failed", "running"])
+async def test_content_change_invalidates_previous_quality_state(status: str) -> None:
+    current = chapter("drafting")
+    check = quality_check(status)
+    check.result = "旧报告"
+    check.scoreHook = 8
+    check.scoreTension = 7
+    check.scorePayoff = 6
+    check.scorePacing = 5
+    check.scoreEndingHook = 4
+    check.scoreReaderPromise = 3
+    check.scoreOverall = 6
+    check.qualityGate = "pass"
+    check.rewriteBrief = "旧返工说明"
+    session = DraftMutationSession(current, check)
+    repository = DraftMutationRepository(session)
+
+    await repository.update_draft(
+        "chapter-1",
+        "user-1",
+        current.title,
+        "新正文",
+        current.updatedAt.replace(tzinfo=UTC),
+    )
+
+    assert check.status == "pending"
+    assert check.result is None
+    assert check.scoreHook is None
+    assert check.scoreTension is None
+    assert check.scorePayoff is None
+    assert check.scorePacing is None
+    assert check.scoreEndingHook is None
+    assert check.scoreReaderPromise is None
+    assert check.scoreOverall is None
+    assert check.qualityGate is None
+    assert check.rewriteBrief is None
+    assert len(session.executed) == 1
+
+
+@pytest.mark.asyncio
+async def test_title_only_change_keeps_quality_result() -> None:
+    current = chapter("drafting")
+    check = quality_check("completed")
+    check.result = "仍然有效的正文报告"
+    session = DraftMutationSession(current, check)
+    repository = DraftMutationRepository(session)
+
+    await repository.update_draft(
+        "chapter-1",
+        "user-1",
+        "新标题",
+        current.content,
+        current.updatedAt.replace(tzinfo=UTC),
+    )
+
+    assert check.status == "completed"
+    assert check.result == "仍然有效的正文报告"
+    assert session.executed == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["drafting", "completed"])
+async def test_entering_review_resets_unversioned_historical_check(source: str) -> None:
+    current = chapter(source)
+    check = quality_check("completed")
+    check.result = "无法证明对应当前正文的旧报告"
+    check.scoreOverall = 9
+    session = DraftMutationSession(current, check)
+    repository = DraftMutationRepository(session)
+
+    await repository.transition_status(
+        "chapter-1",
+        "user-1",
+        "review",
+        current.updatedAt.replace(tzinfo=UTC),
+    )
+
+    assert current.status == "review"
+    assert check.status == "pending"
+    assert check.result is None
+    assert check.scoreOverall is None
+    assert len(session.executed) == 1
+
+
+@pytest.mark.asyncio
+async def test_repeated_review_keeps_active_quality_run() -> None:
+    current = chapter("review")
+    check = quality_check("running")
+    session = DraftMutationSession(current, check)
+    repository = DraftMutationRepository(session)
+
+    await repository.transition_status(
+        "chapter-1",
+        "user-1",
+        "review",
+        current.updatedAt.replace(tzinfo=UTC),
+    )
+
+    assert check.status == "running"
+    assert session.executed == []
+
+
 @pytest.mark.asyncio
 async def test_status_transition_uses_one_transaction_and_fixed_lock_order() -> None:
     events: list[str] = []
     session = RecordingSession(events)
     repository = RecordingChapterRepository(session, chapter("completed"), None)
-    result = await repository.transition_status("chapter-1", "user-1", "review")
+    result = await repository.transition_status(
+        "chapter-1",
+        "user-1",
+        "review",
+        repository._chapter_value.updatedAt.replace(tzinfo=UTC),
+    )
     assert result.status == "review"
     assert events == [
         "事务开始",
@@ -126,6 +361,10 @@ class RecordingQualityRepository(QualityRepository):
         del check_id
         session.events.append("锁质量检查")
         return self._check_value
+
+    async def _find_active_quality_run(self, session, check_id: str):
+        del session, check_id
+        return None
 
 
 @pytest.mark.asyncio
@@ -213,6 +452,10 @@ class InterleavingQualityRepository(QualityRepository):
         await self.shared.allow_quality_to_continue.wait()
         return self.shared.check
 
+    async def _find_active_quality_run(self, session, check_id: str):
+        del session, check_id
+        return None
+
 
 @pytest.mark.asyncio
 async def test_quality_patch_and_completion_cannot_interleave_between_locks() -> None:
@@ -225,7 +468,12 @@ async def test_quality_patch_and_completion_cannot_interleave_between_locks() ->
     )
     await shared.quality_has_chapter_lock.wait()
     completion_task = asyncio.create_task(
-        chapter_repository.transition_status("chapter-1", "user-1", "completed")
+        chapter_repository.transition_status(
+            "chapter-1",
+            "user-1",
+            "completed",
+            shared.chapter.updatedAt.replace(tzinfo=UTC),
+        )
     )
     await asyncio.sleep(0)
     assert completion_task.done() is False

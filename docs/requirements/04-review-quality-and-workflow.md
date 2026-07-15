@@ -141,6 +141,7 @@ flowchart TD
 - 如果目标是 existing_chapter，写入指定章节正文。
 - 如果目标是 new_next_chapter，创建下一章并写入正文。
 - 应用后确保章节一致性终检项。
+- existing_chapter 应用后必须退回 drafting 并清空 completedAt；正文实际变化时复用章节编辑路径，使旧质量结果失效并取消活动质量运行。
 - 标记 applied。
 
 正文草案目标：
@@ -175,7 +176,7 @@ flowchart TD
 
 ## 一致性终检运行流程
 
-Core API 负责浏览器认证、检查项归属和可选 `taskId` 绑定校验。`taskId` 必须与检查项属于同一用户、小说和章节，否则返回 403。Core 先把本次检查完整输入保存到独立的 `WorkflowRun(kind=quality_check)`，再使用该运行 ID 作为稳定队列标识投递；同一检查项已有 `pending/running` 运行时返回 409，只有前一次运行终态后才能创建新运行。Redis 暂时不可用时由 dispatcher 补投，不得丢失已受理任务，也不得与同一检查项的其他运行混淆。Agent Service 异步生成报告，并通过签名内部回调同时结算对应运行终态；只有该检查项的最新运行可以更新公共检查结果，旧运行延迟回调不得覆盖新结果。
+Core API 负责浏览器认证、检查项归属和可选 `taskId` 绑定校验。`taskId` 必须与检查项属于同一用户、小说和章节，否则返回 403；只有 review 章节允许创建质量运行，drafting/completed 调用返回 409。Core 先把本次检查的完整正文快照、正文 SHA-256、章节更新时间、检查项和可选任务绑定保存到独立的 `WorkflowRun(kind=quality_check)`，并立即把公共检查置为 running，再使用该运行 ID 作为稳定队列标识投递；同一检查项已有 `pending/running` 运行时返回 409，只有前一次运行终态后才能创建新运行。Redis 暂时不可用时由 dispatcher 补投，不得丢失已受理任务，也不得与同一检查项的其他运行混淆。Agent Service 只分析 WorkflowRun 中的正文快照并异步生成报告，通过签名内部回调结算对应运行终态；回调时当前正文哈希必须仍与来源一致，且只有该检查项的最新运行可以更新公共检查结果。旧正文或旧运行的延迟回调收敛为 cancelled/failed，不能覆盖新结果或满足完成门禁。
 
 ~~~mermaid
 sequenceDiagram
@@ -203,6 +204,9 @@ sequenceDiagram
 - 检查项不存在返回 404。
 - Agent 无报告或保存失败时，检查项标记 failed，任务标记 error。
 - 内部回调必须校验用户、小说、检查项和运行的绑定关系，不得使用另一次运行的结果覆盖当前检查。
+- 正文变化后，检查项重置为 pending，仍在 pending/running 的旧 WorkflowRun 标记 cancelled，错误码为 `QUALITY_SOURCE_CHANGED`。
+- 浏览器在运行受理后轮询检查项到终态；pending/running 期间禁用重复运行、跳过和章节完成操作。
+- 轮询失败或超时后保留 running 权威状态，并提供继续查询入口；活动运行期间公开状态接口拒绝重置/跳过，completed 章节拒绝任何检查状态修改。
 
 ## Beat Plan
 

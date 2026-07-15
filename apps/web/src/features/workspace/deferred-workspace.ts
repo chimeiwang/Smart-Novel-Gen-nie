@@ -46,7 +46,15 @@ export class DeferredWorkspaceLoader {
     planning: { status: "idle" },
     resources: { status: "idle" },
   };
-  private readonly inFlight = new Map<WorkspaceGroup, Promise<unknown>>();
+  private readonly generations: Record<WorkspaceGroup, number> = {
+    lore: 0,
+    planning: 0,
+    resources: 0,
+  };
+  private readonly inFlight = new Map<
+    WorkspaceGroup,
+    { generation: number; request: Promise<unknown> }
+  >();
   private readonly listeners = new Set<() => void>();
 
   constructor(private readonly loaders: WorkspaceGroupLoaders) {}
@@ -65,36 +73,59 @@ export class DeferredWorkspaceLoader {
     if (state.status === "success" && state.data) {
       return state.data;
     }
+    const generation = this.generations[group];
     const existing = this.inFlight.get(group);
-    if (existing) {
-      return existing as Promise<WorkspaceGroupData[Group]>;
+    if (existing?.generation === generation) {
+      return existing.request as Promise<WorkspaceGroupData[Group]>;
     }
 
     this.update(group, { ...state, status: "loading", error: undefined });
-    const request = this.loaders[group]().then(
+    let request: Promise<WorkspaceGroupData[Group]>;
+    request = this.loaders[group]().then(
       (data) => {
-        this.update(group, { status: "success", data });
+        if (this.isCurrent(group, generation, request)) {
+          this.update(group, { status: "success", data });
+        }
         return data;
       },
       (error: unknown) => {
         const message = error instanceof Error ? error.message : "延迟数据加载失败";
-        this.update(group, { status: "error", error: message });
+        if (this.isCurrent(group, generation, request)) {
+          this.update(group, { status: "error", error: message });
+        }
         throw error;
       },
     ).finally(() => {
-      this.inFlight.delete(group);
+      if (this.isCurrent(group, generation, request)) {
+        this.inFlight.delete(group);
+      }
     });
-    this.inFlight.set(group, request);
+    this.inFlight.set(group, { generation, request });
     return request;
   }
 
   retry<Group extends WorkspaceGroup>(group: Group): Promise<WorkspaceGroupData[Group]> {
-    this.update(group, { status: "idle" });
+    this.invalidate(group);
     return this.load(group);
   }
 
   refresh<Group extends WorkspaceGroup>(group: Group): Promise<WorkspaceGroupData[Group]> {
     return this.retry(group);
+  }
+
+  invalidate(group: WorkspaceGroup): void {
+    this.generations[group] += 1;
+    this.inFlight.delete(group);
+    this.update(group, { status: "idle" });
+  }
+
+  private isCurrent<Group extends WorkspaceGroup>(
+    group: Group,
+    generation: number,
+    request: Promise<WorkspaceGroupData[Group]>,
+  ): boolean {
+    const current = this.inFlight.get(group);
+    return this.generations[group] === generation && current?.request === request;
   }
 
   private update<Group extends WorkspaceGroup>(

@@ -17,8 +17,9 @@ OCCURRED_AT = datetime(2026, 7, 10, 8, 30, tzinfo=UTC)
 
 def valid_event_payload() -> dict[str, object]:
     return {
-        "protocolVersion": "1.0",
+        "protocolVersion": "1.1",
         "eventId": "event-1",
+        "jobId": "job-1",
         "runId": "run-1",
         "taskId": "task-1",
         "sequence": 1,
@@ -32,8 +33,9 @@ def test_valid_agent_event_is_json_serializable_and_preserves_camel_case() -> No
     event = AgentEvent.model_validate(valid_event_payload())
 
     dumped = event.model_dump(mode="json")
-    assert dumped["protocolVersion"] == "1.0"
+    assert dumped["protocolVersion"] == "1.1"
     assert dumped["eventId"] == "event-1"
+    assert dumped["jobId"] == "job-1"
     assert dumped["occurredAt"] == "2026-07-10T08:30:00Z"
     json.dumps(dumped, ensure_ascii=False)
 
@@ -53,8 +55,9 @@ def test_agent_event_supports_json_round_trip() -> None:
         (
             CheckpointCallback,
             {
-                "protocolVersion": "1.0",
+                "protocolVersion": "1.1",
                 "eventId": "event-1",
+                "jobId": "job-1",
                 "runId": "run-1",
                 "taskId": "task-1",
                 "sequence": 1,
@@ -65,8 +68,9 @@ def test_agent_event_supports_json_round_trip() -> None:
         (
             RunCompletionCallback,
             {
-                "protocolVersion": "1.0",
+                "protocolVersion": "1.1",
                 "eventId": "event-1",
+                "jobId": "job-1",
                 "runId": "run-1",
                 "taskId": "task-1",
                 "sequence": 1,
@@ -77,8 +81,9 @@ def test_agent_event_supports_json_round_trip() -> None:
         (
             RunFailureCallback,
             {
-                "protocolVersion": "1.0",
+                "protocolVersion": "1.1",
                 "eventId": "event-1",
+                "jobId": "job-1",
                 "runId": "run-1",
                 "taskId": "task-1",
                 "sequence": 1,
@@ -97,6 +102,72 @@ def test_event_models_reject_unknown_fields(
 
     with pytest.raises(ValidationError):
         model.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("model", "payload"),
+    [
+        (AgentEvent, valid_event_payload()),
+        (
+            CheckpointCallback,
+            {
+                "protocolVersion": "1.1",
+                "eventId": "event-1",
+                "jobId": "job-1",
+                "runId": "run-1",
+                "taskId": "task-1",
+                "sequence": 1,
+                "checkpoint": {"phase": "running"},
+                "occurredAt": OCCURRED_AT,
+            },
+        ),
+        (
+            RunCompletionCallback,
+            {
+                "protocolVersion": "1.1",
+                "eventId": "event-1",
+                "jobId": "job-1",
+                "runId": "run-1",
+                "taskId": "task-1",
+                "sequence": 1,
+                "result": {},
+                "occurredAt": OCCURRED_AT,
+            },
+        ),
+        (
+            RunFailureCallback,
+            {
+                "protocolVersion": "1.1",
+                "eventId": "event-1",
+                "jobId": "job-1",
+                "runId": "run-1",
+                "taskId": "task-1",
+                "sequence": 1,
+                "code": "FAILED",
+                "message": "执行失败",
+                "recoverable": False,
+                "occurredAt": OCCURRED_AT,
+            },
+        ),
+    ],
+)
+def test_event_models_require_job_id_and_protocol_1_1(
+    model: type[BaseModel], payload: dict[str, object]
+) -> None:
+    validated = model.model_validate(payload)
+
+    assert validated.protocolVersion == "1.1"
+    assert validated.jobId == "job-1"
+
+    missing_job_id = dict(payload)
+    missing_job_id.pop("jobId")
+    with pytest.raises(ValidationError):
+        model.model_validate(missing_job_id)
+
+    legacy_protocol = dict(payload)
+    legacy_protocol["protocolVersion"] = "1.0"
+    with pytest.raises(ValidationError):
+        model.model_validate(legacy_protocol)
 
 
 @pytest.mark.parametrize("sequence", [0, -1])
@@ -144,8 +215,9 @@ def test_agent_event_rejects_blank_identifiers_and_event(field: str, value: obje
 @pytest.mark.parametrize("model", [CheckpointCallback, RunCompletionCallback, RunFailureCallback])
 def test_callbacks_reject_naive_datetime(model: type[BaseModel]) -> None:
     payload: dict[str, object] = {
-        "protocolVersion": "1.0",
+        "protocolVersion": "1.1",
         "eventId": "event-1",
+        "jobId": "job-1",
         "runId": "run-1",
         "taskId": "task-1",
         "sequence": 1,

@@ -56,12 +56,15 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 - 命令 dispatcher 使用命令 ID 作为稳定 job ID，并对 pending 到期命令退避补投；Redis 短时不可用不会丢失已经返回 202 的请求。
 - 命令 dispatcher 也对账超时的 `submitted/processing` 命令，并消费 Agent 返回的真实 job 状态；Redis 已为终态而 PostgreSQL 尚未收到正式回调时，必须在锁定命令与任务的同一事务中幂等收敛失败，不能把终态误记为已重新提交。
 - Agent 每个稳定步骤通过签名回调保存版本化图快照。
+- 写作回调协议使用命令 ID 作为 `jobId`；Core 在持久化前复核当前活动命令，旧命令回调不得改变任务、快照、命令或事件流。
+- 检查点事件序号只能单调前进；Redis 短期事件状态丢失后，只允许经过 PostgreSQL 身份校验的当前 job 从持久检查点之后重建序号基线。
 - Agent 进程退出后，另一个兼容实例可以领取租约并从最后稳定检查点继续。
-- Redis 丢失时，dispatcher 补投活动命令；旧任务对账器只处理没有活动命令的 active 或 waiting_call 任务，不重新投递 awaiting_user_review。
+- Redis 丢失时，dispatcher 补投活动命令；旧任务对账器只处理没有活动命令的 active 或 waiting_call 任务，在任务行锁内先创建唯一持久命令再交给 dispatcher，不重新投递 awaiting_user_review。
 - 旧写作任务的终态对账必须校验领取时的任务阶段和图快照仍未变化；延迟终态不得覆盖新阶段或新快照。
 - 文风画像、质量检查和 RAG 索引分别从 `StylePortraitTask`、`WorkflowRun(kind=quality_check)` 和 `RagDocument` 恢复投递；进程内任务或 Redis 状态都不是这些工作的唯一事实来源。
 - Agent 对重复稳定 job ID 返回 Redis 中的实际任务状态。Core dispatcher 遇到 `completed/failed/cancelled` 时必须幂等结束仍处于 PostgreSQL 活动态的画像、质量检查或 RAG 记录，不能把终态 job 当作已重新排队；已经完成的业务记录和 RAG 的新内容版本不得被旧 job 覆盖。
-- Core 的命令、旧任务对账、画像、质量检查和 RAG dispatcher，以及 Agent 的队列消费者，都由生命周期任务监督器管理；后台协程异常退出后必须退避重启，就绪检查必须检查实际运行的 `Task`，不能只检查对象是否存在。
+- Core 的命令、旧任务对账、画像、质量检查和 RAG dispatcher，以及 Agent 的队列消费者，都由生命周期任务监督器管理；后台协程异常退出后按 1、2、4、8 秒、最高 30 秒退避重启，稳定运行窗口结束后清零连续失败计数。就绪检查必须检查实际运行的内部 `Task`，启动、退避、连续失败和监督器退出时不能只因对象存在而报告健康。
+- 后台循环只在明确的数据库、网络或 Redis 暂态异常上原地退避；TypeError、Pydantic 契约错误和其他未知程序错误必须退出循环交给监督器。Redis OOM、MISCONF 和 READONLY 等写入拒绝立即使消费者退出并让 readiness 失败。
 - `WritingMessage` 只保存用户可见聊天记录，不能反推图状态。
 
 ## 版本化数据迁移
@@ -116,6 +119,9 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 - 每个 Python 服务一个 worker；
 - 同时只执行一个模型任务；
 - Redis `maxmemory` 为 64 MB，关闭 AOF，并使用 `maxmemory-policy noeviction`；内存耗尽时必须明确拒绝新写入，不能淘汰队列、事件或防重放键；
+- Agent 队列完成、失败或取消的 job 只在 Redis 保留默认 7 天、最少 24 小时的终态 tombstone；终态时间 ZSET 驱动有界清理，过期后删除 status 和索引，PostgreSQL 继续作为长期幂等事实来源。
+- 升级前缺少终态 ZSET 的旧 status 使用 HSCAN 游标分批回填 tombstone，并清除 ready、processing、payload、lease、attempt 和 score 残留；过期租约缺少 payload 或 score 时原子收敛为 failed，不能留下 running 孤儿。
+- ready ZSET 按优先级分别查询已经到期的成员，未来才可重试的高优先级 job 不得阻塞当前已到期的低优先级 job；同优先级仍按 readyAt 排序。
 - 所有容器使用非 root 用户、只读根文件系统、健康检查和资源上限。
 
 运维必须监控 Redis `used_memory`、`evicted_keys` 和写入被拒绝数量。`evicted_keys` 应持续为 0；内存接近上限或出现写入拒绝时先停止接收新的模型任务并扩容或清理可确认过期的数据，不能临时切回淘汰策略。
@@ -127,6 +133,7 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 | `DATABASE_URL` | Core | 现有 PostgreSQL 地址 |
 | `JWT_SECRET` | Core、Web | 浏览器会话签名 |
 | `REDIS_URL` | Core、Agent | 队列、事件和防重放 |
+| `QUEUE_TERMINAL_RETENTION_DAYS` | Agent | Redis 队列终态 tombstone 保留天数，默认 7、最少 1；Compose 显式透传 |
 | `RAG_INDEX_ENABLED` | Core、Agent | 同时启用资料索引投递和 embedding 就绪校验；两端必须使用相同值 |
 | `OPENAI_API_KEY` | Agent | 模型服务密钥 |
 | `OPENAI_BASE_URL` | Agent | 模型服务地址 |
@@ -136,6 +143,8 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 | `AGENT_SERVICE_PRIVATE_KEY_PATH` | Agent | Agent 签名私钥 |
 | `CORE_SERVICE_PUBLIC_KEY_PATH` | Agent | Core 验签公钥 |
 | `WORKFLOW_HUMAN_LOG_DIR` | Agent | 人工日志目录 |
+
+Core 与 Agent readiness 在后台任务不健康时保留 `checks` 兼容字段，并在 `backgroundTasks` 中返回具体任务名及稳定错误码，便于区分未启动、退避、连续失败和监督器停止。
 
 `DEPLOY_SSH_KNOWN_HOSTS` 属于 GitHub `production` environment Secret，不是应用容器环境变量；只用于为发布流程生成严格校验的临时 `known_hosts` 文件。
 

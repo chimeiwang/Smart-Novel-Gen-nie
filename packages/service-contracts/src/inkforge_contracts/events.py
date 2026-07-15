@@ -8,8 +8,9 @@ from .identity import Identifier, NonBlankString
 class AgentEvent(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    protocolVersion: Literal["1.0"]
+    protocolVersion: Literal["1.1"]
     eventId: Identifier
+    jobId: Identifier
     runId: Identifier
     taskId: Identifier
     sequence: PositiveInt
@@ -21,8 +22,9 @@ class AgentEvent(BaseModel):
 class CheckpointCallback(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    protocolVersion: Literal["1.0"]
+    protocolVersion: Literal["1.1"]
     eventId: Identifier
+    jobId: Identifier
     runId: Identifier
     taskId: Identifier
     sequence: PositiveInt
@@ -33,8 +35,9 @@ class CheckpointCallback(BaseModel):
 class RunCompletionCallback(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    protocolVersion: Literal["1.0"]
+    protocolVersion: Literal["1.1"]
     eventId: Identifier
+    jobId: Identifier
     runId: Identifier
     taskId: Identifier
     sequence: PositiveInt
@@ -45,8 +48,9 @@ class RunCompletionCallback(BaseModel):
 class RunFailureCallback(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    protocolVersion: Literal["1.0"]
+    protocolVersion: Literal["1.1"]
     eventId: Identifier
+    jobId: Identifier
     runId: Identifier
     taskId: Identifier
     sequence: PositiveInt

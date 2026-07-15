@@ -42,6 +42,7 @@ class RunResource(BaseModel):
     novelId: str
     taskId: str
     runId: str
+    jobId: str | None = None
 
 
 class CoreServiceError(RuntimeError):
@@ -90,10 +91,12 @@ class CoreServiceClient:
         event: str,
         data: dict[str, JsonValue],
     ) -> None:
-        event_id = _event_id(resource.runId, sequence, event)
+        job_id = _writing_job_id(resource)
+        event_id = _event_id(resource.runId, job_id, sequence, event)
         body = AgentEvent(
-            protocolVersion="1.0",
+            protocolVersion="1.1",
             eventId=event_id,
+            jobId=job_id,
             runId=resource.runId,
             taskId=resource.taskId,
             sequence=sequence,
@@ -117,10 +120,12 @@ class CoreServiceClient:
         sequence: int,
         checkpoint: dict[str, JsonValue],
     ) -> None:
-        event_id = _event_id(resource.runId, sequence, "checkpoint")
+        job_id = _writing_job_id(resource)
+        event_id = _event_id(resource.runId, job_id, sequence, "checkpoint")
         body = CheckpointCallback(
-            protocolVersion="1.0",
+            protocolVersion="1.1",
             eventId=event_id,
+            jobId=job_id,
             runId=resource.runId,
             taskId=resource.taskId,
             sequence=sequence,
@@ -143,10 +148,12 @@ class CoreServiceClient:
         sequence: int,
         result: dict[str, JsonValue],
     ) -> None:
-        event_id = _event_id(resource.runId, sequence, "complete")
+        job_id = _writing_job_id(resource)
+        event_id = _event_id(resource.runId, job_id, sequence, "complete")
         body = RunCompletionCallback(
-            protocolVersion="1.0",
+            protocolVersion="1.1",
             eventId=event_id,
+            jobId=job_id,
             runId=resource.runId,
             taskId=resource.taskId,
             sequence=sequence,
@@ -171,10 +178,12 @@ class CoreServiceClient:
         message: str,
         recoverable: bool = True,
     ) -> None:
-        event_id = _event_id(resource.runId, sequence, "fail")
+        job_id = _writing_job_id(resource)
+        event_id = _event_id(resource.runId, job_id, sequence, "fail")
         body = RunFailureCallback(
-            protocolVersion="1.0",
+            protocolVersion="1.1",
             eventId=event_id,
+            jobId=job_id,
             runId=resource.runId,
             taskId=resource.taskId,
             sequence=sequence,
@@ -535,8 +544,17 @@ class CoreBillingGateway:
         )
 
 
-def _event_id(run_id: str, sequence: int, event: str) -> str:
-    digest = hashlib.sha256(f"{run_id}:{sequence}:{event}".encode()).hexdigest()[:32]
+def _writing_job_id(resource: RunResource) -> str:
+    job_id = resource.jobId
+    if job_id is None or not job_id.strip():
+        raise CoreServiceError("写作回调缺少作业标识", recoverable=False)
+    return job_id
+
+
+def _event_id(run_id: str, job_id: str, sequence: int, event: str) -> str:
+    digest = hashlib.sha256(
+        f"{run_id}:{job_id}:{sequence}:{event}".encode()
+    ).hexdigest()[:32]
     return f"event-{digest}"
 
 

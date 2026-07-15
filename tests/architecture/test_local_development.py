@@ -76,7 +76,8 @@ def test_e2e_uses_current_project_and_writing_entry_points() -> None:
     assert writing.count('getByRole("button", { name: /生成正文/' ) == 2
     assert 'const styleName = `端到端文风-${Date.now()}`' in knowledge
     assert "expect.poll" in quality
-    assert "page.reload()" in quality
+    assert "page.reload()" not in quality
+    assert "chapter-check-status.completed" in quality
     assert 'page.request.get("/api/v1/billing/usage")' in quality
     assert "body.totalUsage.totalTokens" in quality
     assert "prepareWritingOutlineWithApi" in helpers

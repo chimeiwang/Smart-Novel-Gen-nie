@@ -57,7 +57,7 @@ class Submitter:
     ) -> AgentJobStatus:
         self.calls.append((user_id, novel_id, reference_id, content_hash))
         if reference_id == self.failing_reference_id:
-            raise RuntimeError("模拟索引投递失败")
+            raise ConnectionError("索引提交暂时失败")
         return self.statuses.get(reference_id, "queued")
 
 
@@ -82,6 +82,27 @@ async def test_rag_dispatcher_isolates_one_submission_failure() -> None:
 
 
 @pytest.mark.asyncio
+async def test_rag_dispatcher_propagates_deterministic_submission_error() -> None:
+    repository = Repository([record("invalid")])
+
+    class InvalidSubmitter(Submitter):
+        async def submit(
+            self,
+            user_id: str,
+            novel_id: str,
+            reference_id: str,
+            content_hash: str,
+        ) -> AgentJobStatus:
+            del user_id, novel_id, reference_id, content_hash
+            raise TypeError("索引提交契约错误")
+
+    dispatcher = RagIndexDispatcher(repository, InvalidSubmitter())
+
+    with pytest.raises(TypeError, match="索引提交契约错误"):
+        await dispatcher.run_once()
+
+
+@pytest.mark.asyncio
 async def test_rag_dispatcher_converges_existing_terminal_job() -> None:
     repository = Repository([record("terminal")])
     submitter = Submitter(statuses={"terminal": "cancelled"})
@@ -103,7 +124,7 @@ async def test_rag_dispatcher_loop_recovers_after_repository_failure() -> None:
         async def list_pending_rag_documents(self, limit: int) -> list[RagDispatchRecord]:
             if not self.failed:
                 self.failed = True
-                raise RuntimeError("模拟索引领取失败")
+                raise ConnectionError("索引任务领取暂时失败")
             return await super().list_pending_rag_documents(limit)
 
     repository = FlakyRepository()

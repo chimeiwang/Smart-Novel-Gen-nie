@@ -181,6 +181,10 @@ flowchart TD
 
 启动、普通恢复和草案决定都先写入 PostgreSQL `WritingRunCommand`。命令状态为 pending、submitted、processing、succeeded 或 failed；同一任务同一时刻最多存在一条活动命令。dispatcher 使用命令 ID 作为稳定队列 job ID，失败后按退避时间补投，Core 重启后也能继续处理到期命令。
 
+智能体事件、检查点、完成和失败回调使用协议 `1.1`，必须携带产生回调的 `jobId`。Core 在任何任务、命令或快照写入前按 `taskId + jobId` 锁定并复核当前命令；已经被新命令取代的旧 job 回调只记录稳定错误码并幂等返回，不得污染新命令或用户事件。检查点中的 `eventSequence` 必须与回调序号一致并且只能单调前进。
+
+没有持久命令的历史 active/waiting_call 任务在对账时先于任务行锁内创建唯一 `WritingRunCommand`，再由标准 dispatcher 使用命令 ID 投递；命令建立后旧 legacy job 立即失效。没有活动命令时也只允许最新终态命令重试原回调，不能让更早的历史命令重新获得身份。
+
 草案决定接口把正式数据变更、草案状态或删除以及 `artifact_decision` 命令放在同一外层事务中。接口成功返回 202 后，前端只连接返回 taskId 的 SSE，Agent 恢复负责推进图状态和终态回调，不得再次应用或删除正式草案。
 
 ## 会话恢复
@@ -277,7 +281,10 @@ Agent Runtime 是唯一多轮 tool-call loop。
 
 - Core API 已提供 `/api/v1/writing/sessions`、消息、运行启动、恢复和事件流接口。
 - 写作事件使用短期 Redis Stream 保存，支持 `Last-Event-ID` 重放、来源事件去重和序号缺口对账；没有 Redis 的测试环境使用同契约内存实现。
-- 智能体事件、检查点、完成和失败只接受可信网段内的 Ed25519 签名内部回调。
+- 智能体事件、检查点、完成和失败只接受可信网段内的 Ed25519 签名内部回调；签名请求体和来源幂等标识都包含 `jobId`。
+- Redis 事件序号键丢失时，Core 先用 PostgreSQL 当前命令身份和持久检查点授权，再允许当前 job 从持久序号后重建基线；旧 job 或小于等于持久序号的事件不能抬高、回退或重置基线。
+- 回调按“精确身份授权、Redis 序号预检、PostgreSQL 二次锁定并持久化、Redis Lua 原子发布”执行；数据库已成功而首次发布失败时，同一来源事件能够幂等补发。
+- 同一 job 已保存 `completed/error` 快照后，Agent 重试必须从持久序号直接重放 completion/failure，不能重新执行图或重新生成正文；failure 回调自身的 5xx、超时或断线保留可重试语义。
 - Agent 图返回 `phase=error` 时，Agent Service 保存错误快照并调用失败回调，不得发送完成回调。
 - 稳定快照写入 `WritingTask.graphStateJson`，并拒绝 `runtime`、回调、聚合作品数据和控制事件等仅运行时字段。
 - Python 智能体服务已迁移五个智能体定义、系统提示词、能力与工具白名单、严格工具参数校验和唯一多轮工具循环；模型运行时仍只负责单次供应商调用。

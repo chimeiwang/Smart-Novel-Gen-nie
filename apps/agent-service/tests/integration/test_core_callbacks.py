@@ -68,6 +68,7 @@ async def test_core_client_signs_tools_events_checkpoint_and_completion() -> Non
         novelId="novel-1",
         taskId="task-1",
         runId="run-1",
+        jobId="job-1",
     )
 
     result = await client.call_tool(resource, "编辑", "get_writing_context", {})
@@ -134,6 +135,44 @@ async def test_core_client_signs_tools_events_checkpoint_and_completion() -> Non
         "/internal/v1/quality-checks/check-1/context",
         "/internal/v1/quality-checks/check-1/success",
     ]
+    writing_callbacks = [
+        payload
+        for _, path, payload in requests
+        if path.startswith("/internal/v1/writing/runs/")
+    ]
+    assert writing_callbacks == [
+        {
+            "protocolVersion": "1.1",
+            "eventId": writing_callbacks[0]["eventId"],
+            "jobId": "job-1",
+            "runId": "run-1",
+            "taskId": "task-1",
+            "sequence": 1,
+            "event": "start",
+            "data": {},
+            "occurredAt": writing_callbacks[0]["occurredAt"],
+        },
+        {
+            "protocolVersion": "1.1",
+            "eventId": writing_callbacks[1]["eventId"],
+            "jobId": "job-1",
+            "runId": "run-1",
+            "taskId": "task-1",
+            "sequence": 2,
+            "checkpoint": {"taskId": "task-1"},
+            "occurredAt": writing_callbacks[1]["occurredAt"],
+        },
+        {
+            "protocolVersion": "1.1",
+            "eventId": writing_callbacks[2]["eventId"],
+            "jobId": "job-1",
+            "runId": "run-1",
+            "taskId": "task-1",
+            "sequence": 3,
+            "result": {"finalContent": "完成"},
+            "occurredAt": writing_callbacks[2]["occurredAt"],
+        },
+    ]
     await http.aclose()
 
 
@@ -150,11 +189,22 @@ async def test_core_client_uses_stable_idempotency_keys_for_retries() -> None:
         novelId="novel-1",
         taskId="task-1",
         runId="run-1",
+        jobId="job-1",
     )
 
     await client.fail(resource, sequence=4, code="MODEL_ERROR", message="失败")
     await client.fail(resource, sequence=4, code="MODEL_ERROR", message="失败")
+    await client.fail(
+        resource.model_copy(update={"jobId": "job-2"}),
+        sequence=4,
+        code="MODEL_ERROR",
+        message="失败",
+    )
 
     assert signer.calls[0]["idempotency_key"] == signer.calls[1]["idempotency_key"]
+    assert signer.calls[0]["idempotency_key"] != signer.calls[2]["idempotency_key"]
     assert signer.calls[0]["body"] == signer.calls[1]["body"]
+    failure_payload = json.loads(signer.calls[0]["body"])
+    assert failure_payload["protocolVersion"] == "1.1"
+    assert failure_payload["jobId"] == "job-1"
     await http.aclose()

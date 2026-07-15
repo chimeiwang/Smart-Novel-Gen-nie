@@ -7,6 +7,8 @@ from typing import Protocol
 
 from inkforge_contracts.jobs import AgentJobStatus
 
+from ..operations.transient_errors import is_transient_infrastructure_error
+
 logger = logging.getLogger(__name__)
 
 
@@ -112,6 +114,9 @@ class QualityRunDispatcher:
                     "记录质量检查投递失败状态时发生异常",
                     extra={"runId": record.run_id},
                 )
+                raise
+            if not is_transient_infrastructure_error(exc):
+                raise
             logger.warning(
                 "质量检查投递失败，等待后台重试",
                 extra={
@@ -134,8 +139,13 @@ class QualityRunDispatcher:
         while not self._stop.is_set():
             try:
                 await self.run_once()
-            except Exception:
-                logger.exception("质量检查后台领取失败，等待下次重试")
+            except Exception as exc:
+                if not is_transient_infrastructure_error(exc):
+                    raise
+                logger.warning(
+                    "质量检查后台领取暂时失败，等待下次重试",
+                    extra={"errorCode": type(exc).__name__},
+                )
             try:
                 await asyncio.wait_for(
                     self._stop.wait(),

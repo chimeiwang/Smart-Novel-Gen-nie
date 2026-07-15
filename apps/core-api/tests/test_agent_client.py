@@ -148,7 +148,7 @@ async def test_writing_command_uses_command_id_as_job_id() -> None:
         id="command-stable",
         task=task,
         kind="resume",
-        payload={"resume": True, "chapterId": "chapter-1"},
+        payload={"resume": True, "chapterId": "chapter-1", "force": True},
         status="pending",
         attempt_count=0,
     )
@@ -157,6 +157,7 @@ async def test_writing_command_uses_command_id_as_job_id() -> None:
 
     assert captured[0].jobId == "command-stable"
     assert captured[0].payload == command.payload
+    assert captured[0].force is True
     assert status == "completed"
 
 

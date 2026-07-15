@@ -2,7 +2,7 @@
 
 import type { components } from "@inkforge/api-client";
 import { useRouter } from "next/navigation";
-import { useState, useSyncExternalStore, useTransition } from "react";
+import { useEffect, useState, useSyncExternalStore, useTransition } from "react";
 
 import { Modal } from "@/components/modal";
 import { ChapterList } from "@/features/chapters/chapter-list";
@@ -13,6 +13,7 @@ import { ReferencePanel } from "@/features/references/reference-panel";
 import { StylePanel } from "@/features/styles/style-panel";
 import { browserApi } from "@/lib/api/browser";
 import { requireApiData } from "@/lib/api/response";
+import { countTextLength } from "@/shared/lib/word-count";
 import {
   STORY_LENGTH_PROFILE_CONFIG,
   normalizeStoryLengthProfile,
@@ -23,6 +24,7 @@ import {
   groupForTab,
   type DeferredGroupState,
 } from "./deferred-workspace";
+import { subscribeWorkspaceInvalidation } from "./workspace-invalidation";
 
 type SidebarTabKey = "chapters" | "lore" | "style" | "reference";
 type PlanningData = components["schemas"]["WorkspacePlanningResponse"];
@@ -105,6 +107,16 @@ export function SidebarTabs({
     loader.subscribe,
     loader.snapshot,
     loader.snapshot,
+  );
+  useEffect(
+    () => subscribeWorkspaceInvalidation(novelId, (groups) => {
+      for (const group of groups) loader.invalidate(group);
+      const activeGroup = groupForTab(activeTab);
+      if (activeGroup && groups.includes(activeGroup)) {
+        void loader.load(activeGroup).catch(() => undefined);
+      }
+    }),
+    [activeTab, loader, novelId],
   );
   const loadGroup = (group: NonNullable<ReturnType<typeof groupForTab>>) => {
     void loader.load(group).catch(() => undefined);
@@ -324,7 +336,7 @@ export function SidebarTabs({
             placeholder="记录故事的整体进展、关键转折、伏笔等..."
           />
           <div className="row row-between">
-            <span className="muted">{storyProgressContent.length} / 30000 字</span>
+            <span className="muted">{countTextLength(storyProgressContent)} / 30000 字</span>
             <button className="button" type="button" onClick={handleSaveStoryProgress}>
               {pending ? "保存中..." : "保存"}
             </button>

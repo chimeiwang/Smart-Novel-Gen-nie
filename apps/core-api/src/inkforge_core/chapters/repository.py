@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import cast
 
 from sqlalchemy import func, select
@@ -20,6 +20,11 @@ from ..db.models import (
 from ..errors import ApiError
 from ..novels.repository import chapter_dict, utc_datetime
 from ..novels.schemas import ChapterStatus, WorkspaceChapter
+from .content_state import (
+    invalidate_quality_state,
+    next_chapter_updated_at,
+    replace_chapter_content,
+)
 from .service import ChapterRecordPort
 
 DEFAULT_QUALITY_TYPE = "consistency"
@@ -33,6 +38,7 @@ class ChapterRecord:
     novel_id: str
     status: ChapterStatus
     completed_at: datetime | None
+    updated_at: datetime
 
 
 class ChapterRepository:
@@ -96,16 +102,43 @@ class ChapterRepository:
         return values[0]
 
     async def update_draft(
-        self, chapter_id: str, user_id: str, title: str, content: str
+        self,
+        chapter_id: str,
+        user_id: str,
+        title: str,
+        content: str,
+        expected_updated_at: datetime,
     ) -> datetime:
         async with self._session_factory() as session:
             async with session.begin():
-                await self._require_chapter(session, chapter_id, user_id, lock=True)
-                chapter = await session.get(Chapter, chapter_id, with_for_update=True)
-                if chapter is None:
-                    raise ApiError(status_code=404, code="CHAPTER_NOT_FOUND", message="章节不存在")
+                chapter = await self._lock_chapter_owner(session, chapter_id, user_id)
+                current_updated_at = _required_updated_at(chapter.updatedAt)
+                if chapter.title == title and chapter.content == content:
+                    return current_updated_at
+                if chapter.status != "drafting":
+                    raise ApiError(
+                        status_code=409,
+                        code="CHAPTER_NOT_EDITABLE",
+                        message="章节退回草稿后才能编辑正文",
+                    )
+                _require_expected_updated_at(current_updated_at, expected_updated_at)
+                content_changed = chapter.content != content
+                check = (
+                    await self._lock_consistency_check(session, chapter_id)
+                    if content_changed
+                    else None
+                )
                 chapter.title = title
-                chapter.content = content
+                if content_changed:
+                    await replace_chapter_content(
+                        session,
+                        chapter,
+                        check,
+                        content,
+                        reopen=False,
+                    )
+                else:
+                    chapter.updatedAt = next_chapter_updated_at(current_updated_at)
                 await session.flush()
                 updated_at = utc_datetime(chapter.updatedAt)
         if updated_at is None:
@@ -133,11 +166,17 @@ class ChapterRepository:
         return updated_at
 
     async def transition_status(
-        self, chapter_id: str, user_id: str, status: ChapterStatus
+        self,
+        chapter_id: str,
+        user_id: str,
+        status: ChapterStatus,
+        expected_updated_at: datetime,
     ) -> ChapterRecordPort:
         async with self._session_factory() as session:
             async with session.begin():
                 chapter = await self._lock_chapter_owner(session, chapter_id, user_id)
+                current_updated_at = _required_updated_at(chapter.updatedAt)
+                _require_expected_updated_at(current_updated_at, expected_updated_at)
                 allowed = {
                     "drafting": {"drafting", "review"},
                     "review": {"drafting", "review", "completed"},
@@ -150,6 +189,7 @@ class ChapterRepository:
                         message="章节状态不能这样切换",
                     )
                 check = await self._lock_consistency_check(session, chapter_id)
+                source_status = chapter.status
                 if status == "completed" and (
                     check is None or check.status not in {"completed", "skipped"}
                 ):
@@ -171,10 +211,16 @@ class ChapterRepository:
                     else:
                         check.title = DEFAULT_QUALITY_TITLE
                         check.summary = DEFAULT_QUALITY_SUMMARY
-                chapter.status = status
-                chapter.completedAt = (
+                        if source_status != "review":
+                            await invalidate_quality_state(session, check)
+                next_completed_at = (
                     chapter.completedAt or utc_now() if status == "completed" else None
                 )
+                changed = chapter.status != status or chapter.completedAt != next_completed_at
+                chapter.status = status
+                chapter.completedAt = next_completed_at
+                if changed:
+                    chapter.updatedAt = next_chapter_updated_at(current_updated_at)
                 await session.flush()
                 result = self._record(chapter)
         return result
@@ -314,8 +360,29 @@ class ChapterRepository:
             novel_id=chapter.novelId,
             status=cast(ChapterStatus, chapter.status),
             completed_at=utc_datetime(chapter.completedAt),
+            updated_at=_required_updated_at(chapter.updatedAt),
         )
 
     @staticmethod
     def _empty_chapter(chapter: Chapter) -> dict[str, object]:
         return chapter_dict(chapter, None, [], None, [])
+
+
+def _required_updated_at(value: datetime | None) -> datetime:
+    updated_at = utc_datetime(value)
+    if updated_at is None:
+        raise RuntimeError("章节更新时间缺失")
+    return updated_at
+
+
+def _require_expected_updated_at(current: datetime, expected: datetime) -> None:
+    normalized_expected = (
+        expected.replace(tzinfo=UTC) if expected.tzinfo is None else expected.astimezone(UTC)
+    )
+    if normalized_expected != current:
+        raise ApiError(
+            status_code=409,
+            code="CHAPTER_VERSION_CONFLICT",
+            message="章节已在其他位置更新，请保留当前草稿并重新加载",
+            details={"currentUpdatedAt": current.isoformat()},
+        )

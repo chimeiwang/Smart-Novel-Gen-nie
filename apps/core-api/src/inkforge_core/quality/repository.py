@@ -2,14 +2,20 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, cast
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ..chapters.content_state import (
+    QUALITY_SOURCE_CHANGED,
+    content_sha256,
+    reset_quality_check,
+)
 from ..db.models import Chapter, ChapterQualityCheck, Novel, WorkflowRun, WritingTask
 from ..errors import ApiError
-from ..novels.repository import quality_check_dict
+from ..novels.repository import quality_check_dict, utc_datetime
 from ..novels.schemas import QualityCheckDto
 from .dispatcher import QualityDispatchRecord
 from .service import QualityRecordPort
@@ -22,6 +28,16 @@ class QualityRecord:
     novel_id: str
     type: str
     status: str
+
+
+@dataclass(frozen=True, slots=True)
+class QualityRunInput:
+    check_id: str
+    source_task_id: str | None
+    message: str | None
+    chapter_content: str
+    chapter_content_sha256: str
+    source_updated_at: str
 
 
 class QualityRepository:
@@ -43,11 +59,23 @@ class QualityRepository:
     ) -> QualityCheckDto:
         async with self._session_factory() as session:
             async with session.begin():
-                await self._lock_chapter_owner_for_check(session, check_id, user_id)
+                chapter = await self._lock_chapter_owner_for_check(session, check_id, user_id)
                 check = await self._lock_check(session, check_id)
                 if check is None:
                     raise ApiError(
                         status_code=404, code="QUALITY_CHECK_NOT_FOUND", message="检查项不存在"
+                    )
+                if chapter.status == "completed":
+                    raise ApiError(
+                        status_code=409,
+                        code="QUALITY_CHECK_CHAPTER_COMPLETED",
+                        message="已完成章节不能重置或跳过一致性终检",
+                    )
+                if await self._find_active_quality_run(session, check_id) is not None:
+                    raise ApiError(
+                        status_code=409,
+                        code="QUALITY_RUN_ACTIVE",
+                        message="质量检查运行期间不能修改检查状态",
                     )
                 check.status = status
                 if reset_result:
@@ -93,6 +121,12 @@ class QualityRepository:
                         code="QUALITY_CHECK_NOT_FOUND",
                         message="检查项不存在",
                     )
+                if chapter.status != "review":
+                    raise ApiError(
+                        status_code=409,
+                        code="QUALITY_CHECK_CHAPTER_NOT_IN_REVIEW",
+                        message="只有待审章节可以运行一致性终检",
+                    )
                 record = self._record(check, chapter.novelId)
                 await self._validate_task_binding(session, record, user_id, task_id)
                 active_run = await self._find_active_quality_run(session, check_id)
@@ -102,6 +136,7 @@ class QualityRepository:
                         code="QUALITY_RUN_ACTIVE",
                         message="质量检查已有运行中的任务",
                     )
+                check.status = "running"
                 run = WorkflowRun(
                     chapterId=record.chapter_id,
                     novelId=record.novel_id,
@@ -115,6 +150,9 @@ class QualityRepository:
                             "checkId": check_id,
                             "sourceTaskId": task_id,
                             "message": message,
+                            "chapterContent": chapter.content,
+                            "chapterContentSha256": content_sha256(chapter.content),
+                            "sourceUpdatedAt": _source_updated_at(chapter.updatedAt),
                         },
                         ensure_ascii=False,
                         separators=(",", ":"),
@@ -195,6 +233,7 @@ class QualityRepository:
                         expected_novel_id=None,
                     )
                     durable = self._dispatch_record(run)
+                    run_input = self._run_input(run)
                     if (
                         durable.source_task_id != task_id
                         or durable.message != message
@@ -227,7 +266,7 @@ class QualityRepository:
                         durable.source_task_id,
                     )
                     check.status = "running"
-                    content = chapter.content
+                    content = run_input.chapter_content
             return {
                 "checkId": check_id,
                 "novelId": record.novel_id,
@@ -272,7 +311,7 @@ class QualityRepository:
             raise ValueError("质量报告缺少评分")
         async with self._session_factory() as session:
             async with session.begin():
-                await self._lock_chapter_owner_for_check(session, check_id, user_id)
+                chapter = await self._lock_chapter_owner_for_check(session, check_id, user_id)
                 workflow_run = (
                     await self._require_bound_quality_run(
                         session,
@@ -297,10 +336,26 @@ class QualityRepository:
                     "cancelled",
                 }:
                     return
+                run_input = self._run_input(workflow_run) if workflow_run is not None else None
                 is_latest = workflow_run is None or await self._is_latest_quality_run(
                     session, workflow_run
                 )
                 if workflow_run is not None:
+                    if (
+                        run_input is not None
+                        and content_sha256(chapter.content)
+                        != run_input.chapter_content_sha256
+                    ):
+                        workflow_run.status = "cancelled"
+                        workflow_run.output = json.dumps(
+                            result,
+                            ensure_ascii=False,
+                            separators=(",", ":"),
+                        )
+                        workflow_run.errorMessage = QUALITY_SOURCE_CHANGED
+                        if is_latest:
+                            reset_quality_check(check)
+                        return
                     workflow_run.status = "completed"
                     workflow_run.output = json.dumps(
                         result,
@@ -335,7 +390,7 @@ class QualityRepository:
     ) -> None:
         async with self._session_factory() as session:
             async with session.begin():
-                await self._lock_chapter_owner_for_check(session, check_id, user_id)
+                chapter = await self._lock_chapter_owner_for_check(session, check_id, user_id)
                 workflow_run = (
                     await self._require_bound_quality_run(
                         session,
@@ -360,10 +415,21 @@ class QualityRepository:
                     "cancelled",
                 }:
                     return
+                run_input = self._run_input(workflow_run) if workflow_run is not None else None
                 is_latest = workflow_run is None or await self._is_latest_quality_run(
                     session, workflow_run
                 )
                 if workflow_run is not None:
+                    if (
+                        run_input is not None
+                        and content_sha256(chapter.content)
+                        != run_input.chapter_content_sha256
+                    ):
+                        workflow_run.status = "cancelled"
+                        workflow_run.errorMessage = QUALITY_SOURCE_CHANGED
+                        if is_latest:
+                            reset_quality_check(check)
+                        return
                     workflow_run.status = "failed"
                     workflow_run.errorMessage = "QUALITY_RUN_FAILED"
                 if is_latest:
@@ -480,18 +546,7 @@ class QualityRepository:
 
     @staticmethod
     def _dispatch_record(run: WorkflowRun) -> QualityDispatchRecord:
-        try:
-            payload = json.loads(run.input or "")
-        except json.JSONDecodeError as exc:
-            raise ValueError("质量检查运行输入无效") from exc
-        if not isinstance(payload, dict) or payload.get("checkId") != run.sourceId:
-            raise ValueError("质量检查运行输入无效")
-        source_task_id = payload.get("sourceTaskId")
-        message = payload.get("message")
-        if source_task_id is not None and not isinstance(source_task_id, str):
-            raise ValueError("质量检查源任务无效")
-        if message is not None and not isinstance(message, str):
-            raise ValueError("质量检查消息无效")
+        payload = QualityRepository._run_input(run)
         if run.userId is None or run.sourceId is None:
             raise ValueError("质量检查运行归属无效")
         return QualityDispatchRecord(
@@ -500,8 +555,47 @@ class QualityRepository:
             user_id=run.userId,
             novel_id=run.novelId,
             chapter_id=run.chapterId,
+            source_task_id=payload.source_task_id,
+            message=payload.message,
+        )
+
+    @staticmethod
+    def _run_input(run: WorkflowRun) -> QualityRunInput:
+        try:
+            payload = json.loads(run.input or "")
+        except json.JSONDecodeError as exc:
+            raise ValueError("质量检查运行输入无效") from exc
+        if (
+            run.sourceId is None
+            or not isinstance(payload, dict)
+            or payload.get("checkId") != run.sourceId
+        ):
+            raise ValueError("质量检查运行输入无效")
+        source_task_id = payload.get("sourceTaskId")
+        message = payload.get("message")
+        chapter_content = payload.get("chapterContent")
+        chapter_content_hash = payload.get("chapterContentSha256")
+        source_updated_at = payload.get("sourceUpdatedAt")
+        if source_task_id is not None and not isinstance(source_task_id, str):
+            raise ValueError("质量检查源任务无效")
+        if message is not None and not isinstance(message, str):
+            raise ValueError("质量检查消息无效")
+        if not isinstance(chapter_content, str):
+            raise ValueError("质量检查正文快照无效")
+        if (
+            not isinstance(chapter_content_hash, str)
+            or chapter_content_hash != content_sha256(chapter_content)
+        ):
+            raise ValueError("质量检查正文哈希无效")
+        if not isinstance(source_updated_at, str) or not source_updated_at:
+            raise ValueError("质量检查正文版本无效")
+        return QualityRunInput(
+            check_id=run.sourceId,
             source_task_id=source_task_id,
             message=message,
+            chapter_content=chapter_content,
+            chapter_content_sha256=chapter_content_hash,
+            source_updated_at=source_updated_at,
         )
 
     async def _lock_chapter_owner_for_check(
@@ -587,3 +681,12 @@ def _score(value: object) -> int | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     return round(float(value))
+
+
+def _source_updated_at(value: object) -> str:
+    if not isinstance(value, datetime):
+        raise RuntimeError("章节更新时间缺失")
+    normalized = utc_datetime(value)
+    if normalized is None:
+        raise RuntimeError("章节更新时间缺失")
+    return normalized.isoformat()

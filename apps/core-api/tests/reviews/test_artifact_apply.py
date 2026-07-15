@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 import pytest
+from inkforge_core.db.models import Chapter, ChapterQualityCheck, Novel
 from inkforge_core.errors import ApiError
 from inkforge_core.reviews.apply import FormalArtifactApplier
+from inkforge_core.reviews.formal_writes import FormalWriteRepository
 from inkforge_core.reviews.service import ReviewService
 
 
@@ -188,3 +192,139 @@ async def test_formal_applier_filters_selected_agent_updates() -> None:
     )
 
     assert executor.updates == {"characters": [{"action": "update", "name": "乙"}]}
+
+
+class FormalWriteSession:
+    def __init__(self, chapter: Chapter, check: ChapterQualityCheck) -> None:
+        self.chapter = chapter
+        self.check = check
+        self.executed: list[object] = []
+        self.added: list[object] = []
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        del exc_type, exc, traceback
+
+    @asynccontextmanager
+    async def begin(self):
+        yield
+
+    async def scalar(self, statement):
+        entity = statement.column_descriptions[0].get("entity")
+        if entity is Novel:
+            return "user-1"
+        if entity is Chapter:
+            return self.chapter
+        if entity is ChapterQualityCheck:
+            return self.check
+        raise AssertionError(f"未处理的查询实体：{entity}")
+
+    async def execute(self, statement):
+        self.executed.append(statement)
+        return None
+
+    def add(self, value: object) -> None:
+        self.added.append(value)
+
+    async def flush(self) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_formal_chapter_write_reopens_chapter_and_invalidates_old_check() -> None:
+    now = datetime(2026, 7, 11, tzinfo=UTC)
+    chapter = Chapter(
+        id="chapter-1",
+        novelId="novel-1",
+        order=1,
+        status="completed",
+        title="第一章",
+        content="旧正文",
+        completedAt=now,
+        createdAt=now,
+        updatedAt=now,
+    )
+    check = ChapterQualityCheck(
+        id="check-1",
+        chapterId=chapter.id,
+        type="consistency",
+        status="completed",
+        title="一致性终检",
+        result="旧报告",
+        scoreOverall=9,
+        qualityGate="pass",
+        createdAt=now,
+        updatedAt=now,
+    )
+    session = FormalWriteSession(chapter, check)
+    repository = FormalWriteRepository(lambda: session)  # type: ignore[arg-type]
+    artifact = Artifact(
+        payload={
+            "kind": "chapter_draft",
+            "content": "新正文",
+            "target": {"mode": "existing_chapter", "chapterId": chapter.id},
+        }
+    )
+    artifact.novel_id = "novel-1"
+    artifact.chapter_id = chapter.id
+
+    await repository.apply_chapter(artifact, "user-1", "新正文")  # type: ignore[arg-type]
+
+    assert chapter.content == "新正文"
+    assert chapter.status == "drafting"
+    assert chapter.completedAt is None
+    assert check.status == "pending"
+    assert check.result is None
+    assert check.scoreOverall is None
+    assert check.qualityGate is None
+    assert len(session.executed) == 1
+
+
+@pytest.mark.asyncio
+async def test_formal_same_content_still_reopens_without_invalidating_check() -> None:
+    now = datetime(2026, 7, 11, tzinfo=UTC)
+    chapter = Chapter(
+        id="chapter-1",
+        novelId="novel-1",
+        order=1,
+        status="completed",
+        title="第一章",
+        content="相同正文",
+        completedAt=now,
+        createdAt=now,
+        updatedAt=now,
+    )
+    check = ChapterQualityCheck(
+        id="check-1",
+        chapterId=chapter.id,
+        type="consistency",
+        status="completed",
+        title="一致性终检",
+        result="当前正文报告",
+        scoreOverall=9,
+        qualityGate="pass",
+        createdAt=now,
+        updatedAt=now,
+    )
+    session = FormalWriteSession(chapter, check)
+    repository = FormalWriteRepository(lambda: session)  # type: ignore[arg-type]
+    artifact = Artifact(
+        payload={
+            "kind": "chapter_draft",
+            "content": "相同正文",
+            "target": {"mode": "existing_chapter", "chapterId": chapter.id},
+        }
+    )
+    artifact.novel_id = "novel-1"
+    artifact.chapter_id = chapter.id
+
+    await repository.apply_chapter(artifact, "user-1", "相同正文")  # type: ignore[arg-type]
+
+    assert chapter.status == "drafting"
+    assert chapter.completedAt is None
+    assert chapter.updatedAt.replace(tzinfo=UTC) > now
+    assert check.status == "completed"
+    assert check.result == "当前正文报告"
+    assert session.executed == []

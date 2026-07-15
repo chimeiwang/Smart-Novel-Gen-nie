@@ -19,8 +19,9 @@ def create_contract_client() -> TestClient:
 
 def valid_event() -> AgentEvent:
     return AgentEvent(
-        protocolVersion="1.0",
+        protocolVersion="1.1",
         eventId="event-1",
+        jobId="job-1",
         runId="run-1",
         taskId="task-1",
         sequence=1,

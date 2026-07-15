@@ -19,6 +19,7 @@ import {
 import type { AgentUpdateSelectionRef } from "@/shared/contracts/agent-updates";
 import type { ReviewArtifactDecision } from "@/shared/contracts/review-artifact";
 import type { WritingSessionTaskSummary } from "@/shared/contracts/writing-session";
+import { countTextLength } from "@/shared/lib/word-count";
 import {
   EMPTY_AGENT_ACTIVITY_STATE,
   reduceAgentActivityState,
@@ -2959,7 +2960,7 @@ export function WritingConversation({
           <div className="preview-section">
             <div className="preview-header">
               <span>📝 正文预览</span>
-              <span className="word-count">{generatedContent.length} 字</span>
+              <span className="word-count">{countTextLength(generatedContent)} 字</span>
             </div>
             <div className="preview-content"><ParagraphText text={generatedContent} /></div>
             <div className="preview-actions">

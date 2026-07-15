@@ -15,6 +15,7 @@ import { ReferencePanel } from "@/features/references/reference-panel";
 import { StylePanel } from "@/features/styles/style-panel";
 import { AgentSelector, getDefaultSelectedAgents } from "@/features/writing/agent-selector";
 import { WritingConversation } from "@/features/writing/writing-conversation";
+import { countTextLength } from "@/shared/lib/word-count";
 
 type InspectorTabKey = "style" | "progress" | "storyProgress" | "storyBackground" | "worldSetting" | "outline" | "reference" | "smartWriting";
 
@@ -193,7 +194,7 @@ export function InspectorTabs({
               rows={15}
             />
             <div className="row row-between">
-              <span className="muted">{storyProgressContent.length} / 30000 字</span>
+              <span className="muted">{countTextLength(storyProgressContent)} / 30000 字</span>
               <button className="button" type="button" onClick={handleSaveStoryProgress}>
                 {pending ? "保存中..." : "保存"}
               </button>

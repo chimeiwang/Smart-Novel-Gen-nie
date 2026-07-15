@@ -3,7 +3,7 @@ from __future__ import annotations
 from ipaddress import ip_network
 from typing import Annotated, Literal
 
-from pydantic import SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Environment = Literal["dev", "test", "production"]
@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     openai_base_url: str = "https://api.deepseek.com/v1"
     openai_model: str = "deepseek-v4-flash"
     redis_url: SecretStr | None = None
+    queue_terminal_retention_days: int = Field(default=7, ge=1)
     trusted_core_cidrs: Annotated[tuple[str, ...], NoDecode] = ()
     core_service_public_key_path: str | None = None
     agent_service_private_key_path: str | None = None

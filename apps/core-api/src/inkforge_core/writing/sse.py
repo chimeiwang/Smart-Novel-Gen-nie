@@ -71,12 +71,20 @@ class InMemoryWritingEventStore:
         sequence: int,
         event: str,
         data: dict[str, JsonValue],
+        durable_baseline: int = 0,
+        allow_rebase: bool = False,
     ) -> WritingEvent:
         async with self._lock:
             duplicate = self._source_ids.get((task_id, source_event_id))
             if duplicate is not None:
                 return duplicate
-            expected = self._last_sequences.get(task_id, 0) + 1
+            last_sequence = self._last_sequences.get(task_id)
+            expected = _expected_sequence(
+                last_sequence,
+                sequence=sequence,
+                durable_baseline=durable_baseline,
+                allow_rebase=allow_rebase,
+            )
             if sequence != expected:
                 raise EventSequenceGap(expected, sequence)
             event_id = str(len(self._events.get(task_id, [])) + 1)
@@ -92,6 +100,35 @@ class InMemoryWritingEventStore:
             self._last_sequences[task_id] = sequence
             return item
 
+    async def validate_agent_event(
+        self,
+        task_id: str,
+        *,
+        source_event_id: str,
+        sequence: int,
+        durable_baseline: int,
+        allow_rebase: bool,
+    ) -> bool:
+        async with self._lock:
+            if (task_id, source_event_id) in self._source_ids:
+                return False
+            last_sequence = self._last_sequences.get(task_id)
+            if (
+                last_sequence is None
+                and allow_rebase
+                and sequence <= durable_baseline
+            ):
+                return False
+            expected = _expected_sequence(
+                last_sequence,
+                sequence=sequence,
+                durable_baseline=durable_baseline,
+                allow_rebase=allow_rebase,
+            )
+            if sequence != expected:
+                raise EventSequenceGap(expected, sequence)
+            return True
+
     async def replay(self, task_id: str, last_event_id: str | None) -> list[WritingEvent]:
         events = list(self._events.get(task_id, []))
         if last_event_id is None:
@@ -104,10 +141,16 @@ local existing = redis.call('GET', KEYS[2])
 if existing then
   return {'duplicate', existing}
 end
-local last = tonumber(redis.call('GET', KEYS[3]) or '0')
 local received = tonumber(ARGV[1])
-if received ~= last + 1 then
-  return {'gap', tostring(last + 1)}
+local last_raw = redis.call('GET', KEYS[3])
+local expected = 1
+if last_raw then
+  expected = tonumber(last_raw) + 1
+elseif ARGV[8] == '1' and received > tonumber(ARGV[7]) then
+  expected = received
+end
+if received ~= expected then
+  return {'gap', tostring(expected)}
 end
 local id = redis.call(
   'XADD', KEYS[1], '*',
@@ -153,20 +196,24 @@ class RedisWritingEventStore:
         sequence: int,
         event: str,
         data: dict[str, JsonValue],
+        durable_baseline: int = 0,
+        allow_rebase: bool = False,
     ) -> WritingEvent:
         occurred_at = datetime.now(UTC)
         result = await self._redis.eval(
             _APPEND_AGENT_EVENT_SCRIPT,
             3,
             _stream_key(task_id),
-            f"writing:event-source:{task_id}:{source_event_id}",
-            f"writing:event-sequence:{task_id}",
+            _source_key(task_id, source_event_id),
+            _sequence_key(task_id),
             str(sequence),
             event,
             _encode_data(data),
             occurred_at.isoformat(),
             source_event_id,
             str(self._ttl_seconds),
+            str(durable_baseline),
+            "1" if allow_rebase else "0",
         )
         state, value = (_text(result[0]), _text(result[1]))
         if state == "gap":
@@ -184,6 +231,40 @@ class RedisWritingEventStore:
             source_event_id=source_event_id,
             sequence=sequence,
         )
+
+    async def validate_agent_event(
+        self,
+        task_id: str,
+        *,
+        source_event_id: str,
+        sequence: int,
+        durable_baseline: int,
+        allow_rebase: bool,
+    ) -> bool:
+        source_event, raw_last_sequence = await self._redis.mget(
+            _source_key(task_id, source_event_id),
+            _sequence_key(task_id),
+        )
+        if source_event is not None:
+            return False
+        last_sequence = (
+            int(_text(raw_last_sequence)) if raw_last_sequence is not None else None
+        )
+        if (
+            last_sequence is None
+            and allow_rebase
+            and sequence <= durable_baseline
+        ):
+            return False
+        expected = _expected_sequence(
+            last_sequence,
+            sequence=sequence,
+            durable_baseline=durable_baseline,
+            allow_rebase=allow_rebase,
+        )
+        if sequence != expected:
+            raise EventSequenceGap(expected, sequence)
+        return True
 
     async def replay(self, task_id: str, last_event_id: str | None) -> list[WritingEvent]:
         minimum = "-" if last_event_id is None else last_event_id
@@ -245,6 +326,28 @@ async def stream_task_events(
 
 def _stream_key(task_id: str) -> str:
     return f"writing:events:{task_id}"
+
+
+def _source_key(task_id: str, source_event_id: str) -> str:
+    return f"writing:event-source:{task_id}:{source_event_id}"
+
+
+def _sequence_key(task_id: str) -> str:
+    return f"writing:event-sequence:{task_id}"
+
+
+def _expected_sequence(
+    last_sequence: int | None,
+    *,
+    sequence: int,
+    durable_baseline: int,
+    allow_rebase: bool,
+) -> int:
+    if last_sequence is not None:
+        return last_sequence + 1
+    if allow_rebase and sequence > durable_baseline:
+        return sequence
+    return 1
 
 
 def _encode_data(data: dict[str, JsonValue]) -> str:

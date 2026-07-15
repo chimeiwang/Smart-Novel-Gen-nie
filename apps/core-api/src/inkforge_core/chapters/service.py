@@ -26,6 +26,9 @@ class ChapterRecordPort(Protocol):
     @property
     def completed_at(self) -> datetime | None: ...
 
+    @property
+    def updated_at(self) -> datetime: ...
+
 
 class ChapterRepositoryPort(Protocol):
     async def require_chapter(
@@ -35,11 +38,20 @@ class ChapterRepositoryPort(Protocol):
     async def list_chapters(self, novel_id: str, user_id: str) -> list[WorkspaceChapter]: ...
     async def get_chapter(self, chapter_id: str, user_id: str) -> WorkspaceChapter: ...
     async def update_draft(
-        self, chapter_id: str, user_id: str, title: str, content: str
+        self,
+        chapter_id: str,
+        user_id: str,
+        title: str,
+        content: str,
+        expected_updated_at: datetime,
     ) -> datetime: ...
     async def upsert_progress(self, chapter_id: str, user_id: str, content: str) -> datetime: ...
     async def transition_status(
-        self, chapter_id: str, user_id: str, status: ChapterStatus
+        self,
+        chapter_id: str,
+        user_id: str,
+        status: ChapterStatus,
+        expected_updated_at: datetime,
     ) -> ChapterRecordPort: ...
 
 
@@ -62,7 +74,11 @@ class ChapterService:
         await self._repository.require_chapter(chapter_id, user_id)
         title = request.title.strip() or "未命名章节"
         updated_at = await self._repository.update_draft(
-            chapter_id, user_id, title, request.content
+            chapter_id,
+            user_id,
+            title,
+            request.content,
+            request.expectedUpdatedAt,
         )
         return ChapterMutationResponse(updatedAt=updated_at)
 
@@ -76,7 +92,15 @@ class ChapterService:
     async def set_status(
         self, user_id: str, chapter_id: str, request: ChapterStatusRequest
     ) -> ChapterStatusResponse:
-        updated = await self._repository.transition_status(chapter_id, user_id, request.status)
+        updated = await self._repository.transition_status(
+            chapter_id,
+            user_id,
+            request.status,
+            request.expectedUpdatedAt,
+        )
         return ChapterStatusResponse(
-            id=updated.id, status=updated.status, completedAt=updated.completed_at
+            id=updated.id,
+            status=updated.status,
+            completedAt=updated.completed_at,
+            updatedAt=updated.updated_at,
         )

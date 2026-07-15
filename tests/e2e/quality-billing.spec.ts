@@ -7,7 +7,7 @@ test("用户可以运行质量检查并查看模拟模型零扣费摘要", async
   await openWorkspace(page, identity);
 
   await page.getByPlaceholder("正文内容").fill("用于一致性终检的完整章节正文。");
-  await expect(page.getByText("已自动保存")).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("已保存", { exact: true })).toBeVisible({ timeout: 20_000 });
   await page.getByRole("button", { name: "送审", exact: true }).click();
   await page.getByRole("button", { name: /^一致性终检/ }).click();
   await page.getByRole("button", { name: "执行", exact: true }).click();
@@ -23,8 +23,6 @@ test("用户可以运行质量检查并查看模拟模型零扣费摘要", async
       ?.status;
   }, { timeout: 60_000 }).toBe("completed");
 
-  await page.reload();
-  await page.getByRole("button", { name: /^一致性终检/ }).click();
   await expect(page.locator(".chapter-check-status.completed")).toHaveText("完成");
 
   await page.goto("/billing");

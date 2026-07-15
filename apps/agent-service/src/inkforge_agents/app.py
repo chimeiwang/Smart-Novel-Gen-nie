@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import timedelta
 from typing import Protocol, cast
 
 import httpx
@@ -35,6 +35,7 @@ from .service_auth import (
     create_core_request_verifier,
     install_service_auth_error_handler,
 )
+from .supervision import CoroutineSupervisor
 from .tools.registry import build_default_registry
 
 
@@ -64,15 +65,24 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         consumer = cast(ConsumerPort | None, getattr(app.state, "queue_consumer", None))
-        task = asyncio.create_task(consumer.run()) if consumer is not None else None
-        app.state.consumer_task = task
+        supervisor = (
+            CoroutineSupervisor(
+                name="queue_consumer",
+                coroutine_factory=consumer.run,
+                request_stop=consumer.request_stop,
+            )
+            if consumer is not None
+            else None
+        )
+        if supervisor is not None:
+            supervisor.start()
+        app.state.consumer_supervisor = supervisor
+        app.state.consumer_task = supervisor.task if supervisor is not None else None
         try:
             yield
         finally:
-            if consumer is not None:
-                consumer.request_stop()
-            if task is not None:
-                await asyncio.gather(task, return_exceptions=True)
+            if supervisor is not None:
+                await supervisor.stop()
             core_http = cast(
                 httpx.AsyncClient | None,
                 getattr(app.state, "core_http", None),
@@ -105,6 +115,8 @@ def create_app(
     app.state.run_queue = run_queue
     app.state.core_request_verifier = core_request_verifier
     app.state.queue_consumer = queue_consumer
+    app.state.consumer_supervisor = None
+    app.state.consumer_task = None
     app.state.embedding_provider = None
     app.state.runtime_error = None
     if not testing:
@@ -132,8 +144,8 @@ def create_app(
                     "queue_consumer": (
                         "ok"
                         if app.state.queue_consumer is not None
-                        and getattr(app.state, "consumer_task", None) is not None
-                        and not app.state.consumer_task.done()
+                        and getattr(app.state, "consumer_supervisor", None) is not None
+                        and app.state.consumer_supervisor.is_ready()
                         else "failed"
                     ),
                 }
@@ -143,12 +155,26 @@ def create_app(
                     "ok" if app.state.embedding_provider is not None else "failed"
                 )
         ready = all(value == "ok" for value in checks.values())
+        content: dict[str, object] = {
+            "status": "ready" if ready else "not_ready",
+            "checks": checks,
+        }
+        if checks.get("queue_consumer") == "failed":
+            supervisor = cast(
+                CoroutineSupervisor | None,
+                getattr(app.state, "consumer_supervisor", None),
+            )
+            content["backgroundTasks"] = {
+                "queue_consumer": (
+                    supervisor.error_code
+                    if supervisor is not None
+                    else "BACKGROUND_TASK_NOT_REGISTERED"
+                )
+                or "BACKGROUND_TASK_NOT_RUNNING"
+            }
         return JSONResponse(
             status_code=200 if ready else 503,
-            content={
-                "status": "ready" if ready else "not_ready",
-                "checks": checks,
-            },
+            content=content,
         )
 
     install_service_auth_error_handler(app)
@@ -176,7 +202,12 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
             )
             app.state.redis = redis
         if app.state.run_queue is None and redis is not None:
-            app.state.run_queue = RedisRunQueue(redis)
+            app.state.run_queue = RedisRunQueue(
+                redis,
+                terminal_retention=timedelta(
+                    days=settings.queue_terminal_retention_days
+                ),
+            )
         if (
             app.state.core_request_verifier is None
             and redis is not None

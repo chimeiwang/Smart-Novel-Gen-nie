@@ -50,7 +50,7 @@ class Submitter:
         self.calls.append(kwargs)
         self.submitted.set()
         if kwargs["task_id"] == self.failing_task_id:
-            raise RuntimeError("模拟画像投递失败")
+            raise ConnectionError("画像提交暂时失败")
         return self.statuses.get(str(kwargs["task_id"]), "queued")
 
 
@@ -101,6 +101,21 @@ async def test_portrait_dispatcher_isolates_one_submission_failure() -> None:
 
 
 @pytest.mark.asyncio
+async def test_portrait_dispatcher_propagates_deterministic_submission_error() -> None:
+    repository = Repository([record("invalid")])
+
+    class InvalidSubmitter(Submitter):
+        async def submit(self, **kwargs: object) -> AgentJobStatus:
+            del kwargs
+            raise TypeError("画像提交契约错误")
+
+    dispatcher = PortraitTaskDispatcher(repository, InvalidSubmitter())
+
+    with pytest.raises(TypeError, match="画像提交契约错误"):
+        await dispatcher.run_once()
+
+
+@pytest.mark.asyncio
 async def test_portrait_dispatcher_converges_existing_terminal_job() -> None:
     repository = Repository([record("terminal")])
     submitter = Submitter(statuses={"terminal": "failed"})
@@ -124,7 +139,7 @@ async def test_portrait_dispatcher_loop_recovers_after_repository_failure() -> N
         ) -> list[PortraitDispatchRecord]:
             if self.failures == 0:
                 self.failures += 1
-                raise RuntimeError("模拟画像数据库领取失败")
+                raise ConnectionError("画像任务领取暂时失败")
             return await super().list_reconcilable_portrait_tasks(limit, stale_before)
 
     repository = FlakyRepository()

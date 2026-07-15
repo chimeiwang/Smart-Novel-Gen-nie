@@ -1,3 +1,5 @@
+import asyncio
+from datetime import timedelta
 from pathlib import Path
 
 import inkforge_agents.app as app_module
@@ -5,6 +7,9 @@ import pytest
 from fastapi.testclient import TestClient
 from inkforge_agents.app import create_app
 from inkforge_agents.config import Settings
+from inkforge_agents.queue.consumer import QueueConsumer
+from inkforge_agents.supervision import CoroutineSupervisor
+from redis.exceptions import ResponseError
 
 
 class Consumer:
@@ -49,6 +54,7 @@ def test_testing_app_is_ready_with_explicit_fake_provider() -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "ready"
+    assert "backgroundTasks" not in response.json()
 
 
 def test_agent_settings_never_accept_database_as_a_service_field() -> None:
@@ -93,12 +99,211 @@ def test_readiness_fails_when_queue_consumer_task_exits_unexpectedly() -> None:
         import time
 
         deadline = time.monotonic() + 1
-        while not app.state.consumer_task.done() and time.monotonic() < deadline:
+        while (
+            app.state.consumer_supervisor.error_code
+            != "BACKGROUND_TASK_BACKOFF"
+            and time.monotonic() < deadline
+        ):
             time.sleep(0.001)
         response = client.get("/internal/v1/health/ready")
 
     assert response.status_code == 503
     assert response.json()["checks"]["queue_consumer"] == "failed"
+    assert response.json()["backgroundTasks"] == {
+        "queue_consumer": "BACKGROUND_TASK_BACKOFF"
+    }
+
+
+def test_readiness_fails_after_queue_redis_oom() -> None:
+    class OomQueue:
+        terminal_retention = timedelta(days=7)
+
+        async def purge_terminal(self, *args, **kwargs):
+            del args, kwargs
+            raise ResponseError("OOM command not allowed when used memory > maxmemory")
+
+    settings = Settings.model_validate(
+        {
+            "environment": "production",
+            "model_provider": "fake",
+        }
+    )
+    consumer = QueueConsumer(OomQueue(), {})  # type: ignore[arg-type]
+    app = create_app(
+        testing=True,
+        settings=settings,
+        run_queue=object(),  # type: ignore[arg-type]
+        core_request_verifier=object(),  # type: ignore[arg-type]
+        queue_consumer=consumer,
+    )
+    app.state.core_client = object()
+
+    with TestClient(app) as client:
+        import time
+
+        deadline = time.monotonic() + 1
+        while (
+            app.state.consumer_supervisor.error_code
+            != "BACKGROUND_TASK_BACKOFF"
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.001)
+        response = client.get("/internal/v1/health/ready")
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["queue_consumer"] == "failed"
+    assert response.json()["backgroundTasks"] == {
+        "queue_consumer": "BACKGROUND_TASK_BACKOFF"
+    }
+
+
+def test_readiness_recovers_after_queue_consumer_restarts() -> None:
+    class FlakyConsumer:
+        def __init__(self) -> None:
+            self.starts = 0
+            self.stopped = False
+            self.stop_event = asyncio.Event()
+
+        async def run(self) -> None:
+            self.starts += 1
+            if self.starts == 1:
+                raise RuntimeError("模拟首次崩溃")
+            await self.stop_event.wait()
+
+        def request_stop(self) -> None:
+            self.stopped = True
+            self.stop_event.set()
+
+    import time
+
+    settings = Settings.model_validate(
+        {
+            "environment": "production",
+            "model_provider": "fake",
+        }
+    )
+    consumer = FlakyConsumer()
+    app = create_app(
+        testing=True,
+        settings=settings,
+        run_queue=object(),  # type: ignore[arg-type]
+        core_request_verifier=object(),  # type: ignore[arg-type]
+        queue_consumer=consumer,
+    )
+    app.state.core_client = object()
+
+    with TestClient(app) as client:
+        deadline = time.monotonic() + 2
+        while consumer.starts < 2 and time.monotonic() < deadline:
+            time.sleep(0.005)
+        response = client.get("/internal/v1/health/ready")
+
+    assert consumer.starts == 2
+    assert response.status_code == 200
+    assert response.json()["checks"]["queue_consumer"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_consumer_supervisor_restarts_without_parallel_instances() -> None:
+    starts = 0
+    active = 0
+    maximum_active = 0
+    restarted = asyncio.Event()
+    stopped = asyncio.Event()
+
+    async def run() -> None:
+        nonlocal starts, active, maximum_active
+        starts += 1
+        active += 1
+        maximum_active = max(maximum_active, active)
+        try:
+            if starts == 1:
+                raise RuntimeError("模拟首次崩溃")
+            restarted.set()
+            await stopped.wait()
+        finally:
+            active -= 1
+
+    supervisor = CoroutineSupervisor(
+        name="queue_consumer",
+        coroutine_factory=run,
+        request_stop=stopped.set,
+        backoff_base=0.001,
+        backoff_max=0.002,
+        stability_window=0.01,
+    )
+    supervisor.start()
+
+    await asyncio.wait_for(restarted.wait(), timeout=1)
+
+    assert starts == 2
+    assert maximum_active == 1
+    assert supervisor.is_ready() is True
+    await supervisor.stop()
+
+
+@pytest.mark.asyncio
+async def test_consumer_supervisor_shutdown_does_not_restart() -> None:
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+    starts = 0
+
+    async def run() -> None:
+        nonlocal starts
+        starts += 1
+        started.set()
+        await stopped.wait()
+
+    supervisor = CoroutineSupervisor(
+        name="queue_consumer",
+        coroutine_factory=run,
+        request_stop=stopped.set,
+        backoff_base=0.001,
+        backoff_max=0.002,
+        stability_window=0.01,
+    )
+    supervisor.start()
+    await started.wait()
+
+    await supervisor.stop()
+    await asyncio.sleep(0.01)
+
+    assert starts == 1
+    assert supervisor.is_ready() is False
+
+
+@pytest.mark.asyncio
+async def test_consumer_supervisor_recovers_after_stability_window() -> None:
+    starts = 0
+    restarted = asyncio.Event()
+    stopped = asyncio.Event()
+
+    async def run() -> None:
+        nonlocal starts
+        starts += 1
+        if starts == 1:
+            raise RuntimeError("模拟首次崩溃")
+        restarted.set()
+        await stopped.wait()
+
+    supervisor = CoroutineSupervisor(
+        name="queue_consumer",
+        coroutine_factory=run,
+        request_stop=stopped.set,
+        backoff_base=0.001,
+        backoff_max=0.002,
+        stability_window=0.02,
+        unhealthy_failure_threshold=1,
+    )
+    supervisor.start()
+    try:
+        await asyncio.wait_for(restarted.wait(), timeout=1)
+
+        assert supervisor.is_ready() is False
+        await asyncio.sleep(0.03)
+        assert supervisor.is_ready() is True
+    finally:
+        await supervisor.stop()
 
 
 def test_readiness_fails_when_rag_is_enabled_without_embedding_provider() -> None:

@@ -245,13 +245,6 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
     app.state.writing_task_repository = writing_task_repository
     app.state.writing_command_repository = writing_command_repository
     writing_submitter = WritingTaskAgentSubmitter(agent_client) if agent_client else None
-    if writing_submitter is not None and getattr(app.state, "writing_reconciler", None) is None:
-        app.state.writing_reconciler = WritingRunReconciler(
-            writing_task_repository,
-            writing_submitter,
-            batch_size=20,
-            interval_seconds=30,
-        )
     if (
         writing_submitter is not None
         and getattr(app.state, "writing_command_dispatcher", None) is None
@@ -266,6 +259,16 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
         WritingRunCommandDispatcher | None,
         getattr(app.state, "writing_command_dispatcher", None),
     )
+    if (
+        command_dispatcher is not None
+        and getattr(app.state, "writing_reconciler", None) is None
+    ):
+        app.state.writing_reconciler = WritingRunReconciler(
+            writing_task_repository,
+            command_dispatcher,
+            batch_size=20,
+            interval_seconds=30,
+        )
     app.state.writing_task_service = WritingTaskService(
         writing_command_repository,
         dispatcher=command_dispatcher,
@@ -329,9 +332,14 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     registry = BackgroundTaskRegistry()
     app.state.background_task_registry = registry
     for name, worker in workers:
-        registry.start(name, worker)
+        registry.start(name, worker.run, worker.request_stop)
     if workers:
-        register_readiness_check(app, "background_tasks", registry.is_ready)
+        register_readiness_check(
+            app,
+            "background_tasks",
+            registry.is_ready,
+            error_details=registry.error_codes,
+        )
     try:
         readiness = cast(
             DatabaseReadiness | None,
@@ -388,6 +396,7 @@ def create_app(
     app.state.writing_reconciler = writing_reconciler
     app.state.writing_command_dispatcher = writing_command_dispatcher
     app.state.readiness_checks = {}
+    app.state.readiness_error_details = {}
     register_readiness_check(app, "configuration", lambda: True)
     configure_database(app, loaded_settings)
     _configure_auth(app, loaded_settings)

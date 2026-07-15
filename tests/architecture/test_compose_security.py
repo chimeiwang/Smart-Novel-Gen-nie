@@ -74,6 +74,16 @@ def test_redis_is_bounded() -> None:
     assert "allkeys-lru" not in redis_config
 
 
+def test_agent_queue_terminal_retention_is_configurable() -> None:
+    source = COMPOSE.read_text(encoding="utf-8")
+    agent = _service_block(source, "agent-service")
+
+    assert (
+        "QUEUE_TERMINAL_RETENTION_DAYS: ${QUEUE_TERMINAL_RETENTION_DAYS:-7}"
+        in agent
+    )
+
+
 def test_web_and_core_require_the_same_production_jwt_secret() -> None:
     source = COMPOSE.read_text(encoding="utf-8")
     expected = "JWT_SECRET: ${JWT_SECRET:?必须配置会话签名密钥}"
