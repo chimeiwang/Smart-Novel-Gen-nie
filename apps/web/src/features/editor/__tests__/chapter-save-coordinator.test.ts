@@ -340,7 +340,7 @@ describe("ChapterSaveCoordinator", () => {
 
   it("浏览器拒绝访问 localStorage 属性时仍允许编辑器初始化", () => {
     const storage = createBestEffortChapterDraftStorage({
-      get localStorage() {
+      get localStorage(): never {
         throw new Error("浏览器禁止访问本地存储");
       },
     }, "draft:user:novel:chapter");

@@ -8,7 +8,7 @@
 
 **技术栈：** Python asyncio、Redis Lua、FastAPI lifespan、pytest。
 
-**状态：** 已完成实现、独立交叉审查和相关验证；全仓 TypeScript 类型检查受章节测试的已知类型标注问题影响。
+**状态：** 已完成实现、独立交叉审查和全量验证。
 
 ---
 

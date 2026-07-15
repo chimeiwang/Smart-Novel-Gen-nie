@@ -8,7 +8,7 @@
 
 **技术栈：** React/TypeScript、Next.js、FastAPI、SQLAlchemy async、OpenAPI、Vitest、pytest。
 
-**状态：** 已完成实现和独立交叉审查；提交前验证除测试 getter 返回类型标注导致的全仓 TypeScript 类型检查失败外均已完成。
+**状态：** 已完成实现、独立交叉审查和全量验证。
 
 ---
 
