@@ -113,12 +113,19 @@ async def test_background_registry_is_not_ready_during_restart_backoff() -> None
         stability_window=0.01,
     )
     registry.start("退避任务", crash, lambda: None)
-    await asyncio.wait_for(first_crash.wait(), timeout=1)
-    await asyncio.sleep(0)
+    try:
+        await asyncio.wait_for(first_crash.wait(), timeout=1)
+        async with asyncio.timeout(1):
+            # 被测监督器没有公开状态变更事件，这里必须有界轮询内部状态。
+            while (  # noqa: ASYNC110
+                registry.error_code("退避任务") != "BACKGROUND_TASK_BACKOFF"
+            ):
+                await asyncio.sleep(0)
 
-    assert registry.is_ready() is False
-    assert registry.error_code("退避任务") == "BACKGROUND_TASK_BACKOFF"
-    await registry.stop_all()
+        assert registry.is_ready() is False
+        assert registry.error_code("退避任务") == "BACKGROUND_TASK_BACKOFF"
+    finally:
+        await registry.stop_all()
 
 
 @pytest.mark.asyncio
