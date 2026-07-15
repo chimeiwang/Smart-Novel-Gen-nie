@@ -6,6 +6,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
+from ..definitions.capabilities import AGENT_CAPABILITIES
 from ..providers.base import ModelTool
 from .permissions import ToolPermission
 
@@ -106,9 +107,9 @@ class ToolRegistry:
         registered = self.require(tool.name)
         if registered is not tool:
             raise ValueError("工具定义与注册表不一致")
-        if not tool.permission.allows(
-            context.agentId,
-            {tool.permission.capability},
+        capabilities = AGENT_CAPABILITIES.get(context.agentId)
+        if capabilities is None or not tool.permission.allows(
+            context.agentId, capabilities
         ):
             raise PermissionError(f"当前智能体无权执行工具：{tool.name}")
         if tool.toolKind == "control":
