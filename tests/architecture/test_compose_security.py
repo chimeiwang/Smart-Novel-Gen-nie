@@ -128,14 +128,13 @@ def test_production_env_example_targets_host_gateway() -> None:
 def test_ip_http_auth_mode_is_explicit_and_disabled_by_default() -> None:
     compose = COMPOSE.read_text(encoding="utf-8")
     env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
+    compose_variable = "ALLOW_INSECURE_HTTP_AUTH: ${ALLOW_INSECURE_HTTP_AUTH:-false}"
 
-    assert (
-        "ALLOW_INSECURE_HTTP_AUTH: ${ALLOW_INSECURE_HTTP_AUTH:-false}"
-        in _service_block(compose, "core-api")
-    )
+    assert compose_variable in _service_block(compose, "core-api")
+    assert compose.count(compose_variable) == 1
     assert "ALLOW_INSECURE_HTTP_AUTH=false" in env_example
     assert "仅短期 IP/HTTP 使用" in env_example
-    assert "恢复 HTTPS 后改回 false" in env_example
+    assert "恢复 HTTPS 后删除 ALLOW_INSECURE_HTTP_AUTH 并重新部署" in env_example
 
 
 def test_production_deployment_forbids_dynamic_trust_and_destructive_commands() -> None:
