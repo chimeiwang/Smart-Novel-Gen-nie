@@ -417,10 +417,17 @@ async def test_cookie_security_attributes_follow_environment() -> None:
         insecure_production = await client.post(
             "/api/v1/auth/login", json={"username": "alice", "password": "123456"}
         )
+        insecure_production_registration = await client.post(
+            "/api/v1/auth/register",
+            json={"username": "bob", "password": "123456", "confirmPassword": "123456"},
+        )
 
     development_cookie = development.headers["set-cookie"]
     production_cookie = production.headers["set-cookie"]
     insecure_production_cookie = insecure_production.headers["set-cookie"]
+    insecure_production_registration_cookie = insecure_production_registration.headers[
+        "set-cookie"
+    ]
     for value in (development_cookie, production_cookie, insecure_production_cookie):
         assert "HttpOnly" in value
         assert "Path=/" in value
@@ -429,6 +436,10 @@ async def test_cookie_security_attributes_follow_environment() -> None:
     assert "Secure" not in development_cookie
     assert "Secure" in production_cookie
     assert "Secure" not in insecure_production_cookie
+    assert "Secure" not in insecure_production_registration_cookie
+    assert "HttpOnly" in insecure_production_registration_cookie
+    assert "SameSite=lax" in insecure_production_registration_cookie
+    assert "Path=/" in insecure_production_registration_cookie
 
 
 @pytest.mark.asyncio
@@ -477,6 +488,8 @@ async def test_logout_is_idempotent_and_clears_cookie_on_same_path() -> None:
     assert cookie.startswith("inkforge-token=")
     assert "Path=/" in cookie
     assert "Max-Age=0" in cookie
+    assert "HttpOnly" in cookie
+    assert "SameSite=lax" in cookie
     assert "Secure" not in cookie
 
 
