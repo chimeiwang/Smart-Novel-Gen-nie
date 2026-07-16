@@ -35,7 +35,7 @@ export function mergeActionableReviewArtifacts<T extends ReviewArtifactCandidate
   for (const collection of collections) {
     for (const artifact of collection) {
       if (artifact.status !== "awaiting_user") continue;
-      const key = artifact.artifactKey || artifact.id;
+      const key = artifact.id;
       if (!artifacts.has(key)) order.push(key);
       artifacts.set(key, artifact);
     }

@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import type { QualityCheckDto } from "../../../shared/contracts/quality-check";
 
 import {
+  countUnhandledQualityChecks,
   getQualityCheckPresentationState,
   isHandledQualityCheck,
   isValidCompletedQualityCheck,
@@ -61,5 +62,14 @@ describe("质量终检展示态", () => {
     assert.equal(isHandledQualityCheck(invalid), false);
     assert.equal(getQualityCheckPresentationState(invalid), "invalid");
     assert.equal(getQualityCheckPresentationState(validCheck()), "completed");
+  });
+
+  it("待处理计数包含无效 completed，不包含有效 completed 和 skipped", () => {
+    assert.equal(countUnhandledQualityChecks([
+      validCheck({ status: "pending", result: null, scoreOverall: null, qualityGate: null }),
+      validCheck({ result: null }),
+      validCheck(),
+      validCheck({ status: "skipped", result: null, scoreOverall: null, qualityGate: null }),
+    ]), 2);
   });
 });

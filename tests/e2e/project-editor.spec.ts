@@ -119,6 +119,7 @@ test("送审会先保存最新正文并回到阅读只读态", async ({ page }) 
 
   await expect(page.getByPlaceholder("章节标题")).toHaveCount(0);
   await expect(page.getByPlaceholder("正文内容")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "退出小修", exact: true })).toHaveCount(0);
   await expect(page.getByText("章节正在审核中，请先退回草稿后再编辑。")).toBeVisible();
   await expect(page.getByText("送审按钮点击前刚输入的正文", { exact: true })).toBeVisible();
   await expect.poll(async () => {

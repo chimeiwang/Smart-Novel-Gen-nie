@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useOptimistic, useReducer, useRef, useState, useTransition, useEffect } from "react";
+import { useCallback, useOptimistic, useReducer, useRef, useState, useSyncExternalStore, useTransition, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { parseSseFrame } from "@inkforge/api-client";
 
@@ -85,6 +85,18 @@ import {
   isVisibleToolActivity,
 } from "./tool-activity";
 import "./writing-conversation.css";
+
+function subscribeToReviewRail() {
+  return () => undefined;
+}
+
+function getReviewRailHostSnapshot() {
+  return document.getElementById("workspace-review-rail");
+}
+
+function getServerReviewRailHostSnapshot(): HTMLElement | null {
+  return null;
+}
 
 type WritingConversationProps = {
   novelId: string;
@@ -704,6 +716,12 @@ export function WritingConversation({
   const [flowLogs, setFlowLogs] = useState<FlowLogEntry[]>([]);
   const [activityState, setActivityState] = useState<AgentActivityState>(EMPTY_AGENT_ACTIVITY_STATE);
   const activityStateRef = useRef<AgentActivityState>(EMPTY_AGENT_ACTIVITY_STATE);
+
+  const reviewRailHost = useSyncExternalStore(
+    subscribeToReviewRail,
+    getReviewRailHostSnapshot,
+    getServerReviewRailHostSnapshot,
+  );
 
   const applyAgentActivityAction = useCallback((action: AgentActivityAction) => {
     const next = reduceAgentActivityState(activityStateRef.current, action);
@@ -2798,10 +2816,6 @@ export function WritingConversation({
     hasApprovedBeatPlan: Boolean(chapterContext?.approvedBeatPlan),
     hasOpenConsistencyCheck: Boolean(chapterContext?.openConsistencyCheckCount),
   });
-  const reviewRailHost = typeof document === "undefined"
-    ? null
-    : document.getElementById("workspace-review-rail");
-
   return (
     <div className="writing-chat">
       {/* 顶部栏 */}
@@ -2830,7 +2844,7 @@ export function WritingConversation({
           </span>
           <div className="more-menu">
             <button
-              className="tool-btn"
+              className="more-menu-button"
               onClick={() => setShowMoreMenu((visible) => !visible)}
               aria-expanded={showMoreMenu}
             >
@@ -3224,7 +3238,9 @@ export function WritingConversation({
         <div className="writing-chat workspace-review-content">
           <div className="workspace-review-heading">
             <span>审核与确认</span>
-            <small>本章待确认 {reviewRailArtifacts.length} 项</small>
+            {reviewRailArtifacts.length > 0 ? (
+              <small>本章待确认 {reviewRailArtifacts.length} 项</small>
+            ) : null}
           </div>
           {reviewRailArtifacts.length > 0 ? (
             <div className="workspace-review-artifacts">

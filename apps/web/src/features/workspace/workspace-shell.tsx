@@ -8,6 +8,7 @@ import { LogoutButton } from "@/features/auth/user-menu";
 import { ChapterList } from "@/features/chapters/chapter-list";
 import { ChapterEditor } from "@/features/editor/chapter-editor";
 import { flushActiveChapterSave } from "@/features/editor/chapter-save-navigation";
+import { countUnhandledQualityChecks } from "@/features/editor/quality-presentation";
 import { LibraryPane } from "./library-pane";
 import { SmartWritingPanel } from "./smart-writing-panel";
 import {
@@ -131,10 +132,11 @@ export function WorkspaceShell({
                 title: currentChapter.title,
                 status: currentChapter.status,
                 wordCount: currentChapter.wordCount,
-                openConsistencyCheckCount: currentChapter.qualityChecks.filter(
-                  (check) => check.type === "consistency"
-                    && (check.status === "pending" || check.status === "failed"),
-                ).length,
+                openConsistencyCheckCount: countUnhandledQualityChecks(
+                  currentChapter.qualityChecks.filter(
+                    (check) => check.type === "consistency",
+                  ),
+                ),
                 approvedBeatPlan: approvedBeatPlan ? {
                   id: approvedBeatPlan.id,
                   chapterGoal: approvedBeatPlan.chapterGoal,

@@ -31,6 +31,19 @@ test("资料详情使用主画布分区而不是完整表单弹窗", async () =>
   assert.doesNotMatch(source, /<Modal/);
 });
 
+test("三个规划长文本编辑器切换时使用独立实例", async () => {
+  const paneUrl = new URL("../library-pane.tsx", import.meta.url);
+  const source = await readFile(paneUrl, "utf8");
+
+  for (const item of ["storyProgress", "storyBackground", "worldSetting"]) {
+    assert.match(
+      source,
+      new RegExp(`<PlanningTextEditor key="${item}"`),
+      item,
+    );
+  }
+});
+
 test("旧检查器与临时侧栏已删除", async () => {
   await assert.rejects(access(new URL("../inspector-tabs.tsx", import.meta.url)));
   await assert.rejects(access(new URL("../sidebar-tabs.tsx", import.meta.url)));

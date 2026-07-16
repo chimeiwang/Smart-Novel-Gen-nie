@@ -117,10 +117,11 @@ def normalize_operation(
 
 def classify_by_explicit_keywords(message: str) -> CreativeOperation:
     rules = [
-        (r"章节计划|规划.{0,6}章节|Beat Plan", "plan_chapter"),
-        (r"伏笔", "manage_foreshadowing"),
         (r"改写|重写|润色", "rewrite_scene"),
         (r"续写|写正文|生成.{0,4}正文|写一章", "write_chapter"),
+        (r"章节计划|规划.{0,6}章节|Beat Plan", "plan_chapter"),
+        (r"伏笔", "manage_foreshadowing"),
+        (r"一致性|OOC|角色.{0,4}一致|逻辑断裂|检查.{0,12}冲突", "review_chapter"),
         (r"审核|评审|商业性|追读", "review_chapter"),
         (r"创建.{0,6}大纲|生成.{0,6}大纲", "create_outline"),
         (r"修改.{0,6}大纲|调整.{0,6}大纲", "revise_outline"),

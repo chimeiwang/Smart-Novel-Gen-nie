@@ -154,6 +154,34 @@ def test_chapter_mutations_require_expected_updated_at() -> None:
     assert status.expectedUpdatedAt == expected
 
 
+@pytest.mark.parametrize(
+    ("request_type", "body"),
+    [
+        (
+            UpdateChapterRequest,
+            {
+                "title": "标题",
+                "content": "正文",
+                "expectedUpdatedAt": "2026-07-16T12:58:53.791000Z",
+            },
+        ),
+        (
+            ChapterStatusRequest,
+            {
+                "status": "review",
+                "expectedUpdatedAt": "2026-07-16T12:58:53.791000Z",
+            },
+        ),
+    ],
+)
+def test_chapter_mutations_accept_json_datetime_strings(request_type, body) -> None:
+    request = request_type.model_validate(body)
+
+    assert request.expectedUpdatedAt == datetime(
+        2026, 7, 16, 12, 58, 53, 791000, tzinfo=UTC
+    )
+
+
 @pytest.mark.asyncio
 async def test_review_creates_default_consistency_check_and_is_idempotent() -> None:
     repository = RecordingChapterRepository()
@@ -385,6 +413,10 @@ def test_chapter_requests_reject_unknown_fields(request_type, body) -> None:
         (
             ChapterStatusRequest,
             {"status": 1, "expectedUpdatedAt": datetime(2026, 7, 11, tzinfo=UTC)},
+        ),
+        (
+            UpdateChapterRequest,
+            {"title": "标题", "content": "正文", "expectedUpdatedAt": 123},
         ),
     ],
 )

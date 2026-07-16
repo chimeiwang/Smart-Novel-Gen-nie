@@ -19,6 +19,8 @@ test("工作区外壳常驻挂载三类主要面板", async () => {
   assert.doesNotMatch(source, /key=\{activeView\}/);
   assert.match(source, /<aside[^>]+id="workspace-review-rail"/);
   assert.doesNotMatch(source, /workspace-review-rail[^>]+hidden=/);
+  assert.match(source, /countUnhandledQualityChecks\([\s\S]{0,100}currentChapter\.qualityChecks\.filter/);
+  assert.doesNotMatch(source, /check\.status === "pending" \|\| check\.status === "failed"/);
 });
 
 test("审核内容与审核弹窗使用独立 portal host", async () => {
@@ -29,6 +31,26 @@ test("审核内容与审核弹窗使用独立 portal host", async () => {
   assert.match(source, /getElementById\("workspace-review-rail"\)/);
   assert.match(source, /createPortal\([\s\S]*document\.body/);
   assert.match(source, /当前没有待确认变更/);
+  assert.match(source, /useSyncExternalStore/);
+  assert.match(source, /document\.getElementById\("workspace-review-rail"\)/);
+  assert.match(source, /function getServerReviewRailHostSnapshot[\s\S]{0,120}return null/);
+  assert.doesNotMatch(source, /setReviewRailHost/);
+  assert.doesNotMatch(source, /const reviewRailHost = typeof document/);
+});
+
+test("审核弹窗 portal 根节点命中全屏遮罩样式", async () => {
+  const conversationUrl = new URL("../../writing/writing-conversation.tsx", import.meta.url);
+  const cssUrl = new URL("../../writing/writing-conversation.css", import.meta.url);
+  const [conversationSource, cssSource] = await Promise.all([
+    readFile(conversationUrl, "utf8"),
+    readFile(cssUrl, "utf8"),
+  ]);
+
+  assert.match(conversationSource, /className="writing-chat modal-overlay"/);
+  assert.match(
+    cssSource,
+    /\.writing-chat\.modal-overlay,\s*\.writing-chat \.modal-overlay\s*\{[\s\S]{0,220}z-index:\s*1000/,
+  );
 });
 
 test("创作台使用单一任务入口并隐藏 Agent picker", async () => {
@@ -108,4 +130,28 @@ test("完整桌面在 1440 与 1920 宽度保留三栏并限制阅读宽度", as
   assert.match(source, /@media \(min-width: 1920px\)/);
   assert.match(source, /chapter-reading-content[\s\S]{0,140}max-width:/);
   assert.match(source, /@media \(max-width: 1439px\)/);
+});
+
+test("桌面工作区为右上角用户浮层预留空间", async () => {
+  const cssUrl = new URL("../../../app/globals.css", import.meta.url);
+  const source = await readFile(cssUrl, "utf8");
+
+  assert.match(source, /\.workspace-shell-header[\s\S]{0,220}padding-right:\s*240px/);
+  assert.match(source, /\.home-header[\s\S]{0,160}padding-right:\s*240px/);
+});
+
+test("创作台更多按钮不竖排且空审核栏不显示零计数", async () => {
+  const conversationUrl = new URL("../../writing/writing-conversation.tsx", import.meta.url);
+  const cssUrl = new URL("../../writing/writing-conversation.css", import.meta.url);
+  const [conversationSource, cssSource] = await Promise.all([
+    readFile(conversationUrl, "utf8"),
+    readFile(cssUrl, "utf8"),
+  ]);
+
+  assert.match(conversationSource, /className="more-menu-button"/);
+  assert.match(cssSource, /\.writing-chat \.more-menu-button[\s\S]{0,180}white-space:\s*nowrap/);
+  assert.match(
+    conversationSource,
+    /reviewRailArtifacts\.length > 0 \? \([\s\S]{0,140}<small>本章待确认/,
+  );
 });

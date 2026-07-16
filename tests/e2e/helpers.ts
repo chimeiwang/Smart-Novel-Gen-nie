@@ -1,4 +1,8 @@
 import { expect, type APIResponse, type Page } from "@playwright/test";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileAsync = promisify(execFile);
 
 export const E2E_PASSWORD = "e2e-pass-123";
 
@@ -103,6 +107,15 @@ export async function openWorkspace(page: Page, identity: NovelIdentity): Promis
   await expect(
     page.getByPlaceholder("描述要完成的创作任务，系统会自动分配合适的 Agent"),
   ).toBeVisible();
+}
+
+export async function seedInvalidQualityCheck(checkId: string): Promise<void> {
+  if (!process.env.DATABASE_URL) process.loadEnvFile(".env.local");
+  await execFileAsync(
+    "uv",
+    ["run", "python", "tests/e2e/seed_invalid_quality_check.py", checkId],
+    { cwd: process.cwd(), env: process.env },
+  );
 }
 
 export async function openReadingWorkspace(

@@ -363,13 +363,13 @@ export function LibraryPane({ novelId, appliedStyleId, active }: LibraryPaneProp
       return <ProgressPanel novelId={novelId} progress={planning.plotProgress} onChanged={() => refresh("planning")} />;
     }
     if (activeItem === "storyProgress") {
-      return <PlanningTextEditor title="故事进展" description="记录故事整体进展、关键转折和伏笔。" initialValue={planning.storyProgress ?? ""} placeholder="记录故事的整体进展..." onSave={(value) => savePlanningText("/api/v1/novels/{novel_id}/story-progress", value)} />;
+      return <PlanningTextEditor key="storyProgress" title="故事进展" description="记录故事整体进展、关键转折和伏笔。" initialValue={planning.storyProgress ?? ""} placeholder="记录故事的整体进展..." onSave={(value) => savePlanningText("/api/v1/novels/{novel_id}/story-progress", value)} />;
     }
     if (activeItem === "storyBackground") {
-      return <PlanningTextEditor title="故事背景" description="描述故事的基础背景和核心冲突。" initialValue={planning.storyBackground?.content ?? ""} placeholder="描述故事的时代背景、起始事件和核心冲突..." onSave={(value) => savePlanningText("/api/v1/novels/{novel_id}/story-background", value)} />;
+      return <PlanningTextEditor key="storyBackground" title="故事背景" description="描述故事的基础背景和核心冲突。" initialValue={planning.storyBackground?.content ?? ""} placeholder="描述故事的时代背景、起始事件和核心冲突..." onSave={(value) => savePlanningText("/api/v1/novels/{novel_id}/story-background", value)} />;
     }
     if (activeItem === "worldSetting") {
-      return <PlanningTextEditor title="世界设定" description="描述世界类型、力量体系、规则和历史。" initialValue={planning.worldSetting?.content ?? ""} placeholder="描述世界的设定..." onSave={(value) => savePlanningText("/api/v1/novels/{novel_id}/world-setting", value)} />;
+      return <PlanningTextEditor key="worldSetting" title="世界设定" description="描述世界类型、力量体系、规则和历史。" initialValue={planning.worldSetting?.content ?? ""} placeholder="描述世界的设定..." onSave={(value) => savePlanningText("/api/v1/novels/{novel_id}/world-setting", value)} />;
     }
     return <WritingBibleEditor novelId={novelId} writingBible={planning.writingBible} onChanged={() => refresh("planning")} />;
   };

@@ -160,7 +160,9 @@ export function ChapterEditor({
   const hasBlockingCheck = visibleChecks.some((check) => !isHandledQualityCheck(check));
   const flowSteps = getChapterFlowSteps(chapterStatus, visibleChecks.length, doneCheckCount);
   const chapterEditable = chapterStatus === "drafting";
-  const minorEditing = view === "reading" && minorEditingSession === readingSession;
+  const minorEditing = view === "reading"
+    && chapterEditable
+    && minorEditingSession === readingSession;
   const editorPresentation = getChapterEditorPresentation({
     view,
     chapterStatus,
@@ -207,6 +209,7 @@ export function ChapterEditor({
         }));
         coordinator?.advanceVersion(response.updatedAt);
         setChapterStatus(status);
+        if (status !== "drafting") setMinorEditingSession(null);
         router.refresh();
       } catch (error) {
         setQualityError(error instanceof Error ? error.message : "章节状态更新失败");

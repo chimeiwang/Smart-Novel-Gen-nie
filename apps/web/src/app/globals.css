@@ -421,6 +421,7 @@ button {
 .home-header {
   min-height: 44px;
   padding: 2px 2px 0;
+  padding-right: 240px;
 }
 
 .home-kicker {
@@ -918,16 +919,6 @@ body:has(.marketing-page) .user-info-bar {
   box-shadow: var(--shadow);
 }
 
-/* 工作区三栏布局 */
-.workspace {
-  display: grid;
-  grid-template-columns: minmax(280px, 300px) minmax(0, 1fr) minmax(480px, 560px);
-  gap: 12px;
-  flex: 1;
-  min-height: 0;
-  overflow: hidden;
-}
-
 /* Agent 优先工作区外壳 */
 .workspace-page {
   min-width: 1440px;
@@ -940,6 +931,7 @@ body:has(.marketing-page) .user-info-bar {
   gap: 16px;
   min-height: 58px;
   padding: 8px 12px;
+  padding-right: 240px;
   flex: 0 0 auto;
 }
 
@@ -1045,6 +1037,10 @@ body:has(.marketing-page) .user-info-bar {
   .workspace-page {
     min-width: 1180px;
     overflow: auto;
+  }
+
+  .workspace-shell-header {
+    padding-right: 12px;
   }
 
   .workspace-shell {
@@ -1214,11 +1210,6 @@ body:has(.marketing-page) .user-info-bar {
 .library-long-textarea {
   min-height: 520px;
   resize: vertical;
-}
-
-.workspace > * {
-  height: 100%;
-  overflow: hidden;
 }
 
 /* 章节链接 */

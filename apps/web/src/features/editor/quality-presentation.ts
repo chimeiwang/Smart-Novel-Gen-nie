@@ -26,6 +26,12 @@ export function isHandledQualityCheck(
   return check.status === "skipped" || isValidCompletedQualityCheck(check);
 }
 
+export function countUnhandledQualityChecks(
+  checks: readonly QualityCheckPresentationInput[],
+): number {
+  return checks.filter((check) => !isHandledQualityCheck(check)).length;
+}
+
 export function getQualityCheckPresentationState(
   check: QualityCheckPresentationInput,
 ): QualityCheckPresentationState {

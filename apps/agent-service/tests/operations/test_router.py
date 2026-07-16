@@ -66,6 +66,27 @@ async def test_agent_command_prefers_matching_explicit_operation(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("message", "kind"),
+    [
+        ("请为当前章节生成一份可应用的章节计划。", "plan_chapter"),
+        ("请根据当前章节、已确认章节计划和大纲生成当前章节正文草案。", "write_chapter"),
+        ("请找出当前章节最需要加强的一场戏并重写。", "rewrite_scene"),
+        ("请从网文追读角度审核当前章节。", "review_chapter"),
+        ("请检查当前章节正文与角色设定是否存在冲突和逻辑断裂。", "review_chapter"),
+        ("请重点检查当前章节是否存在角色 OOC。", "review_chapter"),
+    ],
+)
+async def test_product_tasks_use_automatic_operation_routing(
+    message: str, kind: str
+) -> None:
+    result = await route_creative_operation(message)
+
+    assert result.usedCommand is False
+    assert result.operation.kind == kind
+
+
+@pytest.mark.asyncio
 async def test_removed_sync_lore_request_falls_back_to_question() -> None:
     message = (
         "@设定 根据当前章节及最近几章正文，维护设定库。"

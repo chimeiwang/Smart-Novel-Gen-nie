@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   composeWritingTaskActions,
   getWritingNextActions,
+  WRITING_ACTION_PROMPTS,
   WRITING_SHORTCUT_ACTIONS,
 } from "../product-actions";
 
@@ -59,6 +60,18 @@ describe("writing product actions", () => {
     assert.equal(actions[0].kind, "write_draft");
   });
 
+  it("待处理终检在送审章节优先推荐一致性检查", () => {
+    const actions = getWritingNextActions({
+      chapterStatus: "review",
+      wordCount: 1200,
+      awaitingArtifactCount: 0,
+      hasApprovedBeatPlan: true,
+      hasOpenConsistencyCheck: true,
+    });
+
+    assert.equal(actions[0].kind, "consistency_check");
+  });
+
   it("does not expose removed lore synchronization actions", () => {
     const snapshots = [
       {
@@ -86,6 +99,12 @@ describe("writing product actions", () => {
         getWritingNextActions(snapshot).some((action) => String(action.kind) === "sync_lore"),
         false,
       );
+    }
+  });
+
+  it("普通任务入口使用自然语言，不通过 @Agent 强制路由", () => {
+    for (const prompt of Object.values(WRITING_ACTION_PROMPTS)) {
+      assert.doesNotMatch(prompt, /@[\u4e00-\u9fa5A-Za-z0-9_-]+/);
     }
   });
 });

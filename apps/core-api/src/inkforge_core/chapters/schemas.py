@@ -1,14 +1,24 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, BeforeValidator, ConfigDict
 
 from ..novels.schemas import ChapterStatus, WorkspaceChapter
 
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+
+
+def _parse_json_datetime(value: object) -> object:
+    if isinstance(value, str):
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return value
+
+
+JsonDatetime = Annotated[datetime, BeforeValidator(_parse_json_datetime)]
 
 
 class CreateChapterRequest(StrictModel):
@@ -18,12 +28,12 @@ class CreateChapterRequest(StrictModel):
 class UpdateChapterRequest(StrictModel):
     title: str
     content: str
-    expectedUpdatedAt: datetime
+    expectedUpdatedAt: JsonDatetime
 
 
 class ChapterStatusRequest(StrictModel):
     status: ChapterStatus
-    expectedUpdatedAt: datetime
+    expectedUpdatedAt: JsonDatetime
 
 
 class ChapterProgressRequest(StrictModel):

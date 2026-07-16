@@ -84,7 +84,7 @@ def test_e2e_uses_current_project_and_writing_entry_points() -> None:
     assert writing.count("prepareWritingOutlineWithApi(page, identity)") == 2
     assert "已应用" not in writing
     assert "已丢弃" not in writing
-    assert 'getByRole("button", { name: "待确认 0" })' in writing
+    assert 'getByText("本章待确认 0 项", { exact: true })).toHaveCount(0)' in writing
 
 
 def test_local_environment_example_contains_required_service_boundaries() -> None:
