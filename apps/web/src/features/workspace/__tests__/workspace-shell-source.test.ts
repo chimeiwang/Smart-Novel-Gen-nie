@@ -26,6 +26,10 @@ test("工作区外壳跟随服务端视图和浏览器历史", async () => {
   assert.match(source, /addEventListener\("popstate"/);
   assert.match(source, /removeEventListener\("popstate"/);
   assert.match(source, /parseWorkspaceViewFromSearch\(window\.location\.search\)/);
+  assert.match(source, /const handlePopState = async \(\) => \{[\s\S]*commitWorkspaceViewChange/);
+  assert.match(source, /activeViewRef/);
+  assert.match(source, /popstateTransitionRef/);
+  assert.match(source, /catch \(error\) \{[\s\S]*history\.replaceState/);
 });
 
 test("studio 使用单一宽主画布，窄桌面可滚动降级", async () => {

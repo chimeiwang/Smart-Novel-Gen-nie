@@ -21,3 +21,14 @@ export async function commitWorkspaceViewChange({
 export function parseWorkspaceViewFromSearch(search: string): WorkspaceView {
   return parseWorkspaceView(new URLSearchParams(search).get("view"));
 }
+
+export function buildWorkspaceViewHref(href: string, view: WorkspaceView): string {
+  const url = new URL(href);
+  url.searchParams.set("view", view);
+  return url.toString();
+}
+
+export function formatWorkspaceViewSaveError(error: unknown): string {
+  const detail = error instanceof Error ? error.message : "保存失败";
+  return `章节保存失败，无法切换视图：${detail}`;
+}
