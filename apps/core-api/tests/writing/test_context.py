@@ -2,7 +2,7 @@ import json
 from typing import Any, cast
 
 import pytest
-from inkforge_core.db.models import ReviewArtifact, WritingRunCommand, WritingTask
+from inkforge_core.db.models import Foreshadowing, ReviewArtifact, WritingRunCommand, WritingTask
 from inkforge_core.errors import ApiError
 from inkforge_core.writing.context import (
     ChapterGroupSnapshot,
@@ -65,6 +65,16 @@ class FakePlanningRepository:
             "approvedBeatPlan": {"chapterGoal": "按计划推进", "sceneBeats": []},
             "chapterGroup": {"id": "group-1", "content": "完整章节组内容"},
             "outlinePath": [{"kind": "stage", "title": "第一卷"}],
+            "foreshadowingSummaries": [
+                {
+                    "id": "foreshadowing-1",
+                    "name": "断裂墨印",
+                    "status": "active",
+                    "plantedAt": "第一章",
+                    "expectedPayoff": "第五章",
+                    "payoffAt": None,
+                }
+            ],
             "activeArtifact": None,
         }
 
@@ -85,6 +95,7 @@ async def test_context_combines_complete_workspace_and_current_planning_scope() 
     assert context["workspace"]["novel"]["name"] == "作品"
     assert context["planning"]["approvedBeatPlan"]["chapterGoal"] == "按计划推进"
     assert context["planning"]["chapterGroup"]["content"] == "完整章节组内容"
+    assert context["planning"]["foreshadowingSummaries"][0]["name"] == "断裂墨印"
 
 
 class FakeScalarSession:
@@ -94,6 +105,61 @@ class FakeScalarSession:
     async def scalar(self, statement: object) -> object | None:
         del statement
         return next(self._responses)
+
+
+class FakeScalarsResult:
+    def __init__(self, values: list[object]) -> None:
+        self._values = values
+
+    def all(self) -> list[object]:
+        return self._values
+
+
+class FakeScalarsSession:
+    def __init__(self, values: list[object]) -> None:
+        self.values = values
+        self.statement: object | None = None
+
+    async def scalars(self, statement: object) -> FakeScalarsResult:
+        self.statement = statement
+        return FakeScalarsResult(self.values)
+
+
+@pytest.mark.asyncio
+async def test_foreshadowing_summaries_use_stable_order_and_exclude_detail() -> None:
+    repository = WritingContextRepository(cast(Any, None))
+    session = FakeScalarsSession(
+        [
+            Foreshadowing(
+                id="foreshadowing-1",
+                novelId="novel-1",
+                name="断裂墨印",
+                status="active",
+                plantedAt="第一章",
+                expectedPayoff="第五章",
+                payoffAt=None,
+                plantedContent="种下伏笔的完整正文",
+            )
+        ]
+    )
+
+    result = await repository._foreshadowing_summaries(
+        cast(AsyncSession, session), "novel-1"
+    )
+
+    assert result == [
+        {
+            "id": "foreshadowing-1",
+            "name": "断裂墨印",
+            "status": "active",
+            "plantedAt": "第一章",
+            "expectedPayoff": "第五章",
+            "payoffAt": None,
+        }
+    ]
+    statement = str(session.statement)
+    assert 'ORDER BY public."Foreshadowing"."createdAt" ASC' in statement
+    assert 'public."Foreshadowing".id ASC' in statement
 
 
 def _task_with_active_artifact(artifact_id: str = "artifact-1") -> WritingTask:

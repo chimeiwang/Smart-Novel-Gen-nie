@@ -12,6 +12,7 @@ from ..db.models import (
     Chapter,
     ChapterBeatPlan,
     ChapterWritingGoal,
+    Foreshadowing,
     Novel,
     OutlineNode,
     ReviewArtifact,
@@ -147,6 +148,9 @@ class WritingContextRepository:
                     ).scalars()
                 )
             outline_path = await self._outline_path(session, group) if group is not None else []
+            foreshadowing_summaries = await self._foreshadowing_summaries(
+                session, task.novelId
+            )
             active_artifact = await self._active_artifact(session, task)
             conversation_history = _conversation_history(task.conversationHistory)
             prior_conversation_history, latest_user_message = (
@@ -171,6 +175,7 @@ class WritingContextRepository:
                     else None
                 ),
                 "outlinePath": outline_path,
+                "foreshadowingSummaries": foreshadowing_summaries,
                 "activeArtifact": active_artifact,
                 "phase": task.phase,
                 "targetWordCount": task.targetWordCount,
@@ -203,6 +208,32 @@ class WritingContextRepository:
                 parent_id=node.parentId,
             )
             for node in nodes
+        ]
+
+    async def _foreshadowing_summaries(
+        self,
+        session: AsyncSession,
+        novel_id: str,
+    ) -> list[dict[str, Any]]:
+        values = list(
+            (
+                await session.scalars(
+                    select(Foreshadowing)
+                    .where(Foreshadowing.novelId == novel_id)
+                    .order_by(Foreshadowing.createdAt.asc(), Foreshadowing.id.asc())
+                )
+            ).all()
+        )
+        return [
+            {
+                "id": value.id,
+                "name": value.name,
+                "status": value.status,
+                "plantedAt": value.plantedAt,
+                "expectedPayoff": value.expectedPayoff,
+                "payoffAt": value.payoffAt,
+            }
+            for value in values
         ]
 
     async def _outline_path(

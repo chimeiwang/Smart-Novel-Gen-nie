@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Iterable, Mapping
 from typing import Any, Literal
@@ -8,14 +9,18 @@ from ..operations.definitions import OperationDefinition
 
 _NOVEL_FIELDS = ("id", "name", "summary", "storyProgress")
 _CHAPTER_SUMMARY_FIELDS = ("id", "title", "order", "status", "wordCount", "updatedAt")
-_LORE_INDEX_FIELDS = (
+_CHARACTER_FIELDS = ("id", "name", "identity", "currentStatus", "statusNote")
+_ITEM_FIELDS = ("id", "name", "type", "rarity")
+_LOCATION_FIELDS = ("id", "name", "type", "parentId")
+_FACTION_FIELDS = ("id", "name", "type", "baseId")
+_GLOSSARY_FIELDS = ("id", "term", "category")
+_FORESHADOWING_FIELDS = (
     "id",
     "name",
-    "term",
-    "type",
-    "category",
-    "summary",
-    "currentStatus",
+    "status",
+    "plantedAt",
+    "expectedPayoff",
+    "payoffAt",
 )
 _OUTLINE_NODE_FIELDS = (
     "id",
@@ -64,8 +69,8 @@ def build_operation_context(
         ]
         projection["chapterGoal"] = planning.get("chapterGoal")
         projection["beatPlan"] = planning.get("approvedBeatPlan")
-        projection["outline"] = _outline_index(workspace, planning)
-        projection["loreIndex"] = _lore_index(workspace)
+        projection["outlinePath"] = planning.get("outlinePath", [])
+        projection["relatedCharacters"] = _related_characters(workspace, planning)
         return projection
     if definition.contextStrategy == "review":
         projection["currentChapter"] = dict(current)
@@ -117,14 +122,77 @@ def _chapter_scope(
 
 
 def _lore_index(workspace: Mapping[str, Any]) -> dict[str, list[dict[str, Any]]]:
-    result: dict[str, list[dict[str, Any]]] = {}
-    for key in ("characters", "items", "locations", "factions", "glossaries"):
-        result[key] = [
-            _select(item, _LORE_INDEX_FIELDS)
-            for item in workspace.get(key, [])
-            if isinstance(item, Mapping)
-        ]
+    return {
+        "characters": [_character_summary(item) for item in _items(workspace, "characters")],
+        "items": [_item_summary(item) for item in _items(workspace, "items")],
+        "locations": [
+            _select(item, _LOCATION_FIELDS) for item in _items(workspace, "locations")
+        ],
+        "factions": [
+            _select(item, _FACTION_FIELDS) for item in _items(workspace, "factions")
+        ],
+        "glossaries": [
+            _select(item, _GLOSSARY_FIELDS) for item in _items(workspace, "glossaries")
+        ],
+    }
+
+
+def _items(workspace: Mapping[str, Any], key: str) -> list[Mapping[str, Any]]:
+    value = workspace.get(key)
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, Mapping)]
+
+
+def _character_summary(item: Mapping[str, Any]) -> dict[str, Any]:
+    result = _select(item, _CHARACTER_FIELDS)
+    faction = item.get("faction")
+    if isinstance(faction, Mapping):
+        result["faction"] = _select(faction, ("id", "name"))
     return result
+
+
+def _item_summary(item: Mapping[str, Any]) -> dict[str, Any]:
+    result = _select(item, _ITEM_FIELDS)
+    owner = item.get("owner")
+    if isinstance(owner, Mapping):
+        result["owner"] = _select(owner, ("id", "name"))
+    return result
+
+
+def _related_characters(
+    workspace: Mapping[str, Any],
+    planning: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    names = _beat_plan_character_names(planning.get("approvedBeatPlan"))
+    if not names:
+        return []
+    return [
+        _character_summary(item)
+        for item in _items(workspace, "characters")
+        if item.get("name") in names
+    ]
+
+
+def _beat_plan_character_names(value: object) -> set[str]:
+    plan = _mapping(value)
+    scenes = plan.get("sceneBeats")
+    if not isinstance(scenes, list):
+        return set()
+    names: set[str] = set()
+    for scene in scenes:
+        if not isinstance(scene, Mapping):
+            continue
+        serialized = scene.get("characters")
+        if not isinstance(serialized, str):
+            continue
+        try:
+            parsed = json.loads(serialized)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(parsed, list):
+            names.update(item for item in parsed if isinstance(item, str) and item)
+    return names
 
 
 def _setting_index(workspace: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
@@ -140,7 +208,9 @@ def _outline_index(
     planning: Mapping[str, Any],
 ) -> dict[str, Any]:
     return {
-        "outline": _select(_mapping(workspace.get("outline")), ("id", "updatedAt")),
+        "outline": _select(
+            _mapping(workspace.get("outline")), ("id", "content", "updatedAt")
+        ),
         "nodes": [
             _select(item, _OUTLINE_NODE_FIELDS)
             for item in workspace.get("outlineNodes", [])
@@ -149,7 +219,12 @@ def _outline_index(
         "plotProgress": workspace.get("plotProgress"),
         "chapterGroup": _select(
             _mapping(planning.get("chapterGroup")),
-            ("id", "title", "chapterStartOrder", "chapterEndOrder"),
+            ("id", "title", "chapterStartOrder", "chapterEndOrder", "content"),
         ),
         "outlinePath": planning.get("outlinePath", []),
+        "foreshadowingSummaries": [
+            _select(item, _FORESHADOWING_FIELDS)
+            for item in planning.get("foreshadowingSummaries", [])
+            if isinstance(item, Mapping)
+        ],
     }
