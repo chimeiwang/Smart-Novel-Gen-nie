@@ -1025,10 +1025,6 @@ body:has(.marketing-page) .user-info-bar {
   overflow: hidden;
 }
 
-.workspace-shell-main[data-view="studio"] {
-  grid-template-columns: minmax(380px, 1.05fr) minmax(360px, 0.95fr);
-}
-
 .workspace-pane {
   display: flex;
   min-width: 0;
@@ -1081,6 +1077,22 @@ body:has(.marketing-page) .user-info-bar {
 .chapter-reading-content p {
   margin: 0 0 1em;
   white-space: pre-wrap;
+}
+
+@media (max-width: 999px) {
+  .workspace-page {
+    overflow: auto;
+  }
+
+  .workspace-shell-header,
+  .workspace-shell {
+    min-width: 760px;
+  }
+
+  .workspace-shell {
+    min-height: 640px;
+    overflow: visible;
+  }
 }
 
 .workspace > * {

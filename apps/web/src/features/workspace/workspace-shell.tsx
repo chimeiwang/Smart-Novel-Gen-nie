@@ -2,7 +2,7 @@
 
 import type { components } from "@inkforge/api-client";
 import Link from "next/link";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { LogoutButton } from "@/features/auth/user-menu";
 import { ChapterList } from "@/features/chapters/chapter-list";
@@ -10,7 +10,10 @@ import { ChapterEditor } from "@/features/editor/chapter-editor";
 import { flushActiveChapterSave } from "@/features/editor/chapter-save-navigation";
 import { SidebarTabs } from "./sidebar-tabs";
 import { SmartWritingPanel } from "./smart-writing-panel";
-import { commitWorkspaceViewChange } from "./workspace-shell-state";
+import {
+  commitWorkspaceViewChange,
+  parseWorkspaceViewFromSearch,
+} from "./workspace-shell-state";
 import type { WorkspaceView } from "./workspace-view";
 
 type WorkspaceShellProps = {
@@ -35,8 +38,30 @@ export function WorkspaceShell({
   const [readingSession, setReadingSession] = useState(0);
   const [switchingView, setSwitchingView] = useState<WorkspaceView | null>(null);
   const [viewError, setViewError] = useState<string | null>(null);
+  const previousInitialViewRef = useRef(initialView);
   const totalCount = chapters.reduce((sum, item) => sum + item.wordCount, 0);
   const approvedBeatPlan = currentChapter?.approvedBeatPlan ?? null;
+
+  const applyActiveView = useCallback((view: WorkspaceView) => {
+    if (view === "reading") setReadingSession((current) => current + 1);
+    setActiveView(view);
+  }, []);
+
+  useEffect(() => {
+    if (previousInitialViewRef.current === initialView) return;
+    previousInitialViewRef.current = initialView;
+    const syncTimer = window.setTimeout(() => applyActiveView(initialView), 0);
+    return () => window.clearTimeout(syncTimer);
+  }, [applyActiveView, initialView]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setViewError(null);
+      applyActiveView(parseWorkspaceViewFromSearch(window.location.search));
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [applyActiveView]);
 
   const selectView = async (nextView: WorkspaceView) => {
     if (switchingView) return;
@@ -51,8 +76,7 @@ export function WorkspaceShell({
           const url = new URL(window.location.href);
           url.searchParams.set("view", view);
           window.history.replaceState(window.history.state, "", url);
-          if (view === "reading") setReadingSession((current) => current + 1);
-          setActiveView(view);
+          applyActiveView(view);
         },
       });
     } catch (error) {
@@ -131,7 +155,7 @@ export function WorkspaceShell({
             />
           </section>
 
-          <section className="workspace-pane workspace-editor-pane" hidden={activeView === "library"}>
+          <section className="workspace-pane workspace-editor-pane" hidden={activeView !== "reading"}>
             {currentChapter ? (
               <ChapterEditor
                 key={`${currentChapter.id}:${currentChapter.updatedAt}`}

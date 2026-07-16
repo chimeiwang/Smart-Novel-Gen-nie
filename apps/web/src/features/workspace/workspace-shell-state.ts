@@ -1,4 +1,4 @@
-import type { WorkspaceView } from "./workspace-view";
+import { parseWorkspaceView, type WorkspaceView } from "./workspace-view";
 
 type WorkspaceViewChangeOptions = {
   currentView: WorkspaceView;
@@ -14,6 +14,10 @@ export async function commitWorkspaceViewChange({
   commit,
 }: WorkspaceViewChangeOptions): Promise<void> {
   if (currentView === nextView) return;
-  if (currentView === "reading") await flush();
+  await flush();
   commit(nextView);
+}
+
+export function parseWorkspaceViewFromSearch(search: string): WorkspaceView {
+  return parseWorkspaceView(new URLSearchParams(search).get("view"));
 }

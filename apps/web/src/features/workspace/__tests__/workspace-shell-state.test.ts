@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { commitWorkspaceViewChange } from "../workspace-shell-state";
+import {
+  commitWorkspaceViewChange,
+  parseWorkspaceViewFromSearch,
+} from "../workspace-shell-state";
 
 describe("工作区视图切换", () => {
   it("离开阅读视图前先 flush，成功后才提交视图", async () => {
@@ -26,7 +29,7 @@ describe("工作区视图切换", () => {
 
     await assert.rejects(
       commitWorkspaceViewChange({
-        currentView: "reading",
+        currentView: "studio",
         nextView: "library",
         flush: async () => {
           throw new Error("保存失败");
@@ -41,22 +44,27 @@ describe("工作区视图切换", () => {
     assert.equal(committed, false);
   });
 
-  it("其他视图之间切换不 flush", async () => {
-    let flushCount = 0;
-    let committedView = "";
+  it("其他视图之间切换也先 flush", async () => {
+    const events: string[] = [];
 
     await commitWorkspaceViewChange({
       currentView: "studio",
       nextView: "library",
       flush: async () => {
-        flushCount += 1;
+        events.push("flush");
       },
       commit: (view) => {
-        committedView = view;
+        events.push(`commit:${view}`);
       },
     });
 
-    assert.equal(flushCount, 0);
-    assert.equal(committedView, "library");
+    assert.deepEqual(events, ["flush", "commit:library"]);
+  });
+
+  it("从浏览器查询参数恢复合法视图", () => {
+    assert.equal(parseWorkspaceViewFromSearch("?chapterId=c1&view=reading"), "reading");
+    assert.equal(parseWorkspaceViewFromSearch("?view=library"), "library");
+    assert.equal(parseWorkspaceViewFromSearch("?view=unknown"), "studio");
+    assert.equal(parseWorkspaceViewFromSearch("?chapterId=c1"), "studio");
   });
 });
