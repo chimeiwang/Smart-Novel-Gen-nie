@@ -28,6 +28,10 @@ import {
   findQualityCheckToResume,
   pollQualityCheck,
 } from "./quality-check-poller";
+import {
+  getQualityCheckPresentationState,
+  isHandledQualityCheck,
+} from "./quality-presentation";
 
 type ChapterEditorProps = {
   view: WorkspaceView;
@@ -151,11 +155,9 @@ export function ChapterEditor({
   const visibleChecks = chapterStatus === "review" || chapterStatus === "completed"
     ? checks.filter((check) => check.type === "consistency")
     : [];
-  const openCheckCount = visibleChecks.filter((check) => check.status === "pending" || check.status === "failed").length;
-  const doneCheckCount = visibleChecks.filter((check) => check.status === "completed" || check.status === "skipped").length;
-  const hasBlockingCheck = visibleChecks.some(
-    (check) => check.status !== "completed" && check.status !== "skipped",
-  );
+  const openCheckCount = visibleChecks.filter((check) => !isHandledQualityCheck(check)).length;
+  const doneCheckCount = visibleChecks.filter(isHandledQualityCheck).length;
+  const hasBlockingCheck = visibleChecks.some((check) => !isHandledQualityCheck(check));
   const flowSteps = getChapterFlowSteps(chapterStatus, visibleChecks.length, doneCheckCount);
   const chapterEditable = chapterStatus === "drafting";
   const minorEditing = view === "reading" && minorEditingSession === readingSession;
@@ -552,20 +554,22 @@ export function ChapterEditor({
                 </div>
               ) : null}
               {visibleChecks.map((check) => {
-                const finished = check.status === "completed" || check.status === "skipped";
+                const presentationState = getQualityCheckPresentationState(check);
+                const finished = isHandledQualityCheck(check);
+                const showCompletedResult = presentationState === "completed";
                 const busy = runningCheckId === check.id || check.status === "running";
                 const actionDisabled = Boolean(runningCheckId) || check.status === "running";
                 return (
                   <div className="chapter-check-row" key={check.id}>
                     <div className="chapter-check-row-main">
                       <div className="row">
-                        <span className={`chapter-check-status ${check.status}`}>{getQualityStatusLabel(check.status)}</span>
+                        <span className={`chapter-check-status ${presentationState}`}>{getQualityStatusLabel(presentationState)}</span>
                         <strong>{check.title}</strong>
-                        {check.qualityGate ? <span className={`quality-gate ${check.qualityGate}`}>{getQualityGateLabel(check.qualityGate)}</span> : null}
+                        {showCompletedResult && check.qualityGate ? <span className={`quality-gate ${check.qualityGate}`}>{getQualityGateLabel(check.qualityGate)}</span> : null}
                       </div>
                       {check.summary ? <p>{check.summary}</p> : null}
-                      <QualityScoreStrip check={check} />
-                      {check.result ? (
+                      {showCompletedResult ? <QualityScoreStrip check={check} /> : null}
+                      {showCompletedResult && check.result ? (
                         <details className="chapter-check-result">
                           <summary>查看报告</summary>
                           <div>{check.result}</div>
@@ -649,6 +653,7 @@ function getChapterFlowSteps(status: string, checkCount: number, doneCheckCount:
 }
 
 function getQualityStatusLabel(status: string) {
+  if (status === "invalid") return "结果无效";
   if (status === "running") return "执行中";
   if (status === "completed") return "完成";
   if (status === "skipped") return "跳过";

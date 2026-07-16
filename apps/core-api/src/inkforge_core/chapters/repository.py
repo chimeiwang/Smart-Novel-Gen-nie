@@ -22,6 +22,7 @@ from ..novels.repository import chapter_dict, utc_datetime
 from ..novels.schemas import ChapterStatus, WorkspaceChapter
 from .content_state import (
     invalidate_quality_state,
+    is_handled_quality_check,
     next_chapter_updated_at,
     replace_chapter_content,
 )
@@ -191,7 +192,7 @@ class ChapterRepository:
                 check = await self._lock_consistency_check(session, chapter_id)
                 source_status = chapter.status
                 if status == "completed" and (
-                    check is None or check.status not in {"completed", "skipped"}
+                    check is None or not is_handled_quality_check(check)
                 ):
                     raise ApiError(
                         status_code=409,

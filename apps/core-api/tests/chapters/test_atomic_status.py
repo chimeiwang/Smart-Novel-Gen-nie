@@ -216,6 +216,81 @@ async def test_status_transition_rejects_stale_version() -> None:
     assert current.status == "drafting"
 
 
+def completed_quality_check(
+    *,
+    result: object = "终检报告完整",
+    score_overall: object = 8,
+    quality_gate: object = "pass",
+) -> ChapterQualityCheck:
+    check = quality_check("completed")
+    check.result = result  # type: ignore[assignment]
+    check.scoreOverall = score_overall  # type: ignore[assignment]
+    check.qualityGate = quality_gate  # type: ignore[assignment]
+    return check
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("result", "score_overall", "quality_gate"),
+    [
+        (None, 8, "pass"),
+        ("", 8, "pass"),
+        ("  \n ", 8, "pass"),
+        ("终检报告完整", None, "pass"),
+        ("终检报告完整", float("nan"), "pass"),
+        ("终检报告完整", float("inf"), "pass"),
+        ("终检报告完整", float("-inf"), "pass"),
+        ("终检报告完整", True, "pass"),
+        ("终检报告完整", 8, None),
+        ("终检报告完整", 8, ""),
+        ("终检报告完整", 8, "rewrite"),
+    ],
+)
+async def test_completion_rejects_incomplete_completed_quality_check(
+    result: object,
+    score_overall: object,
+    quality_gate: object,
+) -> None:
+    current = chapter("review")
+    check = completed_quality_check(
+        result=result,
+        score_overall=score_overall,
+        quality_gate=quality_gate,
+    )
+    repository = DraftMutationRepository(DraftMutationSession(current, check))
+
+    with pytest.raises(ApiError) as caught:
+        await repository.transition_status(
+            "chapter-1",
+            "user-1",
+            "completed",
+            current.updatedAt.replace(tzinfo=UTC),
+        )
+
+    assert caught.value.code == "QUALITY_CHECK_REQUIRED"
+    assert current.status == "review"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("quality_gate", ["pass", "revise"])
+async def test_completion_accepts_complete_completed_quality_check(
+    quality_gate: str,
+) -> None:
+    current = chapter("review")
+    check = completed_quality_check(quality_gate=quality_gate)
+    repository = DraftMutationRepository(DraftMutationSession(current, check))
+
+    result = await repository.transition_status(
+        "chapter-1",
+        "user-1",
+        "completed",
+        current.updatedAt.replace(tzinfo=UTC),
+    )
+
+    assert result.status == "completed"
+    assert current.status == "completed"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", ["completed", "skipped", "failed", "running"])
 async def test_content_change_invalidates_previous_quality_state(status: str) -> None:

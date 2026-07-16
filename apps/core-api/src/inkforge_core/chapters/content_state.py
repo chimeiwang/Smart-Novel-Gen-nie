@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from datetime import UTC, datetime, timedelta
 from typing import cast
 
@@ -12,6 +13,23 @@ from ..db.models import Chapter, ChapterQualityCheck, WorkflowRun
 
 CONSISTENCY_CHECK_TYPE = "consistency"
 QUALITY_SOURCE_CHANGED = "QUALITY_SOURCE_CHANGED"
+
+
+def is_valid_completed_quality_check(check: ChapterQualityCheck) -> bool:
+    score_overall = check.scoreOverall
+    return (
+        check.status == "completed"
+        and isinstance(check.result, str)
+        and bool(check.result.strip())
+        and isinstance(score_overall, (int, float))
+        and not isinstance(score_overall, bool)
+        and math.isfinite(score_overall)
+        and check.qualityGate in {"pass", "revise"}
+    )
+
+
+def is_handled_quality_check(check: ChapterQualityCheck) -> bool:
+    return check.status == "skipped" or is_valid_completed_quality_check(check)
 
 
 def content_sha256(content: str) -> str:

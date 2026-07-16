@@ -34,6 +34,7 @@ describe("有效质量终检", () => {
     assert.equal(isValidCompletedQualityCheck(validCheck({ scoreOverall: Number.NaN })), false);
     assert.equal(isValidCompletedQualityCheck(validCheck({ scoreOverall: Number.POSITIVE_INFINITY })), false);
     assert.equal(isValidCompletedQualityCheck(validCheck({ scoreOverall: Number.NEGATIVE_INFINITY })), false);
+    assert.equal(isValidCompletedQualityCheck(validCheck({ scoreOverall: true as unknown as number })), false);
     assert.equal(isValidCompletedQualityCheck(validCheck({ qualityGate: "rewrite" })), false);
     assert.equal(isValidCompletedQualityCheck(validCheck({ qualityGate: null })), false);
     assert.equal(isValidCompletedQualityCheck(validCheck({ status: "running" })), false);
