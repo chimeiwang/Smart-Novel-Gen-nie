@@ -54,14 +54,13 @@ flowchart TD
     A["Agent 生成产物"] --> B["提交 ReviewArtifact"]
     B --> C{"是否需要复审"}
     C -->|"否"| D["状态 awaiting_user"]
-    C -->|"是"| E["Reviewer Agent 复审"]
-    E --> F{"submit_evaluation"}
-    F -->|"pass"| G{"是否还有 reviewer"}
-    G -->|"有"| E
-    G -->|"无"| D
-    F -->|"revise"| I["主责 Agent 完整返工生成新 revision"]
+    C -->|"是"| E["向全部 Reviewer 并行扇出复审"]
+    E --> F["合并全部 submit_evaluation 结论"]
+    F --> G{"合并结果"}
+    G -->|"pass"| D
+    G -->|"revise"| I["主责 Agent 完整返工生成新 revision"]
     I --> E
-    F -->|"block"| D
+    G -->|"block"| D
     D --> J{"用户提交单一决定请求"}
     J -->|"approve"| K["事务内正式落库、标记 applied、创建命令"]
     J -->|"revise"| L["事务内退回 draft、创建命令"]

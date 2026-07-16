@@ -54,14 +54,13 @@ flowchart TD
     F -->|"否"| G["直接回复聊天流"]
     F -->|"是"| H["submitArtifactOrRespond 提交 ReviewArtifact"]
     H --> I{"是否有复审 Agent"}
-    I -->|"有"| J["reviewArtifact 复审"]
-    J --> K{"复审结果"}
-    K -->|"pass"| L{"是否还有下个 reviewer"}
-    L -->|"有"| J
-    L -->|"无"| M["awaitUserDecision"]
-    K -->|"revise"| O["reviseArtifact 完整返工"]
+    I -->|"有"| J["reviewArtifact 向全部 Reviewer 并行扇出"]
+    J --> K["mergeArtifactReviews 合并全部复审结论"]
+    K --> L{"合并结果"}
+    L -->|"pass"| M["awaitUserDecision"]
+    L -->|"revise"| O["reviseArtifact 完整返工"]
     O --> H
-    K -->|"block"| M
+    L -->|"block"| M
     I -->|"无"| M
     M --> P["用户批准/修改/丢弃"]
     P --> Q["suggestNextAction"]
