@@ -6,6 +6,7 @@ from typing import Any, Protocol, cast
 from ..clients.core import RunResource
 from ..queue.repository import QueueJob
 from ..runtime.agent_runner import AgentRunner, AgentRunRequest
+from ..runtime.execution import QUALITY_AGENT_ID
 from ..tools.registry import ToolContext
 from .workflow_log import WorkflowLogPort
 
@@ -85,7 +86,7 @@ class QualityJobHandler:
                 raise ValueError("质量检查请求无效")
             result = await self._runner.run(
                 AgentRunRequest(
-                    agentId="编辑",
+                    agentId=QUALITY_AGENT_ID,
                     executionMode="quality",
                     operationKind=None,
                     userMessage=message,
@@ -99,7 +100,7 @@ class QualityJobHandler:
                         novelId=job.novelId,
                         taskId=job.taskId,
                         runId=job.runId,
-                        agentId="编辑",
+                        agentId=QUALITY_AGENT_ID,
                     ),
                 )
             )
@@ -109,7 +110,7 @@ class QualityJobHandler:
                 None,
             )
             if report is None:
-                raise RuntimeError("编辑智能体未提交结构化质量报告")
+                raise RuntimeError(f"{QUALITY_AGENT_ID}智能体未提交结构化质量报告")
             await self._core.complete_quality(
                 resource,
                 check_id,

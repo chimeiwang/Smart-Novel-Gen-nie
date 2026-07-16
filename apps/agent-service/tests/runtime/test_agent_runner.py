@@ -15,7 +15,11 @@ from inkforge_agents.providers.base import (
 )
 from inkforge_agents.runtime.agent_runner import AgentRunner, AgentRunRequest
 from inkforge_agents.runtime.agent_runtime import AgentRuntime
-from inkforge_agents.runtime.execution import resolve_execution_contract
+from inkforge_agents.runtime.execution import (
+    QUALITY_AGENT_ID,
+    resolve_execution_contract,
+    validate_execution_agent,
+)
 from inkforge_agents.runtime.model_runtime import ModelRuntime
 from inkforge_agents.tools.registry import ToolContext, build_default_registry
 from pydantic import ValidationError
@@ -112,7 +116,7 @@ def request(
             "write_chapter",
             OPERATION_DEFINITIONS["write_chapter"].allowedToolNames,
         ),
-        ("编辑", "quality", None, frozenset({"submit_quality_report"})),
+        (QUALITY_AGENT_ID, "quality", None, frozenset({"submit_quality_report"})),
     ],
 )
 async def test_runner_exposes_exact_execution_mode_tools(
@@ -253,7 +257,7 @@ def test_request_rejects_agent_context_mismatch_and_unknown_fields() -> None:
             {"kind": "chapter_draft", "summary": "返工正文"},
         ),
         (
-            "编辑",
+            QUALITY_AGENT_ID,
             "quality",
             None,
             "submit_quality_report",
@@ -286,6 +290,16 @@ def test_execution_tool_contract_is_immutable() -> None:
 
     with pytest.raises(FrozenInstanceError):
         contract.mode = "reviewer"  # type: ignore[misc]
+
+
+def test_quality_execution_uses_single_authoritative_agent_identity() -> None:
+    contract = resolve_execution_contract("quality", None)
+
+    validate_execution_agent(contract, QUALITY_AGENT_ID)
+    for agent_id in AGENT_DEFINITIONS:
+        if agent_id != QUALITY_AGENT_ID:
+            with pytest.raises(ValueError, match="AGENT_EXECUTION_MODE_INVALID"):
+                validate_execution_agent(contract, agent_id)  # type: ignore[arg-type]
 
 
 def test_agent_definition_no_longer_declares_global_terminal_tools() -> None:

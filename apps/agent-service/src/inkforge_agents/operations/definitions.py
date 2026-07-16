@@ -89,6 +89,16 @@ class OperationDefinition:
     artifactKeyPolicy: ArtifactKeyPolicy = "none"
 
     def __post_init__(self) -> None:
+        for field_name in (
+            "allowedToolNames",
+            "terminalControlTools",
+            "artifactEventTypes",
+        ):
+            object.__setattr__(self, field_name, frozenset(getattr(self, field_name)))
+        if self.requiresArtifact != (self.artifactPolicy != "none"):
+            raise ValueError("requiresArtifact 与 artifactPolicy 不一致")
+        if (self.textArtifactKind is not None) != (self.artifactPolicy == "text"):
+            raise ValueError("textArtifactKind 与文本产物策略不一致")
         if not self.terminalControlTools <= self.allowedToolNames:
             raise ValueError("Operation 终止工具必须属于允许工具")
         if self.requiresArtifact:

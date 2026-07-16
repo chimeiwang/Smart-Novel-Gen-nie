@@ -8,6 +8,7 @@ from ..operations.contracts import CreativeOperationKind
 from ..operations.definitions import OPERATION_DEFINITIONS, OperationDefinition
 
 AgentExecutionMode = Literal["primary", "reviewer", "reviser", "quality"]
+QUALITY_AGENT_ID: AgentId = "编辑"
 
 _REVIEWER_TOOLS = frozenset({"submit_evaluation"})
 _QUALITY_TOOLS = frozenset({"submit_quality_report"})
@@ -51,7 +52,7 @@ def validate_execution_agent(
     agent_id: AgentId,
 ) -> None:
     if contract.mode == "quality":
-        valid = agent_id == "编辑"
+        valid = agent_id == QUALITY_AGENT_ID
     elif contract.mode == "reviewer":
         valid = contract.operation is not None and agent_id in contract.operation.reviewers
     else:

@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 from inkforge_agents.jobs.quality import QualityJobHandler
 from inkforge_agents.queue.repository import QueueJob
+from inkforge_agents.runtime.execution import QUALITY_AGENT_ID
 
 
 class Core:
@@ -89,10 +90,10 @@ async def test_quality_job_requires_structured_report_and_returns_visible_result
 
     await handler(job)
 
-    assert runner.requests[0].agentId == "编辑"
+    assert runner.requests[0].agentId == QUALITY_AGENT_ID
     assert runner.requests[0].executionMode == "quality"
     assert runner.requests[0].operationKind is None
-    assert runner.requests[0].toolContext.agentId == "编辑"
+    assert runner.requests[0].toolContext.agentId == QUALITY_AGENT_ID
 
     assert core.result == {
         "result": "一致性良好",
