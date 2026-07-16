@@ -6,9 +6,11 @@ import pytest
 from inkforge_agents.graph.state import create_initial_state
 from inkforge_agents.operations.contracts import (
     CreativeOperation,
+    CreativeOperationKind,
     create_default_operation_for_agent,
 )
 from inkforge_agents.operations.graph import OperationDependencies, build_operation_graph
+from inkforge_agents.runtime.execution import AgentExecutionMode
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
@@ -45,7 +47,15 @@ def _state(**kwargs: Any) -> dict[str, Any]:
 
 
 class AgentExecutor:
-    async def run(self, agent_id: str, state: dict[str, Any]) -> dict[str, Any]:
+    async def run(
+        self,
+        agent_id: str,
+        state: dict[str, Any],
+        *,
+        execution_mode: AgentExecutionMode,
+        operation_kind: CreativeOperationKind,
+    ) -> dict[str, Any]:
+        del execution_mode, operation_kind
         if agent_id == "写作":
             return {
                 "visibleContent": "ARTIFACT_OUTPUT_START\n完整正文\nARTIFACT_OUTPUT_END",
@@ -74,24 +84,40 @@ class AgentExecutor:
 class ArtifactPort:
     def __init__(self) -> None:
         self.actions: list[str] = []
+        self.context: dict[str, Any] | None = None
 
     async def submit(self, state: dict[str, Any], event: dict[str, Any], content: str) -> str:
         del state
         if event.get("type") == "begin_artifact_output":
-            assert content == "完整正文"
+            assert content in {"完整正文", "初稿", "完整返工稿"}
         if event.get("type") == "submit_beat_plan":
             assert content == "章节规划正文"
         self.actions.append("submit")
+        self.context = {
+            "id": "artifact-1",
+            "artifactKey": event["artifactKey"],
+            "kind": event["kind"],
+            "revision": 1,
+            "payload": {"kind": event["kind"], "content": content},
+        }
         return "artifact-1"
-
-    async def apply_patch(self, artifact_id: str, patches: list[dict[str, Any]]) -> None:
-        del artifact_id, patches
-        self.actions.append("patch")
 
     async def revise(self, state: dict[str, Any], event: dict[str, Any], content: str) -> str:
-        del state, event, content
+        del state
         self.actions.append("revise")
+        assert self.context is not None
+        assert event["artifactKey"] == self.context["artifactKey"]
+        self.context = {
+            **self.context,
+            "revision": int(self.context["revision"]) + 1,
+            "payload": {"kind": event["kind"], "content": content},
+        }
         return "artifact-1"
+
+    def review_context(self, artifact_id: str) -> dict[str, Any]:
+        assert artifact_id == "artifact-1"
+        assert self.context is not None
+        return dict(self.context)
 
     async def mark_awaiting_user(self, artifact_id: str) -> None:
         del artifact_id
@@ -194,8 +220,15 @@ class RetryArtifactExecutor:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
-    async def run(self, agent_id: str, state: dict[str, Any]) -> dict[str, Any]:
-        del agent_id
+    async def run(
+        self,
+        agent_id: str,
+        state: dict[str, Any],
+        *,
+        execution_mode: AgentExecutionMode,
+        operation_kind: CreativeOperationKind,
+    ) -> dict[str, Any]:
+        del agent_id, execution_mode, operation_kind
         self.calls.append(state)
         if len(self.calls) == 1:
             return {"visibleContent": "章节规划正文", "controlEvents": []}
@@ -246,8 +279,15 @@ async def test_operation_graph_retries_once_when_primary_agent_omits_artifact_ev
 
 
 class ReviewerFailureExecutor:
-    async def run(self, agent_id: str, state: dict[str, Any]) -> dict[str, Any]:
-        del state
+    async def run(
+        self,
+        agent_id: str,
+        state: dict[str, Any],
+        *,
+        execution_mode: AgentExecutionMode,
+        operation_kind: CreativeOperationKind,
+    ) -> dict[str, Any]:
+        del state, execution_mode, operation_kind
         if agent_id == "写作":
             return {
                 "visibleContent": "ARTIFACT_OUTPUT_START\n完整正文\nARTIFACT_OUTPUT_END",
@@ -289,8 +329,15 @@ class SplitBuilderRetryExecutor:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def run(self, agent_id: str, state: dict[str, Any]) -> dict[str, Any]:
-        del agent_id, state
+    async def run(
+        self,
+        agent_id: str,
+        state: dict[str, Any],
+        *,
+        execution_mode: AgentExecutionMode,
+        operation_kind: CreativeOperationKind,
+    ) -> dict[str, Any]:
+        del agent_id, state, execution_mode, operation_kind
         self.calls += 1
         if self.calls == 1:
             return {
@@ -386,8 +433,15 @@ async def test_removed_sync_lore_snapshot_fails_with_explicit_message() -> None:
 
 
 class MixedBeatPlanExecutor:
-    async def run(self, agent_id: str, state: dict[str, Any]) -> dict[str, Any]:
-        del state
+    async def run(
+        self,
+        agent_id: str,
+        state: dict[str, Any],
+        *,
+        execution_mode: AgentExecutionMode,
+        operation_kind: CreativeOperationKind,
+    ) -> dict[str, Any]:
+        del state, execution_mode, operation_kind
         if agent_id == "剧情":
             return {
                 "visibleContent": "章节规划正文",
@@ -448,10 +502,107 @@ async def test_plan_chapter_prefers_beat_plan_event_over_generic_artifact_event(
         reasoning="测试",
     )
 
+    with pytest.raises(ValueError, match="ARTIFACT_CONTRACT_MISMATCH"):
+        await graph.ainvoke(
+            state,
+            {"configurable": {"thread_id": "mixed-beat-plan"}},
+        )
+
+    assert artifacts.actions == []
+
+
+class RevisionFlowExecutor:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, AgentExecutionMode, CreativeOperationKind]] = []
+        self.reviewer_calls = 0
+
+    async def run(
+        self,
+        agent_id: str,
+        state: dict[str, Any],
+        *,
+        execution_mode: AgentExecutionMode,
+        operation_kind: CreativeOperationKind,
+    ) -> dict[str, Any]:
+        del state
+        self.calls.append((agent_id, execution_mode, operation_kind))
+        if execution_mode in {"primary", "reviser"}:
+            content = "初稿" if execution_mode == "primary" else "完整返工稿"
+            return {
+                "visibleContent": (
+                    f"ARTIFACT_OUTPUT_START\n{content}\nARTIFACT_OUTPUT_END"
+                ),
+                "controlEvents": [
+                    {
+                        "type": "begin_artifact_output",
+                        "kind": "chapter_draft",
+                        "summary": content,
+                    }
+                ],
+            }
+        self.reviewer_calls += 1
+        if self.reviewer_calls == 1:
+            return {
+                "visibleContent": "需要返工",
+                "controlEvents": [
+                    {
+                        "type": "submit_evaluation",
+                        "verdict": "revise",
+                        "summary": "错字与衔接问题",
+                        "requiredChanges": "修正错字并补足场景衔接",
+                        "revisionMode": "patch",
+                        "patches": [{"kind": "text_replace", "find": "甲", "replace": "乙"}],
+                    }
+                ],
+            }
+        return {
+            "visibleContent": "返工通过",
+            "controlEvents": [
+                {"type": "submit_evaluation", "verdict": "pass", "summary": "通过"}
+            ],
+        }
+
+
+@pytest.mark.asyncio
+async def test_graph_passes_explicit_modes_and_revises_without_patch_node() -> None:
+    executor = RevisionFlowExecutor()
+    artifacts = ArtifactPort()
+    graph = build_operation_graph(
+        OperationDependencies(agentExecutor=executor, artifacts=artifacts),
+        checkpointer=InMemorySaver(),
+    )
+    state = _state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="续写本章",
+    )
+    state["currentOperation"] = CreativeOperation(
+        kind="write_chapter",
+        targetType="chapter",
+        userGoal="续写本章",
+        primaryAgent="写作",
+        reviewers=["校验"],
+        outputKind="chapter_text",
+        requiresArtifact=True,
+        requiresUserApproval=True,
+        confidence=1,
+        reasoning="测试显式执行模式",
+    )
+
     result = await graph.ainvoke(
         state,
-        {"configurable": {"thread_id": "mixed-beat-plan"}},
+        {"configurable": {"thread_id": "revision-flow"}},
     )
 
     assert result["__interrupt__"]
-    assert artifacts.actions == ["submit", "await"]
+    assert [(agent, mode) for agent, mode, _ in executor.calls] == [
+        ("写作", "primary"),
+        ("校验", "reviewer"),
+        ("写作", "reviser"),
+        ("校验", "reviewer"),
+    ]
+    assert all(kind == "write_chapter" for _, _, kind in executor.calls)
+    assert artifacts.actions == ["submit", "revise", "await"]
+    assert "applyArtifactPatch" not in graph.get_graph().nodes

@@ -14,6 +14,7 @@ class CoreClient:
         self.tools: list[tuple[str, str, dict[str, object]]] = []
         self.artifacts: list[dict[str, Any]] = []
         self.resources: list[object] = []
+        self.evaluations: list[tuple[str, dict[str, Any]]] = []
 
     async def call_tool(
         self,
@@ -37,6 +38,17 @@ class CoreClient:
         del idempotency_key
         self.artifacts.append(payload)
         return {"id": "artifact-1", "revision": len(self.artifacts)}
+
+    async def submit_evaluation(
+        self,
+        resource: object,
+        artifact_id: str,
+        payload: dict[str, Any],
+        *,
+        idempotency_key: str,
+    ) -> None:
+        del resource, idempotency_key
+        self.evaluations.append((artifact_id, payload))
 
 
 class RecordingRunner:
@@ -208,12 +220,16 @@ async def test_reviewer_receives_submitted_artifact_without_read_tools() -> None
             },
             "runtimeContext": _runtime_context(),
         },
+        execution_mode="reviewer",
+        operation_kind="revise_lore",
     )
 
     assert runner.requests[0].executionMode == "reviewer"
     assert runner.requests[0].operationKind == "revise_lore"
     assert "当前待审核草案权威内容" in runner.requests[0].contextMessages[-1]
     assert "新增事实" in runner.requests[0].contextMessages[-1]
+    assert runner.requests[0].contextMessages == [runner.requests[0].contextMessages[-1]]
+    assert "submit_evaluation" in runner.requests[0].executionInstructions[-1]
 
 
 @pytest.mark.asyncio
@@ -230,7 +246,12 @@ async def test_executor_marks_primary_and_reviser_modes_explicitly() -> None:
         "runtimeContext": _runtime_context(),
     }
 
-    await executor.run("写作", base_state)
+    await executor.run(
+        "写作",
+        base_state,
+        execution_mode="primary",
+        operation_kind="write_chapter",
+    )
     assert runner.requests[-1].executionMode == "primary"
     assert runner.requests[-1].operationKind == "write_chapter"
 
@@ -258,9 +279,30 @@ async def test_executor_marks_primary_and_reviser_modes_explicitly() -> None:
             "activeArtifactId": artifact_id,
             "pendingRevision": {"requiredChanges": "补足冲突"},
         },
+        execution_mode="reviser",
+        operation_kind="write_chapter",
     )
     assert runner.requests[-1].executionMode == "reviser"
     assert runner.requests[-1].operationKind == "write_chapter"
+    revision_context = runner.requests[-1].contextMessages[-1]
+    assert all(
+        key in revision_context
+        for key in (
+            "artifactId",
+            "artifactKey",
+            "revision",
+            "kind",
+            "artifactIteration",
+            "requiredChanges",
+            "payload",
+        )
+    )
+    assert "补足冲突" in revision_context
+    instructions = "\n".join(runner.requests[-1].executionInstructions)
+    assert "补足冲突" not in instructions
+    assert "submit_evaluation" not in instructions
+    assert "get_active_review_artifact" not in instructions
+    assert "审阅" not in instructions
 
 
 @pytest.mark.asyncio
@@ -279,4 +321,98 @@ async def test_executor_rejects_missing_operation_kind() -> None:
                 "currentOperation": {},
                 "runtimeContext": _runtime_context(),
             },
+            execution_mode="primary",
+            operation_kind="answer_question",
+        )
+
+
+@pytest.mark.asyncio
+async def test_evaluation_uses_local_artifact_identity_not_model_locators() -> None:
+    core = CoreClient()
+    port = CoreArtifactPort(core)
+    state = {
+        "chapterId": "chapter-1",
+        "activeAgent": "写作",
+        "runtimeContext": _runtime_context(),
+    }
+    artifact_id = await port.submit(
+        state,
+        {
+            "type": "begin_artifact_output",
+            "kind": "chapter_draft",
+            "summary": "正文草案",
+            "artifactKey": "authority-key",
+        },
+        "正文",
+    )
+
+    await port.submit_evaluation(
+        state,
+        artifact_id,
+        "校验",
+        {
+            "type": "submit_evaluation",
+            "artifactId": "spoofed-artifact",
+            "artifactKey": "spoofed-key",
+            "verdict": "pass",
+            "summary": "通过",
+        },
+    )
+
+    submitted_id, payload = core.evaluations[0]
+    assert submitted_id == artifact_id
+    assert payload["revision"] == 1
+    assert "artifactKey" not in payload
+    assert "artifactId" not in payload
+
+
+class MismatchingRevisionCore(CoreClient):
+    async def create_artifact(
+        self,
+        resource: object,
+        payload: dict[str, Any],
+        *,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        response = await super().create_artifact(
+            resource,
+            payload,
+            idempotency_key=idempotency_key,
+        )
+        if len(self.artifacts) > 1:
+            return {"id": "artifact-other", "revision": 2}
+        return response
+
+
+@pytest.mark.asyncio
+async def test_revision_rejects_core_returning_different_artifact_id() -> None:
+    core = MismatchingRevisionCore()
+    port = CoreArtifactPort(core)
+    state = {
+        "chapterId": "chapter-1",
+        "activeAgent": "写作",
+        "runtimeContext": _runtime_context(),
+    }
+    artifact_id = await port.submit(
+        state,
+        {
+            "type": "begin_artifact_output",
+            "kind": "chapter_draft",
+            "summary": "初稿",
+            "artifactKey": "authority-key",
+        },
+        "正文",
+    )
+    state["activeArtifactId"] = artifact_id
+
+    with pytest.raises(RuntimeError, match="ARTIFACT_REVISION_IDENTITY_MISMATCH"):
+        await port.revise(
+            state,
+            {
+                "type": "begin_artifact_output",
+                "kind": "chapter_draft",
+                "summary": "返工",
+                "artifactKey": "authority-key",
+            },
+            "返工正文",
         )

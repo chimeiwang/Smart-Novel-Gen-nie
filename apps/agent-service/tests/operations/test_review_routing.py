@@ -20,7 +20,7 @@ def test_review_outcome_priority_is_block_then_revise_then_pass() -> None:
     assert outcome.revisionMode == "rewrite"
 
 
-def test_patch_is_used_only_when_every_reviser_provides_safe_patches() -> None:
+def test_patch_intent_is_preserved_but_all_revisions_are_rewrites() -> None:
     patch = decide_review_outcome(
         [
             ReviewResult(
@@ -39,8 +39,10 @@ def test_patch_is_used_only_when_every_reviser_provides_safe_patches() -> None:
             ),
         ]
     )
-    assert patch.revisionMode == "patch"
+    assert patch.revisionMode == "rewrite"
     assert len(patch.patches) == 2
+    assert "校验：错字" in (patch.requiredChanges or "")
+    assert "编辑：病句" in (patch.requiredChanges or "")
 
     rewrite = decide_review_outcome(
         [

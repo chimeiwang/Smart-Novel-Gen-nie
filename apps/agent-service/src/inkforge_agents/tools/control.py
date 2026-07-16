@@ -130,7 +130,7 @@ class ValidationReportArgs(StrictArgs):
 
 
 class EvaluationArgs(StrictArgs):
-    artifactKey: str = Field(min_length=1, max_length=200)
+    artifactKey: str | None = Field(default=None, min_length=1, max_length=200)
     verdict: Literal["pass", "revise", "block"]
     summary: str = Field(min_length=1)
     artifactId: str | None = Field(default=None, min_length=1, max_length=200)

@@ -235,7 +235,7 @@ OPERATION_DEFINITIONS: dict[CreativeOperationKind, OperationDefinition] = {
         "outline",
         "text",
         "生成可审核的章节规划草案。",
-        "beat_plan_draft",
+        "beat_plan",
         allowed_tools=_BASE_READ | {"submit_beat_plan"},
         terminal_tools=frozenset({"submit_beat_plan"}),
         artifact_events=frozenset({"submit_beat_plan"}),

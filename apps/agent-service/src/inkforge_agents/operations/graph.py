@@ -8,17 +8,27 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, Send, interrupt
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..artifacts.builder import resolve_builder_artifact
-from ..artifacts.updates import extract_artifact_content
 from ..definitions.agents import AgentId
 from ..graph.context import build_operation_context
 from ..graph.state import GraphState
-from .contracts import CreativeOperation
+from ..runtime.execution import AgentExecutionMode
+from .artifact_contract import (
+    has_artifact_terminal_event,
+    validate_artifact_submission,
+)
+from .contracts import CreativeOperation, CreativeOperationKind
 from .definitions import OPERATION_DEFINITIONS, OperationDefinition
 
 
 class AgentExecutorPort(Protocol):
-    async def run(self, agent_id: str, state: dict[str, Any]) -> dict[str, Any]: ...
+    async def run(
+        self,
+        agent_id: str,
+        state: dict[str, Any],
+        *,
+        execution_mode: AgentExecutionMode,
+        operation_kind: CreativeOperationKind,
+    ) -> dict[str, Any]: ...
 
 
 class ArtifactPort(Protocol):
@@ -28,12 +38,6 @@ class ArtifactPort(Protocol):
         event: dict[str, Any],
         content: str,
     ) -> str: ...
-
-    async def apply_patch(
-        self,
-        artifact_id: str,
-        patches: list[dict[str, Any]],
-    ) -> None: ...
 
     async def revise(
         self,
@@ -47,6 +51,8 @@ class ArtifactPort(Protocol):
     async def apply(self, artifact_id: str) -> None: ...
 
     async def discard(self, artifact_id: str) -> None: ...
+
+    def review_context(self, artifact_id: str) -> dict[str, Any]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,12 +90,7 @@ def decide_review_outcome(results: list[ReviewResult]) -> ReviewOutcome:
         return _outcome_from("block", blockers, "rewrite")
     revisers = [result for result in results if result.verdict == "revise"]
     if revisers:
-        can_patch = all(result.revisionMode == "patch" and result.patches for result in revisers)
-        return _outcome_from(
-            "revise",
-            revisers,
-            "patch" if can_patch else "rewrite",
-        )
+        return _outcome_from("revise", revisers, "rewrite")
     passed = results or [ReviewResult(reviewer="编辑", verdict="pass", summary="审核通过")]
     return _outcome_from("pass", passed, "rewrite")
 
@@ -107,11 +108,7 @@ def _outcome_from(
             f"{result.reviewer}：{result.requiredChanges or result.summary}" for result in results
         ),
         revisionMode=revision_mode,
-        patches=(
-            [patch for result in results for patch in result.patches]
-            if revision_mode == "patch"
-            else []
-        ),
+        patches=[patch for result in results for patch in result.patches],
     )
 
 
@@ -144,6 +141,8 @@ def build_operation_graph(
         result = await dependencies.agentExecutor.run(
             operation.primaryAgent,
             dict(state),
+            execution_mode="primary",
+            operation_kind=operation.kind,
         )
         outputs = dict(state.get("agentOutputs", {}))
         outputs[operation.primaryAgent] = result
@@ -160,21 +159,24 @@ def build_operation_graph(
         output = state.get("agentOutputs", {}).get(operation.primaryAgent, {})
         visible = str(output.get("visibleContent", ""))
         control_events = _control_events(output.get("controlEvents", []))
-        preferred_artifact_type = (
-            "submit_beat_plan" if definition.kind == "plan_chapter" else None
-        )
         if not definition.requiresArtifact:
             return {
                 "finalResponse": visible,
                 "operationStep": "direct_response",
                 "operationStage": "直接回复",
             }
-        event = _artifact_event(
-            control_events,
-            visible,
-            preferred_type=preferred_artifact_type,
+        is_revision = bool(
+            state.get("activeArtifactId")
+            and state.get("artifactIteration", 0) > 0
         )
-        if event is None:
+        authoritative_artifact: dict[str, Any] | None = None
+        if is_revision:
+            artifact_id = state.get("activeArtifactId")
+            if not isinstance(artifact_id, str) or not artifact_id:
+                raise ValueError("ARTIFACT_REVISION_IDENTITY_MISMATCH：返工缺少草案标识")
+            authoritative_artifact = dependencies.artifacts.review_context(artifact_id)
+
+        if not has_artifact_terminal_event(control_events):
             retry_state = dict(state)
             retry_state["executionInstructions"] = [
                 *state.get("executionInstructions", []),
@@ -183,6 +185,8 @@ def build_operation_graph(
             retry_output = await dependencies.agentExecutor.run(
                 operation.primaryAgent,
                 retry_state,
+                execution_mode="reviser" if is_revision else "primary",
+                operation_kind=operation.kind,
             )
             retry_visible = str(retry_output.get("visibleContent", ""))
             if _has_builder_events(control_events):
@@ -200,27 +204,22 @@ def build_operation_graph(
             }
             outputs = dict(state.get("agentOutputs", {}))
             outputs[operation.primaryAgent] = output
-            event = _artifact_event(
-                control_events,
-                visible,
-                preferred_type=preferred_artifact_type,
-            )
-            if event is None:
-                return {
-                    "agentOutputs": outputs,
-                    "errorMessage": "主责智能体未提交待审核草案控制事件",
-                    "phase": "error",
-                    "operationStep": "submit_artifact",
-                }
-        content = (
-            extract_artifact_content(visible)
-            if event["type"] == "begin_artifact_output"
-            else visible
+        submission = validate_artifact_submission(
+            definition=definition,
+            events=control_events,
+            visible_content=visible,
+            authoritative_artifact=authoritative_artifact,
+            task_id=_required_state_text(state, "taskId"),
+            operation_kind=operation.kind,
         )
         artifact_id = (
-            await dependencies.artifacts.revise(dict(state), event, content)
-            if state.get("activeArtifactId") and state.get("artifactIteration", 0) > 0
-            else await dependencies.artifacts.submit(dict(state), event, content)
+            await dependencies.artifacts.revise(
+                dict(state), submission.event, submission.content
+            )
+            if is_revision
+            else await dependencies.artifacts.submit(
+                dict(state), submission.event, submission.content
+            )
         )
         return {
             "activeArtifactId": artifact_id,
@@ -260,7 +259,12 @@ def build_operation_graph(
             raise ValueError("复审智能体无效")
         reviewer_id = cast(AgentId, reviewer)
         try:
-            result = await dependencies.agentExecutor.run(reviewer_id, dict(state))
+            result = await dependencies.agentExecutor.run(
+                reviewer_id,
+                dict(state),
+                execution_mode="reviewer",
+                operation_kind=_operation(state).kind,
+            )
         except Exception:
             review = ReviewResult(
                 reviewer=reviewer_id,
@@ -310,41 +314,31 @@ def build_operation_graph(
     def route_after_review(state: GraphState) -> str:
         pending = state.get("pendingRevision")
         if pending and state.get("artifactIteration", 0) < state.get("maxArtifactIterations", 5):
-            return (
-                "applyArtifactPatch" if pending.get("revisionMode") == "patch" else "reviseArtifact"
-            )
+            return "reviseArtifact"
         return "markArtifactAwaitingUser"
 
-    async def apply_patch(state: GraphState) -> dict[str, Any]:
-        artifact_id = state.get("activeArtifactId")
-        pending = state.get("pendingRevision") or {}
-        patches = pending.get("patches", [])
-        if not artifact_id or not patches:
-            return {"pendingRevision": {**pending, "revisionMode": "rewrite"}}
-        try:
-            await dependencies.artifacts.apply_patch(artifact_id, patches)
-            return {
-                "artifactIteration": state.get("artifactIteration", 0) + 1,
-                "pendingRevision": None,
-                "artifactStatus": "reviewing",
-                "operationStep": "apply_artifact_patch",
-            }
-        except Exception as exc:
-            return {
-                "pendingRevision": {
-                    **pending,
-                    "revisionMode": "rewrite",
-                    "requiredChanges": str(exc),
-                }
-            }
-
-    def route_after_patch(state: GraphState) -> str:
-        pending = state.get("pendingRevision")
-        return "reviseArtifact" if pending else "reviewArtifact"
-
     async def revise(state: GraphState) -> dict[str, Any]:
+        operation = _operation(state)
+        iteration = state.get("artifactIteration", 0) + 1
+        revision_state = {
+            **dict(state),
+            "artifactIteration": iteration,
+            "artifactStatus": "revision_requested",
+            "operationStep": "revise_artifact",
+            "operationStage": "返工待审核草案",
+        }
+        result = await dependencies.agentExecutor.run(
+            operation.primaryAgent,
+            revision_state,
+            execution_mode="reviser",
+            operation_kind=operation.kind,
+        )
+        outputs = dict(state.get("agentOutputs", {}))
+        outputs[operation.primaryAgent] = result
         return {
-            "artifactIteration": state.get("artifactIteration", 0) + 1,
+            "activeAgent": operation.primaryAgent,
+            "agentOutputs": outputs,
+            "artifactIteration": iteration,
             "artifactStatus": "revision_requested",
             "operationStep": "revise_artifact",
             "operationStage": "返工待审核草案",
@@ -463,7 +457,6 @@ def build_operation_graph(
     builder.add_node("reviewArtifact", review_artifact)
     builder.add_node("reviewArtifactWorker", review_worker)
     builder.add_node("mergeArtifactReviews", merge_reviews)
-    builder.add_node("applyArtifactPatch", apply_patch)
     builder.add_node("reviseArtifact", revise)
     builder.add_node("markArtifactAwaitingUser", mark_awaiting_user)
     builder.add_node("awaitUserDecision", await_user)
@@ -483,8 +476,7 @@ def build_operation_graph(
     builder.add_conditional_edges("reviewArtifact", route_review_workers)
     builder.add_edge("reviewArtifactWorker", "mergeArtifactReviews")
     builder.add_conditional_edges("mergeArtifactReviews", route_after_review)
-    builder.add_conditional_edges("applyArtifactPatch", route_after_patch)
-    builder.add_edge("reviseArtifact", "executeOperation")
+    builder.add_edge("reviseArtifact", "submitArtifactOrRespond")
     builder.add_edge("markArtifactAwaitingUser", "awaitUserDecision")
     builder.add_edge("suggestNextAction", END)
     return builder.compile(checkpointer=checkpointer)
@@ -504,34 +496,6 @@ def _operation_definition(operation: CreativeOperation) -> OperationDefinition:
     if definition is None:
         raise ValueError(f"不支持的创作操作：{operation.kind}")
     return definition
-
-
-def _artifact_event(
-    events: object,
-    visible_content: str,
-    *,
-    preferred_type: str | None = None,
-) -> dict[str, Any] | None:
-    typed_events = _control_events(events)
-    if preferred_type is not None:
-        preferred = next(
-            (event for event in typed_events if event.get("type") == preferred_type),
-            None,
-        )
-        if preferred is not None:
-            return preferred
-    builder = resolve_builder_artifact(typed_events, visible_content)
-    if builder is not None:
-        return builder
-    accepted = {
-        "propose_updates",
-        "begin_artifact_output",
-        "submit_beat_plan",
-    }
-    return next(
-        (event for event in typed_events if event.get("type") in accepted),
-        None,
-    )
 
 
 def _evaluation_event(events: object) -> dict[str, Any] | None:
@@ -584,3 +548,10 @@ def _artifact_retry_instruction(definition: OperationDefinition) -> str:
         "上一次响应缺少待审核草案控制事件。本次必须提交待审核草案控制事件："
         f"{tool_requirement}；不能只返回普通文本。"
     )
+
+
+def _required_state_text(state: GraphState, key: str) -> str:
+    value = state.get(key)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"图状态缺少 {key}")
+    return value

@@ -83,7 +83,19 @@ class CoreArtifactPort:
         event: dict[str, Any],
         content: str,
     ) -> str:
-        return await self._save(state, event, content, status="under_review")
+        artifact_id = _required_text(state, "activeArtifactId")
+        record = self._require_record(artifact_id)
+        if event.get("artifactKey") != record.request.get("artifactKey"):
+            raise RuntimeError(
+                "ARTIFACT_REVISION_IDENTITY_MISMATCH：返工 artifactKey 与权威草案不一致"
+            )
+        return await self._save(
+            state,
+            event,
+            content,
+            status="under_review",
+            expected_artifact_id=artifact_id,
+        )
 
     async def mark_awaiting_user(self, artifact_id: str) -> None:
         record = self._require_record(artifact_id)
@@ -95,10 +107,6 @@ class CoreArtifactPort:
         )
         record.request = request
         record.revision = _revision(response)
-
-    async def apply_patch(self, artifact_id: str, patches: list[dict[str, Any]]) -> None:
-        del artifact_id, patches
-        raise RuntimeError("跨服务草案补丁暂未启用，将改用完整返工")
 
     async def apply(self, artifact_id: str) -> None:
         del artifact_id
@@ -148,17 +156,21 @@ class CoreArtifactPort:
         content: str,
         *,
         status: str,
+        expected_artifact_id: str | None = None,
     ) -> str:
         resource = _resource(state)
         agent_id = _agent_id(state)
         kind, payload = _artifact_payload(event, content)
+        artifact_key = event.get("artifactKey")
+        if not isinstance(artifact_key, str) or not artifact_key:
+            raise ValueError("ARTIFACT_CONTRACT_MISMATCH：待审核草案缺少 artifactKey")
         request = {
             "runId": resource.runId,
             "taskId": resource.taskId,
             "novelId": resource.novelId,
             "chapterId": state.get("chapterId"),
             "workflowRunId": None,
-            "artifactKey": event.get("artifactKey"),
+            "artifactKey": artifact_key,
             "kind": kind,
             "status": status,
             "title": event.get("title"),
@@ -176,6 +188,10 @@ class CoreArtifactPort:
         artifact_id = response.get("id")
         if not isinstance(artifact_id, str) or not artifact_id:
             raise RuntimeError("核心服务未返回待审核草案标识")
+        if expected_artifact_id is not None and artifact_id != expected_artifact_id:
+            raise RuntimeError(
+                "ARTIFACT_REVISION_IDENTITY_MISMATCH：Core 返回了不同的草案标识"
+            )
         self._records[artifact_id] = _ArtifactRecord(resource, request, _revision(response))
         return artifact_id
 
@@ -191,8 +207,16 @@ class CoreGraphAgentExecutor:
         self._runner = runner
         self._artifacts = artifacts
 
-    async def run(self, agent_id: str, state: dict[str, Any]) -> dict[str, Any]:
-        operation_kind = _operation_kind(state)
+    async def run(
+        self,
+        agent_id: str,
+        state: dict[str, Any],
+        *,
+        execution_mode: AgentExecutionMode,
+        operation_kind: CreativeOperationKind,
+    ) -> dict[str, Any]:
+        if _operation_kind(state) != operation_kind:
+            raise ValueError("当前 Operation kind 与显式执行参数不一致")
         resource = _resource(state)
         context = ToolContext(
             userId=resource.userId,
@@ -202,31 +226,43 @@ class CoreGraphAgentExecutor:
             jobId=resource.jobId,
             agentId=agent_id,
         )
-        context_messages = [str(item) for item in state.get("contextMessages", [])]
-        execution_instructions = [
-            str(item) for item in state.get("executionInstructions", [])
-        ]
-        artifact_context: dict[str, Any] | None = None
+        context_messages: list[str]
+        execution_instructions: list[str]
+        conversation_messages: list[dict[str, object]]
         artifact_id = state.get("activeArtifactId")
-        if isinstance(artifact_id, str):
-            try:
-                artifact_context = self._artifacts.review_context(artifact_id)
-            except RuntimeError:
-                artifact_context = None
-        if artifact_context is not None:
-            context_messages.append(
-                "当前待审核草案权威内容："
-                + json.dumps(artifact_context, ensure_ascii=False, separators=(",", ":"))
-            )
-            execution_instructions.append(
-                "读取工具不可用，请直接审阅只读资料中的权威草案并调用 submit_evaluation。"
-            )
-        execution_mode: AgentExecutionMode = "primary"
-        if artifact_context is not None:
-            operation = OPERATION_DEFINITIONS[operation_kind]
-            execution_mode = (
-                "reviser" if agent_id == operation.primaryAgent else "reviewer"
-            )
+        if execution_mode == "primary":
+            context_messages = [str(item) for item in state.get("contextMessages", [])]
+            execution_instructions = [
+                str(item) for item in state.get("executionInstructions", [])
+            ]
+            conversation_messages = [
+                dict(item)
+                for item in state.get("conversationHistory", [])
+                if isinstance(item, dict)
+            ]
+        else:
+            if not isinstance(artifact_id, str) or not artifact_id:
+                raise RuntimeError("当前执行模式缺少权威待审核草案标识")
+            artifact_context = self._artifacts.review_context(artifact_id)
+            conversation_messages = []
+            if execution_mode == "reviewer":
+                context_messages = [_reviewer_context(artifact_context)]
+                execution_instructions = [
+                    "当前处于复审模式。只处理只读资料中的 Core 权威草案；"
+                    "不要重新读取或猜测其他草案，完成后只调用一次 submit_evaluation。"
+                ]
+            elif execution_mode == "reviser":
+                context_messages = [_reviser_context(state, artifact_context)]
+                execution_instructions = [
+                    "当前处于完整返工模式。根据只读资料中的修改要求重写完整草案，"
+                    "保持权威 artifactKey 和原产物类型，完成后使用当前 Operation 的产物提交工具。",
+                    *[
+                        str(item)
+                        for item in state.get("executionInstructions", [])
+                    ],
+                ]
+            else:
+                raise ValueError("CoreGraphAgentExecutor 不支持 quality 执行模式")
         result = await self._runner.run(
             AgentRunRequest(
                 agentId=cast(Any, agent_id),
@@ -235,16 +271,12 @@ class CoreGraphAgentExecutor:
                 userMessage=_required_text(state, "userMessage"),
                 contextMessages=context_messages,
                 executionInstructions=execution_instructions,
-                conversationMessages=[
-                    dict(item)
-                    for item in state.get("conversationHistory", [])
-                    if isinstance(item, dict)
-                ],
+                conversationMessages=conversation_messages,
                 toolContext=context,
             )
         )
         payload = result.model_dump()
-        if isinstance(artifact_id, str):
+        if execution_mode == "reviewer" and isinstance(artifact_id, str):
             for event in payload.get("controlEvents", []):
                 if isinstance(event, dict) and event.get("type") == "submit_evaluation":
                     await self._artifacts.submit_evaluation(state, artifact_id, agent_id, event)
@@ -257,6 +289,48 @@ def _operation_kind(state: dict[str, Any]) -> CreativeOperationKind:
     if not isinstance(kind, str) or kind not in OPERATION_DEFINITIONS:
         raise ValueError("当前 Operation kind 无效")
     return kind
+
+
+def _reviewer_context(artifact: dict[str, Any]) -> str:
+    readonly = {
+        "artifactId": artifact.get("id"),
+        "artifactKey": artifact.get("artifactKey"),
+        "revision": artifact.get("revision"),
+        "kind": artifact.get("kind"),
+        "title": artifact.get("title"),
+        "summary": artifact.get("summary"),
+        "payload": artifact.get("payload"),
+    }
+    return "当前待审核草案权威内容：" + json.dumps(
+        readonly,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def _reviser_context(state: dict[str, Any], artifact: dict[str, Any]) -> str:
+    pending = state.get("pendingRevision")
+    if not isinstance(pending, dict):
+        raise RuntimeError("返工执行缺少合并后的修改要求")
+    required_changes = pending.get("requiredChanges")
+    if not isinstance(required_changes, str) or not required_changes:
+        raise RuntimeError("返工执行缺少合并后的修改要求")
+    readonly = {
+        "artifactId": artifact.get("id"),
+        "artifactKey": artifact.get("artifactKey"),
+        "revision": artifact.get("revision"),
+        "kind": artifact.get("kind"),
+        "artifactIteration": state.get("artifactIteration", 0),
+        "requiredChanges": required_changes,
+        "payload": artifact.get("payload"),
+        "title": artifact.get("title"),
+        "summary": artifact.get("summary"),
+    }
+    return "当前返工草案权威内容：" + json.dumps(
+        readonly,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
 
 
 def _artifact_payload(event: dict[str, Any], content: str) -> tuple[str, dict[str, Any]]:

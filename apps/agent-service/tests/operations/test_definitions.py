@@ -103,7 +103,7 @@ EXPECTED_CONTRACTS: dict[str, dict[str, Any]] = {
         "allowed": BASE_READ | {"submit_beat_plan"},
         "terminal": frozenset({"submit_beat_plan"}),
         "events": frozenset({"submit_beat_plan"}),
-        "text_kind": "beat_plan_draft",
+        "text_kind": "beat_plan",
         "key_policy": "generated_stable",
     },
     "write_chapter": {

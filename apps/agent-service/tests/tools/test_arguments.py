@@ -27,3 +27,11 @@ def test_evaluation_arguments_reject_invalid_verdict() -> None:
                 "summary": "不确定",
             }
         )
+
+
+def test_evaluation_artifact_key_is_optional() -> None:
+    tool = build_default_registry().require("submit_evaluation")
+
+    validated = tool.validate({"verdict": "pass", "summary": "审核通过"})
+
+    assert "artifactKey" not in validated

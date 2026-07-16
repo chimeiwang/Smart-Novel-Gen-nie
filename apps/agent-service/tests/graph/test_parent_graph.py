@@ -9,8 +9,17 @@ from inkforge_agents.operations.graph import OperationDependencies
 
 
 class AgentExecutor:
-    async def run(self, agent_id: str, state: dict[str, Any]) -> dict[str, Any]:
+    async def run(
+        self,
+        agent_id: str,
+        state: dict[str, Any],
+        *,
+        execution_mode: str,
+        operation_kind: str,
+    ) -> dict[str, Any]:
         del state
+        assert execution_mode == "primary"
+        assert operation_kind == "review_chapter"
         return {"visibleContent": f"{agent_id}回答", "controlEvents": []}
 
 
