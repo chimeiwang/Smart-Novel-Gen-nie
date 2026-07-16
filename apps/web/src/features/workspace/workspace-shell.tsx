@@ -183,6 +183,12 @@ export function WorkspaceShell({
             />
           </section>
         </div>
+
+        <aside
+          id="workspace-review-rail"
+          className="panel workspace-review-rail"
+          aria-label="当前章节审核栏"
+        />
       </div>
     </main>
   );

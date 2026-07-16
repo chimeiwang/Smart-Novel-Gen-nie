@@ -73,6 +73,37 @@
   gap: 12px;
 }
 
+.writing-chat .more-menu {
+  position: relative;
+}
+
+.writing-chat .more-menu-popover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 120px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  box-shadow: var(--shadow-modal);
+}
+
+.writing-chat .more-menu-popover button {
+  width: 100%;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.writing-chat .more-menu-popover button:hover {
+  background: var(--panel-soft);
+}
+
 .writing-chat .phase-indicator {
   padding: 4px 10px;
   background: #f0f5ff;
@@ -2165,6 +2196,86 @@
 .writing-chat .next-action-button.urgent {
   border-color: var(--warning);
   background: var(--warning-soft);
+}
+
+.writing-chat .next-action-button.recommended {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.writing-chat .review-artifact-message-hint {
+  margin-top: 10px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 12px;
+  text-align: left;
+}
+
+.writing-chat .flow-log-empty {
+  padding: 14px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.workspace-review-content {
+  height: 100%;
+  overflow: auto;
+  padding: 14px;
+  background: var(--panel);
+}
+
+.workspace-review-content .workspace-review-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--divider);
+  color: var(--text);
+  font-weight: 650;
+}
+
+.workspace-review-content .workspace-review-heading small,
+.workspace-review-content .workspace-review-empty span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.workspace-review-content .review-artifact-card {
+  margin: 12px 0 0;
+}
+
+.workspace-review-content .workspace-review-empty {
+  display: grid;
+  gap: 12px;
+  padding-top: 16px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.workspace-review-content .workspace-review-empty > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.workspace-review-content .workspace-review-empty p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.workspace-review-content .workspace-review-empty-state {
+  padding: 20px 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--panel-soft);
+  color: var(--muted);
+  text-align: center;
 }
 
 .writing-chat .next-action-button span {

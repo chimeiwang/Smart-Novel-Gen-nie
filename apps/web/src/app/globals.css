@@ -999,7 +999,7 @@ body:has(.marketing-page) .user-info-bar {
 
 .workspace-shell {
   display: grid;
-  grid-template-columns: minmax(220px, 250px) minmax(0, 1fr);
+  grid-template-columns: minmax(220px, 250px) minmax(0, 1fr) minmax(300px, 340px);
   gap: 12px;
   flex: 1;
   min-width: 0;
@@ -1008,7 +1008,7 @@ body:has(.marketing-page) .user-info-bar {
 }
 
 .workspace-shell[data-view="library"] {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 340px);
 }
 
 .workspace-chapter-navigation {
@@ -1023,6 +1023,28 @@ body:has(.marketing-page) .user-info-bar {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.workspace-review-rail {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+@media (max-width: 1279px) {
+  .workspace-shell {
+    grid-template-columns: minmax(220px, 250px) minmax(0, 1fr);
+    overflow: auto;
+  }
+
+  .workspace-shell[data-view="library"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .workspace-review-rail {
+    grid-column: 1 / -1;
+    min-height: 280px;
+  }
 }
 
 .workspace-pane {

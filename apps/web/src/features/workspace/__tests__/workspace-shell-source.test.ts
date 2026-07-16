@@ -16,6 +16,38 @@ test("工作区外壳常驻挂载三类主要面板", async () => {
   assert.match(source, /hidden=\{activeView !== "library"\}/);
   assert.match(source, /workspace-editor-pane" hidden=\{activeView !== "reading"\}/);
   assert.doesNotMatch(source, /key=\{activeView\}/);
+  assert.match(source, /<aside[^>]+id="workspace-review-rail"/);
+  assert.doesNotMatch(source, /workspace-review-rail[^>]+hidden=/);
+});
+
+test("审核内容与审核弹窗使用独立 portal host", async () => {
+  const conversationUrl = new URL("../../writing/writing-conversation.tsx", import.meta.url);
+  const source = await readFile(conversationUrl, "utf8");
+
+  assert.match(source, /createPortal/);
+  assert.match(source, /getElementById\("workspace-review-rail"\)/);
+  assert.match(source, /createPortal\([\s\S]*document\.body/);
+  assert.match(source, /当前没有待确认变更/);
+});
+
+test("创作台使用单一任务入口并隐藏 Agent picker", async () => {
+  const conversationUrl = new URL("../../writing/writing-conversation.tsx", import.meta.url);
+  const source = await readFile(conversationUrl, "utf8");
+
+  assert.match(source, /创作任务/);
+  assert.match(source, /历史对话/);
+  assert.match(source, /开始新对话/);
+  assert.match(source, /系统会自动分配合适的 Agent/);
+  assert.doesNotMatch(source, /showAgentPicker|agentPickerActiveIndex|role="listbox"/);
+});
+
+test("会话恢复完成前不会把临时 idle 阶段写回服务端", async () => {
+  const conversationUrl = new URL("../../writing/writing-conversation.tsx", import.meta.url);
+  const source = await readFile(conversationUrl, "utf8");
+
+  assert.match(source, /phasePersistenceReadyRef/);
+  assert.match(source, /if \(!phasePersistenceReadyRef\.current\) return/);
+  assert.match(source, /requireApiData\(await browserApi\.PATCH/);
 });
 
 test("工作区外壳跟随服务端 initialView", async () => {

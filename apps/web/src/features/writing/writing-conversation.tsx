@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useOptimistic, useReducer, useRef, useState, useTransition, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { parseSseFrame } from "@inkforge/api-client";
 
 import {
@@ -50,10 +51,15 @@ import {
   resolveLoadedSessionRecoveryState,
 } from "./session-task-state";
 import {
-  getWritingNextActions,
-  WRITING_SHORTCUT_ACTIONS,
+  composeWritingTaskActions,
   type WritingProductAction,
 } from "./product-actions";
+import {
+  createWritingSessionTitle,
+  formatSessionDisplayTitle,
+  mapWritingPhaseToPersistentPhase,
+  selectDefaultWritingSessionId,
+} from "./session-presentation";
 import { shouldPersistOptimisticWritingMessage } from "./message-persistence";
 import { createAsyncActionGuard } from "./send-guard";
 import {
@@ -609,6 +615,9 @@ export function WritingConversation({
   const taskIdRef = useRef<string | null>(null);
   const activeReviewArtifactRef = useRef<ReviewArtifactData | null>(null);
   const sessionLoadVersionRef = useRef(0);
+  const sessionInitializationRef = useRef(false);
+  const phasePersistenceReadyRef = useRef(false);
+  const persistedPhaseKeyRef = useRef<string | null>(null);
 
   const replaceSessionWorkspace = useCallback((next: SessionWorkspaceState<ReviewArtifactData>) => {
     currentSessionIdRef.current = next.sessionId;
@@ -684,17 +693,13 @@ export function WritingConversation({
     applyAgentLiveAction({ type: "reset" });
   }, [applyAgentLiveAction]);
 
-  const [showAgentPicker, setShowAgentPicker] = useState(false);
-  const [agentPickerQuery, setAgentPickerQuery] = useState("");
-  const [agentPickerActiveIndex, setAgentPickerActiveIndex] = useState(0);
-
   // 中断控制
   const abortRef = useRef<AbortController | null>(null);
   const sendGuardRef = useRef(createAsyncActionGuard());
   const eventCursorsRef = useRef(createWritingEventCursors());
 
-  const [cursorPosition, setCursorPosition] = useState(0);
   const [showFlowLog, setShowFlowLog] = useState(false);
+  const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [flowLogs, setFlowLogs] = useState<FlowLogEntry[]>([]);
   const [activityState, setActivityState] = useState<AgentActivityState>(EMPTY_AGENT_ACTIVITY_STATE);
   const activityStateRef = useRef<AgentActivityState>(EMPTY_AGENT_ACTIVITY_STATE);
@@ -729,6 +734,8 @@ export function WritingConversation({
 
   const resetSessionContext = useCallback((sessionId: string | null) => {
     sessionLoadVersionRef.current += 1;
+    phasePersistenceReadyRef.current = false;
+    persistedPhaseKeyRef.current = null;
     replaceSessionWorkspace(createEmptySessionWorkspace<ReviewArtifactData>(sessionId));
     setMessages([]);
     setGeneratedContent("");
@@ -853,9 +860,11 @@ export function WritingConversation({
         params: { query: { novelId, chapterId } },
       }));
       setSessions(data);
+      return data as Session[];
     } catch (err) {
       console.error("加载会话列表失败", err);
     }
+    return [] as Session[];
   }, [novelId, chapterId]);
 
   const loadReviewArtifacts = useCallback(async () => {
@@ -914,6 +923,7 @@ export function WritingConversation({
           operationStage: sessionTaskState.operationStage,
           activeReviewArtifact: null,
         });
+        phasePersistenceReadyRef.current = true;
         resetAgentActivity();
         setIsAssigningTask(false);
         clearAgentLiveRuns();
@@ -925,10 +935,10 @@ export function WritingConversation({
   }, [clearAgentLiveRuns, replaceSessionWorkspace, resetAgentActivity, updateReviewArtifactAction]);
 
   // 创建新会话
-  const createSession = useCallback(async (): Promise<string | null> => {
+  const createSession = useCallback(async (title: string): Promise<string | null> => {
     try {
       const session = requireApiData(await browserApi.POST("/api/v1/writing/sessions", {
-        body: { novelId, chapterId },
+        body: { novelId, chapterId, title },
       }));
       await loadSessions();
       resetSessionContext(session.id);
@@ -990,14 +1000,49 @@ export function WritingConversation({
     setShowSessionModal(false);
   }, [loadSessionMessages, resetSessionContext]);
 
+  const startNewConversation = useCallback(() => {
+    resetSessionContext(null);
+    setShowSessionModal(false);
+  }, [resetSessionContext]);
+
   // 初始加载
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      void loadSessions();
-      void loadReviewArtifacts();
+      void (async () => {
+        const loadedSessions = await loadSessions();
+        if (sessionInitializationRef.current) return;
+        sessionInitializationRef.current = true;
+        const defaultSessionId = selectDefaultWritingSessionId(loadedSessions);
+        if (!defaultSessionId) {
+          resetSessionContext(null);
+          return;
+        }
+        resetSessionContext(defaultSessionId);
+        await loadSessionMessages(defaultSessionId);
+      })();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [loadSessions, loadReviewArtifacts]);
+  }, [loadSessionMessages, loadSessions, resetSessionContext]);
+
+  useEffect(() => {
+    if (!phasePersistenceReadyRef.current) return;
+    const persistentPhase = mapWritingPhaseToPersistentPhase(phase);
+    if (!currentSessionId || !persistentPhase) return;
+    const phaseKey = `${currentSessionId}:${persistentPhase}`;
+    if (persistedPhaseKeyRef.current === phaseKey) return;
+    persistedPhaseKeyRef.current = phaseKey;
+    void (async () => {
+      try {
+        requireApiData(await browserApi.PATCH("/api/v1/writing/sessions/{session_id}", {
+          params: { path: { session_id: currentSessionId } },
+          body: { phase: persistentPhase },
+        }));
+      } catch (phaseError) {
+        persistedPhaseKeyRef.current = null;
+        console.error("保存会话阶段失败", phaseError);
+      }
+    })();
+  }, [currentSessionId, phase]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -1124,50 +1169,6 @@ export function WritingConversation({
     };
     return labels[status] || "处理";
   };
-
-  const handleInputChange = useCallback((value: string, cursorPos: number) => {
-    setUserInput(value);
-    setCursorPosition(cursorPos);
-
-    const textBeforeCursor = value.slice(0, cursorPos);
-    const lastAtIndex = textBeforeCursor.lastIndexOf("@");
-
-    if (lastAtIndex !== -1) {
-      const textAfterAt = textBeforeCursor.slice(lastAtIndex + 1);
-      if (!textAfterAt.includes(" ") && textAfterAt.length <= 20) {
-        setAgentPickerQuery(textAfterAt);
-        setShowAgentPicker(true);
-        setAgentPickerActiveIndex(0);
-        return;
-      }
-    }
-
-    setShowAgentPicker(false);
-    setAgentPickerQuery("");
-    setAgentPickerActiveIndex(0);
-  }, []);
-
-  const insertAgentMention = useCallback((agentId: string) => {
-    const textBeforeCursor = userInput.slice(0, cursorPosition);
-    const lastAtIndex = textBeforeCursor.lastIndexOf("@");
-
-    if (lastAtIndex !== -1) {
-      const beforeAt = userInput.slice(0, lastAtIndex);
-      const afterCursor = userInput.slice(cursorPosition);
-      const mention = `@${agentId}`;
-      const newValue = `${beforeAt}${mention} ${afterCursor}`;
-      setUserInput(newValue);
-      setShowAgentPicker(false);
-      setAgentPickerQuery("");
-      setAgentPickerActiveIndex(0);
-
-      setTimeout(() => {
-        inputRef.current?.focus();
-        const newCursorPos = beforeAt.length + mention.length + 1;
-        inputRef.current?.setSelectionRange(newCursorPos, newCursorPos);
-      }, 0);
-    }
-  }, [userInput, cursorPosition]);
 
   const agentStartTimes = useRef<Map<string, number>>(new Map());
 
@@ -1798,11 +1799,12 @@ export function WritingConversation({
     return sendGuardRef.current.run(action);
   }, []);
 
-  const startDiscussionInternal = async (messageOverride?: string) => {
+  const startDiscussionInternal = async (messageOverride?: string, titleOverride?: string) => {
     const userMessage = (messageOverride ?? userInput).trim();
     if (!userMessage) return;
 
-    const sessionIdForRequest = currentSessionId ?? await createSession();
+    const sessionTitle = titleOverride ?? createWritingSessionTitle(userMessage);
+    const sessionIdForRequest = currentSessionId ?? await createSession(sessionTitle);
     if (!sessionIdForRequest) {
       setError("无法创建写作会话");
       return;
@@ -1812,6 +1814,7 @@ export function WritingConversation({
     addMessage({ role: "user", content: userMessage, sessionId: sessionIdForRequest, persist: false });
     setIsAssigningTask(true);
     addFlowLog({ type: "user", content: `用户: ${userMessage.slice(0, 50)}${userMessage.length > 50 ? "..." : ""}` });
+    phasePersistenceReadyRef.current = true;
     setPhase("discussing");
     setIsSending(true);
 
@@ -1840,8 +1843,8 @@ export function WritingConversation({
     }
   };
 
-  const handleStartDiscussion = async (messageOverride?: string) => {
-    const guarded = runSendAction(() => startDiscussionInternal(messageOverride));
+  const handleStartDiscussion = async (messageOverride?: string, titleOverride?: string) => {
+    const guarded = runSendAction(() => startDiscussionInternal(messageOverride, titleOverride));
     await guarded;
   };
 
@@ -1919,11 +1922,11 @@ export function WritingConversation({
     setShowArtifactTray(true);
   };
 
-  const runPromptAction = async (message: string) => {
+  const runPromptAction = async (message: string, title: string) => {
     if (taskId && phase !== "idle") {
       await handleSendMessage(message);
     } else {
-      await handleStartDiscussion(message);
+      await handleStartDiscussion(message, title);
     }
   };
 
@@ -1932,7 +1935,7 @@ export function WritingConversation({
       openArtifactTray();
       return;
     }
-    if (action.prompt) await runPromptAction(action.prompt);
+    if (action.prompt) await runPromptAction(action.prompt, action.label);
   };
 
   const processStream = async (
@@ -2087,7 +2090,7 @@ export function WritingConversation({
 
   const hasWriter = selectedAgents.includes("写作");
 
-  const UpdatesPreviewCard = ({ updates, compact = false }: { updates: PendingUpdatesData; compact?: boolean }) => {
+  const renderUpdatesPreviewCard = (updates: PendingUpdatesData, compact = false) => {
     const actionLabels: Record<string, string> = {
       create: "新增",
       update: "修改",
@@ -2405,7 +2408,7 @@ export function WritingConversation({
             </div>
           ) : null}
           {diffItems.length > 0 || hasStructuredUpdates ? (
-            <UpdatesPreviewCard updates={{ ...(artifact.payload?.updates ?? {}), __diff: diffItems.slice(0, 6) }} compact />
+            renderUpdatesPreviewCard({ ...(artifact.payload?.updates ?? {}), __diff: diffItems.slice(0, 6) }, true)
           ) : null}
           {action ? (
             <div className={`review-action-status ${action.status}`} role={action.status === "failed" ? "alert" : "status"}>
@@ -2542,7 +2545,7 @@ export function WritingConversation({
 
           {diffItems.length > 0 || hasStructuredUpdates ? (
             <section className="review-dialog-section review-dialog-diffs">
-              <UpdatesPreviewCard updates={{ ...(artifact.payload?.updates ?? {}), __diff: diffItems }} compact />
+              {renderUpdatesPreviewCard({ ...(artifact.payload?.updates ?? {}), __diff: diffItems }, true)}
             </section>
           ) : null}
         </div>
@@ -2761,21 +2764,16 @@ export function WritingConversation({
     ? 1
     : 0;
   const effectiveAwaitingArtifactCount = awaitingArtifactCount + workflowAwaitingArtifactExtra;
-  const nextActions = getWritingNextActions({
+  const nextActions = composeWritingTaskActions({
     chapterStatus: chapterContext?.status,
     wordCount: chapterContext?.wordCount ?? 0,
     awaitingArtifactCount: effectiveAwaitingArtifactCount,
     hasApprovedBeatPlan: Boolean(chapterContext?.approvedBeatPlan),
     hasOpenConsistencyCheck: Boolean(chapterContext?.openConsistencyCheckCount),
   });
-  const availableAgents = AGENT_REGISTRY.filter(a => !selectedAgents.includes(a.id as AgentId));
-  const filteredAgents = agentPickerQuery
-    ? availableAgents.filter(a =>
-        a.name.toLowerCase().includes(agentPickerQuery.toLowerCase()) ||
-        a.id.toLowerCase().includes(agentPickerQuery.toLowerCase())
-      )
-    : availableAgents;
-  const visibleAgentOptions = filteredAgents.slice(0, 5);
+  const reviewRailHost = typeof document === "undefined"
+    ? null
+    : document.getElementById("workspace-review-rail");
 
   return (
     <div className="writing-chat">
@@ -2783,16 +2781,17 @@ export function WritingConversation({
       <div className="chat-header">
         <div className="header-left">
           <button className="session-trigger" onClick={() => setShowSessionModal(true)}>
-            💬 会话列表
-            {currentSession && <span className="current-session-name">：{currentSession.title || "未命名"}</span>}
+            历史对话
+            {currentSession && <span className="current-session-name">：{formatSessionDisplayTitle(currentSession)}</span>}
           </button>
-          <button
-            className="session-trigger artifact-trigger"
-            onClick={openArtifactTray}
-          >
-            待确认 {effectiveAwaitingArtifactCount}
-            {effectiveAwaitingArtifactCount > 0 ? <span className="artifact-count-hot">{effectiveAwaitingArtifactCount}</span> : null}
-          </button>
+          {effectiveAwaitingArtifactCount > 0 ? (
+            <button
+              className="session-trigger artifact-trigger"
+              onClick={openArtifactTray}
+            >
+              待确认 <span className="artifact-count-hot">{effectiveAwaitingArtifactCount}</span>
+            </button>
+          ) : null}
         </div>
         <div className="header-right">
           <span className="phase-indicator">
@@ -2802,19 +2801,35 @@ export function WritingConversation({
              phase === "recording" ? "记录中" :
              phase === "completed" ? "已完成" : phase}
           </span>
-          <button className="tool-btn" onClick={() => setShowFlowLog(!showFlowLog)} title="流程日志">
-            📋
-          </button>
+          <div className="more-menu">
+            <button
+              className="tool-btn"
+              onClick={() => setShowMoreMenu((visible) => !visible)}
+              aria-expanded={showMoreMenu}
+            >
+              更多
+            </button>
+            {showMoreMenu ? (
+              <div className="more-menu-popover">
+                <button type="button" onClick={() => {
+                  setShowFlowLog((visible) => !visible);
+                  setShowMoreMenu(false);
+                }}>
+                  流程日志
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
       </div>
 
       {chapterContext ? (
-        <div className="next-action-panel">
-          <div className="next-action-kicker">下一步</div>
+        <div className="next-action-panel writing-task-panel">
+          <div className="next-action-kicker">创作任务</div>
           <div className="next-action-buttons">
-            {nextActions.map((action) => (
+            {nextActions.map((action, index) => (
               <button
-                className={action.kind === "open_artifacts" ? "next-action-button urgent" : "next-action-button"}
+                className={`next-action-button ${index === 0 ? "recommended" : ""} ${action.kind === "open_artifacts" ? "urgent" : ""}`}
                 key={action.kind}
                 type="button"
                 onClick={() => void handleProductAction(action)}
@@ -2833,25 +2848,7 @@ export function WritingConversation({
         {messages.length === 0 && phase === "idle" && liveAgentRuns.length === 0 && (
           <div className="welcome-state">
             <div className="welcome-icon">✦</div>
-            <div className="welcome-text">选择一个任务开始</div>
-            <div className="agent-quick-btns">
-              <div className="agent-quick-section">
-                <div className="agent-quick-label">常用写作动作</div>
-                <div className="agent-quick-row">
-                  {WRITING_SHORTCUT_ACTIONS.map((action) => (
-                    <button
-                      className="agent-quick-btn"
-                      key={action.kind}
-                      onClick={() => void handleProductAction(action)}
-                      disabled={isSending}
-                    >
-                      <span className="agent-name">{action.label}</span>
-                      <small>{action.description}</small>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
+            <div className="welcome-text">从上方推荐任务开始，或直接描述你要完成的创作任务</div>
           </div>
         )}
 
@@ -2906,7 +2903,13 @@ export function WritingConversation({
                     </div>
                   )}
                   {msg.reviewArtifact ? (
-                    renderArtifactReviewCard(resolveMessageReviewArtifact(msg.reviewArtifact))
+                    <button
+                      type="button"
+                      className="review-artifact-message-hint"
+                      onClick={() => openReviewArtifactModal(resolveMessageReviewArtifact(msg.reviewArtifact!))}
+                    >
+                      这条回复包含待确认变更，已显示在右侧审核栏
+                    </button>
                   ) : null}
                 </div>
                 {isUser && <div className="message-avatar user-avatar">我</div>}
@@ -2989,11 +2992,9 @@ export function WritingConversation({
           </div>
         ) : null}
 
-        {messages.length === 0 && workflowReviewArtifact ? (
-          renderArtifactReviewCard(workflowReviewArtifact)
-        ) : (() => {
+        {(() => {
           const pendingUpdates = messages[messages.length - 1]?.pendingUpdates;
-          return pendingUpdates ? <UpdatesPreviewCard updates={pendingUpdates} /> : null;
+          return pendingUpdates ? renderUpdatesPreviewCard(pendingUpdates) : null;
         })()}
 
         {error && (
@@ -3003,13 +3004,15 @@ export function WritingConversation({
           </div>
         )}
 
-        {showFlowLog && flowLogs.length > 0 && (
+        {showFlowLog && (
           <div className="flow-log">
             <div className="flow-log-title">
               <span>流程日志</span>
               <button onClick={() => setFlowLogs([])}>清空</button>
             </div>
-            {flowLogs.map(log => (
+            {flowLogs.length === 0 ? (
+              <div className="flow-log-empty">本次对话还没有流程记录</div>
+            ) : flowLogs.map(log => (
               <div key={log.id} className={`flow-log-item flow-${log.type}`}>
                 <span className="flow-icon">
                   {log.type === "phase" && "📍"}
@@ -3068,26 +3071,14 @@ export function WritingConversation({
           <textarea
             ref={inputRef}
             value={userInput}
-            onChange={(e) => handleInputChange(e.target.value, e.target.selectionStart)}
-            onSelect={(e) => setCursorPosition(e.currentTarget.selectionStart)}
-            placeholder="输入消息...（@ 邀请助手）"
+            onChange={(e) => setUserInput(e.target.value)}
+            placeholder="描述要完成的创作任务，系统会自动分配合适的 Agent"
             rows={1}
             onKeyDown={(e) => {
-              if (showAgentPicker && visibleAgentOptions.length > 0 && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
-                e.preventDefault();
-                setAgentPickerActiveIndex((current) => {
-                  const delta = e.key === "ArrowDown" ? 1 : -1;
-                  return (current + delta + visibleAgentOptions.length) % visibleAgentOptions.length;
-                });
-              } else if (showAgentPicker && visibleAgentOptions.length > 0 && e.key === "Enter") {
-                e.preventDefault();
-                insertAgentMention(visibleAgentOptions[agentPickerActiveIndex]?.id ?? visibleAgentOptions[0].id);
-              } else if (e.key === "Enter" && !e.shiftKey && !showAgentPicker) {
+              if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 handleSendMessage();
               } else if (e.key === "Escape") {
-                setShowAgentPicker(false);
-                setAgentPickerActiveIndex(0);
                 if (editingMessageId) cancelEdit();
               }
             }}
@@ -3098,32 +3089,11 @@ export function WritingConversation({
           </button>
         </div>
 
-        {showAgentPicker && visibleAgentOptions.length > 0 && (
-          <div className="agent-picker" role="listbox" aria-label="选择 Agent">
-            {visibleAgentOptions.map((agent, index) => {
-              const info = getAgentInfo(agent.id);
-              return (
-                <button
-                  key={agent.id}
-                  className={`agent-item ${index === agentPickerActiveIndex ? "active" : ""}`}
-                  onMouseEnter={() => setAgentPickerActiveIndex(index)}
-                  onClick={() => insertAgentMention(agent.id)}
-                  role="option"
-                  aria-selected={index === agentPickerActiveIndex}
-                >
-                  <span className={`agent-icon tone-${info.tone}`}>{info.emoji}</span>
-                  <span className="agent-name">{agent.name}</span>
-                  <span className="agent-id">@{agent.id}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
       </div>
 
       {/* 待确认变更查看/审核弹窗 */}
-      {showReviewArtifactModal && modalReviewArtifact && (
-        <div className="modal-overlay" onClick={() => closeReviewArtifactModal()}>
+      {showReviewArtifactModal && modalReviewArtifact && typeof document !== "undefined" ? createPortal(
+        <div className="writing-chat modal-overlay" onClick={() => closeReviewArtifactModal()}>
           <div className="modal-content review-artifact-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
               <span>{modalReviewArtifact.status === "awaiting_user" ? "待你确认" : "查看变更"}</span>
@@ -3140,8 +3110,9 @@ export function WritingConversation({
               {renderArtifactReviewDialog(modalReviewArtifact)}
             </div>
           </div>
-        </div>
-      )}
+        </div>,
+        document.body,
+      ) : null}
 
       {showArtifactTray && (
         <div className="modal-overlay" onClick={() => setShowArtifactTray(false)}>
@@ -3182,11 +3153,11 @@ export function WritingConversation({
         <div className="modal-overlay" onClick={() => setShowSessionModal(false)}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <span>会话列表</span>
+              <span>历史对话</span>
               <button className="modal-close" onClick={() => setShowSessionModal(false)}>×</button>
             </div>
             <div className="modal-body">
-              <button className="new-session-btn" onClick={createSession}>+ 新建会话</button>
+              <button className="new-session-btn" onClick={startNewConversation}>开始新对话</button>
               <div className="session-list">
                 {sessions.length === 0 ? (
                   <div className="empty-state">暂无会话记录</div>
@@ -3198,7 +3169,7 @@ export function WritingConversation({
                       onClick={() => selectSession(session.id)}
                     >
                       <div className="session-info">
-                        <div className="session-title">{session.title || "未命名会话"}</div>
+                        <div className="session-title">{formatSessionDisplayTitle(session)}</div>
                         <div className="session-meta">
                           <span className={`status ${session.phase}`}>
                             {session.phase === "completed" ? "已完成" :
@@ -3221,6 +3192,31 @@ export function WritingConversation({
           </div>
         </div>
       )}
+
+      {reviewRailHost ? createPortal(
+        <div className="writing-chat workspace-review-content">
+          <div className="workspace-review-heading">
+            <span>审核与确认</span>
+            <small>当前主会话</small>
+          </div>
+          {workflowReviewArtifact ? renderArtifactReviewCard(workflowReviewArtifact) : (
+            <div className="workspace-review-empty">
+              <div>
+                <strong>{chapterContext?.title ?? "当前章节"}</strong>
+                <span>{chapterContext?.status ?? "未选择"} · {chapterContext?.wordCount ?? 0} 字</span>
+              </div>
+              {chapterContext?.approvedBeatPlan ? (
+                <p>
+                  已批准计划：{chapterContext.approvedBeatPlan.chapterGoal} · {chapterContext.approvedBeatPlan.sceneCount} 场 · 约 {chapterContext.approvedBeatPlan.totalEstimatedWords} 字
+                </p>
+              ) : <p>尚未批准章节计划</p>}
+              <p>待处理终检：{chapterContext?.openConsistencyCheckCount ?? 0}</p>
+              <div className="workspace-review-empty-state">当前没有待确认变更</div>
+            </div>
+          )}
+        </div>,
+        reviewRailHost,
+      ) : null}
     </div>
   );
 }

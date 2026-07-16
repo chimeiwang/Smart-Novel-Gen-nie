@@ -127,3 +127,22 @@ export function getWritingNextActions(snapshot: WritingNextActionSnapshot): Writ
 
   return actions.slice(0, 3);
 }
+
+export function composeWritingTaskActions(
+  snapshot: WritingNextActionSnapshot,
+  shortcuts: readonly WritingProductAction[] = WRITING_SHORTCUT_ACTIONS,
+  limit = 5,
+): WritingProductAction[] {
+  const recommended = getWritingNextActions(snapshot);
+  if (recommended[0]?.kind === "open_artifacts") {
+    return [recommended[0]];
+  }
+
+  const merged = [...recommended, ...shortcuts];
+  const seen = new Set<WritingProductActionKind>();
+  return merged.filter((action) => {
+    if (seen.has(action.kind)) return false;
+    seen.add(action.kind);
+    return true;
+  }).slice(0, Math.max(1, limit));
+}
