@@ -928,6 +928,161 @@ body:has(.marketing-page) .user-info-bar {
   overflow: hidden;
 }
 
+/* Agent 优先工作区外壳 */
+.workspace-page {
+  min-width: 0;
+}
+
+.workspace-shell-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 58px;
+  padding: 8px 12px;
+  flex: 0 0 auto;
+}
+
+.workspace-shell-summary {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.workspace-shell-summary > div {
+  min-width: 0;
+}
+
+.workspace-view-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-soft);
+}
+
+.workspace-view-button {
+  min-height: 30px;
+  padding: 4px 11px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.workspace-view-button.active {
+  border-color: var(--border-strong);
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: var(--shadow);
+}
+
+.workspace-view-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.workspace-view-error {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-md);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.workspace-shell {
+  display: grid;
+  grid-template-columns: minmax(220px, 250px) minmax(0, 1fr);
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workspace-shell[data-view="library"] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.workspace-chapter-navigation {
+  min-width: 0;
+  min-height: 0;
+}
+
+.workspace-shell-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workspace-shell-main[data-view="studio"] {
+  grid-template-columns: minmax(380px, 1.05fr) minmax(360px, 0.95fr);
+}
+
+.workspace-pane {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.workspace-pane > .panel,
+.workspace-library-pane > .sidebar-panel {
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+}
+
+.workspace-pane[hidden],
+.workspace-chapter-navigation[hidden] {
+  display: none;
+}
+
+.chapter-link.navigating {
+  opacity: 0.68;
+  pointer-events: none;
+}
+
+.chapter-readonly-notice {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: 13px;
+}
+
+.chapter-reading-content {
+  width: min(760px, 100%);
+  margin: 0 auto;
+  padding: 18px 22px 40px;
+  overflow: auto;
+  color: var(--text);
+  font-size: 16px;
+  line-height: 1.9;
+}
+
+.chapter-reading-content h2 {
+  margin: 0 0 24px;
+  font-size: 22px;
+  line-height: 1.4;
+}
+
+.chapter-reading-content p {
+  margin: 0 0 1em;
+  white-space: pre-wrap;
+}
+
 .workspace > * {
   height: 100%;
   overflow: hidden;

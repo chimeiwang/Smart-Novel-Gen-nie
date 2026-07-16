@@ -10,10 +10,12 @@ import {
   useTransition,
 } from "react";
 
+import type { WorkspaceView } from "@/features/workspace/workspace-view";
 import { browserApi } from "@/lib/api/browser";
 import { requireApiData } from "@/lib/api/response";
 import type { QualityCheckDto } from "@/shared/contracts/quality-check";
 import { countTextLength } from "@/shared/lib/word-count";
+import { getChapterEditorPresentation } from "./chapter-editor-presentation";
 import {
   ChapterSaveCoordinator,
   createBestEffortChapterDraftStorage,
@@ -28,6 +30,8 @@ import {
 } from "./quality-check-poller";
 
 type ChapterEditorProps = {
+  view: WorkspaceView;
+  readingSession: number;
   userId: string;
   novelId: string;
   chapter: {
@@ -44,6 +48,8 @@ type ChapterEditorProps = {
 };
 
 export function ChapterEditor({
+  view,
+  readingSession,
   userId,
   novelId,
   chapter,
@@ -61,6 +67,9 @@ export function ChapterEditor({
   const [runningCheckId, setRunningCheckId] = useState<string | null>(null);
   const [qualityError, setQualityError] = useState<string | null>(null);
   const [draftDiscardError, setDraftDiscardError] = useState<string | null>(null);
+  const [minorEditError, setMinorEditError] = useState<string | null>(null);
+  const [minorEditingSession, setMinorEditingSession] = useState<number | null>(null);
+  const [pendingMinorEdit, startMinorEditTransition] = useTransition();
   const [localChecks, setLocalChecks] = useState<Record<string, QualityCheckDto>>({});
   const saveCoordinatorRef = useRef<ChapterSaveCoordinator | null>(null);
   const qualityPollingGenerationRef = useRef(0);
@@ -149,6 +158,12 @@ export function ChapterEditor({
   );
   const flowSteps = getChapterFlowSteps(chapterStatus, visibleChecks.length, doneCheckCount);
   const chapterEditable = chapterStatus === "drafting";
+  const minorEditing = view === "reading" && minorEditingSession === readingSession;
+  const editorPresentation = getChapterEditorPresentation({
+    view,
+    chapterStatus,
+    minorEditing,
+  });
   const retryableRunningCheck = qualityError
     ? findRunningQualityCheck(checks, runningCheckId)
     : null;
@@ -159,6 +174,19 @@ export function ChapterEditor({
         params: { path: { chapter_id: chapter.id } },
         body: { content: progressContent },
       }));
+    });
+  };
+
+  const handleExitMinorEdit = () => {
+    startMinorEditTransition(async () => {
+      setMinorEditError(null);
+      try {
+        await saveCoordinatorRef.current?.flush();
+        setMinorEditingSession(null);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : "保存失败";
+        setMinorEditError(`章节保存失败，无法退出小修：${detail}`);
+      }
     });
   };
 
@@ -341,13 +369,37 @@ export function ChapterEditor({
               ))}
             </div>
           </div>
-          <button
-            className="button ghost sm"
-            type="button"
-            onClick={() => setShowProgress(!showProgress)}
-          >
-            {showProgress ? "隐藏章节进展" : "章节进展"}
-          </button>
+          {editorPresentation.showEnterMinorEdit ? (
+            <button
+              className="button secondary sm"
+              type="button"
+              onClick={() => {
+                setMinorEditError(null);
+                setMinorEditingSession(readingSession);
+              }}
+            >
+              进入小修
+            </button>
+          ) : null}
+          {view === "reading" && minorEditing ? (
+            <button
+              className="button secondary sm"
+              type="button"
+              onClick={handleExitMinorEdit}
+              disabled={pendingMinorEdit}
+            >
+              {pendingMinorEdit ? "保存中..." : "退出小修"}
+            </button>
+          ) : null}
+          {view !== "reading" ? (
+            <button
+              className="button ghost sm"
+              type="button"
+              onClick={() => setShowProgress(!showProgress)}
+            >
+              {showProgress ? "隐藏章节进展" : "章节进展"}
+            </button>
+          ) : null}
           <button
             className="button ghost sm"
             type="button"
@@ -401,32 +453,52 @@ export function ChapterEditor({
       </div>
 
       <div className="panel-body stack editor-layout">
-        <input
-          className="input"
-          placeholder="章节标题"
-          value={title}
-          readOnly={!chapterEditable}
-          onChange={(event) => {
-            const nextTitle = event.target.value;
-            setTitle(nextTitle);
-            saveCoordinatorRef.current?.schedule({ title: nextTitle, content });
-          }}
-        />
+        {minorEditing && minorEditError ? <p className="muted error-text" role="alert">{minorEditError}</p> : null}
+        {editorPresentation.readOnlyReason ? (
+          <div className="chapter-readonly-notice">{editorPresentation.readOnlyReason}</div>
+        ) : null}
 
-        <textarea
-          className="textarea editor-area"
-          placeholder="正文内容"
-          value={content}
-          readOnly={!chapterEditable}
-          onChange={(event) => {
-            const nextContent = event.target.value;
-            setContent(nextContent);
-            saveCoordinatorRef.current?.schedule({ title, content: nextContent });
-          }}
-        />
+        {editorPresentation.showEditableFields ? (
+          <>
+            <input
+              className="input"
+              placeholder="章节标题"
+              value={title}
+              readOnly={!chapterEditable}
+              onChange={(event) => {
+                const nextTitle = event.target.value;
+                setTitle(nextTitle);
+                saveCoordinatorRef.current?.schedule({ title: nextTitle, content });
+              }}
+            />
+
+            <textarea
+              className="textarea editor-area"
+              placeholder="正文内容"
+              value={content}
+              readOnly={!chapterEditable}
+              onChange={(event) => {
+                const nextContent = event.target.value;
+                setContent(nextContent);
+                saveCoordinatorRef.current?.schedule({ title, content: nextContent });
+              }}
+            />
+          </>
+        ) : null}
+
+        {editorPresentation.showReadingContent ? (
+          <article className="chapter-reading-content">
+            <h2>{title || "未命名章节"}</h2>
+            {content.trim() ? content.split(/\n\s*\n/).map((paragraph, index) => (
+              <p key={`${index}:${paragraph.slice(0, 24)}`}>{paragraph}</p>
+            )) : (
+              <div className="empty">本章还没有正文内容。</div>
+            )}
+          </article>
+        ) : null}
 
         {/* 章节进展 */}
-        {showProgress ? (
+        {showProgress && view !== "reading" ? (
           <div className="stack editor-progress">
             <textarea
               className="textarea textarea-resize"

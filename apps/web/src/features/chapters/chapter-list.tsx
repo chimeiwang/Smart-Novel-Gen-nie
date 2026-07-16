@@ -5,12 +5,18 @@ import { useRouter } from "next/navigation";
 import { type MouseEvent, useState, useTransition } from "react";
 
 import { flushActiveChapterSave } from "@/features/editor/chapter-save-navigation";
+import {
+  buildWorkspaceChapterHref,
+  type WorkspaceView,
+} from "@/features/workspace/workspace-view";
 import { browserApi } from "@/lib/api/browser";
 import { requireApiData } from "@/lib/api/response";
+import { formatChapterBeatPlanMeta } from "./chapter-plan-presentation";
 
 type ChapterListProps = {
   novelId: string;
   activeChapterId: string;
+  view: WorkspaceView;
   chapters: Array<{
     id: string;
     title: string;
@@ -29,13 +35,16 @@ export function ChapterList({
   novelId,
   activeChapterId,
   chapters,
+  view,
 }: ChapterListProps) {
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const [creating, startCreatingTransition] = useTransition();
+  const [, startNavigationTransition] = useTransition();
+  const [navigatingChapterId, setNavigatingChapterId] = useState<string | null>(null);
   const [navigationError, setNavigationError] = useState<string | null>(null);
 
   const handleCreateChapter = () => {
-    startTransition(async () => {
+    startCreatingTransition(async () => {
       setNavigationError(null);
       try {
         await flushActiveChapterSave();
@@ -43,7 +52,11 @@ export function ChapterList({
           "/api/v1/novels/{novel_id}/chapters",
           { params: { path: { novel_id: novelId } } },
         ));
-        router.push(`/workspace/${novelId}?chapterId=${chapter.chapter.id}`);
+        router.push(buildWorkspaceChapterHref({
+          novelId,
+          chapterId: chapter.chapter.id,
+          view,
+        }));
         router.refresh();
       } catch (error) {
         setNavigationError(error instanceof Error ? error.message : "章节保存失败，无法新建章节");
@@ -65,13 +78,17 @@ export function ChapterList({
       return;
     }
     event.preventDefault();
-    startTransition(async () => {
+    if (navigatingChapterId === chapterId) return;
+    setNavigatingChapterId(chapterId);
+    startNavigationTransition(async () => {
       setNavigationError(null);
       try {
         await flushActiveChapterSave();
-        router.push(`/workspace/${novelId}?chapterId=${chapterId}`);
+        router.push(buildWorkspaceChapterHref({ novelId, chapterId, view }));
       } catch (error) {
         setNavigationError(error instanceof Error ? error.message : "章节保存失败，无法切换章节");
+      } finally {
+        setNavigatingChapterId(null);
       }
     });
   };
@@ -83,28 +100,38 @@ export function ChapterList({
           <h2 className="title-md">章节</h2>
           <p className="muted">当前共 {chapters.length} 章</p>
         </div>
-        <button className="button secondary" type="button" onClick={handleCreateChapter} disabled={pending}>
-          {pending ? "添加中..." : "新增章节"}
+        <button className="button secondary" type="button" onClick={handleCreateChapter} disabled={creating}>
+          {creating ? "添加中..." : "新增章节"}
         </button>
       </div>
       {navigationError ? <p className="muted error-text">{navigationError}</p> : null}
       <div className="list">
-        {chapters.map((chapter) => (
-          <Link
-            key={chapter.id}
-            href={`/workspace/${novelId}?chapterId=${chapter.id}`}
-            className={`chapter-link ${activeChapterId === chapter.id ? "active" : ""}`}
-            onClick={(event) => handleChapterNavigation(event, chapter.id)}
-          >
-            <div className="title-md">{chapter.title}</div>
-            <div className="chapter-link-meta">
-              <span>排序 #{chapter.order}</span>
-              <span>{chapter.wordCount ?? 0} 字</span>
-              <span>{formatBeatPlanMeta(chapter.approvedBeatPlan)}</span>
-              <span className="badge">{getStatusLabel(chapter.status)}</span>
-            </div>
-          </Link>
-        ))}
+        {chapters.map((chapter) => {
+          const isCurrentChapter = activeChapterId === chapter.id;
+          const beatPlanMeta = formatChapterBeatPlanMeta(
+            chapter.approvedBeatPlan ?? null,
+            { isCurrentChapter },
+          );
+          const navigating = navigatingChapterId === chapter.id;
+          return (
+            <Link
+              key={chapter.id}
+              href={buildWorkspaceChapterHref({ novelId, chapterId: chapter.id, view })}
+              className={`chapter-link ${isCurrentChapter ? "active" : ""} ${navigating ? "navigating" : ""}`}
+              aria-disabled={navigating}
+              onClick={(event) => handleChapterNavigation(event, chapter.id)}
+            >
+              <div className="title-md">{chapter.title}</div>
+              <div className="chapter-link-meta">
+                <span>排序 #{chapter.order}</span>
+                <span>{chapter.wordCount ?? 0} 字</span>
+                {beatPlanMeta ? <span>{beatPlanMeta}</span> : null}
+                <span className="badge">{getStatusLabel(chapter.status)}</span>
+                {navigating ? <span>切换中...</span> : null}
+              </div>
+            </Link>
+          );
+        })}
       </div>
     </div>
   );
@@ -114,9 +141,4 @@ function getStatusLabel(status?: string) {
   if (status === "review") return "待审";
   if (status === "completed") return "完成";
   return "草稿";
-}
-
-function formatBeatPlanMeta(plan?: { sceneCount: number; totalEstimatedWords: number } | null) {
-  if (!plan) return "未确认章节计划";
-  return `章节计划 ${plan.sceneCount} 场 · ${plan.totalEstimatedWords} 字`;
 }

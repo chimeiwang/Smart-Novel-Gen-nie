@@ -25,6 +25,7 @@ import {
   type DeferredGroupState,
 } from "./deferred-workspace";
 import { subscribeWorkspaceInvalidation } from "./workspace-invalidation";
+import type { WorkspaceView } from "./workspace-view";
 
 type SidebarTabKey = "chapters" | "lore" | "style" | "reference";
 type PlanningData = components["schemas"]["WorkspacePlanningResponse"];
@@ -34,6 +35,8 @@ type SidebarTabsProps = {
   activeChapterId: string;
   chapters: components["schemas"]["WorkspaceChapterSummary"][];
   appliedStyleId: string | null;
+  view?: WorkspaceView;
+  showChapters?: boolean;
 };
 
 const TAB_ITEMS: Array<{ key: SidebarTabKey; label: string }> = [
@@ -85,8 +88,10 @@ export function SidebarTabs({
   activeChapterId,
   chapters,
   appliedStyleId,
+  view = "studio",
+  showChapters = true,
 }: SidebarTabsProps) {
-  const [activeTab, setActiveTab] = useState<SidebarTabKey>("chapters");
+  const [activeTab, setActiveTab] = useState<SidebarTabKey>(showChapters ? "chapters" : "lore");
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const [loader] = useState(() => new DeferredWorkspaceLoader({
@@ -229,7 +234,7 @@ export function SidebarTabs({
     <div className="panel panel-flex sidebar-panel">
       <div className="panel-header">
         <div className="tabs sidebar-tabs">
-          {TAB_ITEMS.map((tab) => (
+          {TAB_ITEMS.filter((tab) => showChapters || tab.key !== "chapters").map((tab) => (
             <button
               key={tab.key}
               className={`tab-button ${activeTab === tab.key ? "active" : ""}`}
@@ -252,6 +257,7 @@ export function SidebarTabs({
             novelId={novelId}
             activeChapterId={activeChapterId}
             chapters={chapters}
+            view={view}
           />
         ) : null}
 
