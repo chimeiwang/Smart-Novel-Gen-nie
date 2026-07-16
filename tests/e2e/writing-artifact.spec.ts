@@ -7,7 +7,9 @@ import {
   readWorkspace,
 } from "./helpers";
 
-test("模拟模型可以完成写作会话和草案应用", async ({ page }) => {
+test.use({ viewport: { width: 1440, height: 900 } });
+
+test("生成正文进入固定审核栏，刷新恢复主会话与待确认产物后可以应用", async ({ page }) => {
   const reactKeyWarnings: string[] = [];
   page.on("console", (message) => {
     const text = message.text();
@@ -28,6 +30,9 @@ test("模拟模型可以完成写作会话和草案应用", async ({ page }) => 
   await expect(page.getByRole("button", { name: "应用到项目" }).first()).toBeVisible({
     timeout: 60_000,
   });
+  const reviewRail = page.getByRole("complementary", { name: "当前章节审核栏" });
+  await expect(reviewRail.getByText("本章待确认 1 项", { exact: true })).toBeVisible();
+  await expect(reviewRail.getByRole("button", { name: "应用到项目" })).toBeVisible();
 
   const sessionsResponse = await page.request.get(
     `/api/v1/writing/sessions?novelId=${identity.novelId}&chapterId=${identity.chapterId}`,
@@ -43,9 +48,11 @@ test("模拟模型可以完成写作会话和草案应用", async ({ page }) => 
   expect(session.messages.some((message) => message.role === "user")).toBe(true);
 
   await page.reload();
-  await page.getByRole("button", { name: /会话列表/ }).click();
-  await page.getByText("未命名会话", { exact: true }).click();
-  await expect(page.getByRole("button", { name: "应用到项目" }).first()).toBeVisible({
+  await expect(page.getByRole("button", { name: /历史对话：生成正文/ })).toBeVisible();
+  await expect(reviewRail.getByText("本章待确认 1 项", { exact: true })).toBeVisible({
+    timeout: 30_000,
+  });
+  await expect(reviewRail.getByRole("button", { name: "应用到项目" })).toBeVisible({
     timeout: 30_000,
   });
   const workspaceBeforeApply = await readWorkspace(page, identity.novelId);
@@ -57,7 +64,7 @@ test("模拟模型可以完成写作会话和草案应用", async ({ page }) => 
     chaptersBeforeApply.find((chapter) => chapter.id === identity.chapterId)?.content,
   ).toBe("");
 
-  await page.getByRole("button", { name: "应用到项目" }).first().click();
+  await reviewRail.getByRole("button", { name: "应用到项目" }).click();
   await expect.poll(async () => {
     const workspace = await readWorkspace(page, identity.novelId);
     const chapters = workspace.chapters as Array<{ id: string; content: string }>;
@@ -89,7 +96,8 @@ test("用户可以丢弃待确认草案", async ({ page }) => {
     timeout: 60_000,
   });
   await page.getByRole("button", { name: "丢弃变更" }).first().click();
-  await expect(page.getByRole("button", { name: "待确认 0" })).toBeVisible();
+  await expect(page.getByText("本章待确认 0 项", { exact: true })).toBeVisible();
+  await expect(page.getByText("当前没有待确认变更", { exact: true })).toBeVisible();
 
   await page.reload();
   const sessionsResponse = await page.request.get(
@@ -114,15 +122,16 @@ test("普通问答完成后可以恢复双方消息", async ({ page }) => {
   await openWorkspace(page, identity);
 
   const question = "开始写这一章前，我应该先准备什么？";
-  await page.getByPlaceholder("输入消息...（@ 邀请助手）").fill(question);
+  await page
+    .getByPlaceholder("描述要完成的创作任务，系统会自动分配合适的 Agent")
+    .fill(question);
   await page.getByRole("button", { name: "发送" }).click();
   await expect(page.getByText("模拟模型已完成本轮处理。", { exact: true })).toBeVisible({
     timeout: 60_000,
   });
 
   await page.reload();
-  await page.getByRole("button", { name: /会话列表/ }).click();
-  await page.getByText("未命名会话", { exact: true }).click();
+  await expect(page.getByRole("button", { name: /历史对话：开始写这一章前/ })).toBeVisible();
   await expect(page.getByText(question, { exact: true })).toBeVisible();
   await expect(page.getByText("模拟模型已完成本轮处理。", { exact: true })).toBeVisible();
 

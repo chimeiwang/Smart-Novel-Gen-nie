@@ -96,5 +96,32 @@ export async function expectApiOk(
 
 export async function openWorkspace(page: Page, identity: NovelIdentity): Promise<void> {
   await page.goto(`/workspace/${identity.novelId}?chapterId=${identity.chapterId}`);
+  await expect(page.getByRole("button", { name: "AI 创作", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(
+    page.getByPlaceholder("描述要完成的创作任务，系统会自动分配合适的 Agent"),
+  ).toBeVisible();
+}
+
+export async function openReadingWorkspace(
+  page: Page,
+  identity: NovelIdentity,
+): Promise<void> {
+  await page.goto(
+    `/workspace/${identity.novelId}?chapterId=${identity.chapterId}&view=reading`,
+  );
+  await expect(page.getByRole("button", { name: "阅读与小修", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(page.getByRole("button", { name: "进入小修", exact: true })).toBeVisible();
+  await expect(page.getByPlaceholder("正文内容")).toHaveCount(0);
+}
+
+export async function enterMinorEdit(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "进入小修", exact: true }).click();
   await expect(page.getByPlaceholder("章节标题")).toBeVisible();
+  await expect(page.getByPlaceholder("正文内容")).toBeEditable();
 }

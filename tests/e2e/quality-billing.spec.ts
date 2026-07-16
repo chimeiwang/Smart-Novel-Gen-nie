@@ -1,10 +1,18 @@
 import { expect, test } from "@playwright/test";
 
-import { createNovelWithApi, openWorkspace, readWorkspace } from "./helpers";
+import {
+  createNovelWithApi,
+  enterMinorEdit,
+  openReadingWorkspace,
+  readWorkspace,
+} from "./helpers";
+
+test.use({ viewport: { width: 1440, height: 900 } });
 
 test("用户可以运行质量检查并查看模拟模型零扣费摘要", async ({ page }) => {
   const identity = await createNovelWithApi(page);
-  await openWorkspace(page, identity);
+  await openReadingWorkspace(page, identity);
+  await enterMinorEdit(page);
 
   await page.getByPlaceholder("正文内容").fill("用于一致性终检的完整章节正文。");
   await expect(page.getByText("已保存", { exact: true })).toBeVisible({ timeout: 20_000 });
