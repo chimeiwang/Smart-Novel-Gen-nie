@@ -103,6 +103,32 @@ class ToolRegistry:
             tool for tool in self._tools.values() if tool.permission.allows(agent_id, capabilities)
         ]
 
+    def for_execution(
+        self,
+        *,
+        agent_id: str,
+        capabilities: set[str] | frozenset[str],
+        allowed_tool_names: frozenset[str],
+    ) -> list[ToolDefinition]:
+        unknown = allowed_tool_names.difference(self._tools)
+        if unknown:
+            raise ValueError(
+                "Operation 声明了未注册工具：" + "、".join(sorted(unknown))
+            )
+        agent_tools = {
+            tool.name: tool
+            for tool in self.for_agent(agent_id=agent_id, capabilities=capabilities)
+        }
+        unauthorized = allowed_tool_names.difference(agent_tools)
+        if unauthorized:
+            raise ValueError(
+                "Operation 工具超出智能体能力："
+                + "、".join(sorted(unauthorized))
+            )
+        return [
+            tool for name, tool in self._tools.items() if name in allowed_tool_names
+        ]
+
     async def execute(
         self,
         name: str,

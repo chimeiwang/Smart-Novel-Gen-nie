@@ -75,6 +75,39 @@ def test_registry_contains_migrated_read_proposal_and_control_tools() -> None:
     assert set(READ_TOOL_NAMES) <= names
 
 
+def test_for_execution_returns_exact_tools_in_registry_order() -> None:
+    registry = build_default_registry()
+    tools = registry.for_execution(
+        agent_id="写作",
+        capabilities={"novel.read", "control.artifact"},
+        allowed_tool_names=frozenset({"begin_artifact_output", "get_novel_info"}),
+    )
+
+    assert [tool.name for tool in tools] == ["get_novel_info", "begin_artifact_output"]
+
+
+def test_for_execution_rejects_unregistered_tool() -> None:
+    registry = build_default_registry()
+
+    with pytest.raises(ValueError, match="Operation 声明了未注册工具.*missing_tool"):
+        registry.for_execution(
+            agent_id="写作",
+            capabilities={"novel.read"},
+            allowed_tool_names=frozenset({"missing_tool"}),
+        )
+
+
+def test_for_execution_rejects_operation_tool_outside_agent_capability() -> None:
+    registry = build_default_registry()
+
+    with pytest.raises(ValueError, match="Operation 工具超出智能体能力.*submit_evaluation"):
+        registry.for_execution(
+            agent_id="写作",
+            capabilities={"novel.read"},
+            allowed_tool_names=frozenset({"submit_evaluation"}),
+        )
+
+
 def test_require_authorized_returns_the_registered_tool_for_known_agent() -> None:
     registry = ToolRegistry()
     tool = restricted_tool()

@@ -86,6 +86,8 @@ class QualityJobHandler:
             result = await self._runner.run(
                 AgentRunRequest(
                     agentId="编辑",
+                    executionMode="quality",
+                    operationKind=None,
                     userMessage=message,
                     contextMessages=[
                         "质量检查完整上下文："

@@ -1,108 +1,296 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import FrozenInstanceError
+from typing import Any
+
 import pytest
 from inkforge_agents.definitions.agents import AGENT_DEFINITIONS
-from inkforge_agents.providers.base import ModelTurnRequest, ModelTurnResult, ModelUsage
+from inkforge_agents.operations.definitions import OPERATION_DEFINITIONS
+from inkforge_agents.providers.base import (
+    ModelToolCall,
+    ModelTurnRequest,
+    ModelTurnResult,
+    ModelUsage,
+)
 from inkforge_agents.runtime.agent_runner import AgentRunner, AgentRunRequest
 from inkforge_agents.runtime.agent_runtime import AgentRuntime
+from inkforge_agents.runtime.execution import resolve_execution_contract
 from inkforge_agents.runtime.model_runtime import ModelRuntime
 from inkforge_agents.tools.registry import ToolContext, build_default_registry
+from pydantic import ValidationError
+
+USAGE = ModelUsage(
+    promptTokens=1,
+    cachedTokens=0,
+    completionTokens=1,
+    totalTokens=2,
+)
 
 
 class CapturingProvider:
     billable = False
 
     def __init__(self) -> None:
-        self.request: ModelTurnRequest | None = None
+        self.requests: list[ModelTurnRequest] = []
 
     async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
-        self.request = request
+        self.requests.append(request)
         return ModelTurnResult(
             content="已完成",
             toolCalls=[],
             finishReason="stop",
             rawFinishReason="stop",
-            usage=ModelUsage(
-                promptTokens=1,
-                cachedTokens=0,
-                completionTokens=1,
-                totalTokens=2,
-            ),
+            usage=USAGE,
         )
 
 
-@pytest.mark.asyncio
-async def test_runner_builds_prompt_and_exposes_only_agent_tools() -> None:
-    provider = CapturingProvider()
-    registry = build_default_registry()
-    runner = AgentRunner(
-        AgentRuntime(ModelRuntime(provider), registry),
-        registry,
-    )
-    result = await runner.run(
-        AgentRunRequest(
-            agentId="写作",
-            userMessage="续写本章",
-            contextMessages=["当前章节目标：主角逃离围城"],
-            toolContext=ToolContext(
-                userId="user-1",
-                novelId="novel-1",
-                taskId="task-1",
-                runId="run-1",
-                agentId="写作",
-            ),
+class TerminalProvider:
+    billable = False
+
+    def __init__(self, tool_name: str, arguments: Mapping[str, Any]) -> None:
+        self.tool_name = tool_name
+        self.arguments = dict(arguments)
+        self.calls = 0
+
+    async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+        self.calls += 1
+        if self.calls > 1:
+            raise AssertionError("终止控制工具成功后不应再次调用模型")
+        assert self.tool_name in {tool.name for tool in request.tools}
+        return ModelTurnResult(
+            content="草案正文",
+            toolCalls=[
+                ModelToolCall(id="call-1", name=self.tool_name, arguments=self.arguments)
+            ],
+            finishReason="tool_calls",
+            rawFinishReason="tool_calls",
+            usage=USAGE,
         )
+
+
+def tool_context(agent_id: str) -> ToolContext:
+    return ToolContext(
+        userId="user-1",
+        novelId="novel-1",
+        taskId="task-1",
+        runId="run-1",
+        agentId=agent_id,
     )
 
-    assert result.agentId == "写作"
-    assert provider.request is not None
-    assert provider.request.messages[0].role == "system"
-    assert "小说正文创作者" in provider.request.messages[0].content
-    tool_names = {tool.name for tool in provider.request.tools}
-    assert "begin_artifact_output" in tool_names
-    assert "get_recent_chapters" in tool_names
-    assert "submit_evaluation" not in tool_names
-    assert "propose_updates" not in tool_names
+
+def request(
+    *,
+    agent_id: str = "写作",
+    mode: str = "primary",
+    operation_kind: str | None = "write_chapter",
+) -> AgentRunRequest:
+    return AgentRunRequest(
+        agentId=agent_id,
+        executionMode=mode,
+        operationKind=operation_kind,
+        userMessage="处理当前任务",
+        contextMessages=["当前章节目标：主角逃离围城"],
+        toolContext=tool_context(agent_id),
+    )  # type: ignore[arg-type]
 
 
 @pytest.mark.asyncio
-async def test_runner_can_limit_operation_to_control_tools() -> None:
+@pytest.mark.parametrize(
+    ("agent_id", "mode", "operation_kind", "expected"),
+    [
+        (
+            "写作",
+            "primary",
+            "write_chapter",
+            OPERATION_DEFINITIONS["write_chapter"].allowedToolNames,
+        ),
+        ("校验", "reviewer", "write_chapter", frozenset({"submit_evaluation"})),
+        (
+            "写作",
+            "reviser",
+            "write_chapter",
+            OPERATION_DEFINITIONS["write_chapter"].allowedToolNames,
+        ),
+        ("编辑", "quality", None, frozenset({"submit_quality_report"})),
+    ],
+)
+async def test_runner_exposes_exact_execution_mode_tools(
+    agent_id: str,
+    mode: str,
+    operation_kind: str | None,
+    expected: frozenset[str],
+) -> None:
     provider = CapturingProvider()
     registry = build_default_registry()
     runner = AgentRunner(AgentRuntime(ModelRuntime(provider), registry), registry)
 
     await runner.run(
-        AgentRunRequest(
-            agentId="设定",
-            userMessage="同步设定",
-            contextMessages=["核心服务权威写作上下文：完整上下文"],
-            toolMode="control_only",
-            toolContext=ToolContext(
-                userId="user-1",
-                novelId="novel-1",
-                taskId="task-1",
-                runId="run-1",
-                agentId="设定",
-            ),
-        )
+        request(agent_id=agent_id, mode=mode, operation_kind=operation_kind)
     )
 
-    assert provider.request is not None
-    tool_names = {tool.name for tool in provider.request.tools}
-    assert "start_update_builder" in tool_names
-    assert "finish_update_builder" in tool_names
-    assert "get_recent_chapters" not in tool_names
-    assert "list_characters_summary" not in tool_names
+    assert len(provider.requests) == 1
+    assert {tool.name for tool in provider.requests[0].tools} == expected
 
 
-def test_all_five_agents_use_single_output_protocol() -> None:
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("operation_kind", "expected", "unexpected"),
+    [
+        ("plan_chapter", "submit_beat_plan", "begin_artifact_output"),
+        ("write_chapter", "begin_artifact_output", "submit_beat_plan"),
+    ],
+)
+async def test_primary_artifact_operations_do_not_expose_wrong_artifact_tool(
+    operation_kind: str,
+    expected: str,
+    unexpected: str,
+) -> None:
+    provider = CapturingProvider()
+    registry = build_default_registry()
+    runner = AgentRunner(AgentRuntime(ModelRuntime(provider), registry), registry)
+    agent_id = OPERATION_DEFINITIONS[operation_kind].primaryAgent  # type: ignore[index]
+
+    await runner.run(
+        request(agent_id=agent_id, mode="primary", operation_kind=operation_kind)
+    )
+
+    names = {tool.name for tool in provider.requests[0].tools}
+    assert expected in names
+    assert unexpected not in names
+    assert "submit_evaluation" not in names
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("agent_id", "mode", "operation_kind"),
+    [
+        ("编辑", "primary", "write_chapter"),
+        ("设定", "reviser", "write_chapter"),
+        ("设定", "reviewer", "write_chapter"),
+        ("校验", "quality", None),
+        ("编辑", "primary", "sync_lore"),
+    ],
+)
+async def test_runner_rejects_invalid_agent_mode_operation_combination(
+    agent_id: str,
+    mode: str,
+    operation_kind: str | None,
+) -> None:
+    provider = CapturingProvider()
+    registry = build_default_registry()
+    runner = AgentRunner(AgentRuntime(ModelRuntime(provider), registry), registry)
+
+    with pytest.raises(ValueError, match="AGENT_EXECUTION_MODE_INVALID"):
+        await runner.run(
+            request(agent_id=agent_id, mode=mode, operation_kind=operation_kind)
+        )
+
+    assert provider.requests == []
+
+
+@pytest.mark.parametrize(
+    ("mode", "operation_kind", "message"),
+    [
+        ("quality", "write_chapter", "质量模式不能绑定 CreativeOperation"),
+        ("primary", None, "创作执行模式缺少 Operation"),
+        ("reviewer", None, "创作执行模式缺少 Operation"),
+        ("reviser", None, "创作执行模式缺少 Operation"),
+    ],
+)
+def test_request_rejects_invalid_mode_operation_scope(
+    mode: str,
+    operation_kind: str | None,
+    message: str,
+) -> None:
+    with pytest.raises(ValidationError, match=message):
+        request(mode=mode, operation_kind=operation_kind)
+
+
+def test_request_rejects_agent_context_mismatch_and_unknown_fields() -> None:
+    with pytest.raises(ValidationError, match="运行智能体与工具上下文智能体不一致"):
+        AgentRunRequest(
+            agentId="写作",
+            executionMode="primary",
+            operationKind="write_chapter",
+            userMessage="续写本章",
+            toolContext=tool_context("编辑"),
+        )
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        AgentRunRequest(
+            agentId="写作",
+            executionMode="primary",
+            operationKind="write_chapter",
+            userMessage="续写本章",
+            toolMode="all",
+            toolContext=tool_context("写作"),
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("agent_id", "mode", "operation_kind", "tool_name", "arguments"),
+    [
+        (
+            "写作",
+            "primary",
+            "write_chapter",
+            "begin_artifact_output",
+            {"kind": "chapter_draft", "summary": "正文草案"},
+        ),
+        (
+            "校验",
+            "reviewer",
+            "write_chapter",
+            "submit_evaluation",
+            {"artifactKey": "task-1:chapter", "verdict": "pass", "summary": "通过"},
+        ),
+        (
+            "写作",
+            "reviser",
+            "write_chapter",
+            "begin_artifact_output",
+            {"kind": "chapter_draft", "summary": "返工正文"},
+        ),
+        (
+            "编辑",
+            "quality",
+            None,
+            "submit_quality_report",
+            {"scores": {"overall": 90}, "qualityGate": "pass"},
+        ),
+    ],
+)
+async def test_runtime_stops_on_call_level_terminal_tool(
+    agent_id: str,
+    mode: str,
+    operation_kind: str | None,
+    tool_name: str,
+    arguments: Mapping[str, Any],
+) -> None:
+    provider = TerminalProvider(tool_name, arguments)
+    registry = build_default_registry()
+    runner = AgentRunner(AgentRuntime(ModelRuntime(provider), registry), registry)
+
+    result = await runner.run(
+        request(agent_id=agent_id, mode=mode, operation_kind=operation_kind)
+    )
+
+    assert provider.calls == 1
+    assert result.finishReason == "terminal_control_tool"
+    assert [event["type"] for event in result.controlEvents] == [tool_name]
+
+
+def test_execution_tool_contract_is_immutable() -> None:
+    contract = resolve_execution_contract("primary", "write_chapter")
+
+    with pytest.raises(FrozenInstanceError):
+        contract.mode = "reviewer"  # type: ignore[misc]
+
+
+def test_agent_definition_no_longer_declares_global_terminal_tools() -> None:
     assert set(AGENT_DEFINITIONS) == {"设定", "剧情", "写作", "校验", "编辑"}
-    assert {definition.outputMode for definition in AGENT_DEFINITIONS.values()} == {
-        "paragraph_text_with_control_tools"
-    }
-
-
-def test_lore_agent_stops_after_submitting_updates() -> None:
-    assert AGENT_DEFINITIONS["设定"].terminalControlTools == frozenset(
-        {"propose_updates", "finish_update_builder"}
+    assert all(
+        not hasattr(definition, "terminalControlTools")
+        for definition in AGENT_DEFINITIONS.values()
     )

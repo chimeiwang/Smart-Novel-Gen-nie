@@ -185,6 +185,71 @@ async def test_reviewer_receives_submitted_artifact_without_read_tools() -> None
         },
     )
 
-    assert runner.requests[0].toolMode == "control_only"
+    assert runner.requests[0].executionMode == "reviewer"
+    assert runner.requests[0].operationKind == "revise_lore"
     assert "当前待审核草案权威内容" in runner.requests[0].contextMessages[-1]
     assert "新增事实" in runner.requests[0].contextMessages[-1]
+
+
+@pytest.mark.asyncio
+async def test_executor_marks_primary_and_reviser_modes_explicitly() -> None:
+    runner = RecordingRunner()
+    executor = CoreGraphAgentExecutor(runner, CoreArtifactPort(CoreClient()))  # type: ignore[arg-type]
+    base_state = {
+        "userId": "user-1",
+        "novelId": "novel-1",
+        "taskId": "task-1",
+        "userMessage": "续写章节",
+        "contextMessages": [],
+        "currentOperation": {"kind": "write_chapter", "primaryAgent": "写作"},
+    }
+
+    await executor.run("写作", base_state)
+    assert runner.requests[-1].executionMode == "primary"
+    assert runner.requests[-1].operationKind == "write_chapter"
+
+    core = CoreClient()
+    artifacts = CoreArtifactPort(core)
+    artifact_id = await artifacts.submit(
+        {
+            **base_state,
+            "chapterId": "chapter-1",
+            "activeAgent": "写作",
+        },
+        {
+            "type": "begin_artifact_output",
+            "kind": "chapter_draft",
+            "summary": "正文草案",
+            "artifactKey": "task-1:chapter",
+        },
+        "原正文",
+    )
+    executor = CoreGraphAgentExecutor(runner, artifacts)  # type: ignore[arg-type]
+    await executor.run(
+        "写作",
+        {
+            **base_state,
+            "activeArtifactId": artifact_id,
+            "pendingRevision": {"requiredChanges": "补足冲突"},
+        },
+    )
+    assert runner.requests[-1].executionMode == "reviser"
+    assert runner.requests[-1].operationKind == "write_chapter"
+
+
+@pytest.mark.asyncio
+async def test_executor_rejects_missing_operation_kind() -> None:
+    runner = RecordingRunner()
+    executor = CoreGraphAgentExecutor(runner, CoreArtifactPort(CoreClient()))  # type: ignore[arg-type]
+
+    with pytest.raises(ValueError, match="当前 Operation kind 无效"):
+        await executor.run(
+            "编辑",
+            {
+                "userId": "user-1",
+                "novelId": "novel-1",
+                "taskId": "task-1",
+                "userMessage": "回答问题",
+                "currentOperation": {},
+            },
+        )

@@ -8,7 +8,10 @@ from typing import Any, Protocol, cast
 from pydantic import JsonValue
 
 from ..clients.core import CoreServiceClient, RunResource
+from ..operations.contracts import CreativeOperationKind
+from ..operations.definitions import OPERATION_DEFINITIONS
 from ..runtime.agent_runner import AgentRunner, AgentRunRequest
+from ..runtime.execution import AgentExecutionMode
 from ..tools.registry import ToolContext
 
 
@@ -188,6 +191,7 @@ class CoreGraphAgentExecutor:
         self._artifacts = artifacts
 
     async def run(self, agent_id: str, state: dict[str, Any]) -> dict[str, Any]:
+        operation_kind = _operation_kind(state)
         context = ToolContext(
             userId=_required_text(state, "userId"),
             novelId=_required_text(state, "novelId"),
@@ -209,9 +213,17 @@ class CoreGraphAgentExecutor:
                 + json.dumps(artifact_context, ensure_ascii=False, separators=(",", ":"))
                 + "\n读取工具不可用，请直接审阅以上草案并调用 submit_evaluation。"
             )
+        execution_mode: AgentExecutionMode = "primary"
+        if artifact_context is not None:
+            operation = OPERATION_DEFINITIONS[operation_kind]
+            execution_mode = (
+                "reviser" if agent_id == operation.primaryAgent else "reviewer"
+            )
         result = await self._runner.run(
             AgentRunRequest(
                 agentId=cast(Any, agent_id),
+                executionMode=execution_mode,
+                operationKind=operation_kind,
                 userMessage=_required_text(state, "userMessage"),
                 contextMessages=context_messages,
                 conversationMessages=[
@@ -219,7 +231,6 @@ class CoreGraphAgentExecutor:
                     for item in state.get("conversationHistory", [])
                     if isinstance(item, dict)
                 ],
-                toolMode=("control_only" if artifact_context is not None else "all"),
                 toolContext=context,
             )
         )
@@ -229,6 +240,14 @@ class CoreGraphAgentExecutor:
                 if isinstance(event, dict) and event.get("type") == "submit_evaluation":
                     await self._artifacts.submit_evaluation(state, artifact_id, agent_id, event)
         return payload
+
+
+def _operation_kind(state: dict[str, Any]) -> CreativeOperationKind:
+    operation = state.get("currentOperation")
+    kind = operation.get("kind") if isinstance(operation, dict) else None
+    if not isinstance(kind, str) or kind not in OPERATION_DEFINITIONS:
+        raise ValueError("当前 Operation kind 无效")
+    return kind
 
 
 def _artifact_payload(event: dict[str, Any], content: str) -> tuple[str, dict[str, Any]]:

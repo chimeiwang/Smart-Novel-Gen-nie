@@ -38,9 +38,10 @@ class Core:
 class Runner:
     def __init__(self, workflow_log: WorkflowLog) -> None:
         self._workflow_log = workflow_log
+        self.requests: list[Any] = []
 
     async def run(self, request: object):
-        del request
+        self.requests.append(request)
         assert self._workflow_log.entries[0][0] == "开始"
 
         class Result:
@@ -72,7 +73,8 @@ class WorkflowLog:
 async def test_quality_job_requires_structured_report_and_returns_visible_result() -> None:
     core = Core()
     workflow_log = WorkflowLog()
-    handler = QualityJobHandler(core, Runner(workflow_log), workflow_log=workflow_log)
+    runner = Runner(workflow_log)
+    handler = QualityJobHandler(core, runner, workflow_log=workflow_log)
     job = QueueJob(
         jobId="quality-check-1",
         kind="quality",
@@ -86,6 +88,11 @@ async def test_quality_job_requires_structured_report_and_returns_visible_result
     )
 
     await handler(job)
+
+    assert runner.requests[0].agentId == "编辑"
+    assert runner.requests[0].executionMode == "quality"
+    assert runner.requests[0].operationKind is None
+    assert runner.requests[0].toolContext.agentId == "编辑"
 
     assert core.result == {
         "result": "一致性良好",

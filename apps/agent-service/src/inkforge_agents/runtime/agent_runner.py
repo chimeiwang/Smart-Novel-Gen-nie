@@ -1,12 +1,18 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..definitions.agents import AGENT_DEFINITIONS, AgentId
+from ..operations.contracts import CreativeOperationKind
 from ..tools.registry import ToolContext, ToolRegistry
 from .agent_runtime import AgentRuntime
+from .execution import (
+    AgentExecutionMode,
+    resolve_execution_contract,
+    validate_execution_agent,
+)
 from .model_runtime import ModelCallContext
 from .turn_result import AgentTurnResult
 
@@ -15,16 +21,21 @@ class AgentRunRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     agentId: AgentId
+    executionMode: AgentExecutionMode
+    operationKind: CreativeOperationKind | None
     userMessage: str
     contextMessages: list[str] = Field(default_factory=list)
     conversationMessages: list[dict[str, object]] = Field(default_factory=list)
-    toolMode: Literal["all", "control_only"] = "all"
     toolContext: ToolContext
 
     @model_validator(mode="after")
-    def validate_agent_context(self) -> AgentRunRequest:
+    def validate_execution_scope(self) -> Self:
         if self.agentId != self.toolContext.agentId:
             raise ValueError("运行智能体与工具上下文智能体不一致")
+        if self.executionMode == "quality" and self.operationKind is not None:
+            raise ValueError("质量模式不能绑定 CreativeOperation")
+        if self.executionMode != "quality" and self.operationKind is None:
+            raise ValueError("创作执行模式缺少 Operation")
         return self
 
 
@@ -39,6 +50,11 @@ class AgentRunner:
 
     async def run(self, request: AgentRunRequest) -> AgentRunResult:
         definition = AGENT_DEFINITIONS[request.agentId]
+        execution = resolve_execution_contract(
+            request.executionMode,
+            request.operationKind,
+        )
+        validate_execution_agent(execution, request.agentId)
         messages: list[dict[str, object]] = [{"role": "system", "content": definition.systemPrompt}]
         messages.extend(
             {"role": "system", "content": context_message}
@@ -46,18 +62,17 @@ class AgentRunner:
         )
         messages.extend(request.conversationMessages)
         messages.append({"role": "user", "content": request.userMessage})
-        tools = self._registry.for_agent(
+        tools = self._registry.for_execution(
             agent_id=definition.id,
             capabilities=definition.toolCapabilities,
+            allowed_tool_names=execution.allowedToolNames,
         )
-        if request.toolMode == "control_only":
-            tools = [tool for tool in tools if tool.toolKind == "control"]
         result = await self._runtime.run(
             messages=messages,
             exposed_tools=tools,
             context=request.toolContext,
             max_iterations=definition.maxIterations,
-            terminal_control_tools=definition.terminalControlTools,
+            terminal_control_tools=execution.terminalControlTools,
             model_context=ModelCallContext(
                 userId=request.toolContext.userId,
                 novelId=request.toolContext.novelId,

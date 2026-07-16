@@ -18,6 +18,7 @@ AGENT_CAPABILITIES: dict[str, frozenset[str]] = {
         {
             "novel.read",
             "character.read",
+            "lore.read",
             "plot.read",
             "chapter.read",
             "artifact.read",
