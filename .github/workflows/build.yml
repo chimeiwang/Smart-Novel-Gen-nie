@@ -130,6 +130,7 @@ jobs:
           chmod 600 "$SSH_KNOWN_HOSTS_FILE"
 
       - name: Upload Docker images
+        timeout-minutes: 30
         env:
           DEPLOY_SHA: ${{ github.sha }}
           SERVER_HOST: ${{ secrets.SERVER_HOST }}

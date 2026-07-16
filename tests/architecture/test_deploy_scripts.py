@@ -28,6 +28,40 @@ def test_upload_requires_pinned_known_hosts_before_network_calls() -> None:
     assert "ssh-keyscan" not in source
 
 
+def test_upload_preflights_and_processes_each_image_with_bounded_stages() -> None:
+    source = UPLOAD.read_text(encoding="utf-8")
+
+    for contract in (
+        'CONNECT_TIMEOUT_SECONDS="${CONNECT_TIMEOUT_SECONDS:-15}"',
+        'REMOTE_COMMAND_TIMEOUT_SECONDS="${REMOTE_COMMAND_TIMEOUT_SECONDS:-300}"',
+        'IMAGE_ARCHIVE_TIMEOUT_SECONDS="${IMAGE_ARCHIVE_TIMEOUT_SECONDS:-600}"',
+        'IMAGE_UPLOAD_TIMEOUT_SECONDS="${IMAGE_UPLOAD_TIMEOUT_SECONDS:-1200}"',
+        "validate_timeout",
+        'ConnectTimeout=$CONNECT_TIMEOUT_SECONDS',
+        "ConnectionAttempts=2",
+        "--kill-after=30s",
+        "docker info",
+        "DockerRootDir",
+        "df -Pk",
+        'mktemp -d "${RUNNER_TEMP:-/tmp}/inkforge-images.XXXXXX"',
+        'trap cleanup_upload_archives EXIT',
+        'for index in "${!images_to_upload[@]}"',
+        'image="${images_to_upload[$index]}"',
+        'docker save "$1" | gzip -1 > "$2"',
+        'stat -c %s "$archive"',
+        'timeout --kill-after=30s "$IMAGE_UPLOAD_TIMEOUT_SECONDS"',
+        "bash -o pipefail -c 'gunzip | docker load'",
+        "服务器镜像查询失败",
+        "服务器 Docker 容量不足",
+        "image_size * 2 + REMOTE_DOCKER_SAFETY_BYTES",
+        "镜像归档完成",
+        "开始传输并导入镜像",
+        "镜像传输并导入完成",
+        "镜像传输或导入失败",
+    ):
+        assert contract in source
+
+
 def test_deploy_scripts_contain_no_destructive_or_dynamic_trust_commands() -> None:
     source = "\n".join(
         path.read_text(encoding="utf-8") for path in (UPLOAD, DEPLOY)
@@ -55,6 +89,116 @@ def _posix_path(path: Path) -> str:
     if os.name != "nt":
         return resolved.as_posix()
     return f"/{resolved.drive[0].lower()}{resolved.as_posix()[2:]}"
+
+
+def _run_upload(
+    tmp_path: Path,
+    *,
+    current_status: int = 20,
+    has_image_status: int = 20,
+    upload_status: int = 0,
+) -> tuple[subprocess.CompletedProcess[str], str, Path]:
+    bin_dir = tmp_path / "bin"
+    runner_temp = tmp_path / "runner"
+    bin_dir.mkdir()
+    runner_temp.mkdir()
+    known_hosts = tmp_path / "known_hosts"
+    known_hosts.write_text("example ssh-ed25519 fixture\n", encoding="utf-8")
+    log_path = tmp_path / "upload.log"
+
+    _write_executable(
+        bin_dir / "docker",
+        "#!/bin/sh\n"
+        "printf 'docker %s\\n' \"$*\" >> \"$UPLOAD_LOG\"\n"
+        "case \"$*\" in\n"
+        "  'image inspect --format={{.Id}} '*) echo 'sha256:fixture' ;;\n"
+        "  'image inspect --format={{.Size}} '*) echo '1048576' ;;\n"
+        "  save*) printf 'fixture-archive' ;;\n"
+        "  *) exit 1 ;;\n"
+        "esac\n",
+    )
+    _write_executable(
+        bin_dir / "ssh",
+        "#!/bin/sh\n"
+        "command_text=''\n"
+        "for argument in \"$@\"; do command_text=$argument; done\n"
+        "printf 'ssh %s\\n' \"$command_text\" >> \"$UPLOAD_LOG\"\n"
+        "case \"$command_text\" in\n"
+        "  *'DockerRootDir'*) echo '服务器 Docker 响应正常'; exit 0 ;;\n"
+        "  *'container_id='*) exit \"$FAKE_CURRENT_STATUS\" ;;\n"
+        "  *'required_bytes'*) echo '服务器 Docker 容量满足要求'; exit 0 ;;\n"
+        "  *'docker image inspect \"$image_id\"'*) exit \"$FAKE_HAS_IMAGE_STATUS\" ;;\n"
+        "  *'gunzip | docker load'*) cat >/dev/null; exit \"$FAKE_UPLOAD_STATUS\" ;;\n"
+        "  *) exit 0 ;;\n"
+        "esac\n",
+    )
+    _write_executable(
+        bin_dir / "timeout",
+        "#!/bin/sh\n"
+        "while [ \"$#\" -gt 0 ]; do\n"
+        "  case \"$1\" in --foreground|--kill-after=*) shift ;; *) break ;; esac\n"
+        "done\n"
+        "shift\n"
+        "exec \"$@\"\n",
+    )
+    env = {
+        **os.environ,
+        "SERVER_HOST": "example.invalid",
+        "SERVER_USER": "deploy",
+        "SSH_KEY_PATH": _posix_path(tmp_path / "key"),
+        "SSH_KNOWN_HOSTS_FILE": _posix_path(known_hosts),
+        "INKFORGE_IMAGE_TAG": "a" * 40,
+        "DEPLOY_SHA": "a" * 40,
+        "RUNNER_TEMP": _posix_path(runner_temp),
+        "UPLOAD_LOG": _posix_path(log_path),
+        "FAKE_CURRENT_STATUS": str(current_status),
+        "FAKE_HAS_IMAGE_STATUS": str(has_image_status),
+        "FAKE_UPLOAD_STATUS": str(upload_status),
+    }
+    result = subprocess.run(  # noqa: S603 - 仅执行仓库脚本和测试夹具
+        [
+            POSIX_SHELL,
+            "-c",
+            'PATH="$1:$PATH"; export PATH; exec /bin/bash "$2"',
+            "upload-test",
+            _posix_path(bin_dir),
+            _posix_path(UPLOAD),
+        ],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=20,
+        check=False,
+    )
+    log = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
+    return result, log, runner_temp
+
+
+def test_upload_stops_when_the_server_image_query_fails(tmp_path: Path) -> None:
+    result, log, _ = _run_upload(tmp_path, current_status=255)
+
+    assert result.returncode != 0
+    assert "服务器镜像查询失败：web，退出码 255" in result.stderr
+    assert "docker save" not in log
+
+
+def test_upload_processes_images_separately_and_cleans_archives(tmp_path: Path) -> None:
+    result, log, runner_temp = _run_upload(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert log.count("docker save ") == 3
+    assert log.count("gunzip | docker load") == 3
+    assert list(runner_temp.iterdir()) == []
+
+
+def test_upload_timeout_names_the_image_and_stage(tmp_path: Path) -> None:
+    result, _, runner_temp = _run_upload(tmp_path, upload_status=124)
+
+    assert result.returncode != 0
+    assert "镜像传输或导入超时：inkforge-web:" in result.stderr
+    assert list(runner_temp.iterdir()) == []
 
 
 def _run_deploy(
