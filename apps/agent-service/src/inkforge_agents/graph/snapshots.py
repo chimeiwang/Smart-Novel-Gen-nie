@@ -11,6 +11,7 @@ from .state import GraphState
 SNAPSHOT_VERSION = 1
 RUNTIME_ONLY_FIELDS = {
     "runtime",
+    "runtimeContext",
     "callbacks",
     "novelData",
     "controlEvents",

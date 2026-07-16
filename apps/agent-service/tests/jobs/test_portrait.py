@@ -133,6 +133,8 @@ class Provider:
         return ModelTurnResult(
             content="单节结果",
             toolCalls=[],
+            finishReason="stop",
+            rawFinishReason="stop",
             usage=ModelUsage(
                 promptTokens=1,
                 completionTokens=1,

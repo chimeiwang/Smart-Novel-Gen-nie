@@ -22,6 +22,8 @@ class FakeModelProvider:
         return ModelTurnResult(
             content=content,
             toolCalls=tool_calls,
+            finishReason="tool_calls" if tool_calls else "stop",
+            rawFinishReason="tool_calls" if tool_calls else "stop",
             usage=ModelUsage(
                 promptTokens=prompt_tokens,
                 cachedTokens=0,
@@ -61,20 +63,20 @@ def _select_tool(
     tool_names: set[str],
     message_text: str,
 ) -> tuple[str | None, dict[str, JsonValue]]:
-    if "质量检查完整上下文" in message_text and "submit_quality_report" in tool_names:
+    if "submit_quality_report" in tool_names:
         return (
             "submit_quality_report",
             {
                 "scores": {
-                    "hook": 8,
-                    "tension": 8,
-                    "payoff": 8,
-                    "pacing": 8,
-                    "endingHook": 8,
-                    "readerPromise": 8,
-                    "overall": 8,
+                    "characterConsistency": 90.0,
+                    "worldRuleConsistency": 90.0,
+                    "timelineConsistency": 90.0,
+                    "causalityConsistency": 90.0,
+                    "foreshadowingConsistency": 90.0,
                 },
                 "qualityGate": "pass",
+                "issues": [],
+                "report": "一致性终检未发现冲突。",
                 "rewriteBrief": None,
             },
         )

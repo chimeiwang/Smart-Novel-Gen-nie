@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 
+from inkforge_contracts import ConsistencyQualityReport
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -306,9 +307,8 @@ class QualityRepository:
         run_id: str | None = None,
         novel_id: str | None = None,
     ) -> None:
-        scores = result.get("scores")
-        if not isinstance(scores, dict):
-            raise ValueError("质量报告缺少评分")
+        report = ConsistencyQualityReport.model_validate(result)
+        report_payload = report.model_dump()
         async with self._session_factory() as session:
             async with session.begin():
                 chapter = await self._lock_chapter_owner_for_check(session, check_id, user_id)
@@ -348,7 +348,7 @@ class QualityRepository:
                     ):
                         workflow_run.status = "cancelled"
                         workflow_run.output = json.dumps(
-                            result,
+                            report_payload,
                             ensure_ascii=False,
                             separators=(",", ":"),
                         )
@@ -358,7 +358,7 @@ class QualityRepository:
                         return
                     workflow_run.status = "completed"
                     workflow_run.output = json.dumps(
-                        result,
+                        report_payload,
                         ensure_ascii=False,
                         separators=(",", ":"),
                     )
@@ -366,19 +366,26 @@ class QualityRepository:
                 if not is_latest:
                     return
                 check.status = "completed"
-                check.result = str(result.get("result", ""))
-                check.scoreHook = _score(scores.get("hook"))
-                check.scoreTension = _score(scores.get("tension"))
-                check.scorePayoff = _score(scores.get("payoff"))
-                check.scorePacing = _score(scores.get("pacing"))
-                check.scoreEndingHook = _score(scores.get("endingHook"))
-                check.scoreReaderPromise = _score(scores.get("readerPromise"))
-                check.scoreOverall = _score(scores.get("overall"))
-                check.qualityGate = cast(str, result.get("qualityGate"))
-                rewrite_brief = result.get("rewriteBrief")
-                check.rewriteBrief = (
-                    rewrite_brief if isinstance(rewrite_brief, str) else None
+                check.result = report.report
+                check.scoreHook = None
+                check.scoreTension = None
+                check.scorePayoff = None
+                check.scorePacing = None
+                check.scoreEndingHook = None
+                check.scoreReaderPromise = None
+                scores = report.scores
+                check.scoreOverall = _score(
+                    (
+                        scores.characterConsistency
+                        + scores.worldRuleConsistency
+                        + scores.timelineConsistency
+                        + scores.causalityConsistency
+                        + scores.foreshadowingConsistency
+                    )
+                    / 5
                 )
+                check.qualityGate = report.qualityGate
+                check.rewriteBrief = report.rewriteBrief
 
     async def fail_run(
         self,

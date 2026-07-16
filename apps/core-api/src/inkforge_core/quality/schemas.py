@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
+from inkforge_contracts import ConsistencyQualityReport
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..novels.schemas import QualityCheckDto
@@ -48,15 +49,13 @@ class QualityRunContextResponse(StrictModel):
     message: str
 
 
-class QualityRunSuccessRequest(StrictModel):
+class QualityRunSuccessRequest(ConsistencyQualityReport):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
     userId: str = Field(min_length=1, max_length=256)
     novelId: str = Field(min_length=1, max_length=256)
     taskId: str = Field(min_length=1, max_length=256)
     runId: str = Field(min_length=1, max_length=256)
-    result: str
-    scores: dict[str, float]
-    qualityGate: Literal["pass", "revise", "rewrite"]
-    rewriteBrief: str | None = None
 
 
 class QualityRunFailureRequest(StrictModel):

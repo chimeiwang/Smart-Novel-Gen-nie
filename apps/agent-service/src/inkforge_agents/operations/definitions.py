@@ -10,6 +10,63 @@ from .contracts import CreativeOperationKind, OutputKind, TargetType
 
 ContextStrategy = Literal["brief", "lore", "outline", "chapter", "review"]
 ArtifactPolicy = Literal["none", "agent_updates", "text"]
+ArtifactKeyPolicy = Literal[
+    "none", "generated_stable", "builder_or_generated", "preserve"
+]
+
+NOVEL_READ = frozenset({"get_novel_info", "list_available_data"})
+CHARACTER_READ = frozenset(
+    {"list_characters_summary", "get_character_detail", "get_character_list"}
+)
+LORE_READ = frozenset(
+    {
+        "list_factions_summary",
+        "get_faction_detail",
+        "list_locations_summary",
+        "get_location_detail",
+        "list_items_summary",
+        "get_item_detail",
+        "list_glossaries_summary",
+        "get_glossary_detail",
+        "search_lore",
+        "find_similar_lore",
+        "semantic_search_references",
+    }
+)
+PLOT_READ = frozenset(
+    {
+        "list_outline_summary",
+        "get_outline_node",
+        "get_plot_progress",
+        "list_foreshadowings_summary",
+        "get_foreshadowing_detail",
+        "get_recent_chapters",
+    }
+)
+STYLE_READ = frozenset({"get_style_profile"})
+LORE_PROPOSALS = frozenset(
+    {"propose_update_character", "propose_update_character_status"}
+)
+OUTLINE_PROPOSALS = frozenset({"propose_update_outline"})
+FORESHADOW_PROPOSALS = frozenset(
+    {"propose_add_foreshadowing", "propose_resolve_foreshadowing"}
+)
+COMMON_BUILDER_TOOLS = frozenset(
+    {
+        "propose_updates",
+        "start_update_builder",
+        "append_update_batch",
+        "put_update_text_block",
+        "put_update_item_text_block",
+        "put_update_item_text_blocks",
+        "finish_update_builder",
+    }
+)
+OUTLINE_BUILDER_TOOLS = COMMON_BUILDER_TOOLS | {"append_outline_tree"}
+
+_BASE_READ = NOVEL_READ | CHARACTER_READ | LORE_READ | PLOT_READ
+_EDITOR_READ = NOVEL_READ | CHARACTER_READ | PLOT_READ | STYLE_READ
+_STRUCTURED_TERMINALS = frozenset({"propose_updates", "finish_update_builder"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,6 +83,35 @@ class OperationDefinition:
     requiresUserApproval: bool
     executionBrief: str
     textArtifactKind: str | None = None
+    allowedToolNames: frozenset[str] = frozenset()
+    terminalControlTools: frozenset[str] = frozenset()
+    artifactEventTypes: frozenset[str] = frozenset()
+    artifactKeyPolicy: ArtifactKeyPolicy = "none"
+
+    def __post_init__(self) -> None:
+        for field_name in (
+            "allowedToolNames",
+            "terminalControlTools",
+            "artifactEventTypes",
+        ):
+            object.__setattr__(self, field_name, frozenset(getattr(self, field_name)))
+        if self.requiresArtifact != (self.artifactPolicy != "none"):
+            raise ValueError("requiresArtifact 与 artifactPolicy 不一致")
+        if (self.textArtifactKind is not None) != (self.artifactPolicy == "text"):
+            raise ValueError("textArtifactKind 与文本产物策略不一致")
+        if not self.terminalControlTools <= self.allowedToolNames:
+            raise ValueError("Operation 终止工具必须属于允许工具")
+        if self.requiresArtifact:
+            if not self.artifactEventTypes:
+                raise ValueError("产物 Operation 必须声明产物事件")
+            if self.artifactKeyPolicy == "none":
+                raise ValueError("产物 Operation 必须声明 artifactKey 策略")
+        elif (
+            self.artifactEventTypes
+            or self.terminalControlTools
+            or self.artifactKeyPolicy != "none"
+        ):
+            raise ValueError("无产物 Operation 不得声明产物执行契约")
 
 
 def _definition(
@@ -39,6 +125,11 @@ def _definition(
     policy: ArtifactPolicy,
     brief: str,
     text_kind: str | None = None,
+    *,
+    allowed_tools: frozenset[str],
+    terminal_tools: frozenset[str] = frozenset(),
+    artifact_events: frozenset[str] = frozenset(),
+    artifact_key_policy: ArtifactKeyPolicy = "none",
 ) -> OperationDefinition:
     requires_artifact = policy != "none"
     return OperationDefinition(
@@ -54,6 +145,10 @@ def _definition(
         requiresUserApproval=requires_artifact,
         executionBrief=brief,
         textArtifactKind=text_kind,
+        allowedToolNames=allowed_tools,
+        terminalControlTools=terminal_tools,
+        artifactEventTypes=artifact_events,
+        artifactKeyPolicy=artifact_key_policy,
     )
 
 
@@ -68,6 +163,7 @@ OPERATION_DEFINITIONS: dict[CreativeOperationKind, OperationDefinition] = {
         "brief",
         "none",
         "直接回答用户问题，不生成待审核草案。",
+        allowed_tools=_EDITOR_READ,
     ),
     "create_lore": _definition(
         "create_lore",
@@ -79,6 +175,10 @@ OPERATION_DEFINITIONS: dict[CreativeOperationKind, OperationDefinition] = {
         "lore",
         "agent_updates",
         "生成可审核的设定新增草案。",
+        allowed_tools=_BASE_READ | LORE_PROPOSALS | COMMON_BUILDER_TOOLS,
+        terminal_tools=_STRUCTURED_TERMINALS,
+        artifact_events=_STRUCTURED_TERMINALS,
+        artifact_key_policy="builder_or_generated",
     ),
     "revise_lore": _definition(
         "revise_lore",
@@ -90,6 +190,10 @@ OPERATION_DEFINITIONS: dict[CreativeOperationKind, OperationDefinition] = {
         "lore",
         "agent_updates",
         "生成可审核的设定修改草案。",
+        allowed_tools=_BASE_READ | LORE_PROPOSALS | COMMON_BUILDER_TOOLS,
+        terminal_tools=_STRUCTURED_TERMINALS,
+        artifact_events=_STRUCTURED_TERMINALS,
+        artifact_key_policy="builder_or_generated",
     ),
     "create_outline": _definition(
         "create_outline",
@@ -101,6 +205,10 @@ OPERATION_DEFINITIONS: dict[CreativeOperationKind, OperationDefinition] = {
         "outline",
         "agent_updates",
         "生成可审核的结构化大纲草案。",
+        allowed_tools=_BASE_READ | OUTLINE_PROPOSALS | OUTLINE_BUILDER_TOOLS,
+        terminal_tools=_STRUCTURED_TERMINALS,
+        artifact_events=_STRUCTURED_TERMINALS,
+        artifact_key_policy="builder_or_generated",
     ),
     "revise_outline": _definition(
         "revise_outline",
@@ -112,6 +220,10 @@ OPERATION_DEFINITIONS: dict[CreativeOperationKind, OperationDefinition] = {
         "outline",
         "agent_updates",
         "生成可审核的大纲修改草案。",
+        allowed_tools=_BASE_READ | OUTLINE_PROPOSALS | OUTLINE_BUILDER_TOOLS,
+        terminal_tools=_STRUCTURED_TERMINALS,
+        artifact_events=_STRUCTURED_TERMINALS,
+        artifact_key_policy="builder_or_generated",
     ),
     "plan_chapter": _definition(
         "plan_chapter",
@@ -123,7 +235,11 @@ OPERATION_DEFINITIONS: dict[CreativeOperationKind, OperationDefinition] = {
         "outline",
         "text",
         "生成可审核的章节规划草案。",
-        "beat_plan_draft",
+        "beat_plan",
+        allowed_tools=_BASE_READ | {"submit_beat_plan"},
+        terminal_tools=frozenset({"submit_beat_plan"}),
+        artifact_events=frozenset({"submit_beat_plan"}),
+        artifact_key_policy="generated_stable",
     ),
     "write_chapter": _definition(
         "write_chapter",
@@ -136,6 +252,10 @@ OPERATION_DEFINITIONS: dict[CreativeOperationKind, OperationDefinition] = {
         "text",
         "生成正文草案，不直接写入章节。",
         "chapter_draft",
+        allowed_tools=_BASE_READ | STYLE_READ | {"begin_artifact_output"},
+        terminal_tools=frozenset({"begin_artifact_output"}),
+        artifact_events=frozenset({"begin_artifact_output"}),
+        artifact_key_policy="generated_stable",
     ),
     "rewrite_scene": _definition(
         "rewrite_scene",
@@ -148,6 +268,10 @@ OPERATION_DEFINITIONS: dict[CreativeOperationKind, OperationDefinition] = {
         "text",
         "生成场景改写草案。",
         "chapter_draft",
+        allowed_tools=_BASE_READ | STYLE_READ | {"begin_artifact_output"},
+        terminal_tools=frozenset({"begin_artifact_output"}),
+        artifact_events=frozenset({"begin_artifact_output"}),
+        artifact_key_policy="generated_stable",
     ),
     "review_chapter": _definition(
         "review_chapter",
@@ -159,6 +283,7 @@ OPERATION_DEFINITIONS: dict[CreativeOperationKind, OperationDefinition] = {
         "review",
         "none",
         "生成章节审核报告。",
+        allowed_tools=_EDITOR_READ,
     ),
     "manage_foreshadowing": _definition(
         "manage_foreshadowing",
@@ -170,5 +295,9 @@ OPERATION_DEFINITIONS: dict[CreativeOperationKind, OperationDefinition] = {
         "outline",
         "agent_updates",
         "生成伏笔新增、推进、回收或废弃草案。",
+        allowed_tools=_BASE_READ | FORESHADOW_PROPOSALS | OUTLINE_BUILDER_TOOLS,
+        terminal_tools=_STRUCTURED_TERMINALS,
+        artifact_events=_STRUCTURED_TERMINALS,
+        artifact_key_policy="builder_or_generated",
     ),
 }

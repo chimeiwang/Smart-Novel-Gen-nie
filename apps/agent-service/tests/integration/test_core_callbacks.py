@@ -98,9 +98,16 @@ async def test_core_client_signs_tools_events_checkpoint_and_completion() -> Non
         resource,
         "check-1",
         {
-            "result": "报告",
-            "scores": {"overall": 9.0},
+            "scores": {
+                "characterConsistency": 81.0,
+                "worldRuleConsistency": 82.0,
+                "timelineConsistency": 83.0,
+                "causalityConsistency": 84.0,
+                "foreshadowingConsistency": 88.0,
+            },
             "qualityGate": "pass",
+            "issues": [],
+            "report": "完整一致性报告",
             "rewriteBrief": None,
         },
     )

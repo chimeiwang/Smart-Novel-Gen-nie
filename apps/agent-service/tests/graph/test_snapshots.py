@@ -64,7 +64,14 @@ def test_snapshot_accepts_core_flat_compatibility_state() -> None:
 
 @pytest.mark.parametrize(
     "forbidden",
-    ["runtime", "callbacks", "novelData", "controlEvents", "streamCallbacks"],
+    [
+        "runtime",
+        "runtimeContext",
+        "callbacks",
+        "novelData",
+        "controlEvents",
+        "streamCallbacks",
+    ],
 )
 def test_snapshot_rejects_runtime_only_fields(forbidden: str) -> None:
     state = create_initial_state(
@@ -78,3 +85,24 @@ def test_snapshot_rejects_runtime_only_fields(forbidden: str) -> None:
 
     with pytest.raises(ValueError, match="仅运行时字段"):
         serialize_snapshot(state)
+
+
+def test_stable_snapshot_does_not_contain_workspace_or_runtime_identity() -> None:
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="续写",
+    )
+    state["contextMessages"] = ["只读最小投影"]
+    stable = {
+        key: value for key, value in state.items() if key != "runtimeContext"
+    }
+
+    serialized = serialize_snapshot(stable)
+    payload = repr(serialized)
+
+    assert "workspace" not in payload
+    assert "runId" not in payload
+    assert "jobId" not in payload

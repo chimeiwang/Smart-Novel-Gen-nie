@@ -20,6 +20,8 @@ class Provider:
         return ModelTurnResult(
             content="完成",
             toolCalls=[],
+            finishReason="stop",
+            rawFinishReason="stop",
             usage=ModelUsage(
                 promptTokens=100,
                 cachedTokens=20,
@@ -61,15 +63,21 @@ class Billing:
 
 class ModelObserver:
     def __init__(self) -> None:
-        self.calls: list[tuple[ModelCallContext, list[dict[str, str]], str]] = []
+        self.calls: list[
+            tuple[ModelCallContext, list[dict[str, str]], str, str, str | None]
+        ] = []
 
     def record_model_call(
         self,
         context: ModelCallContext,
         messages: list[dict[str, str]],
         output: str,
+        finish_reason: str,
+        raw_finish_reason: str | None,
     ) -> None:
-        self.calls.append((context, messages, output))
+        self.calls.append(
+            (context, messages, output, finish_reason, raw_finish_reason)
+        )
 
 
 @pytest.mark.asyncio
@@ -162,5 +170,7 @@ async def test_runtime_records_complete_messages_without_tool_schema(billable: b
             context,
             [{"role": "user", "content": "完整请求" * 5000}],
             "完成",
+            "stop",
+            "stop",
         )
     ]

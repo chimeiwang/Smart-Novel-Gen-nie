@@ -54,16 +54,13 @@ flowchart TD
     A["Agent 生成产物"] --> B["提交 ReviewArtifact"]
     B --> C{"是否需要复审"}
     C -->|"否"| D["状态 awaiting_user"]
-    C -->|"是"| E["Reviewer Agent 复审"]
-    E --> F{"submit_evaluation"}
-    F -->|"pass"| G{"是否还有 reviewer"}
-    G -->|"有"| E
-    G -->|"无"| D
-    F -->|"revise patch"| H["服务端应用小修补丁"]
-    H --> E
-    F -->|"revise rewrite"| I["主责 Agent 返工生成新 revision"]
+    C -->|"是"| E["向全部 Reviewer 并行扇出复审"]
+    E --> F["合并全部 submit_evaluation 结论"]
+    F --> G{"合并结果"}
+    G -->|"pass"| D
+    G -->|"revise"| I["主责 Agent 完整返工生成新 revision"]
     I --> E
-    F -->|"block"| D
+    G -->|"block"| D
     D --> J{"用户提交单一决定请求"}
     J -->|"approve"| K["事务内正式落库、标记 applied、创建命令"]
     J -->|"revise"| L["事务内退回 draft、创建命令"]
@@ -174,6 +171,16 @@ flowchart TD
 
 当前 quality-check API 只支持 consistency。设定同步、商业性评审和技法评审应通过写作草案流程或显式 Agent 操作处理。
 
+一致性终检固定使用“校验”Agent 的 `quality` 执行模式，只暴露 `submit_quality_report`。报告契约由 Agent Service 与 Core API 共用，禁止分别维护可漂移的字段：
+
+- `scores` 必须包含 characterConsistency、worldRuleConsistency、timelineConsistency、causalityConsistency、foreshadowingConsistency 五项 0..100 分数；
+- `qualityGate` 只能是 pass 或 revise；
+- 每个 issue 必须包含 dimension、severity、message、evidence、suggestion，可选 location；
+- `report` 必须是非空完整自然语言报告，`rewriteBrief` 可选；
+- 缺字段、额外字段、越界分数、非法 dimension/severity 或空报告都使质量任务失败，不能保存部分报告。
+
+Core 把完整 scores、issues、report、qualityGate 和 rewriteBrief 保存到 `WorkflowRun.output`；`ChapterQualityCheck.result` 保存 report，`scoreOverall` 保存五项分数平均值经现有 Python `round()` 取整的结果。商业性评分列 `scoreHook/scoreTension/scorePayoff/scorePacing/scoreEndingHook/scoreReaderPromise` 保持空值，不能借用来存一致性维度。
+
 ## 一致性终检运行流程
 
 Core API 负责浏览器认证、检查项归属和可选 `taskId` 绑定校验。`taskId` 必须与检查项属于同一用户、小说和章节，否则返回 403；只有 review 章节允许创建质量运行，drafting/completed 调用返回 409。Core 先把本次检查的完整正文快照、正文 SHA-256、章节更新时间、检查项和可选任务绑定保存到独立的 `WorkflowRun(kind=quality_check)`，并立即把公共检查置为 running，再使用该运行 ID 作为稳定队列标识投递；同一检查项已有 `pending/running` 运行时返回 409，只有前一次运行终态后才能创建新运行。Redis 暂时不可用时由 dispatcher 补投，不得丢失已受理任务，也不得与同一检查项的其他运行混淆。Agent Service 只分析 WorkflowRun 中的正文快照并异步生成报告，通过签名内部回调结算对应运行终态；回调时当前正文哈希必须仍与来源一致，且只有该检查项的最新运行可以更新公共检查结果。旧正文或旧运行的延迟回调收敛为 cancelled/failed，不能覆盖新结果或满足完成门禁。
@@ -203,6 +210,7 @@ sequenceDiagram
 - 越权返回 403。
 - 检查项不存在返回 404。
 - Agent 无报告或保存失败时，检查项标记 failed，任务标记 error。
+- 模型返回长度截断、内容过滤、矛盾完成原因或无合法工具调用的 unknown 响应时，Agent Service 在接受报告或执行回调前失败；日志保留供应商原始完成原因。
 - 内部回调必须校验用户、小说、检查项和运行的绑定关系，不得使用另一次运行的结果覆盖当前检查。
 - 正文变化后，检查项重置为 pending，仍在 pending/running 的旧 WorkflowRun 标记 cancelled，错误码为 `QUALITY_SOURCE_CHANGED`。
 - 浏览器在运行受理后轮询检查项到终态；pending/running 期间禁用重复运行、跳过和章节完成操作。
@@ -277,8 +285,11 @@ WorkflowStep 记录运行步骤：
 - 草案决定由 Core 事务编排器统一受理；正式数据、草案和持久命令任一写入失败时必须整体回滚。
 - Agent 从稳定决定恢复时只推进 LangGraph 状态，不能第二次应用或删除已经由 Core 事务处理的草案。
 - Agent 创建或修订草案、提交复审结论必须使用签名内部接口，并绑定同一用户、小说、任务和运行。
+- 草案执行显式区分 primary、reviewer 和 reviser：reviewer 无读取工具，只读取注入的 Core 权威草案并提交一次 evaluation；reviser 获得原 payload、revision、artifactKey 和合并后的 requiredChanges，按原 Operation 产物契约生成同类新 revision。
 - 草案完成复审并进入 `awaiting_user` 后，Agent Service 必须发送草案等待确认事件，前端再通过 Core 查询权威草案内容，不能依赖进程内状态猜测。
-- 首版跨服务复审不承诺局部草案 patch；需要修改时退化为完整草案重新生成。该降级必须明确记录并保留原有审核边界，不能把完整返工描述为局部修订，也不能因此直接写正式小说数据。
+- 服务重启或新命令恢复自动复审/返工前，Agent Service 必须从 Core `planning.activeArtifact` 水合权威草案；approve/discard 已由 Core 事务完成，不依赖草案继续存在。等待态只在事件与 checkpoint 成功后、完成态和错误态只在相应回调成功后，按当前 QueueJob 的 `runId/jobId` 释放进程内记录。
+- 首版跨服务复审不实现局部草案 patch；所有修改结论归一为完整 rewrite，同时保留原 requiredChanges 和 patch 意图。不能把完整返工描述为局部修订，也不能因此直接写正式小说数据。
+- 一致性终检由“校验”Agent 的 quality 模式执行，并通过共享严格报告契约保存完整 WorkflowRun 输出；旧商业评分列不承载一致性数据。
 - 正文、大纲、Beat Plan 和 `agent_updates` 只有在 `awaiting_user` 状态下由用户批准后才能正式写入；应用失败会恢复为等待用户确认。
 - `revision_brief` 永远不能正式应用，部分 `agent_updates` 只执行用户明确选择的 section 或 item。
 - 正文和长文本不会静默截断；现有数据库无法承载的字段会明确拒绝。

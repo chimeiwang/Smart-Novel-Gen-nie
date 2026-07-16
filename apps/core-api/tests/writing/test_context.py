@@ -2,12 +2,13 @@ import json
 from typing import Any, cast
 
 import pytest
-from inkforge_core.db.models import ReviewArtifact, WritingRunCommand, WritingTask
+from inkforge_core.db.models import Foreshadowing, ReviewArtifact, WritingRunCommand, WritingTask
 from inkforge_core.errors import ApiError
 from inkforge_core.writing.context import (
     ChapterGroupSnapshot,
     WritingContextRepository,
     WritingContextService,
+    _split_current_user_message,
     select_unique_chapter_group,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,6 +25,34 @@ def test_chapter_group_allows_missing_but_rejects_ambiguous_mapping() -> None:
         )
 
 
+def test_split_current_user_preserves_older_identical_message() -> None:
+    history, current = _split_current_user_message(
+        [
+            {"role": "user", "content": "再写一次"},
+            {"role": "agent", "content": "上次回复"},
+            {"role": "user", "content": "再写一次"},
+        ]
+    )
+
+    assert current == "再写一次"
+    assert history == [
+        {"role": "user", "content": "再写一次"},
+        {"role": "agent", "content": "上次回复"},
+    ]
+
+
+def test_split_current_user_ignores_non_string_user_records() -> None:
+    history, current = _split_current_user_message(
+        [
+            {"role": "user", "content": "合法请求"},
+            {"role": "user", "content": None},
+        ]
+    )
+
+    assert current == "合法请求"
+    assert history == [{"role": "user", "content": None}]
+
+
 class FakePlanningRepository:
     async def get_planning_context(self, user_id: str, task_id: str):
         assert (user_id, task_id) == ("user-1", "task-1")
@@ -36,6 +65,16 @@ class FakePlanningRepository:
             "approvedBeatPlan": {"chapterGoal": "按计划推进", "sceneBeats": []},
             "chapterGroup": {"id": "group-1", "content": "完整章节组内容"},
             "outlinePath": [{"kind": "stage", "title": "第一卷"}],
+            "foreshadowingSummaries": [
+                {
+                    "id": "foreshadowing-1",
+                    "name": "断裂墨印",
+                    "status": "active",
+                    "plantedAt": "第一章",
+                    "expectedPayoff": "第五章",
+                    "payoffAt": None,
+                }
+            ],
             "activeArtifact": None,
         }
 
@@ -56,6 +95,7 @@ async def test_context_combines_complete_workspace_and_current_planning_scope() 
     assert context["workspace"]["novel"]["name"] == "作品"
     assert context["planning"]["approvedBeatPlan"]["chapterGoal"] == "按计划推进"
     assert context["planning"]["chapterGroup"]["content"] == "完整章节组内容"
+    assert context["planning"]["foreshadowingSummaries"][0]["name"] == "断裂墨印"
 
 
 class FakeScalarSession:
@@ -65,6 +105,61 @@ class FakeScalarSession:
     async def scalar(self, statement: object) -> object | None:
         del statement
         return next(self._responses)
+
+
+class FakeScalarsResult:
+    def __init__(self, values: list[object]) -> None:
+        self._values = values
+
+    def all(self) -> list[object]:
+        return self._values
+
+
+class FakeScalarsSession:
+    def __init__(self, values: list[object]) -> None:
+        self.values = values
+        self.statement: object | None = None
+
+    async def scalars(self, statement: object) -> FakeScalarsResult:
+        self.statement = statement
+        return FakeScalarsResult(self.values)
+
+
+@pytest.mark.asyncio
+async def test_foreshadowing_summaries_use_stable_order_and_exclude_detail() -> None:
+    repository = WritingContextRepository(cast(Any, None))
+    session = FakeScalarsSession(
+        [
+            Foreshadowing(
+                id="foreshadowing-1",
+                novelId="novel-1",
+                name="断裂墨印",
+                status="active",
+                plantedAt="第一章",
+                expectedPayoff="第五章",
+                payoffAt=None,
+                plantedContent="种下伏笔的完整正文",
+            )
+        ]
+    )
+
+    result = await repository._foreshadowing_summaries(
+        cast(AsyncSession, session), "novel-1"
+    )
+
+    assert result == [
+        {
+            "id": "foreshadowing-1",
+            "name": "断裂墨印",
+            "status": "active",
+            "plantedAt": "第一章",
+            "expectedPayoff": "第五章",
+            "payoffAt": None,
+        }
+    ]
+    statement = str(session.statement)
+    assert 'ORDER BY public."Foreshadowing"."createdAt" ASC' in statement
+    assert 'public."Foreshadowing".id ASC' in statement
 
 
 def _task_with_active_artifact(artifact_id: str = "artifact-1") -> WritingTask:
@@ -96,6 +191,82 @@ def _active_decision_command() -> WritingRunCommand:
         idempotencyKey="user-1:request-1",
         payloadJson="{}",
     )
+
+
+def _hydration_artifact(**overrides: Any) -> ReviewArtifact:
+    values: dict[str, Any] = {
+        "id": "artifact-1",
+        "taskId": "task-1",
+        "novelId": "novel-1",
+        "chapterId": "chapter-1",
+        "workflowRunId": "workflow-1",
+        "artifactKey": "authority-key",
+        "kind": "chapter_draft",
+        "status": "under_review",
+        "title": "正文草案",
+        "summary": "首版",
+        "payloadJson": json.dumps({"kind": "chapter_draft", "content": "完整正文"}),
+        "diffJson": json.dumps({"changed": True}),
+        "createdByAgent": "写作",
+        "reviewerAgent": "校验",
+        "revision": 2,
+    }
+    values.update(overrides)
+    return ReviewArtifact(**values)
+
+
+@pytest.mark.asyncio
+async def test_context_returns_complete_hydratable_active_artifact() -> None:
+    repository = WritingContextRepository(cast(Any, None))
+    artifact = _hydration_artifact()
+    session = cast(AsyncSession, FakeScalarSession([artifact]))
+
+    active = await repository._active_artifact(session, _task_with_active_artifact())
+
+    assert active is not None
+    assert set(active) == {
+        "id",
+        "taskId",
+        "novelId",
+        "chapterId",
+        "workflowRunId",
+        "artifactKey",
+        "kind",
+        "status",
+        "title",
+        "summary",
+        "payload",
+        "diff",
+        "createdByAgent",
+        "reviewerAgent",
+        "revision",
+    }
+    assert active["payload"] == {"kind": "chapter_draft", "content": "完整正文"}
+    assert active["diff"] == {"changed": True}
+    assert "runId" not in active
+    assert "jobId" not in active
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "artifact",
+    [
+        _hydration_artifact(payloadJson="{"),
+        _hydration_artifact(payloadJson=json.dumps(["不是对象"])),
+        _hydration_artifact(payloadJson=json.dumps({"kind": "outline_draft"})),
+        _hydration_artifact(diffJson="{"),
+    ],
+)
+async def test_context_rejects_invalid_active_artifact_json(
+    artifact: ReviewArtifact,
+) -> None:
+    repository = WritingContextRepository(cast(Any, None))
+    session = cast(AsyncSession, FakeScalarSession([artifact]))
+
+    with pytest.raises(ApiError) as caught:
+        await repository._active_artifact(session, _task_with_active_artifact())
+
+    assert caught.value.code == "ARTIFACT_PAYLOAD_INVALID"
 
 
 @pytest.mark.asyncio

@@ -6,6 +6,8 @@ from typing import Any, Protocol, cast
 from ..clients.core import RunResource
 from ..queue.repository import QueueJob
 from ..runtime.agent_runner import AgentRunner, AgentRunRequest
+from ..runtime.execution import QUALITY_AGENT_ID
+from ..tools.control import QualityReportArgs
 from ..tools.registry import ToolContext
 from .workflow_log import WorkflowLogPort
 
@@ -85,7 +87,9 @@ class QualityJobHandler:
                 raise ValueError("质量检查请求无效")
             result = await self._runner.run(
                 AgentRunRequest(
-                    agentId="编辑",
+                    agentId=QUALITY_AGENT_ID,
+                    executionMode="quality",
+                    operationKind=None,
                     userMessage=message,
                     contextMessages=[
                         "质量检查完整上下文："
@@ -97,7 +101,7 @@ class QualityJobHandler:
                         novelId=job.novelId,
                         taskId=job.taskId,
                         runId=job.runId,
-                        agentId="编辑",
+                        agentId=QUALITY_AGENT_ID,
                     ),
                 )
             )
@@ -107,16 +111,14 @@ class QualityJobHandler:
                 None,
             )
             if report is None:
-                raise RuntimeError("编辑智能体未提交结构化质量报告")
+                raise RuntimeError(f"{QUALITY_AGENT_ID}智能体未提交结构化质量报告")
+            validated_report = QualityReportArgs.model_validate(
+                {key: value for key, value in report.items() if key != "type"}
+            )
             await self._core.complete_quality(
                 resource,
                 check_id,
-                {
-                    "result": str(result.visibleContent),
-                    "scores": report.get("scores", {}),
-                    "qualityGate": report["qualityGate"],
-                    "rewriteBrief": report.get("rewriteBrief"),
-                },
+                validated_report.model_dump(),
             )
         except Exception as exc:
             try:

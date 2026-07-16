@@ -25,7 +25,6 @@ class AgentDefinition:
     toolCapabilities: frozenset[str]
     outputMode: OutputMode = "paragraph_text_with_control_tools"
     maxIterations: int = 10
-    terminalControlTools: frozenset[str] = frozenset()
 
 
 AGENT_DEFINITIONS: dict[str, AgentDefinition] = {
@@ -35,7 +34,6 @@ AGENT_DEFINITIONS: dict[str, AgentDefinition] = {
         description="讨论、评价、创建和维护小说设定。",
         systemPrompt=LORE_SYSTEM_PROMPT,
         toolCapabilities=AGENT_CAPABILITIES["设定"],
-        terminalControlTools=frozenset({"propose_updates", "finish_update_builder"}),
     ),
     "剧情": AgentDefinition(
         id="剧情",
@@ -57,7 +55,6 @@ AGENT_DEFINITIONS: dict[str, AgentDefinition] = {
         description="审计一致性、逻辑和设定冲突。",
         systemPrompt=VALIDATOR_SYSTEM_PROMPT,
         toolCapabilities=AGENT_CAPABILITIES["校验"],
-        terminalControlTools=frozenset({"submit_evaluation"}),
     ),
     "编辑": AgentDefinition(
         id="编辑",
@@ -66,6 +63,5 @@ AGENT_DEFINITIONS: dict[str, AgentDefinition] = {
         systemPrompt=EDITOR_SYSTEM_PROMPT,
         toolCapabilities=AGENT_CAPABILITIES["编辑"],
         maxIterations=12,
-        terminalControlTools=frozenset({"submit_evaluation"}),
     ),
 }

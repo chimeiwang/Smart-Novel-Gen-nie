@@ -18,6 +18,7 @@ AGENT_CAPABILITIES: dict[str, frozenset[str]] = {
         {
             "novel.read",
             "character.read",
+            "lore.read",
             "plot.read",
             "chapter.read",
             "artifact.read",
@@ -50,6 +51,7 @@ AGENT_CAPABILITIES: dict[str, frozenset[str]] = {
             "control.artifact",
             "control.validation",
             "control.evaluation",
+            "control.quality",
         }
     ),
     "编辑": frozenset(
@@ -61,7 +63,6 @@ AGENT_CAPABILITIES: dict[str, frozenset[str]] = {
             "style.read",
             "artifact.read",
             "control.artifact",
-            "control.quality",
             "control.evaluation",
         }
     ),

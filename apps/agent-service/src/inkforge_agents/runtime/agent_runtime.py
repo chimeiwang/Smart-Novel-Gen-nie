@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from ..providers.base import ModelMessage, ModelTurnRequest
+from ..providers.base import ModelMessage, ModelToolCall, ModelTurnRequest, ModelTurnResult
 from ..tools.registry import ToolContext, ToolDefinition, ToolRegistry
 from .model_runtime import ModelCallContext, ModelRuntime
 from .turn_result import (
@@ -49,7 +49,6 @@ class AgentRuntime:
             message if isinstance(message, ModelMessage) else ModelMessage.model_validate(message)
             for message in messages
         ]
-        exposed = {tool.name: tool for tool in exposed_tools}
         visible_parts: list[str] = []
         control_events: list[dict[str, Any]] = []
         tool_calls: list[RuntimeToolCall] = []
@@ -72,9 +71,15 @@ class AgentRuntime:
                 context=model_context,
             )
             usage = add_usage(usage, response.usage)
+            validated_calls = self._preflight_response(
+                response,
+                {tool.name: tool for tool in available_tools},
+                context,
+                terminal_control_tools,
+            )
             if response.content:
                 visible_parts.append(response.content)
-            if not response.toolCalls:
+            if not validated_calls:
                 return self._result(
                     visible_parts,
                     control_events,
@@ -93,58 +98,31 @@ class AgentRuntime:
             )
             terminal = False
             index = 0
-            while index < len(response.toolCalls):
-                call = response.toolCalls[index]
-                tool = exposed.get(call.name)
-                if tool is None:
-                    visible_parts.append(
-                        f"工具“{call.name}”未向当前智能体暴露，已停止本轮工具调用。"
-                    )
-                    return self._result(
-                        visible_parts,
-                        control_events,
-                        tool_calls,
-                        tool_results,
-                        usage,
-                        "tool_authorization_error",
-                    )
-
+            while index < len(validated_calls):
+                call, tool, arguments = validated_calls[index]
                 safe_batch = []
-                while index < len(response.toolCalls):
-                    candidate = response.toolCalls[index]
-                    candidate_tool = exposed.get(candidate.name)
+                while index < len(validated_calls):
+                    candidate, candidate_tool, candidate_arguments = validated_calls[index]
                     if (
-                        candidate_tool is None
-                        or candidate_tool.toolKind != "read"
+                        candidate_tool.toolKind != "read"
                         or not candidate_tool.permission.readOnly
                         or not candidate_tool.permission.concurrencySafe
                     ):
                         break
-                    safe_batch.append((candidate, candidate_tool))
+                    safe_batch.append(
+                        (candidate, candidate_tool, candidate_arguments)
+                    )
                     index += 1
                 if safe_batch:
-                    try:
-                        validated_batch = [
-                            (call_item, tool_item, tool_item.validate(call_item.arguments))
-                            for call_item, tool_item in safe_batch
-                        ]
-                    except ValidationError as exc:
-                        visible_parts.append(f"工具参数校验失败：{exc}")
-                        return self._result(
-                            visible_parts,
-                            control_events,
-                            tool_calls,
-                            tool_results,
-                            usage,
-                            "tool_validation_error",
-                        )
                     tasks: list[Coroutine[Any, Any, dict[str, Any]]] = [
-                        self._registry.execute(tool_item.name, arguments, context)
-                        for _, tool_item, arguments in validated_batch
+                        self._registry.execute_validated(
+                            tool_item, validated_arguments, context
+                        )
+                        for _, tool_item, validated_arguments in safe_batch
                     ]
                     results = await asyncio.gather(*tasks, return_exceptions=True)
                     for (call_item, tool_item, arguments), result in zip(
-                        validated_batch, results, strict=True
+                        safe_batch, results, strict=True
                     ):
                         normalized = self._normalize_result(result)
                         self._record_tool(
@@ -158,18 +136,6 @@ class AgentRuntime:
                         )
                     continue
 
-                try:
-                    arguments = tool.validate(call.arguments)
-                except ValidationError as exc:
-                    visible_parts.append(f"工具参数校验失败：{exc}")
-                    return self._result(
-                        visible_parts,
-                        control_events,
-                        tool_calls,
-                        tool_results,
-                        usage,
-                        "tool_validation_error",
-                    )
                 if tool.toolKind == "control":
                     artifact_key = arguments.get("artifactKey")
                     if tool.name == "start_update_builder":
@@ -231,7 +197,9 @@ class AgentRuntime:
                         terminal = terminal or tool.name in terminal_control_tools
                 else:
                     try:
-                        normalized = await self._registry.execute(tool.name, arguments, context)
+                        normalized = await self._registry.execute_validated(
+                            tool, arguments, context
+                        )
                     except Exception as exc:
                         normalized = {"error": str(exc)}
                 self._record_tool(
@@ -265,6 +233,78 @@ class AgentRuntime:
             usage,
             "max_iterations",
         )
+
+    def _preflight_response(
+        self,
+        response: ModelTurnResult,
+        exposed: dict[str, ToolDefinition],
+        context: ToolContext,
+        terminal_control_tools: set[str] | frozenset[str],
+    ) -> list[tuple[ModelToolCall, ToolDefinition, dict[str, Any]]]:
+        raw_finish_reason = (
+            response.rawFinishReason
+            if response.rawFinishReason is not None
+            else "未提供"
+        )
+        if response.finishReason == "length":
+            raise RuntimeError(
+                "MODEL_OUTPUT_TRUNCATED：供应商报告模型输出达到长度上限"
+                f"（原始原因：{raw_finish_reason}）"
+            )
+        if response.finishReason == "content_filter":
+            raise RuntimeError(
+                "MODEL_OUTPUT_FILTERED：供应商报告模型输出被内容过滤"
+                f"（原始原因：{raw_finish_reason}）"
+            )
+
+        has_tool_calls = bool(response.toolCalls)
+        if (response.finishReason == "stop" and has_tool_calls) or (
+            response.finishReason == "tool_calls" and not has_tool_calls
+        ):
+            raise RuntimeError(
+                "PROVIDER_FINISH_REASON_INVALID：供应商完成原因与工具调用状态不一致"
+            )
+        if response.finishReason == "unknown" and not has_tool_calls:
+            raise RuntimeError(
+                "PROVIDER_FINISH_REASON_UNKNOWN：供应商未提供可确认完成的结束原因"
+            )
+
+        validated_calls: list[
+            tuple[ModelToolCall, ToolDefinition, dict[str, Any]]
+        ] = []
+        seen_call_ids: set[str] = set()
+        for call in response.toolCalls:
+            if not call.id.strip():
+                raise RuntimeError(
+                    "MODEL_TOOL_CALL_ID_INVALID：模型工具调用缺少有效 ID"
+                )
+            if call.id in seen_call_ids:
+                raise RuntimeError(
+                    f"MODEL_TOOL_CALL_ID_DUPLICATE：模型工具调用 ID 重复 {call.id}"
+                )
+            seen_call_ids.add(call.id)
+            tool = exposed.get(call.name)
+            if tool is None:
+                raise RuntimeError(
+                    f"MODEL_TOOL_NOT_EXPOSED：模型调用了未暴露工具 {call.name}"
+                )
+            tool = self._registry.require_authorized(tool, context)
+            try:
+                arguments = tool.validate(call.arguments)
+            except ValidationError as exc:
+                raise RuntimeError(
+                    f"MODEL_TOOL_ARGUMENTS_INVALID：工具 {call.name} 参数校验失败：{exc}"
+                ) from exc
+            validated_calls.append((call, tool, arguments))
+
+        terminal_count = sum(
+            call.name in terminal_control_tools for call in response.toolCalls
+        )
+        if terminal_count > 1:
+            raise RuntimeError(
+                "MODEL_TERMINAL_TOOL_CONFLICT：同一模型响应包含多个终止控制工具"
+            )
+        return validated_calls
 
     @staticmethod
     def _normalize_result(result: object) -> dict[str, Any]:

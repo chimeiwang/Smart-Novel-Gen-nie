@@ -83,6 +83,8 @@ class HumanWorkflowLog:
         agent_id: str,
         messages: list[dict[str, Any]],
         output: str,
+        finish_reason: str,
+        raw_finish_reason: str | None,
     ) -> None:
         with self._lock:
             path = self._require_path(run_id)
@@ -93,7 +95,20 @@ class HumanWorkflowLog:
                 role = _role_label(message.get("role"))
                 value = message.get("content")
                 sections.extend((f"[{role}]", value if isinstance(value, str) else _json(value)))
-            sections.extend(("模型响应：", output, ""))
+            sections.extend(
+                (
+                    "模型响应：",
+                    output,
+                    f"完成原因：{finish_reason}",
+                    "供应商原始原因："
+                    + (
+                        raw_finish_reason
+                        if raw_finish_reason is not None
+                        else "未提供"
+                    ),
+                    "",
+                )
+            )
             self._append(path, "\n".join(sections))
 
     def finish_run(self, run_id: str, status: str) -> Path:

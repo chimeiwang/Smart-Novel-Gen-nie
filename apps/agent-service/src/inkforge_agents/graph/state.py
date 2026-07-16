@@ -4,6 +4,11 @@ import operator
 from typing import Annotated, Any, Literal, TypedDict
 
 
+class RuntimeContext(TypedDict):
+    coreContext: dict[str, Any]
+    runResource: dict[str, Any]
+
+
 class GraphState(TypedDict, total=False):
     taskId: str
     userId: str
@@ -16,6 +21,8 @@ class GraphState(TypedDict, total=False):
     operationStep: str
     operationStage: str | None
     contextMessages: list[str]
+    executionInstructions: list[str]
+    runtimeContext: RuntimeContext
     conversationHistory: list[dict[str, Any]]
     activeAgent: str | None
     agentOutputs: dict[str, dict[str, Any]]
@@ -53,6 +60,7 @@ def create_initial_state(
         operationStep="init",
         operationStage=None,
         contextMessages=[],
+        executionInstructions=[],
         conversationHistory=[],
         activeAgent=None,
         agentOutputs={},

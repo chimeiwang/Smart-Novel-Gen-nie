@@ -12,6 +12,7 @@ from ..db.models import (
     Chapter,
     ChapterBeatPlan,
     ChapterWritingGoal,
+    Foreshadowing,
     Novel,
     OutlineNode,
     ReviewArtifact,
@@ -147,15 +148,13 @@ class WritingContextRepository:
                     ).scalars()
                 )
             outline_path = await self._outline_path(session, group) if group is not None else []
+            foreshadowing_summaries = await self._foreshadowing_summaries(
+                session, task.novelId
+            )
             active_artifact = await self._active_artifact(session, task)
             conversation_history = _conversation_history(task.conversationHistory)
-            latest_user_message = next(
-                (
-                    str(item["content"])
-                    for item in reversed(conversation_history)
-                    if item.get("role") == "user" and isinstance(item.get("content"), str)
-                ),
-                "",
+            prior_conversation_history, latest_user_message = (
+                _split_current_user_message(conversation_history)
             )
             return {
                 "taskId": task.id,
@@ -176,11 +175,12 @@ class WritingContextRepository:
                     else None
                 ),
                 "outlinePath": outline_path,
+                "foreshadowingSummaries": foreshadowing_summaries,
                 "activeArtifact": active_artifact,
                 "phase": task.phase,
                 "targetWordCount": task.targetWordCount,
                 "selectedAgents": [item for item in task.selectedAgents.split(",") if item],
-                "conversationHistory": conversation_history,
+                "conversationHistory": prior_conversation_history,
                 "userMessage": latest_user_message,
                 "graphState": (json.loads(task.graphStateJson) if task.graphStateJson else None),
             }
@@ -208,6 +208,32 @@ class WritingContextRepository:
                 parent_id=node.parentId,
             )
             for node in nodes
+        ]
+
+    async def _foreshadowing_summaries(
+        self,
+        session: AsyncSession,
+        novel_id: str,
+    ) -> list[dict[str, Any]]:
+        values = list(
+            (
+                await session.scalars(
+                    select(Foreshadowing)
+                    .where(Foreshadowing.novelId == novel_id)
+                    .order_by(Foreshadowing.createdAt.asc(), Foreshadowing.id.asc())
+                )
+            ).all()
+        )
+        return [
+            {
+                "id": value.id,
+                "name": value.name,
+                "status": value.status,
+                "plantedAt": value.plantedAt,
+                "expectedPayoff": value.expectedPayoff,
+                "payoffAt": value.payoffAt,
+            }
+            for value in values
         ]
 
     async def _outline_path(
@@ -269,12 +295,29 @@ class WritingContextRepository:
             "awaiting_user",
             "applying",
         }:
+            try:
+                payload = json.loads(artifact.payloadJson)
+                diff = json.loads(artifact.diffJson) if artifact.diffJson is not None else None
+            except (json.JSONDecodeError, TypeError):
+                raise _artifact_payload_invalid() from None
+            if not isinstance(payload, dict) or payload.get("kind") != artifact.kind:
+                raise _artifact_payload_invalid()
             return {
                 "id": artifact.id,
+                "taskId": artifact.taskId,
+                "novelId": artifact.novelId,
+                "chapterId": artifact.chapterId,
+                "workflowRunId": artifact.workflowRunId,
+                "artifactKey": artifact.artifactKey,
                 "kind": artifact.kind,
                 "status": artifact.status,
+                "title": artifact.title,
+                "summary": artifact.summary,
+                "payload": payload,
+                "diff": diff,
+                "createdByAgent": artifact.createdByAgent,
+                "reviewerAgent": artifact.reviewerAgent,
                 "revision": artifact.revision,
-                "payload": artifact.payloadJson,
             }
         active_decision_command = await session.scalar(
             select(WritingRunCommand.id).where(
@@ -291,6 +334,14 @@ class WritingContextRepository:
             code="ACTIVE_ARTIFACT_MISMATCH",
             message="稳定快照引用的待审核草案与任务不匹配",
         )
+
+
+def _artifact_payload_invalid() -> ApiError:
+    return ApiError(
+        status_code=409,
+        code="ARTIFACT_PAYLOAD_INVALID",
+        message="待审核草案的持久化内容格式无效",
+    )
 
 
 def _goal_dict(goal: ChapterWritingGoal | None) -> dict[str, Any] | None:
@@ -326,6 +377,16 @@ def _conversation_history(serialized: str | None) -> list[dict[str, Any]]:
             message="写作任务对话历史格式错误",
         )
     return value
+
+
+def _split_current_user_message(
+    history: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], str]:
+    for index in range(len(history) - 1, -1, -1):
+        item = history[index]
+        if item.get("role") == "user" and isinstance(item.get("content"), str):
+            return [*history[:index], *history[index + 1 :]], str(item["content"])
+    return list(history), ""
 
 
 def _beat_plan_dict(plan: ChapterBeatPlan | None, scenes: list[SceneBeat]) -> dict[str, Any] | None:

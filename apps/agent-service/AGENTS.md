@@ -32,17 +32,21 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 ## Agent 与工具规则
 
 - Agent ID 固定为：设定、剧情、写作、校验、编辑。
-- AgentRunner 只向模型暴露当前 Agent 能力白名单允许的工具。
+- Agent 调用显式使用 `primary`、`reviewer`、`reviser`、`quality` 四种执行模式，禁止根据是否存在草案推断当前角色。
+- AgentRunner 只暴露“Agent 能力白名单、CreativeOperation 工具白名单、执行模式工具白名单”的交集；`primary/reviser` 使用 Operation 契约，`reviewer` 无读取工具且只允许 `submit_evaluation`，`quality` 只允许 `submit_quality_report`。
 - ToolRegistry 再次校验 Agent 权限；未暴露工具必须拒绝执行。
 - 26 个只读工具的名称和参数模型统一定义在 `inkforge_contracts.read_tools`；Agent 与 Core 必须共同引用该契约，禁止分别维护同名参数模型。
 - 只读且并发安全的工具可以并行；控制工具按模型返回顺序执行。
+- 每个 CreativeOperation 必须声明上下文策略、允许工具、终止控制工具、产物事件、产物类型和 artifactKey 策略；图层在提交 Core 前确定性拒绝错误事件、错误 kind、变化的 artifactKey 和冲突终止产物。
+- 设定新增/修改可使用通用更新构建器，但不暴露 `append_outline_tree`；该工具只允许创建/修改大纲和管理伏笔 Operation 使用。
 - 可见正文使用自然段文本，控制信息通过工具调用或明确产物边界提交。
 - 禁止从可见正文解析路由、评分或 JSON 控制信封。
 - 更新构建器在单次运行中只能启动一次；启动后 Runtime 不再暴露 `start_update_builder`，追加和完成必须沿用同一 `artifactKey`。重复开始事件在跨纠正重试合并时按幂等处理，不得清空已追加批次。
 - Agent 的产物提交工具必须配置为终止控制工具；`propose_updates`、`finish_update_builder` 等产物完成事件成功后应立即结束本轮工具循环。
 - `sync_lore` 已从当前可执行 Operation 和前端入口中删除；共享类型仅保留历史快照解析兼容，路由和分类器不得生成新的同步设定任务。
-- 当前运行创建草案后，`CoreArtifactPort` 保存已提交 Core 的完整请求快照；复审执行器把该快照作为权威草案上下文注入 reviewer，并使用 `control_only` 模式。没有本地快照时必须显式收敛失败，不得猜测或从正文反推草案。
-- 首版不提供跨服务草案局部 patch。复审请求局部修改时，`CoreArtifactPort.apply_patch()` 会明确拒绝该路径，工作流按完整草案重新生成；这是已接受的成本降级，不得伪装成局部修订成功，也不得绕过 ReviewArtifact 直接修改正式内容。
+- 当前运行创建草案后，`CoreArtifactPort` 保存已提交 Core 的完整请求快照；reviewer 只接收该权威草案并提交一次评审，reviser 接收同一草案、revision、artifactKey、原 payload 和合并后的 `requiredChanges`，按原 Operation 产物契约生成同类新 revision。没有权威快照时必须显式失败，不得猜测或从正文反推草案。
+- 首版不提供跨服务草案局部 patch。所有修改结论在合并时归一为完整 rewrite，保留具体修改意见和 patch 意图但不进入 patch 节点，不得伪装成局部修订成功，也不得绕过 ReviewArtifact 直接修改正式内容。
+- 一致性终检固定由“校验”Agent 的 `quality` 模式执行，结果使用 Agent、Core 共用的严格报告契约；商业性、追读和爽点评审仍属于“编辑”职责。
 
 ## 数据与信任边界
 
@@ -53,6 +57,9 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 - 写入类内部请求必须经过 Redis 重放保护。
 - Agent 只能生成 ReviewArtifact 或评审结果，不能直接写章节、设定、大纲或计费表。
 - 运行恢复以 Core 持久化的 `WritingTask.graphStateJson` 为权威；Redis 只承载队列、短期事件和重放保护。
+- 模型消息统一按“静态 Agent system prompt、服务端执行 brief、只读资料 user 消息、历史消息、唯一当前 user 消息”构造；作品数据和历史 system 记录不得提升为当前 system 指令。`contextStrategy` 只生成最小资料投影，完整聚合 `workspace` 不进入稳定快照。
+- 写作处理器在每次初始、命令恢复或当前 job 快照恢复时重新附加仅运行时 `runtimeContext`；其中 `RunResource` 的 `runId/jobId` 必须来自当前 QueueJob，供工具、草案、评审和水合统一使用，并在稳定快照序列化前移除。
+- 需要继续自动复审、自动返工或用户选择 revise 时，写作处理器必须先用 Core 的 `planning.activeArtifact` 水合本地权威草案；approve/discard 不依赖草案仍存在。等待、完成或错误稳定收敛后，只能在相应 checkpoint/回调成功后按同一 `runId/jobId` 释放缓存，失败时保留以供重试。
 - 写作事件、检查点、完成和失败回调必须携带当前队列 `jobId`，协议版本为 `1.1`；来源事件 ID 也必须绑定 jobId，禁止只靠 runId 猜测命令身份。
 - 当前 job 已锚定 `completed/error` 持久快照时，重试必须从快照序号直接重放终态回调，禁止重新执行图；终态回调自身暂时不可用时必须保留可重试异常。
 - 图进入等待用户确认时，必须先发送 `artifact_awaiting_user_approval`，再保存包含最新事件序号的稳定快照，确保前端能刷新草案入口且恢复时不会复用旧序号。
@@ -62,6 +69,7 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 - 队列终态必须进入时间 ZSET 并在保留窗口后有界清理；ack/cancel 同时删除 payload、lease、attempt 和 score。领取任务时按优先级查询已到期成员，不能让未来重试任务形成队头阻塞。
 - 升级前旧终态使用 HSCAN 游标分批补齐 tombstone；保留天数由 `QUEUE_TERMINAL_RETENTION_DAYS` 配置，默认 7、最少 1。
 - Redis OOM、MISCONF、READONLY 和达到阈值的连续基础设施失败必须交给监督器并使 readiness 失败；TypeError、Pydantic 契约错误和未知程序异常不得在消费循环中无限吞掉。
+- Provider 必须返回规范化 `finishReason` 并保留供应商原始原因；`length`、`content_filter`、完成原因与工具状态矛盾，以及无合法工具调用的 `unknown` 都必须在接受正文或执行工具副作用前失败。人工模型日志同时记录规范化值和未经截断的原始值。
 
 ## LangGraph 规则
 
