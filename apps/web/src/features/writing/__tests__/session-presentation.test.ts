@@ -1,20 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import type { components } from "@inkforge/api-client";
+
 import {
   formatSessionDisplayTitle,
   selectDefaultWritingSessionId,
 } from "../session-presentation";
 
-type SessionCandidate = {
-  id: string;
-  title: string | null;
-  phase: string;
-  updatedAt: string;
-  currentTask: { phase: string } | null;
-  firstMessage?: { content: string } | null;
-  lastMessage?: { content: string } | null;
-};
+type SessionCandidate = components["schemas"]["WritingSessionListItem"];
 
 const session = (
   id: string,
@@ -22,29 +16,36 @@ const session = (
   overrides: Partial<SessionCandidate> = {},
 ): SessionCandidate => ({
   id,
+  novelId: "novel-1",
+  chapterId: "chapter-1",
   title: null,
   phase: "idle",
+  createdAt: "2026-07-15T08:00:00Z",
   updatedAt,
-  currentTask: null,
+  messageCount: 0,
+  lastMessage: null,
   ...overrides,
 });
 
 describe("会话默认选择", () => {
-  it("活动或 awaiting 会话优先于更近的普通历史会话", () => {
+  it("活动阶段会话优先于更近的普通历史会话", () => {
     const sessions = [
       session("recent-idle", "2026-07-16T10:00:00Z"),
-      session("active", "2026-07-16T08:00:00Z", {
-        currentTask: { phase: "active" },
+      session("discussing", "2026-07-16T07:00:00Z", {
+        phase: "discussing",
       }),
-      session("awaiting", "2026-07-16T09:00:00Z", {
-        phase: "awaiting_user_review",
+      session("generating", "2026-07-16T08:00:00Z", {
+        phase: "generating",
+      }),
+      session("recording", "2026-07-16T09:00:00Z", {
+        phase: "recording",
       }),
     ];
 
-    assert.equal(selectDefaultWritingSessionId(sessions), "awaiting");
+    assert.equal(selectDefaultWritingSessionId(sessions), "recording");
   });
 
-  it("没有活动或 awaiting 会话时选择 updatedAt 最近者", () => {
+  it("没有活动阶段会话时选择 updatedAt 最近者", () => {
     const sessions = [
       session("older", "2026-07-15T10:00:00Z"),
       session("newer", "2026-07-16T10:00:00Z"),
@@ -60,32 +61,37 @@ describe("会话可读标题", () => {
     assert.equal(
       formatSessionDisplayTitle(session("one", "2026-07-16T10:00:00Z", {
         title: "  第三章冲突设计  ",
-        firstMessage: { content: "这条消息不应覆盖标题" },
+        lastMessage: {
+          content: "这条消息不应覆盖标题",
+          role: "user",
+          agentId: null,
+        },
       })),
       "第三章冲突设计",
     );
   });
 
-  it("没有标题时依次使用首条消息和最后消息摘要", () => {
+  it("没有标题时使用最后消息摘要", () => {
     assert.equal(
       formatSessionDisplayTitle(session("one", "2026-07-16T10:00:00Z", {
-        firstMessage: { content: "  请先梳理\n\n第三章冲突  " },
-        lastMessage: { content: "最后回复" },
+        lastMessage: {
+          content: "  请先梳理\n\n第三章冲突  ",
+          role: "user",
+          agentId: null,
+        },
       })),
       "请先梳理 第三章冲突",
-    );
-    assert.equal(
-      formatSessionDisplayTitle(session("two", "2026-07-16T10:00:00Z", {
-        lastMessage: { content: "只有最后消息" },
-      })),
-      "只有最后消息",
     );
   });
 
   it("摘要超过上限时截断并追加省略号", () => {
     assert.equal(
       formatSessionDisplayTitle(session("one", "2026-07-16T10:00:00Z", {
-        firstMessage: { content: "一二三四五六七八九十" },
+        lastMessage: {
+          content: "一二三四五六七八九十",
+          role: "agent",
+          agentId: "写作",
+        },
       }), 6),
       "一二三四五六…",
     );
