@@ -70,9 +70,18 @@ def test_image_upload_reuses_matching_server_images() -> None:
     assert 'docker image inspect "$image_id"' in source
     assert 'docker image tag "$image_id" "$image"' in source
     assert 'images_to_upload+=("$image")' in source
-    assert 'docker save "${images_to_upload[@]}"' in source
+    assert 'docker save "${images_to_upload[@]}"' not in source
+    assert 'docker save "$1"' in source
     assert 'if [ "${#images_to_upload[@]}" -eq 0 ]' in source
     assert "docker load" in source
+
+
+def test_image_upload_step_has_a_total_timeout() -> None:
+    source = WORKFLOW.read_text(encoding="utf-8")
+    upload_step = source.split("      - name: Upload Docker images", maxsplit=1)[1]
+    upload_step = upload_step.split("      - name: Deploy over SSH", maxsplit=1)[0]
+
+    assert "timeout-minutes: 30" in upload_step
 
 
 def test_image_upload_reuses_services_with_unchanged_build_inputs() -> None:

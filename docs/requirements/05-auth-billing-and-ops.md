@@ -85,6 +85,8 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 
 生产发布由 GitHub Actions 在 Runner 上构建带提交哈希标签的 Web、Core API 和 Agent Service 三张镜像，经 SSH 加载到服务器，再以 `--no-build` 启动 `infra/compose.yaml`。2 核 2 GB 服务器不得现场安装依赖或构建镜像；缺少 `.env`、四个服务密钥、宿主机 PostgreSQL 连接或可恢复备份时必须停止部署。
 
+镜像上传必须先对远端 Docker 和相关文件系统可用容量执行只读预检，再把无法复用的镜像逐张归档、压缩、传输和导入。日志必须标明镜像名、阶段、压缩后大小和耗时；单镜像传输导入与工作流上传步骤都必须设置有界超时。临时归档只保存在一次性 Runner 并在退出时清理，不得为了腾出空间自动删除生产镜像、容器、卷或数据。
+
 生产 SSH 必须严格校验管理员离线核对过的主机公钥：
 
 - GitHub `production` environment 必须配置 `DEPLOY_SSH_KNOWN_HOSTS` Secret；内容由管理员通过可信渠道取得并在线下比对，不能在部署时使用 `ssh-keyscan` 动态信任远端；
