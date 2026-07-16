@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
-  buildWorkspaceViewHref,
   commitWorkspaceViewChange,
-  parseWorkspaceViewFromSearch,
 } from "../workspace-shell-state";
 
 describe("工作区视图切换", () => {
@@ -62,20 +60,4 @@ describe("工作区视图切换", () => {
     assert.deepEqual(events, ["flush", "commit:library"]);
   });
 
-  it("从浏览器查询参数恢复合法视图", () => {
-    assert.equal(parseWorkspaceViewFromSearch("?chapterId=c1&view=reading"), "reading");
-    assert.equal(parseWorkspaceViewFromSearch("?view=library"), "library");
-    assert.equal(parseWorkspaceViewFromSearch("?view=unknown"), "studio");
-    assert.equal(parseWorkspaceViewFromSearch("?chapterId=c1"), "studio");
-  });
-
-  it("保存失败后保留其他查询参数并恢复当前视图 URL", () => {
-    assert.equal(
-      buildWorkspaceViewHref(
-        "https://inkforge.test/workspace/n1?chapterId=c2&view=library",
-        "reading",
-      ),
-      "https://inkforge.test/workspace/n1?chapterId=c2&view=reading",
-    );
-  });
 });

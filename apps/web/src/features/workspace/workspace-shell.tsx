@@ -11,10 +11,8 @@ import { flushActiveChapterSave } from "@/features/editor/chapter-save-navigatio
 import { SidebarTabs } from "./sidebar-tabs";
 import { SmartWritingPanel } from "./smart-writing-panel";
 import {
-  buildWorkspaceViewHref,
   commitWorkspaceViewChange,
   formatWorkspaceViewSaveError,
-  parseWorkspaceViewFromSearch,
 } from "./workspace-shell-state";
 import type { WorkspaceView } from "./workspace-view";
 
@@ -41,13 +39,10 @@ export function WorkspaceShell({
   const [switchingView, setSwitchingView] = useState<WorkspaceView | null>(null);
   const [viewError, setViewError] = useState<string | null>(null);
   const previousInitialViewRef = useRef(initialView);
-  const activeViewRef = useRef(initialView);
-  const popstateTransitionRef = useRef(false);
   const totalCount = chapters.reduce((sum, item) => sum + item.wordCount, 0);
   const approvedBeatPlan = currentChapter?.approvedBeatPlan ?? null;
 
   const applyActiveView = useCallback((view: WorkspaceView) => {
-    activeViewRef.current = view;
     if (view === "reading") setReadingSession((current) => current + 1);
     setActiveView(view);
   }, []);
@@ -55,57 +50,9 @@ export function WorkspaceShell({
   useEffect(() => {
     if (previousInitialViewRef.current === initialView) return;
     previousInitialViewRef.current = initialView;
-    if (popstateTransitionRef.current) return;
     const syncTimer = window.setTimeout(() => applyActiveView(initialView), 0);
     return () => window.clearTimeout(syncTimer);
   }, [applyActiveView, initialView]);
-
-  useEffect(() => {
-    const handlePopState = async () => {
-      const currentView = activeViewRef.current;
-      if (popstateTransitionRef.current) {
-        window.history.replaceState(
-          window.history.state,
-          "",
-          buildWorkspaceViewHref(window.location.href, currentView),
-        );
-        return;
-      }
-      const nextView = parseWorkspaceViewFromSearch(window.location.search);
-      if (nextView === currentView) return;
-
-      popstateTransitionRef.current = true;
-      setViewError(null);
-      setSwitchingView(nextView);
-      try {
-        await commitWorkspaceViewChange({
-          currentView,
-          nextView,
-          flush: flushActiveChapterSave,
-          commit: (view) => {
-            window.history.replaceState(
-              window.history.state,
-              "",
-              buildWorkspaceViewHref(window.location.href, view),
-            );
-            applyActiveView(view);
-          },
-        });
-      } catch (error) {
-        window.history.replaceState(
-          window.history.state,
-          "",
-          buildWorkspaceViewHref(window.location.href, currentView),
-        );
-        setViewError(formatWorkspaceViewSaveError(error));
-      } finally {
-        popstateTransitionRef.current = false;
-        setSwitchingView(null);
-      }
-    };
-    window.addEventListener("popstate", handlePopState);
-    return () => window.removeEventListener("popstate", handlePopState);
-  }, [applyActiveView]);
 
   const selectView = async (nextView: WorkspaceView) => {
     if (switchingView) return;
@@ -117,11 +64,9 @@ export function WorkspaceShell({
         nextView,
         flush: flushActiveChapterSave,
         commit: (view) => {
-          window.history.replaceState(
-            window.history.state,
-            "",
-            buildWorkspaceViewHref(window.location.href, view),
-          );
+          const url = new URL(window.location.href);
+          url.searchParams.set("view", view);
+          window.history.replaceState(window.history.state, "", url);
           applyActiveView(view);
         },
       });

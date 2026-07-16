@@ -18,18 +18,14 @@ test("工作区外壳常驻挂载三类主要面板", async () => {
   assert.doesNotMatch(source, /key=\{activeView\}/);
 });
 
-test("工作区外壳跟随服务端视图和浏览器历史", async () => {
+test("工作区外壳跟随服务端 initialView", async () => {
   const shellUrl = new URL("../workspace-shell.tsx", import.meta.url);
   const source = await readFile(shellUrl, "utf8");
 
   assert.match(source, /useEffect\([\s\S]*initialView/);
-  assert.match(source, /addEventListener\("popstate"/);
-  assert.match(source, /removeEventListener\("popstate"/);
-  assert.match(source, /parseWorkspaceViewFromSearch\(window\.location\.search\)/);
-  assert.match(source, /const handlePopState = async \(\) => \{[\s\S]*commitWorkspaceViewChange/);
-  assert.match(source, /activeViewRef/);
-  assert.match(source, /popstateTransitionRef/);
-  assert.match(source, /catch \(error\) \{[\s\S]*history\.replaceState/);
+  assert.match(source, /previousInitialViewRef/);
+  assert.doesNotMatch(source, /addEventListener\("popstate"/);
+  assert.doesNotMatch(source, /activeViewRef|popstateTransitionRef/);
 });
 
 test("studio 使用单一宽主画布，窄桌面可滚动降级", async () => {

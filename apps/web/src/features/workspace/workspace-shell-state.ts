@@ -1,4 +1,4 @@
-import { parseWorkspaceView, type WorkspaceView } from "./workspace-view";
+import type { WorkspaceView } from "./workspace-view";
 
 type WorkspaceViewChangeOptions = {
   currentView: WorkspaceView;
@@ -16,16 +16,6 @@ export async function commitWorkspaceViewChange({
   if (currentView === nextView) return;
   await flush();
   commit(nextView);
-}
-
-export function parseWorkspaceViewFromSearch(search: string): WorkspaceView {
-  return parseWorkspaceView(new URLSearchParams(search).get("view"));
-}
-
-export function buildWorkspaceViewHref(href: string, view: WorkspaceView): string {
-  const url = new URL(href);
-  url.searchParams.set("view", view);
-  return url.toString();
 }
 
 export function formatWorkspaceViewSaveError(error: unknown): string {
