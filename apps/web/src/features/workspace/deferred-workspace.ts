@@ -24,6 +24,10 @@ export type DeferredWorkspaceSnapshot = {
 
 const TAB_GROUPS: Record<string, WorkspaceGroup | undefined> = {
   characters: "lore",
+  locations: "lore",
+  factions: "lore",
+  items: "lore",
+  glossaries: "lore",
   lore: "lore",
   progress: "planning",
   storyProgress: "planning",

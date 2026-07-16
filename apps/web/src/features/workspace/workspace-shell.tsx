@@ -8,7 +8,7 @@ import { LogoutButton } from "@/features/auth/user-menu";
 import { ChapterList } from "@/features/chapters/chapter-list";
 import { ChapterEditor } from "@/features/editor/chapter-editor";
 import { flushActiveChapterSave } from "@/features/editor/chapter-save-navigation";
-import { SidebarTabs } from "./sidebar-tabs";
+import { LibraryPane } from "./library-pane";
 import { SmartWritingPanel } from "./smart-writing-panel";
 import {
   commitWorkspaceViewChange,
@@ -173,13 +173,10 @@ export function WorkspaceShell({
           </section>
 
           <section className="workspace-pane workspace-library-pane" hidden={activeView !== "library"}>
-            <SidebarTabs
+            <LibraryPane
               novelId={novel.id}
-              activeChapterId={currentChapter?.id ?? ""}
-              chapters={chapters}
               appliedStyleId={novel.appliedStyleId}
-              view={activeView}
-              showChapters={false}
+              active={activeView === "library"}
             />
           </section>
         </div>

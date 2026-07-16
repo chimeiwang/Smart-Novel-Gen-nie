@@ -46,6 +46,8 @@ type LorePanelProps = {
   locations: components["schemas"]["LocationDto"][];
   factions: components["schemas"]["FactionDto"][];
   glossaries: components["schemas"]["GlossaryDto"][];
+  selectedTab?: LoreTabKey;
+  showTabs?: boolean;
   onChanged?: () => void;
 };
 
@@ -56,11 +58,14 @@ export function LorePanel({
   locations,
   factions,
   glossaries,
+  selectedTab,
+  showTabs = true,
   onChanged,
 }: LorePanelProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [activeTab, setActiveTab] = useState<LoreTabKey>("characters");
+  const [internalActiveTab, setActiveTab] = useState<LoreTabKey>("characters");
+  const activeTab = selectedTab ?? internalActiveTab;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form] = Form.useForm();
@@ -1371,7 +1376,7 @@ export function LorePanel({
   };
 
   return (
-    <div className="stack">
+    <div className="stack lore-panel-root">
       <div>
         <h3 className="title-md">设定库</h3>
         <p className="muted">管理角色、物品、地点、势力、术语等设定</p>
@@ -1382,7 +1387,7 @@ export function LorePanel({
           + 新增设定
         </button>
       </div>
-      <div className="tabs">
+      {showTabs ? <div className="tabs">
         <button
           className={`tab-button ${activeTab === "characters" ? "active" : ""}`}
           type="button"
@@ -1418,7 +1423,7 @@ export function LorePanel({
         >
           术语
         </button>
-      </div>
+      </div> : null}
 
       <div className="list">{renderList()}</div>
 
@@ -1470,18 +1475,14 @@ export function LorePanel({
 
       <style jsx>{`
         .lore-fullscreen-overlay {
-          position: fixed;
-          top: 0;
-          left: 320px;
-          right: 560px;
-          bottom: 0;
+          position: absolute;
+          inset: 0;
           background: var(--bg);
           z-index: 100;
           display: flex;
           flex-direction: column;
           animation: slideIn 0.2s ease-out;
-          margin-top: 72px;
-          height: calc(100vh - 72px)
+          min-height: 0;
         }
         @keyframes slideIn {
           from {

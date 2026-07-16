@@ -10,7 +10,17 @@ import { countTextLength } from "../../../shared/lib/word-count";
 
 test("把侧栏入口映射到三个延迟分组", () => {
   assert.equal(groupForTab("characters"), "lore");
+  assert.equal(groupForTab("locations"), "lore");
+  assert.equal(groupForTab("factions"), "lore");
+  assert.equal(groupForTab("items"), "lore");
+  assert.equal(groupForTab("glossaries"), "lore");
+  assert.equal(groupForTab("storyBackground"), "planning");
+  assert.equal(groupForTab("worldSetting"), "planning");
   assert.equal(groupForTab("outline"), "planning");
+  assert.equal(groupForTab("progress"), "planning");
+  assert.equal(groupForTab("storyProgress"), "planning");
+  assert.equal(groupForTab("writingBible"), "planning");
+  assert.equal(groupForTab("style"), "resources");
   assert.equal(groupForTab("references"), "resources");
   assert.equal(groupForTab("chapters"), null);
 });
