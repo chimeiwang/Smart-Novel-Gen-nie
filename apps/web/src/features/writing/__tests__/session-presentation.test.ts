@@ -71,9 +71,10 @@ describe("会话可读标题", () => {
     );
   });
 
-  it("没有标题时使用最后消息摘要", () => {
+  it("标题仅含空白时降级使用最后消息摘要", () => {
     assert.equal(
       formatSessionDisplayTitle(session("one", "2026-07-16T10:00:00Z", {
+        title: "  \n ",
         lastMessage: {
           content: "  请先梳理\n\n第三章冲突  ",
           role: "user",
@@ -81,6 +82,20 @@ describe("会话可读标题", () => {
         },
       })),
       "请先梳理 第三章冲突",
+    );
+  });
+
+  it("标题和最后消息仅含空白时回退未命名会话", () => {
+    assert.equal(
+      formatSessionDisplayTitle(session("empty", "2026-07-16T10:00:00Z", {
+        title: "  ",
+        lastMessage: {
+          content: " \n\t ",
+          role: "user",
+          agentId: null,
+        },
+      })),
+      "未命名会话",
     );
   });
 

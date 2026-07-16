@@ -1,18 +1,18 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import type { QualityCheckDto } from "../../../shared/contracts/quality-check";
+
 import {
   getQualityCheckPresentationState,
   isHandledQualityCheck,
   isValidCompletedQualityCheck,
 } from "../quality-presentation";
 
-type QualityCheck = {
-  status: string;
-  result: string | null;
-  scoreOverall: number | null;
-  qualityGate: string | null;
-};
+type QualityCheck = Pick<
+  QualityCheckDto,
+  "status" | "result" | "scoreOverall" | "qualityGate"
+>;
 
 const validCheck = (overrides: Partial<QualityCheck> = {}): QualityCheck => ({
   status: "completed",
@@ -32,6 +32,8 @@ describe("有效质量终检", () => {
     assert.equal(isValidCompletedQualityCheck(validCheck({ result: "  \n " })), false);
     assert.equal(isValidCompletedQualityCheck(validCheck({ scoreOverall: null })), false);
     assert.equal(isValidCompletedQualityCheck(validCheck({ scoreOverall: Number.NaN })), false);
+    assert.equal(isValidCompletedQualityCheck(validCheck({ scoreOverall: Number.POSITIVE_INFINITY })), false);
+    assert.equal(isValidCompletedQualityCheck(validCheck({ scoreOverall: Number.NEGATIVE_INFINITY })), false);
     assert.equal(isValidCompletedQualityCheck(validCheck({ qualityGate: "rewrite" })), false);
     assert.equal(isValidCompletedQualityCheck(validCheck({ qualityGate: null })), false);
     assert.equal(isValidCompletedQualityCheck(validCheck({ status: "running" })), false);
