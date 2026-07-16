@@ -48,6 +48,10 @@ import {
   shouldRefreshAwaitingReviewArtifact,
 } from "./review-artifact-state";
 import {
+  collectAwaitingReviewTaskIds,
+  mergeActionableReviewArtifacts,
+} from "./review-artifact-collection";
+import {
   resolveLoadedSessionRecoveryState,
 } from "./session-task-state";
 import {
@@ -250,10 +254,6 @@ type ChapterTargetPrompt = {
   summary?: string;
   content?: string;
 };
-
-function isActionableReviewArtifact(artifact: ReviewArtifactData) {
-  return artifact.status === "awaiting_user";
-}
 
 function getReviewArtifactActionMessage(
   decision: ReviewArtifactDecision,
@@ -618,6 +618,7 @@ export function WritingConversation({
   const sessionInitializationRef = useRef(false);
   const phasePersistenceReadyRef = useRef(false);
   const persistedPhaseKeyRef = useRef<string | null>(null);
+  const artifactCollectionVersionRef = useRef(0);
 
   const replaceSessionWorkspace = useCallback((next: SessionWorkspaceState<ReviewArtifactData>) => {
     currentSessionIdRef.current = next.sessionId;
@@ -867,22 +868,50 @@ export function WritingConversation({
     return [] as Session[];
   }, [novelId, chapterId]);
 
-  const loadReviewArtifacts = useCallback(async () => {
+  const loadReviewArtifacts = useCallback(async (knownSessions?: readonly Session[]) => {
+    const requestVersion = ++artifactCollectionVersionRef.current;
     try {
-      const currentTaskId = taskIdRef.current;
-      if (!currentTaskId) {
-        setReviewArtifacts([]);
-        return;
-      }
-      const artifact = requireApiData(await browserApi.GET(
-        "/api/v1/writing/tasks/{task_id}/artifact",
-        { params: { path: { task_id: currentTaskId } }, cache: "no-store" },
-      )) as ReviewArtifactData | null;
-      setReviewArtifacts(artifact && isActionableReviewArtifact(artifact) ? [artifact] : []);
+      const sessionList = knownSessions ?? requireApiData(await browserApi.GET(
+        "/api/v1/writing/sessions",
+        { params: { query: { novelId, chapterId } }, cache: "no-store" },
+      )) as Session[];
+      if (artifactCollectionVersionRef.current !== requestVersion) return;
+
+      const sessionResults = await Promise.allSettled(sessionList.map(async (session) => (
+        requireApiData(await browserApi.GET(
+          "/api/v1/writing/sessions/{session_id}",
+          { params: { path: { session_id: session.id } }, cache: "no-store" },
+        )) as LoadedSessionResponse
+      )));
+      if (artifactCollectionVersionRef.current !== requestVersion) return;
+
+      const loadedSessions = sessionResults.flatMap((result) => (
+        result.status === "fulfilled" ? [result.value] : []
+      ));
+      const taskIds = collectAwaitingReviewTaskIds(loadedSessions);
+      const artifactResults = await Promise.allSettled(taskIds.map(async (awaitingTaskId) => (
+        requireApiData(await browserApi.GET(
+          "/api/v1/writing/tasks/{task_id}/artifact",
+          { params: { path: { task_id: awaitingTaskId } }, cache: "no-store" },
+        )) as ReviewArtifactData | null
+      )));
+      if (artifactCollectionVersionRef.current !== requestVersion) return;
+
+      const fetchedArtifacts = artifactResults.flatMap((result) => (
+        result.status === "fulfilled" && result.value ? [result.value] : []
+      ));
+      const hasPartialFailure = sessionResults.some((result) => result.status === "rejected") ||
+        artifactResults.some((result) => result.status === "rejected");
+      const visibleCurrentArtifact = activeReviewArtifactRef.current;
+      setReviewArtifacts((previous) => mergeActionableReviewArtifacts(
+        ...(hasPartialFailure ? [previous] : []),
+        fetchedArtifacts,
+        visibleCurrentArtifact ? [visibleCurrentArtifact] : [],
+      ));
     } catch (err) {
       console.error("加载待确认变更失败", err);
     }
-  }, []);
+  }, [chapterId, novelId]);
 
   // 加载会话消息
   const loadSessionMessages = useCallback(async (sessionId: string) => {
@@ -1010,19 +1039,22 @@ export function WritingConversation({
     const timer = window.setTimeout(() => {
       void (async () => {
         const loadedSessions = await loadSessions();
+        const reviewArtifactsPromise = loadReviewArtifacts(loadedSessions);
         if (sessionInitializationRef.current) return;
         sessionInitializationRef.current = true;
         const defaultSessionId = selectDefaultWritingSessionId(loadedSessions);
         if (!defaultSessionId) {
           resetSessionContext(null);
+          await reviewArtifactsPromise;
           return;
         }
         resetSessionContext(defaultSessionId);
         await loadSessionMessages(defaultSessionId);
+        await reviewArtifactsPromise;
       })();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [loadSessionMessages, loadSessions, resetSessionContext]);
+  }, [loadReviewArtifacts, loadSessionMessages, loadSessions, resetSessionContext]);
 
   useEffect(() => {
     if (!phasePersistenceReadyRef.current) return;
@@ -1187,10 +1219,7 @@ export function WritingConversation({
       setTaskId(nextTaskId);
     }
     setActiveReviewArtifact(artifact);
-    setReviewArtifacts((prev) => {
-      const rest = prev.filter((item) => item.id !== artifact.id);
-      return isActionableReviewArtifact(artifact) ? [artifact, ...rest] : rest;
-    });
+    setReviewArtifacts((prev) => mergeActionableReviewArtifacts(prev, [artifact]));
     if (artifact.status === "awaiting_user") setPhase("recording");
     setMessages((prev) => attachReviewArtifactToConversation<Message, ReviewArtifactData>(prev, artifact, () => ({
       id: `restored-review-${artifact.id}`,
@@ -1201,19 +1230,13 @@ export function WritingConversation({
   }, [setActiveReviewArtifact, setPhase, setTaskId, taskId]);
 
   const inspectReviewArtifactFromTray = useCallback((artifact: ReviewArtifactData) => {
-    setReviewArtifacts((prev) => {
-      const rest = prev.filter((item) => item.id !== artifact.id);
-      return isActionableReviewArtifact(artifact) ? [artifact, ...rest] : rest;
-    });
+    setReviewArtifacts((prev) => mergeActionableReviewArtifacts(prev, [artifact]));
     setShowArtifactTray(false);
     openReviewArtifactModal(artifact);
   }, [openReviewArtifactModal]);
 
   const updateDetachedReviewArtifact = useCallback((artifact: ReviewArtifactData) => {
-    setReviewArtifacts((prev) => {
-      const rest = prev.filter((item) => item.id !== artifact.id);
-      return isActionableReviewArtifact(artifact) ? [artifact, ...rest] : rest;
-    });
+    setReviewArtifacts((prev) => mergeActionableReviewArtifacts(prev, [artifact]));
     setReviewDialogArtifact((current) => current?.id === artifact.id ? artifact : current);
   }, []);
 
@@ -2348,7 +2371,6 @@ export function WritingConversation({
     );
   };
 
-  /* eslint-disable react-hooks/refs -- 审核卡片事件处理器只在点击时读取运行句柄。 */
   const renderArtifactReviewCard = (artifact: ReviewArtifactData) => {
     const diffItems = artifact.diff ?? artifact.payload?.updates?.__diff ?? [];
     const hasStructuredUpdates = Boolean(artifact.payload?.updates && (
@@ -2365,6 +2387,7 @@ export function WritingConversation({
     const selectedUpdateRefsForApply = getSelectedUpdateRefsForApply(artifact);
     const action = getReviewArtifactAction(artifact.id);
     const actionLocked = isReviewArtifactActionLocked(action);
+    const isCurrentSessionArtifact = activeReviewArtifact?.id === artifact.id;
     const isApplyDisabled = isSending ||
       isActing ||
       actionLocked ||
@@ -2445,7 +2468,13 @@ export function WritingConversation({
                 className="button ghost sm"
                 type="button"
                 disabled={isSending || isActing || actionLocked}
-                onClick={focusChatForArtifactRevision}
+                onClick={() => {
+                  if (isCurrentSessionArtifact) {
+                    focusChatForArtifactRevision();
+                    return;
+                  }
+                  void handleArtifactDecision(artifact, "revise", "继续修改待确认变更");
+                }}
               >
                 {getReviewArtifactActionButtonLabel(action, "revise") ?? (artifact.optimisticStatus === "revising" ? "准备返工..." : "继续修改")}
               </button>
@@ -2472,7 +2501,6 @@ export function WritingConversation({
       </div>
     );
   };
-  /* eslint-enable react-hooks/refs */
 
   const renderArtifactReviewDialog = (artifact: ReviewArtifactData) => {
     const latestEvaluation = artifact.evaluations?.[0];
@@ -2746,6 +2774,10 @@ export function WritingConversation({
 
   const currentSession = sessions.find(s => s.id === currentSessionId);
   const workflowReviewArtifact = resolveVisibleReviewArtifact(optimisticReviewArtifact, messages);
+  const reviewRailArtifacts = mergeActionableReviewArtifacts(
+    reviewArtifacts,
+    workflowReviewArtifact ? [workflowReviewArtifact] : [],
+  );
   const resolveMessageReviewArtifact = (artifact: ReviewArtifactData) => {
     if (!workflowReviewArtifact) return artifact;
     if (workflowReviewArtifact.id === artifact.id) return workflowReviewArtifact;
@@ -2758,12 +2790,7 @@ export function WritingConversation({
       : reviewDialogArtifact ?? workflowReviewArtifact;
   const modalReviewArtifactAction = modalReviewArtifact ? getReviewArtifactAction(modalReviewArtifact.id) : null;
   const isReviewArtifactModalLocked = isReviewArtifactActionLocked(modalReviewArtifactAction);
-  const awaitingArtifactCount = reviewArtifacts.filter((artifact) => artifact.status === "awaiting_user").length;
-  const workflowAwaitingArtifactExtra = workflowReviewArtifact?.status === "awaiting_user" &&
-    !reviewArtifacts.some((artifact) => artifact.id === workflowReviewArtifact.id)
-    ? 1
-    : 0;
-  const effectiveAwaitingArtifactCount = awaitingArtifactCount + workflowAwaitingArtifactExtra;
+  const effectiveAwaitingArtifactCount = reviewRailArtifacts.length;
   const nextActions = composeWritingTaskActions({
     chapterStatus: chapterContext?.status,
     wordCount: chapterContext?.wordCount ?? 0,
@@ -3122,9 +3149,9 @@ export function WritingConversation({
              <button className="modal-close" onClick={() => setShowArtifactTray(false)}>×</button>
            </div>
            <div className="modal-body artifact-tray-body">
-             {reviewArtifacts.length === 0 ? (
+             {reviewRailArtifacts.length === 0 ? (
                 <div className="artifact-empty">暂无待确认变更。</div>
-             ) : reviewArtifacts.map((artifact) => (
+             ) : reviewRailArtifacts.map((artifact) => (
                 <button
                   key={artifact.id}
                   className="artifact-tray-item"
@@ -3197,9 +3224,17 @@ export function WritingConversation({
         <div className="writing-chat workspace-review-content">
           <div className="workspace-review-heading">
             <span>审核与确认</span>
-            <small>当前主会话</small>
+            <small>本章待确认 {reviewRailArtifacts.length} 项</small>
           </div>
-          {workflowReviewArtifact ? renderArtifactReviewCard(workflowReviewArtifact) : (
+          {reviewRailArtifacts.length > 0 ? (
+            <div className="workspace-review-artifacts">
+              {reviewRailArtifacts.map((artifact) => (
+                <div className="workspace-review-artifact" key={artifact.id}>
+                  {renderArtifactReviewCard(artifact)}
+                </div>
+              ))}
+            </div>
+          ) : (
             <div className="workspace-review-empty">
               <div>
                 <strong>{chapterContext?.title ?? "当前章节"}</strong>

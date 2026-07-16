@@ -50,6 +50,32 @@ test("会话恢复完成前不会把临时 idle 阶段写回服务端", async ()
   assert.match(source, /requireApiData\(await browserApi\.PATCH/);
 });
 
+test("审核栏汇总多个会话产物并隔离并发失败与旧响应", async () => {
+  const conversationUrl = new URL("../../writing/writing-conversation.tsx", import.meta.url);
+  const source = await readFile(conversationUrl, "utf8");
+
+  assert.match(source, /Promise\.allSettled/);
+  assert.match(source, /artifactCollectionVersionRef/);
+  assert.match(source, /reviewRailArtifacts\.map/);
+  assert.match(source, /mergeActionableReviewArtifacts/);
+});
+
+test("开始新对话不会清空其他会话待审核产物", async () => {
+  const conversationUrl = new URL("../../writing/writing-conversation.tsx", import.meta.url);
+  const source = await readFile(conversationUrl, "utf8");
+  const resetBody = source.match(/const resetSessionContext[\s\S]*?\n  \}, \[/)?.[0] ?? "";
+
+  assert.doesNotMatch(resetBody, /setReviewArtifacts\(\[\]\)/);
+});
+
+test("审核栏中的非当前会话产物也能进入返工流程", async () => {
+  const conversationUrl = new URL("../../writing/writing-conversation.tsx", import.meta.url);
+  const source = await readFile(conversationUrl, "utf8");
+  const cardBody = source.match(/const renderArtifactReviewCard[\s\S]*?const renderArtifactReviewDialog/)?.[0] ?? "";
+
+  assert.match(cardBody, /handleArtifactDecision\(artifact,\s*"revise"/);
+});
+
 test("工作区外壳跟随服务端 initialView", async () => {
   const shellUrl = new URL("../workspace-shell.tsx", import.meta.url);
   const source = await readFile(shellUrl, "utf8");

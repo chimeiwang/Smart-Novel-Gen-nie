@@ -2250,6 +2250,11 @@
   margin: 12px 0 0;
 }
 
+.workspace-review-content .workspace-review-artifacts {
+  display: grid;
+  gap: 12px;
+}
+
 .workspace-review-content .workspace-review-empty {
   display: grid;
   gap: 12px;
