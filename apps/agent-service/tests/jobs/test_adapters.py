@@ -362,7 +362,7 @@ async def test_reviewer_receives_submitted_artifact_without_read_tools() -> None
     assert "当前待审核草案权威内容" in runner.requests[0].contextMessages[-1]
     assert "新增事实" in runner.requests[0].contextMessages[-1]
     assert runner.requests[0].contextMessages == [runner.requests[0].contextMessages[-1]]
-    assert "submit_evaluation" in runner.requests[0].executionInstructions[-1]
+    assert runner.requests[0].executionInstructions == []
 
 
 @pytest.mark.asyncio

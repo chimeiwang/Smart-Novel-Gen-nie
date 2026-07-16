@@ -335,19 +335,11 @@ class CoreGraphAgentExecutor:
             conversation_messages = []
             if execution_mode == "reviewer":
                 context_messages = [_reviewer_context(artifact_context)]
-                execution_instructions = [
-                    "当前处于复审模式。只处理只读资料中的 Core 权威草案；"
-                    "不要重新读取或猜测其他草案，完成后只调用一次 submit_evaluation。"
-                ]
+                execution_instructions = []
             elif execution_mode == "reviser":
                 context_messages = [_reviser_context(state, artifact_context)]
                 execution_instructions = [
-                    "当前处于完整返工模式。根据只读资料中的修改要求重写完整草案，"
-                    "保持权威 artifactKey 和原产物类型，完成后使用当前 Operation 的产物提交工具。",
-                    *[
-                        str(item)
-                        for item in state.get("executionInstructions", [])
-                    ],
+                    str(item) for item in state.get("executionInstructions", [])
                 ]
             else:
                 raise ValueError("CoreGraphAgentExecutor 不支持 quality 执行模式")

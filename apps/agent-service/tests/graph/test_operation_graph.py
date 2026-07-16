@@ -275,6 +275,13 @@ async def test_operation_graph_retries_once_when_primary_agent_omits_artifact_ev
         in executor.calls[1]["executionInstructions"][-1]
     )
     assert "必须提交待审核草案控制事件" not in executor.calls[1]["contextMessages"][-1]
+    assert result["agentOutputs"]["剧情"]["controlEvents"] == [
+        {
+            "type": "submit_beat_plan",
+            "summary": "章节规划",
+        }
+    ]
+    assert result["agentOutputs"]["剧情"]["visibleContent"] == "章节规划正文"
     assert artifacts.actions == ["submit", "await"]
 
 

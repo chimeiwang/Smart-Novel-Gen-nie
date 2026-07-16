@@ -118,6 +118,28 @@ async def test_runner_keeps_server_instruction_system_and_context_low_privilege(
 
 
 @pytest.mark.asyncio
+async def test_reviser_keeps_required_changes_out_of_system_messages() -> None:
+    provider = CapturingProvider()
+    registry = build_default_registry()
+    runner = AgentRunner(AgentRuntime(ModelRuntime(provider), registry), registry)
+    reviser_request = request(mode="reviser", operation_kind="write_chapter")
+    reviser_request.contextMessages = [
+        '权威草案：{"artifactKey":"authority-key","requiredChanges":"补足冲突"}'
+    ]
+
+    await runner.run(reviser_request)
+
+    messages = provider.requests[0].messages
+    system_text = "\n".join(item.content for item in messages if item.role == "system")
+    context = next(item for item in messages if item.name == "project_context")
+    assert "begin_artifact_output" in system_text
+    assert "权威 artifactKey" in system_text
+    assert "完整重写" in system_text
+    assert "requiredChanges" not in system_text
+    assert "requiredChanges" in context.content
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("agent_id", "mode", "operation_kind", "expected"),
     [

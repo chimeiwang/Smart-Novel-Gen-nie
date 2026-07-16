@@ -157,6 +157,7 @@ def build_operation_graph(
         operation = _operation(state)
         definition = _operation_definition(operation)
         output = state.get("agentOutputs", {}).get(operation.primaryAgent, {})
+        outputs = dict(state.get("agentOutputs", {}))
         visible = str(output.get("visibleContent", ""))
         control_events = _control_events(output.get("controlEvents", []))
         if not definition.requiresArtifact:
@@ -202,7 +203,6 @@ def build_operation_graph(
                 "visibleContent": visible,
                 "controlEvents": control_events,
             }
-            outputs = dict(state.get("agentOutputs", {}))
             outputs[operation.primaryAgent] = output
         submission = validate_artifact_submission(
             definition=definition,
@@ -222,6 +222,7 @@ def build_operation_graph(
             )
         )
         return {
+            "agentOutputs": outputs,
             "activeArtifactId": artifact_id,
             "artifactStatus": "draft_submitted",
             "operationStep": "submit_artifact",

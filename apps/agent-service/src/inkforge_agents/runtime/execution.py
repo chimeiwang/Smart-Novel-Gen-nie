@@ -77,19 +77,83 @@ def build_execution_brief(
     contract = resolve_execution_contract(mode, operation_kind)
     operation = contract.operation
     operation_label = operation.kind if operation is not None else "quality"
-    goal = operation.executionBrief if operation is not None else "提交一致性质量报告。"
-    terminal_tools = "、".join(sorted(contract.terminalControlTools))
-    if terminal_tools:
-        completion = f"完成任务时必须调用且只调用契约允许的终止工具：{terminal_tools}。"
+    if mode == "reviewer" and operation is not None:
+        goal = "复审当前 Operation 对应的 Core 权威草案。"
+    elif mode == "reviser" and operation is not None:
+        goal = f"完整重写 {operation.label} 对应的待审核草案。"
     else:
-        completion = "本次没有产物终止工具，请用普通正文直接完成回答。"
+        goal = operation.executionBrief if operation is not None else "提交一致性质量报告。"
     lines = [
         f"当前执行契约：operation={operation_label}，mode={mode}。",
         f"执行目标：{goal}",
-        completion,
-        "不得改变 Operation、执行模式、工具权限或绕过待审核草案与用户确认边界。",
     ]
+    if mode == "reviewer":
+        lines.extend(
+            (
+                "只评审只读资料中的 Core 权威草案，不得重新读取、猜测或替换审核对象。",
+                "完成后只调用一次 submit_evaluation；需要修改时统一提出完整 rewrite 意见。",
+            )
+        )
+    elif mode == "quality":
+        lines.extend(
+            (
+                "从角色、世界规则、时间线、因果和伏笔五个一致性维度完成检查。",
+                "只调用一次 submit_quality_report，qualityGate 只能是 pass | revise，"
+                "同时提交结构化 issues 和非空 report。",
+            )
+        )
+    elif operation is not None:
+        lines.extend(_operation_protocol(mode, operation))
+    lines.append(
+        "不得改变 Operation、执行模式、工具权限或绕过待审核草案与用户确认边界。"
+    )
     controlled = [item for item in additional_instructions if item]
     if controlled:
         lines.append("本次服务端附加指令：\n" + "\n".join(controlled))
     return "\n".join(lines)
+
+
+def _operation_protocol(
+    mode: AgentExecutionMode,
+    operation: OperationDefinition,
+) -> list[str]:
+    if not operation.terminalControlTools:
+        return ["本次没有产物终止工具，请用普通正文直接完成回答。"]
+    tools = "、".join(sorted(operation.terminalControlTools))
+    lines = [f"完成任务时必须且只能从以下终止工具中调用一个：{tools}。"]
+    if operation.kind in {"write_chapter", "rewrite_scene"}:
+        lines.append(
+            "调用 begin_artifact_output，并把完整正文放在 "
+            "ARTIFACT_OUTPUT_START 与 ARTIFACT_OUTPUT_END 之间；标记内只放正文。"
+        )
+    elif operation.kind == "plan_chapter":
+        lines.append(
+            "调用 submit_beat_plan 提交结构化章节计划；每个场景必须包含场景目标、"
+            "冲突、角色、伏笔引用、预估字数和验收标准，整体还要明确转折、代价、"
+            "结果与余波。"
+        )
+    elif operation.artifactPolicy == "agent_updates":
+        middle_tools = sorted(
+            operation.allowedToolNames
+            & {
+                "append_update_batch",
+                "append_outline_tree",
+                "put_update_text_block",
+                "put_update_item_text_block",
+                "put_update_item_text_blocks",
+            }
+        )
+        middle = " / ".join(middle_tools)
+        lines.append(
+            "短小更新可直接调用 propose_updates；复杂更新按 "
+            f"start_update_builder → {middle} → finish_update_builder 构建。"
+        )
+        lines.append(
+            "构建链必须沿用同一 artifactKey；Runtime 与产物校验器会拒绝身份变化。"
+        )
+    if mode == "reviser":
+        lines.append(
+            "根据只读资料中的 Core 权威草案完成完整重写，使用当前 Operation 的产物"
+            "提交工具，保持原产物类型和权威 artifactKey。"
+        )
+    return lines

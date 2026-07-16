@@ -59,10 +59,8 @@ flowchart TD
     K -->|"pass"| L{"是否还有下个 reviewer"}
     L -->|"有"| J
     L -->|"无"| M["awaitUserDecision"]
-    K -->|"revise patch"| N["applyArtifactPatch 小修"]
-    N --> J
-    K -->|"revise rewrite"| O["reviseArtifact 返工"]
-    O --> E
+    K -->|"revise"| O["reviseArtifact 完整返工"]
+    O --> H
     K -->|"block"| M
     I -->|"无"| M
     M --> P["用户批准/修改/丢弃"]
@@ -242,21 +240,25 @@ Agent Runtime 是唯一多轮 tool-call loop。
 工具要求：
 
 - 工具统一从注册表暴露。
-- AgentRunner 只能暴露当前 Agent toolCapabilities 允许的工具。
+- 每次调用显式声明 `primary`、`reviewer`、`reviser` 或 `quality` 执行模式，不能根据是否存在草案推断角色。
+- AgentRunner 只能暴露当前 Agent toolCapabilities、CreativeOperation 工具白名单和执行模式白名单的交集。
 - 工具自身 permission.agentIds 继续做服务端校验。
 - Runtime 拒绝本轮未暴露的 tool call。
 - 只读且并发安全的工具可以并行；control 或不安全工具必须按顺序执行。
+- 每个 Operation 声明允许工具、终止控制工具、产物事件、产物类型和 artifactKey 策略；错误事件、错误 kind、变化的 artifactKey 或冲突终止产物必须在提交 Core 前失败。
 - 更新构建器只允许在单次运行中启动一次；启动后隐藏开始工具，后续追加和完成必须沿用同一 `artifactKey`。跨一次纠正重试合并事件时，重复开始不得覆盖已经追加的更新。
+- 新建/修改设定只使用通用更新构建器，不暴露 `append_outline_tree`；只有创建/修改大纲和管理伏笔可以追加结构化大纲树。
 - 设定 Agent 调用 `propose_updates` 或 `finish_update_builder` 成功后立即结束本轮工具循环。
-- 同一运行内创建 ReviewArtifact 后，Agent Service 将已提交 Core 的完整草案请求注入复审上下文，reviewer 只使用评审控制工具；本地不存在该权威快照时不得猜测草案内容。
+- reviewer 不暴露读取工具，只能接收 Core 权威草案并调用一次 `submit_evaluation`；reviser 使用原 Operation 工具契约，接收原草案、revision、artifactKey 和合并后的修改要求后生成同类新 revision。
+- consistency 质量任务由“校验”Agent 的 `quality` 模式执行，只暴露 `submit_quality_report`。
 
 控制工具示例：
 
 - propose_updates：提交短小更新草案。
 - update builder 系列：构建批量 AgentUpdates 草案。
-- append_outline_tree：提交 stage → plotUnits → chapterGroups 嵌套大纲树。
-- submit_quality_report：提交质量评分。
-- submit_validation_report：提交一致性报告。
+- append_outline_tree：仅在大纲和伏笔 Operation 中提交 stage → plotUnits → chapterGroups 嵌套大纲树。
+- submit_quality_report：提交固定结构的一致性终检报告。
+- submit_validation_report：保留的通用冲突报告工具；当前 quality 模式不使用。
 - submit_beat_plan：提交章节 Beat Plan。
 - submit_evaluation：提交草案复审结论。
 
@@ -266,7 +268,21 @@ Agent Runtime 是唯一多轮 tool-call loop。
 - 控制信息通过 tool calls 提交。
 - 不再从 Agent 可见正文解析 JSON 信封、路由字段或评分字段。
 - 设定/大纲/伏笔/正文/Beat Plan 等正式变更必须进入 ReviewArtifact。
+- `plan_chapter` 只能提交 Beat Plan，`write_chapter/rewrite_scene` 只能提交 `chapter_draft`，设定/大纲/伏笔 Operation 只能提交 `agent_updates`。
+- reviewer 的任何修改请求统一进入完整 rewrite；保留具体修改意见，但不执行跨服务局部 patch。
 - 职责外任务只能在正文说明边界，不得通过越权工具硬写草案。
+
+## 模型消息、上下文与恢复
+
+模型输入统一由运行时构造，顺序为：静态 Agent system prompt、服务端 Operation/模式 system brief、只读作品资料 user 消息、当前轮之前的历史消息、唯一当前 user 消息。作品正文、设定、参考资料和历史 system 记录都不能成为当前 system 指令；当前用户请求只能出现一次。
+
+Operation 的 `contextStrategy` 只生成最小投影：`brief` 提供任务、小说和章节摘要；`lore` 提供设定摘要索引；`outline` 提供大纲、节点、剧情进度、章节组、outlinePath 和伏笔摘要；`chapter` 提供当前章、相邻章摘要、章节目标、已批准 Beat Plan、outlinePath 和相关人物摘要；`review` 提供当前章及必要审阅资料。详细内容由只读工具按需获取，完整聚合 `workspace` 不进入稳定快照。
+
+写作处理器在初次运行、命令恢复和当前 job 快照恢复时附加仅运行时 `runtimeContext`，其中 `RunResource.runId/jobId` 只来自当前 QueueJob。Agent 执行、工具、草案创建、评审和草案水合统一使用该身份；`runtimeContext` 在稳定快照序列化前移除，不能成为可恢复业务状态。
+
+恢复自动复审、自动返工或用户 revise 决定前，Agent Service 使用 Core `planning.activeArtifact` 水合权威草案并校验 task、novel、chapter、kind、artifactKey 与 revision；Core 已事务处理的 approve/discard 不要求草案继续存在。进程内草案记录只在等待态 checkpoint、完成回调或失败回调成功后，按同一 `runId/jobId` 释放。
+
+Provider 必须提供规范化完成原因并保留供应商原始值。`length`、`content_filter`、`stop`/`tool_calls` 与实际工具状态矛盾、以及没有合法工具调用的 `unknown` 都在接受正文或执行工具副作用前失败；人工模型日志记录规范化值和完整原始值。
 
 ## 验收标准
 
@@ -289,7 +305,9 @@ Agent Runtime 是唯一多轮 tool-call loop。
 - 稳定快照写入 `WritingTask.graphStateJson`，并拒绝 `runtime`、回调、聚合作品数据和控制事件等仅运行时字段。
 - Python 智能体服务已迁移五个智能体定义、系统提示词、能力与工具白名单、严格工具参数校验和唯一多轮工具循环；模型运行时仍只负责单次供应商调用。
 - 只读且并发安全的工具可以并行执行，控制工具按模型调用顺序生成结构化事件；未暴露工具、无效参数和最大轮次均明确终止，不截断用户可见文本。
-- Python LangGraph 已迁移 CreativeOperation 路由、复审 `Send` 扇出、确定性复审优先级、补丁或重写返工、最大修订次数、用户中断和 `Command` 恢复；图状态快照使用版本信封并排除运行时字段。
+- Python LangGraph 已迁移 CreativeOperation 路由、复审 `Send` 扇出、四种显式执行模式、确定性复审优先级、rewrite-only 返工、最大修订次数、用户中断和 `Command` 恢复；图状态快照使用版本信封并排除 `runtimeContext` 等运行时字段。
+- OperationDefinition 已成为工具、终止事件、产物 kind 和 artifactKey 的运行契约；reviewer 无读取工具，reviser 只基于 Core 权威草案返工，错误产物不会静默兜底。
+- OpenAI-compatible Provider 已把规范化和原始完成原因传入 Runtime 与人工日志；长度截断、内容过滤、矛盾完成原因和非法 unknown 响应不会被当成成功。
 - Core API 已把写作启动、恢复和草案决定先保存为 PostgreSQL 持久命令，再由 dispatcher 提交到 Redis 队列。文风画像以 `StylePortraitTask`、质量检查以 `WorkflowRun(kind=quality_check)`、资料索引以 `RagDocument` 的待重建状态作为持久事实；各自 dispatcher 使用稳定任务标识补投，Redis 只承载可重建的投递状态。Agent Service 消费任务并通过签名回调保存检查点、事件、草案和终态。
 - 草案进入等待用户确认时，Agent Service 先发送 `artifact_awaiting_user_approval` SSE 事件，再保存带有最新事件序号的稳定快照；前端据此刷新待确认草案。
 - Core 对账器可以强制修复 Redis 中缺失的 queued 索引或完全丢失的运行键，但不得重新打开 Redis 已记录为 completed、failed 或 cancelled 的运行。

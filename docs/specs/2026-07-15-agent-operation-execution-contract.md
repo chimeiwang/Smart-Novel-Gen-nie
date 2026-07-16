@@ -3,12 +3,12 @@
 ## 状态
 
 - 日期：2026-07-15
-- 状态：设计已批准，待实现
+- 状态：已实现
 - 范围：Agent 执行模式、模型消息拼装、Operation 工具契约、ReviewArtifact 返工与恢复、产物校验、一致性终检、模型截断识别
 
 ## 背景
 
-当前五个 Agent 的静态提示词已经相对简短，主要问题不在角色文案长度，而在运行时语义没有形成单一契约：
+改造前五个 Agent 的静态提示词已经相对简短，主要问题不在角色文案长度，而在运行时语义没有形成单一契约：
 
 - `CoreGraphAgentExecutor` 通过是否存在 `activeArtifactId` 推断当前 Agent 是否为 reviewer，导致主责 Agent 返工时也可能收到复审指令和 `control_only` 工具模式；
 - 复审合并结果已经写入 `pendingRevision.requiredChanges`，但返工调用没有把它传给主责 Agent；
@@ -105,6 +105,8 @@ Agent 能力白名单 ∩ Operation 工具白名单 ∩ 执行模式工具白名
 - reviewer：无读取工具，只允许 `submit_evaluation`；
 - quality：只允许一致性报告控制工具。
 
+更新构建器按 Operation 继续收敛：`create_lore/revise_lore` 只使用通用构建器，不暴露 `append_outline_tree`；`create_outline/revise_outline/manage_foreshadowing` 才允许追加结构化大纲树。
+
 `terminalControlTools` 从 Agent 级默认值收敛为当前调用的 Operation/模式值。`begin_artifact_output`、`submit_beat_plan`、`propose_updates`、`finish_update_builder`、`submit_evaluation` 和质量报告工具在对应契约下成功后立即结束本轮，不再额外调用一次模型。
 
 ### 3. 模型消息拼装
@@ -130,11 +132,11 @@ Agent 能力白名单 ∩ Operation 工具白名单 ∩ 执行模式工具白名
 
 `contextStrategy` 用于生成最小上下文投影：
 
-- `brief`：小说、章节和任务的最小标识与摘要；
-- `lore`：设定类型及摘要索引，不注入全部详情；
-- `outline`：大纲、章节组和伏笔摘要，不注入全部章节正文；
-- `chapter`：当前章节、相邻必要信息、已批准 Beat Plan 和相关摘要；
-- `review`：明确的待审对象或当前章节快照。
+- `brief`：任务、小说和当前章节的最小标识与摘要；
+- `lore`：人物、物品、地点、势力、术语和设置文档的摘要索引，不注入全部详情；
+- `outline`：文本大纲、节点、剧情进度、章节组、outlinePath 和伏笔摘要，不注入全部章节正文；
+- `chapter`：当前章节、相邻章摘要、章节目标、已批准 Beat Plan、outlinePath 和 Beat Plan 关联人物摘要；
+- `review`：当前章节、章节目标和已批准 Beat Plan。
 
 详细内容继续通过 Core 只读工具按需获取。聚合 `workspace` 不能直接进入稳定快照。
 
@@ -185,7 +187,7 @@ artifactKey 规则：
 
 ### 6. 重启后的权威草案水合
 
-Core 当前写作上下文已经提供 `planning.activeArtifact`，但只有 `id/kind/status/revision/payload`，不足以重建 Agent Service 已提交的完整草案请求。Core 内部写作上下文必须把该对象扩展为：
+Core 内部写作上下文的 `planning.activeArtifact` 已扩展为可重建 Agent Service 完整草案请求的对象：
 
 ```text
 id
@@ -221,7 +223,7 @@ revision
 - payload 不符合对应 artifact kind；
 - 当前 Operation 不允许该 artifact kind。
 
-`CoreGraphAgentExecutor` 不得捕获本地记录缺失后静默回退为普通 `all` 工具模式。任务进入稳定等待态、完成态或错误态后释放进程内记录；下次继续时重新从 Core 水合，防止单例缓存长期保存完整正文。
+`CoreGraphAgentExecutor` 不得捕获本地记录缺失后静默回退为普通工具模式。等待态仅在等待事件和稳定 checkpoint 成功后释放，完成态与错误态仅在相应 Core 回调成功后释放；释放还必须匹配当前 `RunResource.runId/jobId`。checkpoint 或回调失败时保留记录，下次命令重新从 Core 水合，防止单例缓存长期保存完整正文或被其他 job 抢占/误删。
 
 ### 7. Rewrite-only 返工
 
@@ -346,6 +348,7 @@ Core graphState + planning.activeArtifact
 - Operation 调用未允许工具：沿用 Runtime 未暴露工具错误，并终止当前运行。
 - 产物事件或 kind 不匹配：`ARTIFACT_CONTRACT_MISMATCH`。
 - 返工 artifactKey 或 revision 不匹配：`ARTIFACT_REVISION_IDENTITY_MISMATCH`。
+- 其他 runId/jobId 试图覆盖或释放草案缓存：`ARTIFACT_RUNTIME_IDENTITY_MISMATCH`。
 - 恢复时权威草案缺失：`ACTIVE_ARTIFACT_CONTEXT_MISSING`。
 - 权威草案 payload/diff 不是合法 JSON 或 payload kind 不一致：`ARTIFACT_PAYLOAD_INVALID`。
 - 模型输出被长度限制截断：`MODEL_OUTPUT_TRUNCATED`。
@@ -380,42 +383,42 @@ Core graphState + planning.activeArtifact
 
 ### 消息与提示词
 
-- 最终模型消息中当前用户请求只出现一次。
-- 会话历史不包含当前轮重复消息。
-- 作品正文和参考资料不使用 system 角色。
-- reviewer 动态指令不包含 `get_active_review_artifact`。
-- reviser 必须收到完整 `requiredChanges` 和原草案身份。
-- 静态提示词不再包含 reviewer、patch 和运行时 artifactKey 协议。
+- [x] 最终模型消息中当前用户请求只出现一次。
+- [x] 会话历史不包含当前轮重复消息。
+- [x] 作品正文和参考资料不使用 system 角色。
+- [x] reviewer 动态指令不包含 `get_active_review_artifact`。
+- [x] reviser 必须收到完整 `requiredChanges` 和原草案身份。
+- [x] 静态提示词不再包含 reviewer、patch 和运行时 artifactKey 协议。
 
 ### 工具与产物
 
-- 每个 Operation 的工具集合有精确断言。
-- reviewer 只暴露 `submit_evaluation`。
-- quality 只暴露一致性报告工具。
-- `plan_chapter` 只能通过 `submit_beat_plan` 完成。
-- `write_chapter` 只能提交 `chapter_draft`。
-- 错误事件、错误 kind、变化的 artifactKey 和多个冲突终止事件会被拒绝。
-- 产物终止工具成功后不会发生额外模型调用。
+- [x] 每个 Operation 的工具集合有精确断言；设定构建器不含 `append_outline_tree`，大纲和伏笔 Operation 可以使用。
+- [x] reviewer 只暴露 `submit_evaluation`，不暴露读取工具。
+- [x] quality 只暴露 `submit_quality_report`。
+- [x] `plan_chapter` 只能通过 `submit_beat_plan` 完成。
+- [x] `write_chapter` 只能提交 `chapter_draft`。
+- [x] 错误事件、错误 kind、变化的 artifactKey 和多个冲突终止事件会被拒绝。
+- [x] 产物终止工具成功后不会发生额外模型调用。
 
 ### 复审、返工与恢复
 
-- reviewer 的 `control_only` 行为由显式模式决定。
-- reviser 获得原草案、revision、artifactKey 和合并修改意见。
-- patch 结论直接归一为 rewrite，不调用 `apply_patch()`，且不丢失原修改意见。
-- 新建空 `CoreArtifactPort` 模拟服务重启后，可以从 `planning.activeArtifact` 恢复并继续复审或返工。
-- 权威草案缺失或身份不一致时明确失败。
-- 已由 Core 完成的 approve/discard 决定即使不再返回 activeArtifact，也能只推进图并稳定结束。
-- 等待态、完成态和错误态会释放进程内草案缓存。
+- [x] reviewer 的无读取工具、仅 `submit_evaluation` 行为由显式模式决定，不再由 `activeArtifactId` 推断。
+- [x] reviser 获得原草案、revision、artifactKey 和合并修改意见。
+- [x] patch 结论直接归一为 rewrite，不调用 `apply_patch()`，且不丢失原修改意见。
+- [x] 新建空 `CoreArtifactPort` 模拟服务重启后，可以从 `planning.activeArtifact` 恢复并继续复审或返工。
+- [x] 权威草案缺失、Operation 身份不一致或其他 job 争用缓存时明确失败。
+- [x] 已由 Core 完成的 approve/discard 决定即使不再返回 activeArtifact，也能只推进图并稳定结束。
+- [x] 等待态在事件和 checkpoint 成功后释放，完成态和错误态在相应回调成功后释放；失败时保留缓存。
 
 ### 质量与模型完成态
 
-- consistency 使用“校验”Agent，而不是“编辑”。
-- 任意 score key、越界值和缺失字段会被拒绝。
-- issues 缺少固定字段、包含未知字段或使用非法 dimension/severity 时会被拒绝。
-- 质量报告正文缺失或为空时会被拒绝，不能完成为空报告。
-- 五项一致性分数和 issues 完整保存在 WorkflowRun 输出中，公共检查只写平均 `scoreOverall`，旧商业评分列保持空值。
-- `finishReason=length` 不会生成成功草案、成功评审或成功质量报告。
-- `finishReason=content_filter/unknown` 按设计明确收敛，`stop + toolCalls`、`tool_calls + 无工具` 和非法 `unknown` 工具在正文或副作用产生前失败。
+- [x] consistency 使用“校验”Agent，而不是“编辑”。
+- [x] 任意 score key、越界值和缺失字段会被拒绝。
+- [x] issues 缺少固定字段、包含未知字段或使用非法 dimension/severity 时会被拒绝。
+- [x] 质量报告正文缺失或为空时会被拒绝，不能完成为空报告。
+- [x] 五项一致性分数和 issues 完整保存在 WorkflowRun 输出中，公共检查只写平均 `scoreOverall`，旧商业评分列保持空值。
+- [x] `finishReason=length` 不会生成成功草案、成功评审或成功质量报告。
+- [x] `finishReason=content_filter/unknown` 按设计明确收敛，`stop + toolCalls`、`tool_calls + 无工具` 和非法 `unknown` 工具在正文或副作用产生前失败；模型日志同时保留规范化和供应商原始原因。
 
 ### 回归命令
 
@@ -432,4 +435,4 @@ uv run --frozen mypy apps/agent-service/src apps/core-api/src packages/service-c
 uv run --frozen pytest packages/service-contracts/tests packages/service-auth/tests -q
 ```
 
-验收时 Agent Service 全量测试必须保持通过；当前基线为 `153 passed`。不得通过放宽断言、保留静默回退或修改数据库结构让测试变绿。
+验收时 Agent Service 全量测试必须保持通过；历史固定 passed 数不作为当前验收依据，以本计划记录的实际回归命令退出码为准。不得通过放宽断言、保留静默回退或修改数据库结构让测试变绿。
