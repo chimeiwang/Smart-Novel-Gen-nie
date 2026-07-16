@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
@@ -68,6 +69,90 @@ class CoreArtifactPort:
     def __init__(self, core: CoreServiceClient) -> None:
         self._core = core
         self._records: dict[str, _ArtifactRecord] = {}
+
+    def hydrate(
+        self,
+        resource: RunResource,
+        state: Mapping[str, Any],
+        active_artifact: Mapping[str, Any],
+    ) -> None:
+        artifact_id = _hydration_text(active_artifact, "id")
+        task_id = _hydration_text(active_artifact, "taskId")
+        novel_id = _hydration_text(active_artifact, "novelId")
+        chapter_id = _hydration_text(active_artifact, "chapterId")
+        artifact_key = _hydration_text(active_artifact, "artifactKey")
+        kind = _hydration_text(active_artifact, "kind")
+        status = _hydration_text(active_artifact, "status")
+        created_by_agent = _hydration_text(active_artifact, "createdByAgent")
+        revision = active_artifact.get("revision")
+        payload = active_artifact.get("payload")
+        if (
+            isinstance(revision, bool)
+            or not isinstance(revision, int)
+            or revision < 1
+            or not isinstance(payload, dict)
+            or payload.get("kind") != kind
+        ):
+            raise _artifact_identity_mismatch("草案修订号或载荷无效")
+        workflow_run_id = active_artifact.get("workflowRunId")
+        if workflow_run_id is not None and (
+            not isinstance(workflow_run_id, str) or not workflow_run_id
+        ):
+            raise _artifact_identity_mismatch("workflowRunId 无效")
+        state_task_id = _hydration_text(state, "taskId")
+        state_user_id = _hydration_text(state, "userId")
+        state_novel_id = _hydration_text(state, "novelId")
+        state_chapter_id = _hydration_text(state, "chapterId")
+        state_artifact_id = _hydration_text(state, "activeArtifactId")
+        if (
+            state_user_id != resource.userId
+            or state_task_id != resource.taskId
+            or state_novel_id != resource.novelId
+            or task_id != resource.taskId
+            or novel_id != resource.novelId
+            or chapter_id != state_chapter_id
+            or artifact_id != state_artifact_id
+        ):
+            raise _artifact_identity_mismatch("草案与当前运行资源不一致")
+        try:
+            definition = OPERATION_DEFINITIONS[_operation_kind(dict(state))]
+        except ValueError:
+            raise _artifact_identity_mismatch("当前 Operation 身份无效") from None
+        expected_kind = (
+            "agent_updates"
+            if definition.artifactPolicy == "agent_updates"
+            else definition.textArtifactKind
+        )
+        if expected_kind is None or kind != expected_kind:
+            raise _artifact_identity_mismatch("草案类型与当前 Operation 不一致")
+        request = {
+            "runId": resource.runId,
+            "taskId": task_id,
+            "novelId": novel_id,
+            "chapterId": chapter_id,
+            "workflowRunId": workflow_run_id,
+            "artifactKey": artifact_key,
+            "kind": kind,
+            "status": status,
+            "title": active_artifact.get("title"),
+            "summary": active_artifact.get("summary"),
+            "payload": dict(payload),
+            "diff": active_artifact.get("diff"),
+            "createdByAgent": created_by_agent,
+            "reviewerAgent": active_artifact.get("reviewerAgent"),
+        }
+        current = self._records.get(artifact_id)
+        if current is not None:
+            _require_same_runtime_owner(current.resource, resource)
+            for field in ("taskId", "novelId", "chapterId", "artifactKey", "kind"):
+                if current.request.get(field) != request.get(field):
+                    raise _artifact_identity_mismatch("同一草案的稳定身份字段发生变化")
+        self._records[artifact_id] = _ArtifactRecord(resource, request, revision)
+
+    def release(self, artifact_id: str, resource: RunResource) -> None:
+        record = self._require_record(artifact_id)
+        _require_same_runtime_owner(record.resource, resource)
+        del self._records[artifact_id]
 
     async def submit(
         self,
@@ -192,6 +277,9 @@ class CoreArtifactPort:
             raise RuntimeError(
                 "ARTIFACT_REVISION_IDENTITY_MISMATCH：Core 返回了不同的草案标识"
             )
+        current = self._records.get(artifact_id)
+        if current is not None:
+            _require_same_runtime_owner(current.resource, resource)
         self._records[artifact_id] = _ArtifactRecord(resource, request, _revision(response))
         return artifact_id
 
@@ -374,6 +462,24 @@ def _required_text(state: dict[str, Any], key: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"图状态缺少 {key}")
     return value
+
+
+def _hydration_text(value: Mapping[str, Any], key: str) -> str:
+    item = value.get(key)
+    if not isinstance(item, str) or not item:
+        raise _artifact_identity_mismatch(f"缺少有效字段 {key}")
+    return item
+
+
+def _artifact_identity_mismatch(detail: str) -> RuntimeError:
+    return RuntimeError(f"ARTIFACT_REVISION_IDENTITY_MISMATCH：{detail}")
+
+
+def _require_same_runtime_owner(current: RunResource, incoming: RunResource) -> None:
+    if current.runId != incoming.runId or current.jobId != incoming.jobId:
+        raise RuntimeError(
+            "ARTIFACT_RUNTIME_IDENTITY_MISMATCH：草案已由其他运行命令持有"
+        )
 
 
 def _revision(response: dict[str, Any]) -> int:

@@ -276,6 +276,7 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                         ParentGraphDependencies(operation=dependencies)
                     ),
                     operation_graph=build_operation_graph(dependencies),
+                    artifacts=artifacts,
                     workflow_log=workflow_log,
                 )
                 app.state.model_runtime = model_runtime

@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 import pytest
+from inkforge_agents.clients.core import RunResource
 from inkforge_agents.jobs.adapters import CoreArtifactPort, CoreGraphAgentExecutor, CoreToolGateway
 from inkforge_agents.providers.base import ModelUsage
 from inkforge_agents.runtime.agent_runner import AgentRunRequest, AgentRunResult
@@ -90,6 +91,138 @@ def _runtime_context() -> dict[str, Any]:
             "jobId": "job-1",
         },
     }
+
+
+def _resource(*, run_id: str = "run-1", job_id: str = "job-1") -> RunResource:
+    return RunResource(
+        userId="user-1",
+        novelId="novel-1",
+        taskId="task-1",
+        runId=run_id,
+        jobId=job_id,
+    )
+
+
+def _active_artifact(**overrides: Any) -> dict[str, Any]:
+    value: dict[str, Any] = {
+        "id": "artifact-1",
+        "taskId": "task-1",
+        "novelId": "novel-1",
+        "chapterId": "chapter-1",
+        "workflowRunId": None,
+        "artifactKey": "authority-key",
+        "kind": "chapter_draft",
+        "status": "under_review",
+        "title": "正文草案",
+        "summary": "首版",
+        "payload": {"kind": "chapter_draft", "content": "完整正文"},
+        "diff": None,
+        "createdByAgent": "写作",
+        "reviewerAgent": "校验",
+        "revision": 2,
+        "runId": "伪造运行",
+        "jobId": "伪造命令",
+    }
+    value.update(overrides)
+    return value
+
+
+def _hydration_state() -> dict[str, Any]:
+    return {
+        "taskId": "task-1",
+        "userId": "user-1",
+        "novelId": "novel-1",
+        "chapterId": "chapter-1",
+        "activeArtifactId": "artifact-1",
+        "currentOperation": {"kind": "write_chapter", "primaryAgent": "写作"},
+        "userMessage": "继续返工",
+        "pendingRevision": {"requiredChanges": "补足冲突"},
+        "runtimeContext": _runtime_context(),
+    }
+
+
+def test_artifact_port_hydrates_authority_with_current_runtime_identity() -> None:
+    port = CoreArtifactPort(CoreClient())  # type: ignore[arg-type]
+
+    port.hydrate(_resource(), _hydration_state(), _active_artifact())
+
+    context = port.review_context("artifact-1")
+    assert context["runId"] == "run-1"
+    assert context["artifactKey"] == "authority-key"
+    assert context["revision"] == 2
+    assert "jobId" not in context
+
+
+@pytest.mark.parametrize(
+    "active",
+    [
+        _active_artifact(novelId="other"),
+        _active_artifact(chapterId="other"),
+        _active_artifact(artifactKey=""),
+        _active_artifact(revision=0),
+        _active_artifact(payload=[]),
+        _active_artifact(payload={"kind": "outline_draft"}),
+    ],
+)
+def test_artifact_port_rejects_invalid_hydration_identity(active: dict[str, Any]) -> None:
+    port = CoreArtifactPort(CoreClient())  # type: ignore[arg-type]
+
+    with pytest.raises(RuntimeError, match="ARTIFACT_REVISION_IDENTITY_MISMATCH"):
+        port.hydrate(_resource(), _hydration_state(), active)
+
+
+def test_artifact_port_rejects_hydration_without_operation_identity() -> None:
+    port = CoreArtifactPort(CoreClient())  # type: ignore[arg-type]
+    state = _hydration_state()
+    state["currentOperation"] = None
+
+    with pytest.raises(RuntimeError, match="ARTIFACT_REVISION_IDENTITY_MISMATCH"):
+        port.hydrate(_resource(), state, _active_artifact())
+
+
+def test_artifact_port_rejects_different_job_owner_and_release() -> None:
+    port = CoreArtifactPort(CoreClient())  # type: ignore[arg-type]
+    port.hydrate(_resource(), _hydration_state(), _active_artifact())
+
+    with pytest.raises(RuntimeError, match="ARTIFACT_RUNTIME_IDENTITY_MISMATCH"):
+        port.hydrate(
+            _resource(run_id="run-2", job_id="job-2"),
+            _hydration_state(),
+            _active_artifact(),
+        )
+    with pytest.raises(RuntimeError, match="ARTIFACT_RUNTIME_IDENTITY_MISMATCH"):
+        port.release("artifact-1", _resource(run_id="run-2", job_id="job-2"))
+
+    assert port.review_context("artifact-1")["runId"] == "run-1"
+    port.release("artifact-1", _resource())
+    with pytest.raises(RuntimeError, match="缺少待审核草案上下文"):
+        port.review_context("artifact-1")
+
+
+def test_artifact_port_rejects_release_without_owned_record() -> None:
+    port = CoreArtifactPort(CoreClient())  # type: ignore[arg-type]
+
+    with pytest.raises(RuntimeError, match="缺少待审核草案上下文"):
+        port.release("artifact-1", _resource())
+
+
+@pytest.mark.asyncio
+async def test_restart_hydration_allows_reviser_to_use_authoritative_context() -> None:
+    artifacts = CoreArtifactPort(CoreClient())  # type: ignore[arg-type]
+    state = _hydration_state()
+    artifacts.hydrate(_resource(), state, _active_artifact())
+    runner = RecordingRunner()
+    executor = CoreGraphAgentExecutor(runner, artifacts)  # type: ignore[arg-type]
+
+    await executor.run(
+        "写作",
+        state,
+        execution_mode="reviser",
+        operation_kind="write_chapter",
+    )
+
+    assert "完整正文" in runner.requests[0].contextMessages[0]
+    assert "authority-key" in runner.requests[0].contextMessages[0]
 
 
 @pytest.mark.asyncio

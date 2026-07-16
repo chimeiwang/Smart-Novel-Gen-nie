@@ -193,6 +193,82 @@ def _active_decision_command() -> WritingRunCommand:
     )
 
 
+def _hydration_artifact(**overrides: Any) -> ReviewArtifact:
+    values: dict[str, Any] = {
+        "id": "artifact-1",
+        "taskId": "task-1",
+        "novelId": "novel-1",
+        "chapterId": "chapter-1",
+        "workflowRunId": "workflow-1",
+        "artifactKey": "authority-key",
+        "kind": "chapter_draft",
+        "status": "under_review",
+        "title": "正文草案",
+        "summary": "首版",
+        "payloadJson": json.dumps({"kind": "chapter_draft", "content": "完整正文"}),
+        "diffJson": json.dumps({"changed": True}),
+        "createdByAgent": "写作",
+        "reviewerAgent": "校验",
+        "revision": 2,
+    }
+    values.update(overrides)
+    return ReviewArtifact(**values)
+
+
+@pytest.mark.asyncio
+async def test_context_returns_complete_hydratable_active_artifact() -> None:
+    repository = WritingContextRepository(cast(Any, None))
+    artifact = _hydration_artifact()
+    session = cast(AsyncSession, FakeScalarSession([artifact]))
+
+    active = await repository._active_artifact(session, _task_with_active_artifact())
+
+    assert active is not None
+    assert set(active) == {
+        "id",
+        "taskId",
+        "novelId",
+        "chapterId",
+        "workflowRunId",
+        "artifactKey",
+        "kind",
+        "status",
+        "title",
+        "summary",
+        "payload",
+        "diff",
+        "createdByAgent",
+        "reviewerAgent",
+        "revision",
+    }
+    assert active["payload"] == {"kind": "chapter_draft", "content": "完整正文"}
+    assert active["diff"] == {"changed": True}
+    assert "runId" not in active
+    assert "jobId" not in active
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "artifact",
+    [
+        _hydration_artifact(payloadJson="{"),
+        _hydration_artifact(payloadJson=json.dumps(["不是对象"])),
+        _hydration_artifact(payloadJson=json.dumps({"kind": "outline_draft"})),
+        _hydration_artifact(diffJson="{"),
+    ],
+)
+async def test_context_rejects_invalid_active_artifact_json(
+    artifact: ReviewArtifact,
+) -> None:
+    repository = WritingContextRepository(cast(Any, None))
+    session = cast(AsyncSession, FakeScalarSession([artifact]))
+
+    with pytest.raises(ApiError) as caught:
+        await repository._active_artifact(session, _task_with_active_artifact())
+
+    assert caught.value.code == "ARTIFACT_PAYLOAD_INVALID"
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "artifact",

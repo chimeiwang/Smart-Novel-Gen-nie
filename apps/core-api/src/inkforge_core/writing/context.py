@@ -295,12 +295,29 @@ class WritingContextRepository:
             "awaiting_user",
             "applying",
         }:
+            try:
+                payload = json.loads(artifact.payloadJson)
+                diff = json.loads(artifact.diffJson) if artifact.diffJson is not None else None
+            except (json.JSONDecodeError, TypeError):
+                raise _artifact_payload_invalid() from None
+            if not isinstance(payload, dict) or payload.get("kind") != artifact.kind:
+                raise _artifact_payload_invalid()
             return {
                 "id": artifact.id,
+                "taskId": artifact.taskId,
+                "novelId": artifact.novelId,
+                "chapterId": artifact.chapterId,
+                "workflowRunId": artifact.workflowRunId,
+                "artifactKey": artifact.artifactKey,
                 "kind": artifact.kind,
                 "status": artifact.status,
+                "title": artifact.title,
+                "summary": artifact.summary,
+                "payload": payload,
+                "diff": diff,
+                "createdByAgent": artifact.createdByAgent,
+                "reviewerAgent": artifact.reviewerAgent,
                 "revision": artifact.revision,
-                "payload": artifact.payloadJson,
             }
         active_decision_command = await session.scalar(
             select(WritingRunCommand.id).where(
@@ -317,6 +334,14 @@ class WritingContextRepository:
             code="ACTIVE_ARTIFACT_MISMATCH",
             message="稳定快照引用的待审核草案与任务不匹配",
         )
+
+
+def _artifact_payload_invalid() -> ApiError:
+    return ApiError(
+        status_code=409,
+        code="ARTIFACT_PAYLOAD_INVALID",
+        message="待审核草案的持久化内容格式无效",
+    )
 
 
 def _goal_dict(goal: ChapterWritingGoal | None) -> dict[str, Any] | None:

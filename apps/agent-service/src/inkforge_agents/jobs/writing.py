@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Protocol, cast
 
 from pydantic import JsonValue
@@ -61,6 +62,17 @@ class GraphPort(Protocol):
     async def ainvoke(self, value: GraphState) -> dict[str, Any]: ...
 
 
+class ArtifactHydrationPort(Protocol):
+    def hydrate(
+        self,
+        resource: RunResource,
+        state: Mapping[str, Any],
+        active_artifact: Mapping[str, Any],
+    ) -> None: ...
+
+    def release(self, artifact_id: str, resource: RunResource) -> None: ...
+
+
 class WritingJobHandler:
     def __init__(
         self,
@@ -68,11 +80,13 @@ class WritingJobHandler:
         *,
         parent_graph: GraphPort,
         operation_graph: GraphPort,
+        artifacts: ArtifactHydrationPort,
         workflow_log: WorkflowLogPort | None = None,
     ) -> None:
         self._core = core
         self._parent_graph = parent_graph
         self._operation_graph = operation_graph
+        self._artifacts = artifacts
         self._workflow_log = workflow_log
 
     async def __call__(self, job: QueueJob) -> None:
@@ -94,16 +108,23 @@ class WritingJobHandler:
             )
         context = await self._core.call_tool(resource, "写作", "get_writing_context", {})
         current_job_state = _current_job_snapshot(job, context)
+        owned_artifact_id: str | None = None
         if current_job_state is not None:
             current_job_state = _attach_runtime_context(
                 current_job_state,
                 context,
                 resource,
             )
+            owned_artifact_id = self._hydrate_for_state(
+                resource,
+                current_job_state,
+                context,
+            )
             if await self._settle_recovered_state(
                 resource,
                 job.runId,
                 current_job_state,
+                owned_artifact_id,
             ):
                 return
         state, graph = self._prepare_state(
@@ -111,6 +132,9 @@ class WritingJobHandler:
             context,
             current_job_state=current_job_state,
         )
+        if current_job_state is None:
+            owned_artifact_id = self._hydrate_for_state(resource, state, context)
+        input_artifact_id = state.get("activeArtifactId")
         self._record_state(
             job.runId,
             "准备运行",
@@ -135,6 +159,7 @@ class WritingJobHandler:
                 message=str(exc) or "智能体运行失败",
                 recoverable=True,
             )
+            self._release(owned_artifact_id, resource)
             raise NonRetryableJobError("写作运行失败已上报核心服务") from exc
 
         stable = cast(
@@ -152,6 +177,14 @@ class WritingJobHandler:
             stable["phase"] = "waiting_user"
             stable["operationStep"] = "await_user_decision"
             stable["operationStage"] = "等待用户决策"
+        stable_artifact_id = stable.get("activeArtifactId")
+        if (
+            owned_artifact_id is None
+            and not isinstance(input_artifact_id, str)
+            and isinstance(stable_artifact_id, str)
+            and stable_artifact_id
+        ):
+            owned_artifact_id = stable_artifact_id
         waiting_for_user = "__interrupt__" in result or stable.get("phase") == "waiting_user"
         artifact_id = stable.get("activeArtifactId")
         next_sequence = sequence + 1
@@ -190,15 +223,18 @@ class WritingJobHandler:
                 message=message,
                 recoverable=True,
             )
+            self._release(owned_artifact_id, resource)
             raise NonRetryableJobError("写作运行失败已上报核心服务")
         if waiting_for_user:
             self._finish_log(job.runId, "等待用户确认")
+            self._release(owned_artifact_id, resource)
             return
         await self._core.complete(
             resource,
             sequence=next_sequence + 1,
             result={"finalResponse": str(stable.get("finalResponse", ""))},
         )
+        self._release(owned_artifact_id, resource)
         self._finish_log(job.runId, "完成")
 
     def _record_state(self, run_id: str, node: str, changes: dict[str, Any]) -> None:
@@ -214,6 +250,7 @@ class WritingJobHandler:
         resource: RunResource,
         run_id: str,
         state: GraphState,
+        owned_artifact_id: str | None = None,
     ) -> bool:
         phase = state.get("phase")
         sequence = int(state.get("eventSequence", 0)) + 1
@@ -224,6 +261,7 @@ class WritingJobHandler:
                 sequence=sequence,
                 result={"finalResponse": str(state.get("finalResponse", ""))},
             )
+            self._release(owned_artifact_id, resource)
             self._finish_log(run_id, "完成")
             return True
         if phase == "error":
@@ -236,12 +274,46 @@ class WritingJobHandler:
                 message=message,
                 recoverable=True,
             )
+            self._release(owned_artifact_id, resource)
             self._finish_log(run_id, "错误")
             raise NonRetryableJobError("写作运行失败已上报核心服务")
         if phase == "waiting_user":
+            self._release(owned_artifact_id, resource)
             self._finish_log(run_id, "等待用户确认")
             return True
         return False
+
+    def _hydrate_for_state(
+        self,
+        resource: RunResource,
+        state: GraphState,
+        context: dict[str, Any],
+    ) -> str | None:
+        artifact_id = state.get("activeArtifactId")
+        if not isinstance(artifact_id, str) or not artifact_id:
+            return None
+        decision = state.get("resumeDecision")
+        decision_value = decision.get("decision") if isinstance(decision, dict) else None
+        if decision_value in {"approve", "discard"} or state.get("artifactStatus") in {
+            "applied",
+            "discarded",
+        }:
+            return None
+        planning = context.get("planning")
+        active_artifact = planning.get("activeArtifact") if isinstance(planning, dict) else None
+        if (
+            not isinstance(active_artifact, dict)
+            or active_artifact.get("id") != artifact_id
+        ):
+            raise RuntimeError(
+                "ACTIVE_ARTIFACT_CONTEXT_MISSING：当前恢复状态缺少匹配的 Core 权威草案"
+            )
+        self._artifacts.hydrate(resource, state, active_artifact)
+        return artifact_id
+
+    def _release(self, artifact_id: str | None, resource: RunResource) -> None:
+        if artifact_id is not None:
+            self._artifacts.release(artifact_id, resource)
 
     def _prepare_state(
         self,

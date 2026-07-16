@@ -70,6 +70,43 @@ class Graph:
         return {**value, **self.result}
 
 
+class ArtifactHydration:
+    def __init__(self) -> None:
+        self.hydrated: list[tuple[Any, dict[str, Any], dict[str, Any]]] = []
+        self.released: list[tuple[str, Any]] = []
+
+    def hydrate(
+        self,
+        resource: Any,
+        state: dict[str, Any],
+        active_artifact: dict[str, Any],
+    ) -> None:
+        self.hydrated.append((resource, state, active_artifact))
+
+    def release(self, artifact_id: str, resource: Any) -> None:
+        self.released.append((artifact_id, resource))
+
+
+def _active_artifact() -> dict[str, Any]:
+    return {
+        "id": "artifact-1",
+        "taskId": "task-1",
+        "novelId": "novel-1",
+        "chapterId": "chapter-1",
+        "workflowRunId": "workflow-run-1",
+        "artifactKey": "authority-key",
+        "kind": "chapter_draft",
+        "status": "awaiting_user",
+        "title": "第一章",
+        "summary": "摘要",
+        "payload": {"kind": "chapter_draft", "content": "正文"},
+        "diff": None,
+        "createdByAgent": "写作",
+        "reviewerAgent": None,
+        "revision": 1,
+    }
+
+
 class WorkflowLog:
     def __init__(self) -> None:
         self.entries: list[tuple[str, object]] = []
@@ -124,7 +161,12 @@ async def test_new_writing_job_runs_parent_graph_and_persists_completion() -> No
     )
     parent = Graph({"phase": "completed", "finalResponse": "已完成"})
     operation = Graph({})
-    handler = WritingJobHandler(core, parent_graph=parent, operation_graph=operation)
+    handler = WritingJobHandler(
+        core,
+        parent_graph=parent,
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
 
     await handler(_job())
 
@@ -185,12 +227,19 @@ async def test_resume_writing_job_uses_flat_snapshot_and_continues_sequence() ->
             ],
             "userMessage": "",
             "graphState": to_typescript_snapshot(serialize_snapshot(state)),
+            "activeArtifact": _active_artifact(),
         },
     }
     core = CoreClient(context)
     parent = Graph({})
     operation = Graph({"phase": "completed", "finalResponse": "已按意见处理"})
-    handler = WritingJobHandler(core, parent_graph=parent, operation_graph=operation)
+    artifacts = ArtifactHydration()
+    handler = WritingJobHandler(
+        core,
+        parent_graph=parent,
+        operation_graph=operation,
+        artifacts=artifacts,
+    )
 
     await handler(
         _job(
@@ -219,6 +268,54 @@ async def test_resume_writing_job_uses_flat_snapshot_and_continues_sequence() ->
     assert core.events == [(9, "agent_start")]
     assert core.checkpoints[0][0] == 10
     assert core.completions == [(11, {"finalResponse": "已按意见处理"})]
+    assert artifacts.hydrated[0][0].runId == "run-1"
+    assert artifacts.hydrated[0][0].jobId == "job-1"
+    assert artifacts.hydrated[0][2]["id"] == "artifact-1"
+    assert [item[0] for item in artifacts.released] == ["artifact-1"]
+
+
+@pytest.mark.asyncio
+async def test_approve_resume_does_not_require_active_artifact_hydration() -> None:
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="初始请求",
+    )
+    state["activeArtifactId"] = "artifact-1"
+    state["phase"] = "waiting_user"
+    context = {
+        "workspace": {},
+        "planning": {
+            "taskId": "task-1",
+            "novelId": "novel-1",
+            "chapterId": "chapter-1",
+            "conversationHistory": [],
+            "userMessage": "",
+            "graphState": to_typescript_snapshot(serialize_snapshot(state)),
+            "activeArtifact": None,
+        },
+    }
+    operation = Graph({"phase": "completed", "finalResponse": "已应用"})
+    artifacts = ArtifactHydration()
+    handler = WritingJobHandler(
+        CoreClient(context),
+        parent_graph=Graph({}),
+        operation_graph=operation,
+        artifacts=artifacts,
+    )
+
+    await handler(
+        _job(
+            resume=True,
+            resume_input={"decision": "approve", "artifactId": "artifact-1"},
+        )
+    )
+
+    assert len(operation.inputs) == 1
+    assert artifacts.hydrated == []
+    assert artifacts.released == []
 
 
 @pytest.mark.asyncio
@@ -242,6 +339,7 @@ async def test_writing_job_records_human_workflow_states() -> None:
         core,
         parent_graph=Graph({"phase": "completed", "finalResponse": "完成"}),
         operation_graph=Graph({}),
+        artifacts=ArtifactHydration(),
         workflow_log=workflow_log,
     )
 
@@ -286,6 +384,7 @@ async def test_writing_job_publishes_artifact_event_before_waiting_checkpoint() 
             }
         ),
         operation_graph=Graph({}),
+        artifacts=ArtifactHydration(),
     )
 
     await handler(_job())
@@ -340,6 +439,7 @@ async def test_writing_job_recovers_waiting_state_from_nested_graph_interrupt() 
             }
         ),
         operation_graph=Graph({}),
+        artifacts=ArtifactHydration(),
     )
 
     await handler(_job())
@@ -406,6 +506,7 @@ async def test_writing_job_replays_artifact_event_before_recovering_failed_check
             },
         }
     )
+    artifacts = ArtifactHydration()
     handler = WritingJobHandler(
         core,
         parent_graph=Graph(
@@ -417,10 +518,12 @@ async def test_writing_job_replays_artifact_event_before_recovering_failed_check
             }
         ),
         operation_graph=Graph({}),
+        artifacts=artifacts,
     )
 
     with pytest.raises(RuntimeError, match="checkpoint 持久化失败"):
         await handler(_job())
+    assert artifacts.released == []
     await handler(_job())
 
     assert core.events == [
@@ -463,6 +566,7 @@ async def test_writing_job_reports_stable_error_instead_of_completion() -> None:
             }
         ),
         operation_graph=Graph({}),
+        artifacts=ArtifactHydration(),
     )
 
     with pytest.raises(NonRetryableJobError):
@@ -517,6 +621,7 @@ async def test_writing_job_keeps_failure_callback_transport_errors_retryable(
         core,
         parent_graph=parent,
         operation_graph=Graph({}),
+        artifacts=ArtifactHydration(),
     )
 
     with pytest.raises(CoreServiceError, match="核心服务暂时不可用") as caught:
@@ -555,7 +660,12 @@ async def test_initial_job_retry_replays_its_terminal_checkpoint_without_rerunni
     )
     parent = Graph({"phase": "completed", "finalResponse": "不应重新生成"})
     operation = Graph({"phase": "completed", "finalResponse": "不应重新恢复"})
-    handler = WritingJobHandler(core, parent_graph=parent, operation_graph=operation)
+    handler = WritingJobHandler(
+        core,
+        parent_graph=parent,
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
 
     await handler(_job())
 
@@ -593,7 +703,12 @@ async def test_current_job_nonterminal_snapshot_uses_fresh_runtime_identity() ->
     }
     core = CoreClient(context)
     operation = Graph({"phase": "completed", "finalResponse": "恢复完成"})
-    handler = WritingJobHandler(core, parent_graph=Graph({}), operation_graph=operation)
+    handler = WritingJobHandler(
+        core,
+        parent_graph=Graph({}),
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
 
     await handler(_job())
 
@@ -619,6 +734,7 @@ async def test_current_job_terminal_snapshot_is_attached_before_settlement() -> 
         user_message="初始请求",
     )
     state["phase"] = "completed"
+    state["activeArtifactId"] = "artifact-1"
     snapshot = to_typescript_snapshot(serialize_snapshot(state))
     snapshot["callbackJobId"] = "job-1"
     context = {
@@ -631,6 +747,7 @@ async def test_current_job_terminal_snapshot_is_attached_before_settlement() -> 
             "conversationHistory": [],
             "userMessage": "初始请求",
             "graphState": snapshot,
+            "activeArtifact": _active_artifact(),
         },
     }
 
@@ -638,15 +755,26 @@ async def test_current_job_terminal_snapshot_is_attached_before_settlement() -> 
         seen_state: dict[str, Any] | None = None
 
         async def _settle_recovered_state(
-            self, resource: Any, run_id: str, recovered: Any
+            self,
+            resource: Any,
+            run_id: str,
+            recovered: Any,
+            owned_artifact_id: str | None = None,
         ) -> bool:
             self.seen_state = recovered
-            return await super()._settle_recovered_state(resource, run_id, recovered)
+            return await super()._settle_recovered_state(
+                resource,
+                run_id,
+                recovered,
+                owned_artifact_id,
+            )
 
+    artifacts = ArtifactHydration()
     handler = InspectingHandler(
         CoreClient(context),
         parent_graph=Graph({}),
         operation_graph=Graph({}),
+        artifacts=artifacts,
     )
 
     await handler(_job())
@@ -654,3 +782,5 @@ async def test_current_job_terminal_snapshot_is_attached_before_settlement() -> 
     assert handler.seen_state is not None
     assert handler.seen_state["runtimeContext"]["runResource"]["runId"] == "run-1"
     assert handler.seen_state["runtimeContext"]["runResource"]["jobId"] == "job-1"
+    assert artifacts.hydrated[0][2]["id"] == "artifact-1"
+    assert [item[0] for item in artifacts.released] == ["artifact-1"]
