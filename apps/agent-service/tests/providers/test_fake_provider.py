@@ -94,3 +94,41 @@ async def test_fake_provider_creates_valid_chapter_artifact_call() -> None:
     assert result.toolCalls[0].arguments["kind"] == "chapter_draft"
     assert "ARTIFACT_OUTPUT_START" in result.content
     assert "ARTIFACT_OUTPUT_END" in result.content
+
+
+@pytest.mark.asyncio
+async def test_fake_provider_returns_complete_quality_report_from_tool_scope() -> None:
+    result = await FakeModelProvider().complete_turn(
+        ModelTurnRequest(
+            messages=[
+                {
+                    "role": "user",
+                    "name": "project_context",
+                    "content": "只读章节资料，不依赖 system 角色触发",
+                }
+            ],
+            tools=[
+                {
+                    "name": "submit_quality_report",
+                    "description": "提交一致性终检",
+                    "parameters": {"type": "object", "properties": {}},
+                }
+            ],
+            maxOutputTokens=256,
+        )
+    )
+
+    assert result.toolCalls[0].name == "submit_quality_report"
+    assert result.toolCalls[0].arguments == {
+        "scores": {
+            "characterConsistency": 90.0,
+            "worldRuleConsistency": 90.0,
+            "timelineConsistency": 90.0,
+            "causalityConsistency": 90.0,
+            "foreshadowingConsistency": 90.0,
+        },
+        "qualityGate": "pass",
+        "issues": [],
+        "report": "一致性终检未发现冲突。",
+        "rewriteBrief": None,
+    }

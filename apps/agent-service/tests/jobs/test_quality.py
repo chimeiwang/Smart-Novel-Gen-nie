@@ -46,12 +46,20 @@ class Runner:
         assert self._workflow_log.entries[0][0] == "开始"
 
         class Result:
-            visibleContent = "一致性良好"
+            visibleContent = "这段可见正文不能作为报告"
             controlEvents = [
                 {
                     "type": "submit_quality_report",
-                    "scores": {"overall": 9, "pacing": 8},
+                    "scores": {
+                        "characterConsistency": 81.0,
+                        "worldRuleConsistency": 82.0,
+                        "timelineConsistency": 83.0,
+                        "causalityConsistency": 84.0,
+                        "foreshadowingConsistency": 88.0,
+                    },
                     "qualityGate": "pass",
+                    "issues": [],
+                    "report": "完整一致性报告",
                     "rewriteBrief": None,
                 }
             ]
@@ -71,7 +79,7 @@ class WorkflowLog:
 
 
 @pytest.mark.asyncio
-async def test_quality_job_requires_structured_report_and_returns_visible_result() -> None:
+async def test_quality_job_uses_validator_and_forwards_complete_typed_report() -> None:
     core = Core()
     workflow_log = WorkflowLog()
     runner = Runner(workflow_log)
@@ -94,11 +102,19 @@ async def test_quality_job_requires_structured_report_and_returns_visible_result
     assert runner.requests[0].executionMode == "quality"
     assert runner.requests[0].operationKind is None
     assert runner.requests[0].toolContext.agentId == QUALITY_AGENT_ID
+    assert QUALITY_AGENT_ID == "校验"
 
     assert core.result == {
-        "result": "一致性良好",
-        "scores": {"overall": 9, "pacing": 8},
+        "scores": {
+            "characterConsistency": 81.0,
+            "worldRuleConsistency": 82.0,
+            "timelineConsistency": 83.0,
+            "causalityConsistency": 84.0,
+            "foreshadowingConsistency": 88.0,
+        },
         "qualityGate": "pass",
+        "issues": [],
+        "report": "完整一致性报告",
         "rewriteBrief": None,
     }
     assert workflow_log.entries == [

@@ -190,7 +190,7 @@ async def test_primary_artifact_operations_do_not_expose_wrong_artifact_tool(
         ("编辑", "primary", "write_chapter"),
         ("设定", "reviser", "write_chapter"),
         ("设定", "reviewer", "write_chapter"),
-        ("校验", "quality", None),
+        ("编辑", "quality", None),
         ("编辑", "primary", "sync_lore"),
     ],
 )
@@ -279,7 +279,19 @@ def test_request_rejects_agent_context_mismatch_and_unknown_fields() -> None:
             "quality",
             None,
             "submit_quality_report",
-            {"scores": {"overall": 90}, "qualityGate": "pass"},
+            {
+                "scores": {
+                    "characterConsistency": 90.0,
+                    "worldRuleConsistency": 90.0,
+                    "timelineConsistency": 90.0,
+                    "causalityConsistency": 90.0,
+                    "foreshadowingConsistency": 90.0,
+                },
+                "qualityGate": "pass",
+                "issues": [],
+                "report": "一致性终检通过。",
+                "rewriteBrief": None,
+            },
         ),
     ],
 )

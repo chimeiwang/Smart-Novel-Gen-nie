@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Self
 
+from inkforge_contracts import ConsistencyQualityReport
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from .permissions import control_permission
@@ -16,10 +17,8 @@ class StrictArgs(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class QualityReportArgs(StrictArgs):
-    scores: dict[str, float]
-    qualityGate: Literal["pass", "revise", "rewrite"]
-    rewriteBrief: str | None = Field(default=None, max_length=1000)
+class QualityReportArgs(ConsistencyQualityReport):
+    pass
 
 
 class ProposalUpdatesArgs(StrictArgs):

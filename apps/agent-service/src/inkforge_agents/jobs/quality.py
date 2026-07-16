@@ -7,6 +7,7 @@ from ..clients.core import RunResource
 from ..queue.repository import QueueJob
 from ..runtime.agent_runner import AgentRunner, AgentRunRequest
 from ..runtime.execution import QUALITY_AGENT_ID
+from ..tools.control import QualityReportArgs
 from ..tools.registry import ToolContext
 from .workflow_log import WorkflowLogPort
 
@@ -111,15 +112,13 @@ class QualityJobHandler:
             )
             if report is None:
                 raise RuntimeError(f"{QUALITY_AGENT_ID}智能体未提交结构化质量报告")
+            validated_report = QualityReportArgs.model_validate(
+                {key: value for key, value in report.items() if key != "type"}
+            )
             await self._core.complete_quality(
                 resource,
                 check_id,
-                {
-                    "result": str(result.visibleContent),
-                    "scores": report.get("scores", {}),
-                    "qualityGate": report["qualityGate"],
-                    "rewriteBrief": report.get("rewriteBrief"),
-                },
+                validated_report.model_dump(),
             )
         except Exception as exc:
             try:

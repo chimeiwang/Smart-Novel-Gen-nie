@@ -9,15 +9,47 @@ from datetime import UTC, datetime
 
 import httpx
 import pytest
+from inkforge_contracts import ConsistencyQualityReport
 from inkforge_core.app import create_app
 from inkforge_core.auth.dependencies import get_current_user
 from inkforge_core.auth.repository import AuthUser
 from inkforge_core.errors import ApiError
 from inkforge_core.novels.schemas import QualityCheckDto
 from inkforge_core.quality.dispatcher import QualityDispatchRecord
-from inkforge_core.quality.schemas import RunQualityCheckRequest, UpdateQualityCheckRequest
+from inkforge_core.quality.schemas import (
+    QualityRunSuccessRequest,
+    RunQualityCheckRequest,
+    UpdateQualityCheckRequest,
+)
 from inkforge_core.quality.service import QualityService
 from pydantic import ValidationError
+
+
+def valid_quality_report(**overrides: object) -> dict[str, object]:
+    report: dict[str, object] = {
+        "scores": {
+            "characterConsistency": 81.0,
+            "worldRuleConsistency": 82.0,
+            "timelineConsistency": 83.0,
+            "causalityConsistency": 84.0,
+            "foreshadowingConsistency": 88.0,
+        },
+        "qualityGate": "revise",
+        "issues": [
+            {
+                "dimension": "timeline",
+                "severity": "warning",
+                "message": "时间顺序需要核对",
+                "evidence": "第二幕早于第一幕结尾",
+                "location": "第二幕开头",
+                "suggestion": "统一日期",
+            }
+        ],
+        "report": "完整一致性报告",
+        "rewriteBrief": "修正时间线",
+    }
+    report.update(overrides)
+    return report
 
 
 @dataclass
@@ -185,6 +217,20 @@ def test_quality_requests_reject_unknown_fields() -> None:
         UpdateQualityCheckRequest.model_validate({"status": "pending", "scoreOverall": 10})
 
 
+def test_quality_success_request_reuses_shared_report_contract() -> None:
+    assert issubclass(QualityRunSuccessRequest, ConsistencyQualityReport)
+    with pytest.raises(ValidationError):
+        QualityRunSuccessRequest.model_validate(
+            {
+                "userId": "user-1",
+                "novelId": "novel-1",
+                "taskId": "task-1",
+                "runId": "run-1",
+                **valid_quality_report(report="   "),
+            }
+        )
+
+
 @pytest.mark.parametrize(
     ("request_type", "body"),
     [
@@ -288,12 +334,7 @@ async def test_internal_quality_context_and_result_stay_in_core() -> None:
     context = await service.get_run_context(
         "user-1", "check-1", None, "检查一致性"
     )
-    result = {
-        "result": "检查报告",
-        "scores": {"overall": 9},
-        "qualityGate": "pass",
-        "rewriteBrief": None,
-    }
+    result = valid_quality_report()
     await service.complete_run("user-1", "check-1", result)
 
     assert context["chapterContent"] == "完整章节"
@@ -553,6 +594,45 @@ def quality_repository_with_locked_records(session: QualityRunSession):
 
 
 @pytest.mark.asyncio
+async def test_quality_success_persists_full_report_and_only_average() -> None:
+    session = QualityRunSession("quality-run-current")
+    repository, _, check = quality_repository_with_locked_records(session)
+    run = quality_run_model(run_id="quality-run-current", status="running")
+    report = valid_quality_report()
+
+    async def require_bound(*args, **kwargs):
+        del args, kwargs
+        return run
+
+    repository._require_bound_quality_run = require_bound  # type: ignore[method-assign]
+
+    await repository.complete_run(
+        "check-1",
+        "user-1",
+        report,
+        run_id=run.id,
+        novel_id="novel-1",
+    )
+
+    assert json.loads(run.output) == report
+    assert check.scoreOverall == 84
+    assert check.result == "完整一致性报告"
+    assert check.qualityGate == "revise"
+    assert check.rewriteBrief == "修正时间线"
+    assert all(
+        value is None
+        for value in (
+            check.scoreHook,
+            check.scoreTension,
+            check.scorePayoff,
+            check.scorePacing,
+            check.scoreEndingHook,
+            check.scoreReaderPromise,
+        )
+    )
+
+
+@pytest.mark.asyncio
 async def test_repository_rejects_second_active_quality_run_atomically() -> None:
     active = quality_run_model(run_id="quality-run-active", status="running")
     session = QualityRunSession(active)
@@ -715,15 +795,17 @@ async def test_stale_quality_success_only_settles_its_own_workflow_run() -> None
         return stale
 
     repository._require_bound_quality_run = require_bound  # type: ignore[method-assign]
+    report = valid_quality_report(report="旧运行结果")
     await repository.complete_run(
         "check-1",
         "user-1",
-        {"result": "旧运行结果", "scores": {"overall": 1}},
+        report,
         run_id=stale.id,
         novel_id="novel-1",
     )
 
     assert stale.status == "completed"
+    assert json.loads(stale.output) == report
     assert check.status == "completed"
     assert check.result == "新运行结果"
 
@@ -786,15 +868,17 @@ async def test_changed_content_cancels_quality_success_without_completing_check(
     repository._require_bound_quality_run = require_bound  # type: ignore[method-assign]
     repository._is_latest_quality_run = is_latest  # type: ignore[method-assign]
 
+    report = valid_quality_report(report="旧正文报告")
     await repository.complete_run(
         "check-1",
         "user-1",
-        {"result": "旧正文报告", "scores": {"overall": 9}},
+        report,
         run_id=run.id,
         novel_id="novel-1",
     )
 
     assert run.status == "cancelled"
+    assert json.loads(run.output) == report
     assert run.errorMessage == "QUALITY_SOURCE_CHANGED"
     assert check.status == "pending"
     assert check.result is None
