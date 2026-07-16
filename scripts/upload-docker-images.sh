@@ -44,6 +44,7 @@ ssh_options=(
   -o "UserKnownHostsFile=$SSH_KNOWN_HOSTS_FILE"
   -o "ConnectTimeout=$CONNECT_TIMEOUT_SECONDS"
   -o ConnectionAttempts=2
+  -o BatchMode=yes
   -o ServerAliveInterval=30
   -o ServerAliveCountMax=20
   -o TCPKeepAlive=yes
@@ -67,7 +68,9 @@ preflight_remote() {
   echo "开始检查服务器 Docker 与文件系统容量"
   remote_ssh '
     set -eu
+    echo "服务器 SSH 响应正常"
     command -v bash >/dev/null
+    echo "服务器 Bash 可用，开始读取 Docker 信息"
     docker_root="$(docker info --format "{{.DockerRootDir}}")"
     [ -n "$docker_root" ]
     echo "服务器 Docker 响应正常，数据目录：$docker_root"
