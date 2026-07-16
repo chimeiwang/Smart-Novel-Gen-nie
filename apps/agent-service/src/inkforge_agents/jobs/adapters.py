@@ -45,6 +45,7 @@ class CoreToolGateway:
                 novelId=context.novelId,
                 taskId=context.taskId,
                 runId=context.runId,
+                jobId=context.jobId,
             ),
             context.agentId,
             tool_name,
@@ -192,14 +193,19 @@ class CoreGraphAgentExecutor:
 
     async def run(self, agent_id: str, state: dict[str, Any]) -> dict[str, Any]:
         operation_kind = _operation_kind(state)
+        resource = _resource(state)
         context = ToolContext(
-            userId=_required_text(state, "userId"),
-            novelId=_required_text(state, "novelId"),
-            taskId=_required_text(state, "taskId"),
-            runId=_required_text(state, "taskId"),
+            userId=resource.userId,
+            novelId=resource.novelId,
+            taskId=resource.taskId,
+            runId=resource.runId,
+            jobId=resource.jobId,
             agentId=agent_id,
         )
         context_messages = [str(item) for item in state.get("contextMessages", [])]
+        execution_instructions = [
+            str(item) for item in state.get("executionInstructions", [])
+        ]
         artifact_context: dict[str, Any] | None = None
         artifact_id = state.get("activeArtifactId")
         if isinstance(artifact_id, str):
@@ -211,7 +217,9 @@ class CoreGraphAgentExecutor:
             context_messages.append(
                 "当前待审核草案权威内容："
                 + json.dumps(artifact_context, ensure_ascii=False, separators=(",", ":"))
-                + "\n读取工具不可用，请直接审阅以上草案并调用 submit_evaluation。"
+            )
+            execution_instructions.append(
+                "读取工具不可用，请直接审阅只读资料中的权威草案并调用 submit_evaluation。"
             )
         execution_mode: AgentExecutionMode = "primary"
         if artifact_context is not None:
@@ -226,6 +234,7 @@ class CoreGraphAgentExecutor:
                 operationKind=operation_kind,
                 userMessage=_required_text(state, "userMessage"),
                 contextMessages=context_messages,
+                executionInstructions=execution_instructions,
                 conversationMessages=[
                     dict(item)
                     for item in state.get("conversationHistory", [])
@@ -264,13 +273,16 @@ def _artifact_payload(event: dict[str, Any], content: str) -> tuple[str, dict[st
 
 
 def _resource(state: dict[str, Any]) -> RunResource:
-    task_id = _required_text(state, "taskId")
-    return RunResource(
-        userId=_required_text(state, "userId"),
-        novelId=_required_text(state, "novelId"),
-        taskId=task_id,
-        runId=task_id,
-    )
+    runtime_context = state.get("runtimeContext")
+    if not isinstance(runtime_context, dict):
+        raise ValueError("图状态缺少仅运行时上下文")
+    raw_resource = runtime_context.get("runResource")
+    if not isinstance(raw_resource, dict):
+        raise ValueError("仅运行时上下文缺少运行资源")
+    resource = RunResource.model_validate(raw_resource)
+    if not resource.jobId:
+        raise ValueError("写作运行资源缺少当前队列 jobId")
+    return resource
 
 
 def _agent_id(state: dict[str, Any]) -> str:

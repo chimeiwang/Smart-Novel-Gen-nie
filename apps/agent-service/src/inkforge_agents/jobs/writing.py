@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from typing import Any, Protocol, cast
 
 from pydantic import JsonValue
@@ -79,13 +78,7 @@ class WritingJobHandler:
     async def __call__(self, job: QueueJob) -> None:
         if job.kind != "writing":
             raise ValueError("写作处理器收到非写作任务")
-        resource = RunResource(
-            userId=job.userId,
-            novelId=job.novelId,
-            taskId=job.taskId,
-            runId=job.runId,
-            jobId=job.jobId,
-        )
+        resource = _resource(job)
         if self._workflow_log is not None:
             self._workflow_log.start_run(
                 run_id=job.runId,
@@ -101,12 +94,18 @@ class WritingJobHandler:
             )
         context = await self._core.call_tool(resource, "写作", "get_writing_context", {})
         current_job_state = _current_job_snapshot(job, context)
-        if current_job_state is not None and await self._settle_recovered_state(
-            resource,
-            job.runId,
-            current_job_state,
-        ):
-            return
+        if current_job_state is not None:
+            current_job_state = _attach_runtime_context(
+                current_job_state,
+                context,
+                resource,
+            )
+            if await self._settle_recovered_state(
+                resource,
+                job.runId,
+                current_job_state,
+            ):
+                return
         state, graph = self._prepare_state(
             job,
             context,
@@ -140,7 +139,11 @@ class WritingJobHandler:
 
         stable = cast(
             GraphState,
-            {key: value for key, value in result.items() if key != "__interrupt__"},
+            {
+                key: value
+                for key, value in result.items()
+                if key not in {"__interrupt__", "runtimeContext"}
+            },
         )
         interrupt_artifact_id = _artifact_id_from_interrupt(result.get("__interrupt__"))
         if interrupt_artifact_id is not None:
@@ -252,7 +255,11 @@ class WritingJobHandler:
             raise ValueError("核心服务缺少写作规划上下文")
         snapshot = planning.get("graphState")
         if current_job_state is not None:
-            return current_job_state, self._operation_graph
+            _apply_planning_history(current_job_state, planning)
+            return (
+                _attach_runtime_context(current_job_state, context, _resource(job)),
+                self._operation_graph,
+            )
         is_resume = job.payload.get("resume") is True
         if is_resume:
             if not isinstance(snapshot, dict):
@@ -264,7 +271,11 @@ class WritingJobHandler:
                 message = resume_input.get("userMessage")
                 if isinstance(message, str) and message:
                     state["userMessage"] = message
-            return state, self._operation_graph
+            _apply_planning_history(state, planning)
+            return (
+                _attach_runtime_context(state, context, _resource(job)),
+                self._operation_graph,
+            )
 
         chapter_id = planning.get("chapterId")
         user_message = planning.get("userMessage")
@@ -283,16 +294,11 @@ class WritingJobHandler:
             user_message=user_message,
             target_word_count=target_word_count,
         )
-        history = planning.get("conversationHistory")
-        if isinstance(history, list):
-            state["conversationHistory"] = [
-                dict(item) for item in history if isinstance(item, dict)
-            ]
-        state["contextMessages"] = [
-            "核心服务权威写作上下文："
-            + json.dumps(context, ensure_ascii=False, separators=(",", ":"))
-        ]
-        return state, self._parent_graph
+        _apply_planning_history(state, planning)
+        return (
+            _attach_runtime_context(state, context, _resource(job)),
+            self._parent_graph,
+        )
 
 
 def _current_job_snapshot(
@@ -306,6 +312,39 @@ def _current_job_snapshot(
     if not isinstance(snapshot, dict) or snapshot.get("callbackJobId") != job.jobId:
         return None
     return deserialize_snapshot(snapshot)
+
+
+def _resource(job: QueueJob) -> RunResource:
+    return RunResource(
+        userId=job.userId,
+        novelId=job.novelId,
+        taskId=job.taskId,
+        runId=job.runId,
+        jobId=job.jobId,
+    )
+
+
+def _attach_runtime_context(
+    state: GraphState,
+    context: dict[str, Any],
+    resource: RunResource,
+) -> GraphState:
+    state["runtimeContext"] = {
+        "coreContext": context,
+        "runResource": resource.model_dump(),
+    }
+    return state
+
+
+def _apply_planning_history(
+    state: GraphState,
+    planning: dict[str, Any],
+) -> None:
+    history = planning.get("conversationHistory")
+    if isinstance(history, list):
+        state["conversationHistory"] = [
+            dict(item) for item in history if isinstance(item, dict)
+        ]
 
 
 def _artifact_id_from_interrupt(interrupts: object) -> str | None:

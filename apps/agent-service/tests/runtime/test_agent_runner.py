@@ -95,8 +95,26 @@ def request(
         operationKind=operation_kind,
         userMessage="处理当前任务",
         contextMessages=["当前章节目标：主角逃离围城"],
+        executionInstructions=["上次缺少草案事件，本次必须提交。"],
         toolContext=tool_context(agent_id),
     )  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_runner_keeps_server_instruction_system_and_context_low_privilege() -> None:
+    provider = CapturingProvider()
+    registry = build_default_registry()
+    runner = AgentRunner(AgentRuntime(ModelRuntime(provider), registry), registry)
+
+    await runner.run(request())
+
+    messages = provider.requests[0].messages
+    assert [item.role for item in messages].count("system") == 2
+    assert "上次缺少草案事件" in messages[1].content
+    context = next(item for item in messages if item.name == "project_context")
+    assert context.role == "user"
+    assert "主角逃离围城" in context.content
+    assert [item.content for item in messages].count("处理当前任务") == 1
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,7 @@ from inkforge_core.writing.context import (
     ChapterGroupSnapshot,
     WritingContextRepository,
     WritingContextService,
+    _split_current_user_message,
     select_unique_chapter_group,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +23,34 @@ def test_chapter_group_allows_missing_but_rejects_ambiguous_mapping() -> None:
             3,
             [matching, ChapterGroupSnapshot("group-2", "重叠组", 3, 6, "冲突")],
         )
+
+
+def test_split_current_user_preserves_older_identical_message() -> None:
+    history, current = _split_current_user_message(
+        [
+            {"role": "user", "content": "再写一次"},
+            {"role": "agent", "content": "上次回复"},
+            {"role": "user", "content": "再写一次"},
+        ]
+    )
+
+    assert current == "再写一次"
+    assert history == [
+        {"role": "user", "content": "再写一次"},
+        {"role": "agent", "content": "上次回复"},
+    ]
+
+
+def test_split_current_user_ignores_non_string_user_records() -> None:
+    history, current = _split_current_user_message(
+        [
+            {"role": "user", "content": "合法请求"},
+            {"role": "user", "content": None},
+        ]
+    )
+
+    assert current == "合法请求"
+    assert history == [{"role": "user", "content": None}]
 
 
 class FakePlanningRepository:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, cast
 
@@ -122,17 +123,16 @@ def build_operation_graph(
     async def prepare(state: GraphState) -> dict[str, Any]:
         operation = _operation(state)
         definition = _operation_definition(operation)
-        source = {
-            "taskId": state["taskId"],
-            "novelId": state["novelId"],
-            "chapterId": state["chapterId"],
-            "targetWordCount": state["targetWordCount"],
-            "userMessage": state["userMessage"],
-        }
+        runtime_context = state.get("runtimeContext")
+        if not isinstance(runtime_context, dict):
+            raise ValueError("图状态缺少仅运行时上下文")
+        source = runtime_context.get("coreContext")
+        if not isinstance(source, dict):
+            raise ValueError("仅运行时上下文缺少 Core 聚合上下文")
+        projection = build_operation_context(definition, source)
         return {
             "contextMessages": [
-                *state.get("contextMessages", []),
-                *build_operation_context(definition, source),
+                json.dumps(projection, ensure_ascii=False, separators=(",", ":"))
             ],
             "operationStep": "prepare_context",
             "operationStage": "准备操作上下文",
@@ -176,8 +176,8 @@ def build_operation_graph(
         )
         if event is None:
             retry_state = dict(state)
-            retry_state["contextMessages"] = [
-                *state.get("contextMessages", []),
+            retry_state["executionInstructions"] = [
+                *state.get("executionInstructions", []),
                 _artifact_retry_instruction(definition),
             ]
             retry_output = await dependencies.agentExecutor.run(

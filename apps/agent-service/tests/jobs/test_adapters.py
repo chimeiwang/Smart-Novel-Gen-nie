@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import pytest
 from inkforge_agents.jobs.adapters import CoreArtifactPort, CoreGraphAgentExecutor, CoreToolGateway
@@ -13,6 +13,7 @@ class CoreClient:
     def __init__(self) -> None:
         self.tools: list[tuple[str, str, dict[str, object]]] = []
         self.artifacts: list[dict[str, Any]] = []
+        self.resources: list[object] = []
 
     async def call_tool(
         self,
@@ -21,7 +22,7 @@ class CoreClient:
         tool_name: str,
         arguments: dict[str, object],
     ) -> dict[str, Any]:
-        del resource
+        self.resources.append(resource)
         self.tools.append((agent_id, tool_name, arguments))
         return {"title": "林舟"}
 
@@ -32,7 +33,8 @@ class CoreClient:
         *,
         idempotency_key: str,
     ) -> dict[str, Any]:
-        del resource, idempotency_key
+        self.resources.append(resource)
+        del idempotency_key
         self.artifacts.append(payload)
         return {"id": "artifact-1", "revision": len(self.artifacts)}
 
@@ -65,6 +67,19 @@ class FakeEmbeddings:
         return [[0.1, 0.2, 0.3]]
 
 
+def _runtime_context() -> dict[str, Any]:
+    return {
+        "coreContext": {"workspace": {}, "planning": {}},
+        "runResource": {
+            "userId": "user-1",
+            "novelId": "novel-1",
+            "taskId": "task-1",
+            "runId": "run-1",
+            "jobId": "job-1",
+        },
+    }
+
+
 @pytest.mark.asyncio
 async def test_core_tool_gateway_binds_tool_context_to_request() -> None:
     core = CoreClient()
@@ -73,7 +88,8 @@ async def test_core_tool_gateway_binds_tool_context_to_request() -> None:
         userId="user-1",
         novelId="novel-1",
         taskId="task-1",
-        runId="task-1",
+        runId="run-1",
+        jobId="job-1",
         agentId="设定",
     )
 
@@ -81,6 +97,9 @@ async def test_core_tool_gateway_binds_tool_context_to_request() -> None:
 
     assert result == {"title": "林舟"}
     assert core.tools == [("设定", "get_character_detail", {"characterId": "c-1"})]
+    resource = cast(Any, core.resources[0])
+    assert resource.runId == "run-1"
+    assert resource.jobId == "job-1"
 
 
 @pytest.mark.asyncio
@@ -120,6 +139,7 @@ async def test_artifact_port_creates_revision_and_marks_awaiting_user() -> None:
         "taskId": "task-1",
         "chapterId": "chapter-1",
         "activeAgent": "写作",
+        "runtimeContext": _runtime_context(),
     }
     event = {
         "type": "begin_artifact_output",
@@ -132,6 +152,9 @@ async def test_artifact_port_creates_revision_and_marks_awaiting_user() -> None:
     await port.mark_awaiting_user(artifact_id)
 
     assert artifact_id == "artifact-1"
+    resource = cast(Any, core.resources[0])
+    assert resource.runId == "run-1"
+    assert resource.jobId == "job-1"
     assert core.artifacts[0]["status"] == "under_review"
     assert core.artifacts[0]["workflowRunId"] is None
     assert core.artifacts[0]["payload"] == {
@@ -157,6 +180,7 @@ async def test_reviewer_receives_submitted_artifact_without_read_tools() -> None
             "taskId": "task-1",
             "chapterId": "chapter-1",
             "activeAgent": "设定",
+            "runtimeContext": _runtime_context(),
         },
         {
             "type": "propose_updates",
@@ -182,6 +206,7 @@ async def test_reviewer_receives_submitted_artifact_without_read_tools() -> None
                 "kind": "revise_lore",
                 "primaryAgent": "设定",
             },
+            "runtimeContext": _runtime_context(),
         },
     )
 
@@ -202,6 +227,7 @@ async def test_executor_marks_primary_and_reviser_modes_explicitly() -> None:
         "userMessage": "续写章节",
         "contextMessages": [],
         "currentOperation": {"kind": "write_chapter", "primaryAgent": "写作"},
+        "runtimeContext": _runtime_context(),
     }
 
     await executor.run("写作", base_state)
@@ -251,5 +277,6 @@ async def test_executor_rejects_missing_operation_kind() -> None:
                 "taskId": "task-1",
                 "userMessage": "回答问题",
                 "currentOperation": {},
+                "runtimeContext": _runtime_context(),
             },
         )

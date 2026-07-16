@@ -10,9 +10,11 @@ from ..tools.registry import ToolContext, ToolRegistry
 from .agent_runtime import AgentRuntime
 from .execution import (
     AgentExecutionMode,
+    build_execution_brief,
     resolve_execution_contract,
     validate_execution_agent,
 )
+from .messages import build_agent_messages
 from .model_runtime import ModelCallContext
 from .turn_result import AgentTurnResult
 
@@ -25,6 +27,7 @@ class AgentRunRequest(BaseModel):
     operationKind: CreativeOperationKind | None
     userMessage: str
     contextMessages: list[str] = Field(default_factory=list)
+    executionInstructions: list[str] = Field(default_factory=list)
     conversationMessages: list[dict[str, object]] = Field(default_factory=list)
     toolContext: ToolContext
 
@@ -55,13 +58,21 @@ class AgentRunner:
             request.operationKind,
         )
         validate_execution_agent(execution, request.agentId)
-        messages: list[dict[str, object]] = [{"role": "system", "content": definition.systemPrompt}]
-        messages.extend(
-            {"role": "system", "content": context_message}
-            for context_message in request.contextMessages
+        messages = build_agent_messages(
+            agent_system_prompt=definition.systemPrompt,
+            execution_brief=build_execution_brief(
+                request.executionMode,
+                request.operationKind,
+                request.executionInstructions,
+            ),
+            readonly_context=(
+                "\n\n".join(request.contextMessages)
+                if request.contextMessages
+                else None
+            ),
+            prior_messages=request.conversationMessages,
+            user_message=request.userMessage,
         )
-        messages.extend(request.conversationMessages)
-        messages.append({"role": "user", "content": request.userMessage})
         tools = self._registry.for_execution(
             agent_id=definition.id,
             capabilities=definition.toolCapabilities,

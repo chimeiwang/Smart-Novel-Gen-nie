@@ -88,7 +88,7 @@ def _job(*, resume: bool = False, resume_input: dict[str, Any] | None = None) ->
     return QueueJob(
         jobId="job-1",
         kind="writing",
-        runId="task-1",
+        runId="run-1",
         taskId="task-1",
         novelId="novel-1",
         userId="user-1",
@@ -113,7 +113,10 @@ async def test_new_writing_job_runs_parent_graph_and_persists_completion() -> No
                 "novelId": "novel-1",
                 "chapterId": "chapter-1",
                 "targetWordCount": 3200,
-                "conversationHistory": [{"role": "user", "content": "续写本章"}],
+                "conversationHistory": [
+                    {"role": "user", "content": "更早的请求"},
+                    {"role": "agent", "content": "更早的回答"},
+                ],
                 "userMessage": "续写本章",
                 "graphState": None,
             },
@@ -126,12 +129,33 @@ async def test_new_writing_job_runs_parent_graph_and_persists_completion() -> No
     await handler(_job())
 
     assert parent.inputs[0]["targetWordCount"] == 3200
-    assert parent.inputs[0]["conversationHistory"] == [{"role": "user", "content": "续写本章"}]
+    assert parent.inputs[0]["conversationHistory"] == [
+        {"role": "user", "content": "更早的请求"},
+        {"role": "agent", "content": "更早的回答"},
+    ]
+    assert all(
+        item.get("content") != "续写本章"
+        for item in parent.inputs[0]["conversationHistory"]
+    )
+    assert parent.inputs[0]["runtimeContext"] == {
+        "coreContext": core.context,
+        "runResource": {
+            "userId": "user-1",
+            "novelId": "novel-1",
+            "taskId": "task-1",
+            "runId": "run-1",
+            "jobId": "job-1",
+        },
+    }
     assert operation.inputs == []
     assert core.events == [(1, "agent_start")]
     assert core.event_payloads[0] == {"agentId": "写作", "agentName": "作家"}
     assert core.checkpoints[0][0] == 2
     assert core.checkpoints[0][1]["eventSequence"] == 2
+    assert "runtimeContext" not in core.checkpoints[0][1]
+    assert "workspace" not in repr(core.checkpoints[0][1])
+    assert "runId" not in repr(core.checkpoints[0][1])
+    assert "jobId" not in repr(core.checkpoints[0][1])
     assert core.completions == [(3, {"finalResponse": "已完成"})]
     assert core.resource_job_ids == ["job-1", "job-1", "job-1", "job-1"]
 
@@ -155,7 +179,10 @@ async def test_resume_writing_job_uses_flat_snapshot_and_continues_sequence() ->
             "novelId": "novel-1",
             "chapterId": "chapter-1",
             "targetWordCount": 4000,
-            "conversationHistory": [],
+            "conversationHistory": [
+                {"role": "user", "content": "上一轮请求"},
+                {"role": "agent", "content": "上一轮回答"},
+            ],
             "userMessage": "",
             "graphState": to_typescript_snapshot(serialize_snapshot(state)),
         },
@@ -182,6 +209,13 @@ async def test_resume_writing_job_uses_flat_snapshot_and_continues_sequence() ->
         "artifactId": "artifact-1",
         "userMessage": "加强冲突",
     }
+    assert operation.inputs[0]["conversationHistory"] == [
+        {"role": "user", "content": "上一轮请求"},
+        {"role": "agent", "content": "上一轮回答"},
+    ]
+    assert operation.inputs[0]["runtimeContext"]["coreContext"] is context
+    assert operation.inputs[0]["runtimeContext"]["runResource"]["runId"] == "run-1"
+    assert operation.inputs[0]["runtimeContext"]["runResource"]["jobId"] == "job-1"
     assert core.events == [(9, "agent_start")]
     assert core.checkpoints[0][0] == 10
     assert core.completions == [(11, {"finalResponse": "已按意见处理"})]
@@ -215,14 +249,14 @@ async def test_writing_job_records_human_workflow_states() -> None:
 
     assert [entry[0] for entry in workflow_log.entries] == ["开始", "状态", "状态", "结束"]
     assert workflow_log.entries[0][1] == {
-        "run_id": "task-1",
+        "run_id": "run-1",
         "task_id": "task-1",
         "run_kind": "初次运行",
         "user_id": "user-1",
         "novel_id": "novel-1",
         "chapter_id": "chapter-1",
     }
-    assert workflow_log.entries[-1] == ("结束", ("task-1", "完成"))
+    assert workflow_log.entries[-1] == ("结束", ("run-1", "完成"))
 
 
 @pytest.mark.asyncio
@@ -531,3 +565,92 @@ async def test_initial_job_retry_replays_its_terminal_checkpoint_without_rerunni
     assert core.completions == [
         (3, {"finalResponse": "首次执行已经完成的正文"})
     ]
+
+
+@pytest.mark.asyncio
+async def test_current_job_nonterminal_snapshot_uses_fresh_runtime_identity() -> None:
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="初始请求",
+    )
+    state["phase"] = "active"
+    snapshot = to_typescript_snapshot(serialize_snapshot(state))
+    snapshot["callbackJobId"] = "job-1"
+    context = {
+        "workspace": {"novel": {"name": "当前作品"}},
+        "planning": {
+            "taskId": "task-1",
+            "novelId": "novel-1",
+            "chapterId": "chapter-1",
+            "targetWordCount": 4000,
+            "conversationHistory": [],
+            "userMessage": "初始请求",
+            "graphState": snapshot,
+        },
+    }
+    core = CoreClient(context)
+    operation = Graph({"phase": "completed", "finalResponse": "恢复完成"})
+    handler = WritingJobHandler(core, parent_graph=Graph({}), operation_graph=operation)
+
+    await handler(_job())
+
+    assert operation.inputs[0]["runtimeContext"] == {
+        "coreContext": context,
+        "runResource": {
+            "userId": "user-1",
+            "novelId": "novel-1",
+            "taskId": "task-1",
+            "runId": "run-1",
+            "jobId": "job-1",
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_current_job_terminal_snapshot_is_attached_before_settlement() -> None:
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="初始请求",
+    )
+    state["phase"] = "completed"
+    snapshot = to_typescript_snapshot(serialize_snapshot(state))
+    snapshot["callbackJobId"] = "job-1"
+    context = {
+        "workspace": {},
+        "planning": {
+            "taskId": "task-1",
+            "novelId": "novel-1",
+            "chapterId": "chapter-1",
+            "targetWordCount": 4000,
+            "conversationHistory": [],
+            "userMessage": "初始请求",
+            "graphState": snapshot,
+        },
+    }
+
+    class InspectingHandler(WritingJobHandler):
+        seen_state: dict[str, Any] | None = None
+
+        async def _settle_recovered_state(
+            self, resource: Any, run_id: str, recovered: Any
+        ) -> bool:
+            self.seen_state = recovered
+            return await super()._settle_recovered_state(resource, run_id, recovered)
+
+    handler = InspectingHandler(
+        CoreClient(context),
+        parent_graph=Graph({}),
+        operation_graph=Graph({}),
+    )
+
+    await handler(_job())
+
+    assert handler.seen_state is not None
+    assert handler.seen_state["runtimeContext"]["runResource"]["runId"] == "run-1"
+    assert handler.seen_state["runtimeContext"]["runResource"]["jobId"] == "job-1"

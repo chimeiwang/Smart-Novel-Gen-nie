@@ -149,13 +149,8 @@ class WritingContextRepository:
             outline_path = await self._outline_path(session, group) if group is not None else []
             active_artifact = await self._active_artifact(session, task)
             conversation_history = _conversation_history(task.conversationHistory)
-            latest_user_message = next(
-                (
-                    str(item["content"])
-                    for item in reversed(conversation_history)
-                    if item.get("role") == "user" and isinstance(item.get("content"), str)
-                ),
-                "",
+            prior_conversation_history, latest_user_message = (
+                _split_current_user_message(conversation_history)
             )
             return {
                 "taskId": task.id,
@@ -180,7 +175,7 @@ class WritingContextRepository:
                 "phase": task.phase,
                 "targetWordCount": task.targetWordCount,
                 "selectedAgents": [item for item in task.selectedAgents.split(",") if item],
-                "conversationHistory": conversation_history,
+                "conversationHistory": prior_conversation_history,
                 "userMessage": latest_user_message,
                 "graphState": (json.loads(task.graphStateJson) if task.graphStateJson else None),
             }
@@ -326,6 +321,16 @@ def _conversation_history(serialized: str | None) -> list[dict[str, Any]]:
             message="写作任务对话历史格式错误",
         )
     return value
+
+
+def _split_current_user_message(
+    history: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], str]:
+    for index in range(len(history) - 1, -1, -1):
+        item = history[index]
+        if item.get("role") == "user" and isinstance(item.get("content"), str):
+            return [*history[:index], *history[index + 1 :]], str(item["content"])
+    return list(history), ""
 
 
 def _beat_plan_dict(plan: ChapterBeatPlan | None, scenes: list[SceneBeat]) -> dict[str, Any] | None:

@@ -13,6 +13,37 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
 
+def _state(**kwargs: Any) -> dict[str, Any]:
+    state = create_initial_state(**kwargs)
+    state["runtimeContext"] = {
+        "coreContext": {
+            "workspace": {
+                "novel": {"id": kwargs["novel_id"], "name": "测试小说"},
+                "chapters": [
+                    {
+                        "id": kwargs["chapter_id"],
+                        "title": "测试章节",
+                        "content": "当前正文",
+                    }
+                ],
+            },
+            "planning": {
+                "taskId": kwargs["task_id"],
+                "novelId": kwargs["novel_id"],
+                "chapterId": kwargs["chapter_id"],
+            },
+        },
+        "runResource": {
+            "userId": kwargs["user_id"],
+            "novelId": kwargs["novel_id"],
+            "taskId": kwargs["task_id"],
+            "runId": "run-1",
+            "jobId": "job-1",
+        },
+    }
+    return state
+
+
 class AgentExecutor:
     async def run(self, agent_id: str, state: dict[str, Any]) -> dict[str, Any]:
         if agent_id == "写作":
@@ -82,7 +113,7 @@ async def test_operation_graph_interrupts_and_resumes_user_approval() -> None:
         OperationDependencies(agentExecutor=AgentExecutor(), artifacts=artifacts),
         checkpointer=InMemorySaver(),
     )
-    state = create_initial_state(
+    state = _state(
         task_id="task-1",
         user_id="user-1",
         novel_id="novel-1",
@@ -109,7 +140,7 @@ async def test_new_graph_instance_resumes_from_stable_user_decision_state() -> N
         OperationDependencies(agentExecutor=AgentExecutor(), artifacts=artifacts),
         checkpointer=InMemorySaver(),
     )
-    state = create_initial_state(
+    state = _state(
         task_id="task-1",
         user_id="user-1",
         novel_id="novel-1",
@@ -137,7 +168,7 @@ async def test_new_graph_instance_resumes_from_stable_user_decision_state() -> N
 @pytest.mark.asyncio
 async def test_stable_discard_decision_does_not_delete_artifact_twice() -> None:
     artifacts = ArtifactPort()
-    state = create_initial_state(
+    state = _state(
         task_id="task-1",
         user_id="user-1",
         novel_id="novel-1",
@@ -182,7 +213,7 @@ async def test_operation_graph_retries_once_when_primary_agent_omits_artifact_ev
         OperationDependencies(agentExecutor=executor, artifacts=artifacts),
         checkpointer=InMemorySaver(),
     )
-    state = create_initial_state(
+    state = _state(
         task_id="task-1",
         user_id="user-1",
         novel_id="novel-1",
@@ -206,7 +237,11 @@ async def test_operation_graph_retries_once_when_primary_agent_omits_artifact_ev
 
     assert result["__interrupt__"]
     assert len(executor.calls) == 2
-    assert "必须提交待审核草案控制事件" in executor.calls[1]["contextMessages"][-1]
+    assert (
+        "必须提交待审核草案控制事件"
+        in executor.calls[1]["executionInstructions"][-1]
+    )
+    assert "必须提交待审核草案控制事件" not in executor.calls[1]["contextMessages"][-1]
     assert artifacts.actions == ["submit", "await"]
 
 
@@ -234,7 +269,7 @@ async def test_operation_graph_degrades_reviewer_failure_to_block_result() -> No
         OperationDependencies(agentExecutor=ReviewerFailureExecutor(), artifacts=artifacts),
         checkpointer=InMemorySaver(),
     )
-    state = create_initial_state(
+    state = _state(
         task_id="task-1",
         user_id="user-1",
         novel_id="novel-1",
@@ -293,7 +328,7 @@ async def test_operation_graph_combines_builder_events_across_artifact_retry() -
         OperationDependencies(agentExecutor=executor, artifacts=artifacts),
         checkpointer=InMemorySaver(),
     )
-    state = create_initial_state(
+    state = _state(
         task_id="task-1",
         user_id="user-1",
         novel_id="novel-1",
@@ -326,7 +361,7 @@ async def test_removed_sync_lore_snapshot_fails_with_explicit_message() -> None:
         OperationDependencies(agentExecutor=AgentExecutor(), artifacts=ArtifactPort()),
         checkpointer=InMemorySaver(),
     )
-    state = create_initial_state(
+    state = _state(
         task_id="task-legacy",
         user_id="user-1",
         novel_id="novel-1",
@@ -393,7 +428,7 @@ async def test_plan_chapter_prefers_beat_plan_event_over_generic_artifact_event(
         OperationDependencies(agentExecutor=MixedBeatPlanExecutor(), artifacts=artifacts),
         checkpointer=InMemorySaver(),
     )
-    state = create_initial_state(
+    state = _state(
         task_id="task-1",
         user_id="user-1",
         novel_id="novel-1",

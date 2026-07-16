@@ -20,6 +20,7 @@ class ToolContext(BaseModel):
     novelId: str
     taskId: str
     runId: str
+    jobId: str | None = None
     agentId: str
 
 

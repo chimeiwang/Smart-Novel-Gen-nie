@@ -33,10 +33,6 @@ def build_parent_graph(
             "activeAgent": routed.operation.primaryAgent,
             "operationStep": "classify_operation",
             "operationStage": "识别创作操作",
-            "conversationHistory": [
-                *state.get("conversationHistory", []),
-                {"role": "user", "content": state["userMessage"]},
-            ],
         }
 
     builder = StateGraph(GraphState)
