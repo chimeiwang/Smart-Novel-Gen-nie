@@ -11,7 +11,11 @@ from inkforge_agents.providers.base import (
 )
 from inkforge_agents.runtime.agent_runtime import AgentRuntime
 from inkforge_agents.runtime.model_runtime import ModelRuntime
-from inkforge_agents.tools.registry import ToolContext, build_default_registry
+from inkforge_agents.tools.registry import (
+    ToolContext,
+    ToolDefinition,
+    build_default_registry,
+)
 
 
 def turn(
@@ -239,6 +243,170 @@ async def test_runtime_rejects_unexposed_tool_and_invalid_arguments() -> None:
             exposed_tools=registry.for_agent(
                 agent_id="设定", capabilities={"character.read"}
             ),
+            context=context(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_runtime_rejects_exposed_control_tool_not_authorized_for_agent() -> None:
+    gateway = RecordingGateway()
+    registry = build_default_registry(gateway)
+    runtime = AgentRuntime(
+        ModelRuntime(
+            ScriptedProvider(
+                [
+                    turn(
+                        "不能保留的正文",
+                        (
+                            "call-1",
+                            "submit_quality_report",
+                            {
+                                "scores": {
+                                    "character": 90,
+                                    "world_rule": 90,
+                                    "timeline": 90,
+                                    "causality": 90,
+                                    "foreshadowing": 90,
+                                },
+                                "issues": [],
+                                "gate": "pass",
+                            },
+                        ),
+                    )
+                ]
+            )
+        ),
+        registry,
+    )
+
+    with pytest.raises(PermissionError, match="当前智能体无权执行工具"):
+        await runtime.run(
+            messages=[{"role": "user", "content": "越权质量检查"}],
+            exposed_tools=[registry.require("submit_quality_report")],
+            context=context("设定"),
+            terminal_control_tools={"submit_quality_report"},
+        )
+
+    assert gateway.calls == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_rejects_same_name_unregistered_exposed_tool() -> None:
+    gateway = RecordingGateway()
+    registry = build_default_registry(gateway)
+    registered = registry.require("get_novel_info")
+    unregistered = ToolDefinition(
+        name=registered.name,
+        description=registered.description,
+        argumentsModel=registered.argumentsModel,
+        permission=registered.permission,
+        toolKind=registered.toolKind,
+        handler=registered.handler,
+    )
+    runtime = AgentRuntime(
+        ModelRuntime(
+            ScriptedProvider(
+                [turn("不能保留的正文", ("call-1", "get_novel_info", {}))]
+            )
+        ),
+        registry,
+    )
+
+    with pytest.raises(ValueError, match="工具定义与注册表不一致"):
+        await runtime.run(
+            messages=[{"role": "user", "content": "读取小说"}],
+            exposed_tools=[unregistered],
+            context=context("设定"),
+        )
+
+    assert gateway.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("call_id", ["", "   "])
+async def test_runtime_rejects_empty_tool_call_id_before_control_event(
+    call_id: str,
+) -> None:
+    gateway = RecordingGateway()
+    registry = build_default_registry(gateway)
+    runtime = AgentRuntime(
+        ModelRuntime(
+            ScriptedProvider(
+                [
+                    turn(
+                        "不能保留的正文",
+                        (
+                            call_id,
+                            "submit_validation_report",
+                            {"hasConflicts": False, "conflicts": []},
+                        ),
+                    )
+                ]
+            )
+        ),
+        registry,
+    )
+
+    with pytest.raises(RuntimeError, match="MODEL_TOOL_CALL_ID_INVALID"):
+        await runtime.run(
+            messages=[{"role": "user", "content": "校验"}],
+            exposed_tools=[registry.require("submit_validation_report")],
+            context=context("校验"),
+            terminal_control_tools={"submit_validation_report"},
+        )
+
+    assert gateway.calls == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_rejects_duplicate_tool_call_id_before_any_side_effect() -> None:
+    gateway = RecordingGateway()
+    registry = build_default_registry(gateway)
+    runtime = AgentRuntime(
+        ModelRuntime(
+            ScriptedProvider(
+                [
+                    turn(
+                        "不能保留的正文",
+                        (
+                            "duplicate-call",
+                            "submit_validation_report",
+                            {"hasConflicts": False, "conflicts": []},
+                        ),
+                        ("duplicate-call", "get_novel_info", {}),
+                    )
+                ]
+            )
+        ),
+        registry,
+    )
+
+    with pytest.raises(RuntimeError, match="MODEL_TOOL_CALL_ID_DUPLICATE"):
+        await runtime.run(
+            messages=[{"role": "user", "content": "校验"}],
+            exposed_tools=[
+                registry.require("submit_validation_report"),
+                registry.require("get_novel_info"),
+            ],
+            context=context("校验"),
+        )
+
+    assert gateway.calls == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_preserves_empty_raw_finish_reason_in_error() -> None:
+    response = turn("不能接受", finish_reason="length")
+    response.rawFinishReason = ""
+    runtime = AgentRuntime(
+        ModelRuntime(ScriptedProvider([response])),
+        build_default_registry(RecordingGateway()),
+    )
+
+    with pytest.raises(RuntimeError, match="原始原因：）"):
+        await runtime.run(
+            messages=[{"role": "user", "content": "测试"}],
+            exposed_tools=[],
             context=context(),
         )
 

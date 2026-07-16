@@ -78,6 +78,21 @@ class ToolRegistry:
             raise KeyError(f"工具未注册：{name}")
         return tool
 
+    def require_authorized(
+        self,
+        tool: ToolDefinition,
+        context: ToolContext,
+    ) -> ToolDefinition:
+        registered = self.require(tool.name)
+        if registered is not tool:
+            raise ValueError("工具定义与注册表不一致")
+        capabilities = AGENT_CAPABILITIES.get(context.agentId)
+        if capabilities is None or not registered.permission.allows(
+            context.agentId, capabilities
+        ):
+            raise PermissionError(f"当前智能体无权执行工具：{registered.name}")
+        return registered
+
     def for_agent(
         self,
         *,
@@ -104,19 +119,12 @@ class ToolRegistry:
         arguments: dict[str, Any],
         context: ToolContext,
     ) -> dict[str, Any]:
-        registered = self.require(tool.name)
-        if registered is not tool:
-            raise ValueError("工具定义与注册表不一致")
-        capabilities = AGENT_CAPABILITIES.get(context.agentId)
-        if capabilities is None or not tool.permission.allows(
-            context.agentId, capabilities
-        ):
-            raise PermissionError(f"当前智能体无权执行工具：{tool.name}")
-        if tool.toolKind == "control":
+        authorized = self.require_authorized(tool, context)
+        if authorized.toolKind == "control":
             raise ValueError("控制工具只能由智能体运行时捕获")
-        if tool.handler is None:
-            raise RuntimeError(f"工具缺少执行器：{tool.name}")
-        return await tool.handler(arguments, context)
+        if authorized.handler is None:
+            raise RuntimeError(f"工具缺少执行器：{authorized.name}")
+        return await authorized.handler(arguments, context)
 
 
 class _UnavailableGateway:

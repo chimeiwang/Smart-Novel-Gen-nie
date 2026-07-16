@@ -75,6 +75,32 @@ def test_registry_contains_migrated_read_proposal_and_control_tools() -> None:
     assert set(READ_TOOL_NAMES) <= names
 
 
+def test_require_authorized_returns_the_registered_tool_for_known_agent() -> None:
+    registry = ToolRegistry()
+    tool = restricted_tool()
+    registry.register(tool)
+
+    assert registry.require_authorized(tool, tool_context("设定")) is tool
+
+
+def test_require_authorized_rejects_same_name_unregistered_definition() -> None:
+    registry = ToolRegistry()
+    registry.register(restricted_tool())
+
+    with pytest.raises(ValueError, match="工具定义与注册表不一致"):
+        registry.require_authorized(restricted_tool(), tool_context("设定"))
+
+
+@pytest.mark.parametrize("agent_id", ["写作", "未知"])
+def test_require_authorized_uses_trusted_capabilities(agent_id: str) -> None:
+    registry = ToolRegistry()
+    tool = restricted_tool()
+    registry.register(tool)
+
+    with pytest.raises(PermissionError, match="当前智能体无权执行工具"):
+        registry.require_authorized(tool, tool_context(agent_id))
+
+
 @pytest.mark.asyncio
 async def test_registry_refuses_control_tool_direct_execution() -> None:
     registry = build_default_registry()

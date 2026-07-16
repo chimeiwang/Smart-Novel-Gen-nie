@@ -100,7 +100,12 @@ class HumanWorkflowLog:
                     "模型响应：",
                     output,
                     f"完成原因：{finish_reason}",
-                    f"供应商原始原因：{raw_finish_reason or '未提供'}",
+                    "供应商原始原因："
+                    + (
+                        raw_finish_reason
+                        if raw_finish_reason is not None
+                        else "未提供"
+                    ),
                     "",
                 )
             )

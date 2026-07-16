@@ -74,6 +74,7 @@ class AgentRuntime:
             validated_calls = self._preflight_response(
                 response,
                 {tool.name: tool for tool in available_tools},
+                context,
                 terminal_control_tools,
             )
             if response.content:
@@ -233,21 +234,27 @@ class AgentRuntime:
             "max_iterations",
         )
 
-    @staticmethod
     def _preflight_response(
+        self,
         response: ModelTurnResult,
         exposed: dict[str, ToolDefinition],
+        context: ToolContext,
         terminal_control_tools: set[str] | frozenset[str],
     ) -> list[tuple[ModelToolCall, ToolDefinition, dict[str, Any]]]:
+        raw_finish_reason = (
+            response.rawFinishReason
+            if response.rawFinishReason is not None
+            else "未提供"
+        )
         if response.finishReason == "length":
             raise RuntimeError(
                 "MODEL_OUTPUT_TRUNCATED：供应商报告模型输出达到长度上限"
-                f"（原始原因：{response.rawFinishReason or '未提供'}）"
+                f"（原始原因：{raw_finish_reason}）"
             )
         if response.finishReason == "content_filter":
             raise RuntimeError(
                 "MODEL_OUTPUT_FILTERED：供应商报告模型输出被内容过滤"
-                f"（原始原因：{response.rawFinishReason or '未提供'}）"
+                f"（原始原因：{raw_finish_reason}）"
             )
 
         has_tool_calls = bool(response.toolCalls)
@@ -265,12 +272,23 @@ class AgentRuntime:
         validated_calls: list[
             tuple[ModelToolCall, ToolDefinition, dict[str, Any]]
         ] = []
+        seen_call_ids: set[str] = set()
         for call in response.toolCalls:
+            if not call.id.strip():
+                raise RuntimeError(
+                    "MODEL_TOOL_CALL_ID_INVALID：模型工具调用缺少有效 ID"
+                )
+            if call.id in seen_call_ids:
+                raise RuntimeError(
+                    f"MODEL_TOOL_CALL_ID_DUPLICATE：模型工具调用 ID 重复 {call.id}"
+                )
+            seen_call_ids.add(call.id)
             tool = exposed.get(call.name)
             if tool is None:
                 raise RuntimeError(
                     f"MODEL_TOOL_NOT_EXPOSED：模型调用了未暴露工具 {call.name}"
                 )
+            tool = self._registry.require_authorized(tool, context)
             try:
                 arguments = tool.validate(call.arguments)
             except ValidationError as exc:
