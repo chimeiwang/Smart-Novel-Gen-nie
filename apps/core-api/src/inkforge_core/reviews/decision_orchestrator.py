@@ -180,7 +180,7 @@ class ReviewDecisionOrchestrator:
                     "resumeInput": resume_input,
                     "decisionRequest": _decision_semantics(artifact_id, request),
                 }
-                await dependencies.commands.create_artifact_decision(
+                persisted_command = await dependencies.commands.create_artifact_decision(
                     command_id=command_id,
                     user_id=user_id,
                     task_id=task.id,
@@ -189,6 +189,11 @@ class ReviewDecisionOrchestrator:
                     client_request_id=request.clientRequestId,
                     payload=payload,
                     result=accepted.model_dump(mode="json"),
+                )
+                accepted = _accepted_response_from_command(
+                    persisted_command,
+                    artifact_id,
+                    request,
                 )
         await self._kick_dispatcher()
         return accepted

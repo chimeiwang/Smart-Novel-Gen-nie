@@ -193,7 +193,19 @@ class CommandRepository:
             command(result=kwargs["result"]),
             id=kwargs["command_id"],
             decision=kwargs["decision"],
+            artifact_id=kwargs["artifact_id"],
+            payload=kwargs["payload"],
         )
+
+
+class RacingCommandRepository(CommandRepository):
+    def __init__(self, persisted: WritingCommandRecord) -> None:
+        super().__init__()
+        self.persisted = persisted
+
+    async def create_artifact_decision(self, **kwargs: Any) -> WritingCommandRecord:
+        self.created = kwargs
+        return self.persisted
 
 
 @dataclass
@@ -404,3 +416,88 @@ async def test_short_outline_approve_rejects_edited_content_shortcut() -> None:
         )
     assert caught.value.code == "SHORT_OUTLINE_EDIT_REQUIRES_SAVE"
     assert subject.commands.created is None
+
+
+def _orchestrator_with_commands(
+    commands: CommandRepository,
+) -> ReviewDecisionOrchestrator:
+    dependencies = ReviewDecisionDependencies(
+        repository=ArtifactRepository(),
+        service=DecisionService(),
+        commands=commands,
+    )
+    return ReviewDecisionOrchestrator(
+        OuterFactory(OuterSession()),  # type: ignore[arg-type]
+        command_lookup=Lookup(),
+        dependencies_builder=lambda _factory: dependencies,
+        transactional_factory_builder=lambda _connection: object(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_command_insert_race_returns_the_persisted_command_result() -> None:
+    persisted_result = {
+        "artifactId": "artifact-1",
+        "taskId": "task-1",
+        "commandId": "command-persisted",
+        "decision": "discard",
+        "status": "submitted",
+        "savedCount": 0,
+        "deleted": True,
+    }
+    persisted = replace(
+        command(result=persisted_result),
+        id="command-persisted",
+        status="submitted",
+    )
+    orchestrator = _orchestrator_with_commands(RacingCommandRepository(persisted))
+
+    response = await orchestrator.decide(
+        "user-1",
+        "artifact-1",
+        ReviewArtifactDecisionRequest(
+            clientRequestId="request-00000001",
+            decision="discard",
+            expectedRevision=1,
+        ),
+    )
+
+    assert response.commandId == "command-persisted"
+    assert response.status == "submitted"
+
+
+@pytest.mark.asyncio
+async def test_command_insert_race_rejects_different_persisted_semantics() -> None:
+    persisted_result = {
+        "artifactId": "artifact-1",
+        "taskId": "task-1",
+        "commandId": "command-persisted",
+        "decision": "discard",
+        "status": "pending",
+        "savedCount": 0,
+        "deleted": True,
+    }
+    persisted = replace(
+        command(result=persisted_result),
+        id="command-persisted",
+        payload={
+            **command().payload,
+            "decisionRequest": {
+                **command().payload["decisionRequest"],
+                "expectedRevision": 2,
+            },
+        },
+    )
+    orchestrator = _orchestrator_with_commands(RacingCommandRepository(persisted))
+
+    with pytest.raises(ApiError) as caught:
+        await orchestrator.decide(
+            "user-1",
+            "artifact-1",
+            ReviewArtifactDecisionRequest(
+                clientRequestId="request-00000001",
+                decision="discard",
+                expectedRevision=1,
+            ),
+        )
+    assert caught.value.code == "IDEMPOTENCY_KEY_REUSED"

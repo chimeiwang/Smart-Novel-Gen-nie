@@ -296,6 +296,16 @@ class WritingRunCommandRepository:
                     )
                     return record
                 task, owner_id = await self._require_owned_task(session, user_id, task_id)
+                raced = await self._get_by_idempotency_key(session, key)
+                if raced is not None:
+                    record = _command_record(*raced)
+                    _assert_artifact_decision_semantics(
+                        record,
+                        artifact_id=artifact_id,
+                        decision=decision,
+                        payload=payload,
+                    )
+                    return record
                 if task.phase in {"completed", "error"}:
                     raise ApiError(
                         status_code=409,
@@ -310,14 +320,28 @@ class WritingRunCommandRepository:
                 source_revision = decision_request.get("expectedRevision")
                 if (
                     decision == "revise"
-                    and task.writingSessionId is not None
                     and isinstance(raw_user_message, str)
                     and raw_user_message.strip()
                     and isinstance(source_revision, int)
+                    and not isinstance(source_revision, bool)
                 ):
+                    if task.writingSessionId is None:
+                        writing_session = WritingSession(
+                            novelId=task.novelId,
+                            chapterId=task.chapterId,
+                            title="草案修改",
+                            phase="idle",
+                        )
+                        session.add(writing_session)
+                        await session.flush()
+                        task.writingSessionId = writing_session.id
+                        payload["writingSessionId"] = writing_session.id
+                        writing_session_id = writing_session.id
+                    else:
+                        writing_session_id = task.writingSessionId
                     session.add(
                         WritingMessage(
-                            sessionId=task.writingSessionId,
+                            sessionId=writing_session_id,
                             role="user",
                             content=raw_user_message,
                             intent="revision_focus",
@@ -331,7 +355,7 @@ class WritingRunCommandRepository:
                             ),
                         )
                     )
-                    await _touch_writing_session(session, task.writingSessionId)
+                    await _touch_writing_session(session, writing_session_id)
                 command = WritingRunCommand(
                     id=command_id,
                     taskId=task_id,

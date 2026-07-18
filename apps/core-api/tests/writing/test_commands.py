@@ -7,7 +7,12 @@ from datetime import datetime, timedelta
 
 import pytest
 from inkforge_core.db.base import utc_now
-from inkforge_core.db.models import WritingMessage, WritingRunCommand, WritingTask
+from inkforge_core.db.models import (
+    WritingMessage,
+    WritingRunCommand,
+    WritingSession,
+    WritingTask,
+)
 from inkforge_core.errors import ApiError
 from inkforge_core.writing.commands import (
     WritingRunCommandRepository,
@@ -361,6 +366,7 @@ async def test_revise_decision_persists_raw_revision_focus_once_with_command() -
             RowResult(None),
             RowResult((owned_task, "user-1")),
             RowResult(None),
+            RowResult(None),
         ]
     )
     repository = WritingRunCommandRepository(  # type: ignore[arg-type]
@@ -417,6 +423,7 @@ async def test_non_revise_decision_does_not_persist_revision_focus_message() -> 
         [
             RowResult(None),
             RowResult((owned_task, "user-1")),
+            RowResult(None),
             RowResult(None),
         ]
     )
@@ -482,3 +489,65 @@ async def test_artifact_decision_repository_rejects_raced_semantic_key_reuse() -
             result={"artifactId": "artifact-1"},
         )
     assert caught.value.code == "IDEMPOTENCY_KEY_REUSED"
+
+
+@pytest.mark.asyncio
+async def test_revise_decision_creates_and_binds_session_before_persisting_raw_message() -> None:
+    owned_task = task()
+    owned_task.writingSessionId = None
+    first_session = CommandSession(
+        [
+            RowResult(None),
+            RowResult((owned_task, "user-1")),
+            RowResult(None),
+            RowResult(None),
+        ]
+    )
+    factory = SessionFactory([first_session])
+    repository = WritingRunCommandRepository(factory)  # type: ignore[arg-type]
+    payload = {
+        "version": 1,
+        "resume": True,
+        "writingSessionId": None,
+        "decisionRequest": {
+            "artifactId": "artifact-1",
+            "decision": "revise",
+            "expectedRevision": 4,
+            "userMessage": "  保留原始空格，不要牺牲结尾。  ",
+        },
+    }
+
+    first = await repository.create_artifact_decision(
+        command_id="command-1",
+        user_id="user-1",
+        task_id="task-1",
+        artifact_id="artifact-1",
+        decision="revise",
+        client_request_id="request-00000001",
+        payload=payload,
+        result={"artifactId": "artifact-1"},
+    )
+
+    sessions = [item for item in first_session.added if isinstance(item, WritingSession)]
+    messages = [item for item in first_session.added if isinstance(item, WritingMessage)]
+    commands = [item for item in first_session.added if isinstance(item, WritingRunCommand)]
+    assert len(sessions) == len(messages) == len(commands) == 1
+    assert owned_task.writingSessionId == sessions[0].id
+    assert messages[0].sessionId == sessions[0].id
+    assert messages[0].content == "  保留原始空格，不要牺牲结尾。  "
+    assert first.payload["writingSessionId"] == sessions[0].id
+
+    second_session = CommandSession([RowResult((commands[0], owned_task, "user-1"))])
+    factory.sessions.append(second_session)
+    second = await repository.create_artifact_decision(
+        command_id="command-other",
+        user_id="user-1",
+        task_id="task-1",
+        artifact_id="artifact-1",
+        decision="revise",
+        client_request_id="request-00000001",
+        payload=payload,
+        result={"artifactId": "artifact-1"},
+    )
+    assert second.id == first.id
+    assert second_session.added == []
