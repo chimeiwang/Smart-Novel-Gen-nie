@@ -51,6 +51,8 @@ stateDiagram-v2
 
 ## 草案审核主流程
 
+下图的 Reviewer 并行扇出适用于 `long_serial` 和其他非中短篇草案。`short_medium` 大纲不自动复审；中短篇整稿固定串行执行“编辑 → 校验”，最多自动完整返工一次后再串行复审。
+
 ~~~mermaid
 flowchart TD
     A["Agent 生成产物"] --> B["提交 ReviewArtifact"]
@@ -82,7 +84,7 @@ flowchart TD
 
 公开入口是 `POST /api/v1/review-artifacts/{artifactId}/decision`。请求必须携带 clientRequestId，Core 先按该标识检查幂等结果，再在一个数据库事务中完成正式写入或草案变化并创建 `artifact_decision` 命令，成功返回 202。前端随后只连接该任务 SSE，不再额外调用恢复接口。
 
-所有会改变或批准草案内容的请求还必须携带 `expectedRevision`。内容实际变化才增加 revision；状态切换、相同内容重放和幂等重试不增加。用户直接编辑大纲必须先保存为新 revision 再批准；恢复历史版本会复制为新的当前 revision，不回退版本号。过期 revision 返回冲突。用户修改要求原文必须保存在 WritingMessage、持久命令和 revision diff 中。
+所有 ReviewArtifact 决策，包括 `approve`、`revise`、`discard`，都必须携带 `expectedRevision`；Core 必须在正式应用、状态变化或删除前校验其等于当前 revision。直接编辑和恢复历史等内容变更请求同样必须携带并校验 `expectedRevision`。内容实际变化才增加 revision；状态切换、相同内容重放和幂等重试不增加。用户直接编辑大纲必须先保存为新 revision 再批准；恢复历史版本会复制为新的当前 revision，不回退版本号。过期 revision 返回冲突。用户修改要求原文必须保存在 WritingMessage、持久命令和 revision diff 中。
 
 前端需求：
 
