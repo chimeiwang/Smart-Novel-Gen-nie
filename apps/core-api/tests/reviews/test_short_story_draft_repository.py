@@ -374,7 +374,11 @@ async def test_one_automatic_rewrite_requires_first_dual_review(
         await repository.create_or_revise("user-1", rewritten)
     assert no_reviews.value.code == "SHORT_STORY_AUTOMATIC_REWRITE_REVIEW_REQUIRED"
 
-    await repository.submit_evaluation("user-1", created.id, _evaluation("编辑"))
+    await repository.submit_evaluation(
+        "user-1",
+        created.id,
+        _evaluation("编辑", verdict="revise"),
+    )
     await repository.submit_evaluation("user-1", created.id, _evaluation("校验"))
     revised = await repository.create_or_revise("user-1", rewritten)
     assert revised.revision == 2
@@ -387,6 +391,28 @@ async def test_one_automatic_rewrite_requires_first_dual_review(
             generation_reason="automatic_rewrite",
             expected_revision=2,
         )
+
+
+@pytest.mark.asyncio
+async def test_automatic_rewrite_is_rejected_when_both_reviews_pass(
+    repository: ReviewRepository,
+) -> None:
+    created = await repository.create_or_revise("user-1", _draft_request())
+    await repository.submit_evaluation("user-1", created.id, _evaluation("编辑"))
+    await repository.submit_evaluation("user-1", created.id, _evaluation("校验"))
+
+    with pytest.raises(ApiError) as caught:
+        await repository.create_or_revise(
+            "user-1",
+            _draft_request(
+                content="乙" * 6000,
+                rewrite_count=1,
+                generation_reason="automatic_rewrite",
+                expected_revision=1,
+            ),
+        )
+
+    assert caught.value.code == "SHORT_STORY_AUTOMATIC_REWRITE_NOT_REQUIRED"
 
 
 @pytest.mark.asyncio
@@ -565,3 +591,54 @@ async def test_short_story_workspace_read_model_exposes_task_command_session_and
     assert result.workflowSession.id == "session-1"
     assert result.workflowSession.currentTask is not None
     assert result.workflowSession.currentTask.id == "task-1"
+
+
+@pytest.mark.asyncio
+async def test_short_story_workspace_ignores_legacy_untyped_artifacts(
+    repository: ReviewRepository,
+) -> None:
+    async with repository._session_factory() as session:  # noqa: SLF001
+        async with session.begin():
+            session.add(
+                ReviewArtifact(
+                    id="zz-legacy-outline",
+                    novelId="novel-1",
+                    chapterId="chapter-1",
+                    kind="outline_draft",
+                    status="awaiting_user",
+                    revision=1,
+                    payloadJson=json.dumps(
+                        {"kind": "outline_draft", "content": "旧流程自由文本大纲"},
+                        ensure_ascii=False,
+                    ),
+                )
+            )
+
+    result = await repository.get_short_story_artifacts("user-1", "novel-1")
+
+    assert result.outline is not None
+    assert result.outline.id == "outline-1"
+
+
+@pytest.mark.asyncio
+async def test_legacy_short_story_with_multiple_chapters_can_open_read_model(
+    repository: ReviewRepository,
+) -> None:
+    async with repository._session_factory() as session:  # noqa: SLF001
+        async with session.begin():
+            session.add(
+                Chapter(
+                    id="chapter-legacy-2",
+                    novelId="novel-1",
+                    order=2,
+                    status="drafting",
+                    title="旧项目第二章",
+                    content="旧正文",
+                )
+            )
+
+    result = await repository.get_short_story_artifacts("user-1", "novel-1")
+
+    assert result.outline is not None
+    assert result.latestTask is not None
+    assert result.workflowSession is not None

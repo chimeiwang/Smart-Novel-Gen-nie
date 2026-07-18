@@ -196,9 +196,15 @@ class PlanningRowResult:
 
 
 class ShortPlanningSession:
-    def __init__(self, row: tuple[object, ...], scalars: list[object | None]) -> None:
+    def __init__(
+        self,
+        row: tuple[object, ...],
+        scalar_responses: list[object | None],
+        scalar_list_responses: list[object],
+    ) -> None:
         self.row = row
-        self.scalars = iter(scalars)
+        self._scalar_responses = iter(scalar_responses)
+        self._scalar_list_responses = scalar_list_responses
         self.execute_count = 0
 
     async def __aenter__(self) -> ShortPlanningSession:
@@ -216,7 +222,11 @@ class ShortPlanningSession:
 
     async def scalar(self, statement: object) -> object | None:
         del statement
-        return next(self.scalars)
+        return next(self._scalar_responses)
+
+    async def scalars(self, statement: object) -> FakeScalarsResult:
+        del statement
+        return FakeScalarsResult(self._scalar_list_responses)
 
 
 class ShortPlanningFactory:
@@ -300,7 +310,8 @@ async def test_short_context_bypasses_long_planning_and_prioritizes_direct_edit(
     )
     session = ShortPlanningSession(
         (task, chapter, novel, bible),
-        [command, 1, outline],
+        [command, 1],
+        [outline],
     )
 
     result = await WritingContextRepository(ShortPlanningFactory(session)).get_planning_context(  # type: ignore[arg-type]
@@ -315,6 +326,84 @@ async def test_short_context_bypasses_long_planning_and_prioritizes_direct_edit(
     assert result["chapterGroup"] is None
     assert result["approvedBeatPlan"] is None
     assert result["outlinePath"] == []
+
+
+@pytest.mark.asyncio
+async def test_short_outline_context_ignores_legacy_untyped_artifact() -> None:
+    legacy = ReviewArtifact(
+        id="legacy-outline",
+        novelId="novel-1",
+        chapterId="chapter-1",
+        kind="outline_draft",
+        status="awaiting_user",
+        revision=1,
+        payloadJson=json.dumps(
+            {"kind": "outline_draft", "content": "旧流程自由文本大纲"},
+            ensure_ascii=False,
+        ),
+    )
+
+    outline, direct_edit = await WritingContextRepository(
+        cast(Any, None)
+    )._current_short_outline(
+        cast(AsyncSession, FakeScalarsSession([legacy])),
+        "novel-1",
+    )
+
+    assert outline is None
+    assert direct_edit is None
+
+
+@pytest.mark.asyncio
+async def test_short_outline_context_skips_newer_legacy_artifact() -> None:
+    legacy = ReviewArtifact(
+        id="legacy-outline",
+        novelId="novel-1",
+        chapterId="chapter-1",
+        kind="outline_draft",
+        status="awaiting_user",
+        revision=1,
+        payloadJson=json.dumps(
+            {"kind": "outline_draft", "content": "迟到的旧流程大纲"},
+            ensure_ascii=False,
+        ),
+    )
+    typed = ReviewArtifact(
+        id="typed-outline",
+        novelId="novel-1",
+        chapterId="chapter-1",
+        kind="outline_draft",
+        status="awaiting_user",
+        revision=3,
+        payloadJson=json.dumps(
+            {
+                "kind": "outline_draft",
+                "storyLengthProfile": "short_medium",
+                "originalInspiration": "原始灵感",
+                "corePremise": "核心前提",
+                "anchors": {"mustKeep": [], "confirmed": [], "avoid": []},
+                "sections": [
+                    {"id": "section-1", "title": "第一节", "events": "事件"}
+                ],
+                "content": "权威完整大纲",
+                "changeSummary": "修改摘要",
+                "anchorChanges": [],
+            },
+            ensure_ascii=False,
+        ),
+    )
+
+    outline, direct_edit = await WritingContextRepository(
+        cast(Any, None)
+    )._current_short_outline(
+        cast(AsyncSession, FakeScalarsSession([legacy, typed])),
+        "novel-1",
+    )
+
+    assert outline is not None
+    assert outline["corePremise"] == "核心前提"
+    assert outline["sections"][0]["id"] == "section-1"
+    assert direct_edit is None
 
 
 @pytest.mark.asyncio

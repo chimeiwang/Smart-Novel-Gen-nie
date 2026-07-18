@@ -188,24 +188,10 @@ class ReviewRepository:
                     code="SHORT_STORY_PROFILE_REQUIRED",
                     message="该接口只支持中短篇作品",
                 )
-            chapters = list(
-                (
-                    await session.scalars(
-                        select(Chapter)
-                        .where(Chapter.novelId == novel_id)
-                        .order_by(Chapter.order, Chapter.id)
-                    )
-                ).all()
+            outline = await _latest_short_story_artifact_by_kind(
+                session, novel_id, "outline_draft"
             )
-            if len(chapters) != 1:
-                raise ApiError(
-                    status_code=409,
-                    code="SHORT_STORY_CHAPTER_INVALID",
-                    message="中短篇必须使用唯一正文承载章节",
-                )
-            chapter_id = chapters[0].id
-            outline = await _latest_artifact_by_kind(session, novel_id, "outline_draft")
-            chapter_draft = await _latest_artifact_by_kind(
+            chapter_draft = await _latest_short_story_artifact_by_kind(
                 session, novel_id, "chapter_draft"
             )
             outline_response = (
@@ -222,10 +208,7 @@ class ReviewRepository:
                 (
                     await session.scalars(
                         select(WritingTask)
-                        .where(
-                            WritingTask.novelId == novel_id,
-                            WritingTask.chapterId == chapter_id,
-                        )
+                        .where(WritingTask.novelId == novel_id)
                         .order_by(WritingTask.updatedAt.desc(), WritingTask.id.desc())
                     )
                 ).all()
@@ -301,7 +284,6 @@ class ReviewRepository:
                     select(WritingSession).where(
                         WritingSession.id == preferred[0].writingSessionId,
                         WritingSession.novelId == novel_id,
-                        WritingSession.chapterId == chapter_id,
                     )
                 )
                 if session_record is not None:
@@ -1061,6 +1043,22 @@ async def _validate_short_story_draft_submission(
             error_code="SHORT_STORY_AUTOMATIC_REWRITE_REVIEW_REQUIRED",
             message="首版正文必须完成编辑和校验审核后才能自动完整返工",
         )
+        rewrite_requested = await session.scalar(
+            select(ReviewArtifactEvaluation.id)
+            .where(
+                ReviewArtifactEvaluation.artifactId == existing.id,
+                ReviewArtifactEvaluation.revision == existing.revision,
+                ReviewArtifactEvaluation.evaluatorAgent.in_(("编辑", "校验")),
+                ReviewArtifactEvaluation.verdict.in_(("revise", "block")),
+            )
+            .limit(1)
+        )
+        if rewrite_requested is None:
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_AUTOMATIC_REWRITE_NOT_REQUIRED",
+                message="首轮双审核均已通过，不能触发自动完整返工",
+            )
         return
 
     if not (
@@ -1457,23 +1455,31 @@ def _typed_payload(
     return payload
 
 
-async def _latest_artifact_by_kind(
+async def _latest_short_story_artifact_by_kind(
     session: AsyncSession,
     novel_id: str,
     kind: str,
 ) -> ReviewArtifact | None:
-    return cast(
-        ReviewArtifact | None,
-        await session.scalar(
-            select(ReviewArtifact)
-            .where(
-                ReviewArtifact.novelId == novel_id,
-                ReviewArtifact.kind == kind,
+    candidates = list(
+        (
+            await session.scalars(
+                select(ReviewArtifact)
+                .where(
+                    ReviewArtifact.novelId == novel_id,
+                    ReviewArtifact.kind == kind,
+                )
+                .order_by(ReviewArtifact.updatedAt.desc(), ReviewArtifact.id.desc())
             )
-            .order_by(ReviewArtifact.updatedAt.desc(), ReviewArtifact.id.desc())
-            .limit(1)
-        ),
+        ).all()
     )
+    for artifact in candidates:
+        payload = _parse_json(artifact.payloadJson, {})
+        if (
+            isinstance(payload, dict)
+            and payload.get("storyLengthProfile") == "short_medium"
+        ):
+            return artifact
+    return None
 
 
 async def _short_story_artifact_response(

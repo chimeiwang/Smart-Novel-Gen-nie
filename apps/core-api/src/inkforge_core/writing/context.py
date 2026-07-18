@@ -495,15 +495,30 @@ class WritingContextRepository:
         session: AsyncSession,
         novel_id: str,
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-        artifact = await session.scalar(
-            select(ReviewArtifact)
-            .where(
-                ReviewArtifact.novelId == novel_id,
-                ReviewArtifact.kind == "outline_draft",
-            )
-            .order_by(ReviewArtifact.updatedAt.desc(), ReviewArtifact.id.desc())
-            .limit(1)
+        candidates = list(
+            (
+                await session.scalars(
+                    select(ReviewArtifact)
+                    .where(
+                        ReviewArtifact.novelId == novel_id,
+                        ReviewArtifact.kind == "outline_draft",
+                    )
+                    .order_by(ReviewArtifact.updatedAt.desc(), ReviewArtifact.id.desc())
+                )
+            ).all()
         )
+        artifact = None
+        for candidate in candidates:
+            try:
+                raw_payload = json.loads(candidate.payloadJson)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if (
+                isinstance(raw_payload, dict)
+                and raw_payload.get("storyLengthProfile") == "short_medium"
+            ):
+                artifact = candidate
+                break
         if artifact is None:
             return None, None
         payload = _parse_short_outline(artifact.payloadJson).model_dump(mode="json")
