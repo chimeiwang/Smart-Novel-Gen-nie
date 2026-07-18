@@ -3,8 +3,8 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 test("工作区外壳常驻挂载三类主要面板", async () => {
-  const shellUrl = new URL("../workspace-shell.tsx", import.meta.url);
-  const source = await readFile(shellUrl, "utf8");
+  const longWorkspaceUrl = new URL("../long-serial-workspace.tsx", import.meta.url);
+  const source = await readFile(longWorkspaceUrl, "utf8");
 
   assert.match(source, /"AI 创作"/);
   assert.match(source, /"阅读与小修"/);
@@ -100,8 +100,8 @@ test("审核栏中的非当前会话产物也能进入返工流程", async () =>
 });
 
 test("工作区外壳跟随服务端 initialView", async () => {
-  const shellUrl = new URL("../workspace-shell.tsx", import.meta.url);
-  const source = await readFile(shellUrl, "utf8");
+  const longWorkspaceUrl = new URL("../long-serial-workspace.tsx", import.meta.url);
+  const source = await readFile(longWorkspaceUrl, "utf8");
 
   assert.match(source, /useEffect\([\s\S]*initialView/);
   assert.match(source, /previousInitialViewRef/);

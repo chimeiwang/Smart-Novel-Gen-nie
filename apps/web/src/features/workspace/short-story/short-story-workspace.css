@@ -1,0 +1,245 @@
+.short-story-page {
+  min-height: 100vh;
+}
+
+.short-story-header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  padding: 18px 24px;
+}
+
+.short-story-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(220px, 260px) minmax(0, 1fr) minmax(300px, 360px);
+  height: calc(100vh - 130px);
+  min-height: calc(100vh - 130px);
+}
+
+.short-story-workflow,
+.short-story-review-rail {
+  padding: 20px;
+}
+
+.short-story-workflow ol {
+  display: grid;
+  gap: 14px;
+  margin: 18px 0 0;
+  padding-left: 24px;
+}
+
+.short-story-workflow li {
+  color: var(--muted);
+  display: grid;
+  gap: 4px;
+}
+
+.short-story-workflow li strong {
+  color: var(--text);
+}
+
+.short-story-workflow li.active::marker {
+  color: var(--accent);
+}
+
+.short-story-workflow li.done::marker {
+  color: #24845d;
+}
+
+.short-story-legacy-chapters {
+  background: var(--warning-soft);
+  border: 1px solid color-mix(in srgb, var(--warning) 30%, var(--border));
+  border-radius: 10px;
+  color: var(--text);
+  margin-top: 18px;
+  padding: 12px;
+}
+
+.short-story-legacy-chapters p,
+.short-story-legacy-chapters ul {
+  margin: 0;
+}
+
+.short-story-legacy-chapters ul {
+  display: grid;
+  gap: 6px;
+  padding-left: 18px;
+}
+
+.short-story-legacy-chapters li {
+  display: flex;
+  justify-content: space-between;
+}
+
+.short-story-main-canvas {
+  min-height: 0;
+  overflow: auto;
+  padding: 28px clamp(24px, 4vw, 64px);
+}
+
+.short-story-content {
+  font-size: 17px;
+  line-height: 1.95;
+  margin: 0 auto;
+  max-width: 860px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.short-story-canvas-toolbar,
+.short-story-section-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.short-story-canvas-toolbar {
+  border-bottom: 1px solid var(--border);
+  margin: -8px 0 24px;
+  padding-bottom: 14px;
+  position: sticky;
+  top: -28px;
+  z-index: 2;
+}
+
+.short-story-outline-editor,
+.short-story-draft-view,
+.short-story-version-preview {
+  margin: 0 auto;
+  max-width: 920px;
+}
+
+.short-story-field {
+  gap: 8px;
+}
+
+.short-story-anchor-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.short-story-section-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.short-story-review-rail {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.short-story-review-scroll {
+  height: 100%;
+  overflow: auto;
+  padding-right: 5px;
+}
+
+.short-story-inline-form {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.short-story-settings,
+.short-story-actions,
+.short-story-history,
+.short-story-evaluations {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 18px;
+}
+
+.short-story-action-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.short-story-error,
+.short-story-notice {
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.short-story-error {
+  background: color-mix(in srgb, #c93636 10%, transparent);
+  color: #a42929;
+}
+
+.short-story-notice {
+  background: color-mix(in srgb, #24845d 11%, transparent);
+  color: #176342;
+}
+
+.short-story-empty-state {
+  margin: 18vh auto 0;
+  max-width: 520px;
+  text-align: center;
+}
+
+.short-story-history-item {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.short-story-history-item:hover,
+.short-story-history-item.active {
+  border-color: var(--accent);
+}
+
+.short-story-history-item span,
+.short-story-history-item small {
+  color: var(--muted);
+}
+
+.short-story-evaluation {
+  background: color-mix(in srgb, var(--text) 3%, transparent);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.short-story-evaluation p {
+  margin-bottom: 0;
+}
+
+.short-story-draft-meta {
+  justify-content: center;
+}
+
+.short-story-canvas-toolbar .button.active {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+
+.button.compact {
+  min-height: 32px;
+  padding: 5px 9px;
+}
+
+.button.danger {
+  color: #a42929;
+}
+
+@media (max-width: 1199px) {
+  .short-story-grid {
+    grid-template-columns: minmax(200px, 240px) minmax(600px, 1fr) minmax(280px, 320px);
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 760px) {
+  .short-story-anchor-grid {
+    grid-template-columns: 1fr;
+  }
+}
