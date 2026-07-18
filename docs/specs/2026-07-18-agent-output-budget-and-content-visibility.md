@@ -3,7 +3,7 @@
 ## 状态
 
 - 日期：2026-07-18
-- 状态：已批准，待实现
+- 状态：已实现
 - 范围：模型输出预算、计费授权收缩、画像完成原因、最近章节按需读取、生成正文预览
 
 ## 背景
@@ -162,27 +162,27 @@ count: 1..20，可选
 
 ### 模型输出与计费
 
-- [ ] 默认配置为 `384000`，配置小于 1 或大于 `1000000` 时启动配置校验失败。
-- [ ] 应用装配把统一配置同时传给 `AgentRuntime` 和 `ModelPortraitGenerator`。
-- [ ] 普通 Agent 和画像生产代码中不再存在固定 `8192` 或 `1200` 输出预算。
-- [ ] 余额充足时，大于 `8192` 的请求和 grant 不被 Core 隐式压回旧上限。
-- [ ] Core 返回较小合法 grant 时，Provider 收到的 `maxOutputTokens` 精确等于 grant。
-- [ ] grant 非正、超过请求值或缺少签名字段时，Provider 不被调用。
-- [ ] 超过旧 `8192` 边界且 `finishReason=stop` 的完整正文原样通过，尾部哨兵存在。
-- [ ] `finishReason=length` 仍在正文、控制事件和工具副作用产生前失败。
-- [ ] 画像的 `length/content_filter` 响应不会成为成功画像维度。
+- [x] 默认配置为 `384000`，配置小于 1 或大于 `1000000` 时启动配置校验失败。
+- [x] 应用装配把统一配置同时传给 `AgentRuntime` 和 `ModelPortraitGenerator`。
+- [x] 普通 Agent 和画像生产代码中不再存在固定 `8192` 或 `1200` 输出预算。
+- [x] 余额充足时，大于 `8192` 的请求和 grant 不被 Core 隐式压回旧上限。
+- [x] Core 返回较小合法 grant 时，Provider 收到的 `maxOutputTokens` 精确等于 grant。
+- [x] grant 非正、超过请求值或缺少签名字段时，Provider 不被调用。
+- [x] 超过旧 `8192` 边界且 `finishReason=stop` 的完整正文原样通过，尾部哨兵存在。
+- [x] `finishReason=length` 仍在正文、控制事件和工具副作用产生前失败。
+- [x] 画像的 `length/content_filter` 响应不会成为成功画像维度。
 
 ### 章节读取
 
-- [ ] `count=20` 通过共享契约校验，`count=21` 被拒绝。
-- [ ] Core 工具网关接受 20 章边界并拒绝越界输入。
-- [ ] 默认读取数量仍为 3，读取结果保持目标章之前、顺序正确和正文完整。
+- [x] `count=20` 通过共享契约校验，`count=21` 被拒绝。
+- [x] Core 工具网关接受 20 章边界并拒绝越界输入。
+- [x] 默认读取数量仍为 3，读取结果保持目标章之前、顺序正确和正文完整。
 
 ### 正文预览
 
-- [ ] 预览使用完整 `generatedContent` 和统一字数统计。
-- [ ] 两份样式均不再使用隐藏溢出和尾部渐变。
-- [ ] 长正文区域可以纵向滚动到尾部，采纳与修改按钮保持可用。
+- [x] 预览使用完整 `generatedContent` 和统一字数统计。
+- [x] 两份样式均不再使用隐藏溢出和尾部渐变。
+- [x] 长正文区域可以纵向滚动到尾部，采纳与修改按钮保持可用。
 
 ### 回归命令
 
@@ -196,3 +196,13 @@ npm run typecheck
 npm run lint
 ```
 
+### 实际验收结果（2026-07-18）
+
+- Agent Service 全量测试：294 passed，1 warning，退出码 0。
+- 共享契约、service-auth、Core billing 与 Core 读取工具测试：158 passed，1 skipped，退出码 0。
+- Compose 架构测试：11 passed。
+- Web 测试：187 passed；api-client 测试：3 passed。
+- Ruff：All checks passed。
+- Mypy：193 个源文件无问题。
+- `npm run typecheck`、`npm run lint`：退出码均为 0。
+- 非失败提示：存在 Starlette 既有弃用 warning；Windows pytest 临时目录清理阶段出现 atexit `PermissionError`。相关命令均退出码 0，未声称这两项已修复。
