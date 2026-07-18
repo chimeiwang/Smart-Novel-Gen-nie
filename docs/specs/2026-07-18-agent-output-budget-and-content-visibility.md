@@ -8,7 +8,7 @@
 
 ## 背景
 
-当前普通 Agent 的每轮模型输出被 `AgentRuntime` 固定为 `8192` tokens，画像生成则固定为 `1200` tokens。两个数字都会一路进入 Core 模型预授权和 OpenAI-compatible Provider 的 `max_tokens`，因此它们不是提示词建议，而是会真实截断模型响应的传输层上限。
+本规格实施前，普通 Agent 的每轮模型输出被 `AgentRuntime` 固定为 `8192` tokens，画像生成则固定为 `1200` tokens。两个数字都会一路进入 Core 模型预授权和 OpenAI-compatible Provider 的 `max_tokens`，因此它们不是提示词建议，而是会真实截断模型响应的传输层上限。
 
 当前默认模型 `deepseek-v4-flash` 的上下文窗口和单次最大输出能力均显著高于 `8192`。应用继续使用固定 `8192` 会让较长章节、深入评审和长文本返工过早得到 `finishReason=length`。Runtime 会正确拒绝截断响应，因而不会静默提交半截正文，但用户得到的是整轮失败，已经生成的内容也不能作为完整草案交付。
 
@@ -19,7 +19,7 @@
 
 这三类边界必须分别处理，不能因为模型拥有大上下文就无差别放大 RAG 索引、基础上下文或所有接口载荷。
 
-## 当前项目事实
+## 实施前项目事实
 
 - `AgentRuntime.run()` 的 `max_output_tokens` 默认值是 `8192`，`AgentRunner` 没有覆盖它。
 - `ModelTurnRequest.maxOutputTokens` 是必填正整数；OpenAI-compatible Provider 始终把它传成 `max_tokens`。
