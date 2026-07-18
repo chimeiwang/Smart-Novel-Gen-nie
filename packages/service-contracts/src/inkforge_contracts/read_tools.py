@@ -64,7 +64,7 @@ class ForeshadowingNameArgs(StrictArgs):
 
 
 class RecentChapterArgs(StrictArgs):
-    count: int | None = Field(default=None, ge=1, le=5)
+    count: int | None = Field(default=None, ge=1, le=20)
 
 
 class ArtifactListArgs(StrictArgs):

@@ -54,6 +54,32 @@ async def test_validates_and_forwards_shared_arguments() -> None:
 
 
 @pytest.mark.asyncio
+async def test_最近章节工具接受并透传二十章() -> None:
+    service = FakeReadToolService()
+    gateway = ToolGateway(FakeAuthorizer())
+    register_read_tools(gateway, service)
+
+    result = await gateway.execute(request("get_recent_chapters", {"count": 20}))
+
+    assert result["arguments"] == {"count": 20}
+    assert service.calls == [("get_recent_chapters", {"count": 20})]
+
+
+@pytest.mark.asyncio
+async def test_最近章节工具拒绝二十一章且不调用业务服务() -> None:
+    service = FakeReadToolService()
+    gateway = ToolGateway(FakeAuthorizer())
+    register_read_tools(gateway, service)
+
+    with pytest.raises(ApiError) as error:
+        await gateway.execute(request("get_recent_chapters", {"count": 21}))
+
+    assert error.value.status_code == 422
+    assert error.value.code == "TOOL_ARGUMENTS_INVALID"
+    assert service.calls == []
+
+
+@pytest.mark.asyncio
 async def test_rejects_legacy_camel_case_artifact_parameter() -> None:
     gateway = ToolGateway(FakeAuthorizer())
     register_read_tools(gateway, FakeReadToolService())

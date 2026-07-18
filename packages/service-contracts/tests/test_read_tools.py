@@ -17,3 +17,16 @@ def test_review_artifact_contract_uses_snake_case_parameter() -> None:
     }
     with pytest.raises(ValidationError):
         model.model_validate({"artifactId": "artifact-1"})
+
+
+def test_最近章节参数接受二十章() -> None:
+    model = READ_TOOL_ARGUMENT_MODELS["get_recent_chapters"]
+
+    assert model.model_validate({"count": 20}).model_dump() == {"count": 20}
+
+
+def test_最近章节参数拒绝二十一章() -> None:
+    model = READ_TOOL_ARGUMENT_MODELS["get_recent_chapters"]
+
+    with pytest.raises(ValidationError):
+        model.model_validate({"count": 21})

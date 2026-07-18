@@ -14,8 +14,8 @@ class FakeContext:
         return {
             "planning": {
                 "novelId": "novel-1",
-                "chapterId": "chapter-3",
-                "chapterOrder": 3,
+                "chapterId": "chapter-23",
+                "chapterOrder": 23,
                 "chapterGroup": {"id": "group-1", "title": "第一幕", "content": "章节组全文"},
                 "outlinePath": [{"id": "stage-1", "title": "开端", "kind": "stage"}],
                 "activeArtifact": {"id": "artifact-1"},
@@ -25,14 +25,18 @@ class FakeContext:
                     "id": "novel-1",
                     "name": "测试小说",
                     "summary": "小说简介",
-                    "storyProgress": "推进到第三章",
+                    "storyProgress": "推进到第二十三章",
                     "appliedStyleId": "style-1",
                 },
-                "currentChapterId": "chapter-3",
+                "currentChapterId": "chapter-23",
                 "chapters": [
-                    {"id": "chapter-1", "title": "第一章", "order": 1, "content": "甲" * 5000},
-                    {"id": "chapter-2", "title": "第二章", "order": 2, "content": "乙" * 6000},
-                    {"id": "chapter-3", "title": "第三章", "order": 3, "content": "当前章"},
+                    {
+                        "id": f"chapter-{chapter_order}",
+                        "title": f"第{chapter_order}章",
+                        "order": chapter_order,
+                        "content": f"第{chapter_order}章完整正文" * 1000,
+                    }
+                    for chapter_order in range(1, 24)
                 ],
                 "characters": [
                     {
@@ -185,11 +189,26 @@ async def test_all_registered_read_tools_have_executable_behavior() -> None:
 
 
 @pytest.mark.asyncio
-async def test_recent_chapters_returns_complete_content_before_target_chapter() -> None:
-    result = await service().execute(tool_request("get_recent_chapters", {"count": 2}))
+async def test_最近章节按请求返回二十章且保持顺序与完整正文() -> None:
+    result = await service().execute(tool_request("get_recent_chapters", {"count": 20}))
 
-    assert [chapter["id"] for chapter in result["chapters"]] == ["chapter-1", "chapter-2"]
-    assert result["chapters"][1]["content"] == "乙" * 6000
+    assert result["count"] == 20
+    assert [chapter["id"] for chapter in result["chapters"]] == [
+        f"chapter-{chapter_order}" for chapter_order in range(3, 23)
+    ]
+    assert result["chapters"][-1]["content"] == "第22章完整正文" * 1000
+
+
+@pytest.mark.asyncio
+async def test_最近章节未指定数量时默认返回三章() -> None:
+    result = await service().execute(tool_request("get_recent_chapters"))
+
+    assert result["count"] == 3
+    assert [chapter["id"] for chapter in result["chapters"]] == [
+        "chapter-20",
+        "chapter-21",
+        "chapter-22",
+    ]
 
 
 @pytest.mark.asyncio
