@@ -170,7 +170,6 @@ class ContentRequest(StrictModel):
 
 
 class WritingBibleRequest(StrictModel):
-    storyLengthProfile: StoryLengthProfile | None = None
     targetTotalWordCount: int | None = Field(default=None, gt=0)
     genre: str | None = None
     targetReaders: str | None = None

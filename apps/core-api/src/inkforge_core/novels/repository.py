@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import hashlib
 from collections import defaultdict
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar, cast
 
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ..db.base import utc_now
 from ..db.models import (
     Chapter,
     ChapterBeatPlan,
@@ -38,6 +39,7 @@ from .schemas import (
     DashboardNovel,
     DashboardResponse,
     NovelResponse,
+    UpdateNovelTitleResponse,
     WorkspaceBootstrapResponse,
     WorkspaceLoreResponse,
     WorkspacePlanningResponse,
@@ -226,6 +228,9 @@ class NovelRepository:
                 ).all()
             )
             novel_ids = [novel.id for novel in novels]
+            bibles = await self._for_ids(
+                session, WritingBible, WritingBible.novelId, novel_ids
+            )
             chapters = await self._for_ids(
                 session, Chapter, Chapter.novelId, novel_ids, Chapter.order.asc(), Chapter.id.asc()
             )
@@ -248,6 +253,7 @@ class NovelRepository:
         for chapter in chapters:
             chapter_ids[chapter.novelId].append(chapter.id)
         style_by_id = {style.id: style for style in styles}
+        bible_by_novel = {bible.novelId: bible for bible in bibles}
         return DashboardResponse(
             novels=[
                 DashboardNovel.model_validate(
@@ -255,6 +261,7 @@ class NovelRepository:
                         "id": novel.id,
                         "name": novel.name,
                         "summary": novel.summary,
+                        **self._profile_fields(bible_by_novel.get(novel.id)),
                         "updatedAt": utc_datetime(novel.updatedAt),
                         "chapters": [{"id": value} for value in chapter_ids[novel.id]],
                         "appliedStyle": (
@@ -280,12 +287,76 @@ class NovelRepository:
                     .order_by(Novel.updatedAt.desc(), Novel.id.asc())
                 )
             ).all()
-        return [NovelResponse.model_validate(self._novel_dict(novel)) for novel in novels]
+            bibles = await self._for_ids(
+                session,
+                WritingBible,
+                WritingBible.novelId,
+                [novel.id for novel in novels],
+            )
+        bible_by_novel = {bible.novelId: bible for bible in bibles}
+        return [
+            NovelResponse.model_validate(
+                self._novel_dict(novel, bible_by_novel.get(novel.id))
+            )
+            for novel in novels
+        ]
 
     async def get_novel(self, novel_id: str, user_id: str) -> NovelResponse:
         async with self._session_factory() as session:
             novel = await self._require_owner(session, novel_id, user_id)
-        return NovelResponse.model_validate(self._novel_dict(novel))
+            bible = await self._one_for_novel(session, WritingBible, novel_id)
+        return NovelResponse.model_validate(self._novel_dict(novel, bible))
+
+    async def update_title(
+        self,
+        novel_id: str,
+        user_id: str,
+        name: str,
+        expected_updated_at: datetime,
+    ) -> UpdateNovelTitleResponse:
+        async with self._session_factory() as session:
+            async with session.begin():
+                novel = await session.scalar(
+                    select(Novel).where(Novel.id == novel_id).with_for_update()
+                )
+                if novel is None:
+                    raise ApiError(
+                        status_code=404,
+                        code="NOVEL_NOT_FOUND",
+                        message="小说不存在",
+                    )
+                if novel.userId is None or novel.userId != user_id:
+                    raise ApiError(
+                        status_code=403,
+                        code="NOVEL_FORBIDDEN",
+                        message="无权访问该小说",
+                    )
+                current_updated_at = self._required_novel_updated_at(novel.updatedAt)
+                if novel.name == name:
+                    return UpdateNovelTitleResponse(
+                        name=novel.name,
+                        updatedAt=current_updated_at,
+                    )
+                normalized_expected = (
+                    expected_updated_at.replace(tzinfo=UTC)
+                    if expected_updated_at.tzinfo is None
+                    else expected_updated_at.astimezone(UTC)
+                )
+                if normalized_expected != current_updated_at:
+                    raise ApiError(
+                        status_code=409,
+                        code="NOVEL_VERSION_CONFLICT",
+                        message="小说已在其他位置更新，请重新加载后再修改标题",
+                        details={"currentUpdatedAt": current_updated_at.isoformat()},
+                    )
+                novel.name = name
+                novel.updatedAt = max(
+                    utc_now(),
+                    current_updated_at.replace(tzinfo=None) + timedelta(milliseconds=1),
+                )
+                await session.flush()
+                updated_at = self._required_novel_updated_at(novel.updatedAt)
+        return UpdateNovelTitleResponse(name=novel.name, updatedAt=updated_at)
 
     async def get_workspace(
         self, novel_id: str, user_id: str, chapter_id: str | None
@@ -369,7 +440,7 @@ class NovelRepository:
         resources = await self._load_resources(session, novel, user_id=owner_id)
         return {
             "novel": {
-                **self._novel_dict(novel),
+                **self._novel_dict(novel, planning["writingBible"]),
                 "appliedStyle": resources["appliedStyle"],
             },
             "chapters": chapter_data["allChapters"],
@@ -397,15 +468,18 @@ class NovelRepository:
             session, novel.id, requested_chapter_id, include_all_details=False
         )
         applied_style = await self._load_applied_style(session, novel, user_id)
+        bible = await self._one_for_novel(session, WritingBible, novel.id)
+        profile_fields = self._profile_fields(bible)
         return {
             "novel": {
-                **self._novel_dict(novel),
+                **self._novel_dict(novel, bible),
                 "appliedStyle": (
                     {"id": applied_style.id, "name": applied_style.name}
                     if applied_style
                     else None
                 ),
             },
+            **profile_fields,
             "chapters": chapter_data["chapters"],
             "currentChapter": chapter_data["currentChapter"],
             "currentChapterId": chapter_data["currentChapterId"],
@@ -933,8 +1007,12 @@ class NovelRepository:
         )
 
     @staticmethod
-    def _novel_dict(novel: Novel) -> dict[str, Any]:
-        return model_fields(
+    def _novel_dict(
+        novel: Novel,
+        bible: WritingBible | dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        return {
+            **model_fields(
             novel,
             "id",
             "name",
@@ -943,7 +1021,32 @@ class NovelRepository:
             "appliedStyleId",
             "createdAt",
             "updatedAt",
-        )
+            ),
+            **NovelRepository._profile_fields(bible),
+        }
+
+    @staticmethod
+    def _profile_fields(
+        bible: WritingBible | dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        if bible is None:
+            raise RuntimeError("小说缺少 WritingBible，无法确定篇幅模式")
+        if isinstance(bible, dict):
+            return {
+                "storyLengthProfile": bible["storyLengthProfile"],
+                "targetTotalWordCount": bible.get("targetTotalWordCount"),
+            }
+        return {
+            "storyLengthProfile": bible.storyLengthProfile,
+            "targetTotalWordCount": bible.targetTotalWordCount,
+        }
+
+    @staticmethod
+    def _required_novel_updated_at(value: datetime | None) -> datetime:
+        updated_at = utc_datetime(value)
+        if updated_at is None:
+            raise RuntimeError("小说更新时间缺失")
+        return updated_at
 
     @staticmethod
     def _content_dict(value: Any | None) -> dict[str, Any] | None:

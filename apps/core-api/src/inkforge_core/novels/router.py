@@ -12,6 +12,8 @@ from .schemas import (
     CreateNovelResponse,
     DashboardResponse,
     NovelResponse,
+    UpdateNovelTitleRequest,
+    UpdateNovelTitleResponse,
     WorkspaceBootstrapResponse,
     WorkspaceLoreResponse,
     WorkspacePlanningResponse,
@@ -64,6 +66,16 @@ async def get_novel(
     service: Annotated[NovelService, Depends(get_novel_service)],
 ) -> NovelResponse:
     return await service.get_novel(user.id, novel_id)
+
+
+@router.patch("/novels/{novel_id}/title", response_model=UpdateNovelTitleResponse)
+async def update_novel_title(
+    novel_id: str,
+    body: UpdateNovelTitleRequest,
+    user: Annotated[AuthUser, Depends(get_current_user)],
+    service: Annotated[NovelService, Depends(get_novel_service)],
+) -> UpdateNovelTitleResponse:
+    return await service.update_title(user.id, novel_id, body)
 
 
 @router.get("/novels/{novel_id}/workspace", response_model=WorkspaceResponse)

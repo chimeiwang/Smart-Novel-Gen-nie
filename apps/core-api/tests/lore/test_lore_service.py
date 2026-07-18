@@ -9,6 +9,7 @@ from inkforge_core.lore.schemas import (
     WritingBibleRequest,
 )
 from inkforge_core.lore.service import LoreService
+from pydantic import ValidationError
 
 
 class RecordingRepository:
@@ -92,14 +93,6 @@ async def test_empty_lore_update_is_rejected(kind, body) -> None:
     assert caught.value.code == "EMPTY_UPDATE"
 
 
-@pytest.mark.asyncio
-async def test_writing_bible_rejects_explicit_null_profile() -> None:
-    service = LoreService(RecordingRepository())  # type: ignore[arg-type]
-    with pytest.raises(ApiError) as caught:
-        await service.upsert_content(
-            "user-1",
-            "novel-1",
-            "writing-bible",
-            WritingBibleRequest(storyLengthProfile=None),
-        )
-    assert caught.value.code == "WRITING_BIBLE_PROFILE_REQUIRED"
+def test_writing_bible_update_does_not_expose_profile_switch() -> None:
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        WritingBibleRequest.model_validate({"storyLengthProfile": "short_medium"})
