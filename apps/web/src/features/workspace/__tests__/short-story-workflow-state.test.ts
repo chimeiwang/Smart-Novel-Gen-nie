@@ -23,6 +23,7 @@ test("没有大纲且没有进行中任务时只开放重试生成大纲", () =>
       canReviseDraft: false,
       canDecideDraft: false,
       canUpdateTargetWordCount: true,
+      runFailed: false,
       targetWordCountValid: true,
     },
   );
@@ -167,4 +168,19 @@ test("模型任务 active 或 waiting_call 时锁定全部 mutation", () => {
     commandStatus: "processing",
     taskPhase: "active",
   }).canUpdateTargetWordCount, false);
+});
+
+test("失败命令恢复旧稿后仍提示失败并允许用户处理旧稿", () => {
+  const actions = deriveShortStoryActions({
+    authoritativeStateReady: true,
+    targetWordCount: 20_000,
+    outlineStatus: "applied",
+    draftStatus: "awaiting_user",
+    commandStatus: "failed",
+    taskPhase: "awaiting_user_review",
+  });
+
+  assert.equal(actions.runFailed, true);
+  assert.equal(actions.canReviseDraft, true);
+  assert.equal(actions.canDecideDraft, true);
 });

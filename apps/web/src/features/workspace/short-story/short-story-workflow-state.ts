@@ -11,6 +11,7 @@ type ShortStoryActionState = {
   canReviseDraft: boolean;
   canDecideDraft: boolean;
   canUpdateTargetWordCount: boolean;
+  runFailed: boolean;
   targetWordCountValid: boolean;
 };
 
@@ -69,6 +70,7 @@ export function deriveShortStoryActions({
     canReviseDraft: chapterStructureCompatible && draftAwaitingUser,
     canDecideDraft: chapterStructureCompatible && draftAwaitingUser,
     canUpdateTargetWordCount: authoritativeStateReady && !busy,
+    runFailed: commandStatus === "failed" || taskPhase === "error",
     targetWordCountValid,
   };
 }

@@ -751,7 +751,7 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
   const revisionContent = getRevisionContent(visibleRevisionDetail);
   const visibleRevisions = activePane === "outline" ? revisions : [];
   const outlineEditable = actions.canEditOutline && !interactionLocked;
-  const taskFailed = latestTask?.phase === "error" && !optimisticCommand;
+  const taskFailed = actions.runFailed && !optimisticCommand;
 
   const renderOutlineCanvas = () => {
     if (!outlineArtifact || !outlinePayload) {
@@ -1059,7 +1059,7 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
           ) : null}
           {taskFailed ? (
             <div className="short-story-error" role="alert">
-              当前任务失败，自动轮询已停止。请查看右侧提示后重试对应动作。
+              最近一次运行失败。若已有大纲或正文，旧版内容已保留；你可以继续处理旧版，或重试对应操作。
             </div>
           ) : null}
         </aside>
