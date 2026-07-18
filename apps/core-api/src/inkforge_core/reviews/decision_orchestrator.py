@@ -33,6 +33,12 @@ logger = logging.getLogger(__name__)
 
 
 class ReviewArtifactRepositoryPort(Protocol):
+    async def require_artifact(
+        self,
+        user_id: str,
+        artifact_id: str,
+    ) -> ArtifactRecord: ...
+
     async def require_artifact_revision(
         self,
         user_id: str,
@@ -54,6 +60,10 @@ class ReviewDecisionServicePort(Protocol):
 
 
 class ReviewCommandRepositoryPort(Protocol):
+    async def get_by_idempotency_key(
+        self, user_id: str, client_request_id: str
+    ) -> WritingCommandRecord | None: ...
+
     async def require_owned_task(self, user_id: str, task_id: str) -> TaskRecord: ...
 
     async def create_artifact_decision(
@@ -123,6 +133,33 @@ class ReviewDecisionOrchestrator:
                 connection = await outer.connection()
                 transactional_factory = self._transactional_factory_builder(connection)
                 dependencies = self._dependencies_builder(transactional_factory)
+                try:
+                    artifact_before_lock = await dependencies.repository.require_artifact(
+                        user_id, artifact_id
+                    )
+                except ApiError as exc:
+                    if exc.code != "REVIEW_ARTIFACT_FORBIDDEN":
+                        raise
+                    raced = await dependencies.commands.get_by_idempotency_key(
+                        user_id, request.clientRequestId
+                    )
+                    if raced is not None:
+                        return _accepted_response_from_command(raced, artifact_id, request)
+                    raise
+                if artifact_before_lock.task_id is None:
+                    raise ApiError(
+                        status_code=409,
+                        code="ARTIFACT_TASK_MISSING",
+                        message="待审核草案没有关联写作任务",
+                    )
+                task = await dependencies.commands.require_owned_task(
+                    user_id, artifact_before_lock.task_id
+                )
+                raced = await dependencies.commands.get_by_idempotency_key(
+                    user_id, request.clientRequestId
+                )
+                if raced is not None:
+                    return _accepted_response_from_command(raced, artifact_id, request)
                 artifact = await dependencies.repository.require_artifact_revision(
                     user_id, artifact_id, request.expectedRevision
                 )
@@ -136,13 +173,12 @@ class ReviewDecisionOrchestrator:
                         code="SHORT_OUTLINE_EDIT_REQUIRES_SAVE",
                         message="中短篇大纲必须先保存为新版本，再批准当前精确版本",
                     )
-                if artifact.task_id is None:
+                if artifact.task_id != task.id:
                     raise ApiError(
                         status_code=409,
-                        code="ARTIFACT_TASK_MISSING",
-                        message="待审核草案没有关联写作任务",
+                        code="ARTIFACT_CHANGED_DURING_DECISION",
+                        message="待审核草案在决定受理前已发生变化",
                     )
-                task = await dependencies.commands.require_owned_task(user_id, artifact.task_id)
                 refs = (
                     [item.model_dump(exclude_none=True) for item in request.selectedUpdateRefs]
                     if request.selectedUpdateRefs is not None

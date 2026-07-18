@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 from inkforge_core.errors import ApiError
@@ -182,6 +182,13 @@ class CommandRepository:
     def __init__(self) -> None:
         self.created: dict[str, Any] | None = None
 
+    async def get_by_idempotency_key(
+        self, user_id: str, client_request_id: str
+    ) -> WritingCommandRecord | None:
+        assert user_id == "user-1"
+        assert client_request_id == "request-00000001"
+        return None
+
     async def require_owned_task(self, user_id: str, task_id: str) -> TaskRecord:
         assert user_id == "user-1"
         assert task_id == "task-1"
@@ -208,6 +215,79 @@ class RacingCommandRepository(CommandRepository):
         return self.persisted
 
 
+class LockHandoffArtifactRepository(ArtifactRepository):
+    def __init__(self, events: list[str]) -> None:
+        super().__init__()
+        self.events = events
+
+    async def require_artifact(self, user_id: str, artifact_id: str) -> ArtifactRecord:
+        self.events.append("artifact_task_resolve")
+        return await super().require_artifact(user_id, artifact_id)
+
+    async def require_artifact_revision(
+        self, user_id: str, artifact_id: str, expected_revision: int
+    ) -> ArtifactRecord:
+        del user_id, artifact_id, expected_revision
+        self.events.append("artifact_revision_lock")
+        pytest.fail("锁后二次命令命中时不应继续锁草案版本")
+
+
+class MissingArtifactRepository(ArtifactRepository):
+    def __init__(self, events: list[str]) -> None:
+        super().__init__()
+        self.events = events
+
+    async def require_artifact(self, user_id: str, artifact_id: str) -> ArtifactRecord:
+        del user_id, artifact_id
+        self.events.append("artifact_task_resolve")
+        raise ApiError(
+            status_code=403,
+            code="REVIEW_ARTIFACT_FORBIDDEN",
+            message="草案已被首个请求删除",
+        )
+
+    async def require_artifact_revision(
+        self, user_id: str, artifact_id: str, expected_revision: int
+    ) -> ArtifactRecord:
+        del user_id, artifact_id, expected_revision
+        pytest.fail("已删除草案不应继续锁版本")
+
+
+class LockHandoffCommandRepository(CommandRepository):
+    def __init__(
+        self,
+        events: list[str],
+        persisted: WritingCommandRecord,
+        *,
+        require_task_lock: bool,
+    ) -> None:
+        super().__init__()
+        self.events = events
+        self.persisted = persisted
+        self.require_task_lock = require_task_lock
+        self.task_locked = False
+
+    async def require_owned_task(self, user_id: str, task_id: str) -> TaskRecord:
+        self.events.append("task_lock")
+        result = await super().require_owned_task(user_id, task_id)
+        self.task_locked = True
+        return result
+
+    async def get_by_idempotency_key(
+        self, user_id: str, client_request_id: str
+    ) -> WritingCommandRecord | None:
+        assert user_id == "user-1"
+        assert client_request_id == "request-00000001"
+        if self.require_task_lock:
+            assert self.task_locked is True
+        self.events.append("command_recheck")
+        return self.persisted
+
+    async def create_artifact_decision(self, **kwargs: Any) -> WritingCommandRecord:
+        del kwargs
+        pytest.fail("锁后二次命中时不应重复创建命令")
+
+
 @dataclass
 class Fixture:
     orchestrator: ReviewDecisionOrchestrator
@@ -232,6 +312,53 @@ def fixture(*, fail: bool = False) -> Fixture:
         transactional_factory_builder=lambda _connection: object(),
     )
     return Fixture(orchestrator, outer, artifacts, commands)
+
+
+def persisted_discard_command(
+    *,
+    status: Literal["pending", "submitted"] = "pending",
+    expected_revision: int = 1,
+) -> WritingCommandRecord:
+    saved = {
+        "artifactId": "artifact-1",
+        "taskId": "task-1",
+        "commandId": "command-persisted",
+        "decision": "discard",
+        "status": status,
+        "savedCount": 0,
+        "deleted": True,
+    }
+    original = command(result=saved)
+    return replace(
+        original,
+        id="command-persisted",
+        status=status,
+        payload={
+            **original.payload,
+            "decisionRequest": {
+                **original.payload["decisionRequest"],
+                "expectedRevision": expected_revision,
+            },
+        },
+    )
+
+
+def handoff_orchestrator(
+    artifacts: ArtifactRepository,
+    commands: CommandRepository,
+    service: DecisionService,
+) -> ReviewDecisionOrchestrator:
+    dependencies = ReviewDecisionDependencies(
+        repository=artifacts,
+        service=service,
+        commands=commands,
+    )
+    return ReviewDecisionOrchestrator(
+        OuterFactory(OuterSession()),  # type: ignore[arg-type]
+        command_lookup=Lookup(),
+        dependencies_builder=lambda _factory: dependencies,
+        transactional_factory_builder=lambda _connection: object(),
+    )
 
 
 @pytest.mark.asyncio
@@ -315,6 +442,90 @@ async def test_discard_retry_returns_original_command_before_artifact_lookup() -
 
     assert response.commandId == "command-1"
     assert response.deleted is True
+
+
+@pytest.mark.asyncio
+async def test_same_discard_waiter_rechecks_command_after_task_lock_before_side_effects() -> None:
+    events: list[str] = []
+    artifacts = LockHandoffArtifactRepository(events)
+    commands = LockHandoffCommandRepository(
+        events,
+        persisted_discard_command(status="submitted"),
+        require_task_lock=True,
+    )
+    service = DecisionService()
+    orchestrator = handoff_orchestrator(artifacts, commands, service)
+
+    response = await orchestrator.decide(
+        "user-1",
+        "artifact-1",
+        ReviewArtifactDecisionRequest(
+            clientRequestId="request-00000001",
+            decision="discard",
+            expectedRevision=1,
+        ),
+    )
+
+    assert response.commandId == "command-persisted"
+    assert response.status == "submitted"
+    assert service.calls == 0
+    assert events == ["artifact_task_resolve", "task_lock", "command_recheck"]
+
+
+@pytest.mark.asyncio
+async def test_deleted_artifact_race_rechecks_committed_command_before_failing_lookup() -> None:
+    events: list[str] = []
+    artifacts = MissingArtifactRepository(events)
+    commands = LockHandoffCommandRepository(
+        events,
+        persisted_discard_command(),
+        require_task_lock=False,
+    )
+    service = DecisionService()
+    orchestrator = handoff_orchestrator(artifacts, commands, service)
+
+    response = await orchestrator.decide(
+        "user-1",
+        "artifact-1",
+        ReviewArtifactDecisionRequest(
+            clientRequestId="request-00000001",
+            decision="discard",
+            expectedRevision=1,
+        ),
+    )
+
+    assert response.commandId == "command-persisted"
+    assert response.deleted is True
+    assert service.calls == 0
+    assert events == ["artifact_task_resolve", "command_recheck"]
+
+
+@pytest.mark.asyncio
+async def test_task_lock_recheck_rejects_different_decision_semantics_before_side_effects() -> None:
+    events: list[str] = []
+    artifacts = LockHandoffArtifactRepository(events)
+    commands = LockHandoffCommandRepository(
+        events,
+        persisted_discard_command(expected_revision=2),
+        require_task_lock=True,
+    )
+    service = DecisionService()
+    orchestrator = handoff_orchestrator(artifacts, commands, service)
+
+    with pytest.raises(ApiError) as caught:
+        await orchestrator.decide(
+            "user-1",
+            "artifact-1",
+            ReviewArtifactDecisionRequest(
+                clientRequestId="request-00000001",
+                decision="discard",
+                expectedRevision=1,
+            ),
+        )
+
+    assert caught.value.code == "IDEMPOTENCY_KEY_REUSED"
+    assert service.calls == 0
+    assert events == ["artifact_task_resolve", "task_lock", "command_recheck"]
 
 
 @pytest.mark.asyncio

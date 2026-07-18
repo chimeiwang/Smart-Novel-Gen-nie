@@ -128,6 +128,22 @@ def command(
 
 
 @pytest.mark.asyncio
+async def test_require_owned_task_keeps_lock_in_enclosing_transaction() -> None:
+    owned_task = task()
+    session = CommandSession([RowResult((owned_task, "user-1"))])
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    result = await repository.require_owned_task("user-1", "task-1")
+
+    assert result.id == "task-1"
+    assert session.committed is True
+    rendered = str(session.statements[0].compile(dialect=postgresql.dialect()))
+    assert 'FOR UPDATE OF "WritingTask"' in rendered
+
+
+@pytest.mark.asyncio
 async def test_same_client_request_returns_existing_command() -> None:
     owned_task = task()
     first_session = CommandSession(

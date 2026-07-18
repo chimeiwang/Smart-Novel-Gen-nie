@@ -267,7 +267,8 @@ class WritingRunCommandRepository:
 
     async def require_owned_task(self, user_id: str, task_id: str) -> TaskRecord:
         async with self._session_factory() as session:
-            task, owner_id = await self._require_owned_task(session, user_id, task_id)
+            async with session.begin():
+                task, owner_id = await self._require_owned_task(session, user_id, task_id)
         return _task_record(task, owner_id)
 
     async def create_artifact_decision(
