@@ -16,7 +16,10 @@ CreativeOperationKind = Literal[
     "review_chapter",
     "sync_lore",
     "manage_foreshadowing",
+    "develop_short_outline",
+    "write_short_story",
 ]
+WritingWorkflowKind = Literal["long_serial", "short_medium"]
 
 
 class RunRequest(BaseModel):

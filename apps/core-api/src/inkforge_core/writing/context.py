@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from hashlib import sha256
 from typing import Any, Protocol
 
-from pydantic import BaseModel
-from sqlalchemy import select
+from inkforge_contracts.jobs import (
+    ApprovedShortOutlineSource,
+    ShortOutlineInspirationSource,
+    WritingJobPayload,
+)
+from inkforge_contracts.short_story import ShortStoryOutlineDraft
+from pydantic import BaseModel, ValidationError
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..db.models import (
@@ -17,6 +24,8 @@ from ..db.models import (
     OutlineNode,
     ReviewArtifact,
     SceneBeat,
+    WritingBible,
+    WritingMessage,
     WritingRunCommand,
     WritingTask,
 )
@@ -106,9 +115,10 @@ class WritingContextRepository:
         async with self._session_factory() as session:
             row = (
                 await session.execute(
-                    select(WritingTask, Chapter.order)
+                    select(WritingTask, Chapter, Novel, WritingBible)
                     .join(Novel, Novel.id == WritingTask.novelId)
                     .join(Chapter, Chapter.id == WritingTask.chapterId)
+                    .outerjoin(WritingBible, WritingBible.novelId == Novel.id)
                     .where(WritingTask.id == task_id, Novel.userId == user_id)
                 )
             ).one_or_none()
@@ -118,46 +128,90 @@ class WritingContextRepository:
                     code="WRITING_TASK_FORBIDDEN",
                     message="无权访问该写作任务",
                 )
-            task, chapter_order = row
-            groups = await self._chapter_groups(session, task.novelId)
-            group = select_unique_chapter_group(chapter_order, groups)
-            goal = await session.scalar(
-                select(ChapterWritingGoal)
-                .where(ChapterWritingGoal.chapterId == task.chapterId)
-                .order_by(ChapterWritingGoal.updatedAt.desc(), ChapterWritingGoal.id.desc())
-                .limit(1)
+            task, chapter, novel, bible = row
+            chapter_order = chapter.order
+            command = await self._active_command(session, task.id)
+            command_payload = _parse_command_payload(command)
+            await self._validate_command_identity(
+                session,
+                task=task,
+                chapter=chapter,
+                novel=novel,
+                bible=bible,
+                payload=command_payload,
             )
-            beat_plan = await session.scalar(
-                select(ChapterBeatPlan)
-                .where(
-                    ChapterBeatPlan.chapterId == task.chapterId,
-                    ChapterBeatPlan.status == "approved",
-                )
-                .order_by(ChapterBeatPlan.updatedAt.desc(), ChapterBeatPlan.id.desc())
-                .limit(1)
-            )
+            goal: ChapterWritingGoal | None = None
+            beat_plan: ChapterBeatPlan | None = None
             scenes: list[SceneBeat] = []
-            if beat_plan is not None:
-                scenes = list(
-                    (
-                        await session.execute(
-                            select(SceneBeat)
-                            .where(SceneBeat.beatPlanId == beat_plan.id)
-                            .order_by(SceneBeat.order, SceneBeat.id)
-                        )
-                    ).scalars()
+            group: ChapterGroupSnapshot | None = None
+            outline_path: list[dict[str, Any]] = []
+            foreshadowing_summaries: list[dict[str, Any]] = []
+            if command_payload.workflowKind == "long_serial":
+                groups = await self._chapter_groups(session, task.novelId)
+                group = select_unique_chapter_group(chapter_order, groups)
+                goal = await session.scalar(
+                    select(ChapterWritingGoal)
+                    .where(ChapterWritingGoal.chapterId == task.chapterId)
+                    .order_by(
+                        ChapterWritingGoal.updatedAt.desc(), ChapterWritingGoal.id.desc()
+                    )
+                    .limit(1)
                 )
-            outline_path = await self._outline_path(session, group) if group is not None else []
-            foreshadowing_summaries = await self._foreshadowing_summaries(
-                session, task.novelId
-            )
+                beat_plan = await session.scalar(
+                    select(ChapterBeatPlan)
+                    .where(
+                        ChapterBeatPlan.chapterId == task.chapterId,
+                        ChapterBeatPlan.status == "approved",
+                    )
+                    .order_by(
+                        ChapterBeatPlan.updatedAt.desc(), ChapterBeatPlan.id.desc()
+                    )
+                    .limit(1)
+                )
+                if beat_plan is not None:
+                    scenes = list(
+                        (
+                            await session.execute(
+                                select(SceneBeat)
+                                .where(SceneBeat.beatPlanId == beat_plan.id)
+                                .order_by(SceneBeat.order, SceneBeat.id)
+                            )
+                        ).scalars()
+                    )
+                outline_path = (
+                    await self._outline_path(session, group) if group is not None else []
+                )
+                foreshadowing_summaries = await self._foreshadowing_summaries(
+                    session, task.novelId
+                )
             active_artifact = await self._active_artifact(session, task)
-            conversation_history = _conversation_history(task.conversationHistory)
-            prior_conversation_history, latest_user_message = (
-                _split_current_user_message(conversation_history)
-            )
+            if command_payload.workflowKind == "short_medium":
+                latest_user_message = _command_user_message(command_payload)
+                recent = await self._recent_messages(
+                    session,
+                    task.writingSessionId,
+                    current_user_message=latest_user_message,
+                )
+                current_outline, direct_edit = await self._current_short_outline(
+                    session, task.novelId
+                )
+                short_story_context = _build_short_story_context(
+                    direct_edit=direct_edit,
+                    revision_request=_command_revision_request(command_payload),
+                    outline=current_outline,
+                    inspiration=(novel.summary or "").strip(),
+                    recent_conversation=recent,
+                )
+                prior_conversation_history = recent
+            else:
+                conversation_history = _conversation_history(task.conversationHistory)
+                prior_conversation_history, latest_user_message = (
+                    _split_current_user_message(conversation_history)
+                )
+                short_story_context = None
             return {
                 "taskId": task.id,
+                "commandId": command.id,
                 "novelId": task.novelId,
                 "chapterId": task.chapterId,
                 "chapterOrder": chapter_order,
@@ -179,11 +233,176 @@ class WritingContextRepository:
                 "activeArtifact": active_artifact,
                 "phase": task.phase,
                 "targetWordCount": task.targetWordCount,
+                "workflowKind": command_payload.workflowKind,
+                "operation": command_payload.operation,
+                "targetTotalWordCount": command_payload.targetTotalWordCount,
+                "source": (
+                    command_payload.source.model_dump(mode="json")
+                    if command_payload.source is not None
+                    else None
+                ),
                 "selectedAgents": [item for item in task.selectedAgents.split(",") if item],
                 "conversationHistory": prior_conversation_history,
                 "userMessage": latest_user_message,
+                "shortStoryContext": short_story_context,
                 "graphState": (json.loads(task.graphStateJson) if task.graphStateJson else None),
             }
+
+    async def _active_command(
+        self,
+        session: AsyncSession,
+        task_id: str,
+    ) -> WritingRunCommand:
+        command = await session.scalar(
+            select(WritingRunCommand)
+            .where(
+                WritingRunCommand.taskId == task_id,
+                WritingRunCommand.status.in_(("pending", "submitted", "processing")),
+            )
+            .order_by(WritingRunCommand.createdAt.desc(), WritingRunCommand.id.desc())
+            .limit(1)
+        )
+        if command is None:
+            raise ApiError(
+                status_code=409,
+                code="WRITING_COMMAND_MISSING",
+                message="写作任务缺少当前持久命令",
+            )
+        return command
+
+    async def _validate_command_identity(
+        self,
+        session: AsyncSession,
+        *,
+        task: WritingTask,
+        chapter: Chapter,
+        novel: Novel,
+        bible: WritingBible | None,
+        payload: WritingJobPayload,
+    ) -> None:
+        persisted_profile = bible.storyLengthProfile if bible is not None else "long_serial"
+        if (
+            payload.chapterId != task.chapterId
+            or payload.workflowKind != persisted_profile
+        ):
+            raise _context_identity_mismatch()
+        if persisted_profile == "long_serial":
+            return
+        target = bible.targetTotalWordCount if bible is not None else None
+        if (
+            target is None
+            or not 6_000 <= target <= 80_000
+            or payload.targetTotalWordCount != target
+            or task.targetWordCount != target
+        ):
+            raise _context_identity_mismatch()
+        chapter_count = await session.scalar(
+            select(func.count(Chapter.id)).where(Chapter.novelId == task.novelId)
+        )
+        if chapter_count != 1:
+            raise _context_identity_mismatch()
+        source = payload.source
+        if payload.operation == "develop_short_outline":
+            if (
+                not isinstance(source, ShortOutlineInspirationSource)
+                or source.originalInspiration != (novel.summary or "").strip()
+            ):
+                raise _context_identity_mismatch()
+            return
+        if not isinstance(source, ApprovedShortOutlineSource):
+            raise _context_identity_mismatch()
+        artifact = await session.scalar(
+            select(ReviewArtifact)
+            .where(
+                ReviewArtifact.novelId == task.novelId,
+                ReviewArtifact.kind == "outline_draft",
+            )
+            .order_by(ReviewArtifact.updatedAt.desc(), ReviewArtifact.id.desc())
+            .limit(1)
+        )
+        if (
+            artifact is None
+            or artifact.id != source.outlineArtifactId
+            or artifact.status != "applied"
+            or artifact.revision != source.outlineRevision
+        ):
+            raise _context_identity_mismatch()
+        outline = _parse_short_outline(artifact.payloadJson)
+        if _short_outline_hash(outline) != source.outlineHash:
+            raise _context_identity_mismatch()
+
+    async def _current_short_outline(
+        self,
+        session: AsyncSession,
+        novel_id: str,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        artifact = await session.scalar(
+            select(ReviewArtifact)
+            .where(
+                ReviewArtifact.novelId == novel_id,
+                ReviewArtifact.kind == "outline_draft",
+            )
+            .order_by(ReviewArtifact.updatedAt.desc(), ReviewArtifact.id.desc())
+            .limit(1)
+        )
+        if artifact is None:
+            return None, None
+        payload = _parse_short_outline(artifact.payloadJson).model_dump(mode="json")
+        try:
+            diff = json.loads(artifact.diffJson) if artifact.diffJson is not None else None
+        except (json.JSONDecodeError, TypeError):
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_OUTLINE_DIFF_INVALID",
+                message="中短篇大纲版本差异记录无效",
+            ) from None
+        direct_edit = (
+            {
+                "artifactId": artifact.id,
+                "revision": artifact.revision,
+                "payload": payload,
+                "diff": diff,
+            }
+            if isinstance(diff, dict) and diff.get("type") == "user_edit"
+            else None
+        )
+        return payload, direct_edit
+
+    async def _recent_messages(
+        self,
+        session: AsyncSession,
+        writing_session_id: str | None,
+        *,
+        current_user_message: str,
+    ) -> list[dict[str, Any]]:
+        if writing_session_id is None:
+            return []
+        records = list(
+            (
+                await session.scalars(
+                    select(WritingMessage)
+                    .where(WritingMessage.sessionId == writing_session_id)
+                    .order_by(WritingMessage.createdAt.desc(), WritingMessage.id.desc())
+                    .limit(7)
+                )
+            ).all()
+        )
+        records.reverse()
+        recent = [
+            {
+                "role": record.role,
+                "content": record.content,
+                "agentId": record.agentId,
+            }
+            for record in records
+        ]
+        if (
+            recent
+            and recent[-1]["role"] == "user"
+            and recent[-1]["content"] == current_user_message
+        ):
+            recent.pop()
+        return recent[-6:]
 
     async def _chapter_groups(
         self, session: AsyncSession, novel_id: str
@@ -344,6 +563,81 @@ def _artifact_payload_invalid() -> ApiError:
     )
 
 
+def _parse_command_payload(command: WritingRunCommand) -> WritingJobPayload:
+    try:
+        value = json.loads(command.payloadJson)
+    except (json.JSONDecodeError, TypeError):
+        raise _context_identity_mismatch() from None
+    if not isinstance(value, dict):
+        raise _context_identity_mismatch()
+    if "workflowKind" not in value:
+        value = {
+            **value,
+            "version": 1,
+            "resume": value.get("resume") is True,
+            "chapterId": value.get("chapterId"),
+            "writingSessionId": value.get("writingSessionId"),
+            "resumeInput": value.get("resumeInput"),
+            "workflowKind": "long_serial",
+            "operation": None,
+            "targetTotalWordCount": None,
+            "source": None,
+        }
+    try:
+        return WritingJobPayload.model_validate(value)
+    except ValidationError:
+        raise _context_identity_mismatch() from None
+
+
+def _command_user_message(payload: WritingJobPayload) -> str:
+    for source in (payload.resumeInput, payload.startRequest, payload.decisionRequest):
+        if not isinstance(source, dict):
+            continue
+        value = source.get("userMessage")
+        if isinstance(value, str):
+            return value
+    return ""
+
+
+def _command_revision_request(payload: WritingJobPayload) -> str | None:
+    for source in (payload.resumeInput, payload.decisionRequest):
+        if not isinstance(source, dict):
+            continue
+        value = source.get("userMessage")
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+def _parse_short_outline(serialized: str) -> ShortStoryOutlineDraft:
+    try:
+        return ShortStoryOutlineDraft.model_validate(json.loads(serialized))
+    except (json.JSONDecodeError, ValidationError, TypeError):
+        raise ApiError(
+            status_code=409,
+            code="SHORT_STORY_OUTLINE_INVALID",
+            message="中短篇权威大纲载荷无效",
+        ) from None
+
+
+def _short_outline_hash(outline: ShortStoryOutlineDraft) -> str:
+    canonical = json.dumps(
+        outline.model_dump(mode="json"),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _context_identity_mismatch() -> ApiError:
+    return ApiError(
+        status_code=409,
+        code="WRITING_CONTEXT_IDENTITY_MISMATCH",
+        message="持久命令、作品篇幅或写作来源不一致，不能调用模型",
+    )
+
+
 def _goal_dict(goal: ChapterWritingGoal | None) -> dict[str, Any] | None:
     if goal is None:
         return None
@@ -387,6 +681,27 @@ def _split_current_user_message(
         if item.get("role") == "user" and isinstance(item.get("content"), str):
             return [*history[:index], *history[index + 1 :]], str(item["content"])
     return list(history), ""
+
+
+def _build_short_story_context(
+    *,
+    direct_edit: dict[str, Any] | None,
+    revision_request: str | None,
+    outline: dict[str, Any] | None,
+    inspiration: str,
+    recent_conversation: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """按中短篇权威优先级构造最小上下文，历史只保留最近六条。"""
+
+    anchors = outline.get("anchors") if isinstance(outline, dict) else None
+    return {
+        "directEdit": direct_edit,
+        "revisionRequest": revision_request,
+        "anchors": anchors,
+        "currentOutline": outline,
+        "originalInspiration": inspiration,
+        "recentConversation": recent_conversation[-6:],
+    }
 
 
 def _beat_plan_dict(plan: ChapterBeatPlan | None, scenes: list[SceneBeat]) -> dict[str, Any] | None:

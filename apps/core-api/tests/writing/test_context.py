@@ -1,13 +1,26 @@
+from __future__ import annotations
+
 import json
 from typing import Any, cast
 
 import pytest
-from inkforge_core.db.models import Foreshadowing, ReviewArtifact, WritingRunCommand, WritingTask
+from inkforge_contracts.jobs import WritingJobPayload
+from inkforge_core.db.models import (
+    Chapter,
+    Foreshadowing,
+    Novel,
+    ReviewArtifact,
+    WritingBible,
+    WritingRunCommand,
+    WritingTask,
+)
 from inkforge_core.errors import ApiError
 from inkforge_core.writing.context import (
     ChapterGroupSnapshot,
     WritingContextRepository,
     WritingContextService,
+    _build_short_story_context,
+    _command_revision_request,
     _split_current_user_message,
     select_unique_chapter_group,
 )
@@ -51,6 +64,68 @@ def test_split_current_user_ignores_non_string_user_records() -> None:
 
     assert current == "合法请求"
     assert history == [{"role": "user", "content": None}]
+
+
+def test_short_story_context_keeps_authority_priority_and_only_six_recent_messages() -> None:
+    outline = {
+        "kind": "outline_draft",
+        "storyLengthProfile": "short_medium",
+        "anchors": {"mustKeep": ["结局"], "confirmed": [], "avoid": []},
+        "content": "完整大纲",
+    }
+    recent = [
+        {"role": "user", "content": f"历史-{index}"}
+        for index in range(10)
+    ]
+
+    result = _build_short_story_context(
+        direct_edit={"sections": [{"id": "section-2", "events": "直接编辑"}]},
+        revision_request="只修改第二节，不要改结局",
+        outline=outline,
+        inspiration="原始灵感",
+        recent_conversation=recent,
+    )
+
+    assert list(result) == [
+        "directEdit",
+        "revisionRequest",
+        "anchors",
+        "currentOutline",
+        "originalInspiration",
+        "recentConversation",
+    ]
+    assert result["anchors"] == outline["anchors"]
+    assert result["currentOutline"] is outline
+    assert [item["content"] for item in result["recentConversation"]] == [
+        "历史-4",
+        "历史-5",
+        "历史-6",
+        "历史-7",
+        "历史-8",
+        "历史-9",
+    ]
+
+
+def test_initial_short_outline_start_does_not_turn_start_message_into_revision_request() -> None:
+    payload = WritingJobPayload.model_validate(
+        {
+            "version": 1,
+            "resume": False,
+            "chapterId": "chapter-1",
+            "writingSessionId": None,
+            "resumeInput": None,
+            "workflowKind": "short_medium",
+            "operation": "develop_short_outline",
+            "targetTotalWordCount": 6000,
+            "source": {
+                "kind": "short_outline_inspiration",
+                "originalInspiration": "原始灵感",
+            },
+            "startRequest": {"userMessage": "创建并生成大纲"},
+        }
+    )
+
+    assert _command_revision_request(payload) is None
 
 
 class FakePlanningRepository:
@@ -105,6 +180,241 @@ class FakeScalarSession:
     async def scalar(self, statement: object) -> object | None:
         del statement
         return next(self._responses)
+
+
+class PlanningRowResult:
+    def __init__(self, row: tuple[object, ...]) -> None:
+        self.row = row
+
+    def one_or_none(self) -> tuple[object, ...]:
+        return self.row
+
+
+class ShortPlanningSession:
+    def __init__(self, row: tuple[object, ...], scalars: list[object | None]) -> None:
+        self.row = row
+        self.scalars = iter(scalars)
+        self.execute_count = 0
+
+    async def __aenter__(self) -> ShortPlanningSession:
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        del exc_type, exc, traceback
+
+    async def execute(self, statement: object) -> PlanningRowResult:
+        del statement
+        self.execute_count += 1
+        if self.execute_count > 1:
+            raise AssertionError("中短篇上下文不应执行长篇章节组或 Beat Plan 查询")
+        return PlanningRowResult(self.row)
+
+    async def scalar(self, statement: object) -> object | None:
+        del statement
+        return next(self.scalars)
+
+
+class ShortPlanningFactory:
+    def __init__(self, session: ShortPlanningSession) -> None:
+        self.session = session
+
+    def __call__(self) -> ShortPlanningSession:
+        return self.session
+
+
+@pytest.mark.asyncio
+async def test_short_context_bypasses_long_planning_and_prioritizes_direct_edit() -> None:
+    task = WritingTask(
+        id="task-1",
+        novelId="novel-1",
+        chapterId="chapter-1",
+        writingSessionId=None,
+        phase="active",
+        targetWordCount=6000,
+        selectedAgents="剧情",
+        conversationHistory="[]",
+    )
+    chapter = Chapter(
+        id="chapter-1", novelId="novel-1", title="旧项目正文名", order=1
+    )
+    novel = Novel(id="novel-1", userId="user-1", name="测试", summary="原始灵感")
+    bible = WritingBible(
+        id="bible-1",
+        novelId="novel-1",
+        storyLengthProfile="short_medium",
+        targetTotalWordCount=6000,
+    )
+    command = WritingRunCommand(
+        id="command-1",
+        taskId="task-1",
+        kind="resume",
+        status="submitted",
+        idempotencyKey="user-1:request-1",
+        payloadJson=json.dumps(
+            {
+                "version": 1,
+                "resume": True,
+                "chapterId": "chapter-1",
+                "writingSessionId": None,
+                "resumeInput": {"userMessage": "只修改第二节"},
+                "workflowKind": "short_medium",
+                "operation": "develop_short_outline",
+                "targetTotalWordCount": 6000,
+                "source": {
+                    "kind": "short_outline_inspiration",
+                    "originalInspiration": "原始灵感",
+                },
+            },
+            ensure_ascii=False,
+        ),
+    )
+    outline = ReviewArtifact(
+        id="artifact-1",
+        novelId="novel-1",
+        chapterId="chapter-1",
+        kind="outline_draft",
+        status="awaiting_user",
+        revision=2,
+        payloadJson=json.dumps(
+            {
+                "kind": "outline_draft",
+                "storyLengthProfile": "short_medium",
+                "originalInspiration": "原始灵感",
+                "corePremise": "核心前提",
+                "anchors": {"mustKeep": ["结局"], "confirmed": [], "avoid": []},
+                "sections": [
+                    {"id": "section-1", "title": "第一节", "events": "事件"}
+                ],
+                "content": "由契约重建",
+                "changeSummary": "直接编辑",
+                "anchorChanges": [],
+            },
+            ensure_ascii=False,
+        ),
+        diffJson=json.dumps({"type": "user_edit", "changed": ["section-1"]}),
+    )
+    session = ShortPlanningSession(
+        (task, chapter, novel, bible),
+        [command, 1, outline],
+    )
+
+    result = await WritingContextRepository(ShortPlanningFactory(session)).get_planning_context(  # type: ignore[arg-type]
+        "user-1", "task-1"
+    )
+
+    short = result["shortStoryContext"]
+    assert short["directEdit"]["revision"] == 2
+    assert short["directEdit"]["diff"]["type"] == "user_edit"
+    assert short["revisionRequest"] == "只修改第二节"
+    assert short["originalInspiration"] == "原始灵感"
+    assert result["chapterGroup"] is None
+    assert result["approvedBeatPlan"] is None
+    assert result["outlinePath"] == []
+
+
+@pytest.mark.asyncio
+async def test_long_context_identity_does_not_compare_chapter_and_total_word_targets() -> None:
+    repository = WritingContextRepository(cast(Any, None))
+    task = WritingTask(
+        id="task-1",
+        novelId="novel-1",
+        chapterId="chapter-1",
+        phase="active",
+        targetWordCount=4000,
+        selectedAgents="剧情",
+        conversationHistory="[]",
+    )
+    chapter = Chapter(id="chapter-1", novelId="novel-1", title="第一章", order=1)
+    novel = Novel(id="novel-1", userId="user-1", name="长篇", summary="")
+    bible = WritingBible(
+        id="bible-1",
+        novelId="novel-1",
+        storyLengthProfile="long_serial",
+        targetTotalWordCount=1_000_000,
+    )
+    payload = WritingJobPayload.model_validate(
+        {
+            "version": 1,
+            "resume": False,
+            "chapterId": "chapter-1",
+            "writingSessionId": None,
+            "resumeInput": None,
+            "workflowKind": "long_serial",
+            "operation": None,
+            "targetTotalWordCount": 1_000_000,
+            "source": None,
+        }
+    )
+
+    await repository._validate_command_identity(
+        cast(AsyncSession, FakeScalarSession([])),
+        task=task,
+        chapter=chapter,
+        novel=novel,
+        bible=bible,
+        payload=payload,
+    )
+
+
+@pytest.mark.asyncio
+async def test_short_story_source_must_still_be_the_latest_applied_outline() -> None:
+    repository = WritingContextRepository(cast(Any, None))
+    task = WritingTask(
+        id="task-1",
+        novelId="novel-1",
+        chapterId="chapter-1",
+        phase="active",
+        targetWordCount=6000,
+        selectedAgents="剧情",
+        conversationHistory="[]",
+    )
+    chapter = Chapter(id="chapter-1", novelId="novel-1", title="正文", order=1)
+    novel = Novel(id="novel-1", userId="user-1", name="中短篇", summary="灵感")
+    bible = WritingBible(
+        id="bible-1",
+        novelId="novel-1",
+        storyLengthProfile="short_medium",
+        targetTotalWordCount=6000,
+    )
+    payload = WritingJobPayload.model_validate(
+        {
+            "version": 1,
+            "resume": False,
+            "chapterId": "chapter-1",
+            "writingSessionId": None,
+            "resumeInput": None,
+            "workflowKind": "short_medium",
+            "operation": "write_short_story",
+            "targetTotalWordCount": 6000,
+            "source": {
+                "kind": "approved_short_outline",
+                "outlineArtifactId": "outline-old",
+                "outlineRevision": 1,
+                "outlineHash": "0" * 64,
+            },
+        }
+    )
+    latest_outline = ReviewArtifact(
+        id="outline-new",
+        novelId="novel-1",
+        chapterId="chapter-1",
+        kind="outline_draft",
+        status="awaiting_user",
+        revision=2,
+        payloadJson="{}",
+    )
+
+    with pytest.raises(ApiError) as exc_info:
+        await repository._validate_command_identity(
+            cast(AsyncSession, FakeScalarSession([1, latest_outline])),
+            task=task,
+            chapter=chapter,
+            novel=novel,
+            bible=bible,
+            payload=payload,
+        )
+
+    assert exc_info.value.code == "WRITING_CONTEXT_IDENTITY_MISMATCH"
 
 
 class FakeScalarsResult:

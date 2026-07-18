@@ -5,7 +5,12 @@ from typing import Protocol, cast
 from urllib.parse import urlencode
 
 import httpx
-from inkforge_contracts.jobs import AgentJobAccepted, AgentJobRequest, AgentJobStatus
+from inkforge_contracts.jobs import (
+    AgentJobAccepted,
+    AgentJobRequest,
+    AgentJobStatus,
+    WritingJobPayload,
+)
 from inkforge_contracts.jwt_claims import ServiceScope
 from inkforge_service_auth import ServiceTokenSigner, canonical_json_body
 from pydantic import JsonValue
@@ -161,12 +166,23 @@ class WritingTaskAgentSubmitter:
                 novelId=task.novel_id,
                 userId=task.user_id,
                 priority=10,
-                payload={
-                    "resume": resume,
-                    "chapterId": task.chapter_id,
-                    "writingSessionId": task.writing_session_id,
-                    "resumeInput": cast(JsonValue, resume_input),
-                },
+                payload=cast(
+                    dict[str, JsonValue],
+                    WritingJobPayload.model_validate(
+                        {
+                            "version": 1,
+                            "resume": resume,
+                            "chapterId": task.chapter_id,
+                            "writingSessionId": task.writing_session_id,
+                            "resumeInput": resume_input,
+                            "workflowKind": "long_serial",
+                            "operation": None,
+                            "targetTotalWordCount": None,
+                            "source": None,
+                            "force": force,
+                        }
+                    ).model_dump(mode="json"),
+                ),
                 force=force,
             )
         )

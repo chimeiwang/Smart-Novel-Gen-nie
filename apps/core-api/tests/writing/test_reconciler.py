@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -381,5 +382,9 @@ async def test_reconciliation_creates_single_command_and_invalidates_old_legacy_
     assert command.taskId == model.id
     assert command.status == "pending"
     assert command.id != "writing-old"
+    payload = json.loads(command.payloadJson)
+    assert payload["workflowKind"] == "long_serial"
+    assert payload["operation"] is None
+    assert payload["source"] is None
     assert old_authorization.accepted is False
     assert new_authorization.accepted is True

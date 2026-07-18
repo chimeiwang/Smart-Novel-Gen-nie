@@ -121,7 +121,15 @@ class WorkflowLog:
         self.entries.append(("结束", (run_id, status)))
 
 
-def _job(*, resume: bool = False, resume_input: dict[str, Any] | None = None) -> QueueJob:
+def _job(
+    *,
+    resume: bool = False,
+    resume_input: dict[str, Any] | None = None,
+    workflow_kind: str = "long_serial",
+    operation: str | None = None,
+    target_total_word_count: int | None = None,
+    source: dict[str, Any] | None = None,
+) -> QueueJob:
     return QueueJob(
         jobId="job-1",
         kind="writing",
@@ -131,10 +139,15 @@ def _job(*, resume: bool = False, resume_input: dict[str, Any] | None = None) ->
         userId="user-1",
         priority=10,
         payload={
+            "version": 1,
             "resume": resume,
             "chapterId": "chapter-1",
             "writingSessionId": "session-1",
             "resumeInput": resume_input,
+            "workflowKind": workflow_kind,
+            "operation": operation,
+            "targetTotalWordCount": target_total_word_count,
+            "source": source,
         },
         createdAt=datetime.now(UTC),
     )
@@ -272,6 +285,164 @@ async def test_resume_writing_job_uses_flat_snapshot_and_continues_sequence() ->
     assert artifacts.hydrated[0][0].jobId == "job-1"
     assert artifacts.hydrated[0][2]["id"] == "artifact-1"
     assert [item[0] for item in artifacts.released] == ["artifact-1"]
+
+
+def _short_context(*, operation: str = "develop_short_outline") -> dict[str, Any]:
+    source: dict[str, Any] = {
+        "kind": "short_outline_inspiration",
+        "originalInspiration": "城市每天忘记一个人",
+    }
+    return {
+        "workspace": {
+            "writingBible": {
+                "storyLengthProfile": "short_medium",
+                "targetTotalWordCount": 6000,
+            }
+        },
+        "planning": {
+            "taskId": "task-1",
+            "commandId": "job-1",
+            "novelId": "novel-1",
+            "chapterId": "chapter-1",
+            "targetWordCount": 6000,
+            "workflowKind": "short_medium",
+            "operation": operation,
+            "targetTotalWordCount": 6000,
+            "source": source,
+            "conversationHistory": [],
+            "userMessage": "根据灵感生成大纲",
+            "shortStoryContext": {
+                "directEdit": None,
+                "revisionRequest": "根据灵感生成大纲",
+                "anchors": None,
+                "currentOutline": None,
+                "originalInspiration": "城市每天忘记一个人",
+                "recentConversation": [],
+            },
+            "graphState": None,
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_short_outline_job_bypasses_parent_and_uses_explicit_operation() -> None:
+    context = _short_context()
+    parent = Graph({"phase": "completed", "finalResponse": "不应调用"})
+    operation = Graph({"phase": "completed", "finalResponse": "短篇大纲完成"})
+    handler = WritingJobHandler(
+        CoreClient(context),
+        parent_graph=parent,
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
+
+    await handler(
+        _job(
+            workflow_kind="short_medium",
+            operation="develop_short_outline",
+            target_total_word_count=6000,
+            source=context["planning"]["source"],
+        )
+    )
+
+    assert parent.inputs == []
+    assert operation.inputs[0]["currentOperation"]["kind"] == "develop_short_outline"
+    assert operation.inputs[0]["currentOperation"]["confidence"] == 1
+    assert operation.inputs[0]["workflowKind"] == "short_medium"
+    assert operation.inputs[0]["explicitOperation"] == "develop_short_outline"
+    assert operation.inputs[0]["commandId"] == "job-1"
+
+
+@pytest.mark.asyncio
+async def test_short_identity_mismatch_fails_before_any_graph_call() -> None:
+    context = _short_context()
+    context["planning"]["targetTotalWordCount"] = 7000
+    parent = Graph({})
+    operation = Graph({})
+    handler = WritingJobHandler(
+        CoreClient(context),
+        parent_graph=parent,
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
+
+    with pytest.raises(ValueError, match="WRITING_JOB_IDENTITY_MISMATCH"):
+        await handler(
+            _job(
+                workflow_kind="short_medium",
+                operation="develop_short_outline",
+                target_total_word_count=6000,
+                source=context["planning"]["source"],
+            )
+        )
+
+    assert parent.inputs == []
+    assert operation.inputs == []
+
+
+@pytest.mark.asyncio
+async def test_short_story_placeholder_fails_before_model_instead_of_reusing_long_flow() -> None:
+    context = _short_context(operation="write_short_story")
+    source = {
+        "kind": "approved_short_outline",
+        "outlineArtifactId": "artifact-1",
+        "outlineRevision": 2,
+        "outlineHash": "a" * 64,
+    }
+    context["planning"]["source"] = source
+    parent = Graph({})
+    operation = Graph({})
+    handler = WritingJobHandler(
+        CoreClient(context),
+        parent_graph=parent,
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
+
+    with pytest.raises(ValueError, match="SHORT_STORY_WORKFLOW_NOT_IMPLEMENTED"):
+        await handler(
+            _job(
+                workflow_kind="short_medium",
+                operation="write_short_story",
+                target_total_word_count=6000,
+                source=source,
+            )
+        )
+
+    assert parent.inputs == []
+    assert operation.inputs == []
+
+
+@pytest.mark.asyncio
+async def test_long_explicit_operation_bypasses_parent() -> None:
+    context = {
+        "workspace": {},
+        "planning": {
+            "taskId": "task-1",
+            "commandId": "job-1",
+            "novelId": "novel-1",
+            "chapterId": "chapter-1",
+            "targetWordCount": 4000,
+            "workflowKind": "long_serial",
+            "operation": "write_chapter",
+            "targetTotalWordCount": None,
+            "source": None,
+            "conversationHistory": [],
+            "userMessage": "写正文",
+            "graphState": None,
+        },
+    }
+    parent = Graph({"phase": "completed"})
+    operation = Graph({"phase": "completed"})
+    handler = WritingJobHandler(
+        CoreClient(context),
+        parent_graph=parent,
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
+    await handler(_job(operation="write_chapter"))
+    assert parent.inputs == []
+    assert operation.inputs[0]["currentOperation"]["kind"] == "write_chapter"
 
 
 @pytest.mark.asyncio

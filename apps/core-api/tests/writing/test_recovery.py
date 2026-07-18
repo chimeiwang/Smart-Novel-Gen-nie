@@ -51,6 +51,16 @@ def test_snapshot_requires_task_ownership_identity() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "operation",
+    ["develop_short_outline", "write_short_story"],
+)
+def test_snapshot_accepts_explicit_short_story_operations(operation: str) -> None:
+    result = deserialize_graph_snapshot(_snapshot(currentOperation={"kind": operation}))
+
+    assert result.current_operation == {"kind": operation}
+
+
 def test_recovery_separates_resumable_and_terminal_tasks() -> None:
     now = datetime(2026, 7, 11, 12, 0, 0)
     state = select_recovery_state(

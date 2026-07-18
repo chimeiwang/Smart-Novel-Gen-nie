@@ -2,7 +2,15 @@
 
 from .events import AgentEvent, CheckpointCallback, RunCompletionCallback, RunFailureCallback
 from .identity import CoreAgentId
-from .jobs import AgentJobAccepted, AgentJobCancelRequest, AgentJobRequest, AgentJobStatus
+from .jobs import (
+    AgentJobAccepted,
+    AgentJobCancelRequest,
+    AgentJobRequest,
+    AgentJobStatus,
+    ApprovedShortOutlineSource,
+    ShortOutlineInspirationSource,
+    WritingJobPayload,
+)
 from .jwt_claims import ServiceJwtClaims, ServiceScope
 from .quality import (
     ConsistencyDimension,
@@ -10,7 +18,13 @@ from .quality import (
     ConsistencyQualityReport,
     ConsistencyScores,
 )
-from .runs import CreativeOperationKind, RunAccepted, RunRequest, RunStatusResponse
+from .runs import (
+    CreativeOperationKind,
+    RunAccepted,
+    RunRequest,
+    RunStatusResponse,
+    WritingWorkflowKind,
+)
 from .short_story import (
     ShortStoryAnchors,
     ShortStoryDraftMetadata,
@@ -34,12 +48,14 @@ __all__ = [
     "AgentJobCancelRequest",
     "AgentJobRequest",
     "AgentJobStatus",
+    "ApprovedShortOutlineSource",
     "CreativeOperationKind",
     "RunAccepted",
     "RunCompletionCallback",
     "RunFailureCallback",
     "RunRequest",
     "RunStatusResponse",
+    "ShortOutlineInspirationSource",
     "ShortStoryAnchors",
     "ShortStoryDraftMetadata",
     "ShortStoryOutlineDraft",
@@ -48,5 +64,7 @@ __all__ = [
     "ServiceScope",
     "ToolCallRequest",
     "ToolCallResult",
+    "WritingJobPayload",
+    "WritingWorkflowKind",
     "render_short_story_outline",
 ]

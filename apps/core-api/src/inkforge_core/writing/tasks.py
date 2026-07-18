@@ -11,7 +11,7 @@ from inkforge_contracts.events import (
     RunCompletionCallback,
     RunFailureCallback,
 )
-from inkforge_contracts.jobs import AgentJobStatus
+from inkforge_contracts.jobs import AgentJobStatus, WritingJobPayload
 from sqlalchemy import exists, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -238,14 +238,20 @@ class WritingTaskRepository:
                 )
                 if existing is not None:
                     return False
-                payload = {
-                    "version": 1,
-                    "resume": resume,
-                    "chapterId": task.chapterId,
-                    "writingSessionId": task.writingSessionId,
-                    "resumeInput": None,
-                    "force": True,
-                }
+                payload = WritingJobPayload.model_validate(
+                    {
+                        "version": 1,
+                        "resume": resume,
+                        "chapterId": task.chapterId,
+                        "writingSessionId": task.writingSessionId,
+                        "resumeInput": None,
+                        "workflowKind": "long_serial",
+                        "operation": None,
+                        "targetTotalWordCount": None,
+                        "source": None,
+                        "force": True,
+                    }
+                ).model_dump(mode="json")
                 session.add(
                     WritingRunCommand(
                         id=command_id,

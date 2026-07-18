@@ -25,6 +25,8 @@ OPERATION_KINDS = frozenset(
         "review_chapter",
         "sync_lore",
         "manage_foreshadowing",
+        "develop_short_outline",
+        "write_short_story",
     }
 )
 

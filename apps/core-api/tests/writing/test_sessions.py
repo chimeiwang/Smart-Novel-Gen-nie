@@ -138,6 +138,65 @@ def test_writing_run_requests_require_stable_client_request_id() -> None:
     assert valid.clientRequestId == "request-00000001"
 
 
+@pytest.mark.parametrize("target", [6000, 80000])
+def test_short_writing_run_accepts_target_boundaries(target: int) -> None:
+    request = StartWritingRunRequest.model_validate(
+        {
+            "clientRequestId": "request-00000001",
+            "novelId": "novel-1",
+            "chapterId": "chapter-1",
+            "workflowKind": "short_medium",
+            "operation": "develop_short_outline",
+            "targetWordCount": target,
+            "userMessage": "根据灵感生成大纲",
+        }
+    )
+    assert request.targetWordCount == target
+
+
+@pytest.mark.parametrize("target", [5999, 80001])
+def test_short_writing_run_rejects_out_of_range_target(target: int) -> None:
+    with pytest.raises(ValidationError):
+        StartWritingRunRequest.model_validate(
+            {
+                "clientRequestId": "request-00000001",
+                "novelId": "novel-1",
+                "chapterId": "chapter-1",
+                "workflowKind": "short_medium",
+                "operation": "develop_short_outline",
+                "targetWordCount": target,
+                "userMessage": "根据灵感生成大纲",
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("workflow_kind", "operation"),
+    [
+        ("short_medium", None),
+        ("short_medium", "write_chapter"),
+        ("long_serial", "develop_short_outline"),
+        ("long_serial", "write_short_story"),
+        ("long_serial", "sync_lore"),
+    ],
+)
+def test_writing_run_rejects_cross_profile_operation(
+    workflow_kind: str, operation: str | None
+) -> None:
+    with pytest.raises(ValidationError):
+        StartWritingRunRequest.model_validate(
+            {
+                "clientRequestId": "request-00000001",
+                "novelId": "novel-1",
+                "chapterId": "chapter-1",
+                "workflowKind": workflow_kind,
+                "operation": operation,
+                "targetWordCount": 6000,
+                "userMessage": "开始",
+            }
+        )
+
+
 @pytest.mark.asyncio
 async def test_create_session_uses_authenticated_user_identity() -> None:
     repository = FakeWritingRepository()

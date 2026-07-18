@@ -8,7 +8,15 @@ from typing import Literal
 from ..definitions.agents import AgentId
 from .contracts import CreativeOperationKind, OutputKind, TargetType
 
-ContextStrategy = Literal["brief", "lore", "outline", "chapter", "review"]
+ContextStrategy = Literal[
+    "brief",
+    "lore",
+    "outline",
+    "chapter",
+    "review",
+    "short_outline",
+    "short_story",
+]
 ArtifactPolicy = Literal["none", "agent_updates", "text"]
 ArtifactKeyPolicy = Literal[
     "none", "generated_stable", "builder_or_generated", "preserve"
@@ -299,5 +307,29 @@ OPERATION_DEFINITIONS: dict[CreativeOperationKind, OperationDefinition] = {
         terminal_tools=_STRUCTURED_TERMINALS,
         artifact_events=_STRUCTURED_TERMINALS,
         artifact_key_policy="builder_or_generated",
+    ),
+    "develop_short_outline": _definition(
+        "develop_short_outline",
+        "生成或修改中短篇大纲",
+        "outline",
+        "剧情",
+        (),
+        "outline_proposal",
+        "short_outline",
+        "none",
+        "根据 Core 权威中短篇上下文生成或修改完整大纲；不得回退为长篇大纲。",
+        allowed_tools=_BASE_READ,
+    ),
+    "write_short_story": _definition(
+        "write_short_story",
+        "生成或修改中短篇整稿",
+        "chapter",
+        "写作",
+        (),
+        "chapter_text",
+        "short_story",
+        "none",
+        "中短篇整稿能力由专用串行审核工作流执行，不能复用长篇逐章写作。",
+        allowed_tools=frozenset(),
     ),
 }

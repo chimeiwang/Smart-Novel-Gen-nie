@@ -25,6 +25,7 @@ ALIASES: dict[str, AgentId] = {
     "网文编辑": "编辑",
     "编辑顾问": "编辑",
 }
+SHORT_STORY_OPERATIONS = frozenset({"develop_short_outline", "write_short_story"})
 
 
 class OperationClassifier(Protocol):
@@ -79,6 +80,13 @@ async def route_creative_operation(
                 fallback,
                 False,
                 "同步设定流程已移除，回退为普通问答。",
+            )
+        if operation.kind in SHORT_STORY_OPERATIONS:
+            fallback = create_fallback_operation(user_message)
+            return OperationRouteResult(
+                fallback,
+                False,
+                "中短篇 Operation 必须由 Core 持久命令显式指定，父图不做猜测。",
             )
         if operation.confidence < 0.5:
             operation = create_fallback_operation(user_message)

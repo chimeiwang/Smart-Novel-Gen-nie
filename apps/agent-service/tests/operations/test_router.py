@@ -161,3 +161,25 @@ async def test_classified_operation_is_normalized_by_definition() -> None:
     assert result.operation.primaryAgent == "剧情"
     assert result.operation.reviewers == ["编辑"]
     assert result.operation.requiresArtifact is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["develop_short_outline", "write_short_story"])
+async def test_parent_classifier_cannot_produce_short_story_operations(kind: str) -> None:
+    operation = CreativeOperation(
+        kind=kind,  # type: ignore[arg-type]
+        targetType="outline" if kind == "develop_short_outline" else "chapter",
+        userGoal="写一篇完整短篇全文",
+        primaryAgent="剧情" if kind == "develop_short_outline" else "写作",
+        reviewers=[],
+        outputKind="outline_proposal" if kind == "develop_short_outline" else "chapter_text",
+        requiresArtifact=False,
+        requiresUserApproval=False,
+        confidence=0.99,
+        reasoning="分类器错误猜测",
+    )
+
+    result = await route_creative_operation("短篇、整稿、全文", Classifier(operation))
+
+    assert result.operation.kind == "answer_question"
+    assert "显式" in result.reasoning

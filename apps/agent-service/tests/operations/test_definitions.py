@@ -134,6 +134,20 @@ EXPECTED_CONTRACTS: dict[str, dict[str, Any]] = {
         "text_kind": None,
         "key_policy": "builder_or_generated",
     },
+    "develop_short_outline": {
+        "allowed": BASE_READ,
+        "terminal": frozenset(),
+        "events": frozenset(),
+        "text_kind": None,
+        "key_policy": "none",
+    },
+    "write_short_story": {
+        "allowed": frozenset(),
+        "terminal": frozenset(),
+        "events": frozenset(),
+        "text_kind": None,
+        "key_policy": "none",
+    },
 }
 
 
