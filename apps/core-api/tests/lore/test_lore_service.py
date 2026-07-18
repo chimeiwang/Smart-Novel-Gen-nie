@@ -13,7 +13,7 @@ from pydantic import ValidationError
 
 
 class RecordingRepository:
-    def __init__(self, *, story_length_profile: str = "long_serial") -> None:
+    def __init__(self, *, story_length_profile: str | None = "long_serial") -> None:
         self.fields: dict[str, object] | None = None
         self.content: str | None = None
         self.story_length_profile = story_length_profile
@@ -150,3 +150,21 @@ async def test_long_writing_bible_keeps_nullable_target_rule() -> None:
     )
 
     assert repository.content == {"targetTotalWordCount": None}
+
+
+@pytest.mark.asyncio
+async def test_legacy_missing_writing_bible_can_be_created_with_long_rules() -> None:
+    repository = RecordingRepository(story_length_profile=None)
+    service = LoreService(repository)  # type: ignore[arg-type]
+
+    await service.upsert_content(
+        "user-1",
+        "novel-1",
+        "writing-bible",
+        WritingBibleRequest(targetTotalWordCount=None, genre="悬疑"),
+    )
+
+    assert repository.content == {
+        "targetTotalWordCount": None,
+        "genre": "悬疑",
+    }

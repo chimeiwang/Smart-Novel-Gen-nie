@@ -57,19 +57,15 @@ class LoreRepository:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
 
-    async def get_writing_bible_profile(self, novel_id: str, user_id: str) -> str:
+    async def get_writing_bible_profile(
+        self, novel_id: str, user_id: str
+    ) -> str | None:
         async with self._session_factory() as session:
             await self._require_owner(session, novel_id, user_id)
             profile = await session.scalar(
                 select(WritingBible.storyLengthProfile).where(
                     WritingBible.novelId == novel_id
                 )
-            )
-        if profile is None:
-            raise ApiError(
-                status_code=404,
-                code="WRITING_BIBLE_NOT_FOUND",
-                message="作品圣经不存在",
             )
         return profile
 
@@ -372,12 +368,6 @@ class LoreRepository:
 
     @staticmethod
     def _require_target_for_profile(profile: str | None, target: object) -> None:
-        if profile is None:
-            raise ApiError(
-                status_code=404,
-                code="WRITING_BIBLE_NOT_FOUND",
-                message="作品圣经不存在",
-            )
         if profile == "short_medium" and (
             not isinstance(target, int)
             or isinstance(target, bool)

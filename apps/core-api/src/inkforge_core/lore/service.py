@@ -9,7 +9,9 @@ from .schemas import ContentRequest
 
 
 class LoreRepositoryPort(Protocol):
-    async def get_writing_bible_profile(self, novel_id: str, user_id: str) -> str: ...
+    async def get_writing_bible_profile(
+        self, novel_id: str, user_id: str
+    ) -> str | None: ...
 
     async def list_entities(
         self, novel_id: str, user_id: str, kind: str
@@ -173,7 +175,7 @@ class LoreService:
             raise ApiError(status_code=422, code="EMPTY_UPDATE", message="至少需要提供一个更新字段")
 
     @staticmethod
-    def _require_target_for_profile(profile: str, target: object) -> None:
+    def _require_target_for_profile(profile: str | None, target: object) -> None:
         if profile == "short_medium" and (
             not isinstance(target, int)
             or isinstance(target, bool)
