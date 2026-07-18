@@ -3,9 +3,12 @@ from __future__ import annotations
 import pytest
 from inkforge_contracts import (
     ShortStoryAnchors,
+    ShortStoryChapterDraft,
     ShortStoryDraftMetadata,
     ShortStoryOutlineDraft,
     ShortStoryOutlineSection,
+    canonical_short_outline_hash,
+    count_short_story_text_length,
     render_short_story_outline,
 )
 from pydantic import ValidationError
@@ -116,8 +119,66 @@ def test_short_story_contracts_are_strict_and_validate_metadata() -> None:
         actualWordCount=6123,
         targetChapterId="chapter-1",
         baseChapterHash="b" * 64,
+        generationCommandId="command-1",
+        automaticRewriteCount=0,
+        generationReason="user_request",
     )
     assert metadata.sourceOutlineRevision == 3
 
     with pytest.raises(ValidationError):
         ShortStoryDraftMetadata.model_validate({**metadata.model_dump(), "targetWordCount": 80001})
+
+
+def test_short_story_chapter_draft_is_strict_and_keeps_complete_content() -> None:
+    content = "甲 乙\n丙😀"
+    draft = ShortStoryChapterDraft.model_validate(
+        {
+            "kind": "chapter_draft",
+            "storyLengthProfile": "short_medium",
+            "content": content,
+            "metadata": {
+                "sourceOutlineArtifactId": "outline-1",
+                "sourceOutlineRevision": 2,
+                "sourceOutlineHash": "a" * 64,
+                "targetWordCount": 6000,
+                "actualWordCount": 4,
+                "targetChapterId": "chapter-1",
+                "baseChapterHash": "b" * 64,
+                "generationCommandId": "command-1",
+                "automaticRewriteCount": 0,
+                "generationReason": "user_request",
+            },
+        }
+    )
+
+    assert draft.content == content
+    assert draft.metadata.actualWordCount == count_short_story_text_length(content)
+    with pytest.raises(ValidationError):
+        ShortStoryChapterDraft.model_validate(
+            {**draft.model_dump(mode="json"), "content": "", "unexpected": True}
+        )
+    with pytest.raises(ValidationError):
+        ShortStoryDraftMetadata.model_validate(
+            {**draft.metadata.model_dump(mode="json"), "automaticRewriteCount": 2}
+        )
+
+
+def test_short_story_text_count_matches_web_unicode_rules() -> None:
+    assert count_short_story_text_length("甲 乙\n丙") == 3
+    assert count_short_story_text_length("\u3000甲\t乙") == 2
+    assert count_short_story_text_length("甲\u00a0乙") == 2
+    assert count_short_story_text_length("甲\ufeff乙") == 2
+    assert count_short_story_text_length("\u0085甲") == 1
+    assert count_short_story_text_length("😀") == 1
+
+
+def test_canonical_short_outline_hash_is_stable_and_tracks_full_outline() -> None:
+    outline = _outline()
+
+    assert canonical_short_outline_hash(outline) == canonical_short_outline_hash(
+        ShortStoryOutlineDraft.model_validate(outline.model_dump(mode="json"))
+    )
+    assert len(canonical_short_outline_hash(outline)) == 64
+    assert canonical_short_outline_hash(outline) != canonical_short_outline_hash(
+        _outline(changeSummary="另一版说明")
+    )

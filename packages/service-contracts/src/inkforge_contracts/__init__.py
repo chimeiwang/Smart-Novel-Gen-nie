@@ -26,10 +26,14 @@ from .runs import (
     WritingWorkflowKind,
 )
 from .short_story import (
+    SHORT_STORY_IGNORED_TEXT_CHARACTERS,
     ShortStoryAnchors,
+    ShortStoryChapterDraft,
     ShortStoryDraftMetadata,
     ShortStoryOutlineDraft,
     ShortStoryOutlineSection,
+    canonical_short_outline_hash,
+    count_short_story_text_length,
     render_short_story_outline,
 )
 from .tools import ToolCallRequest, ToolCallResult
@@ -55,8 +59,10 @@ __all__ = [
     "RunFailureCallback",
     "RunRequest",
     "RunStatusResponse",
+    "SHORT_STORY_IGNORED_TEXT_CHARACTERS",
     "ShortOutlineInspirationSource",
     "ShortStoryAnchors",
+    "ShortStoryChapterDraft",
     "ShortStoryDraftMetadata",
     "ShortStoryOutlineDraft",
     "ShortStoryOutlineSection",
@@ -66,5 +72,7 @@ __all__ = [
     "ToolCallResult",
     "WritingJobPayload",
     "WritingWorkflowKind",
+    "canonical_short_outline_hash",
+    "count_short_story_text_length",
     "render_short_story_outline",
 ]

@@ -139,3 +139,56 @@ class ShortStoryDraftMetadata(ShortStoryContract):
     actualWordCount: int = Field(ge=0)
     targetChapterId: str = Field(min_length=1, max_length=256)
     baseChapterHash: str = Field(min_length=64, max_length=64)
+    generationCommandId: str = Field(min_length=1, max_length=256)
+    automaticRewriteCount: int = Field(ge=0, le=1)
+    generationReason: Literal["user_request", "automatic_rewrite"]
+
+    @field_validator("generationCommandId")
+    @classmethod
+    def normalize_generation_command_id(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("正文生成命令 ID 不能为空")
+        return normalized
+
+
+SHORT_STORY_IGNORED_TEXT_CHARACTERS = (
+    "\u0009\u000a\u000b\u000c\u000d\u0020\u0085\u00a0\u1680"
+    "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
+    "\u2028\u2029\u202f\u205f\u3000\ufeff"
+)
+_TEXT_LENGTH_TRANSLATION = str.maketrans("", "", SHORT_STORY_IGNORED_TEXT_CHARACTERS)
+
+
+def count_short_story_text_length(text: str) -> int:
+    """复用 Web countTextLength 语义：忽略 Unicode 空白并按码点计数。"""
+
+    return len(text.translate(_TEXT_LENGTH_TRANSLATION))
+
+
+def canonical_short_outline_hash(outline: ShortStoryOutlineDraft) -> str:
+    """计算包含版本说明在内的权威完整大纲 SHA-256。"""
+
+    canonical = json.dumps(
+        outline.model_dump(mode="json"),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+class ShortStoryChapterDraft(ShortStoryContract):
+    kind: Literal["chapter_draft"] = "chapter_draft"
+    storyLengthProfile: Literal["short_medium"] = "short_medium"
+    content: str = Field(min_length=1)
+    metadata: ShortStoryDraftMetadata
+
+    @model_validator(mode="after")
+    def validate_content_word_count(self) -> ShortStoryChapterDraft:
+        actual = count_short_story_text_length(self.content)
+        if actual == 0:
+            raise ValueError("中短篇完整正文不能为空")
+        if self.metadata.actualWordCount != actual:
+            raise ValueError("正文实际字数与 metadata.actualWordCount 不一致")
+        return self
