@@ -27,6 +27,7 @@ _ARTIFACT_TERMINAL_TYPES = frozenset(
         "finish_update_builder",
         "begin_artifact_output",
         "submit_beat_plan",
+        "submit_short_story_outline",
     }
 )
 
@@ -128,14 +129,14 @@ def validate_artifact_submission(
         actual_kind = "agent_updates"
         event["kind"] = actual_kind
         content = visible_content
+    elif event_type == "submit_short_story_outline":
+        actual_kind = "outline_draft"
+        event["kind"] = actual_kind
+        content = visible_content
     else:
         raise ValueError("ARTIFACT_CONTRACT_MISMATCH：无法识别产物事件")
 
-    expected_kind = (
-        definition.textArtifactKind
-        if definition.artifactPolicy == "text"
-        else "agent_updates"
-    )
+    expected_kind = _expected_artifact_kind(definition)
     if not isinstance(actual_kind, str) or actual_kind != expected_kind:
         raise ValueError(
             "ARTIFACT_CONTRACT_MISMATCH：草案类型不匹配，"
@@ -178,3 +179,22 @@ def validate_artifact_submission(
 
 def has_artifact_terminal_event(events: list[dict[str, Any]]) -> bool:
     return any(event.get("type") in _ARTIFACT_TERMINAL_TYPES for event in events)
+
+
+def expected_artifact_kind(definition: OperationDefinition) -> str | None:
+    """返回 Operation 对应的 Core ReviewArtifact kind。"""
+
+    if definition.artifactPolicy == "text":
+        return definition.textArtifactKind
+    if definition.artifactPolicy == "agent_updates":
+        return "agent_updates"
+    if definition.artifactPolicy == "short_outline":
+        return "outline_draft"
+    return None
+
+
+def _expected_artifact_kind(definition: OperationDefinition) -> str:
+    expected = expected_artifact_kind(definition)
+    if expected is None:
+        raise ValueError("ARTIFACT_CONTRACT_MISMATCH：当前 Operation 没有产物类型")
+    return expected

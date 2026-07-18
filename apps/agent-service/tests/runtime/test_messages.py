@@ -125,6 +125,19 @@ def test_beat_plan_brief_contains_structured_plan_protocol() -> None:
     assert "begin_artifact_output" not in brief
 
 
+def test_short_outline_execution_brief_requires_full_then_patch_submission() -> None:
+    primary = build_execution_brief("primary", "develop_short_outline")
+    reviser = build_execution_brief("reviser", "develop_short_outline")
+
+    assert "submit_short_story_outline" in primary
+    assert "mode=full" in primary
+    assert "mode=patch" not in primary
+    assert "mode=patch" in reviser
+    assert "稳定分节 ID" in reviser
+    assert "begin_artifact_output" not in primary
+    assert "begin_artifact_output" not in reviser
+
+
 def test_structured_update_brief_is_scoped_to_operation_builder_tools() -> None:
     lore = build_execution_brief("primary", "create_lore")
     outline = build_execution_brief("primary", "create_outline")

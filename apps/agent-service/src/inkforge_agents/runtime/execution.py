@@ -80,7 +80,10 @@ def build_execution_brief(
     if mode == "reviewer" and operation is not None:
         goal = "复审当前 Operation 对应的 Core 权威草案。"
     elif mode == "reviser" and operation is not None:
-        goal = f"完整重写 {operation.label} 对应的待审核草案。"
+        if operation.kind == "develop_short_outline":
+            goal = "基于当前 Core 权威大纲提交局部结构修改。"
+        else:
+            goal = f"完整重写 {operation.label} 对应的待审核草案。"
     else:
         goal = operation.executionBrief if operation is not None else "提交一致性质量报告。"
     lines = [
@@ -132,6 +135,19 @@ def _operation_protocol(
             "冲突、角色、伏笔引用、预估字数和验收标准，整体还要明确转折、代价、"
             "结果与余波。"
         )
+    elif operation.kind == "develop_short_outline":
+        if mode == "primary":
+            lines.append(
+                "首次生成只能调用 submit_short_story_outline 并提交 mode=full；"
+                "只提交核心前提、创作锚点、自然分节及修改摘要。原始灵感和稳定 ID "
+                "由服务端补全，不得提交分节字数、固定节数或章节映射。"
+            )
+        else:
+            lines.append(
+                "修改只能调用 submit_short_story_outline 并提交 mode=patch；"
+                "sourceRevision 必须等于只读权威草案 revision，使用稳定分节 ID "
+                "执行 update/insert/move/delete，未涉及分节不得重写。"
+            )
     elif operation.artifactPolicy == "agent_updates":
         middle_tools = sorted(
             operation.allowedToolNames
@@ -151,7 +167,7 @@ def _operation_protocol(
         lines.append(
             "构建链必须沿用同一 artifactKey；Runtime 与产物校验器会拒绝身份变化。"
         )
-    if mode == "reviser":
+    if mode == "reviser" and operation.kind != "develop_short_outline":
         lines.append(
             "根据只读资料中的 Core 权威草案完成完整重写，使用当前 Operation 的产物"
             "提交工具，保持原产物类型和权威 artifactKey。"

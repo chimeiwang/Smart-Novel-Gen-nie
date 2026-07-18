@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from pydantic import JsonValue
 
 from .base import (
@@ -63,6 +65,52 @@ def _select_tool(
     tool_names: set[str],
     message_text: str,
 ) -> tuple[str | None, dict[str, JsonValue]]:
+    if "submit_short_story_outline" in tool_names:
+        if "mode=reviser" in message_text:
+            revision_match = re.search(r'"revision"\s*:\s*(\d+)', message_text)
+            source_revision = (
+                int(revision_match.group(1)) if revision_match is not None else 1
+            )
+            section_match = re.search(
+                r'"id"\s*:\s*"(short-section-[^"]+)"', message_text
+            )
+            section_operations: list[JsonValue] = []
+            if section_match is not None:
+                section_operations.append(
+                    {
+                        "operation": "update",
+                        "sectionId": section_match.group(1),
+                        "events": f"模拟模型根据第 {source_revision} 版和用户意见更新了本节事件。",
+                    }
+                )
+            return (
+                "submit_short_story_outline",
+                {
+                    "mode": "patch",
+                    "sourceRevision": source_revision,
+                    "corePremise": f"模拟模型基于第 {source_revision} 版调整后的核心前提。",
+                    "sectionOperations": section_operations,
+                    "changeSummary": "模拟模型完成了本轮大纲修改。",
+                },
+            )
+        return (
+            "submit_short_story_outline",
+            {
+                "mode": "full",
+                "corePremise": "主角试图保住一名被城市集体遗忘的人。",
+                "anchors": {
+                    "mustKeep": ["结局兑现原始灵感"],
+                    "confirmed": ["保持单一主线"],
+                    "avoid": [],
+                },
+                "sections": [
+                    {"title": "异常", "events": "主角发现熟人从所有人的记忆中消失。"},
+                    {"title": "追索", "events": "主角追查遗忘规则并付出代价。"},
+                    {"title": "选择", "events": "主角理解真相并完成最终选择。"},
+                ],
+                "changeSummary": "模拟模型根据原始灵感形成首版完整大纲。",
+            },
+        )
     if "submit_quality_report" in tool_names:
         return (
             "submit_quality_report",

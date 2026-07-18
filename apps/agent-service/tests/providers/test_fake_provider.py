@@ -132,3 +132,67 @@ async def test_fake_provider_returns_complete_quality_report_from_tool_scope() -
         "report": "一致性终检未发现冲突。",
         "rewriteBrief": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_fake_provider_submits_valid_full_short_outline() -> None:
+    result = await FakeModelProvider().complete_turn(
+        ModelTurnRequest(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "当前执行契约：operation=develop_short_outline，mode=primary。",
+                },
+                {"role": "user", "content": "城市每天忘记一个人"},
+            ],
+            tools=[
+                {
+                    "name": "submit_short_story_outline",
+                    "description": "提交中短篇大纲",
+                    "parameters": {"type": "object", "properties": {}},
+                }
+            ],
+            maxOutputTokens=256,
+        )
+    )
+
+    arguments = result.toolCalls[0].arguments
+    assert result.toolCalls[0].name == "submit_short_story_outline"
+    assert arguments["mode"] == "full"
+    assert "originalInspiration" not in arguments
+    assert all("id" not in section for section in arguments["sections"])
+
+
+@pytest.mark.asyncio
+async def test_fake_provider_submits_patch_against_authoritative_revision_and_id() -> None:
+    result = await FakeModelProvider().complete_turn(
+        ModelTurnRequest(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "当前执行契约：operation=develop_short_outline，mode=reviser。",
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        '当前返工草案权威内容：{"revision":7,"payload":'
+                        '{"sections":[{"id":"short-section-authority","title":"开端",'
+                        '"events":"旧事件"}]}}'
+                    ),
+                },
+            ],
+            tools=[
+                {
+                    "name": "submit_short_story_outline",
+                    "description": "提交中短篇大纲",
+                    "parameters": {"type": "object", "properties": {}},
+                }
+            ],
+            maxOutputTokens=256,
+        )
+    )
+
+    arguments = result.toolCalls[0].arguments
+    assert arguments["mode"] == "patch"
+    assert arguments["sourceRevision"] == 7
+    assert arguments["sectionOperations"][0]["sectionId"] == "short-section-authority"

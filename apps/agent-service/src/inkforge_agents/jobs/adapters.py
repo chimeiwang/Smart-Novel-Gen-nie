@@ -6,13 +6,22 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
+from inkforge_contracts import ShortStoryOutlineDraft
 from pydantic import JsonValue
 
 from ..clients.core import CoreServiceClient, RunResource
+from ..operations.artifact_contract import expected_artifact_kind
 from ..operations.contracts import CreativeOperationKind
 from ..operations.definitions import OPERATION_DEFINITIONS
 from ..runtime.agent_runner import AgentRunner, AgentRunRequest
 from ..runtime.execution import AgentExecutionMode
+from ..short_story.outline import (
+    ShortOutlineFullSubmission,
+    ShortOutlinePatchSubmission,
+    SubmitShortStoryOutlineArgs,
+    build_initial_short_outline,
+    merge_short_outline_patch,
+)
 from ..tools.registry import ToolContext
 
 
@@ -118,11 +127,7 @@ class CoreArtifactPort:
             definition = OPERATION_DEFINITIONS[_operation_kind(dict(state))]
         except ValueError:
             raise _artifact_identity_mismatch("当前 Operation 身份无效") from None
-        expected_kind = (
-            "agent_updates"
-            if definition.artifactPolicy == "agent_updates"
-            else definition.textArtifactKind
-        )
+        expected_kind = expected_artifact_kind(definition)
         if expected_kind is None or kind != expected_kind:
             raise _artifact_identity_mismatch("草案类型与当前 Operation 不一致")
         request = {
@@ -249,7 +254,22 @@ class CoreArtifactPort:
     ) -> str:
         resource = _resource(state)
         agent_id = _agent_id(state)
-        kind, payload = _artifact_payload(event, content)
+        short_patch: dict[str, Any] | None = None
+        title: Any
+        summary: Any
+        reviewer_agent: Any
+        if event.get("type") == "submit_short_story_outline":
+            kind, payload, title, summary, short_patch = self._short_outline_payload(
+                state,
+                event,
+                expected_artifact_id=expected_artifact_id,
+            )
+            reviewer_agent = None
+        else:
+            kind, payload = _artifact_payload(event, content)
+            title = event.get("title")
+            summary = event.get("summary")
+            reviewer_agent = event.get("reviewerAgent")
         artifact_key = event.get("artifactKey")
         if not isinstance(artifact_key, str) or not artifact_key:
             raise ValueError("ARTIFACT_CONTRACT_MISMATCH：待审核草案缺少 artifactKey")
@@ -262,23 +282,25 @@ class CoreArtifactPort:
             "artifactKey": artifact_key,
             "kind": kind,
             "status": status,
-            "title": event.get("title"),
-            "summary": event.get("summary"),
+            "title": title,
+            "summary": summary,
             "payload": payload,
             "diff": None,
             "createdByAgent": agent_id,
-            "reviewerAgent": event.get("reviewerAgent"),
+            "reviewerAgent": reviewer_agent,
         }
         if expected_artifact_id is not None:
             current_record = self._require_record(expected_artifact_id)
             request["expectedRevision"] = current_record.revision
             revision_diff: dict[str, Any] = {
                 "sourceRevision": current_record.revision,
-                "changeSummary": event.get("summary"),
+                "changeSummary": summary,
             }
             raw_user_request = state.get("userMessage")
             if isinstance(raw_user_request, str) and raw_user_request.strip():
                 revision_diff["userRequest"] = raw_user_request
+            if short_patch is not None:
+                revision_diff["outlinePatch"] = short_patch
             request["diff"] = revision_diff
         response = await self._core.create_artifact(
             resource,
@@ -295,6 +317,56 @@ class CoreArtifactPort:
             _require_same_runtime_owner(current.resource, resource)
         self._records[artifact_id] = _ArtifactRecord(resource, request, _revision(response))
         return artifact_id
+
+    def _short_outline_payload(
+        self,
+        state: dict[str, Any],
+        event: dict[str, Any],
+        *,
+        expected_artifact_id: str | None,
+    ) -> tuple[str, dict[str, Any], str, str, dict[str, Any] | None]:
+        model_payload = {
+            key: value
+            for key, value in event.items()
+            if key not in {"type", "kind", "artifactKey"}
+        }
+        submission = SubmitShortStoryOutlineArgs.model_validate(model_payload).root
+        artifact_key = event.get("artifactKey")
+        if not isinstance(artifact_key, str) or not artifact_key:
+            raise ValueError("ARTIFACT_CONTRACT_MISMATCH：中短篇大纲缺少稳定标识")
+        inspiration = _short_outline_inspiration(state)
+        if expected_artifact_id is None:
+            if not isinstance(submission, ShortOutlineFullSubmission):
+                raise ValueError("SHORT_OUTLINE_MERGE_FAILED：首次生成必须提交 mode=full")
+            draft = build_initial_short_outline(
+                submission,
+                original_inspiration=inspiration,
+                artifact_key=artifact_key,
+            )
+            patch = None
+        else:
+            if not isinstance(submission, ShortOutlinePatchSubmission):
+                raise ValueError("SHORT_OUTLINE_MERGE_FAILED：大纲修改必须提交 mode=patch")
+            record = self._require_record(expected_artifact_id)
+            current = ShortStoryOutlineDraft.model_validate(record.request.get("payload"))
+            if current.originalInspiration != inspiration:
+                raise ValueError(
+                    "SHORT_OUTLINE_MERGE_FAILED：Core 原始灵感与权威草案不一致"
+                )
+            draft = merge_short_outline_patch(
+                submission,
+                current=current,
+                artifact_id=expected_artifact_id,
+                current_revision=record.revision,
+            )
+            patch = submission.model_dump(mode="json", exclude_none=True)
+        return (
+            "outline_draft",
+            draft.model_dump(mode="json"),
+            "中短篇大纲",
+            draft.changeSummary,
+            patch,
+        )
 
     def _require_record(self, artifact_id: str) -> _ArtifactRecord:
         record = self._records.get(artifact_id)
@@ -435,6 +507,25 @@ def _artifact_payload(event: dict[str, Any], content: str) -> tuple[str, dict[st
     if not isinstance(kind, str) or not kind:
         raise ValueError("待审核草案控制事件缺少 kind")
     return kind, {"kind": kind, "content": content}
+
+
+def _short_outline_inspiration(state: dict[str, Any]) -> str:
+    runtime_context = state.get("runtimeContext")
+    core_context = (
+        runtime_context.get("coreContext") if isinstance(runtime_context, dict) else None
+    )
+    planning = core_context.get("planning") if isinstance(core_context, dict) else None
+    short_context = (
+        planning.get("shortStoryContext") if isinstance(planning, dict) else None
+    )
+    inspiration = (
+        short_context.get("originalInspiration")
+        if isinstance(short_context, dict)
+        else None
+    )
+    if not isinstance(inspiration, str) or not inspiration.strip():
+        raise ValueError("SHORT_OUTLINE_MERGE_FAILED：缺少 Core 权威原始灵感")
+    return inspiration.strip()
 
 
 def _resource(state: dict[str, Any]) -> RunResource:

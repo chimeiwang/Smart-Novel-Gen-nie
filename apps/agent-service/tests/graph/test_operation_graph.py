@@ -613,3 +613,126 @@ async def test_graph_passes_explicit_modes_and_revises_without_patch_node() -> N
     assert all(kind == "write_chapter" for _, _, kind in executor.calls)
     assert artifacts.actions == ["submit", "revise", "await"]
     assert "applyArtifactPatch" not in graph.get_graph().nodes
+
+
+class ShortOutlineExecutor:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, AgentExecutionMode]] = []
+
+    async def run(
+        self,
+        agent_id: str,
+        state: dict[str, Any],
+        *,
+        execution_mode: AgentExecutionMode,
+        operation_kind: CreativeOperationKind,
+    ) -> dict[str, Any]:
+        assert operation_kind == "develop_short_outline"
+        self.calls.append((agent_id, execution_mode))
+        if execution_mode == "primary":
+            event = {
+                "type": "submit_short_story_outline",
+                "mode": "full",
+                "corePremise": "记者对抗城市的集体遗忘。",
+                "anchors": {"mustKeep": [], "confirmed": [], "avoid": []},
+                "sections": [{"title": "失踪", "events": "同事从记忆中消失。"}],
+                "changeSummary": "首版大纲。",
+            }
+        else:
+            event = {
+                "type": "submit_short_story_outline",
+                "mode": "patch",
+                "sourceRevision": int(state.get("artifactIteration", 0)),
+                "corePremise": f"第 {state.get('artifactIteration')} 次修改后的前提。",
+                "changeSummary": "按用户意见修改。",
+            }
+        return {"visibleContent": "完整大纲已生成。", "controlEvents": [event]}
+
+
+@pytest.mark.asyncio
+async def test_short_outline_uses_only_plot_agent_and_skips_all_reviewers() -> None:
+    executor = ShortOutlineExecutor()
+    artifacts = ArtifactPort()
+    graph = build_operation_graph(
+        OperationDependencies(agentExecutor=executor, artifacts=artifacts),
+        checkpointer=InMemorySaver(),
+    )
+    state = _state(
+        task_id="task-short",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="根据灵感生成大纲",
+    )
+    state["runtimeContext"]["coreContext"]["planning"]["shortStoryContext"] = {
+        "originalInspiration": "城市每天忘记一个人"
+    }
+    # 即使旧快照误带 reviewer，执行契约也以当前 OperationDefinition 为准。
+    state["currentOperation"] = CreativeOperation(
+        kind="develop_short_outline",
+        targetType="outline",
+        userGoal="根据灵感生成大纲",
+        primaryAgent="剧情",
+        reviewers=["编辑", "校验"],
+        outputKind="outline_proposal",
+        requiresArtifact=True,
+        requiresUserApproval=True,
+        confidence=1,
+        reasoning="测试",
+    )
+
+    result = await graph.ainvoke(
+        state, {"configurable": {"thread_id": "short-outline-no-review"}}
+    )
+
+    assert result["__interrupt__"]
+    assert executor.calls == [("剧情", "primary")]
+    assert artifacts.actions == ["submit", "await"]
+    assert result.get("reviewResults", []) == []
+
+
+@pytest.mark.asyncio
+async def test_short_outline_accepts_more_than_five_user_revision_rounds() -> None:
+    executor = ShortOutlineExecutor()
+    artifacts = ArtifactPort()
+    graph = build_operation_graph(
+        OperationDependencies(agentExecutor=executor, artifacts=artifacts)
+    )
+    state = _state(
+        task_id="task-short-many",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="根据灵感生成大纲",
+    )
+    state["runtimeContext"]["coreContext"]["planning"]["shortStoryContext"] = {
+        "originalInspiration": "城市每天忘记一个人"
+    }
+    state["currentOperation"] = CreativeOperation(
+        kind="develop_short_outline",
+        targetType="outline",
+        userGoal="根据灵感生成大纲",
+        primaryAgent="剧情",
+        reviewers=[],
+        outputKind="outline_proposal",
+        requiresArtifact=True,
+        requiresUserApproval=True,
+        confidence=1,
+        reasoning="测试",
+    )
+
+    current = await graph.ainvoke(state)
+    for index in range(6):
+        current = {key: value for key, value in current.items() if key != "__interrupt__"}
+        current["resumeDecision"] = {
+            "decision": "revise",
+            "artifactId": "artifact-1",
+            "userMessage": f"第 {index + 1} 次修改",
+        }
+        current = await graph.ainvoke(current)
+
+    assert current["__interrupt__"]
+    assert current["artifactIteration"] == 6
+    assert executor.calls == [("剧情", "primary"), *[("剧情", "reviser")] * 6]
+    assert artifacts.actions.count("revise") == 6
+    assert artifacts.actions.count("await") == 7

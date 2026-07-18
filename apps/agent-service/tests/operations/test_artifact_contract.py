@@ -41,6 +41,50 @@ def test_text_submission_extracts_complete_content_and_generates_exact_stable_ke
     assert stable_artifact_key("task-1", "rewrite_scene") != expected
 
 
+def test_short_outline_submission_is_normalized_to_outline_artifact() -> None:
+    result = validate_artifact_submission(
+        definition=OPERATION_DEFINITIONS["develop_short_outline"],
+        events=[
+            {
+                "type": "submit_short_story_outline",
+                "mode": "full",
+                "corePremise": "城市每天忘记一个人。",
+                "anchors": {"mustKeep": [], "confirmed": [], "avoid": []},
+                "sections": [{"title": "开端", "events": "记者发现失踪。"}],
+                "changeSummary": "首版。",
+            }
+        ],
+        visible_content="大纲已整理。",
+        authoritative_artifact=None,
+        task_id="task-short",
+        operation_kind="develop_short_outline",
+    )
+
+    assert result.event["kind"] == "outline_draft"
+    assert result.artifactKey == stable_artifact_key(
+        "task-short", "develop_short_outline"
+    )
+    assert result.content == "大纲已整理。"
+
+
+def test_short_outline_rejects_generic_long_outline_terminal_event() -> None:
+    with pytest.raises(ValueError, match="ARTIFACT_CONTRACT_MISMATCH"):
+        validate_artifact_submission(
+            definition=OPERATION_DEFINITIONS["develop_short_outline"],
+            events=[
+                {
+                    "type": "propose_updates",
+                    "updates": {"outline": "错误长篇更新"},
+                    "summary": "错误事件",
+                }
+            ],
+            visible_content="错误",
+            authoritative_artifact=None,
+            task_id="task-short",
+            operation_kind="develop_short_outline",
+        )
+
+
 @pytest.mark.parametrize(
     "events",
     [

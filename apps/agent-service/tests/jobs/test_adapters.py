@@ -93,6 +93,60 @@ def _runtime_context() -> dict[str, Any]:
     }
 
 
+def _short_runtime_context() -> dict[str, Any]:
+    context = _runtime_context()
+    context["coreContext"] = {
+        "workspace": {},
+        "planning": {
+            "shortStoryContext": {
+                "directEdit": None,
+                "revisionRequest": "根据灵感生成大纲",
+                "anchors": None,
+                "currentOutline": None,
+                "originalInspiration": "城市每天忘记一个人",
+                "recentConversation": [],
+            }
+        },
+    }
+    return context
+
+
+def _short_state() -> dict[str, Any]:
+    return {
+        "userId": "user-1",
+        "novelId": "novel-1",
+        "taskId": "task-1",
+        "chapterId": "chapter-1",
+        "activeAgent": "剧情",
+        "userMessage": "根据灵感生成大纲",
+        "currentOperation": {
+            "kind": "develop_short_outline",
+            "primaryAgent": "剧情",
+        },
+        "runtimeContext": _short_runtime_context(),
+    }
+
+
+def _short_full_event() -> dict[str, Any]:
+    return {
+        "type": "submit_short_story_outline",
+        "kind": "outline_draft",
+        "artifactKey": "short-outline-key",
+        "mode": "full",
+        "corePremise": "记者试图保住一名被城市遗忘的人。",
+        "anchors": {
+            "mustKeep": ["被遗忘者主动选择消失"],
+            "confirmed": [],
+            "avoid": ["梦境反转"],
+        },
+        "sections": [
+            {"title": "失踪", "events": "记者发现同事从所有记录中消失。"},
+            {"title": "选择", "events": "记者查明真相并完成告别。"},
+        ],
+        "changeSummary": "形成首版完整大纲。",
+    }
+
+
 def _resource(*, run_id: str = "run-1", job_id: str = "job-1") -> RunResource:
     return RunResource(
         userId="user-1",
@@ -590,3 +644,137 @@ async def test_revision_sends_authoritative_expected_revision_to_core() -> None:
         "userRequest": "  第三节不要让主角妥协。  ",
         "changeSummary": "返工",
     }
+
+
+@pytest.mark.asyncio
+async def test_short_outline_initial_submission_sends_complete_typed_payload_to_core() -> None:
+    core = CoreClient()
+    port = CoreArtifactPort(core)
+
+    artifact_id = await port.submit(_short_state(), _short_full_event(), "模型可见说明")
+
+    assert artifact_id == "artifact-1"
+    request = core.artifacts[0]
+    assert request["kind"] == "outline_draft"
+    assert request["title"] == "中短篇大纲"
+    assert request["summary"] == "形成首版完整大纲。"
+    assert request["reviewerAgent"] is None
+    assert request["diff"] is None
+    payload = request["payload"]
+    assert payload["kind"] == "outline_draft"
+    assert payload["storyLengthProfile"] == "short_medium"
+    assert payload["originalInspiration"] == "城市每天忘记一个人"
+    assert [section["title"] for section in payload["sections"]] == ["失踪", "选择"]
+    assert all(section["id"].startswith("short-section-") for section in payload["sections"])
+    assert "模型可见说明" not in payload["content"]
+    assert "第 2 节：选择" in payload["content"]
+
+
+@pytest.mark.asyncio
+async def test_short_outline_patch_merges_full_payload_and_preserves_raw_diff() -> None:
+    core = CoreClient()
+    port = CoreArtifactPort(core)
+    state = _short_state()
+    artifact_id = await port.submit(state, _short_full_event(), "")
+    current = port.review_context(artifact_id)
+    current_payload = current["payload"]
+    first_id = current_payload["sections"][0]["id"]
+    second_id = current_payload["sections"][1]["id"]
+    state["activeArtifactId"] = artifact_id
+    state["userMessage"] = "  只修改第一节，并在结尾前加一节。  "
+
+    await port.revise(
+        state,
+        {
+            "type": "submit_short_story_outline",
+            "kind": "outline_draft",
+            "artifactKey": "short-outline-key",
+            "mode": "patch",
+            "sourceRevision": 1,
+            "sectionOperations": [
+                {"operation": "update", "sectionId": first_id, "events": "记者收到匿名空白信。"},
+                {
+                    "operation": "insert",
+                    "beforeSectionId": second_id,
+                    "title": "名单",
+                    "events": "记者找到历年被遗忘者名单。",
+                },
+            ],
+            "changeSummary": "修改开场线索并补入名单。",
+        },
+        "",
+    )
+
+    request = core.artifacts[1]
+    assert request["expectedRevision"] == 1
+    assert request["payload"]["sections"][0] == {
+        "id": first_id,
+        "title": "失踪",
+        "events": "记者收到匿名空白信。",
+    }
+    assert request["payload"]["sections"][-1] == current_payload["sections"][-1]
+    assert request["diff"]["userRequest"] == "  只修改第一节，并在结尾前加一节。  "
+    assert request["diff"]["sourceRevision"] == 1
+    assert request["diff"]["changeSummary"] == "修改开场线索并补入名单。"
+    assert request["diff"]["outlinePatch"]["mode"] == "patch"
+    assert request["diff"]["outlinePatch"]["sectionOperations"][0]["sectionId"] == first_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_mode", ["full", "patch"])
+async def test_short_outline_rejects_wrong_generation_mode_before_core_call(
+    invalid_mode: str,
+) -> None:
+    core = CoreClient()
+    port = CoreArtifactPort(core)
+    state = _short_state()
+    if invalid_mode == "patch":
+        event = {
+            "type": "submit_short_story_outline",
+            "kind": "outline_draft",
+            "artifactKey": "short-outline-key",
+            "mode": "patch",
+            "sourceRevision": 1,
+            "corePremise": "错误初稿 patch",
+            "changeSummary": "错误模式。",
+        }
+        with pytest.raises(ValueError, match="首次生成.*full"):
+            await port.submit(state, event, "")
+        assert core.artifacts == []
+        return
+
+    artifact_id = await port.submit(state, _short_full_event(), "")
+    state["activeArtifactId"] = artifact_id
+    before = len(core.artifacts)
+    with pytest.raises(ValueError, match="修改.*patch"):
+        await port.revise(state, _short_full_event(), "")
+    assert len(core.artifacts) == before
+
+
+@pytest.mark.asyncio
+async def test_short_outline_merge_error_does_not_call_core() -> None:
+    core = CoreClient()
+    port = CoreArtifactPort(core)
+    state = _short_state()
+    artifact_id = await port.submit(state, _short_full_event(), "")
+    state["activeArtifactId"] = artifact_id
+    before = len(core.artifacts)
+
+    with pytest.raises(ValueError, match="未知分节"):
+        await port.revise(
+            state,
+            {
+                "type": "submit_short_story_outline",
+                "kind": "outline_draft",
+                "artifactKey": "short-outline-key",
+                "mode": "patch",
+                "sourceRevision": 1,
+                "sectionOperations": [
+                    {"operation": "delete", "sectionId": "unknown-section"}
+                ],
+                "changeSummary": "错误删除。",
+            },
+            "",
+        )
+
+    assert len(core.artifacts) == before

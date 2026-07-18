@@ -53,3 +53,16 @@ def test_all_static_prompts_exclude_runtime_protocol() -> None:
     for prompt in ALL_SYSTEM_PROMPTS:
         for forbidden in RUNTIME_PROTOCOL_FRAGMENTS:
             assert forbidden not in prompt
+
+
+def test_plot_prompt_has_no_fixed_short_story_section_or_chapter_assumption() -> None:
+    for forbidden in (
+        "三到十万字",
+        "八到二十五章",
+        "三到五个剧情单元",
+        "固定节数",
+        "每节字数",
+    ):
+        assert forbidden not in PLOT_SYSTEM_PROMPT
+    assert "分节数量完全由故事需要决定" in PLOT_SYSTEM_PROMPT
+    assert "不映射为章节" in PLOT_SYSTEM_PROMPT

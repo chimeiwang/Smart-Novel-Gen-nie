@@ -17,7 +17,7 @@ ContextStrategy = Literal[
     "short_outline",
     "short_story",
 ]
-ArtifactPolicy = Literal["none", "agent_updates", "text"]
+ArtifactPolicy = Literal["none", "agent_updates", "text", "short_outline"]
 ArtifactKeyPolicy = Literal[
     "none", "generated_stable", "builder_or_generated", "preserve"
 ]
@@ -316,9 +316,12 @@ OPERATION_DEFINITIONS: dict[CreativeOperationKind, OperationDefinition] = {
         (),
         "outline_proposal",
         "short_outline",
-        "none",
+        "short_outline",
         "根据 Core 权威中短篇上下文生成或修改完整大纲；不得回退为长篇大纲。",
-        allowed_tools=_BASE_READ,
+        allowed_tools=frozenset({"submit_short_story_outline"}),
+        terminal_tools=frozenset({"submit_short_story_outline"}),
+        artifact_events=frozenset({"submit_short_story_outline"}),
+        artifact_key_policy="generated_stable",
     ),
     "write_short_story": _definition(
         "write_short_story",

@@ -7,6 +7,7 @@ from typing import Any, Literal, Self
 from inkforge_contracts import ConsistencyQualityReport
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
+from ..short_story.outline import SubmitShortStoryOutlineArgs
 from .permissions import control_permission
 from .registry import ToolDefinition
 
@@ -219,6 +220,13 @@ def control_tools() -> list[ToolDefinition]:
             ValidationReportArgs,
             "control.validation",
             None,
+        ),
+        (
+            "submit_short_story_outline",
+            "提交中短篇完整大纲或基于稳定分节 ID 的局部修改。",
+            SubmitShortStoryOutlineArgs,
+            "control.short_outline",
+            {"剧情"},
         ),
     ]
     return [

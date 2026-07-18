@@ -135,11 +135,11 @@ EXPECTED_CONTRACTS: dict[str, dict[str, Any]] = {
         "key_policy": "builder_or_generated",
     },
     "develop_short_outline": {
-        "allowed": BASE_READ,
-        "terminal": frozenset(),
-        "events": frozenset(),
+        "allowed": frozenset({"submit_short_story_outline"}),
+        "terminal": frozenset({"submit_short_story_outline"}),
+        "events": frozenset({"submit_short_story_outline"}),
         "text_kind": None,
-        "key_policy": "none",
+        "key_policy": "generated_stable",
     },
     "write_short_story": {
         "allowed": frozenset(),
@@ -183,6 +183,17 @@ def test_all_creative_operations_have_exact_execution_contracts() -> None:
         assert definition.artifactEventTypes == expected["events"], kind
         assert definition.textArtifactKind == expected["text_kind"], kind
         assert definition.artifactKeyPolicy == expected["key_policy"], kind
+
+
+def test_short_outline_uses_dedicated_artifact_without_reviewers() -> None:
+    definition = OPERATION_DEFINITIONS["develop_short_outline"]
+
+    assert definition.primaryAgent == "剧情"
+    assert definition.reviewers == ()
+    assert definition.contextStrategy == "short_outline"
+    assert definition.artifactPolicy == "short_outline"
+    assert definition.requiresArtifact is True
+    assert definition.requiresUserApproval is True
 
 
 def test_every_operation_declares_valid_execution_contract() -> None:
