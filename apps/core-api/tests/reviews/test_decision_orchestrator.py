@@ -629,6 +629,49 @@ async def test_short_outline_approve_rejects_edited_content_shortcut() -> None:
     assert subject.commands.created is None
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"editedContent": "试图直接改正文"},
+        {"selectedUpdateRefs": [{"section": "content"}]},
+    ],
+)
+async def test_short_story_approve_rejects_direct_edit_and_partial_apply(
+    changes: dict[str, object],
+) -> None:
+    subject = fixture()
+    original = subject.artifacts.require_artifact_revision
+
+    async def short_story(
+        user_id: str, artifact_id: str, expected_revision: int
+    ) -> ArtifactRecord:
+        result = await original(user_id, artifact_id, expected_revision)
+        return replace(
+            result,
+            payload={
+                "kind": "chapter_draft",
+                "storyLengthProfile": "short_medium",
+                "content": "完整正文",
+            },
+        )
+
+    subject.artifacts.require_artifact_revision = short_story  # type: ignore[method-assign]
+    request = ReviewArtifactDecisionRequest.model_validate(
+        {
+            "clientRequestId": "request-00000001",
+            "decision": "approve",
+            "expectedRevision": 1,
+            **changes,
+        }
+    )
+    with pytest.raises(ApiError) as caught:
+        await subject.orchestrator.decide("user-1", "artifact-1", request)
+
+    assert caught.value.code == "SHORT_STORY_DRAFT_DIRECT_EDIT_FORBIDDEN"
+    assert subject.commands.created is None
+
+
 def _orchestrator_with_commands(
     commands: CommandRepository,
 ) -> ReviewDecisionOrchestrator:

@@ -3,11 +3,13 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from hashlib import sha256
 from typing import Any, Literal, cast
 
 from inkforge_contracts.jobs import AgentJobStatus, WritingJobPayload
-from inkforge_contracts.short_story import ShortStoryOutlineDraft
+from inkforge_contracts.short_story import (
+    ShortStoryOutlineDraft,
+    canonical_short_outline_hash,
+)
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -919,17 +921,11 @@ async def _resolve_start_workflow_identity(
                 code="SHORT_STORY_OUTLINE_INVALID",
                 message="已批准中短篇大纲载荷无效",
             ) from None
-        canonical = json.dumps(
-            outline.model_dump(mode="json"),
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        )
         source = {
             "kind": "approved_short_outline",
             "outlineArtifactId": artifact.id,
             "outlineRevision": artifact.revision,
-            "outlineHash": sha256(canonical.encode("utf-8")).hexdigest(),
+            "outlineHash": canonical_short_outline_hash(outline),
         }
     return {
         "workflowKind": "short_medium",

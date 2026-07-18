@@ -17,6 +17,7 @@ from .schemas import (
     ReviewArtifactRevisionDetail,
     ReviewArtifactRevisionSummary,
     SaveShortStoryOutlineRequest,
+    ShortStoryArtifactsResponse,
 )
 
 router = APIRouter(tags=["待审核草案"])
@@ -55,6 +56,18 @@ DecisionOrchestrator = Annotated[
     ReviewDecisionOrchestrator, Depends(get_review_decision_orchestrator)
 ]
 Repository = Annotated[ReviewRepository, Depends(get_review_repository)]
+
+
+@router.get(
+    "/novels/{novel_id}/short-story/artifacts",
+    response_model=ShortStoryArtifactsResponse,
+)
+async def get_short_story_artifacts(
+    novel_id: str,
+    user: User,
+    repository: Repository,
+) -> ShortStoryArtifactsResponse:
+    return await repository.get_short_story_artifacts(user.id, novel_id)
 
 
 @router.get("/review-artifacts/{artifact_id}", response_model=ReviewArtifactResponse)

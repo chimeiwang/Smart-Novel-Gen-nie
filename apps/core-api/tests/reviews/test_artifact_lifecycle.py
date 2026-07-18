@@ -1,5 +1,5 @@
 import pytest
-from inkforge_contracts import ShortStoryOutlineDraft
+from inkforge_contracts import ShortStoryChapterDraft, ShortStoryOutlineDraft
 from inkforge_core.app import create_app
 from inkforge_core.errors import ApiError
 from inkforge_core.reviews.apply import resolve_apply_target
@@ -196,6 +196,51 @@ def test_short_outline_payload_is_strongly_validated_without_breaking_legacy_out
     assert legacy.payload == {"kind": "outline_draft", "content": "旧长篇大纲"}
 
 
+def test_short_story_chapter_payload_is_strongly_typed() -> None:
+    content = "甲" * 6000
+    request = CreateArtifactRequest.model_validate(
+        {
+            "runId": "run-1",
+            "taskId": "task-1",
+            "novelId": "novel-1",
+            "chapterId": "chapter-1",
+            "artifactKey": "short-story-draft",
+            "kind": "chapter_draft",
+            "status": "under_review",
+            "payload": {
+                "kind": "chapter_draft",
+                "storyLengthProfile": "short_medium",
+                "content": content,
+                "metadata": {
+                    "sourceOutlineArtifactId": "outline-1",
+                    "sourceOutlineRevision": 1,
+                    "sourceOutlineHash": "a" * 64,
+                    "targetWordCount": 6000,
+                    "actualWordCount": 6000,
+                    "targetChapterId": "chapter-1",
+                    "baseChapterHash": "b" * 64,
+                    "generationCommandId": "command-1",
+                    "automaticRewriteCount": 0,
+                    "generationReason": "user_request",
+                },
+            },
+            "createdByAgent": "写作",
+        }
+    )
+
+    assert isinstance(request.payload, ShortStoryChapterDraft)
+    with pytest.raises(ValidationError):
+        CreateArtifactRequest.model_validate(
+            {
+                **request.model_dump(mode="json"),
+                "payload": {
+                    **request.payload.model_dump(mode="json"),
+                    "content": "字数被篡改",
+                },
+            }
+        )
+
+
 def test_decisions_require_revision_and_short_outline_edit_has_no_content_shortcut() -> None:
     with pytest.raises(ValidationError):
         ReviewArtifactDecisionRequest.model_validate(
@@ -233,5 +278,9 @@ def test_public_openapi_exposes_short_outline_and_revision_routes() -> None:
 
     assert "ShortStoryOutlineDraft" in schemas
     assert "ShortStoryOutlineSection" in schemas
+    assert "ShortStoryChapterDraft" in schemas
+    assert "ShortStoryArtifactsResponse" in schemas
+    assert "ShortStoryTaskStatus" in schemas
     assert "/api/v1/review-artifacts/{artifact_id}/revisions" in paths
     assert "/api/v1/review-artifacts/{artifact_id}/outline" in paths
+    assert "/api/v1/novels/{novel_id}/short-story/artifacts" in paths

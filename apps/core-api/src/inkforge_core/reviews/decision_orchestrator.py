@@ -173,6 +173,19 @@ class ReviewDecisionOrchestrator:
                         code="SHORT_OUTLINE_EDIT_REQUIRES_SAVE",
                         message="中短篇大纲必须先保存为新版本，再批准当前精确版本",
                     )
+                if (
+                    artifact.kind == "chapter_draft"
+                    and artifact.payload.get("storyLengthProfile") == "short_medium"
+                    and (
+                        request.editedContent is not None
+                        or request.selectedUpdateRefs is not None
+                    )
+                ):
+                    raise ApiError(
+                        status_code=409,
+                        code="SHORT_STORY_DRAFT_DIRECT_EDIT_FORBIDDEN",
+                        message="中短篇完整正文必须按当前精确版本批准，不能在批准时直接改写或部分应用",
+                    )
                 if artifact.task_id != task.id:
                     raise ApiError(
                         status_code=409,

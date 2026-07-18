@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
@@ -10,8 +11,12 @@ from inkforge_core.db.models import (
     Foreshadowing,
     Novel,
     ReviewArtifact,
+    ReviewArtifactEvaluation,
+    StoryBackground,
+    WorldSetting,
     WritingBible,
     WritingRunCommand,
+    WritingStyle,
     WritingTask,
 )
 from inkforge_core.errors import ApiError
@@ -415,6 +420,197 @@ async def test_short_story_source_must_still_be_the_latest_applied_outline() -> 
         )
 
     assert exc_info.value.code == "WRITING_CONTEXT_IDENTITY_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_short_story_manuscript_context_contains_only_authoritative_inputs() -> None:
+    repository = WritingContextRepository(cast(Any, None))
+    task = WritingTask(
+        id="task-1",
+        novelId="novel-1",
+        chapterId="chapter-1",
+        targetWordCount=6000,
+        selectedAgents="写作,编辑,校验",
+    )
+    chapter = Chapter(
+        id="chapter-1", novelId="novel-1", title="正文", order=1, content="旧正文"
+    )
+    novel = Novel(
+        id="novel-1",
+        userId="user-1",
+        name="中短篇",
+        summary="原始灵感",
+        appliedStyleId="style-1",
+    )
+    bible = WritingBible(
+        id="bible-1",
+        novelId="novel-1",
+        storyLengthProfile="short_medium",
+        targetTotalWordCount=6000,
+        genre="悬疑",
+        taboo="不要梦境解释",
+    )
+    outline_payload = {
+        "kind": "outline_draft",
+        "storyLengthProfile": "short_medium",
+        "originalInspiration": "原始灵感",
+        "corePremise": "主人公必须查清讣告来源。",
+        "anchors": {"mustKeep": ["未来讣告"], "confirmed": [], "avoid": []},
+        "sections": [{"id": "section-1", "title": "来信", "events": "收到讣告。"}],
+        "content": "由契约重建",
+        "changeSummary": "已批准",
+        "anchorChanges": [],
+    }
+    from inkforge_contracts import ShortStoryOutlineDraft, canonical_short_outline_hash
+
+    outline = ShortStoryOutlineDraft.model_validate(outline_payload)
+    artifact = ReviewArtifact(
+        id="outline-1",
+        novelId="novel-1",
+        chapterId="chapter-1",
+        kind="outline_draft",
+        status="applied",
+        revision=2,
+        payloadJson=outline.model_dump_json(),
+    )
+    background = StoryBackground(novelId="novel-1", content="故事背景")
+    world = WorldSetting(novelId="novel-1", content="世界规则")
+    style = WritingStyle(
+        id="style-1",
+        userId="user-1",
+        name="冷峻",
+        portraitMarkdown="文风画像",
+        sourceType="manual",
+    )
+    payload = WritingJobPayload.model_validate(
+        {
+            "version": 1,
+            "resume": False,
+            "chapterId": "chapter-1",
+            "writingSessionId": None,
+            "resumeInput": None,
+            "workflowKind": "short_medium",
+            "operation": "write_short_story",
+            "targetTotalWordCount": 6000,
+            "source": {
+                "kind": "approved_short_outline",
+                "outlineArtifactId": "outline-1",
+                "outlineRevision": 2,
+                "outlineHash": canonical_short_outline_hash(outline),
+            },
+        }
+    )
+
+    result = await repository._short_story_manuscript_context(
+        cast(AsyncSession, FakeScalarSession([artifact, background, world, style])),
+        task=task,
+        chapter=chapter,
+        novel=novel,
+        bible=bible,
+        payload=payload,
+    )
+
+    assert list(result) == [
+        "approvedOutline",
+        "anchors",
+        "originalInspiration",
+        "targetTotalWordCount",
+        "targetChapter",
+        "writingBible",
+        "storyBackground",
+        "worldSetting",
+        "appliedStyle",
+    ]
+    assert result["approvedOutline"]["artifactId"] == "outline-1"
+    assert result["targetChapter"]["baseContentHash"]
+    assert result["storyBackground"] == "故事背景"
+    assert result["appliedStyle"]["portraitMarkdown"] == "文风画像"
+
+
+class ShortRunArtifactSession:
+    def __init__(
+        self,
+        artifact: ReviewArtifact,
+        evaluations: list[ReviewArtifactEvaluation],
+    ) -> None:
+        self.artifact = artifact
+        self.evaluations = evaluations
+
+    async def scalar(self, statement: object) -> object:
+        del statement
+        return self.artifact
+
+    async def scalars(self, statement: object):
+        del statement
+
+        class Result:
+            def __init__(self, values: list[ReviewArtifactEvaluation]) -> None:
+                self.values = values
+
+            def all(self) -> list[ReviewArtifactEvaluation]:
+                return self.values
+
+        return Result(self.evaluations)
+
+
+@pytest.mark.asyncio
+async def test_short_story_run_artifact_recovers_without_snapshot_active_id() -> None:
+    repository = WritingContextRepository(cast(Any, None))
+    content = "甲" * 6000
+    artifact = ReviewArtifact(
+        id="draft-1",
+        taskId="task-1",
+        novelId="novel-1",
+        chapterId="chapter-1",
+        artifactKey="short-story-draft",
+        kind="chapter_draft",
+        status="under_review",
+        revision=1,
+        payloadJson=json.dumps(
+            {
+                "kind": "chapter_draft",
+                "storyLengthProfile": "short_medium",
+                "content": content,
+                "metadata": {
+                    "sourceOutlineArtifactId": "outline-1",
+                    "sourceOutlineRevision": 1,
+                    "sourceOutlineHash": "a" * 64,
+                    "targetWordCount": 6000,
+                    "actualWordCount": 6000,
+                    "targetChapterId": "chapter-1",
+                    "baseChapterHash": "b" * 64,
+                    "generationCommandId": "command-1",
+                    "automaticRewriteCount": 0,
+                    "generationReason": "user_request",
+                },
+            },
+            ensure_ascii=False,
+        ),
+    )
+    evaluation = ReviewArtifactEvaluation(
+        id="evaluation-1",
+        artifactId="draft-1",
+        revision=1,
+        evaluatorAgent="编辑",
+        verdict="pass",
+        summary="编辑通过",
+        createdAt=datetime.now(UTC),
+    )
+    task = WritingTask(
+        id="task-1",
+        novelId="novel-1",
+        chapterId="chapter-1",
+        graphStateJson=None,
+    )
+
+    result = await repository._short_story_run_artifact(
+        cast(AsyncSession, ShortRunArtifactSession(artifact, [evaluation])), task
+    )
+
+    assert result is not None
+    assert result["id"] == "draft-1"
+    assert result["payload"]["content"] == content
+    assert result["evaluations"][0]["evaluatorAgent"] == "编辑"
 
 
 class FakeScalarsResult:

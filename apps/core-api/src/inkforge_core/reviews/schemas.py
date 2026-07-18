@@ -5,6 +5,7 @@ from typing import Literal
 
 from inkforge_contracts import (
     ShortStoryAnchors,
+    ShortStoryChapterDraft,
     ShortStoryOutlineDraft,
 )
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
@@ -63,7 +64,7 @@ class ReviewArtifactResponse(ReviewSchema):
     status: ArtifactStatus
     title: str | None
     summary: str | None
-    payload: ShortStoryOutlineDraft | dict[str, JsonValue]
+    payload: ShortStoryOutlineDraft | ShortStoryChapterDraft | dict[str, JsonValue]
     diff: JsonValue | None
     createdByAgent: str | None
     updatedByAgent: str | None
@@ -116,7 +117,7 @@ class CreateArtifactRequest(ReviewSchema):
     status: Literal["draft", "under_review", "awaiting_user"]
     title: str | None = None
     summary: str | None = None
-    payload: ShortStoryOutlineDraft | dict[str, JsonValue]
+    payload: ShortStoryOutlineDraft | ShortStoryChapterDraft | dict[str, JsonValue]
     diff: JsonValue | None = None
     createdByAgent: Literal["设定", "剧情", "写作", "校验", "编辑"]
     reviewerAgent: Literal["设定", "剧情", "写作", "校验", "编辑"] | None = None
@@ -126,13 +127,18 @@ class CreateArtifactRequest(ReviewSchema):
     def validate_payload_kind(self) -> CreateArtifactRequest:
         payload = (
             self.payload.model_dump(mode="json")
-            if isinstance(self.payload, ShortStoryOutlineDraft)
+            if isinstance(
+                self.payload,
+                (ShortStoryOutlineDraft, ShortStoryChapterDraft),
+            )
             else self.payload
         )
         if payload.get("kind") != self.kind:
             raise ValueError("草案 kind 必须与 payload.kind 一致")
         if self.kind == "outline_draft" and payload.get("storyLengthProfile") == "short_medium":
             self.payload = ShortStoryOutlineDraft.model_validate(payload)
+        if self.kind == "chapter_draft" and payload.get("storyLengthProfile") == "short_medium":
+            self.payload = ShortStoryChapterDraft.model_validate(payload)
         return self
 
 
@@ -164,7 +170,7 @@ class ReviewArtifactRevisionSummary(ReviewSchema):
 
 
 class ReviewArtifactRevisionDetail(ReviewArtifactRevisionSummary):
-    payload: ShortStoryOutlineDraft | dict[str, JsonValue]
+    payload: ShortStoryOutlineDraft | ShortStoryChapterDraft | dict[str, JsonValue]
     diff: JsonValue | None
 
 
@@ -183,3 +189,34 @@ class SubmitArtifactEvaluationRequest(ReviewSchema):
         if self.verdict == "revise" and not self.requiredChanges:
             raise ValueError("要求修改时必须提供 requiredChanges")
         return self
+
+
+class ShortStoryArtifactResponse(ReviewArtifactResponse):
+    kind: Literal["outline_draft", "chapter_draft"]
+    payload: ShortStoryOutlineDraft | ShortStoryChapterDraft
+
+
+class ShortStoryTaskStatus(ReviewSchema):
+    id: str
+    phase: str
+    operation: Literal["develop_short_outline", "write_short_story"]
+    activeArtifactId: str | None
+    latestCommandId: str
+    latestCommandStatus: Literal[
+        "pending", "submitted", "processing", "succeeded", "failed"
+    ]
+    updatedAt: datetime
+
+
+class ShortStoryWorkflowSession(ReviewSchema):
+    id: str
+    phase: str
+    currentTask: ShortStoryTaskStatus | None
+    lastTask: ShortStoryTaskStatus | None
+
+
+class ShortStoryArtifactsResponse(ReviewSchema):
+    outline: ShortStoryArtifactResponse | None
+    chapterDraft: ShortStoryArtifactResponse | None
+    latestTask: ShortStoryTaskStatus | None
+    workflowSession: ShortStoryWorkflowSession | None

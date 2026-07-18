@@ -5,6 +5,10 @@ from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar, cast
 
+from inkforge_contracts import (
+    SHORT_STORY_IGNORED_TEXT_CHARACTERS,
+    count_short_story_text_length,
+)
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -49,14 +53,6 @@ from .schemas import (
 from .service import NovelCreation, require_valid_creation_target
 
 T = TypeVar("T")
-IGNORED_TEXT_CHARACTERS = (
-    "\u0009\u000a\u000b\u000c\u000d\u0020\u0085\u00a0\u1680"
-    "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
-    "\u2028\u2029\u202f\u205f\u3000\ufeff"
-)
-_TEXT_LENGTH_TRANSLATION = str.maketrans("", "", IGNORED_TEXT_CHARACTERS)
-
-
 def utc_datetime(value: datetime | None) -> datetime | None:
     if value is None:
         return None
@@ -66,7 +62,7 @@ def utc_datetime(value: datetime | None) -> datetime | None:
 
 
 def count_text_length(value: str) -> int:
-    return len(value.translate(_TEXT_LENGTH_TRANSLATION))
+    return count_short_story_text_length(value)
 
 
 def beat_plan_chapter_ids(
@@ -522,7 +518,11 @@ class NovelRepository:
             ]
         else:
             word_count = func.length(
-                func.translate(Chapter.content, IGNORED_TEXT_CHARACTERS, "")
+                func.translate(
+                    Chapter.content,
+                    SHORT_STORY_IGNORED_TEXT_CHARACTERS,
+                    "",
+                )
             ).label("wordCount")
             rows = (
                 await session.execute(

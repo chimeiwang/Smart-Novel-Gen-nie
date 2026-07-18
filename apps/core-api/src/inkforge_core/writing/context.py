@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from hashlib import sha256
 from typing import Any, Protocol
 
 from inkforge_contracts.jobs import (
@@ -10,11 +9,16 @@ from inkforge_contracts.jobs import (
     ShortOutlineInspirationSource,
     WritingJobPayload,
 )
-from inkforge_contracts.short_story import ShortStoryOutlineDraft
+from inkforge_contracts.short_story import (
+    ShortStoryChapterDraft,
+    ShortStoryOutlineDraft,
+    canonical_short_outline_hash,
+)
 from pydantic import BaseModel, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ..chapters.content_state import content_sha256
 from ..db.models import (
     Chapter,
     ChapterBeatPlan,
@@ -23,10 +27,14 @@ from ..db.models import (
     Novel,
     OutlineNode,
     ReviewArtifact,
+    ReviewArtifactEvaluation,
     SceneBeat,
+    StoryBackground,
+    WorldSetting,
     WritingBible,
     WritingMessage,
     WritingRunCommand,
+    WritingStyle,
     WritingTask,
 )
 from ..errors import ApiError
@@ -185,6 +193,7 @@ class WritingContextRepository:
                     session, task.novelId
                 )
             active_artifact = await self._active_artifact(session, task)
+            short_story_run_artifact: dict[str, Any] | None = None
             if command_payload.workflowKind == "short_medium":
                 latest_user_message = _command_user_message(command_payload)
                 recent = await self._recent_messages(
@@ -192,17 +201,31 @@ class WritingContextRepository:
                     task.writingSessionId,
                     current_user_message=latest_user_message,
                 )
-                current_outline, direct_edit = await self._current_short_outline(
-                    session, task.novelId
-                )
-                short_story_context = _build_short_story_context(
-                    direct_edit=direct_edit,
-                    revision_request=_command_revision_request(command_payload),
-                    outline=current_outline,
-                    inspiration=(novel.summary or "").strip(),
-                    recent_conversation=recent,
-                )
-                prior_conversation_history = recent
+                if command_payload.operation == "write_short_story":
+                    short_story_context = await self._short_story_manuscript_context(
+                        session,
+                        task=task,
+                        chapter=chapter,
+                        novel=novel,
+                        bible=bible,
+                        payload=command_payload,
+                    )
+                    short_story_run_artifact = await self._short_story_run_artifact(
+                        session, task
+                    )
+                    prior_conversation_history = []
+                else:
+                    current_outline, direct_edit = await self._current_short_outline(
+                        session, task.novelId
+                    )
+                    short_story_context = _build_short_story_context(
+                        direct_edit=direct_edit,
+                        revision_request=_command_revision_request(command_payload),
+                        outline=current_outline,
+                        inspiration=(novel.summary or "").strip(),
+                        recent_conversation=recent,
+                    )
+                    prior_conversation_history = recent
             else:
                 conversation_history = _conversation_history(task.conversationHistory)
                 prior_conversation_history, latest_user_message = (
@@ -245,8 +268,144 @@ class WritingContextRepository:
                 "conversationHistory": prior_conversation_history,
                 "userMessage": latest_user_message,
                 "shortStoryContext": short_story_context,
+                "shortStoryRunArtifact": short_story_run_artifact,
                 "graphState": (json.loads(task.graphStateJson) if task.graphStateJson else None),
             }
+
+    async def _short_story_manuscript_context(
+        self,
+        session: AsyncSession,
+        *,
+        task: WritingTask,
+        chapter: Chapter,
+        novel: Novel,
+        bible: WritingBible | None,
+        payload: WritingJobPayload,
+    ) -> dict[str, Any]:
+        source = payload.source
+        if bible is None or not isinstance(source, ApprovedShortOutlineSource):
+            raise _context_identity_mismatch()
+        outline_artifact = await session.scalar(
+            select(ReviewArtifact).where(ReviewArtifact.id == source.outlineArtifactId)
+        )
+        if outline_artifact is None:
+            raise _context_identity_mismatch()
+        outline = _parse_short_outline(outline_artifact.payloadJson)
+        background = await session.scalar(
+            select(StoryBackground).where(StoryBackground.novelId == task.novelId)
+        )
+        world_setting = await session.scalar(
+            select(WorldSetting).where(WorldSetting.novelId == task.novelId)
+        )
+        applied_style = None
+        if novel.appliedStyleId is not None:
+            applied_style = await session.scalar(
+                select(WritingStyle).where(
+                    WritingStyle.id == novel.appliedStyleId,
+                    WritingStyle.userId == novel.userId,
+                )
+            )
+        return {
+            "approvedOutline": {
+                "artifactId": outline_artifact.id,
+                "revision": outline_artifact.revision,
+                "hash": canonical_short_outline_hash(outline),
+                "payload": outline.model_dump(mode="json"),
+            },
+            "anchors": outline.anchors.model_dump(mode="json"),
+            "originalInspiration": (novel.summary or "").strip(),
+            "targetTotalWordCount": bible.targetTotalWordCount,
+            "targetChapter": {
+                "id": chapter.id,
+                "baseContentHash": content_sha256(chapter.content),
+            },
+            "writingBible": {
+                "genre": bible.genre,
+                "targetReaders": bible.targetReaders,
+                "coreSellingPoint": bible.coreSellingPoint,
+                "readerPromise": bible.readerPromise,
+                "appealModel": bible.appealModel,
+                "taboo": bible.taboo,
+                "comparableTitles": bible.comparableTitles,
+                "notes": bible.notes,
+                "storyLengthProfile": bible.storyLengthProfile,
+                "targetTotalWordCount": bible.targetTotalWordCount,
+            },
+            "storyBackground": (background.content if background is not None else None),
+            "worldSetting": (world_setting.content if world_setting is not None else None),
+            "appliedStyle": (
+                {
+                    "id": applied_style.id,
+                    "name": applied_style.name,
+                    "portraitMarkdown": applied_style.portraitMarkdown,
+                    "creativeMethodology": applied_style.creativeMethodology,
+                    "expressionFeatures": applied_style.expressionFeatures,
+                    "generationStyle": applied_style.generationStyle,
+                    "styleTraits": applied_style.styleTraits,
+                    "uniqueMarkers": applied_style.uniqueMarkers,
+                }
+                if applied_style is not None
+                else None
+            ),
+        }
+
+    async def _short_story_run_artifact(
+        self,
+        session: AsyncSession,
+        task: WritingTask,
+    ) -> dict[str, Any] | None:
+        artifact = await session.scalar(
+            select(ReviewArtifact)
+            .where(
+                ReviewArtifact.taskId == task.id,
+                ReviewArtifact.novelId == task.novelId,
+                ReviewArtifact.chapterId == task.chapterId,
+                ReviewArtifact.kind == "chapter_draft",
+            )
+            .order_by(ReviewArtifact.updatedAt.desc(), ReviewArtifact.id.desc())
+            .limit(1)
+        )
+        if artifact is None:
+            return None
+        try:
+            draft = ShortStoryChapterDraft.model_validate(json.loads(artifact.payloadJson))
+        except (json.JSONDecodeError, ValidationError, TypeError):
+            raise _artifact_payload_invalid() from None
+        evaluations = list(
+            (
+                await session.scalars(
+                    select(ReviewArtifactEvaluation)
+                    .where(
+                        ReviewArtifactEvaluation.artifactId == artifact.id,
+                        ReviewArtifactEvaluation.revision == artifact.revision,
+                    )
+                    .order_by(
+                        ReviewArtifactEvaluation.createdAt.asc(),
+                        ReviewArtifactEvaluation.id.asc(),
+                    )
+                )
+            ).all()
+        )
+        return {
+            "id": artifact.id,
+            "taskId": artifact.taskId,
+            "artifactKey": artifact.artifactKey,
+            "status": artifact.status,
+            "revision": artifact.revision,
+            "payload": draft.model_dump(mode="json"),
+            "evaluations": [
+                {
+                    "id": item.id,
+                    "revision": item.revision,
+                    "evaluatorAgent": item.evaluatorAgent,
+                    "verdict": item.verdict,
+                    "summary": item.summary,
+                    "requiredChanges": item.requiredChanges,
+                    "createdAt": item.createdAt.isoformat(),
+                }
+                for item in evaluations
+            ],
+        }
 
     async def _active_command(
         self,
@@ -621,13 +780,7 @@ def _parse_short_outline(serialized: str) -> ShortStoryOutlineDraft:
 
 
 def _short_outline_hash(outline: ShortStoryOutlineDraft) -> str:
-    canonical = json.dumps(
-        outline.model_dump(mode="json"),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return sha256(canonical.encode("utf-8")).hexdigest()
+    return canonical_short_outline_hash(outline)
 
 
 def _context_identity_mismatch() -> ApiError:

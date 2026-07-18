@@ -2,11 +2,19 @@ from __future__ import annotations
 
 import json
 
+from inkforge_contracts import (
+    ShortStoryChapterDraft,
+    ShortStoryOutlineDraft,
+    canonical_short_outline_hash,
+    count_short_story_text_length,
+)
+from pydantic import ValidationError
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..chapters.content_state import (
+    content_sha256,
     lock_consistency_check,
     replace_chapter_content,
 )
@@ -16,7 +24,10 @@ from ..db.models import (
     ChapterQualityCheck,
     Novel,
     Outline,
+    ReviewArtifact,
+    ReviewArtifactEvaluation,
     SceneBeat,
+    WritingBible,
 )
 from ..errors import ApiError
 from .apply import ApplicableArtifactPort
@@ -45,6 +56,11 @@ class FormalWriteRepository:
         self, artifact: ApplicableArtifactPort, user_id: str, content: str
     ) -> int:
         payload = artifact.payload
+        if (
+            payload.get("kind") == "chapter_draft"
+            and payload.get("storyLengthProfile") == "short_medium"
+        ):
+            return await self._apply_short_story_chapter(artifact, user_id, content)
         target = payload.get("target") if payload.get("kind") == "chapter_draft" else None
         async with self._session_factory() as session:
             async with session.begin():
@@ -107,6 +123,217 @@ class FormalWriteRepository:
                     and target.get("mode") == "existing_chapter"
                 ):
                     await _ensure_consistency_check(session, chapter_id)
+        return 1
+
+    async def _apply_short_story_chapter(
+        self,
+        artifact: ApplicableArtifactPort,
+        user_id: str,
+        content: str,
+    ) -> int:
+        try:
+            draft = ShortStoryChapterDraft.model_validate(artifact.payload)
+        except ValidationError as exc:
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_DRAFT_PAYLOAD_INVALID",
+                message="中短篇完整正文载荷无效",
+            ) from exc
+        if content != draft.content:
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_DRAFT_DIRECT_EDIT_FORBIDDEN",
+                message="中短篇完整正文只能按当前精确版本应用",
+            )
+        async with self._session_factory() as session:
+            async with session.begin():
+                await _require_owner(session, artifact.novel_id, user_id)
+                bible = await session.scalar(
+                    select(WritingBible)
+                    .where(WritingBible.novelId == artifact.novel_id)
+                    .with_for_update()
+                )
+                if (
+                    bible is None
+                    or bible.storyLengthProfile != "short_medium"
+                    or bible.targetTotalWordCount != draft.metadata.targetWordCount
+                    or bible.targetTotalWordCount is None
+                    or not 6_000 <= bible.targetTotalWordCount <= 80_000
+                ):
+                    raise ApiError(
+                        status_code=409,
+                        code="SHORT_STORY_TARGET_MISMATCH",
+                        message="中短篇正文目标字数与作品圣经不一致",
+                    )
+                latest_outline = await session.scalar(
+                    select(ReviewArtifact)
+                    .where(
+                        ReviewArtifact.novelId == artifact.novel_id,
+                        ReviewArtifact.kind == "outline_draft",
+                    )
+                    .order_by(ReviewArtifact.updatedAt.desc(), ReviewArtifact.id.desc())
+                    .limit(1)
+                    .with_for_update()
+                )
+                if (
+                    latest_outline is None
+                    or latest_outline.status != "applied"
+                    or latest_outline.id != draft.metadata.sourceOutlineArtifactId
+                    or latest_outline.revision != draft.metadata.sourceOutlineRevision
+                ):
+                    raise ApiError(
+                        status_code=409,
+                        code="SHORT_STORY_OUTLINE_SOURCE_CHANGED",
+                        message="中短篇正文来源大纲已经变化，不能应用旧草案",
+                    )
+                try:
+                    outline = ShortStoryOutlineDraft.model_validate_json(
+                        latest_outline.payloadJson
+                    )
+                except (ValidationError, ValueError):
+                    raise ApiError(
+                        status_code=409,
+                        code="SHORT_STORY_OUTLINE_SOURCE_CHANGED",
+                        message="中短篇正文来源大纲载荷无效",
+                    ) from None
+                if (
+                    canonical_short_outline_hash(outline)
+                    != draft.metadata.sourceOutlineHash
+                ):
+                    raise ApiError(
+                        status_code=409,
+                        code="SHORT_STORY_OUTLINE_SOURCE_CHANGED",
+                        message="中短篇正文来源大纲哈希已经变化，不能应用旧草案",
+                    )
+                chapters = list(
+                    (
+                        await session.scalars(
+                            select(Chapter)
+                            .where(Chapter.novelId == artifact.novel_id)
+                            .order_by(Chapter.order, Chapter.id)
+                            .with_for_update()
+                        )
+                    ).all()
+                )
+                if len(chapters) != 1:
+                    raise ApiError(
+                        status_code=409,
+                        code="SHORT_STORY_CHAPTER_INVALID",
+                        message="中短篇必须使用唯一正文承载章节",
+                    )
+                chapter = chapters[0]
+                if (
+                    chapter.id != artifact.chapter_id
+                    or chapter.id != draft.metadata.targetChapterId
+                ):
+                    raise ApiError(
+                        status_code=409,
+                        code="SHORT_STORY_TARGET_CHAPTER_MISMATCH",
+                        message="中短篇正文目标章节已经变化",
+                    )
+                if content_sha256(chapter.content) != draft.metadata.baseChapterHash:
+                    raise ApiError(
+                        status_code=409,
+                        code="SHORT_STORY_CHAPTER_BASE_CHANGED",
+                        message="中短篇正式正文基线已经变化，不能应用旧草案",
+                    )
+                actual_count = count_short_story_text_length(draft.content)
+                if (
+                    actual_count != draft.metadata.actualWordCount
+                    or not 6_000 <= actual_count <= 80_000
+                ):
+                    raise ApiError(
+                        status_code=409,
+                        code="SHORT_STORY_ACTUAL_WORD_COUNT_INVALID",
+                        message="中短篇正文实际字数无效",
+                    )
+                current_artifact = await session.scalar(
+                    select(ReviewArtifact)
+                    .where(ReviewArtifact.id == artifact.id)
+                    .with_for_update()
+                )
+                if (
+                    current_artifact is None
+                    or current_artifact.novelId != artifact.novel_id
+                    or current_artifact.chapterId != chapter.id
+                    or current_artifact.taskId != artifact.task_id
+                    or current_artifact.kind != "chapter_draft"
+                    or current_artifact.status != "applying"
+                    or current_artifact.revision != artifact.revision
+                ):
+                    raise ApiError(
+                        status_code=409,
+                        code="SHORT_STORY_DRAFT_CHANGED",
+                        message="中短篇正文草案版本或状态已经变化",
+                    )
+                try:
+                    current_payload = ShortStoryChapterDraft.model_validate_json(
+                        current_artifact.payloadJson
+                    )
+                except (ValidationError, ValueError):
+                    raise ApiError(
+                        status_code=409,
+                        code="SHORT_STORY_DRAFT_CHANGED",
+                        message="中短篇正文当前草案载荷无效",
+                    ) from None
+                if current_payload != draft:
+                    raise ApiError(
+                        status_code=409,
+                        code="SHORT_STORY_DRAFT_CHANGED",
+                        message="中短篇正文草案已经变化",
+                    )
+                evaluations = list(
+                    (
+                        await session.scalars(
+                            select(ReviewArtifactEvaluation).where(
+                                ReviewArtifactEvaluation.artifactId == artifact.id,
+                                ReviewArtifactEvaluation.revision == artifact.revision,
+                                ReviewArtifactEvaluation.evaluatorAgent.in_(("编辑", "校验")),
+                            )
+                        )
+                    ).all()
+                )
+                by_agent = {item.evaluatorAgent: item for item in evaluations}
+                if set(by_agent) != {"编辑", "校验"}:
+                    raise ApiError(
+                        status_code=409,
+                        code="SHORT_STORY_REVIEWS_INCOMPLETE",
+                        message="中短篇正文尚未完成编辑和校验两份审核",
+                    )
+                check = await lock_consistency_check(session, chapter.id)
+                if check is None:
+                    check = ChapterQualityCheck(
+                        chapterId=chapter.id,
+                        type="consistency",
+                        title="一致性终检",
+                        status="pending",
+                    )
+                    session.add(check)
+                await replace_chapter_content(
+                    session,
+                    chapter,
+                    check,
+                    draft.content,
+                    reopen=True,
+                )
+                validator = by_agent["校验"]
+                if validator.verdict == "pass":
+                    check.status = "skipped"
+                    check.summary = "已由中短篇全稿审核覆盖"
+                    check.result = json.dumps(
+                        {
+                            "coverage": "short_story_full_review",
+                            "artifactId": artifact.id,
+                            "artifactRevision": artifact.revision,
+                            "validatorEvaluationId": validator.id,
+                            "validatorVerdict": validator.verdict,
+                        },
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )
+                else:
+                    check.status = "pending"
+                    check.summary = None
         return 1
 
     async def apply_beat_plan(
