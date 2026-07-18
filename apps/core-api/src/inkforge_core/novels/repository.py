@@ -46,7 +46,7 @@ from .schemas import (
     WorkspaceResourcesResponse,
     WorkspaceResponse,
 )
-from .service import NovelCreation
+from .service import NovelCreation, require_valid_creation_target
 
 T = TypeVar("T")
 IGNORED_TEXT_CHARACTERS = (
@@ -177,6 +177,10 @@ class NovelRepository:
     async def create_novel(self, creation: NovelCreation) -> dict[str, str]:
         async with self._session_factory() as session:
             async with session.begin():
+                require_valid_creation_target(
+                    creation.story_length_profile,
+                    creation.target_total_word_count,
+                )
                 novel = Novel(
                     userId=creation.user_id,
                     name=creation.name,
@@ -332,11 +336,6 @@ class NovelRepository:
                         message="无权访问该小说",
                     )
                 current_updated_at = self._required_novel_updated_at(novel.updatedAt)
-                if novel.name == name:
-                    return UpdateNovelTitleResponse(
-                        name=novel.name,
-                        updatedAt=current_updated_at,
-                    )
                 normalized_expected = (
                     expected_updated_at.replace(tzinfo=UTC)
                     if expected_updated_at.tzinfo is None
@@ -348,6 +347,11 @@ class NovelRepository:
                         code="NOVEL_VERSION_CONFLICT",
                         message="小说已在其他位置更新，请重新加载后再修改标题",
                         details={"currentUpdatedAt": current_updated_at.isoformat()},
+                    )
+                if novel.name == name:
+                    return UpdateNovelTitleResponse(
+                        name=novel.name,
+                        updatedAt=current_updated_at,
                     )
                 novel.name = name
                 novel.updatedAt = max(

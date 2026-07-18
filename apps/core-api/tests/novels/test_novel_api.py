@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -128,6 +128,26 @@ async def test_create_long_novel_builds_all_required_defaults() -> None:
     assert repository.creation.current_goal == "主角离开故乡"
     assert repository.creation.target_total_word_count == 1_000_000
     assert repository.creation.notes == "主角起点：林川\n第一章目标：主角离开故乡"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", [5_999, 80_001])
+async def test_service_rejects_constructed_short_target_outside_boundaries(
+    target: int,
+) -> None:
+    repository = RecordingNovelRepository()
+    request = ShortMediumCreateNovelRequest.model_construct(
+        storyLengthProfile="short_medium",
+        inspiration="灵感",
+        targetTotalWordCount=target,
+        name=None,
+    )
+
+    with pytest.raises(ApiError) as caught:
+        await NovelService(repository).create_novel("user-1", request)  # type: ignore[arg-type]
+
+    assert caught.value.code == "SHORT_STORY_TARGET_WORD_COUNT_INVALID"
+    assert repository.creation is None
 
 
 @pytest.mark.asyncio
@@ -568,6 +588,24 @@ async def test_repository_rolls_back_all_initial_records_on_failure() -> None:
     assert session.rolled_back is True
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", [5_999, 80_001])
+async def test_repository_defensively_rejects_invalid_short_target(target: int) -> None:
+    from inkforge_core.novels.repository import NovelRepository
+
+    session = TransactionSession()
+    repository = NovelRepository(lambda: session)  # type: ignore[arg-type]
+
+    with pytest.raises(ApiError) as caught:
+        await repository.create_novel(
+            replace(complete_creation(), target_total_word_count=target)
+        )
+
+    assert caught.value.code == "SHORT_STORY_TARGET_WORD_COUNT_INVALID"
+    assert session.added == []
+    assert session.rolled_back is True
+
+
 class TitleSession:
     def __init__(self, novel: object) -> None:
         self.novel = novel
@@ -616,6 +654,33 @@ async def test_repository_update_title_rejects_stale_expected_version() -> None:
 
     assert caught.value.code == "NOVEL_VERSION_CONFLICT"
     assert novel.name == "旧标题"
+
+
+@pytest.mark.asyncio
+async def test_repository_update_title_rejects_stale_version_even_when_name_is_unchanged() -> None:
+    from inkforge_core.db.models import Novel
+    from inkforge_core.novels.repository import NovelRepository
+
+    current = datetime(2026, 7, 18, 12, tzinfo=UTC)
+    novel = Novel(
+        id="novel-1",
+        userId="user-1",
+        name="旧标题",
+        summary=None,
+        createdAt=current,
+        updatedAt=current,
+    )
+    repository = NovelRepository(lambda: TitleSession(novel))  # type: ignore[arg-type]
+
+    with pytest.raises(ApiError) as caught:
+        await repository.update_title(
+            "novel-1",
+            "user-1",
+            "旧标题",
+            datetime(2026, 7, 18, 11, tzinfo=UTC),
+        )
+
+    assert caught.value.code == "NOVEL_VERSION_CONFLICT"
 
 
 @pytest.mark.asyncio

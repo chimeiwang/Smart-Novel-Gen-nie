@@ -40,6 +40,30 @@ class NovelCreation:
     current_goal: str | None
 
 
+def require_valid_creation_target(profile: str, target: int) -> None:
+    if profile == "short_medium":
+        if not 6_000 <= target <= 80_000:
+            raise ApiError(
+                status_code=422,
+                code="SHORT_STORY_TARGET_WORD_COUNT_INVALID",
+                message="中短篇目标总字数必须在 6000 到 80000 之间",
+            )
+        return
+    if profile == "long_serial":
+        if target <= 0:
+            raise ApiError(
+                status_code=422,
+                code="NOVEL_TARGET_WORD_COUNT_INVALID",
+                message="长篇目标总字数必须大于 0",
+            )
+        return
+    raise ApiError(
+        status_code=422,
+        code="STORY_LENGTH_PROFILE_INVALID",
+        message="作品篇幅模式无效",
+    )
+
+
 class NovelRepositoryPort(Protocol):
     async def create_novel(self, creation: NovelCreation) -> dict[str, str]: ...
     async def list_dashboard(self, user_id: str) -> DashboardResponse: ...
@@ -107,6 +131,7 @@ class NovelService:
             core_selling_point = _clean_optional(request.coreSellingPoint)
             reader_promise = _clean_optional(request.readerPromise)
             first_chapter_title = "第一章"
+        require_valid_creation_target(request.storyLengthProfile, target_total_word_count)
         if not name:
             raise ApiError(
                 status_code=422,
