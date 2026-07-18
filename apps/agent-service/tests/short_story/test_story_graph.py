@@ -402,6 +402,41 @@ async def test_review_issues_trigger_exactly_one_automatic_full_rewrite() -> Non
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failed_turn",
+    [
+        _response(_manuscript("被截断的返工稿"), finish_reason="length"),
+        _response(_manuscript("被过滤的返工稿"), finish_reason="content_filter"),
+        RuntimeError("供应商暂时不可用"),
+    ],
+    ids=["length", "content-filter", "provider-error"],
+)
+async def test_failed_automatic_rewrite_keeps_previous_complete_artifact(
+    failed_turn: dict[str, Any] | Exception,
+) -> None:
+    executor = AgentExecutor(
+        [
+            _response(_manuscript("第一版完整正文，结尾仍在。")),
+            _evaluation("revise", summary="节奏松散", required_changes="压紧中段"),
+            _evaluation(summary="一致性通过"),
+            failed_turn,
+        ]
+    )
+    artifacts = ArtifactPort()
+    graph = build_short_story_graph(
+        ShortStoryGraphDependencies(agentExecutor=executor, artifacts=artifacts)
+    )
+
+    with pytest.raises(RuntimeError):
+        await graph.ainvoke(_state())
+
+    assert artifacts.artifact is not None
+    assert artifacts.artifact["revision"] == 1
+    assert artifacts.artifact["payload"]["content"] == "第一版完整正文，结尾仍在。"
+    assert [action for action, _payload in artifacts.actions].count("revise") == 0
+
+
+@pytest.mark.asyncio
 async def test_reviewer_exception_and_missing_event_are_persisted_as_blocks() -> None:
     executor = AgentExecutor(
         [

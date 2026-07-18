@@ -18,7 +18,6 @@ from ..db.base import utc_now
 from ..db.models import (
     Chapter,
     Novel,
-    ReviewArtifact,
     WritingBible,
     WritingMessage,
     WritingRunCommand,
@@ -26,6 +25,7 @@ from ..db.models import (
     WritingTask,
 )
 from ..errors import ApiError
+from ..short_story_artifacts import latest_short_story_outline_artifact
 from .message_metadata import workflow_message_metadata
 from .records import TaskRecord
 from .recovery import validate_resume_session_binding
@@ -895,17 +895,9 @@ async def _resolve_start_workflow_identity(
             "originalInspiration": inspiration,
         }
     else:
-        artifact = await session.scalar(
-            select(ReviewArtifact)
-            .where(
-                ReviewArtifact.novelId == request.novelId,
-                ReviewArtifact.kind == "outline_draft",
-            )
-            .order_by(
-                ReviewArtifact.updatedAt.desc(),
-                ReviewArtifact.id.desc(),
-            )
-            .limit(1)
+        artifact = await latest_short_story_outline_artifact(
+            session,
+            request.novelId,
         )
         if artifact is None or artifact.status != "applied":
             raise ApiError(

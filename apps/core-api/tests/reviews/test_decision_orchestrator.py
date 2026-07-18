@@ -178,6 +178,16 @@ class DecisionService:
         )
 
 
+class RecordingDecisionService(DecisionService):
+    def __init__(self, events: list[str]) -> None:
+        super().__init__()
+        self.events = events
+
+    async def decide(self, user_id: str, artifact_id: str, decision: str, **kwargs: object):
+        self.events.append("decision_side_effect")
+        return await super().decide(user_id, artifact_id, decision, **kwargs)
+
+
 class CommandRepository:
     def __init__(self) -> None:
         self.created: dict[str, Any] | None = None
@@ -203,6 +213,22 @@ class CommandRepository:
             artifact_id=kwargs["artifact_id"],
             payload=kwargs["payload"],
         )
+
+
+class RecordingCommandRepository(CommandRepository):
+    def __init__(self, events: list[str]) -> None:
+        super().__init__()
+        self.events = events
+
+    async def require_owned_task(self, user_id: str, task_id: str) -> TaskRecord:
+        self.events.append("task_lock")
+        return await super().require_owned_task(user_id, task_id)
+
+    async def get_by_idempotency_key(
+        self, user_id: str, client_request_id: str
+    ) -> WritingCommandRecord | None:
+        self.events.append("command_recheck")
+        return await super().get_by_idempotency_key(user_id, client_request_id)
 
 
 class RacingCommandRepository(CommandRepository):
@@ -272,7 +298,6 @@ class LockHandoffCommandRepository(CommandRepository):
         result = await super().require_owned_task(user_id, task_id)
         self.task_locked = True
         return result
-
     async def get_by_idempotency_key(
         self, user_id: str, client_request_id: str
     ) -> WritingCommandRecord | None:
@@ -288,21 +313,65 @@ class LockHandoffCommandRepository(CommandRepository):
         pytest.fail("锁后二次命中时不应重复创建命令")
 
 
+class ShortDecisionArtifactRepository(ArtifactRepository):
+    def __init__(self, events: list[str], *, kind: str = "outline_draft") -> None:
+        super().__init__()
+        self.events = events
+        self.kind = kind
+
+    async def require_artifact(self, user_id: str, artifact_id: str) -> ArtifactRecord:
+        result = await super().require_artifact(user_id, artifact_id)
+        return replace(
+            result,
+            kind=self.kind,
+            payload={
+                "kind": self.kind,
+                "storyLengthProfile": "short_medium",
+                "content": "完整大纲",
+            },
+        )
+
+    async def lock_short_story_decision_bible(
+        self,
+        user_id: str,
+        novel_id: str,
+    ) -> None:
+        assert user_id == "user-1"
+        assert novel_id == "novel-1"
+        self.events.append("bible_lock")
+
+    async def require_short_story_artifact_revision(
+        self,
+        user_id: str,
+        artifact_id: str,
+        expected_revision: int,
+        *,
+        decision: str,
+    ) -> ArtifactRecord:
+        del decision
+        self.events.append("artifact_lock")
+        result = await self.require_artifact(user_id, artifact_id)
+        assert result.revision == expected_revision
+        return result
+
+
 @dataclass
 class Fixture:
     orchestrator: ReviewDecisionOrchestrator
     outer: OuterSession
     artifacts: ArtifactRepository
     commands: CommandRepository
+    service: DecisionService
 
 
 def fixture(*, fail: bool = False) -> Fixture:
     outer = OuterSession()
     artifacts = ArtifactRepository()
     commands = CommandRepository()
+    service = DecisionService(fail=fail)
     dependencies = ReviewDecisionDependencies(
         repository=artifacts,
-        service=DecisionService(fail=fail),
+        service=service,
         commands=commands,
     )
     orchestrator = ReviewDecisionOrchestrator(
@@ -311,7 +380,7 @@ def fixture(*, fail: bool = False) -> Fixture:
         dependencies_builder=lambda _factory: dependencies,
         transactional_factory_builder=lambda _connection: object(),
     )
-    return Fixture(orchestrator, outer, artifacts, commands)
+    return Fixture(orchestrator, outer, artifacts, commands, service)
 
 
 def persisted_discard_command(
@@ -529,6 +598,36 @@ async def test_task_lock_recheck_rejects_different_decision_semantics_before_sid
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["outline_draft", "chapter_draft"])
+async def test_short_decision_locks_bible_then_task_then_artifact_before_side_effects(
+    kind: str,
+) -> None:
+    events: list[str] = []
+    artifacts = ShortDecisionArtifactRepository(events, kind=kind)
+    commands = RecordingCommandRepository(events)
+    service = RecordingDecisionService(events)
+    orchestrator = handoff_orchestrator(artifacts, commands, service)
+
+    await orchestrator.decide(
+        "user-1",
+        "artifact-1",
+        ReviewArtifactDecisionRequest(
+            clientRequestId="request-00000001",
+            decision="approve",
+            expectedRevision=1,
+        ),
+    )
+
+    assert events == [
+        "bible_lock",
+        "task_lock",
+        "command_recheck",
+        "artifact_lock",
+        "decision_side_effect",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_stale_revision_is_rejected_before_decision_side_effects() -> None:
     subject = fixture()
 
@@ -670,6 +769,89 @@ async def test_short_story_approve_rejects_direct_edit_and_partial_apply(
 
     assert caught.value.code == "SHORT_STORY_DRAFT_DIRECT_EDIT_FORBIDDEN"
     assert subject.commands.created is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["outline_draft", "chapter_draft"])
+@pytest.mark.parametrize("user_message", [None, "", " \n\t "])
+async def test_short_story_revise_requires_nonblank_raw_request_before_side_effects(
+    kind: str,
+    user_message: str | None,
+) -> None:
+    subject = fixture()
+    original = subject.artifacts.require_artifact_revision
+
+    async def short_artifact(
+        user_id: str, artifact_id: str, expected_revision: int
+    ) -> ArtifactRecord:
+        result = await original(user_id, artifact_id, expected_revision)
+        return replace(
+            result,
+            kind=kind,
+            payload={
+                "kind": kind,
+                "storyLengthProfile": "short_medium",
+                "content": "当前完整版本",
+            },
+        )
+
+    subject.artifacts.require_artifact_revision = short_artifact  # type: ignore[method-assign]
+
+    with pytest.raises(ApiError) as caught:
+        await subject.orchestrator.decide(
+            "user-1",
+            "artifact-1",
+            ReviewArtifactDecisionRequest(
+                clientRequestId="request-00000001",
+                decision="revise",
+                expectedRevision=1,
+                userMessage=user_message,
+            ),
+        )
+
+    assert caught.value.status_code == 422
+    assert caught.value.code == "SHORT_STORY_REVISION_REQUEST_REQUIRED"
+    assert subject.service.calls == 0
+    assert subject.commands.created is None
+    assert subject.outer.transaction.rolled_back is True
+
+
+@pytest.mark.asyncio
+async def test_short_story_revise_keeps_raw_request_unchanged_in_command_payload() -> None:
+    subject = fixture()
+    original = subject.artifacts.require_artifact_revision
+
+    async def short_story(
+        user_id: str, artifact_id: str, expected_revision: int
+    ) -> ArtifactRecord:
+        result = await original(user_id, artifact_id, expected_revision)
+        return replace(
+            result,
+            payload={
+                "kind": "chapter_draft",
+                "storyLengthProfile": "short_medium",
+                "content": "当前完整正文",
+            },
+        )
+
+    subject.artifacts.require_artifact_revision = short_story  # type: ignore[method-assign]
+    raw_request = "  结局改得更克制，不要改开头。\n"
+
+    await subject.orchestrator.decide(
+        "user-1",
+        "artifact-1",
+        ReviewArtifactDecisionRequest(
+            clientRequestId="request-00000001",
+            decision="revise",
+            expectedRevision=1,
+            userMessage=raw_request,
+        ),
+    )
+
+    assert subject.commands.created is not None
+    payload = subject.commands.created["payload"]
+    assert payload["resumeInput"]["userMessage"] == raw_request
+    assert payload["decisionRequest"]["userMessage"] == raw_request
 
 
 def _orchestrator_with_commands(

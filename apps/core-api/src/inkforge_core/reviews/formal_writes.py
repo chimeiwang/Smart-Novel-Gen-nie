@@ -27,9 +27,12 @@ from ..db.models import (
     ReviewArtifact,
     ReviewArtifactEvaluation,
     SceneBeat,
-    WritingBible,
 )
 from ..errors import ApiError
+from ..short_story_artifacts import (
+    latest_short_story_outline_artifact,
+    lock_writing_bible,
+)
 from .apply import ApplicableArtifactPort
 
 
@@ -148,11 +151,7 @@ class FormalWriteRepository:
         async with self._session_factory() as session:
             async with session.begin():
                 await _require_owner(session, artifact.novel_id, user_id)
-                bible = await session.scalar(
-                    select(WritingBible)
-                    .where(WritingBible.novelId == artifact.novel_id)
-                    .with_for_update()
-                )
+                bible = await lock_writing_bible(session, artifact.novel_id)
                 if (
                     bible is None
                     or bible.storyLengthProfile != "short_medium"
@@ -165,15 +164,10 @@ class FormalWriteRepository:
                         code="SHORT_STORY_TARGET_MISMATCH",
                         message="中短篇正文目标字数与作品圣经不一致",
                     )
-                latest_outline = await session.scalar(
-                    select(ReviewArtifact)
-                    .where(
-                        ReviewArtifact.novelId == artifact.novel_id,
-                        ReviewArtifact.kind == "outline_draft",
-                    )
-                    .order_by(ReviewArtifact.updatedAt.desc(), ReviewArtifact.id.desc())
-                    .limit(1)
-                    .with_for_update()
+                latest_outline = await latest_short_story_outline_artifact(
+                    session,
+                    artifact.novel_id,
+                    for_update=True,
                 )
                 if (
                     latest_outline is None

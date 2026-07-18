@@ -390,6 +390,59 @@ async def test_short_identity_mismatch_fails_before_any_graph_call() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "operation", ["develop_short_outline", "write_short_story"]
+)
+async def test_short_workflow_graph_exception_reports_failure_callback(
+    operation: str,
+) -> None:
+    class RaisingGraph(Graph):
+        async def ainvoke(self, value: dict[str, Any]) -> dict[str, Any]:
+            self.inputs.append(value)
+            raise RuntimeError("中短篇图执行失败")
+
+    context = _short_context(operation=operation)
+    source = context["planning"]["source"]
+    if operation == "write_short_story":
+        source = {
+            "kind": "approved_short_outline",
+            "outlineArtifactId": "outline-1",
+            "outlineRevision": 2,
+            "outlineHash": "a" * 64,
+        }
+        context["planning"]["source"] = source
+    core = CoreClient(context)
+    raising = RaisingGraph({})
+    handler = WritingJobHandler(
+        core,
+        parent_graph=Graph({}),
+        operation_graph=raising if operation == "develop_short_outline" else Graph({}),
+        short_story_graph=raising if operation == "write_short_story" else Graph({}),
+        artifacts=ArtifactHydration(),
+    )
+
+    with pytest.raises(NonRetryableJobError, match="写作运行失败已上报核心服务"):
+        await handler(
+            _job(
+                workflow_kind="short_medium",
+                operation=operation,
+                target_total_word_count=6000,
+                source=source,
+            )
+        )
+
+    assert core.completions == []
+    assert core.failures == [
+        {
+            "sequence": 2,
+            "code": "AGENT_RUN_FAILED",
+            "message": "中短篇图执行失败",
+            "recoverable": True,
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_short_story_job_uses_only_dedicated_graph() -> None:
     context = _short_context(operation="write_short_story")
     source = {

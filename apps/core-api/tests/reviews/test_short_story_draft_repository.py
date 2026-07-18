@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -276,6 +277,43 @@ async def repository(tmp_path: Path) -> AsyncIterator[ReviewRepository]:
         await engine.dispose()
 
 
+async def _add_newer_legacy_outline(repository: ReviewRepository) -> None:
+    async with repository._session_factory() as session:  # noqa: SLF001
+        async with session.begin():
+            session.add(
+                ReviewArtifact(
+                    id="legacy-outline-newer",
+                    novelId="novel-1",
+                    chapterId="chapter-1",
+                    kind="outline_draft",
+                    status="awaiting_user",
+                    revision=1,
+                    payloadJson=json.dumps(
+                        {"kind": "outline_draft", "content": "旧流程自由文本大纲"},
+                        ensure_ascii=False,
+                    ),
+                    updatedAt=datetime(2099, 1, 1),
+                )
+            )
+
+
+async def _add_newer_malformed_outline(repository: ReviewRepository) -> None:
+    async with repository._session_factory() as session:  # noqa: SLF001
+        async with session.begin():
+            session.add(
+                ReviewArtifact(
+                    id="malformed-outline-newer",
+                    novelId="novel-1",
+                    chapterId="chapter-1",
+                    kind="outline_draft",
+                    status="awaiting_user",
+                    revision=1,
+                    payloadJson="{不是合法 JSON",
+                    updatedAt=datetime(2099, 1, 2),
+                )
+            )
+
+
 @pytest.mark.asyncio
 async def test_initial_short_story_draft_rechecks_all_authoritative_sources(
     repository: ReviewRepository,
@@ -309,6 +347,73 @@ async def test_initial_short_story_draft_rechecks_all_authoritative_sources(
         with pytest.raises(ApiError) as caught:
             await repository.create_or_revise("user-1", request)
         assert caught.value.code == code
+
+
+@pytest.mark.asyncio
+async def test_initial_short_story_draft_skips_newer_legacy_outline(
+    repository: ReviewRepository,
+) -> None:
+    await _add_newer_legacy_outline(repository)
+
+    created = await repository.create_or_revise("user-1", _draft_request())
+
+    assert created.revision == 1
+    assert created.payload.metadata.sourceOutlineArtifactId == "outline-1"  # type: ignore[union-attr]
+
+
+@pytest.mark.asyncio
+async def test_initial_short_story_draft_rejects_newer_malformed_outline(
+    repository: ReviewRepository,
+) -> None:
+    await _add_newer_malformed_outline(repository)
+
+    with pytest.raises(ApiError) as caught:
+        await repository.create_or_revise("user-1", _draft_request())
+
+    assert caught.value.code == "SHORT_OUTLINE_PAYLOAD_INVALID"
+
+
+@pytest.mark.asyncio
+async def test_short_story_draft_submission_locks_bible_before_task_and_outline(
+    repository: ReviewRepository,
+) -> None:
+    statements: list[str] = []
+    engine = repository._session_factory.kw["bind"]  # noqa: SLF001
+
+    def record_statement(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        statements.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", record_statement)
+    try:
+        await repository.create_or_revise("user-1", _draft_request())
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", record_statement)
+
+    bible_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.lstrip().upper().startswith("SELECT") and '"WritingBible"' in statement
+    )
+    task_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.lstrip().upper().startswith("SELECT") and '"WritingTask"' in statement
+    )
+    outline_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.lstrip().upper().startswith("SELECT")
+        and '"ReviewArtifact"' in statement
+        and 'kind = ?' in statement
+    )
+    assert bible_index < task_index < outline_index
 
 
 @pytest.mark.asyncio
@@ -540,6 +645,102 @@ async def test_short_story_apply_rechecks_and_writes_only_unique_chapter(
     assert check.summary == expected_summary
     if validator_verdict == "pass":
         assert json.loads(check.result or "{}")["artifactId"] == created.id
+
+
+@pytest.mark.asyncio
+async def test_short_story_apply_locks_bible_before_selecting_outline(
+    repository: ReviewRepository,
+) -> None:
+    created = await repository.create_or_revise("user-1", _draft_request())
+    await repository.submit_evaluation("user-1", created.id, _evaluation("编辑"))
+    await repository.submit_evaluation("user-1", created.id, _evaluation("校验"))
+    await repository.create_or_revise(
+        "user-1", _draft_request(status="awaiting_user")
+    )
+    artifact = await repository.require_artifact("user-1", created.id)
+    await repository.transition(created.id, "awaiting_user", "applying")
+
+    statements: list[str] = []
+    engine = repository._session_factory.kw["bind"]  # noqa: SLF001
+
+    def record_statement(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        statements.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", record_statement)
+    try:
+        await FormalWriteRepository(repository._session_factory).apply_chapter(  # noqa: SLF001
+            artifact,
+            "user-1",
+            "甲" * 6000,
+        )
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", record_statement)
+
+    bible_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.lstrip().upper().startswith("SELECT") and '"WritingBible"' in statement
+    )
+    outline_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.lstrip().upper().startswith("SELECT")
+        and '"ReviewArtifact"' in statement
+        and 'kind = ?' in statement
+    )
+    assert bible_index < outline_index
+
+
+@pytest.mark.asyncio
+async def test_short_story_apply_skips_newer_legacy_outline(
+    repository: ReviewRepository,
+) -> None:
+    created = await repository.create_or_revise("user-1", _draft_request())
+    await repository.submit_evaluation("user-1", created.id, _evaluation("编辑"))
+    await repository.submit_evaluation("user-1", created.id, _evaluation("校验"))
+    await repository.create_or_revise(
+        "user-1", _draft_request(status="awaiting_user")
+    )
+    artifact = await repository.require_artifact("user-1", created.id)
+    await repository.transition(created.id, "awaiting_user", "applying")
+    await _add_newer_legacy_outline(repository)
+
+    writes = FormalWriteRepository(repository._session_factory)  # noqa: SLF001
+    assert await writes.apply_chapter(artifact, "user-1", "甲" * 6000) == 1
+
+    async with repository._session_factory() as session:  # noqa: SLF001
+        chapter = await session.get(Chapter, "chapter-1")
+    assert chapter is not None
+    assert chapter.content == "甲" * 6000
+
+
+@pytest.mark.asyncio
+async def test_short_story_apply_rejects_newer_malformed_outline_without_writing(
+    repository: ReviewRepository,
+) -> None:
+    created = await repository.create_or_revise("user-1", _draft_request())
+    artifact = await repository.require_artifact("user-1", created.id)
+    await _add_newer_malformed_outline(repository)
+
+    with pytest.raises(ApiError) as caught:
+        await FormalWriteRepository(repository._session_factory).apply_chapter(  # noqa: SLF001
+            artifact,
+            "user-1",
+            "甲" * 6000,
+        )
+
+    assert caught.value.code == "SHORT_OUTLINE_PAYLOAD_INVALID"
+    async with repository._session_factory() as session:  # noqa: SLF001
+        chapter = await session.get(Chapter, "chapter-1")
+    assert chapter is not None
+    assert chapter.content == ""
 
 
 @pytest.mark.asyncio

@@ -179,12 +179,22 @@ async def test_context_combines_complete_workspace_and_current_planning_scope() 
 
 
 class FakeScalarSession:
-    def __init__(self, responses: list[object | None]) -> None:
+    def __init__(
+        self,
+        responses: list[object | None],
+        *,
+        scalar_lists: list[list[object]] | None = None,
+    ) -> None:
         self._responses = iter(responses)
+        self._scalar_lists = iter(scalar_lists or [])
 
     async def scalar(self, statement: object) -> object | None:
         del statement
         return next(self._responses)
+
+    async def scalars(self, statement: object) -> FakeScalarsResult:
+        del statement
+        return FakeScalarsResult(next(self._scalar_lists))
 
 
 class PlanningRowResult:
@@ -500,7 +510,10 @@ async def test_short_story_source_must_still_be_the_latest_applied_outline() -> 
 
     with pytest.raises(ApiError) as exc_info:
         await repository._validate_command_identity(
-            cast(AsyncSession, FakeScalarSession([1, latest_outline])),
+            cast(
+                AsyncSession,
+                FakeScalarSession([1], scalar_lists=[[latest_outline]]),
+            ),
             task=task,
             chapter=chapter,
             novel=novel,

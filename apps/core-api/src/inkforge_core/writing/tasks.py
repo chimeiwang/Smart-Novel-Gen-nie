@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ..db.base import utc_now
 from ..db.models import (
     Novel,
+    ReviewArtifact,
     WritingBible,
     WritingMessage,
     WritingRunCommand,
@@ -631,7 +632,13 @@ class WritingTaskRepository:
                         already_applied=accepted,
                         rejection_code=None if accepted else STATE_NOOP_CODE,
                     )
-                mark_task_failed_state(target.task, code)
+                recovered = await _restore_short_story_artifact_after_failure(
+                    session,
+                    target,
+                    sequence,
+                )
+                if not recovered:
+                    mark_task_failed_state(target.task, code)
                 _transition_callback_command(
                     target.command,
                     "failed",
@@ -998,6 +1005,264 @@ def _persisted_event_sequence(task: WritingTask) -> int:
             message="持久写作快照事件序号无效",
         )
     return cast(int, value)
+
+
+async def _restore_short_story_artifact_after_failure(
+    session: AsyncSession,
+    target: _CallbackTarget,
+    sequence: int,
+) -> bool:
+    command = target.command
+    if command is None:
+        return False
+    try:
+        command_payload = WritingJobPayload.model_validate_json(command.payloadJson)
+    except ValueError:
+        return False
+    if command_payload.workflowKind != "short_medium":
+        return False
+    operation = command_payload.operation
+    if operation == "develop_short_outline":
+        expected_kind = "outline_draft"
+    elif operation == "write_short_story":
+        expected_kind = "chapter_draft"
+    else:
+        return False
+    base_conditions = [
+        ReviewArtifact.taskId == target.task.id,
+        ReviewArtifact.kind == expected_kind,
+        ReviewArtifact.status.in_(("draft", "under_review", "awaiting_user")),
+    ]
+    exact_artifact_id = _failure_recovery_artifact_id(target.task, command)
+    if command.kind == "artifact_decision" and exact_artifact_id is None:
+        return False
+    if exact_artifact_id is not None:
+        artifact = await session.scalar(
+            select(ReviewArtifact)
+            .where(
+                *base_conditions,
+                ReviewArtifact.id == exact_artifact_id,
+            )
+            .with_for_update()
+        )
+    else:
+        candidates = list(
+            await session.scalars(
+                select(ReviewArtifact)
+                .where(*base_conditions)
+                .with_for_update()
+            )
+        )
+        artifact = candidates[0] if len(candidates) == 1 else None
+    if artifact is None:
+        return False
+    if not _is_typed_short_story_artifact(artifact, expected_kind):
+        return False
+    serialized = await _recoverable_short_story_snapshot(
+        session,
+        target.task,
+        command,
+        command_payload,
+        artifact.id,
+        sequence,
+    )
+    if serialized is None:
+        return False
+    artifact.status = "awaiting_user"
+    target.task.graphStateJson = serialized
+    target.task.phase = "awaiting_user_review"
+    target.task.updatedAt = utc_now()
+    return True
+
+
+def _failure_recovery_artifact_id(
+    task: WritingTask,
+    command: WritingRunCommand,
+) -> str | None:
+    if command.artifactId is not None:
+        return command.artifactId
+    if not task.graphStateJson:
+        return None
+    try:
+        snapshot = json.loads(task.graphStateJson)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(snapshot, dict):
+        return None
+    artifact_review = snapshot.get("artifactReview")
+    if isinstance(artifact_review, dict):
+        value = artifact_review.get("activeArtifactId")
+        if isinstance(value, str) and value:
+            return value
+    value = snapshot.get("activeArtifactId")
+    return value if isinstance(value, str) and value else None
+
+
+def _is_typed_short_story_artifact(
+    artifact: ReviewArtifact,
+    expected_kind: str,
+) -> bool:
+    try:
+        artifact_payload = json.loads(artifact.payloadJson)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    if (
+        not isinstance(artifact_payload, dict)
+        or artifact_payload.get("storyLengthProfile") != "short_medium"
+        or artifact_payload.get("kind") != expected_kind
+    ):
+        return False
+    return True
+
+
+async def _recoverable_short_story_snapshot(
+    session: AsyncSession,
+    task: WritingTask,
+    command: WritingRunCommand,
+    command_payload: WritingJobPayload,
+    artifact_id: str,
+    sequence: int,
+) -> str | None:
+    owner_id = await session.scalar(
+        select(Novel.userId).where(Novel.id == task.novelId)
+    )
+    if not isinstance(owner_id, str) or not owner_id:
+        return None
+    snapshot = _load_snapshot_object(task.graphStateJson)
+    history = _snapshot_conversation_history(snapshot, task.conversationHistory)
+    operation = command_payload.operation
+    if operation not in {"develop_short_outline", "write_short_story"}:
+        return None
+    persisted_operation = snapshot.get("currentOperation")
+    persisted_goal = (
+        persisted_operation.get("userGoal")
+        if isinstance(persisted_operation, dict)
+        else None
+    )
+    current_operation = _short_story_recovery_operation(
+        operation,
+        (
+            persisted_goal
+            if isinstance(persisted_goal, str) and persisted_goal.strip()
+            else _latest_user_message(history)
+        ),
+    )
+    snapshot.update(
+        {
+            "taskId": task.id,
+            "userId": owner_id,
+            "novelId": task.novelId,
+            "chapterId": task.chapterId,
+            "targetWordCount": task.targetWordCount,
+            "conversationHistory": history,
+            "currentOperation": current_operation,
+            "operationStage": "等待用户决策",
+            "operationStep": "await_user_decision",
+            "workflowKind": "short_medium",
+            "explicitOperation": operation,
+            "commandId": command.id,
+            "targetTotalWordCount": command_payload.targetTotalWordCount,
+            "commandSource": (
+                command_payload.source.model_dump(mode="json")
+                if command_payload.source is not None
+                else None
+            ),
+            "phase": "awaiting_user_review",
+            "activeArtifactId": artifact_id,
+            "artifactStatus": "awaiting_user",
+            "pendingUserResponse": True,
+            "artifactMode": "review_loop",
+            "eventSequence": sequence,
+        }
+    )
+    snapshot.pop("errorMessage", None)
+    artifact_review = snapshot.get("artifactReview")
+    review_state = dict(artifact_review) if isinstance(artifact_review, dict) else {}
+    review_state.update(
+        {
+            "activeArtifactId": artifact_id,
+            "status": "awaiting_user",
+        }
+    )
+    snapshot["artifactReview"] = review_state
+    serialized = json.dumps(snapshot, ensure_ascii=False)
+    try:
+        deserialize_graph_snapshot(
+            serialized,
+            expected_task_id=task.id,
+            expected_user_id=owner_id,
+            expected_novel_id=task.novelId,
+            expected_chapter_id=task.chapterId,
+        )
+    except InvalidGraphSnapshotError:
+        return None
+    return serialized
+
+
+def _load_snapshot_object(serialized: str | None) -> dict[str, Any]:
+    if not serialized:
+        return {}
+    try:
+        value = json.loads(serialized)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _snapshot_conversation_history(
+    snapshot: dict[str, Any],
+    serialized_history: str | None,
+) -> list[dict[str, Any]]:
+    value = snapshot.get("conversationHistory")
+    if isinstance(value, list):
+        return [dict(item) for item in value if isinstance(item, dict)]
+    if serialized_history:
+        try:
+            persisted = json.loads(serialized_history)
+        except (json.JSONDecodeError, TypeError):
+            persisted = None
+        if isinstance(persisted, list):
+            return [dict(item) for item in persisted if isinstance(item, dict)]
+    return []
+
+
+def _latest_user_message(history: list[dict[str, Any]]) -> str:
+    for item in reversed(history):
+        content = item.get("content")
+        if item.get("role") == "user" and isinstance(content, str) and content.strip():
+            return content
+    return "继续处理中短篇草案"
+
+
+def _short_story_recovery_operation(
+    operation: str,
+    user_goal: str,
+) -> dict[str, Any]:
+    if operation == "develop_short_outline":
+        return {
+            "kind": operation,
+            "targetType": "outline",
+            "userGoal": user_goal,
+            "primaryAgent": "剧情",
+            "reviewers": [],
+            "outputKind": "outline_proposal",
+            "requiresArtifact": True,
+            "requiresUserApproval": True,
+            "confidence": 1,
+            "reasoning": "根据 Core 持久化的中短篇 Operation 恢复用户决策。",
+        }
+    return {
+        "kind": operation,
+        "targetType": "chapter",
+        "userGoal": user_goal,
+        "primaryAgent": "写作",
+        "reviewers": ["编辑", "校验"],
+        "outputKind": "chapter_text",
+        "requiresArtifact": True,
+        "requiresUserApproval": True,
+        "confidence": 1,
+        "reasoning": "根据 Core 持久化的中短篇 Operation 恢复用户决策。",
+    }
 
 
 async def _lock_callback_target(

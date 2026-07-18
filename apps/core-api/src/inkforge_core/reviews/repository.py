@@ -4,9 +4,10 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from inkforge_contracts import (
+    ShortStoryAnchors,
     ShortStoryChapterDraft,
     ShortStoryOutlineDraft,
     canonical_short_outline_hash,
@@ -32,6 +33,10 @@ from ..db.models import (
     WritingTask,
 )
 from ..errors import ApiError
+from ..short_story_artifacts import (
+    latest_short_story_outline_artifact,
+    lock_writing_bible,
+)
 from .schemas import (
     ArtifactEvaluationResponse,
     ArtifactKind,
@@ -98,6 +103,79 @@ class ReviewRepository:
             async with session.begin():
                 artifact = await _lock_owned_artifact(session, user_id, artifact_id)
                 _assert_expected_revision(artifact, expected_revision)
+                return _record(artifact)
+
+    async def lock_short_story_decision_bible(
+        self,
+        user_id: str,
+        novel_id: str,
+    ) -> None:
+        """在任务锁之前取得中短篇决定的作品级互斥锁。"""
+
+        async with self._session_factory() as session:
+            async with session.begin():
+                bible = await lock_writing_bible(
+                    session,
+                    novel_id,
+                    user_id=user_id,
+                )
+                if bible is None or bible.storyLengthProfile != "short_medium":
+                    raise ApiError(
+                        status_code=409,
+                        code="SHORT_STORY_PROFILE_REQUIRED",
+                        message="该草案不属于中短篇作品",
+                    )
+
+    async def require_short_story_artifact_revision(
+        self,
+        user_id: str,
+        artifact_id: str,
+        expected_revision: int,
+        *,
+        decision: Literal["approve", "discard", "revise"],
+    ) -> ArtifactRecord:
+        """按 Bible、任务、草案的固定顺序锁定中短篇决定目标。"""
+
+        async with self._session_factory() as session:
+            async with session.begin():
+                owned = await _owned_artifact(session, user_id, artifact_id)
+                if owned is None:
+                    raise ApiError(
+                        status_code=403,
+                        code="REVIEW_ARTIFACT_FORBIDDEN",
+                        message="无权访问该待审核草案",
+                    )
+                bible = await lock_writing_bible(
+                    session,
+                    owned.novelId,
+                    user_id=user_id,
+                )
+                if bible is None or bible.storyLengthProfile != "short_medium":
+                    raise ApiError(
+                        status_code=409,
+                        code="SHORT_STORY_PROFILE_REQUIRED",
+                        message="该草案不属于中短篇作品",
+                    )
+                artifact = await _lock_owned_artifact(session, user_id, artifact_id)
+                _assert_short_story_decision_artifact(artifact)
+                _assert_expected_revision(artifact, expected_revision)
+                if artifact.kind == "outline_draft" and decision == "approve":
+                    latest = await latest_short_story_outline_artifact(
+                        session,
+                        artifact.novelId,
+                        for_update=True,
+                    )
+                    if (
+                        latest is None
+                        or latest.id != artifact.id
+                        or latest.revision != artifact.revision
+                    ):
+                        raise ApiError(
+                            status_code=409,
+                            code="SHORT_OUTLINE_NOT_LATEST",
+                            message="只能批准当前最新的中短篇大纲版本",
+                        )
+                    _parse_short_outline(latest.payloadJson)
                 return _record(artifact)
 
     async def get_response(self, user_id: str, artifact_id: str) -> ReviewArtifactResponse:
@@ -188,9 +266,7 @@ class ReviewRepository:
                     code="SHORT_STORY_PROFILE_REQUIRED",
                     message="该接口只支持中短篇作品",
                 )
-            outline = await _latest_short_story_artifact_by_kind(
-                session, novel_id, "outline_draft"
-            )
+            outline = await latest_short_story_outline_artifact(session, novel_id)
             chapter_draft = await _latest_short_story_artifact_by_kind(
                 session, novel_id, "chapter_draft"
             )
@@ -410,6 +486,12 @@ class ReviewRepository:
     ) -> ReviewArtifactResponse:
         async with self._session_factory() as session:
             async with session.begin():
+                bible = await lock_writing_bible(
+                    session,
+                    request.novelId,
+                    user_id=user_id,
+                )
+                profile = bible.storyLengthProfile if bible is not None else None
                 task = await session.scalar(
                     select(WritingTask)
                     .join(Novel, Novel.id == WritingTask.novelId)
@@ -428,11 +510,6 @@ class ReviewRepository:
                         code="ARTIFACT_TASK_MISMATCH",
                         message="待审核草案与写作任务资源不匹配",
                     )
-                profile = await session.scalar(
-                    select(WritingBible.storyLengthProfile).where(
-                        WritingBible.novelId == request.novelId
-                    )
-                )
                 payload = _validate_payload_for_profile(
                     profile,
                     request.kind,
@@ -451,9 +528,29 @@ class ReviewRepository:
                         .limit(1)
                         .with_for_update()
                     )
+                if existing is not None and existing.kind != request.kind:
+                    raise ApiError(
+                        status_code=409,
+                        code="ARTIFACT_KIND_CONFLICT",
+                        message="同一草案标识不能变更草案类型",
+                    )
+                if profile == "short_medium" and request.kind == "outline_draft":
+                    target_outline = ShortStoryOutlineDraft.model_validate(payload)
+                    anchor_changes = (
+                        []
+                        if existing is None
+                        else _describe_anchor_changes(
+                            _parse_short_outline(existing.payloadJson).anchors,
+                            target_outline.anchors,
+                        )
+                    )
+                    payload = target_outline.model_copy(
+                        update={"anchorChanges": anchor_changes}
+                    ).model_dump(mode="json")
                 if profile == "short_medium" and request.kind == "chapter_draft":
                     await _validate_short_story_draft_submission(
                         session,
+                        bible=bible,
                         task=task,
                         request=request,
                         payload=ShortStoryChapterDraft.model_validate(payload),
@@ -483,12 +580,6 @@ class ReviewRepository:
                     session.add(artifact)
                     await session.flush()
                 else:
-                    if existing.kind != request.kind:
-                        raise ApiError(
-                            status_code=409,
-                            code="ARTIFACT_KIND_CONFLICT",
-                            message="同一草案标识不能变更草案类型",
-                        )
                     existing_payload = _parse_json(existing.payloadJson, {})
                     if profile == "short_medium" and request.kind == "outline_draft":
                         existing_outline = _parse_short_outline(existing.payloadJson)
@@ -603,6 +694,8 @@ class ReviewRepository:
                     if item.id is not None and item.id not in current_section_ids
                 }
                 if unknown_section_ids:
+                    if artifact.revision != request.expectedRevision:
+                        _assert_expected_revision(artifact, request.expectedRevision)
                     raise ApiError(
                         status_code=422,
                         code="SHORT_OUTLINE_SECTION_ID_UNKNOWN",
@@ -634,7 +727,10 @@ class ReviewRepository:
                             "sections": sections,
                             "content": "",
                             "changeSummary": request.changeSummary,
-                            "anchorChanges": request.anchorChanges,
+                            "anchorChanges": _describe_anchor_changes(
+                                current.anchors,
+                                request.anchors,
+                            ),
                         }
                     )
                 except ValidationError as exc:
@@ -697,7 +793,6 @@ class ReviewRepository:
                         message="待审核草案版本不存在",
                     )
                 source_outline = _parse_short_outline(source.payloadJson)
-                source_payload = source_outline.model_dump(mode="json")
                 current = _parse_short_outline(artifact.payloadJson)
                 if (
                     current.semantic_content_signature()
@@ -705,6 +800,14 @@ class ReviewRepository:
                 ):
                     return _response(artifact, [])
                 _assert_expected_revision(artifact, expected_revision)
+                source_payload = source_outline.model_copy(
+                    update={
+                        "anchorChanges": _describe_anchor_changes(
+                            current.anchors,
+                            source_outline.anchors,
+                        )
+                    }
+                ).model_dump(mode="json")
                 artifact.payloadJson = _dump_json(source_payload)
                 artifact.summary = source.summary
                 artifact.diffJson = _dump_json(
@@ -878,6 +981,7 @@ def _validate_payload_for_profile(
 async def _validate_short_story_draft_submission(
     session: AsyncSession,
     *,
+    bible: WritingBible | None,
     task: WritingTask,
     request: CreateArtifactRequest,
     payload: ShortStoryChapterDraft,
@@ -885,11 +989,6 @@ async def _validate_short_story_draft_submission(
 ) -> None:
     """在持久化前重新核对中短篇整稿的全部权威来源。"""
 
-    bible = await session.scalar(
-        select(WritingBible)
-        .where(WritingBible.novelId == request.novelId)
-        .with_for_update()
-    )
     if (
         bible is None
         or bible.storyLengthProfile != "short_medium"
@@ -977,15 +1076,10 @@ async def _validate_short_story_draft_submission(
             message="当前活动命令不是同一中短篇整稿流程",
         )
 
-    latest_outline = await session.scalar(
-        select(ReviewArtifact)
-        .where(
-            ReviewArtifact.novelId == request.novelId,
-            ReviewArtifact.kind == "outline_draft",
-        )
-        .order_by(ReviewArtifact.updatedAt.desc(), ReviewArtifact.id.desc())
-        .limit(1)
-        .with_for_update()
+    latest_outline = await latest_short_story_outline_artifact(
+        session,
+        request.novelId,
+        for_update=True,
     )
     if (
         latest_outline is None
@@ -1121,6 +1215,27 @@ def _parse_short_story_draft(payload_json: str) -> ShortStoryChapterDraft:
         ) from exc
 
 
+def _assert_short_story_decision_artifact(artifact: ReviewArtifact) -> None:
+    payload = _parse_json(artifact.payloadJson, {})
+    if payload.get("storyLengthProfile") != "short_medium":
+        raise ApiError(
+            status_code=409,
+            code="SHORT_STORY_ARTIFACT_REQUIRED",
+            message="该决定锁只支持显式中短篇草案",
+        )
+    if artifact.kind == "outline_draft":
+        _parse_short_outline(artifact.payloadJson)
+        return
+    if artifact.kind == "chapter_draft":
+        _parse_short_story_draft(artifact.payloadJson)
+        return
+    raise ApiError(
+        status_code=409,
+        code="SHORT_STORY_ARTIFACT_REQUIRED",
+        message="该决定锁只支持中短篇大纲或完整正文",
+    )
+
+
 def _dump_json(value: object) -> str:
     return json.dumps(
         value,
@@ -1162,6 +1277,26 @@ def _non_regressive_callback_status(current: str, requested: str) -> str:
         return current
     _assert_transition(current, requested)
     return requested
+
+
+def _describe_anchor_changes(
+    current: ShortStoryAnchors,
+    target: ShortStoryAnchors,
+) -> list[str]:
+    changes: list[str] = []
+    fields = (
+        ("必须保留", current.mustKeep, target.mustKeep),
+        ("已经确认", current.confirmed, target.confirmed),
+        ("明确不要", current.avoid, target.avoid),
+    )
+    for label, current_items, target_items in fields:
+        changes.extend(
+            f"{label}新增：{item}" for item in target_items if item not in current_items
+        )
+        changes.extend(
+            f"{label}移除：{item}" for item in current_items if item not in target_items
+        )
+    return changes
 
 
 def _deterministic_section_id(
@@ -1237,6 +1372,17 @@ async def _lock_short_outline(
             code="REVIEW_ARTIFACT_FORBIDDEN",
             message="无权访问该待审核草案",
         )
+    bible = await lock_writing_bible(
+        session,
+        owned.novelId,
+        user_id=user_id,
+    )
+    if bible is None or bible.storyLengthProfile != "short_medium":
+        raise ApiError(
+            status_code=409,
+            code="SHORT_OUTLINE_REQUIRED",
+            message="该接口只支持中短篇大纲草案",
+        )
     if owned.taskId is None:
         raise ApiError(
             status_code=409,
@@ -1254,13 +1400,12 @@ async def _lock_short_outline(
         )
     artifact = await session.scalar(
         select(ReviewArtifact)
-        .join(WritingBible, WritingBible.novelId == ReviewArtifact.novelId)
         .where(
             ReviewArtifact.id == artifact_id,
+            ReviewArtifact.novelId == owned.novelId,
             ReviewArtifact.kind == "outline_draft",
-            WritingBible.storyLengthProfile == "short_medium",
         )
-        .with_for_update()
+        .with_for_update(of=ReviewArtifact)
     )
     if artifact is None:
         raise ApiError(

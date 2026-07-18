@@ -46,6 +46,21 @@ class ReviewArtifactRepositoryPort(Protocol):
         expected_revision: int,
     ) -> ArtifactRecord: ...
 
+    async def lock_short_story_decision_bible(
+        self,
+        user_id: str,
+        artifact_id: str,
+    ) -> None: ...
+
+    async def require_short_story_artifact_revision(
+        self,
+        user_id: str,
+        artifact_id: str,
+        expected_revision: int,
+        *,
+        decision: Literal["approve", "discard", "revise"],
+    ) -> ArtifactRecord: ...
+
 
 class ReviewDecisionServicePort(Protocol):
     async def decide(
@@ -152,6 +167,12 @@ class ReviewDecisionOrchestrator:
                         code="ARTIFACT_TASK_MISSING",
                         message="待审核草案没有关联写作任务",
                     )
+                is_short_story = _is_short_story_artifact(artifact_before_lock)
+                if is_short_story:
+                    await dependencies.repository.lock_short_story_decision_bible(
+                        user_id,
+                        artifact_before_lock.novel_id,
+                    )
                 task = await dependencies.commands.require_owned_task(
                     user_id, artifact_before_lock.task_id
                 )
@@ -160,9 +181,33 @@ class ReviewDecisionOrchestrator:
                 )
                 if raced is not None:
                     return _accepted_response_from_command(raced, artifact_id, request)
-                artifact = await dependencies.repository.require_artifact_revision(
-                    user_id, artifact_id, request.expectedRevision
-                )
+                if is_short_story:
+                    artifact = (
+                        await dependencies.repository.require_short_story_artifact_revision(
+                            user_id,
+                            artifact_id,
+                            request.expectedRevision,
+                            decision=request.decision,
+                        )
+                    )
+                else:
+                    artifact = await dependencies.repository.require_artifact_revision(
+                        user_id, artifact_id, request.expectedRevision
+                    )
+                if (
+                    request.decision == "revise"
+                    and artifact.kind in {"outline_draft", "chapter_draft"}
+                    and artifact.payload.get("storyLengthProfile") == "short_medium"
+                    and (
+                        request.userMessage is None
+                        or not request.userMessage.strip()
+                    )
+                ):
+                    raise ApiError(
+                        status_code=422,
+                        code="SHORT_STORY_REVISION_REQUEST_REQUIRED",
+                        message="中短篇返工必须提供非空修改要求原文",
+                    )
                 if (
                     artifact.kind == "outline_draft"
                     and artifact.payload.get("storyLengthProfile") == "short_medium"
@@ -300,6 +345,13 @@ def _decision_semantics(
         ),
         "userMessage": request.userMessage,
     }
+
+
+def _is_short_story_artifact(artifact: ArtifactRecord) -> bool:
+    return (
+        artifact.kind in {"outline_draft", "chapter_draft"}
+        and artifact.payload.get("storyLengthProfile") == "short_medium"
+    )
 
 
 def _build_transactional_factory(

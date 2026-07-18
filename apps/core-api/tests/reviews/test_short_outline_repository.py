@@ -18,7 +18,9 @@ from inkforge_core.db.models import (
 from inkforge_core.errors import ApiError
 from inkforge_core.reviews.repository import ReviewRepository
 from inkforge_core.reviews.schemas import CreateArtifactRequest, SaveShortStoryOutlineRequest
+from inkforge_core.short_story_artifacts import writing_bible_lock_statement
 from sqlalchemy import event
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
@@ -58,6 +60,7 @@ def _create_request(
     title: str = "中短篇大纲",
     summary: str = "首次生成",
     diff: object = None,
+    artifact_key: str = "short-outline",
 ) -> CreateArtifactRequest:
     return CreateArtifactRequest.model_validate(
         {
@@ -65,7 +68,7 @@ def _create_request(
             "taskId": "task-1",
             "novelId": "novel-1",
             "chapterId": "chapter-1",
-            "artifactKey": "short-outline",
+            "artifactKey": artifact_key,
             "kind": "outline_draft",
             "status": status,
             "title": title,
@@ -210,6 +213,230 @@ async def test_create_or_revise_ignores_version_notes_and_keeps_current_payload(
     assert replay.payload.anchorChanges == []  # type: ignore[union-attr]
     revisions = await repository.list_revisions("user-1", created.id)
     assert [item.revision for item in revisions] == [1]
+
+
+@pytest.mark.asyncio
+async def test_agent_outline_anchor_changes_are_computed_by_core(
+    repository: ReviewRepository,
+) -> None:
+    initial_payload = _payload()
+    initial_payload["anchorChanges"] = ["模型伪造的首版锚点变化"]
+    created = await repository.create_or_revise(
+        "user-1",
+        _create_request(status="awaiting_user", payload=initial_payload),
+    )
+    assert created.payload.anchorChanges == []  # type: ignore[union-attr]
+
+    revised_payload = _payload()
+    revised_payload["anchors"] = {
+        "mustKeep": ["回到黎明"],
+        "confirmed": ["主角知情"],
+        "avoid": [],
+    }
+    revised_payload["anchorChanges"] = ["模型伪造的修订锚点变化"]
+    revised = await repository.create_or_revise(
+        "user-1",
+        _create_request(
+            status="awaiting_user",
+            payload=revised_payload,
+            expected_revision=created.revision,
+        ),
+    )
+
+    assert revised.payload.anchorChanges == [  # type: ignore[union-attr]
+        "必须保留新增：回到黎明",
+        "必须保留移除：未来讣告",
+        "已经确认新增：主角知情",
+        "明确不要移除：梦境",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_short_outline_create_locks_bible_before_task_and_artifact(
+    repository: ReviewRepository,
+) -> None:
+    statements: list[str] = []
+    engine = repository._session_factory.kw["bind"]  # noqa: SLF001
+
+    def record_statement(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        statements.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", record_statement)
+    try:
+        await repository.create_or_revise("user-1", _create_request())
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", record_statement)
+
+    bible_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.lstrip().upper().startswith("SELECT") and '"WritingBible"' in statement
+    )
+    task_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.lstrip().upper().startswith("SELECT") and '"WritingTask"' in statement
+    )
+    artifact_insert_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.lstrip().upper().startswith("INSERT")
+        and '"ReviewArtifact"' in statement
+    )
+    assert bible_index < task_index < artifact_insert_index
+
+
+@pytest.mark.asyncio
+async def test_short_outline_revision_locks_bible_before_task_and_artifact(
+    repository: ReviewRepository,
+) -> None:
+    created = await repository.create_or_revise("user-1", _create_request())
+    statements: list[str] = []
+    engine = repository._session_factory.kw["bind"]  # noqa: SLF001
+
+    def record_statement(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        statements.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", record_statement)
+    try:
+        await repository.create_or_revise(
+            "user-1",
+            _create_request(
+                payload=_payload(premise="守夜人必须主动改写自己的死亡。"),
+                expected_revision=created.revision,
+            ),
+        )
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", record_statement)
+
+    bible_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.lstrip().upper().startswith("SELECT") and '"WritingBible"' in statement
+    )
+    task_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.lstrip().upper().startswith("SELECT") and '"WritingTask"' in statement
+    )
+    artifact_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.lstrip().upper().startswith("SELECT")
+        and '"ReviewArtifact"' in statement
+    )
+    assert bible_index < task_index < artifact_index
+
+
+def test_writing_bible_lock_statement_targets_shared_postgresql_row() -> None:
+    sql = str(
+        writing_bible_lock_statement(
+            "novel-1",
+            user_id="user-1",
+        ).compile(dialect=postgresql.dialect())
+    )
+
+    assert 'FOR UPDATE OF "WritingBible"' in sql
+    assert '"WritingBible"."novelId"' in sql
+    assert '"Novel"."userId"' in sql
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["direct_edit", "restore"])
+async def test_user_outline_writes_lock_bible_before_task_and_artifact(
+    repository: ReviewRepository,
+    action: str,
+) -> None:
+    created = await repository.create_or_revise(
+        "user-1", _create_request(status="awaiting_user")
+    )
+    current = created.payload
+    assert not isinstance(current, dict)
+    expected_revision = created.revision
+    if action == "restore":
+        revised = await repository.create_or_revise(
+            "user-1",
+            _create_request(
+                status="awaiting_user",
+                payload=_payload(premise="守夜人先追查讣告纸张。"),
+                expected_revision=created.revision,
+            ),
+        )
+        expected_revision = revised.revision
+
+    statements: list[str] = []
+    engine = repository._session_factory.kw["bind"]  # noqa: SLF001
+
+    def record_statement(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        statements.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", record_statement)
+    try:
+        if action == "restore":
+            await repository.restore_revision(
+                "user-1",
+                created.id,
+                1,
+                expected_revision=expected_revision,
+            )
+        else:
+            await repository.save_short_story_outline(
+                "user-1",
+                created.id,
+                SaveShortStoryOutlineRequest.model_validate(
+                    {
+                        "expectedRevision": expected_revision,
+                        "corePremise": "守夜人主动追查讣告纸张。",
+                        "anchors": current.anchors,
+                        "sections": [
+                            section.model_dump() for section in current.sections
+                        ],
+                        "changeSummary": "用户直接修改",
+                    }
+                ),
+            )
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", record_statement)
+
+    bible_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.lstrip().upper().startswith("SELECT") and '"WritingBible"' in statement
+    )
+    task_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.lstrip().upper().startswith("SELECT") and '"WritingTask"' in statement
+    )
+    locked_artifact_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if index > task_index
+        and statement.lstrip().upper().startswith("SELECT")
+        and '"ReviewArtifact"' in statement
+    )
+    assert bible_index < task_index < locked_artifact_index
 
 
 @pytest.mark.asyncio
@@ -376,6 +603,44 @@ async def test_direct_edit_generates_missing_ids_then_history_restore_copies_new
 
 
 @pytest.mark.asyncio
+async def test_direct_edit_computes_anchor_changes_from_authoritative_versions(
+    repository: ReviewRepository,
+) -> None:
+    created = await repository.create_or_revise(
+        "user-1", _create_request(status="awaiting_user")
+    )
+    current = created.payload
+    assert not isinstance(current, dict)
+
+    edited = await repository.save_short_story_outline(
+        "user-1",
+        created.id,
+        SaveShortStoryOutlineRequest.model_validate(
+            {
+                "expectedRevision": created.revision,
+                "corePremise": current.corePremise,
+                "anchors": {
+                    "mustKeep": ["回到黎明"],
+                    "confirmed": ["主角知情"],
+                    "avoid": [],
+                },
+                "sections": [section.model_dump() for section in current.sections],
+                "changeSummary": "用户调整创作锚点",
+                "anchorChanges": ["客户端伪造的差异说明"],
+            }
+        ),
+    )
+
+    assert edited.revision == 2
+    assert edited.payload.anchorChanges == [  # type: ignore[union-attr]
+        "必须保留新增：回到黎明",
+        "必须保留移除：未来讣告",
+        "已经确认新增：主角知情",
+        "明确不要移除：梦境",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_direct_edit_with_only_version_notes_is_noop_and_keeps_current_payload(
     repository: ReviewRepository,
 ) -> None:
@@ -447,9 +712,94 @@ async def test_restore_semantically_identical_revision_is_noop_and_keeps_current
     assert replay.summary == "当前第三版摘要"
     assert replay.diff == {"rawUserMessage": "还是使用原来的故事"}
     assert replay.payload.changeSummary == "重新回到初版故事内容"  # type: ignore[union-attr]
-    assert replay.payload.anchorChanges == ["恢复原先的核心前提"]  # type: ignore[union-attr]
+    assert replay.payload.anchorChanges == []  # type: ignore[union-attr]
     revisions = await repository.list_revisions("user-1", created.id)
     assert [item.revision for item in revisions] == [3, 2, 1]
+
+
+@pytest.mark.asyncio
+async def test_restore_recomputes_anchor_changes_from_current_to_target(
+    repository: ReviewRepository,
+) -> None:
+    created = await repository.create_or_revise(
+        "user-1", _create_request(status="awaiting_user")
+    )
+    changed_payload = _payload(premise="守夜人决定亲自改写讣告。")
+    changed_payload["anchors"] = {
+        "mustKeep": ["回到黎明"],
+        "confirmed": ["主角知情"],
+        "avoid": [],
+    }
+    changed = await repository.create_or_revise(
+        "user-1",
+        _create_request(
+            status="awaiting_user",
+            payload=changed_payload,
+            expected_revision=created.revision,
+        ),
+    )
+
+    restored = await repository.restore_revision(
+        "user-1",
+        created.id,
+        1,
+        expected_revision=changed.revision,
+    )
+
+    assert restored.payload.anchorChanges == [  # type: ignore[union-attr]
+        "必须保留新增：未来讣告",
+        "必须保留移除：回到黎明",
+        "已经确认移除：主角知情",
+        "明确不要新增：梦境",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_stale_direct_edit_with_removed_section_reports_revision_conflict(
+    repository: ReviewRepository,
+) -> None:
+    created = await repository.create_or_revise(
+        "user-1", _create_request(status="awaiting_user")
+    )
+    current = created.payload
+    assert not isinstance(current, dict)
+    original_section = current.sections[0]
+    await repository.save_short_story_outline(
+        "user-1",
+        created.id,
+        SaveShortStoryOutlineRequest.model_validate(
+            {
+                "expectedRevision": 1,
+                "corePremise": "另一标签页已经重写结构",
+                "anchors": current.anchors,
+                "sections": [{"title": "新结构", "events": "新事件"}],
+                "changeSummary": "并发修改",
+            }
+        ),
+    )
+
+    with pytest.raises(ApiError) as stale:
+        await repository.save_short_story_outline(
+            "user-1",
+            created.id,
+            SaveShortStoryOutlineRequest.model_validate(
+                {
+                    "expectedRevision": 1,
+                    "corePremise": "旧标签页的本地编辑",
+                    "anchors": current.anchors,
+                    "sections": [
+                        {
+                            "id": original_section.id,
+                            "title": original_section.title,
+                            "events": "旧标签页继续修改原分节",
+                        }
+                    ],
+                    "changeSummary": "旧标签页保存",
+                }
+            ),
+        )
+
+    assert stale.value.code == "ARTIFACT_REVISION_CONFLICT"
 
 
 @pytest.mark.asyncio
@@ -491,3 +841,89 @@ async def test_short_outline_version_apis_reject_long_serial_artifact(
     with pytest.raises(ApiError) as caught:
         await repository.list_revisions("user-1", artifact.id)
     assert caught.value.code == "SHORT_OUTLINE_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_short_outline_approve_requires_latest_typed_outline(
+    repository: ReviewRepository,
+) -> None:
+    older = await repository.create_or_revise(
+        "user-1",
+        _create_request(status="awaiting_user", artifact_key="short-outline-old"),
+    )
+    newer = await repository.create_or_revise(
+        "user-1",
+        _create_request(
+            status="awaiting_user",
+            artifact_key="short-outline-new",
+            payload=_payload(premise="守夜人决定先追查讣告纸张。"),
+        ),
+    )
+
+    with pytest.raises(ApiError) as stale:
+        await repository.require_short_story_artifact_revision(
+            "user-1",
+            older.id,
+            older.revision,
+            decision="approve",
+        )
+    assert stale.value.code == "SHORT_OUTLINE_NOT_LATEST"
+
+    current = await repository.require_short_story_artifact_revision(
+        "user-1",
+        newer.id,
+        newer.revision,
+        decision="approve",
+    )
+    assert current.id == newer.id
+
+
+@pytest.mark.asyncio
+async def test_short_decision_repository_locks_bible_before_task_and_artifact(
+    repository: ReviewRepository,
+) -> None:
+    created = await repository.create_or_revise(
+        "user-1", _create_request(status="awaiting_user")
+    )
+    statements: list[str] = []
+    engine = repository._session_factory.kw["bind"]  # noqa: SLF001
+
+    def record_statement(
+        _connection: object,
+        _cursor: object,
+        statement: str,
+        _parameters: object,
+        _context: object,
+        _executemany: bool,
+    ) -> None:
+        statements.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", record_statement)
+    try:
+        await repository.require_short_story_artifact_revision(
+            "user-1",
+            created.id,
+            created.revision,
+            decision="revise",
+        )
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", record_statement)
+
+    bible_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.lstrip().upper().startswith("SELECT") and '"WritingBible"' in statement
+    )
+    task_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.lstrip().upper().startswith("SELECT") and '"WritingTask"' in statement
+    )
+    locked_artifact_index = next(
+        index
+        for index, statement in enumerate(statements)
+        if index > task_index
+        and statement.lstrip().upper().startswith("SELECT")
+        and '"ReviewArtifact"' in statement
+    )
+    assert bible_index < task_index < locked_artifact_index

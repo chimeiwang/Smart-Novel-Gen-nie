@@ -24,15 +24,25 @@ class RowResult:
         return self.value
 
 
+class ScalarsResult:
+    def __init__(self, values: list[object]) -> None:
+        self.values = values
+
+    def all(self) -> list[object]:
+        return self.values
+
+
 class IdentitySession:
     def __init__(
         self,
         row: tuple[object, ...] | None,
         *,
         scalars: list[object | None] | None = None,
+        scalar_lists: list[list[object]] | None = None,
     ) -> None:
         self.row = row
-        self.scalars = list(scalars or [])
+        self.scalar_values = list(scalars or [])
+        self.scalar_lists = list(scalar_lists or [])
 
     async def execute(self, statement: object) -> RowResult:
         del statement
@@ -40,9 +50,15 @@ class IdentitySession:
 
     async def scalar(self, statement: object) -> object | None:
         del statement
-        if not self.scalars:
+        if not self.scalar_values:
             raise AssertionError("收到未预期的 scalar 查询")
-        return self.scalars.pop(0)
+        return self.scalar_values.pop(0)
+
+    async def scalars(self, statement: object) -> ScalarsResult:
+        del statement
+        if not self.scalar_lists:
+            raise AssertionError("收到未预期的 scalars 查询")
+        return ScalarsResult(self.scalar_lists.pop(0))
 
 
 def _request(
@@ -153,7 +169,9 @@ async def test_write_short_story_uses_latest_applied_strong_outline_source() -> 
     )
 
     identity = await _resolve_start_workflow_identity(
-        IdentitySession(_rows(), scalars=[1, artifact]),  # type: ignore[arg-type]
+        IdentitySession(  # type: ignore[arg-type]
+            _rows(), scalars=[1], scalar_lists=[[artifact]]
+        ),
         "user-1",
         _request(operation="write_short_story"),
     )
@@ -164,7 +182,55 @@ async def test_write_short_story_uses_latest_applied_strong_outline_source() -> 
 
 
 @pytest.mark.asyncio
+async def test_write_short_story_skips_newer_legacy_outline_source() -> None:
+    payload = ShortStoryOutlineDraft(
+        originalInspiration="原始灵感",
+        corePremise="守夜人必须决定是否让全城记住被抹去的人。",
+        anchors=ShortStoryAnchors(mustKeep=["遗忘"], confirmed=[], avoid=[]),
+        sections=[{"id": "section-1", "title": "异变", "events": "发现遗忘规律。"}],
+    )
+    typed = ReviewArtifact(
+        id="artifact-typed",
+        novelId="novel-1",
+        chapterId="chapter-1",
+        kind="outline_draft",
+        status="applied",
+        revision=3,
+        payloadJson=payload.model_dump_json(),
+    )
+    legacy = ReviewArtifact(
+        id="artifact-legacy-newer",
+        novelId="novel-1",
+        chapterId="chapter-1",
+        kind="outline_draft",
+        status="awaiting_user",
+        revision=4,
+        payloadJson=json.dumps(
+            {"kind": "outline_draft", "content": "旧流程自由文本大纲"},
+            ensure_ascii=False,
+        ),
+    )
+
+    identity = await _resolve_start_workflow_identity(
+        IdentitySession(  # type: ignore[arg-type]
+            _rows(), scalars=[1], scalar_lists=[[legacy, typed]]
+        ),
+        "user-1",
+        _request(operation="write_short_story"),
+    )
+
+    assert identity["source"]["outlineArtifactId"] == "artifact-typed"
+    assert identity["source"]["outlineRevision"] == 3
+
+
+@pytest.mark.asyncio
 async def test_write_short_story_rejects_latest_outline_when_it_is_not_applied() -> None:
+    payload = ShortStoryOutlineDraft(
+        originalInspiration="原始灵感",
+        corePremise="守夜人必须决定是否让全城记住被抹去的人。",
+        anchors=ShortStoryAnchors(mustKeep=["遗忘"], confirmed=[], avoid=[]),
+        sections=[{"id": "section-1", "title": "异变", "events": "发现遗忘规律。"}],
+    )
     latest = ReviewArtifact(
         id="artifact-new",
         novelId="novel-1",
@@ -172,16 +238,45 @@ async def test_write_short_story_rejects_latest_outline_when_it_is_not_applied()
         kind="outline_draft",
         status="awaiting_user",
         revision=4,
-        payloadJson="{}",
+        payloadJson=payload.model_dump_json(),
     )
 
     with pytest.raises(ApiError) as caught:
         await _resolve_start_workflow_identity(
-            IdentitySession(_rows(), scalars=[1, latest]),  # type: ignore[arg-type]
+            IdentitySession(  # type: ignore[arg-type]
+                _rows(), scalars=[1], scalar_lists=[[latest]]
+            ),
             "user-1",
             _request(operation="write_short_story"),
         )
     assert caught.value.code == "SHORT_STORY_OUTLINE_NOT_APPROVED"
+
+
+@pytest.mark.asyncio
+async def test_write_short_story_rejects_explicitly_marked_invalid_outline() -> None:
+    invalid = ReviewArtifact(
+        id="artifact-invalid",
+        novelId="novel-1",
+        chapterId="chapter-1",
+        kind="outline_draft",
+        status="applied",
+        revision=4,
+        payloadJson=json.dumps(
+            {"kind": "outline_draft", "storyLengthProfile": "short_medium"}
+        ),
+    )
+
+    with pytest.raises(ApiError) as caught:
+        await _resolve_start_workflow_identity(
+            IdentitySession(  # type: ignore[arg-type]
+                _rows(), scalars=[1], scalar_lists=[[invalid]]
+            ),
+            "user-1",
+            _request(operation="write_short_story"),
+        )
+
+    assert caught.value.status_code == 409
+    assert caught.value.code == "SHORT_STORY_OUTLINE_INVALID"
 
 
 def test_start_idempotency_key_cannot_be_reused_with_different_semantics() -> None:

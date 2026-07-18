@@ -38,6 +38,7 @@ from ..db.models import (
     WritingTask,
 )
 from ..errors import ApiError
+from ..short_story_artifacts import latest_short_story_outline_artifact
 from .recovery import InvalidGraphSnapshotError, deserialize_graph_snapshot
 
 
@@ -470,14 +471,9 @@ class WritingContextRepository:
             return
         if not isinstance(source, ApprovedShortOutlineSource):
             raise _context_identity_mismatch()
-        artifact = await session.scalar(
-            select(ReviewArtifact)
-            .where(
-                ReviewArtifact.novelId == task.novelId,
-                ReviewArtifact.kind == "outline_draft",
-            )
-            .order_by(ReviewArtifact.updatedAt.desc(), ReviewArtifact.id.desc())
-            .limit(1)
+        artifact = await latest_short_story_outline_artifact(
+            session,
+            task.novelId,
         )
         if (
             artifact is None
@@ -495,30 +491,7 @@ class WritingContextRepository:
         session: AsyncSession,
         novel_id: str,
     ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
-        candidates = list(
-            (
-                await session.scalars(
-                    select(ReviewArtifact)
-                    .where(
-                        ReviewArtifact.novelId == novel_id,
-                        ReviewArtifact.kind == "outline_draft",
-                    )
-                    .order_by(ReviewArtifact.updatedAt.desc(), ReviewArtifact.id.desc())
-                )
-            ).all()
-        )
-        artifact = None
-        for candidate in candidates:
-            try:
-                raw_payload = json.loads(candidate.payloadJson)
-            except (json.JSONDecodeError, TypeError):
-                continue
-            if (
-                isinstance(raw_payload, dict)
-                and raw_payload.get("storyLengthProfile") == "short_medium"
-            ):
-                artifact = candidate
-                break
+        artifact = await latest_short_story_outline_artifact(session, novel_id)
         if artifact is None:
             return None, None
         payload = _parse_short_outline(artifact.payloadJson).model_dump(mode="json")
