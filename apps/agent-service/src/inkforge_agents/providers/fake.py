@@ -146,6 +146,22 @@ def _select_tool(
             },
         )
     if "submit_evaluation" in tool_names:
+        if (
+            "[E2E_AUTO_REWRITE_ONCE]" in message_text
+            and "operation=write_short_story" in message_text
+            and "mode=reviewer" in message_text
+            and re.search(r'"automaticRewriteCount"\s*:\s*0', message_text)
+            and "结构、节奏、高潮和结局兑现" in message_text
+        ):
+            return (
+                "submit_evaluation",
+                {
+                    "artifactKey": "fake-artifact",
+                    "verdict": "revise",
+                    "summary": "模拟编辑要求执行一次自动完整返工。",
+                    "requiredChanges": "强化开场危机，并保持结局兑现不变。",
+                },
+            )
         return (
             "submit_evaluation",
             {

@@ -1,7 +1,11 @@
 import pytest
 from inkforge_agents.providers.base import ModelTurnRequest
 from inkforge_agents.providers.fake import FakeModelProvider
+from inkforge_agents.runtime.agent_runner import AgentRunner, AgentRunRequest
+from inkforge_agents.runtime.agent_runtime import AgentRuntime
+from inkforge_agents.runtime.model_runtime import ModelRuntime
 from inkforge_agents.short_story.story_graph import extract_complete_short_story
+from inkforge_agents.tools.registry import ToolContext, build_default_registry
 from inkforge_contracts import count_short_story_text_length
 
 
@@ -110,6 +114,90 @@ async def test_fake_provider_finishes_after_tool_result() -> None:
 
     assert result.toolCalls == []
     assert result.finishReason == "stop"
+
+
+@pytest.mark.asyncio
+async def test_fake_provider_can_trigger_one_e2e_editor_rewrite() -> None:
+    class CapturingFakeProvider(FakeModelProvider):
+        def __init__(self) -> None:
+            self.requests: list[ModelTurnRequest] = []
+
+        async def complete_turn(self, request: ModelTurnRequest):
+            self.requests.append(request)
+            return await super().complete_turn(request)
+
+    provider = CapturingFakeProvider()
+    registry = build_default_registry()
+    runner = AgentRunner(
+        AgentRuntime(
+            ModelRuntime(provider),
+            registry,
+            max_output_tokens=16_384,
+        ),
+        registry,
+    )
+
+    async def review(count: int, agent_id: str, instruction: str):
+        result = await runner.run(
+            AgentRunRequest(
+                agentId=agent_id,
+                executionMode="reviewer",
+                operationKind="write_short_story",
+                userMessage="审核当前完整中短篇正文",
+                contextMessages=[
+                    (
+                        "中短篇整稿权威上下文："
+                        '{"originalInspiration":"[E2E_AUTO_REWRITE_ONCE] 守夜人敲钟"}'
+                    ),
+                    (
+                        "当前待审核草案权威内容："
+                        f'{{"payload":{{"metadata":{{"automaticRewriteCount":{count}}}}}}}'
+                    ),
+                ],
+                executionInstructions=[instruction],
+                toolContext=ToolContext(
+                    userId="user-1",
+                    novelId="novel-1",
+                    taskId="task-1",
+                    runId="run-1",
+                    agentId=agent_id,
+                ),
+                maxIterations=1,
+            )
+        )
+        return result, provider.requests[-1]
+
+    first_editor, first_request = await review(
+        0,
+        "编辑",
+        "这是中短篇完整正文的全稿审核，只检查结构、节奏、高潮和结局兑现。",
+    )
+    validator, _ = await review(
+        0,
+        "校验",
+        "这是中短篇完整正文的独立全稿校验，只检查人物、规则、时间线、因果和伏笔。",
+    )
+    second_editor, _ = await review(
+        1,
+        "编辑",
+        "这是中短篇完整正文的全稿审核，只检查结构、节奏、高潮和结局兑现。",
+    )
+
+    runtime_message = "\n".join(message.content for message in first_request.messages)
+    assert "[E2E_AUTO_REWRITE_ONCE]" in runtime_message
+    assert '"automaticRewriteCount":0' in runtime_message
+    assert "operation=write_short_story" in runtime_message
+    assert "mode=reviewer" in runtime_message
+    assert "结构、节奏、高潮和结局兑现" in runtime_message
+    assert first_editor.controlEvents[0] == {
+        "type": "submit_evaluation",
+        "artifactKey": "fake-artifact",
+        "verdict": "revise",
+        "summary": "模拟编辑要求执行一次自动完整返工。",
+        "requiredChanges": "强化开场危机，并保持结局兑现不变。",
+    }
+    assert validator.controlEvents[0]["verdict"] == "pass"
+    assert second_editor.controlEvents[0]["verdict"] == "pass"
 
 
 @pytest.mark.asyncio
