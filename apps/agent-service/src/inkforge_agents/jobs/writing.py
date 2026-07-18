@@ -112,6 +112,10 @@ class WritingJobHandler:
             )
         context = await self._core.call_tool(resource, "写作", "get_writing_context", {})
         _validate_job_context_identity(job, payload, context)
+        if payload.operation == "write_short_story":
+            raise ValueError(
+                "SHORT_STORY_WORKFLOW_NOT_IMPLEMENTED：中短篇整稿专用串行审核尚未接入"
+            )
         current_job_state = _current_job_snapshot(job, context)
         owned_artifact_id: str | None = None
         if current_job_state is not None:
@@ -391,10 +395,6 @@ class WritingJobHandler:
             ),
         )
         _apply_planning_history(state, planning)
-        if payload.operation == "write_short_story":
-            raise ValueError(
-                "SHORT_STORY_WORKFLOW_NOT_IMPLEMENTED：中短篇整稿专用串行审核尚未接入"
-            )
         if payload.operation is not None:
             state["currentOperation"] = _explicit_operation(
                 payload.operation,

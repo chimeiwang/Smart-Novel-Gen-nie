@@ -6,7 +6,8 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import pytest
-from inkforge_core.db.models import WritingRunCommand, WritingTask
+from inkforge_core.db.models import WritingBible, WritingRunCommand, WritingTask
+from inkforge_core.errors import ApiError
 from inkforge_core.writing.reconciler import WritingRunReconciler
 from inkforge_core.writing.records import TaskRecord
 from inkforge_core.writing.tasks import WritingTaskRepository
@@ -247,9 +248,17 @@ class SettlementSession:
 
 
 class ReconciliationCommandSession(SettlementSession):
-    def __init__(self, model: WritingTask) -> None:
+    def __init__(
+        self,
+        model: WritingTask,
+        *,
+        bible: WritingBible | None = None,
+        latest_payload: str | None = None,
+    ) -> None:
         super().__init__(model)
         self.commands: dict[str, WritingRunCommand] = {}
+        self.bible = bible
+        self.latest_payload = latest_payload
 
     async def get(self, model_type, identifier, *, with_for_update=False):
         assert with_for_update is True
@@ -267,6 +276,14 @@ class ReconciliationCommandSession(SettlementSession):
 
     async def flush(self) -> None:
         return None
+
+    async def scalar(self, statement):
+        source = str(statement)
+        if '"WritingBible"' in source:
+            return self.bible
+        if '"WritingRunCommand"."payloadJson"' in source:
+            return self.latest_payload
+        return self.active_command_id
 
 
 @pytest.mark.asyncio
@@ -388,3 +405,179 @@ async def test_reconciliation_creates_single_command_and_invalidates_old_legacy_
     assert payload["source"] is None
     assert old_authorization.accepted is False
     assert new_authorization.accepted is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("operation", "source"),
+    [
+        (
+            "develop_short_outline",
+            {
+                "kind": "short_outline_inspiration",
+                "originalInspiration": "城市每天忘记一个人",
+            },
+        ),
+        (
+            "write_short_story",
+            {
+                "kind": "approved_short_outline",
+                "outlineArtifactId": "outline-1",
+                "outlineRevision": 3,
+                "outlineHash": "a" * 64,
+            },
+        ),
+    ],
+)
+async def test_short_reconciliation_copies_latest_persisted_workflow_identity(
+    operation: str,
+    source: dict[str, object],
+) -> None:
+    latest_payload = json.dumps(
+        {
+            "version": 1,
+            "resume": False,
+            "chapterId": "chapter-1",
+            "writingSessionId": "session-1",
+            "resumeInput": None,
+            "workflowKind": "short_medium",
+            "operation": operation,
+            "targetTotalWordCount": 6000,
+            "source": source,
+        },
+        ensure_ascii=False,
+    )
+    model = WritingTask(
+        id="task-1",
+        novelId="novel-1",
+        chapterId="chapter-1",
+        writingSessionId="session-1",
+        phase="active",
+        selectedAgents="剧情",
+        targetWordCount=6000,
+        graphStateJson='{"phase":"active"}',
+    )
+    expected = TaskRecord(
+        "task-1",
+        "user-1",
+        "novel-1",
+        "chapter-1",
+        "session-1",
+        "active",
+        '{"phase":"active"}',
+    )
+    session = ReconciliationCommandSession(
+        model,
+        bible=WritingBible(
+            id="bible-1",
+            novelId="novel-1",
+            storyLengthProfile="short_medium",
+            targetTotalWordCount=6000,
+        ),
+        latest_payload=latest_payload,
+    )
+    repository = WritingTaskRepository(lambda: session)  # type: ignore[arg-type]
+
+    assert await repository.create_reconciliation_command(expected) is True
+
+    command = next(iter(session.commands.values()))
+    payload = json.loads(command.payloadJson)
+    assert payload["workflowKind"] == "short_medium"
+    assert payload["operation"] == operation
+    assert payload["targetTotalWordCount"] == 6000
+    assert payload["source"] == source
+
+
+@pytest.mark.asyncio
+async def test_long_legacy_reconciliation_remains_long_serial() -> None:
+    model = WritingTask(
+        id="task-1",
+        novelId="novel-1",
+        chapterId="chapter-1",
+        phase="active",
+        targetWordCount=4000,
+        graphStateJson='{"phase":"active"}',
+    )
+    expected = TaskRecord(
+        "task-1",
+        "user-1",
+        "novel-1",
+        "chapter-1",
+        None,
+        "active",
+        '{"phase":"active"}',
+    )
+    session = ReconciliationCommandSession(
+        model,
+        bible=WritingBible(
+            id="bible-1",
+            novelId="novel-1",
+            storyLengthProfile="long_serial",
+            targetTotalWordCount=1_000_000,
+        ),
+        latest_payload=json.dumps(
+            {
+                "version": 1,
+                "resume": True,
+                "chapterId": "chapter-1",
+                "writingSessionId": None,
+                "resumeInput": None,
+            }
+        ),
+    )
+    repository = WritingTaskRepository(lambda: session)  # type: ignore[arg-type]
+
+    assert await repository.create_reconciliation_command(expected) is True
+
+    command = next(iter(session.commands.values()))
+    payload = json.loads(command.payloadJson)
+    assert payload["workflowKind"] == "long_serial"
+    assert payload["operation"] is None
+    assert payload["targetTotalWordCount"] == 1_000_000
+    assert payload["source"] is None
+
+
+@pytest.mark.asyncio
+async def test_short_reconciliation_rejects_legacy_command_without_workflow_identity() -> None:
+    model = WritingTask(
+        id="task-1",
+        novelId="novel-1",
+        chapterId="chapter-1",
+        phase="waiting_call",
+        targetWordCount=6000,
+        graphStateJson='{"phase":"waiting_call"}',
+    )
+    expected = TaskRecord(
+        "task-1",
+        "user-1",
+        "novel-1",
+        "chapter-1",
+        None,
+        "waiting_call",
+        '{"phase":"waiting_call"}',
+    )
+    session = ReconciliationCommandSession(
+        model,
+        bible=WritingBible(
+            id="bible-1",
+            novelId="novel-1",
+            storyLengthProfile="short_medium",
+            targetTotalWordCount=6000,
+        ),
+        latest_payload=json.dumps(
+            {
+                "version": 1,
+                "resume": True,
+                "chapterId": "chapter-1",
+                "writingSessionId": None,
+                "resumeInput": None,
+            }
+        ),
+    )
+    repository = WritingTaskRepository(lambda: session)  # type: ignore[arg-type]
+
+    with pytest.raises(ApiError) as caught:
+        await repository.create_reconciliation_command(expected)
+
+    assert caught.value.code == "WRITING_RECONCILIATION_IDENTITY_MISSING"
+    assert session.commands == {}

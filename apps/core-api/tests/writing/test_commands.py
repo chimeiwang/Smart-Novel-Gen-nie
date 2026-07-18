@@ -189,6 +189,35 @@ async def test_same_client_request_returns_existing_command() -> None:
 
 
 @pytest.mark.asyncio
+async def test_internal_resume_idempotency_ignores_later_task_session_binding() -> None:
+    rebound_task = task()
+    rebound_task.writingSessionId = "session-later"
+    existing = command()
+    existing.payloadJson = json.dumps(
+        {
+            "version": 1,
+            "resume": True,
+            "writingSessionId": None,
+            "resumeInput": {"userMessage": "继续"},
+        }
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory(
+            [CommandSession([RowResult((existing, rebound_task, "user-1"))])]
+        )
+    )
+
+    result = await repository.create_resume(
+        "user-1",
+        "task-1",
+        "request-00000001",
+        {"userMessage": "继续"},
+    )
+
+    assert result.id == existing.id
+
+
+@pytest.mark.asyncio
 async def test_task_allows_only_one_active_command() -> None:
     owned_task = task()
     session = CommandSession(
@@ -236,6 +265,152 @@ async def test_resume_with_message_rejects_same_key_with_different_raw_message()
                 clientRequestId="request-00000001",
                 writingSessionId="session-1",
                 userMessage="只修改第三节",
+            ),
+        )
+
+    assert caught.value.code == "IDEMPOTENCY_KEY_REUSED"
+
+
+@pytest.mark.asyncio
+async def test_resume_with_message_same_key_session_and_message_returns_existing() -> None:
+    existing = command()
+    existing.payloadJson = json.dumps(
+        {
+            "version": 1,
+            "resume": True,
+            "writingSessionId": "session-1",
+            "resumeInput": {"userMessage": "继续"},
+        }
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([CommandSession([RowResult((existing, task(), "user-1"))])])
+    )
+
+    result = await repository.create_resume_with_message(
+        "user-1",
+        "task-1",
+        ResumeWritingRunRequest(
+            clientRequestId="request-00000001",
+            writingSessionId="session-1",
+            userMessage="继续",
+        ),
+    )
+
+    assert result.commandId == existing.id
+    assert result.commandStatus == existing.status
+
+
+@pytest.mark.asyncio
+async def test_resume_with_message_rejects_same_key_with_different_session() -> None:
+    existing = command()
+    existing.payloadJson = json.dumps(
+        {
+            "version": 1,
+            "resume": True,
+            "writingSessionId": "session-1",
+            "resumeInput": {"userMessage": "继续"},
+        }
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([CommandSession([RowResult((existing, task(), "user-1"))])])
+    )
+
+    with pytest.raises(ApiError) as caught:
+        await repository.create_resume_with_message(
+            "user-1",
+            "task-1",
+            ResumeWritingRunRequest(
+                clientRequestId="request-00000001",
+                writingSessionId="session-2",
+                userMessage="继续",
+            ),
+        )
+
+    assert caught.value.code == "IDEMPOTENCY_KEY_REUSED"
+
+
+@pytest.mark.asyncio
+async def test_resume_session_semantics_are_rechecked_after_task_lock() -> None:
+    owned_task = task()
+    owned_task.writingSessionId = "session-2"
+    existing = command()
+    existing.payloadJson = json.dumps(
+        {
+            "version": 1,
+            "resume": True,
+            "writingSessionId": "session-1",
+            "resumeInput": {"userMessage": "继续"},
+        }
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory(
+            [
+                CommandSession([RowResult(None)]),
+                CommandSession(
+                    [
+                        RowResult(None),
+                        RowResult((owned_task, "user-1")),
+                        RowResult((existing, owned_task, "user-1")),
+                    ]
+                ),
+            ]
+        )
+    )
+
+    with pytest.raises(ApiError) as caught:
+        await repository.create_resume_with_message(
+            "user-1",
+            "task-1",
+            ResumeWritingRunRequest(
+                clientRequestId="request-00000001",
+                writingSessionId="session-2",
+                userMessage="继续",
+            ),
+        )
+
+    assert caught.value.code == "IDEMPOTENCY_KEY_REUSED"
+
+
+@pytest.mark.asyncio
+async def test_resume_session_semantics_are_rechecked_after_integrity_race() -> None:
+    owned_task = task()
+    owned_task.writingSessionId = "session-2"
+    raced = command()
+    raced.payloadJson = json.dumps(
+        {
+            "version": 1,
+            "resume": True,
+            "writingSessionId": "session-1",
+            "resumeInput": {"userMessage": "继续"},
+        }
+    )
+    creation_session = RacingCommandSession(
+        [
+            RowResult(None),
+            RowResult((owned_task, "user-1")),
+            RowResult(None),
+            RowResult(None),
+            RowResult(None),
+        ]
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory(
+            [
+                CommandSession([RowResult(None)]),
+                creation_session,
+                CommandSession([RowResult((raced, owned_task, "user-1"))]),
+            ]
+        )
+    )
+
+    with pytest.raises(ApiError) as caught:
+        await repository.create_resume_with_message(
+            "user-1",
+            "task-1",
+            ResumeWritingRunRequest(
+                clientRequestId="request-00000001",
+                writingSessionId="session-2",
+                userMessage="继续",
             ),
         )
 

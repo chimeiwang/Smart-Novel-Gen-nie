@@ -381,7 +381,8 @@ async def test_short_identity_mismatch_fails_before_any_graph_call() -> None:
 
 
 @pytest.mark.asyncio
-async def test_short_story_placeholder_fails_before_model_instead_of_reusing_long_flow() -> None:
+@pytest.mark.parametrize("path", ["initial", "current_job", "resume"])
+async def test_short_story_placeholder_fails_before_every_graph_path(path: str) -> None:
     context = _short_context(operation="write_short_story")
     source = {
         "kind": "approved_short_outline",
@@ -390,18 +391,48 @@ async def test_short_story_placeholder_fails_before_model_instead_of_reusing_lon
         "outlineHash": "a" * 64,
     }
     context["planning"]["source"] = source
+    resume = path == "resume"
+    if path != "initial":
+        state = create_initial_state(
+            task_id="task-1",
+            user_id="user-1",
+            novel_id="novel-1",
+            chapter_id="chapter-1",
+            user_message="生成完整正文",
+            target_word_count=6000,
+            workflow_kind="short_medium",
+            explicit_operation="write_short_story",
+            command_id="job-1" if path == "current_job" else "previous-command",
+            target_total_word_count=6000,
+            command_source=source,
+        )
+        state["currentOperation"] = {
+            "kind": "write_short_story",
+            "userGoal": "生成完整正文",
+        }
+        state["phase"] = "completed" if path == "current_job" else "active"
+        if path == "current_job":
+            state["finalResponse"] = "不得重放的旧整稿结果"
+        snapshot = to_typescript_snapshot(serialize_snapshot(state))
+        if path == "current_job":
+            snapshot["callbackJobId"] = "job-1"
+        context["planning"]["graphState"] = snapshot
     parent = Graph({})
     operation = Graph({})
+    core = CoreClient(context)
+    artifacts = ArtifactHydration()
     handler = WritingJobHandler(
-        CoreClient(context),
+        core,
         parent_graph=parent,
         operation_graph=operation,
-        artifacts=ArtifactHydration(),
+        artifacts=artifacts,
     )
 
     with pytest.raises(ValueError, match="SHORT_STORY_WORKFLOW_NOT_IMPLEMENTED"):
         await handler(
             _job(
+                resume=resume,
+                resume_input={"userMessage": "继续生成整稿"} if resume else None,
                 workflow_kind="short_medium",
                 operation="write_short_story",
                 target_total_word_count=6000,
@@ -411,6 +442,11 @@ async def test_short_story_placeholder_fails_before_model_instead_of_reusing_lon
 
     assert parent.inputs == []
     assert operation.inputs == []
+    assert core.events == []
+    assert core.checkpoints == []
+    assert core.completions == []
+    assert core.failures == []
+    assert artifacts.hydrated == []
 
 
 @pytest.mark.asyncio

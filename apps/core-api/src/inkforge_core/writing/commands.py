@@ -40,6 +40,7 @@ WritingCommandStatus = Literal["pending", "submitted", "processing", "succeeded"
 
 ACTIVE_COMMAND_STATUSES = frozenset({"pending", "submitted", "processing"})
 TERMINAL_COMMAND_STATUSES = frozenset({"succeeded", "failed"})
+_RESUME_SESSION_UNSET = object()
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,6 +180,7 @@ class WritingRunCommandRepository:
                 existing_record,
                 task_id=task_id,
                 resume_input=resume_input,
+                writing_session_id=request.writingSessionId,
             )
             return _resume_record_response(existing_record)
         try:
@@ -191,6 +193,7 @@ class WritingRunCommandRepository:
                             _command_record(command, existing_task, owner_id),
                             task_id=task_id,
                             resume_input=resume_input,
+                            writing_session_id=request.writingSessionId,
                         )
                         return _resume_response(command)
                     task, _owner_id = await self._require_owned_task(session, user_id, task_id)
@@ -201,6 +204,7 @@ class WritingRunCommandRepository:
                             _command_record(command, existing_task, owner_id),
                             task_id=task_id,
                             resume_input=resume_input,
+                            writing_session_id=request.writingSessionId,
                         )
                         return _resume_response(command)
                     if task.phase in {"completed", "error"}:
@@ -245,7 +249,7 @@ class WritingRunCommandRepository:
                                 "version": 1,
                                 "resume": True,
                                 "chapterId": task.chapterId,
-                                "writingSessionId": task.writingSessionId,
+                                "writingSessionId": request.writingSessionId,
                                 "resumeInput": resume_input,
                                 **identity,
                             }
@@ -261,6 +265,7 @@ class WritingRunCommandRepository:
                     raced,
                     task_id=task_id,
                     resume_input=resume_input,
+                    writing_session_id=request.writingSessionId,
                 )
                 return _resume_record_response(raced)
             raise _active_command_error(task_id) from exc
@@ -793,10 +798,15 @@ def _assert_resume_command_semantics(
     *,
     task_id: str,
     resume_input: dict[str, Any],
+    writing_session_id: str | None | object = _RESUME_SESSION_UNSET,
 ) -> None:
     if (
         command.kind != "resume"
         or command.task.id != task_id
+        or (
+            writing_session_id is not _RESUME_SESSION_UNSET
+            and command.payload.get("writingSessionId") != writing_session_id
+        )
         or command.payload.get("resumeInput") != resume_input
     ):
         raise ApiError(

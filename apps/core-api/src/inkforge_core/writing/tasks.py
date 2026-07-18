@@ -16,7 +16,14 @@ from sqlalchemy import exists, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..db.base import utc_now
-from ..db.models import Novel, WritingMessage, WritingRunCommand, WritingSession, WritingTask
+from ..db.models import (
+    Novel,
+    WritingBible,
+    WritingMessage,
+    WritingRunCommand,
+    WritingSession,
+    WritingTask,
+)
 from ..errors import ApiError
 from .job_identity import build_writing_job_id
 from .message_metadata import workflow_message_metadata
@@ -43,6 +50,92 @@ ALREADY_APPLIED_CODE = "WRITING_CALLBACK_ALREADY_APPLIED"
 STATE_NOOP_CODE = "WRITING_CALLBACK_STATE_NOOP"
 CHECKPOINT_CONFLICT_CODE = "WRITING_CHECKPOINT_CONFLICT"
 logger = logging.getLogger(__name__)
+
+
+async def _reconciliation_workflow_identity(
+    session: AsyncSession,
+    task: WritingTask,
+) -> dict[str, Any]:
+    bible = await session.scalar(
+        select(WritingBible).where(WritingBible.novelId == task.novelId)
+    )
+    serialized = await session.scalar(
+        select(WritingRunCommand.payloadJson)
+        .where(WritingRunCommand.taskId == task.id)
+        .order_by(WritingRunCommand.createdAt.desc(), WritingRunCommand.id.desc())
+        .limit(1)
+    )
+    persisted_profile = bible.storyLengthProfile if bible is not None else "long_serial"
+    legacy_long_identity = {
+        "workflowKind": "long_serial",
+        "operation": None,
+        "targetTotalWordCount": (
+            bible.targetTotalWordCount if bible is not None else None
+        ),
+        "source": None,
+    }
+    if serialized is None:
+        if persisted_profile == "short_medium":
+            raise _reconciliation_identity_missing()
+        return legacy_long_identity
+    try:
+        raw_payload = json.loads(serialized)
+    except (json.JSONDecodeError, TypeError):
+        raise _reconciliation_identity_invalid() from None
+    if not isinstance(raw_payload, dict):
+        raise _reconciliation_identity_invalid()
+    if "workflowKind" not in raw_payload:
+        if persisted_profile == "short_medium":
+            raise _reconciliation_identity_missing()
+        return legacy_long_identity
+    try:
+        latest = WritingJobPayload.model_validate(raw_payload)
+    except ValueError:
+        raise _reconciliation_identity_invalid() from None
+    if latest.chapterId != task.chapterId or latest.workflowKind != persisted_profile:
+        raise _reconciliation_identity_mismatch()
+    if latest.workflowKind == "short_medium":
+        target = bible.targetTotalWordCount if bible is not None else None
+        if (
+            target is None
+            or latest.targetTotalWordCount != target
+            or task.targetWordCount != target
+        ):
+            raise _reconciliation_identity_mismatch()
+    return {
+        "workflowKind": latest.workflowKind,
+        "operation": latest.operation,
+        "targetTotalWordCount": latest.targetTotalWordCount,
+        "source": (
+            latest.source.model_dump(mode="json")
+            if latest.source is not None
+            else None
+        ),
+    }
+
+
+def _reconciliation_identity_missing() -> ApiError:
+    return ApiError(
+        status_code=409,
+        code="WRITING_RECONCILIATION_IDENTITY_MISSING",
+        message="中短篇遗留任务缺少可验证的持久写作身份，不能自动对账",
+    )
+
+
+def _reconciliation_identity_invalid() -> ApiError:
+    return ApiError(
+        status_code=409,
+        code="WRITING_RECONCILIATION_IDENTITY_INVALID",
+        message="最近写作命令载荷无效，不能自动对账",
+    )
+
+
+def _reconciliation_identity_mismatch() -> ApiError:
+    return ApiError(
+        status_code=409,
+        code="WRITING_RECONCILIATION_IDENTITY_MISMATCH",
+        message="最近写作命令与作品篇幅身份不一致，不能自动对账",
+    )
 
 
 class WritingCommandRepositoryPort(Protocol):
@@ -225,6 +318,7 @@ class WritingTaskRepository:
                 )
                 if active_command_id is not None:
                     return False
+                identity = await _reconciliation_workflow_identity(session, task)
                 resume = task.graphStateJson is not None
                 command_id = build_writing_job_id(
                     task.id,
@@ -245,10 +339,7 @@ class WritingTaskRepository:
                         "chapterId": task.chapterId,
                         "writingSessionId": task.writingSessionId,
                         "resumeInput": None,
-                        "workflowKind": "long_serial",
-                        "operation": None,
-                        "targetTotalWordCount": None,
-                        "source": None,
+                        **identity,
                         "force": True,
                     }
                 ).model_dump(mode="json")
