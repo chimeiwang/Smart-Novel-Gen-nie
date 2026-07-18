@@ -83,6 +83,17 @@ def tool_context(agent_id: str) -> ToolContext:
     )
 
 
+def make_agent_runtime(
+    model_runtime: ModelRuntime,
+    registry: object,
+) -> AgentRuntime:
+    return AgentRuntime(  # type: ignore[arg-type]
+        model_runtime,
+        registry,
+        max_output_tokens=16_384,
+    )
+
+
 def request(
     *,
     agent_id: str = "写作",
@@ -104,7 +115,7 @@ def request(
 async def test_runner_keeps_server_instruction_system_and_context_low_privilege() -> None:
     provider = CapturingProvider()
     registry = build_default_registry()
-    runner = AgentRunner(AgentRuntime(ModelRuntime(provider), registry), registry)
+    runner = AgentRunner(make_agent_runtime(ModelRuntime(provider), registry), registry)
 
     await runner.run(request())
 
@@ -121,7 +132,7 @@ async def test_runner_keeps_server_instruction_system_and_context_low_privilege(
 async def test_reviser_keeps_required_changes_out_of_system_messages() -> None:
     provider = CapturingProvider()
     registry = build_default_registry()
-    runner = AgentRunner(AgentRuntime(ModelRuntime(provider), registry), registry)
+    runner = AgentRunner(make_agent_runtime(ModelRuntime(provider), registry), registry)
     reviser_request = request(mode="reviser", operation_kind="write_chapter")
     reviser_request.contextMessages = [
         '权威草案：{"artifactKey":"authority-key","requiredChanges":"补足冲突"}'
@@ -167,7 +178,7 @@ async def test_runner_exposes_exact_execution_mode_tools(
 ) -> None:
     provider = CapturingProvider()
     registry = build_default_registry()
-    runner = AgentRunner(AgentRuntime(ModelRuntime(provider), registry), registry)
+    runner = AgentRunner(make_agent_runtime(ModelRuntime(provider), registry), registry)
 
     await runner.run(
         request(agent_id=agent_id, mode=mode, operation_kind=operation_kind)
@@ -192,7 +203,7 @@ async def test_primary_artifact_operations_do_not_expose_wrong_artifact_tool(
 ) -> None:
     provider = CapturingProvider()
     registry = build_default_registry()
-    runner = AgentRunner(AgentRuntime(ModelRuntime(provider), registry), registry)
+    runner = AgentRunner(make_agent_runtime(ModelRuntime(provider), registry), registry)
     agent_id = OPERATION_DEFINITIONS[operation_kind].primaryAgent  # type: ignore[index]
 
     await runner.run(
@@ -223,7 +234,7 @@ async def test_runner_rejects_invalid_agent_mode_operation_combination(
 ) -> None:
     provider = CapturingProvider()
     registry = build_default_registry()
-    runner = AgentRunner(AgentRuntime(ModelRuntime(provider), registry), registry)
+    runner = AgentRunner(make_agent_runtime(ModelRuntime(provider), registry), registry)
 
     with pytest.raises(ValueError, match="AGENT_EXECUTION_MODE_INVALID"):
         await runner.run(
@@ -326,7 +337,7 @@ async def test_runtime_stops_on_call_level_terminal_tool(
 ) -> None:
     provider = TerminalProvider(tool_name, arguments)
     registry = build_default_registry()
-    runner = AgentRunner(AgentRuntime(ModelRuntime(provider), registry), registry)
+    runner = AgentRunner(make_agent_runtime(ModelRuntime(provider), registry), registry)
 
     result = await runner.run(
         request(agent_id=agent_id, mode=mode, operation_kind=operation_kind)

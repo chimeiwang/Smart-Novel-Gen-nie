@@ -364,3 +364,59 @@ async def test_rag_handler_requires_agent_side_feature_flag(
     finally:
         await app.state.core_http.aclose()
         await app.state.embedding_http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_应用装配向模型运行时传入相同输出预算(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, int] = {}
+
+    class CapturingAgentRuntime:
+        def __init__(
+            self,
+            model_runtime: object,
+            registry: object,
+            *,
+            max_output_tokens: int,
+        ) -> None:
+            del model_runtime, registry
+            captured["agent"] = max_output_tokens
+
+    class CapturingPortraitGenerator:
+        def __init__(
+            self,
+            model_runtime: object,
+            *,
+            max_output_tokens: int,
+        ) -> None:
+            del model_runtime
+            captured["portrait"] = max_output_tokens
+
+    monkeypatch.setattr(
+        app_module,
+        "create_agent_callback_signer",
+        lambda **_kwargs: object(),
+    )
+    monkeypatch.setattr(app_module, "AgentRuntime", CapturingAgentRuntime)
+    monkeypatch.setattr(
+        app_module,
+        "ModelPortraitGenerator",
+        CapturingPortraitGenerator,
+    )
+    settings = Settings.model_validate(
+        {
+            "environment": "test",
+            "model_provider": "fake",
+            "agent_service_private_key_path": "unused.pem",
+            "workflow_human_log_dir": str(tmp_path),
+            "model_max_output_tokens": 456_789,
+        }
+    )
+
+    app = create_app(settings=settings, run_queue=object())  # type: ignore[arg-type]
+    try:
+        assert captured == {"agent": 456_789, "portrait": 456_789}
+    finally:
+        await app.state.core_http.aclose()

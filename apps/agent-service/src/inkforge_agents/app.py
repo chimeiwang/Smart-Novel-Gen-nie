@@ -264,7 +264,14 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                 )
                 gateway = CoreToolGateway(core, embedding_provider)
                 registry = build_default_registry(gateway)
-                runner = AgentRunner(AgentRuntime(model_runtime, registry), registry)
+                runner = AgentRunner(
+                    AgentRuntime(
+                        model_runtime,
+                        registry,
+                        max_output_tokens=settings.model_max_output_tokens,
+                    ),
+                    registry,
+                )
                 artifacts = CoreArtifactPort(core)
                 dependencies = OperationDependencies(
                     agentExecutor=CoreGraphAgentExecutor(runner, artifacts),
@@ -283,7 +290,10 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                 handlers: dict[JobKind, JobHandler] = {"writing": writing}
                 handlers["portrait"] = PortraitJobHandler(
                     core,
-                    ModelPortraitGenerator(model_runtime),
+                    ModelPortraitGenerator(
+                        model_runtime,
+                        max_output_tokens=settings.model_max_output_tokens,
+                    ),
                     workflow_log=workflow_log,
                 )
                 handlers["quality"] = QualityJobHandler(

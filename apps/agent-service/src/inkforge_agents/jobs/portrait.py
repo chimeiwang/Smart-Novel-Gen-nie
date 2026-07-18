@@ -128,8 +128,14 @@ class ModelPortraitGenerator:
         "styleTraits": "概括整体文风特质，并为每项结论指出文本证据。",
     }
 
-    def __init__(self, runtime: ModelRuntime) -> None:
+    def __init__(
+        self,
+        runtime: ModelRuntime,
+        *,
+        max_output_tokens: int,
+    ) -> None:
         self._runtime = runtime
+        self._max_output_tokens = max_output_tokens
 
     async def generate(
         self,
@@ -160,7 +166,7 @@ class ModelPortraitGenerator:
                         ),
                     ],
                     tools=[],
-                    maxOutputTokens=1200,
+                    maxOutputTokens=self._max_output_tokens,
                 ),
                 context=ModelCallContext(
                     userId=resource.userId,
@@ -170,6 +176,25 @@ class ModelPortraitGenerator:
                     agentId="编辑",
                 ),
             )
+            raw_finish_reason = (
+                response.rawFinishReason
+                if response.rawFinishReason is not None
+                else "未提供"
+            )
+            if response.finishReason == "length":
+                raise RuntimeError(
+                    "MODEL_OUTPUT_TRUNCATED：供应商报告模型输出达到长度上限"
+                    f"（原始原因：{raw_finish_reason}）"
+                )
+            if response.finishReason == "content_filter":
+                raise RuntimeError(
+                    "MODEL_OUTPUT_FILTERED：供应商报告模型输出被内容过滤"
+                    f"（原始原因：{raw_finish_reason}）"
+                )
+            if response.finishReason != "stop" or response.toolCalls:
+                raise RuntimeError(
+                    "PROVIDER_FINISH_REASON_INVALID：画像模型必须返回无工具的纯文本响应"
+                )
             content = response.content.strip()
             if not content:
                 raise RuntimeError("画像模型返回空内容")

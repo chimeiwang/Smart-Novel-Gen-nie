@@ -30,9 +30,16 @@ _BUILDER_CONTINUATION_TOOLS = {
 
 
 class AgentRuntime:
-    def __init__(self, model_runtime: ModelRuntime, registry: ToolRegistry) -> None:
+    def __init__(
+        self,
+        model_runtime: ModelRuntime,
+        registry: ToolRegistry,
+        *,
+        max_output_tokens: int,
+    ) -> None:
         self._model_runtime = model_runtime
         self._registry = registry
+        self._max_output_tokens = max_output_tokens
 
     async def run(
         self,
@@ -41,7 +48,6 @@ class AgentRuntime:
         exposed_tools: list[ToolDefinition],
         context: ToolContext,
         max_iterations: int = 10,
-        max_output_tokens: int = 8192,
         terminal_control_tools: set[str] | frozenset[str] = frozenset(),
         model_context: ModelCallContext | None = None,
     ) -> AgentTurnResult:
@@ -66,7 +72,7 @@ class AgentRuntime:
                 ModelTurnRequest(
                     messages=conversation,
                     tools=[tool.as_model_tool() for tool in available_tools],
-                    maxOutputTokens=max_output_tokens,
+                    maxOutputTokens=self._max_output_tokens,
                 ),
                 context=model_context,
             )

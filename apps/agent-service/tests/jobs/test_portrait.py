@@ -127,14 +127,15 @@ class Provider:
 
     def __init__(self) -> None:
         self.requests = []
+        self.finish_reason = "stop"
 
     async def complete_turn(self, request):
         self.requests.append(request)
         return ModelTurnResult(
             content="单节结果",
             toolCalls=[],
-            finishReason="stop",
-            rawFinishReason="stop",
+            finishReason=self.finish_reason,
+            rawFinishReason=self.finish_reason,
             usage=ModelUsage(
                 promptTokens=1,
                 completionTokens=1,
@@ -146,7 +147,10 @@ class Provider:
 @pytest.mark.asyncio
 async def test_model_portrait_generator_calls_only_requested_section() -> None:
     provider = Provider()
-    generator = ModelPortraitGenerator(ModelRuntime(provider))
+    generator = ModelPortraitGenerator(
+        ModelRuntime(provider),
+        max_output_tokens=384_000,
+    )
     resource = RunResource(
         userId="user-1",
         novelId="style:style-1",
@@ -159,6 +163,39 @@ async def test_model_portrait_generator_calls_only_requested_section() -> None:
     assert result == {"uniqueMarkers": "单节结果"}
     assert len(provider.requests) == 1
     assert "独特标记" in provider.requests[0].messages[1].content
+    assert provider.requests[0].maxOutputTokens == 384_000
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("finish_reason", "error_code"),
+    [
+        ("length", "MODEL_OUTPUT_TRUNCATED"),
+        ("content_filter", "MODEL_OUTPUT_FILTERED"),
+    ],
+)
+async def test_画像模型生成器拒绝不完整输出(
+    finish_reason: str,
+    error_code: str,
+) -> None:
+    provider = Provider()
+    provider.finish_reason = finish_reason
+    generator = ModelPortraitGenerator(
+        ModelRuntime(provider),
+        max_output_tokens=384_000,
+    )
+
+    with pytest.raises(RuntimeError, match=error_code):
+        await generator.generate(
+            RunResource(
+                userId="user-1",
+                novelId="style:style-1",
+                taskId="task-1",
+                runId="task-1",
+            ),
+            "完整参考正文",
+            section="uniqueMarkers",
+        )
 
 
 class SectionGenerator:

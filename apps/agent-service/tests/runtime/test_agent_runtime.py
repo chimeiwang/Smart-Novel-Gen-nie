@@ -87,6 +87,17 @@ def context(agent_id: str = "设定") -> ToolContext:
     )
 
 
+def make_agent_runtime(
+    model_runtime: ModelRuntime,
+    registry: object,
+) -> AgentRuntime:
+    return AgentRuntime(  # type: ignore[arg-type]
+        model_runtime,
+        registry,
+        max_output_tokens=16_384,
+    )
+
+
 @pytest.mark.asyncio
 async def test_runtime_accumulates_full_text_and_parallelizes_safe_reads() -> None:
     long_text = "正文" * 20_000
@@ -102,7 +113,7 @@ async def test_runtime_accumulates_full_text_and_parallelizes_safe_reads() -> No
     )
     gateway = RecordingGateway()
     registry = build_default_registry(gateway)
-    runtime = AgentRuntime(ModelRuntime(provider), registry)
+    runtime = make_agent_runtime(ModelRuntime(provider), registry)
 
     result = await runtime.run(
         messages=[{"role": "user", "content": "分析设定"}],
@@ -117,6 +128,30 @@ async def test_runtime_accumulates_full_text_and_parallelizes_safe_reads() -> No
     assert gateway.max_active == 2
     assert len(provider.requests) == 2
     assert result.usage.totalTokens == 30
+
+
+@pytest.mark.asyncio
+async def test_运行时保留超过旧输出边界的完整正文() -> None:
+    sentinel = "【正文尾部哨兵】"
+    long_text = "长正文" * 9_000 + sentinel
+    provider = ScriptedProvider([turn(long_text, finish_reason="stop")])
+    registry = build_default_registry(RecordingGateway())
+    runtime = AgentRuntime(
+        ModelRuntime(provider),
+        registry,
+        max_output_tokens=384_000,
+    )
+
+    result = await runtime.run(
+        messages=[{"role": "user", "content": "生成长正文"}],
+        exposed_tools=[],
+        context=context("写作"),
+    )
+
+    assert len(result.visibleContent) > 8_192
+    assert result.visibleContent == long_text
+    assert result.visibleContent.endswith(sentinel)
+    assert provider.requests[0].maxOutputTokens == 384_000
 
 
 @pytest.mark.asyncio
@@ -143,7 +178,7 @@ async def test_runtime_captures_control_events_in_model_order() -> None:
         ]
     )
     registry = build_default_registry(RecordingGateway())
-    runtime = AgentRuntime(ModelRuntime(provider), registry)
+    runtime = make_agent_runtime(ModelRuntime(provider), registry)
 
     result = await runtime.run(
         messages=[{"role": "user", "content": "复审"}],
@@ -193,7 +228,7 @@ async def test_runtime_constrains_update_builder_lifecycle() -> None:
         ]
     )
     registry = build_default_registry(RecordingGateway())
-    runtime = AgentRuntime(ModelRuntime(provider), registry)
+    runtime = make_agent_runtime(ModelRuntime(provider), registry)
 
     result = await runtime.run(
         messages=[{"role": "user", "content": "同步设定"}],
@@ -219,7 +254,7 @@ async def test_runtime_constrains_update_builder_lifecycle() -> None:
 @pytest.mark.asyncio
 async def test_runtime_rejects_unexposed_tool_and_invalid_arguments() -> None:
     registry = build_default_registry(RecordingGateway())
-    unauthorized = AgentRuntime(
+    unauthorized = make_agent_runtime(
         ModelRuntime(
             ScriptedProvider([turn("", ("call-1", "submit_evaluation", {"verdict": "pass"}))])
         ),
@@ -233,7 +268,7 @@ async def test_runtime_rejects_unexposed_tool_and_invalid_arguments() -> None:
             context=context(),
         )
 
-    invalid = AgentRuntime(
+    invalid = make_agent_runtime(
         ModelRuntime(ScriptedProvider([turn("", ("call-2", "get_character_detail", {}))])),
         registry,
     )
@@ -251,7 +286,7 @@ async def test_runtime_rejects_unexposed_tool_and_invalid_arguments() -> None:
 async def test_runtime_rejects_exposed_control_tool_not_authorized_for_agent() -> None:
     gateway = RecordingGateway()
     registry = build_default_registry(gateway)
-    runtime = AgentRuntime(
+    runtime = make_agent_runtime(
         ModelRuntime(
             ScriptedProvider(
                 [
@@ -303,7 +338,7 @@ async def test_runtime_rejects_same_name_unregistered_exposed_tool() -> None:
         toolKind=registered.toolKind,
         handler=registered.handler,
     )
-    runtime = AgentRuntime(
+    runtime = make_agent_runtime(
         ModelRuntime(
             ScriptedProvider(
                 [turn("不能保留的正文", ("call-1", "get_novel_info", {}))]
@@ -329,7 +364,7 @@ async def test_runtime_rejects_empty_tool_call_id_before_control_event(
 ) -> None:
     gateway = RecordingGateway()
     registry = build_default_registry(gateway)
-    runtime = AgentRuntime(
+    runtime = make_agent_runtime(
         ModelRuntime(
             ScriptedProvider(
                 [
@@ -362,7 +397,7 @@ async def test_runtime_rejects_empty_tool_call_id_before_control_event(
 async def test_runtime_rejects_duplicate_tool_call_id_before_any_side_effect() -> None:
     gateway = RecordingGateway()
     registry = build_default_registry(gateway)
-    runtime = AgentRuntime(
+    runtime = make_agent_runtime(
         ModelRuntime(
             ScriptedProvider(
                 [
@@ -398,7 +433,7 @@ async def test_runtime_rejects_duplicate_tool_call_id_before_any_side_effect() -
 async def test_runtime_preserves_empty_raw_finish_reason_in_error() -> None:
     response = turn("不能接受", finish_reason="length")
     response.rawFinishReason = ""
-    runtime = AgentRuntime(
+    runtime = make_agent_runtime(
         ModelRuntime(ScriptedProvider([response])),
         build_default_registry(RecordingGateway()),
     )
@@ -425,7 +460,7 @@ async def test_runtime_rejects_incomplete_output_before_content_or_tool_side_eff
 ) -> None:
     gateway = RecordingGateway()
     registry = build_default_registry(gateway)
-    runtime = AgentRuntime(
+    runtime = make_agent_runtime(
         ModelRuntime(
             ScriptedProvider(
                 [
@@ -464,7 +499,7 @@ async def test_runtime_rejects_finish_reason_and_tool_call_mismatch(
     response: ModelTurnResult,
 ) -> None:
     registry = build_default_registry(RecordingGateway())
-    runtime = AgentRuntime(ModelRuntime(ScriptedProvider([response])), registry)
+    runtime = make_agent_runtime(ModelRuntime(ScriptedProvider([response])), registry)
 
     with pytest.raises(RuntimeError, match="PROVIDER_FINISH_REASON_INVALID"):
         await runtime.run(
@@ -478,7 +513,7 @@ async def test_runtime_rejects_finish_reason_and_tool_call_mismatch(
 
 @pytest.mark.asyncio
 async def test_runtime_rejects_unknown_finish_reason_without_tools() -> None:
-    runtime = AgentRuntime(
+    runtime = make_agent_runtime(
         ModelRuntime(ScriptedProvider([turn("不能接受", finish_reason="unknown")])),
         build_default_registry(RecordingGateway()),
     )
@@ -506,7 +541,7 @@ async def test_runtime_preflights_unknown_tool_calls_before_execution(
 ) -> None:
     gateway = RecordingGateway()
     registry = build_default_registry(gateway)
-    runtime = AgentRuntime(
+    runtime = make_agent_runtime(
         ModelRuntime(
             ScriptedProvider(
                 [turn("", ("call-1", tool_name, arguments), finish_reason="unknown")]
@@ -534,7 +569,7 @@ async def test_runtime_preflights_unknown_tool_calls_before_execution(
 async def test_runtime_allows_unknown_finish_reason_with_valid_tool_calls() -> None:
     gateway = RecordingGateway()
     registry = build_default_registry(gateway)
-    runtime = AgentRuntime(
+    runtime = make_agent_runtime(
         ModelRuntime(
             ScriptedProvider(
                 [
@@ -566,7 +601,7 @@ async def test_runtime_allows_unknown_finish_reason_with_valid_tool_calls() -> N
 async def test_runtime_validates_all_tool_calls_before_first_side_effect() -> None:
     gateway = RecordingGateway()
     registry = build_default_registry(gateway)
-    runtime = AgentRuntime(
+    runtime = make_agent_runtime(
         ModelRuntime(
             ScriptedProvider(
                 [
@@ -597,7 +632,7 @@ async def test_runtime_validates_all_tool_calls_before_first_side_effect() -> No
 @pytest.mark.asyncio
 async def test_runtime_rejects_multiple_terminal_tools_before_side_effects() -> None:
     registry = build_default_registry(RecordingGateway())
-    runtime = AgentRuntime(
+    runtime = make_agent_runtime(
         ModelRuntime(
             ScriptedProvider(
                 [
@@ -642,7 +677,7 @@ async def test_runtime_stops_at_max_iterations_and_surfaces_provider_failure() -
         [turn("", (f"call-{index}", "get_novel_info", {})) for index in range(3)]
     )
     registry = build_default_registry(RecordingGateway())
-    runtime = AgentRuntime(ModelRuntime(looping), registry)
+    runtime = make_agent_runtime(ModelRuntime(looping), registry)
     result = await runtime.run(
         messages=[{"role": "user", "content": "循环"}],
         exposed_tools=registry.for_agent(agent_id="设定", capabilities={"novel.read"}),
@@ -651,7 +686,10 @@ async def test_runtime_stops_at_max_iterations_and_surfaces_provider_failure() -
     )
     assert result.finishReason == "max_iterations"
 
-    failing = AgentRuntime(ModelRuntime(ScriptedProvider([RuntimeError("供应商不可用")])), registry)
+    failing = make_agent_runtime(
+        ModelRuntime(ScriptedProvider([RuntimeError("供应商不可用")])),
+        registry,
+    )
     with pytest.raises(RuntimeError, match="供应商不可用"):
         await failing.run(
             messages=[{"role": "user", "content": "失败"}],

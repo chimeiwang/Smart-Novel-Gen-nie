@@ -41,6 +41,24 @@ def test_queue_terminal_retention_days_reads_environment(
     assert Settings().queue_terminal_retention_days == 3
 
 
+def test_模型最大输出预算默认值与边界() -> None:
+    assert Settings.model_validate({}).model_max_output_tokens == 384_000
+    assert (
+        Settings.model_validate({"model_max_output_tokens": 1}).model_max_output_tokens
+        == 1
+    )
+    assert (
+        Settings.model_validate(
+            {"model_max_output_tokens": 1_000_000}
+        ).model_max_output_tokens
+        == 1_000_000
+    )
+
+    for invalid_value in (0, 1_000_001):
+        with pytest.raises(ValidationError):
+            Settings.model_validate({"model_max_output_tokens": invalid_value})
+
+
 def test_runtime_passes_terminal_retention_setting_to_queue() -> None:
     settings = Settings.model_validate(
         {
