@@ -184,6 +184,35 @@ async def test_content_changes_create_exactly_one_revision_and_status_replay_doe
 
 
 @pytest.mark.asyncio
+async def test_create_or_revise_ignores_version_notes_and_keeps_current_payload(
+    repository: ReviewRepository,
+) -> None:
+    created = await repository.create_or_revise("user-1", _create_request())
+    notes_only_payload = _payload()
+    notes_only_payload["changeSummary"] = "模型换了一种版本摘要"
+    notes_only_payload["anchorChanges"] = ["仅解释旧锚点，没有修改锚点"]
+
+    replay = await repository.create_or_revise(
+        "user-1",
+        _create_request(
+            status="awaiting_user",
+            payload=notes_only_payload,
+            summary="新的顶层摘要",
+            diff={"rawUserMessage": "请换一种方式总结"},
+        ),
+    )
+
+    assert replay.revision == 1
+    assert replay.status == "awaiting_user"
+    assert replay.summary == "首次生成"
+    assert replay.diff is None
+    assert replay.payload.changeSummary == "首次生成"  # type: ignore[union-attr]
+    assert replay.payload.anchorChanges == []  # type: ignore[union-attr]
+    revisions = await repository.list_revisions("user-1", created.id)
+    assert [item.revision for item in revisions] == [1]
+
+
+@pytest.mark.asyncio
 async def test_content_change_requires_current_expected_revision(
     repository: ReviewRepository,
 ) -> None:
@@ -238,6 +267,47 @@ async def test_long_serial_project_rejects_payload_claiming_short_medium(
     with pytest.raises(ApiError) as caught:
         await repository.create_or_revise("user-1", _create_request())
     assert caught.value.code == "ARTIFACT_PROFILE_MISMATCH"
+
+
+@pytest.mark.asyncio
+async def test_long_serial_artifact_keeps_existing_full_field_revision_semantics(
+    repository: ReviewRepository,
+) -> None:
+    async with repository._session_factory() as session:  # noqa: SLF001
+        async with session.begin():
+            bible = await session.get(WritingBible, "bible-1")
+            assert bible is not None
+            bible.storyLengthProfile = "long_serial"
+
+    base_values = {
+        "runId": "run-1",
+        "taskId": "task-1",
+        "novelId": "novel-1",
+        "chapterId": "chapter-1",
+        "artifactKey": "long-outline",
+        "kind": "outline_draft",
+        "status": "draft",
+        "title": "长篇大纲",
+        "payload": {"kind": "outline_draft", "content": "同一份长篇大纲"},
+        "createdByAgent": "剧情",
+    }
+    created = await repository.create_or_revise(
+        "user-1",
+        CreateArtifactRequest.model_validate({**base_values, "summary": "初版说明"}),
+    )
+    revised = await repository.create_or_revise(
+        "user-1",
+        CreateArtifactRequest.model_validate(
+            {
+                **base_values,
+                "summary": "长篇仍把摘要变化视为修订",
+                "expectedRevision": created.revision,
+            }
+        ),
+    )
+
+    assert revised.revision == 2
+    assert revised.summary == "长篇仍把摘要变化视为修订"
 
 
 @pytest.mark.asyncio
@@ -303,6 +373,83 @@ async def test_direct_edit_generates_missing_ids_then_history_restore_copies_new
 
     replay = await repository.restore_revision("user-1", created.id, 1, expected_revision=2)
     assert replay.revision == 3
+
+
+@pytest.mark.asyncio
+async def test_direct_edit_with_only_version_notes_is_noop_and_keeps_current_payload(
+    repository: ReviewRepository,
+) -> None:
+    created = await repository.create_or_revise("user-1", _create_request(status="awaiting_user"))
+    current = created.payload
+    assert not isinstance(current, dict)
+
+    replay = await repository.save_short_story_outline(
+        "user-1",
+        created.id,
+        SaveShortStoryOutlineRequest.model_validate(
+            {
+                "expectedRevision": 1,
+                "corePremise": current.corePremise,
+                "anchors": current.anchors,
+                "sections": [section.model_dump() for section in current.sections],
+                "changeSummary": "只重写用户编辑摘要",
+                "anchorChanges": ["只是说明，没有改变锚点"],
+            }
+        ),
+    )
+
+    assert replay.revision == 1
+    assert replay.summary == "首次生成"
+    assert replay.diff is None
+    assert replay.payload.changeSummary == "首次生成"  # type: ignore[union-attr]
+    assert replay.payload.anchorChanges == []  # type: ignore[union-attr]
+    revisions = await repository.list_revisions("user-1", created.id)
+    assert [item.revision for item in revisions] == [1]
+
+
+@pytest.mark.asyncio
+async def test_restore_semantically_identical_revision_is_noop_and_keeps_current_notes(
+    repository: ReviewRepository,
+) -> None:
+    created = await repository.create_or_revise("user-1", _create_request(status="awaiting_user"))
+    changed = await repository.create_or_revise(
+        "user-1",
+        _create_request(
+            status="awaiting_user",
+            payload=_payload(premise="守夜人先查明讣告的纸张来源。"),
+            expected_revision=1,
+            summary="第二版摘要",
+        ),
+    )
+    returned_payload = _payload()
+    returned_payload["changeSummary"] = "重新回到初版故事内容"
+    returned_payload["anchorChanges"] = ["恢复原先的核心前提"]
+    returned = await repository.create_or_revise(
+        "user-1",
+        _create_request(
+            status="awaiting_user",
+            payload=returned_payload,
+            expected_revision=changed.revision,
+            summary="当前第三版摘要",
+            diff={"rawUserMessage": "还是使用原来的故事"},
+        ),
+    )
+    assert returned.revision == 3
+
+    replay = await repository.restore_revision(
+        "user-1",
+        created.id,
+        1,
+        expected_revision=returned.revision,
+    )
+
+    assert replay.revision == 3
+    assert replay.summary == "当前第三版摘要"
+    assert replay.diff == {"rawUserMessage": "还是使用原来的故事"}
+    assert replay.payload.changeSummary == "重新回到初版故事内容"  # type: ignore[union-attr]
+    assert replay.payload.anchorChanges == ["恢复原先的核心前提"]  # type: ignore[union-attr]
+    revisions = await repository.list_revisions("user-1", created.id)
+    assert [item.revision for item in revisions] == [3, 2, 1]
 
 
 @pytest.mark.asyncio

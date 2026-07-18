@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -113,6 +115,20 @@ class ShortStoryOutlineDraft(ShortStoryContract):
             sections=self.sections,
         )
         return self
+
+    def semantic_content_signature(self) -> str:
+        """计算排除版本说明字段后的稳定内容签名。"""
+
+        canonical = json.dumps(
+            self.model_dump(
+                mode="json",
+                exclude={"changeSummary", "anchorChanges"},
+            ),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 class ShortStoryDraftMetadata(ShortStoryContract):

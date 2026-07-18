@@ -48,6 +48,45 @@ def test_outline_contract_rebuilds_deterministic_human_readable_content() -> Non
     assert ShortStoryOutlineDraft.model_validate(outline.model_dump()).content == outline.content
 
 
+def test_outline_semantic_signature_ignores_version_notes_but_tracks_story_content() -> None:
+    outline = _outline()
+    notes_only = _outline(
+        changeSummary="仅改写本版说明",
+        anchorChanges=["本条只是版本说明，不是当前锚点"],
+    )
+
+    assert notes_only.semantic_content_signature() == outline.semantic_content_signature()
+    assert (
+        _outline(originalInspiration="守夜人收到一封来自未来的求救信。")
+        .semantic_content_signature()
+        != outline.semantic_content_signature()
+    )
+    assert (
+        _outline(corePremise="守夜人必须决定是否让讣告成真。")
+        .semantic_content_signature()
+        != outline.semantic_content_signature()
+    )
+    assert (
+        _outline(
+            anchors={
+                "mustKeep": ["讣告来自未来", "钟楼必须坍塌"],
+                "confirmed": ["结局发生在钟楼"],
+                "avoid": ["不能用梦境解释"],
+            }
+        ).semantic_content_signature()
+        != outline.semantic_content_signature()
+    )
+    assert (
+        _outline(
+            sections=[
+                {"id": "sec-opening", "title": "讣告", "events": "讣告写着新的死因。"},
+                {"id": "sec-ending", "title": "黎明", "events": "他在钟楼作出选择。"},
+            ]
+        ).semantic_content_signature()
+        != outline.semantic_content_signature()
+    )
+
+
 def test_outline_contract_rejects_duplicate_section_ids_and_length_fields() -> None:
     duplicate_sections = [
         {"id": "same", "title": "开头", "events": "发生甲。"},

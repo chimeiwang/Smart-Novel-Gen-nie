@@ -304,11 +304,19 @@ class ReviewRepository:
                             message="同一草案标识不能变更草案类型",
                         )
                     existing_payload = _parse_json(existing.payloadJson, {})
-                    content_changed = (
-                        existing.title != request.title
-                        or existing.summary != request.summary
-                        or existing_payload != payload
-                    )
+                    if profile == "short_medium" and request.kind == "outline_draft":
+                        existing_outline = _parse_short_outline(existing.payloadJson)
+                        target_outline = ShortStoryOutlineDraft.model_validate(payload)
+                        content_changed = (
+                            existing_outline.semantic_content_signature()
+                            != target_outline.semantic_content_signature()
+                        )
+                    else:
+                        content_changed = (
+                            existing.title != request.title
+                            or existing.summary != request.summary
+                            or existing_payload != payload
+                        )
                     if content_changed:
                         if request.expectedRevision is None:
                             raise ApiError(
@@ -438,7 +446,10 @@ class ReviewRepository:
                         message="中短篇大纲结构无效",
                     ) from exc
                 target_payload = target.model_dump(mode="json")
-                if _parse_json(artifact.payloadJson, {}) == target_payload:
+                if (
+                    current.semantic_content_signature()
+                    == target.semantic_content_signature()
+                ):
                     return _response(artifact, [])
                 _assert_expected_revision(artifact, request.expectedRevision)
                 artifact.payloadJson = _dump_json(target_payload)
@@ -487,8 +498,13 @@ class ReviewRepository:
                         code="ARTIFACT_REVISION_NOT_FOUND",
                         message="待审核草案版本不存在",
                     )
-                source_payload = _parse_short_outline(source.payloadJson).model_dump(mode="json")
-                if _parse_json(artifact.payloadJson, {}) == source_payload:
+                source_outline = _parse_short_outline(source.payloadJson)
+                source_payload = source_outline.model_dump(mode="json")
+                current = _parse_short_outline(artifact.payloadJson)
+                if (
+                    current.semantic_content_signature()
+                    == source_outline.semantic_content_signature()
+                ):
                     return _response(artifact, [])
                 _assert_expected_revision(artifact, expected_revision)
                 artifact.payloadJson = _dump_json(source_payload)
