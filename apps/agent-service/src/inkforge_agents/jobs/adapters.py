@@ -184,7 +184,11 @@ class CoreArtifactPort:
 
     async def mark_awaiting_user(self, artifact_id: str) -> None:
         record = self._require_record(artifact_id)
-        request = {**record.request, "status": "awaiting_user"}
+        request = {
+            **record.request,
+            "status": "awaiting_user",
+            "expectedRevision": record.revision,
+        }
         response = await self._core.create_artifact(
             record.resource,
             request,
@@ -265,6 +269,17 @@ class CoreArtifactPort:
             "createdByAgent": agent_id,
             "reviewerAgent": event.get("reviewerAgent"),
         }
+        if expected_artifact_id is not None:
+            current_record = self._require_record(expected_artifact_id)
+            request["expectedRevision"] = current_record.revision
+            revision_diff: dict[str, Any] = {
+                "sourceRevision": current_record.revision,
+                "changeSummary": event.get("summary"),
+            }
+            raw_user_request = state.get("userMessage")
+            if isinstance(raw_user_request, str) and raw_user_request.strip():
+                revision_diff["userRequest"] = raw_user_request
+            request["diff"] = revision_diff
         response = await self._core.create_artifact(
             resource,
             request,
@@ -274,9 +289,7 @@ class CoreArtifactPort:
         if not isinstance(artifact_id, str) or not artifact_id:
             raise RuntimeError("核心服务未返回待审核草案标识")
         if expected_artifact_id is not None and artifact_id != expected_artifact_id:
-            raise RuntimeError(
-                "ARTIFACT_REVISION_IDENTITY_MISMATCH：Core 返回了不同的草案标识"
-            )
+            raise RuntimeError("ARTIFACT_REVISION_IDENTITY_MISMATCH：Core 返回了不同的草案标识")
         current = self._records.get(artifact_id)
         if current is not None:
             _require_same_runtime_owner(current.resource, resource)
@@ -320,9 +333,7 @@ class CoreGraphAgentExecutor:
         artifact_id = state.get("activeArtifactId")
         if execution_mode == "primary":
             context_messages = [str(item) for item in state.get("contextMessages", [])]
-            execution_instructions = [
-                str(item) for item in state.get("executionInstructions", [])
-            ]
+            execution_instructions = [str(item) for item in state.get("executionInstructions", [])]
             conversation_messages = [
                 dict(item)
                 for item in state.get("conversationHistory", [])
@@ -469,9 +480,7 @@ def _artifact_identity_mismatch(detail: str) -> RuntimeError:
 
 def _require_same_runtime_owner(current: RunResource, incoming: RunResource) -> None:
     if current.runId != incoming.runId or current.jobId != incoming.jobId:
-        raise RuntimeError(
-            "ARTIFACT_RUNTIME_IDENTITY_MISMATCH：草案已由其他运行命令持有"
-        )
+        raise RuntimeError("ARTIFACT_RUNTIME_IDENTITY_MISMATCH：草案已由其他运行命令持有")
 
 
 def _revision(response: dict[str, Any]) -> int:

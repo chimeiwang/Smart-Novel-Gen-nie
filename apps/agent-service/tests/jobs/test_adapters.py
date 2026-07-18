@@ -549,3 +549,44 @@ async def test_revision_rejects_core_returning_different_artifact_id() -> None:
             },
             "返工正文",
         )
+
+
+@pytest.mark.asyncio
+async def test_revision_sends_authoritative_expected_revision_to_core() -> None:
+    core = CoreClient()
+    port = CoreArtifactPort(core)
+    state = {
+        "chapterId": "chapter-1",
+        "activeAgent": "写作",
+        "userMessage": "  第三节不要让主角妥协。  ",
+        "runtimeContext": _runtime_context(),
+    }
+    artifact_id = await port.submit(
+        state,
+        {
+            "type": "begin_artifact_output",
+            "kind": "chapter_draft",
+            "summary": "初稿",
+            "artifactKey": "authority-key",
+        },
+        "正文",
+    )
+    state["activeArtifactId"] = artifact_id
+
+    await port.revise(
+        state,
+        {
+            "type": "begin_artifact_output",
+            "kind": "chapter_draft",
+            "summary": "返工",
+            "artifactKey": "authority-key",
+        },
+        "返工正文",
+    )
+
+    assert core.artifacts[1]["expectedRevision"] == 1
+    assert core.artifacts[1]["diff"] == {
+        "sourceRevision": 1,
+        "userRequest": "  第三节不要让主角妥协。  ",
+        "changeSummary": "返工",
+    }

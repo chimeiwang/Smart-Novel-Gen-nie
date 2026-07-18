@@ -81,9 +81,7 @@ class WritingRunCommandRepository:
                     if existing_row is not None:
                         command, task, _owner_id = existing_row
                         return _run_response(task, command)
-                    await _require_chapter(
-                        session, user_id, request.novelId, request.chapterId
-                    )
+                    await _require_chapter(session, user_id, request.novelId, request.chapterId)
                     if request.writingSessionId is not None:
                         await _require_session_binding(
                             session,
@@ -161,9 +159,7 @@ class WritingRunCommandRepository:
                     if existing_row is not None:
                         command, _task, _owner_id = existing_row
                         return _resume_response(command)
-                    task, _owner_id = await self._require_owned_task(
-                        session, user_id, task_id
-                    )
+                    task, _owner_id = await self._require_owned_task(session, user_id, task_id)
                     existing_row = await self._get_by_idempotency_key(session, key)
                     if existing_row is not None:
                         command, _task, _owner_id = existing_row
@@ -291,10 +287,15 @@ class WritingRunCommandRepository:
             async with session.begin():
                 existing = await self._get_by_idempotency_key(session, key)
                 if existing is not None:
-                    return _command_record(*existing)
-                task, owner_id = await self._require_owned_task(
-                    session, user_id, task_id
-                )
+                    record = _command_record(*existing)
+                    _assert_artifact_decision_semantics(
+                        record,
+                        artifact_id=artifact_id,
+                        decision=decision,
+                        payload=payload,
+                    )
+                    return record
+                task, owner_id = await self._require_owned_task(session, user_id, task_id)
                 if task.phase in {"completed", "error"}:
                     raise ApiError(
                         status_code=409,
@@ -302,6 +303,35 @@ class WritingRunCommandRepository:
                         message="终态写作任务不能受理草案决定",
                     )
                 await self._require_no_active_command(session, task_id)
+                decision_request = payload.get("decisionRequest")
+                if not isinstance(decision_request, dict):
+                    decision_request = {}
+                raw_user_message = decision_request.get("userMessage")
+                source_revision = decision_request.get("expectedRevision")
+                if (
+                    decision == "revise"
+                    and task.writingSessionId is not None
+                    and isinstance(raw_user_message, str)
+                    and raw_user_message.strip()
+                    and isinstance(source_revision, int)
+                ):
+                    session.add(
+                        WritingMessage(
+                            sessionId=task.writingSessionId,
+                            role="user",
+                            content=raw_user_message,
+                            intent="revision_focus",
+                            metadata_=workflow_message_metadata(
+                                task.id,
+                                event_type="revision_focus",
+                                content=raw_user_message,
+                                artifact_id=artifact_id,
+                                source_revision=source_revision,
+                                intent="revision_focus",
+                            ),
+                        )
+                    )
+                    await _touch_writing_session(session, task.writingSessionId)
                 command = WritingRunCommand(
                     id=command_id,
                     taskId=task_id,
@@ -354,11 +384,8 @@ class WritingRunCommandRepository:
                                     WritingRunCommand.nextAttemptAt <= now,
                                 ),
                                 and_(
-                                    WritingRunCommand.status.in_(
-                                        ("submitted", "processing")
-                                    ),
-                                    WritingRunCommand.updatedAt
-                                    <= active_stale_before,
+                                    WritingRunCommand.status.in_(("submitted", "processing")),
+                                    WritingRunCommand.updatedAt <= active_stale_before,
                                 ),
                             ),
                             Novel.userId.is_not(None),
@@ -373,8 +400,7 @@ class WritingRunCommandRepository:
                     )
                 ).all()
                 return [
-                    _command_record(command, task, owner_id)
-                    for command, task, owner_id in rows
+                    _command_record(command, task, owner_id) for command, task, owner_id in rows
                 ]
 
     async def mark_agent_active(self, command_id: str) -> WritingCommandRecord:
@@ -441,9 +467,7 @@ class WritingRunCommandRepository:
                 command.updatedAt = now
                 command.lastError = None if task.phase == "completed" else code
                 if command.resultJson is None:
-                    command.resultJson = _dump_json(
-                        {"code": code, "agentStatus": agent_status}
-                    )
+                    command.resultJson = _dump_json({"code": code, "agentStatus": agent_status})
                 if task.phase not in {"completed", "error"}:
                     mark_task_failed_state(task, code)
                 await session.flush()
@@ -602,6 +626,26 @@ def _active_command_error(task_id: str) -> ApiError:
         message="该写作任务已有正在处理的命令",
         details={"taskId": task_id},
     )
+
+
+def _assert_artifact_decision_semantics(
+    command: WritingCommandRecord,
+    *,
+    artifact_id: str,
+    decision: str,
+    payload: dict[str, Any],
+) -> None:
+    if (
+        command.kind != "artifact_decision"
+        or command.artifact_id != artifact_id
+        or command.decision != decision
+        or command.payload.get("decisionRequest") != payload.get("decisionRequest")
+    ):
+        raise ApiError(
+            status_code=409,
+            code="IDEMPOTENCY_KEY_REUSED",
+            message="客户端请求标识已用于其他操作",
+        )
 
 
 def _new_command(

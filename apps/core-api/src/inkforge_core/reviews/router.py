@@ -11,8 +11,12 @@ from .decision_orchestrator import ReviewDecisionOrchestrator
 from .repository import ReviewRepository
 from .schemas import (
     ArtifactDecisionAcceptedResponse,
+    RestoreArtifactRevisionRequest,
     ReviewArtifactDecisionRequest,
     ReviewArtifactResponse,
+    ReviewArtifactRevisionDetail,
+    ReviewArtifactRevisionSummary,
+    SaveShortStoryOutlineRequest,
 )
 
 router = APIRouter(tags=["待审核草案"])
@@ -68,6 +72,61 @@ async def get_task_review_artifact(
     task_id: str, user: User, repository: Repository
 ) -> ReviewArtifactResponse | None:
     return await repository.get_task_artifact(user.id, task_id)
+
+
+@router.get(
+    "/review-artifacts/{artifact_id}/revisions",
+    response_model=list[ReviewArtifactRevisionSummary],
+)
+async def list_review_artifact_revisions(
+    artifact_id: str, user: User, repository: Repository
+) -> list[ReviewArtifactRevisionSummary]:
+    return await repository.list_revisions(user.id, artifact_id)
+
+
+@router.get(
+    "/review-artifacts/{artifact_id}/revisions/{revision}",
+    response_model=ReviewArtifactRevisionDetail,
+)
+async def get_review_artifact_revision(
+    artifact_id: str,
+    revision: int,
+    user: User,
+    repository: Repository,
+) -> ReviewArtifactRevisionDetail:
+    return await repository.get_revision(user.id, artifact_id, revision)
+
+
+@router.post(
+    "/review-artifacts/{artifact_id}/revisions/{revision}/restore",
+    response_model=ReviewArtifactResponse,
+)
+async def restore_review_artifact_revision(
+    artifact_id: str,
+    revision: int,
+    body: RestoreArtifactRevisionRequest,
+    user: User,
+    repository: Repository,
+) -> ReviewArtifactResponse:
+    return await repository.restore_revision(
+        user.id,
+        artifact_id,
+        revision,
+        expected_revision=body.expectedRevision,
+    )
+
+
+@router.put(
+    "/review-artifacts/{artifact_id}/outline",
+    response_model=ReviewArtifactResponse,
+)
+async def save_short_story_outline(
+    artifact_id: str,
+    body: SaveShortStoryOutlineRequest,
+    user: User,
+    repository: Repository,
+) -> ReviewArtifactResponse:
+    return await repository.save_short_story_outline(user.id, artifact_id, body)
 
 
 @router.post(

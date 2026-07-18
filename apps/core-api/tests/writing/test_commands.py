@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 import pytest
 from inkforge_core.db.base import utc_now
-from inkforge_core.db.models import WritingRunCommand, WritingTask
+from inkforge_core.db.models import WritingMessage, WritingRunCommand, WritingTask
 from inkforge_core.errors import ApiError
 from inkforge_core.writing.commands import (
     WritingRunCommandRepository,
@@ -69,6 +69,9 @@ class CommandSession:
         self.added.append(value)
 
     async def flush(self) -> None:
+        return None
+
+    async def get(self, _model: object, _identifier: str) -> None:
         return None
 
 
@@ -219,8 +222,7 @@ async def test_agent_terminal_settles_active_command_and_task(status: str) -> No
         "智能体运行失败：AGENT_JOB_TERMINAL_FAILED"
     )
     rendered = [
-        str(statement.compile(dialect=postgresql.dialect()))
-        for statement in session.statements
+        str(statement.compile(dialect=postgresql.dialect())) for statement in session.statements
     ]
     assert 'FOR UPDATE OF "WritingTask"' in rendered[0]
     assert 'FOR UPDATE OF "WritingRunCommand"' in rendered[1]
@@ -315,9 +317,7 @@ async def test_dispatch_failure_records_only_error_code_and_backs_off() -> None:
         SessionFactory([session])
     )
 
-    record = await repository.record_dispatch_failure(
-        "command-1", "AgentRunSubmitFailed"
-    )
+    record = await repository.record_dispatch_failure("command-1", "AgentRunSubmitFailed")
 
     assert record.status == "pending"
     assert record.attempt_count == 1
@@ -351,3 +351,134 @@ def test_command_idempotency_key_is_user_scoped() -> None:
     assert command_idempotency_key("user-2", "request-1") != command_idempotency_key(
         "user-1", "request-1"
     )
+
+
+@pytest.mark.asyncio
+async def test_revise_decision_persists_raw_revision_focus_once_with_command() -> None:
+    owned_task = task()
+    session = CommandSession(
+        [
+            RowResult(None),
+            RowResult((owned_task, "user-1")),
+            RowResult(None),
+        ]
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+    payload = {
+        "version": 1,
+        "resume": True,
+        "resumeInput": {
+            "artifactId": "artifact-1",
+            "decision": "revise",
+            "expectedRevision": 3,
+            "userMessage": "  第三节不要让主角妥协。  ",
+        },
+        "decisionRequest": {
+            "artifactId": "artifact-1",
+            "decision": "revise",
+            "expectedRevision": 3,
+            "editedContent": None,
+            "selectedUpdateRefs": None,
+            "userMessage": "  第三节不要让主角妥协。  ",
+        },
+    }
+
+    await repository.create_artifact_decision(
+        command_id="command-1",
+        user_id="user-1",
+        task_id="task-1",
+        artifact_id="artifact-1",
+        decision="revise",
+        client_request_id="request-00000001",
+        payload=payload,
+        result={"artifactId": "artifact-1"},
+    )
+
+    messages = [item for item in session.added if isinstance(item, WritingMessage)]
+    commands = [item for item in session.added if isinstance(item, WritingRunCommand)]
+    assert len(messages) == 1
+    assert len(commands) == 1
+    assert messages[0].content == "  第三节不要让主角妥协。  "
+    metadata = json.loads(messages[0].metadata_ or "{}")
+    assert metadata["eventType"] == "revision_focus"
+    assert metadata["intent"] == "revision_focus"
+    assert metadata["artifactId"] == "artifact-1"
+    assert metadata["sourceRevision"] == 3
+    assert metadata["taskId"] == "task-1"
+    assert metadata["contentHash"]
+
+
+@pytest.mark.asyncio
+async def test_non_revise_decision_does_not_persist_revision_focus_message() -> None:
+    owned_task = task()
+    session = CommandSession(
+        [
+            RowResult(None),
+            RowResult((owned_task, "user-1")),
+            RowResult(None),
+        ]
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+    await repository.create_artifact_decision(
+        command_id="command-1",
+        user_id="user-1",
+        task_id="task-1",
+        artifact_id="artifact-1",
+        decision="approve",
+        client_request_id="request-00000001",
+        payload={
+            "decisionRequest": {
+                "artifactId": "artifact-1",
+                "decision": "approve",
+                "expectedRevision": 1,
+                "userMessage": "批准",
+            }
+        },
+        result={"artifactId": "artifact-1"},
+    )
+    assert not any(isinstance(item, WritingMessage) for item in session.added)
+
+
+@pytest.mark.asyncio
+async def test_artifact_decision_repository_rejects_raced_semantic_key_reuse() -> None:
+    existing = command()
+    existing.kind = "artifact_decision"
+    existing.artifactId = "artifact-1"
+    existing.decision = "discard"
+    existing.payloadJson = json.dumps(
+        {
+            "decisionRequest": {
+                "artifactId": "artifact-1",
+                "decision": "discard",
+                "expectedRevision": 1,
+                "userMessage": None,
+            }
+        }
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([CommandSession([RowResult((existing, task(), "user-1"))])])
+    )
+
+    with pytest.raises(ApiError) as caught:
+        await repository.create_artifact_decision(
+            command_id="command-2",
+            user_id="user-1",
+            task_id="task-1",
+            artifact_id="artifact-1",
+            decision="approve",
+            client_request_id="request-00000001",
+            payload={
+                "decisionRequest": {
+                    "artifactId": "artifact-1",
+                    "decision": "approve",
+                    "expectedRevision": 1,
+                    "userMessage": None,
+                }
+            },
+            result={"artifactId": "artifact-1"},
+        )
+    assert caught.value.code == "IDEMPOTENCY_KEY_REUSED"

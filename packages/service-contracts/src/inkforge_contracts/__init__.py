@@ -11,6 +11,13 @@ from .quality import (
     ConsistencyScores,
 )
 from .runs import CreativeOperationKind, RunAccepted, RunRequest, RunStatusResponse
+from .short_story import (
+    ShortStoryAnchors,
+    ShortStoryDraftMetadata,
+    ShortStoryOutlineDraft,
+    ShortStoryOutlineSection,
+    render_short_story_outline,
+)
 from .tools import ToolCallRequest, ToolCallResult
 from .version import PROTOCOL_VERSION
 
@@ -33,8 +40,13 @@ __all__ = [
     "RunFailureCallback",
     "RunRequest",
     "RunStatusResponse",
+    "ShortStoryAnchors",
+    "ShortStoryDraftMetadata",
+    "ShortStoryOutlineDraft",
+    "ShortStoryOutlineSection",
     "ServiceJwtClaims",
     "ServiceScope",
     "ToolCallRequest",
     "ToolCallResult",
+    "render_short_story_outline",
 ]

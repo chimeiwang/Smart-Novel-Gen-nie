@@ -102,7 +102,17 @@ def command(*, result: dict[str, Any] | None = None) -> WritingCommandRecord:
         id="command-1",
         task=task(),
         kind="artifact_decision",
-        payload={"resume": True},
+        payload={
+            "resume": True,
+            "decisionRequest": {
+                "artifactId": "artifact-1",
+                "decision": "discard",
+                "expectedRevision": 1,
+                "editedContent": None,
+                "selectedUpdateRefs": None,
+                "userMessage": None,
+            },
+        },
         status="pending",
         attempt_count=0,
         artifact_id="artifact-1",
@@ -133,13 +143,27 @@ class ArtifactRepository:
         self.required += 1
         return artifact()
 
+    async def require_artifact_revision(
+        self, user_id: str, artifact_id: str, expected_revision: int
+    ) -> ArtifactRecord:
+        result = await self.require_artifact(user_id, artifact_id)
+        if result.revision != expected_revision:
+            raise ApiError(
+                status_code=409,
+                code="ARTIFACT_REVISION_CONFLICT",
+                message="修订号过期",
+            )
+        return result
+
 
 class DecisionService:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
+        self.calls = 0
 
     async def decide(self, user_id: str, artifact_id: str, decision: str, **kwargs: object):
         del user_id, artifact_id, kwargs
+        self.calls += 1
         if self.fail:
             raise ApiError(
                 status_code=409,
@@ -209,6 +233,7 @@ async def test_all_decisions_create_one_durable_resume_command(decision: str) ->
         ReviewArtifactDecisionRequest(
             clientRequestId="request-00000001",
             decision=decision,
+            expectedRevision=1,
             userMessage="按此决定继续",
         ),
     )
@@ -220,6 +245,7 @@ async def test_all_decisions_create_one_durable_resume_command(decision: str) ->
     assert subject.commands.created["payload"]["resumeInput"] == {
         "artifactId": "artifact-1",
         "decision": decision,
+        "expectedRevision": 1,
         "userMessage": "按此决定继续",
     }
     assert subject.outer.transaction.committed is True
@@ -236,6 +262,7 @@ async def test_apply_failure_rolls_back_before_command_creation() -> None:
             ReviewArtifactDecisionRequest(
                 clientRequestId="request-00000001",
                 decision="approve",
+                expectedRevision=1,
             ),
         )
 
@@ -270,8 +297,110 @@ async def test_discard_retry_returns_original_command_before_artifact_lookup() -
         ReviewArtifactDecisionRequest(
             clientRequestId="request-00000001",
             decision="discard",
+            expectedRevision=1,
         ),
     )
 
     assert response.commandId == "command-1"
     assert response.deleted is True
+
+
+@pytest.mark.asyncio
+async def test_stale_revision_is_rejected_before_decision_side_effects() -> None:
+    subject = fixture()
+
+    with pytest.raises(ApiError) as caught:
+        await subject.orchestrator.decide(
+            "user-1",
+            "artifact-1",
+            ReviewArtifactDecisionRequest(
+                clientRequestId="request-00000001",
+                decision="discard",
+                expectedRevision=2,
+            ),
+        )
+
+    assert caught.value.code == "ARTIFACT_REVISION_CONFLICT"
+    assert subject.commands.created is None
+    assert subject.outer.transaction.rolled_back is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("artifact_id", "decision", "expected_revision", "user_message"),
+    [
+        ("artifact-2", "discard", 1, None),
+        ("artifact-1", "approve", 1, None),
+        ("artifact-1", "discard", 2, None),
+        ("artifact-1", "discard", 1, "不同原文"),
+    ],
+)
+async def test_idempotency_key_reuse_requires_identical_decision_semantics(
+    artifact_id: str,
+    decision: str,
+    expected_revision: int,
+    user_message: str | None,
+) -> None:
+    saved = {
+        "artifactId": "artifact-1",
+        "taskId": "task-1",
+        "commandId": "command-1",
+        "decision": "discard",
+        "status": "pending",
+        "savedCount": 0,
+        "deleted": True,
+    }
+    orchestrator = ReviewDecisionOrchestrator(
+        OuterFactory(OuterSession()),  # type: ignore[arg-type]
+        command_lookup=Lookup(command(result=saved)),
+        dependencies_builder=lambda _factory: pytest.fail("不应执行副作用"),
+        transactional_factory_builder=lambda _connection: object(),
+    )
+
+    with pytest.raises(ApiError) as caught:
+        await orchestrator.decide(
+            "user-1",
+            artifact_id,
+            ReviewArtifactDecisionRequest(
+                clientRequestId="request-00000001",
+                decision=decision,  # type: ignore[arg-type]
+                expectedRevision=expected_revision,
+                userMessage=user_message,
+            ),
+        )
+    assert caught.value.code == "IDEMPOTENCY_KEY_REUSED"
+
+
+@pytest.mark.asyncio
+async def test_short_outline_approve_rejects_edited_content_shortcut() -> None:
+    subject = fixture()
+    original = subject.artifacts.require_artifact_revision
+
+    async def short_outline(
+        user_id: str, artifact_id: str, expected_revision: int
+    ) -> ArtifactRecord:
+        result = await original(user_id, artifact_id, expected_revision)
+        return replace(
+            result,
+            kind="outline_draft",
+            payload={
+                "kind": "outline_draft",
+                "storyLengthProfile": "short_medium",
+                "content": "大纲",
+            },
+        )
+
+    subject.artifacts.require_artifact_revision = short_outline  # type: ignore[method-assign]
+    with pytest.raises(ApiError) as caught:
+        await subject.orchestrator.decide(
+            "user-1",
+            "artifact-1",
+            ReviewArtifactDecisionRequest(
+                clientRequestId="request-00000001",
+                decision="approve",
+                expectedRevision=1,
+                editedContent="试图绕过版本保存",
+            ),
+        )
+    assert caught.value.code == "SHORT_OUTLINE_EDIT_REQUIRES_SAVE"
+    assert subject.commands.created is None

@@ -33,8 +33,11 @@ logger = logging.getLogger(__name__)
 
 
 class ReviewArtifactRepositoryPort(Protocol):
-    async def require_artifact(
-        self, user_id: str, artifact_id: str
+    async def require_artifact_revision(
+        self,
+        user_id: str,
+        artifact_id: str,
+        expected_revision: int,
     ) -> ArtifactRecord: ...
 
 
@@ -112,7 +115,7 @@ class ReviewDecisionOrchestrator:
             user_id, request.clientRequestId
         )
         if existing is not None:
-            return _accepted_response_from_command(existing)
+            return _accepted_response_from_command(existing, artifact_id, request)
 
         accepted: ArtifactDecisionAcceptedResponse
         async with self._session_factory() as outer:
@@ -120,18 +123,26 @@ class ReviewDecisionOrchestrator:
                 connection = await outer.connection()
                 transactional_factory = self._transactional_factory_builder(connection)
                 dependencies = self._dependencies_builder(transactional_factory)
-                artifact = await dependencies.repository.require_artifact(
-                    user_id, artifact_id
+                artifact = await dependencies.repository.require_artifact_revision(
+                    user_id, artifact_id, request.expectedRevision
                 )
+                if (
+                    artifact.kind == "outline_draft"
+                    and artifact.payload.get("storyLengthProfile") == "short_medium"
+                    and request.editedContent is not None
+                ):
+                    raise ApiError(
+                        status_code=409,
+                        code="SHORT_OUTLINE_EDIT_REQUIRES_SAVE",
+                        message="中短篇大纲必须先保存为新版本，再批准当前精确版本",
+                    )
                 if artifact.task_id is None:
                     raise ApiError(
                         status_code=409,
                         code="ARTIFACT_TASK_MISSING",
                         message="待审核草案没有关联写作任务",
                     )
-                task = await dependencies.commands.require_owned_task(
-                    user_id, artifact.task_id
-                )
+                task = await dependencies.commands.require_owned_task(user_id, artifact.task_id)
                 refs = (
                     [item.model_dump(exclude_none=True) for item in request.selectedUpdateRefs]
                     if request.selectedUpdateRefs is not None
@@ -157,6 +168,7 @@ class ReviewDecisionOrchestrator:
                 resume_input: dict[str, Any] = {
                     "artifactId": artifact_id,
                     "decision": request.decision,
+                    "expectedRevision": request.expectedRevision,
                 }
                 if request.userMessage is not None:
                     resume_input["userMessage"] = request.userMessage
@@ -166,6 +178,7 @@ class ReviewDecisionOrchestrator:
                     "chapterId": task.chapter_id,
                     "writingSessionId": task.writing_session_id,
                     "resumeInput": resume_input,
+                    "decisionRequest": _decision_semantics(artifact_id, request),
                 }
                 await dependencies.commands.create_artifact_decision(
                     command_id=command_id,
@@ -191,8 +204,17 @@ class ReviewDecisionOrchestrator:
 
 def _accepted_response_from_command(
     command: WritingCommandRecord,
+    artifact_id: str,
+    request: ReviewArtifactDecisionRequest,
 ) -> ArtifactDecisionAcceptedResponse:
-    if command.kind != "artifact_decision" or command.result is None:
+    semantics = _decision_semantics(artifact_id, request)
+    if (
+        command.kind != "artifact_decision"
+        or command.result is None
+        or command.artifact_id != artifact_id
+        or command.decision != request.decision
+        or command.payload.get("decisionRequest") != semantics
+    ):
         raise ApiError(
             status_code=409,
             code="IDEMPOTENCY_KEY_REUSED",
@@ -206,6 +228,24 @@ def _accepted_response_from_command(
             code="WRITING_COMMAND_RESULT_INVALID",
             message="写作命令受理结果无效",
         ) from exc
+
+
+def _decision_semantics(
+    artifact_id: str,
+    request: ReviewArtifactDecisionRequest,
+) -> dict[str, Any]:
+    return {
+        "artifactId": artifact_id,
+        "decision": request.decision,
+        "expectedRevision": request.expectedRevision,
+        "editedContent": request.editedContent,
+        "selectedUpdateRefs": (
+            [item.model_dump(mode="json") for item in request.selectedUpdateRefs]
+            if request.selectedUpdateRefs is not None
+            else None
+        ),
+        "userMessage": request.userMessage,
+    }
 
 
 def _build_transactional_factory(
