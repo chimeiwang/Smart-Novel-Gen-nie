@@ -834,6 +834,36 @@ def workspace_bible():
     )
 
 
+@pytest.mark.asyncio
+async def test_legacy_novel_without_bible_uses_long_profile_in_bootstrap_and_detail() -> None:
+    from inkforge_core.db.models import WritingBible
+    from inkforge_core.novels.repository import NovelRepository
+
+    class LegacyWorkspaceSession(WorkspaceSession):
+        async def scalar(self, statement):
+            entity = statement.column_descriptions[0].get("entity")
+            if entity is WritingBible:
+                return None
+            return await super().scalar(statement)
+
+    repository = NovelRepository(lambda: None)  # type: ignore[arg-type]
+    novel = workspace_novel()
+    bootstrap = await repository._load_workspace_bootstrap(
+        LegacyWorkspaceSession(workspace_chapters(1)),
+        novel,
+        None,
+        user_id="user-1",
+    )
+    detail = repository._novel_dict(novel, None)
+
+    assert bootstrap["storyLengthProfile"] == "long_serial"
+    assert bootstrap["targetTotalWordCount"] is None
+    assert bootstrap["novel"]["storyLengthProfile"] == "long_serial"
+    assert bootstrap["novel"]["targetTotalWordCount"] is None
+    assert detail["storyLengthProfile"] == "long_serial"
+    assert detail["targetTotalWordCount"] is None
+
+
 def workspace_chapters(count: int, content: str = "正文") -> list[object]:
     from datetime import UTC, datetime
 

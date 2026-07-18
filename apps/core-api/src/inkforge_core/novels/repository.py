@@ -1034,7 +1034,10 @@ class NovelRepository:
         bible: WritingBible | dict[str, Any] | None,
     ) -> dict[str, Any]:
         if bible is None:
-            raise RuntimeError("小说缺少 WritingBible，无法确定篇幅模式")
+            return {
+                "storyLengthProfile": "long_serial",
+                "targetTotalWordCount": None,
+            }
         if isinstance(bible, dict):
             return {
                 "storyLengthProfile": bible["storyLengthProfile"],

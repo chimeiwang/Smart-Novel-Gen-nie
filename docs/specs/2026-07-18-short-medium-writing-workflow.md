@@ -89,6 +89,7 @@ Core 在 Pydantic 边界和业务事务内都校验 `targetTotalWordCount`。`59
 
 - Dashboard 小说列表和 Workspace Bootstrap 返回 `storyLengthProfile`、`targetTotalWordCount`。
 - 前端只依据权威响应选择中短篇或长篇工作区，不根据标题、章节数或正文关键词猜测。
+- 对 WritingBible 引入前创建、因而没有 WritingBible 的历史作品，统一按 `long_serial` 返回，`targetTotalWordCount` 返回 `null`；不得根据标题、章节数或正文内容猜测 Profile。
 - 旧中短篇项目允许继续打开。若现有目标小于 6000 或大于 80000，工作区允许查看和修正目标，但禁止启动新的中短篇 Operation，并明确提示先修正目标。
 - 新增小说标题修改公开接口，校验登录、归属、非空标题和并发版本，使中短篇暂定标题可后续修改。
 
