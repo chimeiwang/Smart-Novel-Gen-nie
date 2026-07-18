@@ -14,7 +14,6 @@ import { requireApiData } from "@/lib/api/response";
 import {
   STORY_LENGTH_PROFILE_CONFIG,
   normalizeStoryLengthProfile,
-  type StoryLengthProfile,
 } from "@/shared/contracts/story-length-profile";
 import { countTextLength } from "@/shared/lib/word-count";
 import {
@@ -170,20 +169,19 @@ function WritingBibleEditor({
   const update = (field: keyof typeof form, value: string) => {
     setForm((current) => ({ ...current, [field]: value }));
   };
-  const selectProfile = (profile: StoryLengthProfile) => {
-    setForm((current) => ({
-      ...current,
-      storyLengthProfile: profile,
-      targetTotalWordCount: current.targetTotalWordCount
-        || (profile === "short_medium" ? "80000" : "1000000"),
-    }));
-  };
   const save = () => startTransition(async () => {
     requireApiData(await browserApi.PUT("/api/v1/novels/{novel_id}/writing-bible", {
       params: { path: { novel_id: novelId } },
       body: {
-        ...form,
         targetTotalWordCount: Number(form.targetTotalWordCount) || null,
+        genre: form.genre || null,
+        targetReaders: form.targetReaders || null,
+        coreSellingPoint: form.coreSellingPoint || null,
+        readerPromise: form.readerPromise || null,
+        appealModel: form.appealModel || null,
+        taboo: form.taboo || null,
+        comparableTitles: form.comparableTitles || null,
+        notes: form.notes || null,
       },
     }));
     onChanged();
@@ -196,22 +194,16 @@ function WritingBibleEditor({
         <h3 className="title-md">作品圣经</h3>
         <p className="muted">集中维护作品定位、读者承诺和长期写作约束。</p>
       </div>
-      <div className="story-profile-grid">
-        {(["short_medium", "long_serial"] as const).map((profile) => {
-          const config = STORY_LENGTH_PROFILE_CONFIG[profile];
-          return (
-            <button
-              key={profile}
-              className={`story-profile-option ${form.storyLengthProfile === profile ? "active" : ""}`}
-              type="button"
-              aria-pressed={form.storyLengthProfile === profile}
-              onClick={() => selectProfile(profile)}
-            >
-              <span>{config.label}</span>
-              <small>{config.targetWords[0]}-{config.targetWords[1]} 字</small>
-            </button>
-          );
-        })}
+      <div className="stack">
+        <span className="label">篇幅类型</span>
+        <div className="meta">
+          <span className="badge">
+            {form.storyLengthProfile
+              ? STORY_LENGTH_PROFILE_CONFIG[form.storyLengthProfile].label
+              : "未设置"}
+          </span>
+          <span className="muted">创建后不可切换</span>
+        </div>
       </div>
       <div className="library-form-grid">
         <label className="stack">

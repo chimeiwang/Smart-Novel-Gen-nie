@@ -18,10 +18,12 @@ interface CreateNovelModalProps {
 export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [summary, setSummary] = useState("");
-  const [storyLengthProfile, setStoryLengthProfile] = useState<StoryLengthProfile>("long_serial");
-  const [targetTotalWordCount, setTargetTotalWordCount] = useState("1000000");
+  const [inspiration, setInspiration] = useState("");
+  const [storyLengthProfile, setStoryLengthProfile] = useState<StoryLengthProfile | null>(null);
+  const [targetTotalWordCount, setTargetTotalWordCount] = useState("");
   const [genre, setGenre] = useState("");
   const [protagonist, setProtagonist] = useState("");
   const [coreSellingPoint, setCoreSellingPoint] = useState("");
@@ -29,24 +31,63 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
   const [firstChapterGoal, setFirstChapterGoal] = useState("");
 
   const handleSubmit = async (formData: FormData) => {
+    if (!storyLengthProfile) return;
     setPending(true);
+    setError(null);
     try {
+      const target = Number(targetTotalWordCount);
       const result = requireApiData(await browserApi.POST("/api/v1/novels", {
-        body: {
-          name: String(formData.get("name") ?? ""),
-          summary: String(formData.get("summary") ?? "") || null,
-          storyLengthProfile,
-          targetTotalWordCount: Number(targetTotalWordCount) || null,
-          genre: genre || null,
-          protagonist: protagonist || null,
-          coreSellingPoint: coreSellingPoint || null,
-          readerPromise: readerPromise || null,
-          firstChapterGoal: firstChapterGoal || null,
-        },
+        body: storyLengthProfile === "short_medium"
+          ? {
+              storyLengthProfile: "short_medium",
+              name: name.trim() || null,
+              inspiration: inspiration.trim(),
+              targetTotalWordCount: target,
+            }
+          : {
+              storyLengthProfile: "long_serial",
+              name: String(formData.get("name") ?? ""),
+              summary: String(formData.get("summary") ?? "") || null,
+              targetTotalWordCount: target || null,
+              genre: genre || null,
+              protagonist: protagonist || null,
+              coreSellingPoint: coreSellingPoint || null,
+              readerPromise: readerPromise || null,
+              firstChapterGoal: firstChapterGoal || null,
+            },
       }));
+
+      if (storyLengthProfile === "short_medium") {
+        try {
+          const session = requireApiData(await browserApi.POST("/api/v1/writing/sessions", {
+            body: {
+              novelId: result.novelId,
+              chapterId: result.chapterId,
+              title: "中短篇大纲",
+            },
+          }));
+          requireApiData(await browserApi.POST("/api/v1/writing/runs", {
+            body: {
+              clientRequestId: crypto.randomUUID(),
+              novelId: result.novelId,
+              chapterId: result.chapterId,
+              writingSessionId: session.id,
+              workflowKind: "short_medium",
+              operation: "develop_short_outline",
+              targetWordCount: target,
+              userMessage: "请根据创建时的灵感生成可供确认的完整中短篇大纲。",
+            },
+          }));
+        } catch (error) {
+          console.error("中短篇项目已创建，但大纲任务启动失败，可在工作区重试", error);
+        }
+      }
+
       onClose();
       router.push(`/workspace/${result.novelId}`);
       router.refresh();
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "创建作品失败");
     } finally {
       setPending(false);
     }
@@ -54,8 +95,18 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
 
   const selectStoryLengthProfile = (profile: StoryLengthProfile) => {
     setStoryLengthProfile(profile);
-    setTargetTotalWordCount(profile === "short_medium" ? "80000" : "1000000");
+    setTargetTotalWordCount(profile === "short_medium" ? "" : "1000000");
+    setError(null);
   };
+
+  const shortTarget = Number(targetTotalWordCount);
+  const shortFormValid = inspiration.trim().length > 0
+    && Number.isInteger(shortTarget)
+    && shortTarget >= 6_000
+    && shortTarget <= 80_000;
+  const canSubmit = storyLengthProfile === "short_medium"
+    ? shortFormValid
+    : storyLengthProfile === "long_serial" && name.trim().length > 0;
 
   if (!isOpen) return null;
 
@@ -70,19 +121,7 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
         </div>
         <div className="modal-body">
           <form action={handleSubmit} className="stack">
-            <p className="muted">先补齐几个写作锚点。创建后会自动生成第一章、默认大纲、剧情进度和作品圣经。</p>
-            <input type="hidden" name="storyLengthProfile" value={storyLengthProfile} />
-            <label className="stack">
-              <span>小说名称</span>
-              <input
-                className="input"
-                name="name"
-                placeholder="例如：青云山下有剑仙"
-                required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </label>
+            <p className="muted">先选择作品篇幅。中短篇从灵感和完整大纲开始，长篇保留章节连载流程。</p>
             <div className="stack">
               <span className="label">创作模式</span>
               <div className="story-profile-grid">
@@ -98,25 +137,78 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
                       onClick={() => selectStoryLengthProfile(profile)}
                     >
                       <span>{config.label}</span>
-                      <small>
-                        {config.targetWords[0]}-{config.targetWords[1]} 字 · {config.chapterCount[0]}-{config.chapterCount[1]} 章
-                      </small>
+                      <small>{config.targetWords[0]}-{config.targetWords[1]} 字</small>
                     </button>
                   );
                 })}
               </div>
             </div>
-            <label className="stack">
-              <span>目标总字数</span>
-              <input
-                className="input"
-                name="targetTotalWordCount"
-                inputMode="numeric"
-                value={targetTotalWordCount}
-                onChange={(e) => setTargetTotalWordCount(e.target.value)}
-              />
-            </label>
-            <div className="onboarding-grid">
+
+            {storyLengthProfile === "short_medium" ? (
+              <>
+                <label className="stack">
+                  <span>暂定标题（可选）</span>
+                  <input
+                    className="input"
+                    name="name"
+                    placeholder="可以稍后再决定"
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                  />
+                </label>
+                <label className="stack">
+                  <span>灵感</span>
+                  <textarea
+                    className="textarea"
+                    name="inspiration"
+                    placeholder="可以是开头、结尾、设定，或几句话的大纲"
+                    required
+                    value={inspiration}
+                    onChange={(event) => setInspiration(event.target.value)}
+                  />
+                </label>
+                <label className="stack">
+                  <span>目标总字数</span>
+                  <input
+                    className="input"
+                    name="targetTotalWordCount"
+                    type="number"
+                    inputMode="numeric"
+                    min={6_000}
+                    max={80_000}
+                    required
+                    placeholder="6000-80000"
+                    value={targetTotalWordCount}
+                    onChange={(event) => setTargetTotalWordCount(event.target.value)}
+                  />
+                </label>
+              </>
+            ) : null}
+
+            {storyLengthProfile === "long_serial" ? (
+              <>
+                <label className="stack">
+                  <span>小说名称</span>
+                  <input
+                    className="input"
+                    name="name"
+                    placeholder="例如：青云山下有剑仙"
+                    required
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                  />
+                </label>
+                <label className="stack">
+                  <span>目标总字数</span>
+                  <input
+                    className="input"
+                    name="targetTotalWordCount"
+                    inputMode="numeric"
+                    value={targetTotalWordCount}
+                    onChange={(event) => setTargetTotalWordCount(event.target.value)}
+                  />
+                </label>
+                <div className="onboarding-grid">
               <label className="stack">
                 <span>题材/频道</span>
                 <input
@@ -137,8 +229,8 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
                   onChange={(e) => setProtagonist(e.target.value)}
                 />
               </label>
-            </div>
-            <label className="stack">
+                </div>
+                <label className="stack">
               <span>作品简介</span>
               <textarea
                 className="textarea"
@@ -147,8 +239,8 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
                 value={summary}
                 onChange={(e) => setSummary(e.target.value)}
               />
-            </label>
-            <label className="stack">
+                </label>
+                <label className="stack">
               <span>核心卖点</span>
               <input
                 className="input"
@@ -157,8 +249,8 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
                 value={coreSellingPoint}
                 onChange={(e) => setCoreSellingPoint(e.target.value)}
               />
-            </label>
-            <div className="onboarding-grid">
+                </label>
+                <div className="onboarding-grid">
               <label className="stack">
                 <span>读者承诺</span>
                 <input
@@ -179,10 +271,17 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
                   onChange={(e) => setFirstChapterGoal(e.target.value)}
                 />
               </label>
-            </div>
+                </div>
+              </>
+            ) : null}
+            {error ? <p className="workspace-view-error" role="alert">{error}</p> : null}
             <div className="row">
-              <button className="button" type="submit" disabled={pending || !name.trim()}>
-                {pending ? "创建中..." : "新建小说"}
+              <button className="button" type="submit" disabled={pending || !canSubmit}>
+                {pending
+                  ? "创建中..."
+                  : storyLengthProfile === "short_medium"
+                    ? "创建并生成大纲"
+                    : "新建长篇"}
               </button>
               <button className="button ghost" type="button" onClick={onClose} disabled={pending}>
                 取消

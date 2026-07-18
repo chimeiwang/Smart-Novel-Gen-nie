@@ -28,7 +28,7 @@ export async function createNovelWithApi(
     data: {
       name,
       summary: "端到端测试项目",
-      storyLengthProfile: "short_medium",
+      storyLengthProfile: "long_serial",
       targetTotalWordCount: 50_000,
       genre: "测试",
       protagonist: "测试主角",
@@ -38,6 +38,23 @@ export async function createNovelWithApi(
     },
   });
   await expectApiOk(response, "创建测试小说");
+  return (await response.json()) as NovelIdentity;
+}
+
+export async function createShortNovelWithApi(
+  page: Page,
+  targetTotalWordCount = 50_000,
+  name = `端到端中短篇-${Date.now()}`,
+): Promise<NovelIdentity> {
+  const response = await page.request.post("/api/v1/novels", {
+    data: {
+      storyLengthProfile: "short_medium",
+      name,
+      inspiration: "一个人收到来自未来自己的信，却发现寄信日期是自己的死期。",
+      targetTotalWordCount,
+    },
+  });
+  await expectApiOk(response, "创建中短篇测试小说");
   return (await response.json()) as NovelIdentity;
 }
 

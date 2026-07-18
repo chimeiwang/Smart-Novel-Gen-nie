@@ -58,3 +58,15 @@ test("LorePanel 编辑层不再写死旧三栏位置", async () => {
   assert.match(overlay, /inset:\s*0/);
   assert.doesNotMatch(overlay, /left:\s*320px|right:\s*560px|margin-top|100vh/);
 });
+
+test("作品圣经只读展示篇幅类型且保存时不提交篇幅类型", async () => {
+  const paneUrl = new URL("../library-pane.tsx", import.meta.url);
+  const source = await readFile(paneUrl, "utf8");
+  const editor = source.match(/function WritingBibleEditor[\s\S]*?export function LibraryPane/)?.[0] ?? "";
+  const saveBody = editor.match(/body:\s*\{[\s\S]*?\n\s*\},/)?.[0] ?? "";
+
+  assert.match(editor, /篇幅类型/);
+  assert.match(editor, /STORY_LENGTH_PROFILE_CONFIG\[form\.storyLengthProfile\]\.label/);
+  assert.doesNotMatch(editor, /selectProfile|onClick=\{\(\) => selectProfile/);
+  assert.doesNotMatch(saveBody, /\.\.\.form|storyLengthProfile/);
+});
