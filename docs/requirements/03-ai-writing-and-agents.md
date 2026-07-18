@@ -277,11 +277,19 @@ Agent Runtime 是唯一多轮 tool-call loop。
 
 Operation 的 `contextStrategy` 只生成最小投影：`brief` 提供任务、小说和章节摘要；`lore` 提供设定摘要索引；`outline` 提供大纲、节点、剧情进度、章节组、outlinePath 和伏笔摘要；`chapter` 提供当前章、相邻章摘要、章节目标、已批准 Beat Plan、outlinePath 和相关人物摘要；`review` 提供当前章及必要审阅资料。详细内容由只读工具按需获取，完整聚合 `workspace` 不进入稳定快照。
 
+`get_recent_chapters` 是按需读取最近章节正文的只读工具，`count` 可选且范围为 `1..20`，省略时 Core 默认读取 3 章；基础上下文不会自动注入全部章节。该工具不扩大现有 RAG 每份资料 64 块容量或 `topK`，也不改变 embedding 回调协议。
+
 写作处理器在初次运行、命令恢复和当前 job 快照恢复时附加仅运行时 `runtimeContext`，其中 `RunResource.runId/jobId` 只来自当前 QueueJob。Agent 执行、工具、草案创建、评审和草案水合统一使用该身份；`runtimeContext` 在稳定快照序列化前移除，不能成为可恢复业务状态。
 
 恢复自动复审、自动返工或用户 revise 决定前，Agent Service 使用 Core `planning.activeArtifact` 水合权威草案并校验 task、novel、chapter、kind、artifactKey 与 revision；Core 已事务处理的 approve/discard 不要求草案继续存在。进程内草案记录只在等待态 checkpoint、完成回调或失败回调成功后，按同一 `runId/jobId` 释放。
 
-Provider 必须提供规范化完成原因并保留供应商原始值。`length`、`content_filter`、`stop`/`tool_calls` 与实际工具状态矛盾、以及没有合法工具调用的 `unknown` 都在接受正文或执行工具副作用前失败；人工模型日志记录规范化值和完整原始值。
+Agent Service 使用 `MODEL_MAX_OUTPUT_TOKENS` 表达当前部署模型的单次最大输出能力，默认 `384000`，合法范围为 `1..1_000_000`；普通 Agent 与文风画像共用该值。它不是目标篇幅，不要求模型必须生成到该长度，也不承诺无限输出。
+
+计费模型调用仍先向 Core 申请有限正整数 grant；Core 可以按可用余额缩小额度，`ModelRuntime` 校验授权后把实际 `maxOutputTokens` 精确传给 Provider，任何调用都不得绕过授权上限。
+
+Provider 必须提供规范化完成原因并保留供应商原始值。`length`、`content_filter`、`stop`/`tool_calls` 与实际工具状态矛盾、以及没有合法工具调用的 `unknown` 都在接受正文或执行工具副作用前失败，当前不把 `length` 作为自动续写信号；文风画像只接受 `stop`、无工具调用且正文非空的纯文本响应，半截画像不能成功。人工模型日志记录规范化值和完整原始值。
+
+上述输出与上下文能力不修改 PostgreSQL schema、公共 OpenAPI 或 ReviewArtifact 状态机。
 
 ## 验收标准
 
