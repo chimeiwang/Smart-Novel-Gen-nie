@@ -141,6 +141,13 @@ class WritingJobHandler:
                 owned_artifact_id,
             ):
                 return
+        if await self._settle_foreign_snapshot_without_input(
+            job,
+            payload,
+            context,
+            resource,
+        ):
+            return
         state, graph = self._prepare_state(
             job,
             context,
@@ -298,6 +305,76 @@ class WritingJobHandler:
             return True
         return False
 
+    async def _settle_foreign_snapshot_without_input(
+        self,
+        job: QueueJob,
+        payload: WritingJobPayload,
+        context: dict[str, Any],
+        resource: RunResource,
+    ) -> bool:
+        if not payload.resume or payload.resumeInput is not None:
+            return False
+        planning = context.get("planning")
+        if not isinstance(planning, dict):
+            return False
+        snapshot = planning.get("graphState")
+        if (
+            not isinstance(snapshot, dict)
+            or snapshot.get("callbackJobId") == job.jobId
+        ):
+            return False
+        state = deserialize_snapshot(snapshot)
+        phase = state.get("phase")
+        if phase not in {"completed", "error", "waiting_user"}:
+            return False
+        _validate_stable_identity(state, payload)
+        if phase == "waiting_user":
+            _validate_waiting_artifact_context(planning, state)
+        _apply_planning_history(state, planning)
+        _apply_command_identity(state, payload, job.jobId)
+        if phase in {"completed", "error"}:
+            return await self._settle_recovered_state(resource, job.runId, state)
+        await self._rebind_foreign_waiting_snapshot(resource, job.runId, state)
+        return True
+
+    async def _rebind_foreign_waiting_snapshot(
+        self,
+        resource: RunResource,
+        run_id: str,
+        state: GraphState,
+    ) -> None:
+        artifact_id = state.get("activeArtifactId")
+        if not isinstance(artifact_id, str) or not artifact_id:
+            raise ValueError("WAITING_ARTIFACT_MISSING：等待用户确认的快照缺少草案身份")
+        event_sequence = int(state.get("eventSequence", 0)) + 1
+        active_agent = state.get("activeAgent")
+        await self._core.send_event(
+            resource,
+            sequence=event_sequence,
+            event="artifact_awaiting_user_approval",
+            data={
+                "agentId": active_agent if isinstance(active_agent, str) else "系统",
+                "artifactId": artifact_id,
+            },
+        )
+        checkpoint_sequence = event_sequence + 1
+        state["eventSequence"] = checkpoint_sequence
+        checkpoint = to_typescript_snapshot(serialize_snapshot(state))
+        self._record_state(
+            run_id,
+            "重绑等待确认快照",
+            {
+                "阶段": checkpoint.get("phase"),
+                "草案": artifact_id,
+            },
+        )
+        await self._core.save_checkpoint(
+            resource,
+            sequence=checkpoint_sequence,
+            checkpoint=checkpoint,
+        )
+        self._finish_log(run_id, "等待用户确认")
+
     def _hydrate_for_state(
         self,
         resource: RunResource,
@@ -357,6 +434,7 @@ class WritingJobHandler:
             _validate_stable_identity(state, payload)
             resume_input = job.payload.get("resumeInput")
             if isinstance(resume_input, dict):
+                _validate_resume_artifact_identity(state, resume_input)
                 state["resumeDecision"] = dict(resume_input)
                 message = resume_input.get("userMessage")
                 if isinstance(message, str) and message:
@@ -455,6 +533,40 @@ def _apply_planning_history(
         state["conversationHistory"] = [
             dict(item) for item in history if isinstance(item, dict)
         ]
+
+
+def _validate_resume_artifact_identity(
+    state: Mapping[str, Any],
+    resume_input: Mapping[str, Any],
+) -> None:
+    if resume_input.get("decision") not in {"approve", "revise", "discard"}:
+        return
+    if (
+        not isinstance(resume_input.get("artifactId"), str)
+        or resume_input.get("artifactId") != state.get("activeArtifactId")
+    ):
+        raise ValueError(
+            "RESUME_ARTIFACT_IDENTITY_MISMATCH：用户决定与稳定快照草案不一致"
+        )
+
+
+def _validate_waiting_artifact_context(
+    planning: Mapping[str, Any],
+    state: Mapping[str, Any],
+) -> None:
+    artifact_id = state.get("activeArtifactId")
+    active_artifact = planning.get("activeArtifact")
+    if (
+        not isinstance(artifact_id, str)
+        or not artifact_id
+        or state.get("artifactStatus") != "awaiting_user"
+        or not isinstance(active_artifact, dict)
+        or active_artifact.get("id") != artifact_id
+        or active_artifact.get("status") != "awaiting_user"
+    ):
+        raise ValueError(
+            "WAITING_ARTIFACT_CONTEXT_MISMATCH：等待快照与 Core 权威草案不一致"
+        )
 
 
 def _artifact_id_from_interrupt(interrupts: object) -> str | None:

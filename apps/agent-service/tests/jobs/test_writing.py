@@ -884,6 +884,267 @@ async def test_initial_job_retry_replays_its_terminal_checkpoint_without_rerunni
     ]
 
 
+def _foreign_recovery_context(state: dict[str, Any]) -> dict[str, Any]:
+    snapshot = to_typescript_snapshot(serialize_snapshot(state))
+    snapshot["callbackJobId"] = "old-job"
+    return {
+        "workspace": {},
+        "planning": {
+            "taskId": "task-1",
+            "commandId": "job-1",
+            "novelId": "novel-1",
+            "chapterId": "chapter-1",
+            "targetWordCount": 4000,
+            "conversationHistory": [],
+            "userMessage": "故障恢复",
+            "graphState": snapshot,
+        },
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["completed", "error"])
+async def test_new_reconciliation_job_replays_foreign_terminal_snapshot_without_graph(
+    phase: str,
+) -> None:
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="旧请求",
+    )
+    state["phase"] = phase  # type: ignore[typeddict-item]
+    state["eventSequence"] = 7
+    state["finalResponse"] = "原始完成结果"
+    state["errorMessage"] = "原始失败原因"
+    core = CoreClient(_foreign_recovery_context(state))
+    parent = Graph({"phase": "completed", "finalResponse": "不得生成"})
+    operation = Graph({"phase": "completed", "finalResponse": "不得恢复"})
+    artifacts = ArtifactHydration()
+    handler = WritingJobHandler(
+        core,
+        parent_graph=parent,
+        operation_graph=operation,
+        artifacts=artifacts,
+    )
+
+    if phase == "error":
+        with pytest.raises(NonRetryableJobError):
+            await handler(_job(resume=True))
+    else:
+        await handler(_job(resume=True))
+
+    assert parent.inputs == []
+    assert operation.inputs == []
+    assert artifacts.hydrated == []
+    assert core.events == []
+    assert core.checkpoints == []
+    if phase == "completed":
+        assert core.completions == [(8, {"finalResponse": "原始完成结果"})]
+        assert core.failures == []
+    else:
+        assert core.completions == []
+        assert core.failures == [
+            {
+                "sequence": 8,
+                "code": "AGENT_RUN_FAILED",
+                "message": "原始失败原因",
+                "recoverable": True,
+            }
+        ]
+
+
+@pytest.mark.asyncio
+async def test_new_reconciliation_job_rebinds_foreign_waiting_snapshot_without_graph() -> None:
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="旧请求",
+    )
+    state["phase"] = "waiting_user"
+    state["eventSequence"] = 7
+    state["activeAgent"] = "剧情"
+    state["activeArtifactId"] = "artifact-1"
+    state["artifactStatus"] = "awaiting_user"
+    context = _foreign_recovery_context(state)
+    context["planning"]["activeArtifact"] = _active_artifact()
+    core = CoreClient(context)
+    parent = Graph({"phase": "completed"})
+    operation = Graph({"phase": "completed"})
+    artifacts = ArtifactHydration()
+    handler = WritingJobHandler(
+        core,
+        parent_graph=parent,
+        operation_graph=operation,
+        artifacts=artifacts,
+    )
+
+    await handler(_job(resume=True))
+
+    assert parent.inputs == []
+    assert operation.inputs == []
+    assert artifacts.hydrated == []
+    assert core.events == [(8, "artifact_awaiting_user_approval")]
+    assert core.event_payloads == [
+        {"agentId": "剧情", "artifactId": "artifact-1"}
+    ]
+    assert "content" not in core.event_payloads[0]
+    assert core.checkpoints[0][0] == 9
+    checkpoint = core.checkpoints[0][1]
+    assert checkpoint["phase"] == "awaiting_user_review"
+    assert checkpoint["activeArtifactId"] == "artifact-1"
+    assert checkpoint["artifactStatus"] == "awaiting_user"
+    assert checkpoint["eventSequence"] == 9
+    assert checkpoint["commandId"] == "job-1"
+    assert core.completions == []
+    assert core.failures == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "active_artifact",
+    [
+        None,
+        {**_active_artifact(), "id": "artifact-other"},
+        {**_active_artifact(), "status": "applied"},
+    ],
+)
+async def test_waiting_rebind_requires_matching_authoritative_awaiting_artifact(
+    active_artifact: dict[str, Any] | None,
+) -> None:
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="旧请求",
+    )
+    state["phase"] = "waiting_user"
+    state["activeArtifactId"] = "artifact-1"
+    state["artifactStatus"] = "awaiting_user"
+    context = _foreign_recovery_context(state)
+    context["planning"]["activeArtifact"] = active_artifact
+    core = CoreClient(context)
+    operation = Graph({})
+    handler = WritingJobHandler(
+        core,
+        parent_graph=Graph({}),
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
+
+    with pytest.raises(ValueError, match="WAITING_ARTIFACT_CONTEXT_MISMATCH"):
+        await handler(_job(resume=True))
+
+    assert operation.inputs == []
+    assert core.events == []
+    assert core.checkpoints == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["approve", "revise", "discard"])
+async def test_foreign_waiting_snapshot_with_user_decision_still_enters_operation_graph(
+    decision: str,
+) -> None:
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="旧请求",
+    )
+    state["phase"] = "waiting_user"
+    state["eventSequence"] = 7
+    state["activeArtifactId"] = "artifact-1"
+    state["artifactStatus"] = "awaiting_user"
+    context = _foreign_recovery_context(state)
+    context["planning"]["activeArtifact"] = (
+        _active_artifact() if decision == "revise" else None
+    )
+    operation = Graph({"phase": "completed", "finalResponse": "决定已处理"})
+    handler = WritingJobHandler(
+        CoreClient(context),
+        parent_graph=Graph({}),
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
+
+    await handler(
+        _job(
+            resume=True,
+            resume_input={"decision": decision, "artifactId": "artifact-1"},
+        )
+    )
+
+    assert len(operation.inputs) == 1
+    assert operation.inputs[0]["resumeDecision"] == {
+        "decision": decision,
+        "artifactId": "artifact-1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_foreign_waiting_decision_rejects_mismatched_artifact_before_graph() -> None:
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="旧请求",
+    )
+    state["phase"] = "waiting_user"
+    state["activeArtifactId"] = "artifact-1"
+    state["artifactStatus"] = "awaiting_user"
+    context = _foreign_recovery_context(state)
+    operation = Graph({})
+    core = CoreClient(context)
+    handler = WritingJobHandler(
+        core,
+        parent_graph=Graph({}),
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
+
+    with pytest.raises(ValueError, match="RESUME_ARTIFACT_IDENTITY_MISMATCH"):
+        await handler(
+            _job(
+                resume=True,
+                resume_input={"decision": "approve", "artifactId": "artifact-other"},
+            )
+        )
+
+    assert operation.inputs == []
+    assert core.events == []
+    assert core.checkpoints == []
+
+
+@pytest.mark.asyncio
+async def test_foreign_active_snapshot_without_input_still_runs_fault_recovery_graph() -> None:
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="旧请求",
+    )
+    state["phase"] = "active"
+    state["eventSequence"] = 7
+    operation = Graph({"phase": "completed", "finalResponse": "恢复完成"})
+    handler = WritingJobHandler(
+        CoreClient(_foreign_recovery_context(state)),
+        parent_graph=Graph({}),
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
+
+    await handler(_job(resume=True))
+
+    assert len(operation.inputs) == 1
+
+
 @pytest.mark.asyncio
 async def test_current_job_nonterminal_snapshot_uses_fresh_runtime_identity() -> None:
     state = create_initial_state(
