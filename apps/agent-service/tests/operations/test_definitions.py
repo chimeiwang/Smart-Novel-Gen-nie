@@ -145,8 +145,8 @@ EXPECTED_CONTRACTS: dict[str, dict[str, Any]] = {
         "allowed": frozenset(),
         "terminal": frozenset(),
         "events": frozenset(),
-        "text_kind": None,
-        "key_policy": "none",
+        "text_kind": "chapter_draft",
+        "key_policy": "generated_stable",
     },
 }
 
@@ -196,6 +196,21 @@ def test_short_outline_uses_dedicated_artifact_without_reviewers() -> None:
     assert definition.requiresUserApproval is True
 
 
+def test_short_story_declares_single_text_and_serial_review_contract() -> None:
+    definition = OPERATION_DEFINITIONS["write_short_story"]
+
+    assert definition.primaryAgent == "写作"
+    assert definition.reviewers == ("编辑", "校验")
+    assert definition.contextStrategy == "short_story"
+    assert definition.artifactPolicy == "text"
+    assert definition.generationMode == "single_text_stop"
+    assert definition.reviewStrategy == "short_story_serial_once"
+    assert definition.requiresArtifact is True
+    assert definition.allowedToolNames == frozenset()
+    assert definition.terminalControlTools == frozenset()
+    assert definition.artifactEventTypes == frozenset()
+
+
 def test_every_operation_declares_valid_execution_contract() -> None:
     registry = build_default_registry()
     registered = {tool.name for tool in registry.all()}
@@ -205,7 +220,11 @@ def test_every_operation_declares_valid_execution_contract() -> None:
         assert definition.terminalControlTools <= definition.allowedToolNames
         assert definition.artifactEventTypes == definition.terminalControlTools
         if definition.requiresArtifact:
-            assert definition.artifactEventTypes
+            if definition.generationMode == "control_tool":
+                assert definition.artifactEventTypes
+            else:
+                assert definition.generationMode == "single_text_stop"
+                assert not definition.artifactEventTypes
             assert definition.artifactKeyPolicy != "none"
             assert definition.requiresUserApproval is True
         else:

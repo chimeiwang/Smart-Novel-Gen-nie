@@ -1,6 +1,8 @@
 import pytest
 from inkforge_agents.providers.base import ModelTurnRequest
 from inkforge_agents.providers.fake import FakeModelProvider
+from inkforge_agents.short_story.story_graph import extract_complete_short_story
+from inkforge_contracts import count_short_story_text_length
 
 
 @pytest.mark.asyncio
@@ -44,6 +46,42 @@ async def test_fake_provider_without_tools_returns_full_visible_text() -> None:
     assert result.finishReason == "stop"
     assert result.rawFinishReason == "stop"
     assert result.content == "模拟模型已完成本轮处理。"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target_word_count", [6000, 80000])
+async def test_fake_provider_returns_exact_length_short_story_with_visible_tail(
+    target_word_count: int,
+) -> None:
+    result = await FakeModelProvider().complete_turn(
+        ModelTurnRequest(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "当前执行契约：operation=write_short_story，mode=primary。",
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "生成完整中短篇正文；权威上下文："
+                        f'{{"targetTotalWordCount":{target_word_count}}}'
+                    ),
+                },
+            ],
+            tools=[],
+            maxOutputTokens=256,
+        )
+    )
+
+    assert result.toolCalls == []
+    assert result.finishReason == "stop"
+    assert result.content.startswith("ARTIFACT_OUTPUT_START\n")
+    assert result.content.endswith("\nARTIFACT_OUTPUT_END")
+    assert "【模拟整稿尾部】" in result.content
+    actual = count_short_story_text_length(
+        extract_complete_short_story(result.content)
+    )
+    assert actual == target_word_count
 
 
 @pytest.mark.asyncio

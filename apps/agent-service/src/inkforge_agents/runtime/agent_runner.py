@@ -30,6 +30,7 @@ class AgentRunRequest(BaseModel):
     executionInstructions: list[str] = Field(default_factory=list)
     conversationMessages: list[dict[str, object]] = Field(default_factory=list)
     toolContext: ToolContext
+    maxIterations: int | None = Field(default=None, ge=1, le=100)
 
     @model_validator(mode="after")
     def validate_execution_scope(self) -> Self:
@@ -82,7 +83,7 @@ class AgentRunner:
             messages=messages,
             exposed_tools=tools,
             context=request.toolContext,
-            max_iterations=definition.maxIterations,
+            max_iterations=request.maxIterations or definition.maxIterations,
             terminal_control_tools=execution.terminalControlTools,
             model_context=ModelCallContext(
                 userId=request.toolContext.userId,

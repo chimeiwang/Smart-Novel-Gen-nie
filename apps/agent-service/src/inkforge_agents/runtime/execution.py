@@ -120,6 +120,19 @@ def _operation_protocol(
     mode: AgentExecutionMode,
     operation: OperationDefinition,
 ) -> list[str]:
+    if operation.kind == "write_short_story":
+        lines = [
+            "必须在一次模型响应中输出完整正文，严格使用独占行 "
+            "ARTIFACT_OUTPUT_START 与 ARTIFACT_OUTPUT_END 包裹；边界外不得输出正文或说明。",
+            "以权威上下文 targetTotalWordCount 为全文目标，实际正文必须保持在"
+            "六千至八万字范围内。",
+            "正文可以按故事需要自然分节，但不得拆成章节任务，不得续写半稿、拼接多轮输出或自动补尾。",
+        ]
+        if mode == "reviser":
+            lines.append(
+                "依据只读权威整稿以及用户要求或全稿审核意见完成一次完整重写。"
+            )
+        return lines
     if not operation.terminalControlTools:
         return ["本次没有产物终止工具，请用普通正文直接完成回答。"]
     tools = "、".join(sorted(operation.terminalControlTools))

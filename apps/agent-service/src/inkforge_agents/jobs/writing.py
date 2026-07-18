@@ -75,6 +75,13 @@ class ArtifactHydrationPort(Protocol):
 
     def release(self, artifact_id: str, resource: RunResource) -> None: ...
 
+    def hydrate_short_story(
+        self,
+        resource: RunResource,
+        state: Mapping[str, Any],
+        run_artifact: Mapping[str, Any],
+    ) -> None: ...
+
 
 class WritingJobHandler:
     def __init__(
@@ -83,12 +90,14 @@ class WritingJobHandler:
         *,
         parent_graph: GraphPort,
         operation_graph: GraphPort,
+        short_story_graph: GraphPort | None = None,
         artifacts: ArtifactHydrationPort,
         workflow_log: WorkflowLogPort | None = None,
     ) -> None:
         self._core = core
         self._parent_graph = parent_graph
         self._operation_graph = operation_graph
+        self._short_story_graph = short_story_graph
         self._artifacts = artifacts
         self._workflow_log = workflow_log
 
@@ -112,10 +121,6 @@ class WritingJobHandler:
             )
         context = await self._core.call_tool(resource, "写作", "get_writing_context", {})
         _validate_job_context_identity(job, payload, context)
-        if payload.operation == "write_short_story":
-            raise ValueError(
-                "SHORT_STORY_WORKFLOW_NOT_IMPLEMENTED：中短篇整稿专用串行审核尚未接入"
-            )
         current_job_state = _current_job_snapshot(job, context)
         owned_artifact_id: str | None = None
         if current_job_state is not None:
@@ -154,7 +159,7 @@ class WritingJobHandler:
             current_job_state=current_job_state,
             payload=payload,
         )
-        if current_job_state is None:
+        if owned_artifact_id is None:
             owned_artifact_id = self._hydrate_for_state(resource, state, context)
         input_artifact_id = state.get("activeArtifactId")
         self._record_state(
@@ -392,7 +397,20 @@ class WritingJobHandler:
         }:
             return None
         planning = context.get("planning")
-        active_artifact = planning.get("activeArtifact") if isinstance(planning, dict) else None
+        if not isinstance(planning, dict):
+            raise RuntimeError("ACTIVE_ARTIFACT_CONTEXT_MISSING：Core 缺少规划上下文")
+        if state.get("explicitOperation") == "write_short_story":
+            run_artifact = planning.get("shortStoryRunArtifact")
+            if (
+                not isinstance(run_artifact, dict)
+                or run_artifact.get("id") != artifact_id
+            ):
+                raise RuntimeError(
+                    "ACTIVE_ARTIFACT_CONTEXT_MISSING：当前恢复状态缺少匹配的中短篇正文草案"
+                )
+            self._artifacts.hydrate_short_story(resource, state, run_artifact)
+            return artifact_id
+        active_artifact = planning.get("activeArtifact")
         if (
             not isinstance(active_artifact, dict)
             or active_artifact.get("id") != artifact_id
@@ -422,9 +440,10 @@ class WritingJobHandler:
         if current_job_state is not None:
             _apply_planning_history(current_job_state, planning)
             _apply_command_identity(current_job_state, payload, job.jobId)
+            _attach_short_story_run_identity(current_job_state, planning, payload)
             return (
                 _attach_runtime_context(current_job_state, context, _resource(job)),
-                self._operation_graph,
+                self._graph_for_payload(payload),
             )
         is_resume = job.payload.get("resume") is True
         if is_resume:
@@ -432,6 +451,7 @@ class WritingJobHandler:
                 raise ValueError("恢复写作任务缺少稳定快照")
             state = deserialize_snapshot(snapshot)
             _validate_stable_identity(state, payload)
+            _attach_short_story_run_identity(state, planning, payload)
             resume_input = job.payload.get("resumeInput")
             if isinstance(resume_input, dict):
                 _validate_resume_artifact_identity(state, resume_input)
@@ -443,7 +463,7 @@ class WritingJobHandler:
             _apply_command_identity(state, payload, job.jobId)
             return (
                 _attach_runtime_context(state, context, _resource(job)),
-                self._operation_graph,
+                self._graph_for_payload(payload),
             )
 
         chapter_id = planning.get("chapterId")
@@ -473,6 +493,7 @@ class WritingJobHandler:
             ),
         )
         _apply_planning_history(state, planning)
+        _attach_short_story_run_identity(state, planning, payload)
         if payload.operation is not None:
             state["currentOperation"] = _explicit_operation(
                 payload.operation,
@@ -481,12 +502,21 @@ class WritingJobHandler:
             state["activeAgent"] = OPERATION_DEFINITIONS[payload.operation].primaryAgent
             return (
                 _attach_runtime_context(state, context, _resource(job)),
-                self._operation_graph,
+                self._graph_for_payload(payload),
             )
         return (
             _attach_runtime_context(state, context, _resource(job)),
             self._parent_graph,
         )
+
+    def _graph_for_payload(self, payload: WritingJobPayload) -> GraphPort:
+        if payload.operation != "write_short_story":
+            return self._operation_graph
+        if self._short_story_graph is None:
+            raise ValueError(
+                "SHORT_STORY_GRAPH_NOT_CONFIGURED：中短篇整稿专用图尚未配置"
+            )
+        return self._short_story_graph
 
 
 def _current_job_snapshot(
@@ -535,6 +565,39 @@ def _apply_planning_history(
         ]
 
 
+def _attach_short_story_run_identity(
+    state: GraphState,
+    planning: Mapping[str, Any],
+    payload: WritingJobPayload,
+) -> None:
+    if payload.operation != "write_short_story":
+        return
+    run_artifact = planning.get("shortStoryRunArtifact")
+    if run_artifact is None:
+        return
+    if not isinstance(run_artifact, Mapping):
+        raise ValueError(
+            "SHORT_STORY_RUN_ARTIFACT_INVALID：Core 中短篇正文草案投影无效"
+        )
+    artifact_id = run_artifact.get("id")
+    task_id = run_artifact.get("taskId")
+    existing_id = state.get("activeArtifactId")
+    if (
+        not isinstance(artifact_id, str)
+        or not artifact_id
+        or task_id != state.get("taskId")
+        or (
+            isinstance(existing_id, str)
+            and existing_id
+            and existing_id != artifact_id
+        )
+    ):
+        raise ValueError(
+            "SHORT_STORY_RUN_ARTIFACT_INVALID：Core 中短篇正文草案身份不一致"
+        )
+    state["activeArtifactId"] = artifact_id
+
+
 def _validate_resume_artifact_identity(
     state: Mapping[str, Any],
     resume_input: Mapping[str, Any],
@@ -555,7 +618,11 @@ def _validate_waiting_artifact_context(
     state: Mapping[str, Any],
 ) -> None:
     artifact_id = state.get("activeArtifactId")
-    active_artifact = planning.get("activeArtifact")
+    active_artifact = (
+        planning.get("shortStoryRunArtifact")
+        if state.get("explicitOperation") == "write_short_story"
+        else planning.get("activeArtifact")
+    )
     if (
         not isinstance(artifact_id, str)
         or not artifact_id

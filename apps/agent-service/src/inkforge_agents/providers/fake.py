@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 
+from inkforge_contracts import count_short_story_text_length
 from pydantic import JsonValue
 
 from .base import (
@@ -37,11 +38,27 @@ class FakeModelProvider:
 
 def _build_response(request: ModelTurnRequest) -> tuple[str, list[ModelToolCall]]:
     content = "模拟模型已完成本轮处理。"
+    message_text = "\n".join(message.content for message in request.messages)
+    if not request.tools and "operation=write_short_story" in message_text:
+        target_match = re.search(
+            r'"targetTotalWordCount"\s*:\s*(\d+)', message_text
+        )
+        target = int(target_match.group(1)) if target_match is not None else 6000
+        target = min(max(target, 6000), 80000)
+        tail = "尾声：选择已经兑现，故事在这里完整结束。【模拟整稿尾部】"
+        filler_length = target - count_short_story_text_length(tail)
+        body = "文" * filler_length
+        return (
+            "ARTIFACT_OUTPUT_START\n"
+            f"{body}\n\n"
+            f"{tail}\n"
+            "ARTIFACT_OUTPUT_END",
+            [],
+        )
     if not request.tools or any(message.role == "tool" for message in request.messages):
         return content, []
 
     tool_names = {tool.name for tool in request.tools}
-    message_text = "\n".join(message.content for message in request.messages)
     name, arguments = _select_tool(tool_names, message_text)
     if name is None:
         name = request.tools[0].name

@@ -8,6 +8,11 @@ from inkforge_agents.jobs.adapters import CoreArtifactPort, CoreGraphAgentExecut
 from inkforge_agents.providers.base import ModelUsage
 from inkforge_agents.runtime.agent_runner import AgentRunRequest, AgentRunResult
 from inkforge_agents.tools.registry import ToolContext
+from inkforge_contracts import (
+    ShortStoryChapterDraft,
+    ShortStoryDraftMetadata,
+    count_short_story_text_length,
+)
 
 
 class CoreClient:
@@ -260,6 +265,76 @@ def test_artifact_port_rejects_release_without_owned_record() -> None:
         port.release("artifact-1", _resource())
 
 
+def test_artifact_port_hydrates_minimal_short_story_run_artifact() -> None:
+    port = CoreArtifactPort(CoreClient())  # type: ignore[arg-type]
+    state = {
+        **_hydration_state(),
+        "currentOperation": {"kind": "write_short_story", "primaryAgent": "写作"},
+        "activeArtifactId": "artifact-story",
+    }
+    run_artifact = {
+        "id": "artifact-story",
+        "taskId": "task-1",
+        "artifactKey": "short-story-key",
+        "status": "under_review",
+        "revision": 2,
+        "payload": _short_story_draft().model_dump(mode="json"),
+        "evaluations": [],
+    }
+
+    port.hydrate_short_story(_resource(), state, run_artifact)
+
+    context = port.review_context("artifact-story")
+    assert context["chapterId"] == "chapter-1"
+    assert context["revision"] == 2
+    assert context["payload"]["metadata"]["generationCommandId"] == "job-1"
+
+
+@pytest.mark.asyncio
+async def test_artifact_port_submits_and_revises_typed_short_story_with_raw_diff() -> None:
+    core = CoreClient()
+    port = CoreArtifactPort(core)
+    state = {
+        "userId": "user-1",
+        "novelId": "novel-1",
+        "taskId": "task-1",
+        "chapterId": "chapter-1",
+        "commandId": "job-1",
+        "activeAgent": "写作",
+        "activeArtifactId": None,
+        "currentOperation": {"kind": "write_short_story", "primaryAgent": "写作"},
+        "runtimeContext": _runtime_context(),
+    }
+
+    artifact_id = await port.save_short_story(
+        state,
+        _short_story_draft(),
+        user_request="请生成完整正文",
+    )
+    state["activeArtifactId"] = artifact_id
+    await port.save_short_story(
+        state,
+        _short_story_draft(
+            automatic_rewrite_count=1,
+            generation_reason="automatic_rewrite",
+        ),
+        user_request=None,
+    )
+
+    created, revised = core.artifacts
+    assert created["kind"] == "chapter_draft"
+    assert created["payload"]["storyLengthProfile"] == "short_medium"
+    assert created["diff"] is None
+    assert revised["expectedRevision"] == 1
+    assert revised["artifactKey"] == created["artifactKey"]
+    assert revised["diff"] == {
+        "sourceRevision": 1,
+        "generationCommandId": "job-1",
+        "automaticRewriteCount": 1,
+        "generationReason": "automatic_rewrite",
+    }
+
+
 @pytest.mark.asyncio
 async def test_restart_hydration_allows_reviser_to_use_authoritative_context() -> None:
     artifacts = CoreArtifactPort(CoreClient())  # type: ignore[arg-type]
@@ -493,6 +568,136 @@ async def test_executor_marks_primary_and_reviser_modes_explicitly() -> None:
 
 
 @pytest.mark.asyncio
+async def test_short_story_executor_forces_one_model_iteration_and_zero_tools() -> None:
+    runner = RecordingRunner()
+    executor = CoreGraphAgentExecutor(runner, CoreArtifactPort(CoreClient()))  # type: ignore[arg-type]
+    state = {
+        "userId": "user-1",
+        "novelId": "novel-1",
+        "taskId": "task-1",
+        "chapterId": "chapter-1",
+        "userMessage": "生成完整中短篇正文",
+        "contextMessages": ["中短篇整稿权威上下文"],
+        "currentOperation": {"kind": "write_short_story", "primaryAgent": "写作"},
+        "runtimeContext": _runtime_context(),
+    }
+
+    await executor.run(
+        "写作",
+        state,
+        execution_mode="primary",
+        operation_kind="write_short_story",
+    )
+
+    request = runner.requests[-1]
+    assert request.maxIterations == 1
+    assert request.operationKind == "write_short_story"
+
+
+@pytest.mark.asyncio
+async def test_short_story_reviewers_receive_same_revision_with_separate_scopes() -> None:
+    core = CoreClient()
+    artifacts = CoreArtifactPort(core)
+    state = {
+        "taskId": "task-1",
+        "userId": "user-1",
+        "novelId": "novel-1",
+        "chapterId": "chapter-1",
+        "activeArtifactId": "artifact-story",
+        "currentOperation": {"kind": "write_short_story", "primaryAgent": "写作"},
+        "userMessage": "审核完整正文",
+        "contextMessages": ["中短篇整稿权威上下文：批准大纲、锚点和必要设定"],
+        "shortStoryReviews": [
+            {
+                "revision": 2,
+                "evaluatorAgent": "编辑",
+                "verdict": "revise",
+                "summary": "这条编辑结论不能进入校验上下文",
+            }
+        ],
+        "runtimeContext": _runtime_context(),
+    }
+    run_artifact = {
+        "id": "artifact-story",
+        "taskId": "task-1",
+        "artifactKey": "short-story-key",
+        "status": "under_review",
+        "revision": 2,
+        "payload": _short_story_draft().model_dump(mode="json"),
+        "evaluations": [],
+    }
+    artifacts.hydrate_short_story(_resource(), state, run_artifact)
+    runner = RecordingRunner()
+    executor = CoreGraphAgentExecutor(runner, artifacts)  # type: ignore[arg-type]
+
+    await executor.run(
+        "编辑",
+        state,
+        execution_mode="reviewer",
+        operation_kind="write_short_story",
+    )
+    await executor.run(
+        "校验",
+        state,
+        execution_mode="reviewer",
+        operation_kind="write_short_story",
+    )
+
+    editor, validator = runner.requests
+    assert editor.contextMessages == validator.contextMessages
+    assert "中短篇整稿权威上下文" in editor.contextMessages[0]
+    assert "完整中短篇正文" in editor.contextMessages[-1]
+    assert "这条编辑结论不能进入校验上下文" not in validator.contextMessages[0]
+    assert "结构、节奏、高潮和结局兑现" in "\n".join(editor.executionInstructions)
+    assert "人物、规则、时间线、因果和伏笔" in "\n".join(
+        validator.executionInstructions
+    )
+    assert editor.maxIterations == validator.maxIterations == 1
+
+
+@pytest.mark.asyncio
+async def test_short_story_reviser_receives_authority_context_and_current_full_draft() -> None:
+    artifacts = CoreArtifactPort(CoreClient())  # type: ignore[arg-type]
+    state = {
+        "taskId": "task-1",
+        "userId": "user-1",
+        "novelId": "novel-1",
+        "chapterId": "chapter-1",
+        "activeArtifactId": "artifact-story",
+        "currentOperation": {"kind": "write_short_story", "primaryAgent": "写作"},
+        "userMessage": "把结局改得更克制",
+        "contextMessages": ["中短篇整稿权威上下文：批准大纲和创作锚点"],
+        "pendingRevision": {"requiredChanges": "完整重写并兑现结局"},
+        "runtimeContext": _runtime_context(),
+    }
+    run_artifact = {
+        "id": "artifact-story",
+        "taskId": "task-1",
+        "artifactKey": "short-story-key",
+        "status": "under_review",
+        "revision": 2,
+        "payload": _short_story_draft().model_dump(mode="json"),
+        "evaluations": [],
+    }
+    artifacts.hydrate_short_story(_resource(), state, run_artifact)
+    runner = RecordingRunner()
+    executor = CoreGraphAgentExecutor(runner, artifacts)  # type: ignore[arg-type]
+
+    await executor.run(
+        "写作",
+        state,
+        execution_mode="reviser",
+        operation_kind="write_short_story",
+    )
+
+    request = runner.requests[0]
+    assert "中短篇整稿权威上下文" in request.contextMessages[0]
+    assert "当前返工草案权威内容" in request.contextMessages[-1]
+    assert "完整中短篇正文" in request.contextMessages[-1]
+    assert "完整重写并兑现结局" in request.contextMessages[-1]
+
+
+@pytest.mark.asyncio
 async def test_executor_rejects_missing_operation_kind() -> None:
     runner = RecordingRunner()
     executor = CoreGraphAgentExecutor(runner, CoreArtifactPort(CoreClient()))  # type: ignore[arg-type]
@@ -644,6 +849,30 @@ async def test_revision_sends_authoritative_expected_revision_to_core() -> None:
         "userRequest": "  第三节不要让主角妥协。  ",
         "changeSummary": "返工",
     }
+
+
+def _short_story_draft(
+    *,
+    command_id: str = "job-1",
+    automatic_rewrite_count: int = 0,
+    generation_reason: str = "user_request",
+) -> ShortStoryChapterDraft:
+    content = "完整中短篇正文，尾声明确存在。"
+    return ShortStoryChapterDraft(
+        content=content,
+        metadata=ShortStoryDraftMetadata(
+            sourceOutlineArtifactId="outline-1",
+            sourceOutlineRevision=3,
+            sourceOutlineHash="a" * 64,
+            targetWordCount=6000,
+            actualWordCount=count_short_story_text_length(content),
+            targetChapterId="chapter-1",
+            baseChapterHash="b" * 64,
+            generationCommandId=command_id,
+            automaticRewriteCount=automatic_rewrite_count,
+            generationReason=generation_reason,  # type: ignore[arg-type]
+        ),
+    )
 
 
 @pytest.mark.asyncio

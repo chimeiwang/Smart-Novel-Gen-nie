@@ -138,6 +138,23 @@ def test_short_outline_execution_brief_requires_full_then_patch_submission() -> 
     assert "begin_artifact_output" not in reviser
 
 
+def test_short_story_brief_requires_one_complete_boundary_response_without_chapter_plan() -> None:
+    primary = build_execution_brief("primary", "write_short_story")
+    reviser = build_execution_brief("reviser", "write_short_story")
+
+    for brief in (primary, reviser):
+        assert "一次模型响应" in brief
+        assert "ARTIFACT_OUTPUT_START" in brief
+        assert "ARTIFACT_OUTPUT_END" in brief
+        assert "完整正文" in brief
+        assert "targetTotalWordCount" in brief
+        assert "六千至八万字" in brief
+        assert "不得续写半稿" in brief
+        assert "Beat Plan" not in brief
+        assert "逐章" not in brief
+    assert "用户要求或全稿审核意见" in reviser
+
+
 def test_structured_update_brief_is_scoped_to_operation_builder_tools() -> None:
     lore = build_execution_brief("primary", "create_lore")
     outline = build_execution_brief("primary", "create_outline")

@@ -21,6 +21,8 @@ ArtifactPolicy = Literal["none", "agent_updates", "text", "short_outline"]
 ArtifactKeyPolicy = Literal[
     "none", "generated_stable", "builder_or_generated", "preserve"
 ]
+GenerationMode = Literal["control_tool", "single_text_stop"]
+ReviewStrategy = Literal["parallel", "short_story_serial_once"]
 
 NOVEL_READ = frozenset({"get_novel_info", "list_available_data"})
 CHARACTER_READ = frozenset(
@@ -95,6 +97,8 @@ class OperationDefinition:
     terminalControlTools: frozenset[str] = frozenset()
     artifactEventTypes: frozenset[str] = frozenset()
     artifactKeyPolicy: ArtifactKeyPolicy = "none"
+    generationMode: GenerationMode = "control_tool"
+    reviewStrategy: ReviewStrategy = "parallel"
 
     def __post_init__(self) -> None:
         for field_name in (
@@ -109,8 +113,15 @@ class OperationDefinition:
             raise ValueError("textArtifactKind 与文本产物策略不一致")
         if not self.terminalControlTools <= self.allowedToolNames:
             raise ValueError("Operation 终止工具必须属于允许工具")
+        if self.generationMode == "single_text_stop":
+            if self.artifactPolicy != "text":
+                raise ValueError("纯文本单次生成只支持文本产物")
+            if self.allowedToolNames or self.terminalControlTools or self.artifactEventTypes:
+                raise ValueError("纯文本单次生成不得声明模型工具或产物控制事件")
+        if self.reviewStrategy == "short_story_serial_once" and self.generationMode != "single_text_stop":
+            raise ValueError("中短篇串行审核只支持纯文本单次生成")
         if self.requiresArtifact:
-            if not self.artifactEventTypes:
+            if not self.artifactEventTypes and self.generationMode != "single_text_stop":
                 raise ValueError("产物 Operation 必须声明产物事件")
             if self.artifactKeyPolicy == "none":
                 raise ValueError("产物 Operation 必须声明 artifactKey 策略")
@@ -138,6 +149,8 @@ def _definition(
     terminal_tools: frozenset[str] = frozenset(),
     artifact_events: frozenset[str] = frozenset(),
     artifact_key_policy: ArtifactKeyPolicy = "none",
+    generation_mode: GenerationMode = "control_tool",
+    review_strategy: ReviewStrategy = "parallel",
 ) -> OperationDefinition:
     requires_artifact = policy != "none"
     return OperationDefinition(
@@ -157,6 +170,8 @@ def _definition(
         terminalControlTools=terminal_tools,
         artifactEventTypes=artifact_events,
         artifactKeyPolicy=artifact_key_policy,
+        generationMode=generation_mode,
+        reviewStrategy=review_strategy,
     )
 
 
@@ -328,11 +343,15 @@ OPERATION_DEFINITIONS: dict[CreativeOperationKind, OperationDefinition] = {
         "生成或修改中短篇整稿",
         "chapter",
         "写作",
-        (),
+        ("编辑", "校验"),
         "chapter_text",
         "short_story",
-        "none",
-        "中短篇整稿能力由专用串行审核工作流执行，不能复用长篇逐章写作。",
+        "text",
+        "一次生成完整中短篇正文，再固定由编辑和校验串行完成全稿审核。",
+        "chapter_draft",
         allowed_tools=frozenset(),
+        artifact_key_policy="generated_stable",
+        generation_mode="single_text_stop",
+        review_strategy="short_story_serial_once",
     ),
 }

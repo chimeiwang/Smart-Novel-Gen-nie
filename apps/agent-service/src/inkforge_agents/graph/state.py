@@ -42,6 +42,13 @@ class GraphState(TypedDict, total=False):
     errorMessage: str | None
     finalResponse: str
     eventSequence: int
+    shortStoryDecision: str | None
+    shortStoryNeedsGeneration: bool
+    shortStoryAutomaticRewriteCount: int
+    shortStoryGenerationReason: str | None
+    shortStoryUserRequest: str | None
+    shortStoryArtifactRevision: int | None
+    shortStoryReviews: list[dict[str, Any]]
 
 
 def create_initial_state(
