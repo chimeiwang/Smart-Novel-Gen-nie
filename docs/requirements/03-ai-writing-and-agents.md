@@ -34,6 +34,8 @@
 | rewrite_scene 改写场景草案 | 写作 | 是 | 是 |
 | review_chapter 审核章节 | 编辑 | 否 | 否 |
 | manage_foreshadowing 管理伏笔 | 剧情 | 是 | 是 |
+| develop_short_outline 生成或修改中短篇大纲 | 剧情 | 是 | 是 |
+| write_short_story 生成或修改中短篇整稿 | 写作 | 是 | 是 |
 
 `sync_lore` 已从当前可执行操作中删除。共享类型暂时保留该标识，仅用于解析历史任务快照；前端、关键词路由和分类器不得创建新的同步设定任务。
 
@@ -41,6 +43,9 @@
 
 - 用户使用 @设定、@剧情、@写作、@校验、@编辑 前缀时，系统映射为对应 Agent 的默认 CreativeOperation。
 - 无法稳定识别时，回退为 answer_question。
+- 上述分类和前缀兼容只适用于 `long_serial`。`short_medium` 必须由 Core 显式指定 `develop_short_outline` 或 `write_short_story`；Agent Service 不根据“短篇”“整稿”“全文”等关键词猜测。
+
+中短篇专用流程、强类型草案和兼容边界见 `docs/specs/2026-07-18-short-medium-writing-workflow.md`。
 
 ## Operation 执行流程
 
@@ -140,6 +145,8 @@ flowchart TD
 - novelId；
 - chapterId；
 - writingSessionId；
+- workflowKind；
+- operation；
 - targetWordCount；
 - selectedAgents；
 - userMessage。
@@ -147,6 +154,8 @@ flowchart TD
 业务规则：
 
 - novelId 和 chapterId 必填。
+- workflowKind、operation 必须与 WritingBible 的 `storyLengthProfile` 匹配，并写入持久命令和稳定快照；不匹配时在模型调用前拒绝。
+- `short_medium` 只接受 `develop_short_outline`、`write_short_story`，目标总字数必须为 6000～80000；`long_serial` 继续支持现有操作和聊天路由。
 - 用户必须登录。
 - 小说必须属于当前用户。
 - 如果传 writingSessionId，会话必须属于同一小说、同一章节和当前用户。
@@ -267,7 +276,7 @@ Agent Runtime 是唯一多轮 tool-call loop。
 - 控制信息通过 tool calls 提交。
 - 不再从 Agent 可见正文解析 JSON 信封、路由字段或评分字段。
 - 设定/大纲/伏笔/正文/Beat Plan 等正式变更必须进入 ReviewArtifact。
-- `plan_chapter` 只能提交 Beat Plan，`write_chapter/rewrite_scene` 只能提交 `chapter_draft`，设定/大纲/伏笔 Operation 只能提交 `agent_updates`。
+- `plan_chapter` 只能提交 Beat Plan，`write_chapter/rewrite_scene` 只能提交 `chapter_draft`，长篇设定/大纲/伏笔 Operation 只能提交 `agent_updates`。中短篇 `develop_short_outline` 提交强类型 `outline_draft`，`write_short_story` 提交带来源元数据的 `chapter_draft`。
 - reviewer 的任何修改请求统一进入完整 rewrite；保留具体修改意见，但不执行跨服务局部 patch。
 - 职责外任务只能在正文说明边界，不得通过越权工具硬写草案。
 
@@ -276,6 +285,8 @@ Agent Runtime 是唯一多轮 tool-call loop。
 模型输入统一由运行时构造，顺序为：静态 Agent system prompt、服务端 Operation/模式 system brief、只读作品资料 user 消息、当前轮之前的历史消息、唯一当前 user 消息。作品正文、设定、参考资料和历史 system 记录都不能成为当前 system 指令；当前用户请求只能出现一次。
 
 Operation 的 `contextStrategy` 只生成最小投影：`brief` 提供任务、小说和章节摘要；`lore` 提供设定摘要索引；`outline` 提供大纲、节点、剧情进度、章节组、outlinePath 和伏笔摘要；`chapter` 提供当前章、相邻章摘要、章节目标、已批准 Beat Plan、outlinePath 和相关人物摘要；`review` 提供当前章及必要审阅资料。详细内容由只读工具按需获取，完整聚合 `workspace` 不进入稳定快照。
+
+中短篇使用独立的最小上下文组装器。改纲时按“用户本轮直接编辑、修改要求原文、已确认锚点、当前完整大纲、原始灵感、最近对话”的顺序裁决；最近对话只用于理解指代，不能覆盖前五项。全部历史继续持久化，但不把几十轮聊天全部注入模型。整稿只读取已批准大纲、锚点、必要设定、文风、目标总字数和本轮整稿修改要求。
 
 `get_recent_chapters` 是按需读取最近章节正文的只读工具，必须由 Agent 显式调用；`count` 可选且范围为 `1..20`，省略时 Core 默认读取 3 章。基础上下文不自动注入任何最近章节正文。该工具不扩大现有 RAG 每份资料 64 块容量或 `topK`，也不改变 embedding 回调协议。
 
@@ -296,6 +307,8 @@ Provider 必须提供规范化完成原因并保留供应商原始值。`length`
 - 用户发送普通问题时，系统能直接回复，不生成草案。
 - 用户要求写正文时，系统生成 chapter_draft 草案，并经过校验和编辑复审。
 - 用户要求设定或大纲变更时，系统生成 agent_updates 草案。
+- 中短篇从显式 Operation 进入专用流程，可以反复修改完整大纲；大纲批准前不能生成整稿。
+- 中短篇每次整稿运行只执行一次完整正文生成，供应商截断时整轮失败，不保存半稿、不续写、不拼接。
 - 前端能看到 Operation 分类、Agent 过程、草案卡片和用户决策入口。
 - 用户刷新或重新打开会话后，能恢复消息和待审核草案入口。
 - 未登录或越权用户不能启动或恢复写作任务。
