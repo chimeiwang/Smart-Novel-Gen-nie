@@ -3,7 +3,12 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const PREVIEW_SELECTOR = ".writing-chat .preview-content";
-const PREVIEW_MASK_SELECTOR = ".writing-chat .preview-content::after";
+
+function extractGeneratedContentPreview(source: string): string {
+  return source.match(
+    /\{generatedContent\s*&&\s*\(\s*(<div className="preview-section">[\s\S]*?<\/div>)\s*\)\}\s*\{chapterTargetPrompt\s*\?\s*\(/,
+  )?.[1] ?? "";
+}
 
 function findCssRuleBodies(source: string, selector: string): string[] {
   const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -14,9 +19,11 @@ function findCssRuleBodies(source: string, selector: string): string[] {
 
 test("正文预览直接渲染并统计完整 generatedContent", async () => {
   const source = await readFile(new URL("../writing-conversation.tsx", import.meta.url), "utf8");
+  const previewSection = extractGeneratedContentPreview(source);
 
-  assert.match(source, /<ParagraphText\s+text=\{generatedContent\}\s*\/>/);
-  assert.match(source, /countTextLength\(generatedContent\)/);
+  assert.notEqual(previewSection, "", "未提取到 generatedContent 正文预览块");
+  assert.match(previewSection, /<ParagraphText\s+text=\{generatedContent\}\s*\/>/);
+  assert.match(previewSection, /countTextLength\(generatedContent\)/);
 });
 
 for (const [name, path] of [
@@ -31,8 +38,9 @@ for (const [name, path] of [
     for (const rule of previewRules) {
       assert.match(rule, /max-height:\s*min\(56vh,\s*640px\)/);
       assert.match(rule, /overflow-y:\s*auto/);
+      assert.doesNotMatch(rule, /max-height:\s*150px/);
       assert.doesNotMatch(rule, /overflow:\s*hidden/);
     }
-    assert.equal(findCssRuleBodies(source, PREVIEW_MASK_SELECTOR).length, 0);
+    assert.doesNotMatch(source, /\.writing-chat\s+\.preview-content::after\s*\{/);
   });
 }
