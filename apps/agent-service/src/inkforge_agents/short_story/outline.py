@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Annotated, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 from inkforge_contracts import (
     ShortStoryAnchors,
@@ -9,6 +9,7 @@ from inkforge_contracts import (
     ShortStoryOutlineSection,
 )
 from pydantic import BaseModel, ConfigDict, Field, RootModel, field_validator, model_validator
+from pydantic.json_schema import DEFAULT_REF_TEMPLATE, GenerateJsonSchema, JsonSchemaMode
 
 
 class _StrictSubmission(BaseModel):
@@ -165,6 +166,26 @@ ShortOutlineSubmission = Annotated[
 
 class SubmitShortStoryOutlineArgs(RootModel[ShortOutlineSubmission]):
     """模型提交中短篇大纲时使用的严格判别联合。"""
+
+    @classmethod
+    def model_json_schema(
+        cls,
+        by_alias: bool = True,
+        ref_template: str = DEFAULT_REF_TEMPLATE,
+        schema_generator: type[GenerateJsonSchema] = GenerateJsonSchema,
+        mode: JsonSchemaMode = "validation",
+        *,
+        union_format: Literal["any_of", "primitive_type_array"] = "any_of",
+    ) -> dict[str, Any]:
+        schema = super().model_json_schema(
+            by_alias=by_alias,
+            ref_template=ref_template,
+            schema_generator=schema_generator,
+            mode=mode,
+            union_format=union_format,
+        )
+        # OpenAI 兼容接口要求函数参数的顶层必须显式声明为对象。
+        return {**schema, "type": "object"}
 
 
 def build_initial_short_outline(

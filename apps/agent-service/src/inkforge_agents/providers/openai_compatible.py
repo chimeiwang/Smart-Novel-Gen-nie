@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from typing import Any, cast
 
+from json_repair import repair_json
 from langchain_core.messages import (
     AIMessage,
     BaseMessage,
@@ -20,6 +22,8 @@ from .base import (
     ModelTurnResult,
     ModelUsage,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_finish_reason(value: object) -> ModelFinishReason:
@@ -127,6 +131,7 @@ class OpenAICompatibleProvider:
             )
             for tool_call in response.tool_calls
         ]
+        tool_calls.extend(_repair_invalid_tool_calls(response))
         provider_finish_reason = response.response_metadata.get("finish_reason")
         return ModelTurnResult(
             content=response.content,
@@ -140,3 +145,31 @@ class OpenAICompatibleProvider:
                 totalTokens=total_tokens,
             ),
         )
+
+
+def _repair_invalid_tool_calls(response: AIMessage) -> list[ModelToolCall]:
+    repaired_calls: list[ModelToolCall] = []
+    for invalid_call in response.invalid_tool_calls:
+        call_id = invalid_call.get("id")
+        name = invalid_call.get("name")
+        raw_arguments = invalid_call.get("args")
+        if (
+            not isinstance(call_id, str)
+            or not call_id
+            or not isinstance(name, str)
+            or not name
+            or not isinstance(raw_arguments, str)
+            or not raw_arguments
+        ):
+            raise ValueError("MODEL_TOOL_ARGUMENTS_INVALID：供应商工具调用缺少必要字段")
+        repaired = repair_json(raw_arguments, return_objects=True)
+        if not isinstance(repaired, dict):
+            raise ValueError("MODEL_TOOL_ARGUMENTS_INVALID：供应商工具参数无法修复为对象")
+        logger.warning(
+            "供应商返回的工具参数不是合法 JSON，已修复后交由严格工具契约复验",
+            extra={"toolName": name, "toolCallId": call_id},
+        )
+        repaired_calls.append(
+            ModelToolCall(id=call_id, name=name, arguments=repaired)
+        )
+    return repaired_calls

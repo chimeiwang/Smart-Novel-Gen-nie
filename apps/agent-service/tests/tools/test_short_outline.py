@@ -18,6 +18,21 @@ def _full_payload() -> dict[str, object]:
     }
 
 
+def test_short_outline_tool_exposes_object_json_schema() -> None:
+    tool = build_default_registry().require("submit_short_story_outline")
+
+    parameters = tool.as_model_tool().parameters
+
+    assert parameters["type"] == "object"
+    assert parameters["discriminator"] == {
+        "mapping": {
+            "full": "#/$defs/ShortOutlineFullSubmission",
+            "patch": "#/$defs/ShortOutlinePatchSubmission",
+        },
+        "propertyName": "mode",
+    }
+
+
 def test_short_outline_tool_strictly_discriminates_full_and_patch() -> None:
     tool = build_default_registry().require("submit_short_story_outline")
 
