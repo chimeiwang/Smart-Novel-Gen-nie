@@ -12,6 +12,7 @@ from inkforge_core.db.models import (
     Novel,
     ReviewArtifact,
     ReviewArtifactEvaluation,
+    ReviewArtifactRevision,
     StoryBackground,
     WorldSetting,
     WritingBible,
@@ -92,8 +93,9 @@ def test_short_story_context_keeps_authority_priority_and_only_six_recent_messag
     )
 
     assert list(result) == [
-        "directEdit",
         "revisionRequest",
+        "referencedVersions",
+        "directEdit",
         "anchors",
         "currentOutline",
         "originalInspiration",
@@ -184,9 +186,11 @@ class FakeScalarSession:
         responses: list[object | None],
         *,
         scalar_lists: list[list[object]] | None = None,
+        execute_rows: list[tuple[object, ...] | None] | None = None,
     ) -> None:
         self._responses = iter(responses)
         self._scalar_lists = iter(scalar_lists or [])
+        self._execute_rows = iter(execute_rows or [])
 
     async def scalar(self, statement: object) -> object | None:
         del statement
@@ -195,6 +199,16 @@ class FakeScalarSession:
     async def scalars(self, statement: object) -> FakeScalarsResult:
         del statement
         return FakeScalarsResult(next(self._scalar_lists))
+
+    async def execute(self, statement: object):
+        del statement
+        row = next(self._execute_rows)
+
+        class Result:
+            def one_or_none(self) -> tuple[object, ...] | None:
+                return row
+
+        return Result()
 
 
 class PlanningRowResult:
@@ -338,6 +352,7 @@ async def test_short_context_bypasses_long_planning_and_prioritizes_direct_edit(
     assert result["outlinePath"] == []
     assert result["targetWordCount"] is None
     assert result["targetTotalWordCount"] is None
+    assert result["versionReferences"] == []
 
 
 @pytest.mark.asyncio
@@ -463,7 +478,7 @@ async def test_long_context_identity_does_not_compare_chapter_and_total_word_tar
 
 
 @pytest.mark.asyncio
-async def test_short_story_source_must_still_be_the_latest_applied_outline() -> None:
+async def test_short_story_source_must_still_reference_an_existing_exact_outline() -> None:
     repository = WritingContextRepository(cast(Any, None))
     task = WritingTask(
         id="task-1",
@@ -500,21 +515,11 @@ async def test_short_story_source_must_still_be_the_latest_applied_outline() -> 
             },
         }
     )
-    latest_outline = ReviewArtifact(
-        id="outline-new",
-        novelId="novel-1",
-        chapterId="chapter-1",
-        kind="outline_draft",
-        status="awaiting_user",
-        revision=2,
-        payloadJson="{}",
-    )
-
     with pytest.raises(ApiError) as exc_info:
         await repository._validate_command_identity(
             cast(
                 AsyncSession,
-                FakeScalarSession([1], scalar_lists=[[latest_outline]]),
+                FakeScalarSession([1, None], execute_rows=[None]),
             ),
             task=task,
             chapter=chapter,
@@ -577,6 +582,11 @@ async def test_short_story_manuscript_context_contains_only_authoritative_inputs
         revision=2,
         payloadJson=outline.model_dump_json(),
     )
+    outline_revision = ReviewArtifactRevision(
+        artifactId="outline-1",
+        revision=2,
+        payloadJson=outline.model_dump_json(),
+    )
     background = StoryBackground(novelId="novel-1", content="故事背景")
     world = WorldSetting(novelId="novel-1", content="世界规则")
     style = WritingStyle(
@@ -606,15 +616,23 @@ async def test_short_story_manuscript_context_contains_only_authoritative_inputs
     )
 
     result = await repository._short_story_manuscript_context(
-        cast(AsyncSession, FakeScalarSession([artifact, background, world, style])),
+        cast(
+            AsyncSession,
+            FakeScalarSession(
+                [background, world, style],
+                execute_rows=[(outline_revision, artifact)],
+            ),
+        ),
         task=task,
         chapter=chapter,
         novel=novel,
         bible=bible,
         payload=payload,
+        referenced_versions=[],
     )
 
     assert list(result) == [
+        "referencedVersions",
         "approvedOutline",
         "anchors",
         "originalInspiration",

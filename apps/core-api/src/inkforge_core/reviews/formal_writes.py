@@ -30,7 +30,7 @@ from ..db.models import (
 )
 from ..errors import ApiError
 from ..short_story_artifacts import (
-    latest_short_story_outline_artifact,
+    exact_short_story_outline_revision,
     lock_writing_bible,
 )
 from .apply import ApplicableArtifactPort
@@ -161,16 +161,15 @@ class FormalWriteRepository:
                         code="SHORT_STORY_TARGET_MISMATCH",
                         message="中短篇正文只能应用到中短篇作品",
                     )
-                latest_outline = await latest_short_story_outline_artifact(
+                selected_outline = await exact_short_story_outline_revision(
                     session,
                     artifact.novel_id,
+                    draft.metadata.sourceOutlineArtifactId,
+                    draft.metadata.sourceOutlineRevision,
                     for_update=True,
                 )
                 if (
-                    latest_outline is None
-                    or latest_outline.status != "applied"
-                    or latest_outline.id != draft.metadata.sourceOutlineArtifactId
-                    or latest_outline.revision != draft.metadata.sourceOutlineRevision
+                    selected_outline is None
                 ):
                     raise ApiError(
                         status_code=409,
@@ -179,7 +178,7 @@ class FormalWriteRepository:
                     )
                 try:
                     outline = ShortStoryOutlineDraft.model_validate_json(
-                        latest_outline.payloadJson
+                        selected_outline[1].payloadJson
                     )
                 except (ValidationError, ValueError):
                     raise ApiError(

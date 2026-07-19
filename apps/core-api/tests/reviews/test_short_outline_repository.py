@@ -5,9 +5,11 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from inkforge_contracts import ShortStoryVersionReference
 from inkforge_core.db.models import (
     Chapter,
     Novel,
+    Outline,
     ReviewArtifact,
     ReviewArtifactEvaluation,
     ReviewArtifactRevision,
@@ -30,6 +32,7 @@ TABLES = [
     User.__table__,
     Novel.__table__,
     Chapter.__table__,
+    Outline.__table__,
     WritingBible.__table__,
     WritingTask.__table__,
     ReviewArtifact.__table__,
@@ -61,11 +64,13 @@ def _create_request(
     summary: str = "首次生成",
     diff: object = None,
     artifact_key: str = "short-outline",
+    task_id: str = "task-1",
+    run_id: str = "run-1",
 ) -> CreateArtifactRequest:
     return CreateArtifactRequest.model_validate(
         {
-            "runId": "run-1",
-            "taskId": "task-1",
+            "runId": run_id,
+            "taskId": task_id,
             "novelId": "novel-1",
             "chapterId": "chapter-1",
             "artifactKey": artifact_key,
@@ -184,6 +189,115 @@ async def test_content_changes_create_exactly_one_revision_and_status_replay_doe
     assert changed.diff == {"rawUserMessage": "让主角更主动"}
     revisions = await repository.list_revisions("user-1", created.id)
     assert [item.revision for item in revisions] == [2, 1]
+
+
+@pytest.mark.asyncio
+async def test_short_outline_versions_continue_across_tasks_and_reopen_applied_artifact(
+    repository: ReviewRepository,
+) -> None:
+    created = await repository.create_or_revise(
+        "user-1",
+        _create_request(status="awaiting_user"),
+    )
+    async with repository._session_factory() as session:  # noqa: SLF001
+        async with session.begin():
+            artifact = await session.get(ReviewArtifact, created.id)
+            assert artifact is not None
+            artifact.status = "applied"
+            session.add(
+                WritingTask(
+                    id="task-2",
+                    novelId="novel-1",
+                    chapterId="chapter-1",
+                    phase="active",
+                    selectedAgents="剧情",
+                    targetWordCount=6000,
+                )
+            )
+
+    revised = await repository.create_or_revise(
+        "user-1",
+        _create_request(
+            task_id="task-2",
+            run_id="run-2",
+            status="draft",
+            payload=_payload(premise="守夜人决定主动伪造第二份讣告。"),
+            expected_revision=1,
+        ),
+    )
+
+    assert revised.id == created.id
+    assert revised.revision == 2
+    assert revised.taskId == "task-2"
+    assert revised.status == "draft"
+
+
+@pytest.mark.asyncio
+async def test_short_story_version_index_returns_exact_immutable_outline_payloads(
+    repository: ReviewRepository,
+) -> None:
+    created = await repository.create_or_revise(
+        "user-1",
+        _create_request(status="awaiting_user"),
+    )
+    await repository.create_or_revise(
+        "user-1",
+        _create_request(
+            status="draft",
+            payload=_payload(premise="守夜人选择公开讣告。"),
+            expected_revision=1,
+        ),
+    )
+
+    versions = await repository.list_short_story_versions("user-1", "novel-1")
+
+    assert [(item.kind, item.revision) for item in versions] == [
+        ("outline", 2),
+        ("outline", 1),
+    ]
+    assert [item.version for item in versions] == [2, 1]
+    assert versions[0].artifactId == created.id
+    assert len(versions[0].hash) == 64
+    assert versions[0].status == "pending"
+
+    detail = await repository.get_short_story_version(
+        "user-1", "novel-1", "outline", 1
+    )
+    assert detail.payload.corePremise == "守夜人必须在黎明前查清讣告来源。"
+    assert detail.hash == versions[1].hash
+
+    with pytest.raises(ApiError) as caught:
+        await repository.get_short_story_version(
+            "user-1", "novel-1", "body", 1
+        )
+    assert caught.value.code == "SHORT_STORY_VERSION_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_short_story_version_reference_rejects_stale_hash_before_model_use(
+    repository: ReviewRepository,
+) -> None:
+    await repository.create_or_revise("user-1", _create_request())
+    version = (await repository.list_short_story_versions("user-1", "novel-1"))[0]
+    reference = ShortStoryVersionReference(
+        kind="outline",
+        artifactId=version.artifactId,
+        revision=version.revision,
+        hash=version.hash,
+    )
+
+    detail = await repository.require_short_story_version_reference(
+        "user-1", "novel-1", reference
+    )
+    assert detail.hash == version.hash
+
+    with pytest.raises(ApiError) as caught:
+        await repository.require_short_story_version_reference(
+            "user-1",
+            "novel-1",
+            reference.model_copy(update={"hash": "f" * 64}),
+        )
+    assert caught.value.code == "SHORT_STORY_VERSION_REFERENCE_CONFLICT"
 
 
 @pytest.mark.asyncio
@@ -844,7 +958,7 @@ async def test_short_outline_version_apis_reject_long_serial_artifact(
 
 
 @pytest.mark.asyncio
-async def test_short_outline_approve_requires_latest_typed_outline(
+async def test_short_outline_approve_requires_latest_project_revision(
     repository: ReviewRepository,
 ) -> None:
     older = await repository.create_or_revise(
@@ -857,8 +971,10 @@ async def test_short_outline_approve_requires_latest_typed_outline(
             status="awaiting_user",
             artifact_key="short-outline-new",
             payload=_payload(premise="守夜人决定先追查讣告纸张。"),
+            expected_revision=older.revision,
         ),
     )
+    assert newer.id == older.id
 
     with pytest.raises(ApiError) as stale:
         await repository.require_short_story_artifact_revision(
@@ -867,7 +983,7 @@ async def test_short_outline_approve_requires_latest_typed_outline(
             older.revision,
             decision="approve",
         )
-    assert stale.value.code == "SHORT_OUTLINE_NOT_LATEST"
+    assert stale.value.code == "ARTIFACT_REVISION_CONFLICT"
 
     current = await repository.require_short_story_artifact_revision(
         "user-1",

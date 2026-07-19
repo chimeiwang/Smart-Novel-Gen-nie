@@ -205,6 +205,23 @@ async def test_runner_exposes_exact_execution_mode_tools(
 
 
 @pytest.mark.asyncio
+async def test_short_discussion_does_not_expose_long_story_read_tools() -> None:
+    provider = CapturingProvider()
+    registry = build_default_registry()
+    runner = AgentRunner(make_agent_runtime(ModelRuntime(provider), registry), registry)
+    short_request = request(
+        agent_id="编辑",
+        mode="primary",
+        operation_kind="answer_question",
+    )
+    short_request.workflowKind = "short_medium"
+
+    await runner.run(short_request)
+
+    assert provider.requests[0].tools == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("operation_kind", "expected", "unexpected"),
     [

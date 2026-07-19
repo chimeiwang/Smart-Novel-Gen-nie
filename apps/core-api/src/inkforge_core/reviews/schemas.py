@@ -7,6 +7,7 @@ from inkforge_contracts import (
     ShortStoryAnchors,
     ShortStoryChapterDraft,
     ShortStoryOutlineDraft,
+    ShortStoryVersionReference,
 )
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
@@ -196,6 +197,37 @@ class ShortStoryArtifactResponse(ReviewArtifactResponse):
     payload: ShortStoryOutlineDraft | ShortStoryChapterDraft
 
 
+ShortStoryVersionStatus = Literal["adopted", "formal", "pending", "history"]
+
+
+class ShortStoryVersionListItem(ReviewSchema):
+    kind: Literal["outline", "body"]
+    artifactId: str
+    version: int = Field(ge=1)
+    revision: int = Field(ge=1)
+    hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    status: ShortStoryVersionStatus
+    summary: str | None
+    sourceSessionId: str | None
+    sourceOutlineRevision: int | None = Field(default=None, ge=1)
+    sourceOutlineVersion: int | None = Field(default=None, ge=1)
+    createdAt: datetime
+
+    @property
+    def reference(self) -> ShortStoryVersionReference:
+        return ShortStoryVersionReference(
+            kind=self.kind,
+            artifactId=self.artifactId,
+            revision=self.revision,
+            hash=self.hash,
+        )
+
+
+class ShortStoryVersionDetail(ShortStoryVersionListItem):
+    payload: ShortStoryOutlineDraft | ShortStoryChapterDraft
+    evaluations: list[ArtifactEvaluationResponse] = Field(default_factory=list)
+
+
 class ShortStoryTaskStatus(ReviewSchema):
     id: str
     phase: str
@@ -218,5 +250,7 @@ class ShortStoryWorkflowSession(ReviewSchema):
 class ShortStoryArtifactsResponse(ReviewSchema):
     outline: ShortStoryArtifactResponse | None
     chapterDraft: ShortStoryArtifactResponse | None
+    outlineVersions: list[ShortStoryVersionListItem] = Field(default_factory=list)
+    bodyVersions: list[ShortStoryVersionListItem] = Field(default_factory=list)
     latestTask: ShortStoryTaskStatus | None
     workflowSession: ShortStoryWorkflowSession | None

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -25,6 +25,7 @@ class AgentRunRequest(BaseModel):
     agentId: AgentId
     executionMode: AgentExecutionMode
     operationKind: CreativeOperationKind | None
+    workflowKind: Literal["long_serial", "short_medium"] = "long_serial"
     userMessage: str
     contextMessages: list[str] = Field(default_factory=list)
     executionInstructions: list[str] = Field(default_factory=list)
@@ -57,6 +58,7 @@ class AgentRunner:
         execution = resolve_execution_contract(
             request.executionMode,
             request.operationKind,
+            request.workflowKind,
         )
         validate_execution_agent(execution, request.agentId)
         messages = build_agent_messages(

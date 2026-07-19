@@ -7,6 +7,7 @@ from inkforge_contracts import (
     ShortStoryDraftMetadata,
     ShortStoryOutlineDraft,
     ShortStoryOutlineSection,
+    ShortStoryVersionReference,
     canonical_short_outline_hash,
     count_short_story_text_length,
     render_short_story_outline,
@@ -187,3 +188,24 @@ def test_canonical_short_outline_hash_is_stable_and_tracks_full_outline() -> Non
     assert canonical_short_outline_hash(outline) != canonical_short_outline_hash(
         _outline(changeSummary="另一版说明")
     )
+
+
+def test_short_story_version_reference_is_strict_and_content_addressed() -> None:
+    reference = ShortStoryVersionReference.model_validate(
+        {
+            "kind": "outline",
+            "artifactId": "artifact-outline",
+            "revision": 3,
+            "hash": "a" * 64,
+        }
+    )
+
+    assert reference.revision == 3
+    with pytest.raises(ValidationError):
+        ShortStoryVersionReference.model_validate(
+            {**reference.model_dump(mode="json"), "kind": "正文"}
+        )
+    with pytest.raises(ValidationError):
+        ShortStoryVersionReference.model_validate(
+            {**reference.model_dump(mode="json"), "hash": "not-a-hash"}
+        )

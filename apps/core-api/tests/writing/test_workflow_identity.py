@@ -4,12 +4,20 @@ import json
 
 import pytest
 from inkforge_contracts.short_story import ShortStoryAnchors, ShortStoryOutlineDraft
-from inkforge_core.db.models import Chapter, Novel, ReviewArtifact, WritingBible
+from inkforge_core.db.models import (
+    Chapter,
+    Novel,
+    ReviewArtifact,
+    ReviewArtifactRevision,
+    WritingBible,
+)
 from inkforge_core.errors import ApiError
 from inkforge_core.writing.commands import (
     WritingCommandRecord,
     _assert_start_command_semantics,
     _latest_workflow_identity,
+    _named_short_story_versions,
+    _resolve_named_short_story_version_references,
     _resolve_start_workflow_identity,
 )
 from inkforge_core.writing.records import TaskRecord
@@ -29,6 +37,14 @@ class ScalarsResult:
         self.values = values
 
     def all(self) -> list[object]:
+        return self.values
+
+
+class AllResult:
+    def __init__(self, values: list[tuple[object, object]]) -> None:
+        self.values = values
+
+    def all(self) -> list[tuple[object, object]]:
         return self.values
 
 
@@ -111,6 +127,7 @@ async def test_core_resolves_short_outline_identity_from_persisted_bible(target:
             "kind": "short_outline_inspiration",
             "originalInspiration": "原始灵感",
         },
+        "versionReferences": [],
     }
 
 
@@ -123,6 +140,67 @@ async def test_core_resolves_null_short_reference_from_persisted_bible() -> None
     )
 
     assert identity["targetTotalWordCount"] is None
+
+
+@pytest.mark.asyncio
+async def test_core_resolves_short_discussion_without_requiring_approved_outline() -> None:
+    identity = await _resolve_start_workflow_identity(
+        IdentitySession(_rows(target=None), scalars=[1]),  # type: ignore[arg-type]
+        "user-1",
+        _request(operation="answer_question", target=None),
+    )
+
+    assert identity == {
+        "workflowKind": "short_medium",
+        "operation": "answer_question",
+        "targetTotalWordCount": None,
+        "source": None,
+        "versionReferences": [],
+    }
+
+
+def test_named_short_story_versions_require_explicit_kind_and_version() -> None:
+    assert _named_short_story_versions(
+        "比较大纲 v2 和大纲第 4 版，再微调正文3版"
+    ) == [("outline", 2), ("outline", 4), ("body", 3)]
+    assert _named_short_story_versions("比较第二版和最新版本") == []
+
+
+@pytest.mark.asyncio
+async def test_named_short_story_version_is_resolved_to_exact_revision_and_hash() -> None:
+    payload = ShortStoryOutlineDraft(
+        originalInspiration="原始灵感",
+        corePremise="守夜人必须决定是否公开讣告。",
+        anchors=ShortStoryAnchors(mustKeep=["讣告"], confirmed=[], avoid=[]),
+        sections=[{"id": "section-1", "title": "来信", "events": "收到讣告。"}],
+    )
+    artifact = ReviewArtifact(
+        id="outline-1",
+        novelId="novel-1",
+        kind="outline_draft",
+        payloadJson=payload.model_dump_json(),
+    )
+    revision = ReviewArtifactRevision(
+        artifactId="outline-1",
+        revision=3,
+        payloadJson=payload.model_dump_json(),
+    )
+
+    class NamedSession:
+        async def execute(self, statement: object) -> AllResult:
+            del statement
+            return AllResult([(revision, artifact)])
+
+    references = await _resolve_named_short_story_version_references(
+        NamedSession(),  # type: ignore[arg-type]
+        "novel-1",
+        "请按大纲 v1 微调",
+        [],
+    )
+
+    assert references[0].artifactId == "outline-1"
+    assert references[0].revision == 3
+    assert len(references[0].hash) == 64
 
 
 @pytest.mark.asyncio
@@ -181,7 +259,7 @@ async def test_write_short_story_uses_latest_applied_strong_outline_source() -> 
 
     identity = await _resolve_start_workflow_identity(
         IdentitySession(  # type: ignore[arg-type]
-            _rows(), scalars=[1], scalar_lists=[[artifact]]
+            _rows(), scalars=[1, None], scalar_lists=[[artifact]]
         ),
         "user-1",
         _request(operation="write_short_story"),
@@ -224,7 +302,7 @@ async def test_write_short_story_skips_newer_legacy_outline_source() -> None:
 
     identity = await _resolve_start_workflow_identity(
         IdentitySession(  # type: ignore[arg-type]
-            _rows(), scalars=[1], scalar_lists=[[legacy, typed]]
+            _rows(), scalars=[1, None], scalar_lists=[[legacy, typed]]
         ),
         "user-1",
         _request(operation="write_short_story"),
@@ -254,8 +332,8 @@ async def test_write_short_story_rejects_latest_outline_when_it_is_not_applied()
 
     with pytest.raises(ApiError) as caught:
         await _resolve_start_workflow_identity(
-            IdentitySession(  # type: ignore[arg-type]
-                _rows(), scalars=[1], scalar_lists=[[latest]]
+                IdentitySession(  # type: ignore[arg-type]
+                    _rows(), scalars=[1, None], scalar_lists=[[latest]]
             ),
             "user-1",
             _request(operation="write_short_story"),
@@ -279,8 +357,8 @@ async def test_write_short_story_rejects_explicitly_marked_invalid_outline() -> 
 
     with pytest.raises(ApiError) as caught:
         await _resolve_start_workflow_identity(
-            IdentitySession(  # type: ignore[arg-type]
-                _rows(), scalars=[1], scalar_lists=[[invalid]]
+                IdentitySession(  # type: ignore[arg-type]
+                    _rows(), scalars=[1, None], scalar_lists=[[invalid]]
             ),
             "user-1",
             _request(operation="write_short_story"),
@@ -346,6 +424,7 @@ async def test_resume_identity_is_copied_from_latest_authoritative_command() -> 
         "operation": "develop_short_outline",
         "targetTotalWordCount": 6000,
         "source": source,
+        "versionReferences": [],
     }
 
 
@@ -361,4 +440,5 @@ async def test_legacy_task_without_identity_is_explicitly_long_serial() -> None:
         "operation": None,
         "targetTotalWordCount": None,
         "source": None,
+        "versionReferences": [],
     }

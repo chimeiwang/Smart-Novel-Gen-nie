@@ -13,8 +13,9 @@ def workflow_message_metadata(
     artifact_id: str | None = None,
     source_revision: int | None = None,
     intent: str | None = None,
+    version_references: list[dict[str, object]] | None = None,
 ) -> str:
-    metadata: dict[str, str | int | None] = {
+    metadata: dict[str, object] = {
         "source": "workflow",
         "taskId": task_id,
         "eventType": event_type,
@@ -27,6 +28,8 @@ def workflow_message_metadata(
         metadata["sourceRevision"] = source_revision
     if intent is not None:
         metadata["intent"] = intent
+    if version_references:
+        metadata["versionReferences"] = version_references
     return json.dumps(
         metadata,
         ensure_ascii=False,

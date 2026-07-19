@@ -11,6 +11,15 @@ class ShortStoryContract(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class ShortStoryVersionReference(ShortStoryContract):
+    """指向同一作品中某个不可变中短篇版本的内容寻址引用。"""
+
+    kind: Literal["outline", "body"]
+    artifactId: str = Field(min_length=1, max_length=256)
+    revision: int = Field(ge=1)
+    hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class ShortStoryOutlineSection(ShortStoryContract):
     id: str = Field(min_length=1, max_length=128)
     title: str = Field(min_length=1, max_length=200)

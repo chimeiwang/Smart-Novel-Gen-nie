@@ -6,11 +6,13 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from .identity import Identifier, NonBlankString
 from .runs import CreativeOperationKind, WritingWorkflowKind
+from .short_story import ShortStoryVersionReference
 
 AgentJobKind = Literal["writing", "portrait", "rag", "quality"]
 AgentJobStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
 
 SHORT_STORY_OPERATIONS = frozenset({"develop_short_outline", "write_short_story"})
+SHORT_STORY_ALLOWED_OPERATIONS = SHORT_STORY_OPERATIONS | {"answer_question"}
 
 
 class ShortOutlineInspirationSource(BaseModel):
@@ -48,12 +50,13 @@ class WritingJobPayload(BaseModel):
     source: WritingSource | None
     startRequest: dict[str, JsonValue] | None = None
     decisionRequest: dict[str, JsonValue] | None = None
+    versionReferences: list[ShortStoryVersionReference] = Field(default_factory=list)
     force: bool = False
 
     @model_validator(mode="after")
     def validate_workflow_identity(self) -> Self:
         if self.workflowKind == "short_medium":
-            if self.operation not in SHORT_STORY_OPERATIONS:
+            if self.operation not in SHORT_STORY_ALLOWED_OPERATIONS:
                 raise ValueError("中短篇写作命令必须指定专用 Operation")
             if self.targetTotalWordCount is not None and not (
                 6_000 <= self.targetTotalWordCount <= 80_000
@@ -67,6 +70,8 @@ class WritingJobPayload(BaseModel):
                 self.source, ApprovedShortOutlineSource
             ):
                 raise ValueError("中短篇整稿命令缺少已批准大纲来源")
+            if self.operation == "answer_question" and self.source is not None:
+                raise ValueError("中短篇讨论命令不能携带生成来源")
             return self
         if self.operation in SHORT_STORY_OPERATIONS:
             raise ValueError("长篇命令不能使用中短篇 Operation")
@@ -74,6 +79,8 @@ class WritingJobPayload(BaseModel):
             raise ValueError("已移除的同步设定 Operation 不能进入新写作命令")
         if self.source is not None:
             raise ValueError("长篇命令不能携带中短篇来源")
+        if self.versionReferences:
+            raise ValueError("长篇命令不能携带中短篇版本引用")
         return self
 
 

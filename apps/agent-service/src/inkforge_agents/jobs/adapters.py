@@ -210,6 +210,44 @@ class CoreArtifactPort:
             _require_same_runtime_owner(current.resource, resource)
         self._records[artifact_id] = _ArtifactRecord(resource, request, revision)
 
+    def hydrate_short_story_revision_base(
+        self,
+        resource: RunResource,
+        state: Mapping[str, Any],
+        project_artifact: Mapping[str, Any],
+    ) -> None:
+        """把项目上一版正文绑定为新对话的乐观锁基线。"""
+
+        artifact_id = _hydration_text(project_artifact, "id")
+        artifact_key = _hydration_text(project_artifact, "artifactKey")
+        revision = project_artifact.get("revision")
+        draft = ShortStoryChapterDraft.model_validate(project_artifact.get("payload"))
+        if (
+            state.get("activeArtifactId") != artifact_id
+            or isinstance(revision, bool)
+            or not isinstance(revision, int)
+            or revision < 1
+            or draft.metadata.targetChapterId != _hydration_text(state, "chapterId")
+        ):
+            raise _artifact_identity_mismatch("项目正文版本与当前写作资源不一致")
+        request = {
+            "runId": resource.runId,
+            "taskId": resource.taskId,
+            "novelId": resource.novelId,
+            "chapterId": draft.metadata.targetChapterId,
+            "workflowRunId": None,
+            "artifactKey": artifact_key,
+            "kind": draft.kind,
+            "status": "under_review",
+            "title": "完整正文",
+            "summary": "中短篇完整正文草案",
+            "payload": draft.model_dump(mode="json"),
+            "diff": None,
+            "createdByAgent": "写作",
+            "reviewerAgent": None,
+        }
+        self._records[artifact_id] = _ArtifactRecord(resource, request, revision)
+
     def release(self, artifact_id: str, resource: RunResource) -> None:
         record = self._require_record(artifact_id)
         _require_same_runtime_owner(record.resource, resource)
@@ -582,6 +620,10 @@ class CoreGraphAgentExecutor:
                 agentId=cast(Any, agent_id),
                 executionMode=execution_mode,
                 operationKind=operation_kind,
+                workflowKind=cast(
+                    Any,
+                    state.get("workflowKind", "long_serial"),
+                ),
                 userMessage=(
                     "请审核当前 Core 权威完整正文并提交结构化结论。"
                     if execution_mode == "reviewer"

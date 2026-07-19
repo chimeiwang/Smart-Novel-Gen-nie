@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from inkforge_contracts.jobs import (
     ApprovedShortOutlineSource,
@@ -28,6 +29,7 @@ from ..db.models import (
     OutlineNode,
     ReviewArtifact,
     ReviewArtifactEvaluation,
+    ReviewArtifactRevision,
     SceneBeat,
     StoryBackground,
     WorldSetting,
@@ -38,7 +40,10 @@ from ..db.models import (
     WritingTask,
 )
 from ..errors import ApiError
-from ..short_story_artifacts import latest_short_story_outline_artifact
+from ..short_story_artifacts import (
+    exact_short_story_outline_revision,
+    latest_short_story_outline_artifact,
+)
 from .recovery import InvalidGraphSnapshotError, deserialize_graph_snapshot
 from .schemas import SHORT_STORY_INTERNAL_TASK_WORD_COUNT
 
@@ -196,8 +201,14 @@ class WritingContextRepository:
                 )
             active_artifact = await self._active_artifact(session, task)
             short_story_run_artifact: dict[str, Any] | None = None
+            short_story_project_body_artifact: dict[str, Any] | None = None
             if command_payload.workflowKind == "short_medium":
                 latest_user_message = _command_user_message(command_payload)
+                referenced_versions = await self._short_story_referenced_versions(
+                    session,
+                    task.novelId,
+                    command_payload,
+                )
                 recent = await self._recent_messages(
                     session,
                     task.writingSessionId,
@@ -211,21 +222,39 @@ class WritingContextRepository:
                         novel=novel,
                         bible=bible,
                         payload=command_payload,
+                        referenced_versions=referenced_versions,
                     )
                     short_story_run_artifact = await self._short_story_run_artifact(
                         session, task
                     )
+                    if short_story_run_artifact is None:
+                        short_story_project_body_artifact = (
+                            await self._short_story_project_body_artifact(
+                                session,
+                                task.novelId,
+                                command_payload,
+                            )
+                        )
                     prior_conversation_history = []
                 else:
                     current_outline, direct_edit = await self._current_short_outline(
                         session, task.novelId
                     )
+                    if (
+                        command_payload.operation == "develop_short_outline"
+                        and active_artifact is None
+                    ):
+                        active_artifact = await self._short_outline_authority(
+                            session,
+                            task.novelId,
+                        )
                     short_story_context = _build_short_story_context(
                         direct_edit=direct_edit,
                         revision_request=_command_revision_request(command_payload),
                         outline=current_outline,
                         inspiration=(novel.summary or "").strip(),
                         recent_conversation=recent,
+                        referenced_versions=referenced_versions,
                     )
                     prior_conversation_history = recent
             else:
@@ -270,11 +299,16 @@ class WritingContextRepository:
                     if command_payload.source is not None
                     else None
                 ),
+                "versionReferences": [
+                    item.model_dump(mode="json")
+                    for item in command_payload.versionReferences
+                ],
                 "selectedAgents": [item for item in task.selectedAgents.split(",") if item],
                 "conversationHistory": prior_conversation_history,
                 "userMessage": latest_user_message,
                 "shortStoryContext": short_story_context,
                 "shortStoryRunArtifact": short_story_run_artifact,
+                "shortStoryProjectBodyArtifact": short_story_project_body_artifact,
                 "graphState": (json.loads(task.graphStateJson) if task.graphStateJson else None),
             }
 
@@ -287,16 +321,21 @@ class WritingContextRepository:
         novel: Novel,
         bible: WritingBible | None,
         payload: WritingJobPayload,
+        referenced_versions: list[dict[str, Any]],
     ) -> dict[str, Any]:
         source = payload.source
         if bible is None or not isinstance(source, ApprovedShortOutlineSource):
             raise _context_identity_mismatch()
-        outline_artifact = await session.scalar(
-            select(ReviewArtifact).where(ReviewArtifact.id == source.outlineArtifactId)
+        selected = await exact_short_story_outline_revision(
+            session,
+            task.novelId,
+            source.outlineArtifactId,
+            source.outlineRevision,
         )
-        if outline_artifact is None:
+        if selected is None:
             raise _context_identity_mismatch()
-        outline = _parse_short_outline(outline_artifact.payloadJson)
+        outline_artifact, outline_revision = selected
+        outline = _parse_short_outline(outline_revision.payloadJson)
         background = await session.scalar(
             select(StoryBackground).where(StoryBackground.novelId == task.novelId)
         )
@@ -312,9 +351,10 @@ class WritingContextRepository:
                 )
             )
         return {
+            "referencedVersions": referenced_versions,
             "approvedOutline": {
                 "artifactId": outline_artifact.id,
-                "revision": outline_artifact.revision,
+                "revision": outline_revision.revision,
                 "hash": canonical_short_outline_hash(outline),
                 "payload": outline.model_dump(mode="json"),
             },
@@ -413,6 +453,59 @@ class WritingContextRepository:
             ],
         }
 
+    async def _short_story_project_body_artifact(
+        self,
+        session: AsyncSession,
+        novel_id: str,
+        payload: WritingJobPayload,
+    ) -> dict[str, Any] | None:
+        """返回上一轮正文版本，供新对话生成下一版时做乐观锁基线。"""
+
+        artifact = await session.scalar(
+            select(ReviewArtifact)
+            .where(
+                ReviewArtifact.novelId == novel_id,
+                ReviewArtifact.kind == "chapter_draft",
+            )
+            .order_by(ReviewArtifact.updatedAt.desc(), ReviewArtifact.id.desc())
+            .limit(1)
+        )
+        if artifact is None:
+            return None
+        body_references = [
+            item for item in payload.versionReferences if item.kind == "body"
+        ]
+        if len(body_references) > 1:
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_BODY_BASE_AMBIGUOUS",
+                message="修改正文时只能指定一个正文基线版本",
+            )
+        baseline_payload_json = artifact.payloadJson
+        source_revision = artifact.revision
+        if body_references:
+            reference = body_references[0]
+            record = await session.scalar(
+                select(ReviewArtifactRevision).where(
+                    ReviewArtifactRevision.artifactId == reference.artifactId,
+                    ReviewArtifactRevision.revision == reference.revision,
+                )
+            )
+            if record is None:
+                raise _context_identity_mismatch()
+            baseline_payload_json = record.payloadJson
+            source_revision = reference.revision
+        draft = _parse_short_story_draft(baseline_payload_json)
+        return {
+            "id": artifact.id,
+            "taskId": artifact.taskId,
+            "artifactKey": artifact.artifactKey,
+            "status": artifact.status,
+            "revision": artifact.revision,
+            "sourceRevision": source_revision,
+            "payload": draft.model_dump(mode="json"),
+        }
+
     async def _active_command(
         self,
         session: AsyncSession,
@@ -469,6 +562,10 @@ class WritingContextRepository:
         if chapter_count != 1:
             raise _context_identity_mismatch()
         source = payload.source
+        if payload.operation == "answer_question":
+            if source is not None:
+                raise _context_identity_mismatch()
+            return
         if payload.operation == "develop_short_outline":
             if (
                 not isinstance(source, ShortOutlineInspirationSource)
@@ -478,20 +575,78 @@ class WritingContextRepository:
             return
         if not isinstance(source, ApprovedShortOutlineSource):
             raise _context_identity_mismatch()
-        artifact = await latest_short_story_outline_artifact(
+        selected = await exact_short_story_outline_revision(
             session,
             task.novelId,
+            source.outlineArtifactId,
+            source.outlineRevision,
         )
-        if (
-            artifact is None
-            or artifact.id != source.outlineArtifactId
-            or artifact.status != "applied"
-            or artifact.revision != source.outlineRevision
-        ):
+        if selected is None:
             raise _context_identity_mismatch()
-        outline = _parse_short_outline(artifact.payloadJson)
+        _artifact, revision = selected
+        outline = _parse_short_outline(revision.payloadJson)
         if _short_outline_hash(outline) != source.outlineHash:
             raise _context_identity_mismatch()
+
+    async def _short_story_referenced_versions(
+        self,
+        session: AsyncSession,
+        novel_id: str,
+        payload: WritingJobPayload,
+    ) -> list[dict[str, Any]]:
+        result: list[dict[str, Any]] = []
+        for reference in payload.versionReferences:
+            row = (
+                await session.execute(
+                    select(ReviewArtifactRevision, ReviewArtifact)
+                    .join(
+                        ReviewArtifact,
+                        ReviewArtifact.id == ReviewArtifactRevision.artifactId,
+                    )
+                    .where(
+                        ReviewArtifactRevision.artifactId == reference.artifactId,
+                        ReviewArtifactRevision.revision == reference.revision,
+                        ReviewArtifact.novelId == novel_id,
+                    )
+                )
+            ).one_or_none()
+            if row is None:
+                raise _context_identity_mismatch()
+            revision, artifact = cast(
+                tuple[ReviewArtifactRevision, ReviewArtifact], row
+            )
+            try:
+                raw = json.loads(revision.payloadJson)
+                typed = (
+                    ShortStoryOutlineDraft.model_validate(raw)
+                    if reference.kind == "outline"
+                    else ShortStoryChapterDraft.model_validate(raw)
+                )
+            except (json.JSONDecodeError, ValidationError, TypeError):
+                raise _context_identity_mismatch() from None
+            expected_kind = (
+                "outline_draft" if reference.kind == "outline" else "chapter_draft"
+            )
+            canonical = json.dumps(
+                typed.model_dump(mode="json"),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            actual_hash = (
+                canonical_short_outline_hash(typed)
+                if isinstance(typed, ShortStoryOutlineDraft)
+                else hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+            )
+            if artifact.kind != expected_kind or actual_hash != reference.hash:
+                raise _context_identity_mismatch()
+            result.append(
+                {
+                    "reference": reference.model_dump(mode="json"),
+                    "payload": typed.model_dump(mode="json"),
+                }
+            )
+        return result
 
     async def _current_short_outline(
         self,
@@ -521,6 +676,37 @@ class WritingContextRepository:
             else None
         )
         return payload, direct_edit
+
+    async def _short_outline_authority(
+        self,
+        session: AsyncSession,
+        novel_id: str,
+    ) -> dict[str, Any] | None:
+        artifact = await latest_short_story_outline_artifact(session, novel_id)
+        if artifact is None:
+            return None
+        payload = _parse_short_outline(artifact.payloadJson).model_dump(mode="json")
+        try:
+            diff = json.loads(artifact.diffJson) if artifact.diffJson is not None else None
+        except (json.JSONDecodeError, TypeError):
+            raise _artifact_payload_invalid() from None
+        return {
+            "id": artifact.id,
+            "taskId": artifact.taskId,
+            "novelId": artifact.novelId,
+            "chapterId": artifact.chapterId,
+            "workflowRunId": artifact.workflowRunId,
+            "artifactKey": artifact.artifactKey,
+            "kind": artifact.kind,
+            "status": artifact.status,
+            "title": artifact.title,
+            "summary": artifact.summary,
+            "payload": payload,
+            "diff": diff,
+            "createdByAgent": artifact.createdByAgent,
+            "reviewerAgent": artifact.reviewerAgent,
+            "revision": artifact.revision,
+        }
 
     async def _recent_messages(
         self,
@@ -774,6 +960,17 @@ def _parse_short_outline(serialized: str) -> ShortStoryOutlineDraft:
         ) from None
 
 
+def _parse_short_story_draft(serialized: str) -> ShortStoryChapterDraft:
+    try:
+        return ShortStoryChapterDraft.model_validate(json.loads(serialized))
+    except (json.JSONDecodeError, ValidationError, TypeError):
+        raise ApiError(
+            status_code=409,
+            code="SHORT_STORY_DRAFT_PAYLOAD_INVALID",
+            message="中短篇项目正文版本载荷无效",
+        ) from None
+
+
 def _short_outline_hash(outline: ShortStoryOutlineDraft) -> str:
     return canonical_short_outline_hash(outline)
 
@@ -838,13 +1035,15 @@ def _build_short_story_context(
     outline: dict[str, Any] | None,
     inspiration: str,
     recent_conversation: list[dict[str, Any]],
+    referenced_versions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """按中短篇权威优先级构造最小上下文，历史只保留最近六条。"""
 
     anchors = outline.get("anchors") if isinstance(outline, dict) else None
     return {
-        "directEdit": direct_edit,
         "revisionRequest": revision_request,
+        "referencedVersions": referenced_versions or [],
+        "directEdit": direct_edit,
         "anchors": anchors,
         "currentOutline": outline,
         "originalInspiration": inspiration,

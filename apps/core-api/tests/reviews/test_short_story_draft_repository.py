@@ -16,6 +16,7 @@ from inkforge_core.db.models import (
     Chapter,
     ChapterQualityCheck,
     Novel,
+    Outline,
     ReviewArtifact,
     ReviewArtifactEvaluation,
     ReviewArtifactRevision,
@@ -41,6 +42,7 @@ TABLES = [
     User.__table__,
     Novel.__table__,
     Chapter.__table__,
+    Outline.__table__,
     ChapterQualityCheck.__table__,
     WritingBible.__table__,
     WritingSession.__table__,
@@ -106,13 +108,14 @@ def _draft_request(
     source_revision: int = 1,
     target_chapter_id: str = "chapter-1",
     target_word_count: int | None = 6000,
+    task_id: str = "task-1",
 ) -> CreateArtifactRequest:
     value = content or ("甲" * 6000)
     outline = _outline()
     return CreateArtifactRequest.model_validate(
         {
             "runId": "run-1",
-            "taskId": "task-1",
+            "taskId": task_id,
             "novelId": "novel-1",
             "chapterId": "chapter-1",
             "artifactKey": "short-story-draft",
@@ -350,6 +353,110 @@ async def test_initial_short_story_draft_rechecks_all_authoritative_sources(
 
 
 @pytest.mark.asyncio
+async def test_pending_outline_revision_does_not_invalidate_adopted_source(
+    repository: ReviewRepository,
+) -> None:
+    """确认后的大纲可以继续改，但正文仍可精确使用正式采用的旧版本。"""
+
+    adopted = _outline()
+    pending = ShortStoryOutlineDraft.model_validate(
+        {
+            **adopted.model_dump(mode="json"),
+            "corePremise": "守夜人决定隐瞒讣告来源。",
+            "changeSummary": "待确认的新方向",
+        }
+    )
+    async with repository._session_factory() as session:  # noqa: SLF001
+        async with session.begin():
+            session.add(
+                Outline(
+                    id="formal-outline",
+                    novelId="novel-1",
+                    content=adopted.content,
+                )
+            )
+            session.add(
+                ReviewArtifactRevision(
+                    id="outline-revision-1",
+                    artifactId="outline-1",
+                    revision=1,
+                    payloadJson=adopted.model_dump_json(),
+                )
+            )
+            artifact = await session.get(ReviewArtifact, "outline-1")
+            assert artifact is not None
+            artifact.status = "awaiting_user"
+            artifact.revision = 2
+            artifact.payloadJson = pending.model_dump_json()
+            session.add(
+                ReviewArtifactRevision(
+                    id="outline-revision-2",
+                    artifactId="outline-1",
+                    revision=2,
+                    payloadJson=pending.model_dump_json(),
+                )
+            )
+
+    created = await repository.create_or_revise("user-1", _draft_request())
+
+    assert created.payload.metadata.sourceOutlineRevision == 1  # type: ignore[union-attr]
+
+
+@pytest.mark.asyncio
+async def test_new_conversation_can_create_next_body_version(
+    repository: ReviewRepository,
+) -> None:
+    first = await repository.create_or_revise("user-1", _draft_request())
+    async with repository._session_factory() as session:  # noqa: SLF001
+        async with session.begin():
+            session.add(
+                WritingSession(
+                    id="session-2",
+                    novelId="novel-1",
+                    chapterId="chapter-1",
+                    title="继续修改正文",
+                    phase="generating",
+                )
+            )
+            session.add(
+                WritingTask(
+                    id="task-2",
+                    novelId="novel-1",
+                    chapterId="chapter-1",
+                    phase="active",
+                    selectedAgents="写作,编辑,校验",
+                    targetWordCount=6000,
+                    writingSessionId="session-2",
+                )
+            )
+            session.add(
+                WritingRunCommand(
+                    id="command-2",
+                    taskId="task-2",
+                    kind="start",
+                    status="processing",
+                    attemptCount=0,
+                    idempotencyKey="user-1:start-2",
+                    payloadJson=json.dumps(_command_payload(), ensure_ascii=False),
+                )
+            )
+
+    second = await repository.create_or_revise(
+        "user-1",
+        _draft_request(
+            task_id="task-2",
+            command_id="command-2",
+            expected_revision=first.revision,
+            content="乙" * 6000,
+        ),
+    )
+
+    assert second.id == first.id
+    assert second.revision == 2
+    assert second.taskId == "task-2"
+
+
+@pytest.mark.asyncio
 async def test_short_story_draft_accepts_null_reference_snapshot(
     repository: ReviewRepository,
 ) -> None:
@@ -416,15 +523,14 @@ async def test_initial_short_story_draft_skips_newer_legacy_outline(
 
 
 @pytest.mark.asyncio
-async def test_initial_short_story_draft_rejects_newer_malformed_outline(
+async def test_initial_short_story_draft_ignores_unreferenced_malformed_outline(
     repository: ReviewRepository,
 ) -> None:
     await _add_newer_malformed_outline(repository)
 
-    with pytest.raises(ApiError) as caught:
-        await repository.create_or_revise("user-1", _draft_request())
+    created = await repository.create_or_revise("user-1", _draft_request())
 
-    assert caught.value.code == "SHORT_OUTLINE_PAYLOAD_INVALID"
+    assert created.payload.metadata.sourceOutlineArtifactId == "outline-1"  # type: ignore[union-attr]
 
 
 @pytest.mark.asyncio
@@ -803,25 +909,28 @@ async def test_short_story_apply_skips_newer_legacy_outline(
 
 
 @pytest.mark.asyncio
-async def test_short_story_apply_rejects_newer_malformed_outline_without_writing(
+async def test_short_story_apply_ignores_unreferenced_malformed_outline(
     repository: ReviewRepository,
 ) -> None:
     created = await repository.create_or_revise("user-1", _draft_request())
+    await repository.submit_evaluation("user-1", created.id, _evaluation("编辑"))
+    await repository.submit_evaluation("user-1", created.id, _evaluation("校验"))
+    await repository.create_or_revise(
+        "user-1", _draft_request(status="awaiting_user")
+    )
     artifact = await repository.require_artifact("user-1", created.id)
+    await repository.transition(created.id, "awaiting_user", "applying")
     await _add_newer_malformed_outline(repository)
 
-    with pytest.raises(ApiError) as caught:
-        await FormalWriteRepository(repository._session_factory).apply_chapter(  # noqa: SLF001
-            artifact,
-            "user-1",
-            "甲" * 6000,
-        )
-
-    assert caught.value.code == "SHORT_OUTLINE_PAYLOAD_INVALID"
+    await FormalWriteRepository(repository._session_factory).apply_chapter(  # noqa: SLF001
+        artifact,
+        "user-1",
+        "甲" * 6000,
+    )
     async with repository._session_factory() as session:  # noqa: SLF001
         chapter = await session.get(Chapter, "chapter-1")
     assert chapter is not None
-    assert chapter.content == ""
+    assert chapter.content == "甲" * 6000
 
 
 @pytest.mark.asyncio

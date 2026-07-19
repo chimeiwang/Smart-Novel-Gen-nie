@@ -52,6 +52,16 @@ def build_operation_context(
         "novel": novel,
     }
 
+    if (
+        planning.get("workflowKind") == "short_medium"
+        and definition.kind == "answer_question"
+    ):
+        short_story = planning.get("shortStoryContext")
+        if not isinstance(short_story, Mapping):
+            raise ValueError("中短篇讨论缺少 Core 权威上下文")
+        projection["shortStory"] = dict(short_story)
+        return projection
+
     if definition.contextStrategy == "brief":
         projection["chapter"] = _select(current, _CHAPTER_SUMMARY_FIELDS)
         return projection

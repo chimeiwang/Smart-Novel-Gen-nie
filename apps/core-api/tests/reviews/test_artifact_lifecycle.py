@@ -9,6 +9,8 @@ from inkforge_core.reviews.schemas import (
     CreateArtifactRequest,
     ReviewArtifactDecisionRequest,
     SaveShortStoryOutlineRequest,
+    ShortStoryVersionDetail,
+    ShortStoryVersionListItem,
     assert_status_transition,
 )
 from inkforge_core.reviews.updates import filter_agent_updates_by_selection
@@ -281,6 +283,36 @@ def test_public_openapi_exposes_short_outline_and_revision_routes() -> None:
     assert "ShortStoryChapterDraft" in schemas
     assert "ShortStoryArtifactsResponse" in schemas
     assert "ShortStoryTaskStatus" in schemas
+    assert "ShortStoryVersionReference" in schemas
+    assert "ShortStoryVersionListItem" in schemas
+    assert "ShortStoryVersionDetail" in schemas
     assert "/api/v1/review-artifacts/{artifact_id}/revisions" in paths
     assert "/api/v1/review-artifacts/{artifact_id}/outline" in paths
     assert "/api/v1/novels/{novel_id}/short-story/artifacts" in paths
+
+
+def test_short_story_version_schemas_distinguish_latest_and_adopted_state() -> None:
+    item = ShortStoryVersionListItem.model_validate(
+        {
+            "kind": "outline",
+            "artifactId": "outline-1",
+            "version": 2,
+            "revision": 2,
+            "hash": "a" * 64,
+            "status": "history",
+            "summary": "收紧第二节冲突",
+            "sourceSessionId": "session-1",
+            "sourceOutlineRevision": None,
+            "createdAt": "2026-07-19T00:00:00Z",
+        }
+    )
+    assert item.status == "history"
+
+    detail = ShortStoryVersionDetail.model_validate(
+        {
+            **item.model_dump(mode="json"),
+            "payload": _short_outline_payload(),
+            "evaluations": [],
+        }
+    )
+    assert isinstance(detail.payload, ShortStoryOutlineDraft)

@@ -17,11 +17,23 @@ import {
 } from "./short-story-action-ids";
 import { ShortStoryContent } from "./short-story-content";
 import {
+  ShortStoryChatPane,
+  type ShortStoryVersionAttachment,
+} from "./short-story-chat-pane";
+import {
+  formatShortStoryOperation,
+  formatShortStoryPhase,
+  formatShortStoryVerdict,
+  formatShortStoryVersion,
+} from "./short-story-display-labels";
+import {
   applySavedOutlineToAggregate,
   createOutlineEditorBase,
   type OutlineEditorBase,
   shouldAdoptAggregateOutline,
 } from "./short-story-outline-lifecycle";
+import { ShortStoryOutlineConversation } from "./short-story-outline-conversation";
+import { buildShortStoryOutlineConversation } from "./short-story-outline-conversation-model";
 import {
   appendOutlineItem,
   createEditableOutlineSections,
@@ -62,6 +74,10 @@ type ShortStoryAnchors = components["schemas"]["ShortStoryAnchors"];
 type ShortStoryTask = components["schemas"]["ShortStoryTaskStatus"];
 type RevisionSummary = components["schemas"]["ReviewArtifactRevisionSummary"];
 type RevisionDetail = components["schemas"]["ReviewArtifactRevisionDetail"];
+type WritingMessage = components["schemas"]["MessageResponse"];
+type ShortStoryVersion = components["schemas"]["ShortStoryVersionListItem"];
+type ShortStoryVersionDetail = components["schemas"]["ShortStoryVersionDetail"];
+type ShortStoryVersionReference = components["schemas"]["ShortStoryVersionReference"];
 type ArtifactDecision = components["schemas"]["ReviewArtifactDecisionRequest"]["decision"];
 type ActivePane = ShortStoryPane;
 
@@ -118,6 +134,15 @@ function formatDateTime(value: string): string {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function formatVersionStatus(status: ShortStoryVersion["status"]): string {
+  return {
+    adopted: "当前采用",
+    formal: "当前正式正文",
+    pending: "待确认",
+    history: "历史版本",
+  }[status];
 }
 
 function splitAnchorLines(value: string): string[] {
@@ -206,12 +231,64 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
   const [outlineConflictBase, setOutlineConflictBase] = useState<OutlineEditorBase | null>(null);
 
   const [outlineRevisionRequest, setOutlineRevisionRequest] = useState("");
+  const [outlineConversationMessages, setOutlineConversationMessages] = useState<WritingMessage[]>([]);
+  const [outlineConversationLoading, setOutlineConversationLoading] = useState(false);
+  const [outlineConversationError, setOutlineConversationError] = useState<string | null>(null);
   const [draftRevisionRequest, setDraftRevisionRequest] = useState("");
   const [revisions, setRevisions] = useState<RevisionSummary[]>([]);
   const [revisionsLoading, setRevisionsLoading] = useState(false);
   const [revisionDetail, setRevisionDetail] = useState<RevisionDetail | null>(null);
   const [revisionLoading, setRevisionLoading] = useState(false);
+  const [projectVersionDetail, setProjectVersionDetail] = useState<ShortStoryVersionDetail | null>(null);
+  const [chatReferences, setChatReferences] = useState<ShortStoryVersionAttachment[]>([]);
   const revisionLoadTokenRef = useRef(0);
+
+  const openProjectVersion = useCallback(async (version: ShortStoryVersion) => {
+    setRevisionLoading(true);
+    setActionError(null);
+    try {
+      const detail = requireApiData(await browserApi.GET(
+        "/api/v1/novels/{novel_id}/short-story/versions/{kind}/{revision}",
+        {
+          params: {
+            path: {
+              novel_id: novel.id,
+              kind: version.kind,
+              revision: version.version,
+            },
+          },
+          cache: "no-store",
+        },
+      ));
+      setProjectVersionDetail(detail);
+      setRevisionDetail(null);
+      setActivePane(version.kind === "outline" ? "outline" : "draft");
+    } catch (error) {
+      setActionError(getErrorMessage(error, "读取版本失败"));
+    } finally {
+      setRevisionLoading(false);
+    }
+  }, [novel.id]);
+
+  const referenceVersion = useCallback((version: ShortStoryVersion) => {
+    const reference: ShortStoryVersionReference = {
+      kind: version.kind,
+      artifactId: version.artifactId,
+      revision: version.revision,
+      hash: version.hash,
+    };
+    setChatReferences((current) => current.some((item) => (
+      item.reference.kind === reference.kind
+      && item.reference.artifactId === reference.artifactId
+      && item.reference.revision === reference.revision
+    )) ? current : [
+      ...current,
+      {
+        reference,
+        label: `${version.kind === "outline" ? "大纲" : "正文"} v${version.version}`,
+      },
+    ]);
+  }, []);
 
   const updateOutlineEditorBase = useCallback((base: OutlineEditorBase | null) => {
     editorBaseRef.current = base;
@@ -413,6 +490,41 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
     };
   }, [activePane, outlineArtifactId, outlineArtifactRevision]);
 
+  const outlineConversationSessionId = activePane === "outline"
+    ? aggregate?.workflowSession?.id ?? null
+    : null;
+  const outlineConversationRefreshKey = activePane === "outline"
+    ? `${latestTask?.id ?? "none"}:${latestTask?.updatedAt ?? "none"}:${outlineArtifactRevision ?? "none"}`
+    : "inactive";
+
+  useEffect(() => {
+    if (!outlineConversationSessionId || !outlineArtifactId) return;
+
+    let current = true;
+    const timer = window.setTimeout(() => void (async () => {
+      setOutlineConversationLoading(true);
+      setOutlineConversationError(null);
+      try {
+        const session = requireApiData(await browserApi.GET(
+          "/api/v1/writing/sessions/{session_id}",
+          { params: { path: { session_id: outlineConversationSessionId } } },
+        ));
+        if (current) setOutlineConversationMessages(session.messages);
+      } catch (error) {
+        if (current) {
+          setOutlineConversationError(getErrorMessage(error, "读取改纲对话失败"));
+        }
+      } finally {
+        if (current) setOutlineConversationLoading(false);
+      }
+    })(), 0);
+
+    return () => {
+      current = false;
+      window.clearTimeout(timer);
+    };
+  }, [outlineArtifactId, outlineConversationRefreshKey, outlineConversationSessionId]);
+
   const actions = deriveShortStoryActions({
     authoritativeStateReady: aggregate !== null,
     targetWordCount,
@@ -463,8 +575,8 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
           }
           setActionError(
             outlineDirtyRef.current
-              ? "服务端大纲已更新，你的本地编辑仍保留。请先查看最新 revision，再明确选择基于最新版重试。"
-              : "服务端版本已更新，已刷新当前 revision，请重新执行操作。",
+              ? "服务端大纲已更新，你的本地编辑仍保留。请先查看最新版本，再明确选择基于最新版重试。"
+              : "服务端版本已更新，已刷新当前版本，请重新执行操作。",
           );
         }
       } else {
@@ -543,6 +655,7 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
     artifact: ShortStoryArtifact,
     decision: ArtifactDecision,
     userMessage?: string,
+    onAccepted?: () => void,
   ) => {
     const normalizedMessage = userMessage?.trim() ?? "";
     const actionKey = `decision:${artifact.id}:${artifact.revision}:${decision}:${normalizedMessage}`;
@@ -567,9 +680,17 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
         )),
       );
       trackAcceptedCommand(accepted.commandId, accepted.status);
+      onAccepted?.();
       setActionNotice("操作已接受，状态会自动更新。");
       await refreshAfterMutation();
     });
+  };
+
+  const submitOutlineRevisionRequest = () => {
+    const artifact = aggregateRef.current?.outline;
+    const request = outlineRevisionRequest.trim();
+    if (!artifact || !request) return;
+    decideArtifact(artifact, "revise", request, () => setOutlineRevisionRequest(""));
   };
 
   const saveOutline = () => {
@@ -606,7 +727,7 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
       setOutlineDirty(false);
       setOutlineConflictBase(null);
       applyAggregate(applySavedOutlineToAggregate(current, saved));
-      setActionNotice("大纲编辑已保存为新的 revision。");
+      setActionNotice("大纲编辑已保存为新版本。");
       await refreshAfterMutation();
     });
   };
@@ -616,7 +737,7 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
     updateOutlineEditorBase(outlineConflictBase);
     setOutlineConflictBase(null);
     setActionError(null);
-    setActionNotice("本地编辑内容未改变。已切换保存基线，请核对后基于最新 revision 重试。");
+    setActionNotice("本地编辑内容未改变。已切换保存基线，请核对后基于最新版本重试。");
   };
 
   const saveTitle = () => {
@@ -726,7 +847,7 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
       setRevisionDetail(null);
       const current = aggregateRef.current;
       if (current) applyAggregate(applySavedOutlineToAggregate(current, restored));
-      setActionNotice("历史版本已复制为新的当前 revision。");
+      setActionNotice("历史版本已复制为新的当前版本。");
       await refreshAfterMutation();
     });
   };
@@ -755,6 +876,28 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
   const visibleRevisions = activePane === "outline" ? revisions : [];
   const outlineEditable = actions.canEditOutline && !interactionLocked;
   const taskFailed = actions.runFailed && !optimisticCommand;
+  const outlineTaskActive = ACTIVE_COMMAND_STATUSES.has(effectiveCommandStatus as ShortStoryCommandStatus)
+    || latestTask?.phase === "active"
+    || latestTask?.phase === "waiting_call";
+  const outlineConversationEntries = useMemo(
+    () => outlineArtifact ? buildShortStoryOutlineConversation({
+      artifactId: outlineArtifact.id,
+      currentRevision: outlineArtifact.revision,
+      taskActive: outlineTaskActive,
+      messages: outlineConversationMessages,
+      revisions,
+    }) : [],
+    [outlineArtifact, outlineConversationMessages, outlineTaskActive, revisions],
+  );
+  const outlineConversationReadOnlyReason = !outlineArtifact
+    ? "完整大纲生成后即可开始改纲对话。"
+    : outlineArtifact.status !== "awaiting_user"
+      ? "当前大纲已经结束确认阶段，改纲历史仍可查看。"
+      : outlineDirty
+        ? "你有未保存的直接编辑。请先保存当前大纲，再发送新的修改要求。"
+        : interactionLocked
+          ? "上一条修改要求正在处理，完成后可以继续发送。"
+          : null;
 
   const renderOutlineCanvas = () => {
     if (!outlineArtifact || !outlinePayload) {
@@ -920,11 +1063,11 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
           type="button"
           disabled={!outlineDirty || !outlineEditable}
           onClick={saveOutline}
-        >{pendingAction?.startsWith("save-outline") ? "保存中…" : "保存为新 revision"}</button>
+        >{pendingAction?.startsWith("save-outline") ? "保存中…" : "保存为新版本"}</button>
         {outlineConflictBase ? (
           <div className="short-story-error stack" role="alert">
             <span>
-              服务端当前为 revision {outlineConflictBase.revision}，本地编辑基于 revision {editorBaseRevision ?? "未知"}。
+              服务端当前版本为 {outlineConflictBase.revision}，本地编辑基于版本 {editorBaseRevision ?? "未知"}。
               本地内容尚未改变，请先核对最新大纲。
             </span>
             <button
@@ -932,7 +1075,7 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
               type="button"
               disabled={interactionLocked}
               onClick={rebaseOutlineEditor}
-            >基于最新 revision 重试</button>
+            >基于最新版本重试</button>
           </div>
         ) : null}
       </div>
@@ -955,7 +1098,7 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
             <span className="badge">篇幅参考约 {draftPayload.metadata.targetWordCount} 字</span>
           ) : null}
           <span className="badge">实际 {draftTextLength} 字</span>
-          <span className="badge">来源大纲 revision {draftPayload.metadata.sourceOutlineRevision}</span>
+          <span className="badge">来源大纲{formatShortStoryVersion(draftPayload.metadata.sourceOutlineRevision)}</span>
           <span className="badge">自动返工 {draftPayload.metadata.automaticRewriteCount}/1</span>
         </div>
         <ShortStoryContent content={draftPayload.content} />
@@ -987,8 +1130,10 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
         {evaluations.length ? evaluations.map((evaluation) => (
           <div className="short-story-evaluation" key={evaluation.id}>
             <div className="meta">
-              <span className={`badge verdict-${evaluation.verdict}`}>{evaluation.verdict}</span>
-              <span>revision {evaluation.revision}</span>
+              <span className={`badge verdict-${evaluation.verdict}`}>
+                {formatShortStoryVerdict(evaluation.verdict)}
+              </span>
+              <span>{formatShortStoryVersion(evaluation.revision)}</span>
             </div>
             <p>{evaluation.summary}</p>
             {evaluation.requiredChanges ? <p className="muted">需修改：{evaluation.requiredChanges}</p> : null}
@@ -1001,7 +1146,7 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
   return (
     <main className="page stack short-story-page">
       <header className="panel short-story-header">
-        <div>
+        <div className="short-story-header-context">
           <Link href="/" className="muted">← 返回</Link>
           <h1 className="title-lg">{displayTitle}</h1>
           <div className="meta">
@@ -1009,7 +1154,11 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
             {targetWordCount !== null ? (
               <span className="badge">篇幅参考约 {targetWordCount} 字</span>
             ) : null}
-            {latestTask ? <span className="badge">{latestTask.operation} · {latestTask.phase}</span> : null}
+            {latestTask ? (
+              <span className="badge">
+                {formatShortStoryOperation(latestTask.operation)} · {formatShortStoryPhase(latestTask.phase)}
+              </span>
+            ) : null}
           </div>
         </div>
         <LogoutButton />
@@ -1040,6 +1189,42 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
               <span>{draftArtifact?.status === "applied" ? "已应用到正文" : "等待你的最终确认"}</span>
             </li>
           </ol>
+          <section className="short-story-version-track">
+            <h2 className="title-sm">大纲版本</h2>
+            {aggregate?.outlineVersions?.length ? aggregate.outlineVersions.map((version) => (
+              <article className="short-story-version-track-item" key={`outline:${version.artifactId}:${version.revision}`}>
+                <button type="button" onClick={() => void openProjectVersion(version)}>
+                  <strong>大纲 v{version.version}</strong>
+                  <span>{formatVersionStatus(version.status)}</span>
+                  <small>{version.summary || "无修改摘要"}</small>
+                  <small>{formatDateTime(version.createdAt)}{version.sourceSessionId ? " · 来自写作对话" : ""}</small>
+                </button>
+                <button className="short-story-version-reference-button" type="button" onClick={() => referenceVersion(version)}>
+                  在对话中引用
+                </button>
+              </article>
+            )) : <p className="muted">尚无大纲版本。</p>}
+          </section>
+          <section className="short-story-version-track">
+            <h2 className="title-sm">正文版本</h2>
+            {aggregate?.bodyVersions?.length ? aggregate.bodyVersions.map((version) => (
+              <article className="short-story-version-track-item" key={`body:${version.artifactId}:${version.revision}`}>
+                <button type="button" onClick={() => void openProjectVersion(version)}>
+                  <strong>正文 v{version.version}</strong>
+                  <span>{formatVersionStatus(version.status)}</span>
+                  <small>{version.sourceOutlineVersion
+                    ? `来源大纲 v${version.sourceOutlineVersion}`
+                    : version.sourceOutlineRevision
+                      ? `来源大纲修订 ${version.sourceOutlineRevision}`
+                      : version.summary || "无修改摘要"}</small>
+                  <small>{formatDateTime(version.createdAt)}{version.sourceSessionId ? " · 来自写作对话" : ""}</small>
+                </button>
+                <button className="short-story-version-reference-button" type="button" onClick={() => referenceVersion(version)}>
+                  在对话中引用
+                </button>
+              </article>
+            )) : <p className="muted">尚无正文版本。</p>}
+          </section>
           {legacyMultiChapter ? (
             <section className="short-story-legacy-chapters stack" role="status">
               <strong>需整理为单一正文后才能启动新中短篇流程</strong>
@@ -1072,6 +1257,75 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
         </aside>
 
         <section className="panel short-story-main-canvas" aria-label="中短篇完整内容">
+          <div className="short-story-middle-header">
+            <div className="short-story-middle-settings">
+              <label>
+                <span className="label">标题</span>
+                <div className="short-story-inline-form">
+                  <input className="input" value={titleInput} onChange={(event) => setTitleInput(event.target.value)} />
+                  <button
+                    className="button secondary compact"
+                    type="button"
+                    disabled={titleConflict || interactionLocked || !titleInput.trim() || titleInput.trim() === displayTitle}
+                    onClick={saveTitle}
+                  >保存</button>
+                </div>
+              </label>
+              <label>
+                <span className="label">篇幅参考（可选）</span>
+                <div className="short-story-inline-form">
+                  <input className="input" inputMode="numeric" value={targetInput} onChange={(event) => setTargetInput(event.target.value)} />
+                  <button
+                    className="button secondary compact"
+                    type="button"
+                    disabled={!actions.canUpdateTargetWordCount || interactionLocked || !isValidShortStoryTarget(parseOptionalShortStoryTarget(targetInput))}
+                    onClick={saveTargetWordCount}
+                  >更新</button>
+                </div>
+              </label>
+              <p className="muted">留空时由故事需要决定；填写后仅作为篇幅倾向。</p>
+            </div>
+            <div className="short-story-middle-actions">
+              {aggregate === null ? (
+                <button className="button primary compact" type="button" disabled={initialLoading} onClick={() => void refreshAggregate()}>
+                  {initialLoading ? "正在读取状态…" : "重试读取状态"}
+                </button>
+              ) : null}
+              {!outlineArtifact ? (
+                <button className="button primary compact" type="button" disabled={!actions.canRetryOutline || interactionLocked} onClick={() => startOperation("develop_short_outline")}>
+                  重试生成完整大纲
+                </button>
+              ) : null}
+              {outlineArtifact?.status === "awaiting_user" && activePane === "outline" ? (
+                <>
+                  <button className="button primary compact" type="button" disabled={!actions.canDecideOutline || outlineDirty || interactionLocked} onClick={() => decideArtifact(outlineArtifact, "approve")}>
+                    采用此大纲版本
+                  </button>
+                  <button className="button ghost danger compact" type="button" disabled={!actions.canDecideOutline || outlineDirty || interactionLocked} onClick={() => decideArtifact(outlineArtifact, "discard")}>
+                    放弃待确认版本
+                  </button>
+                </>
+              ) : null}
+              {actions.canGenerateDraft ? (
+                <button className="button primary compact" type="button" disabled={interactionLocked} onClick={() => startOperation("write_short_story")}>
+                  生成完整初稿
+                </button>
+              ) : null}
+              {draftArtifact?.status === "awaiting_user" && activePane === "draft" ? (
+                <>
+                  <button className="button primary compact" type="button" disabled={!actions.canDecideDraft || interactionLocked} onClick={() => decideArtifact(draftArtifact, "approve")}>
+                    采用为正式正文
+                  </button>
+                  <button className="button ghost danger compact" type="button" disabled={!actions.canDecideDraft || interactionLocked} onClick={() => decideArtifact(draftArtifact, "discard")}>
+                    放弃待确认版本
+                  </button>
+                </>
+              ) : null}
+            </div>
+            {loadError ? <p className="short-story-error" role="alert">{loadError}</p> : null}
+            {actionError ? <p className="short-story-error" role="alert">{actionError}</p> : null}
+            {actionNotice ? <p className="short-story-notice" role="status">{actionNotice}</p> : null}
+          </div>
           <div className="short-story-canvas-toolbar">
             <div className="meta">
               <button
@@ -1092,7 +1346,7 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
             </div>
             {activePane === "outline" && outlineArtifact ? (
               <div className="meta">
-                <span className="badge">revision {outlineArtifact.revision}</span>
+                <span className="badge">{formatShortStoryVersion(outlineArtifact.revision)}</span>
                 <button
                   className="button ghost compact"
                   type="button"
@@ -1106,7 +1360,7 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
                 >直接编辑</button>
               </div>
             ) : activePane === "draft" && draftArtifact ? (
-              <span className="badge">revision {draftArtifact.revision}</span>
+              <span className="badge">{formatShortStoryVersion(draftArtifact.revision)}</span>
             ) : activePane === "formal" && currentChapter ? (
               <span className="badge">{formalTextLength} 字 · 只读</span>
             ) : null}
@@ -1119,10 +1373,23 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
               <p className="muted">读取失败不代表尚未生成大纲或初稿。请使用右侧“重试读取状态”。</p>
             </div>
           ) : null}
-          {!initialLoading && visibleRevisionDetail ? (
+          {!initialLoading && projectVersionDetail ? (
             <div className="stack short-story-version-preview">
               <div className="meta">
-                <strong>历史 revision {visibleRevisionDetail.revision}</strong>
+                <strong>{projectVersionDetail.kind === "outline" ? "大纲" : "正文"} v{projectVersionDetail.version}</strong>
+                <span>{formatVersionStatus(projectVersionDetail.status)}</span>
+                <span>{formatDateTime(projectVersionDetail.createdAt)}</span>
+                <button className="button ghost compact" type="button" onClick={() => setProjectVersionDetail(null)}>
+                  返回当前版本
+                </button>
+              </div>
+              <ShortStoryContent content={projectVersionDetail.payload.content} emptyLabel="该版本没有可显示的完整内容。" />
+            </div>
+          ) : null}
+          {!initialLoading && !projectVersionDetail && visibleRevisionDetail ? (
+            <div className="stack short-story-version-preview">
+              <div className="meta">
+                <strong>历史{formatShortStoryVersion(visibleRevisionDetail.revision)}</strong>
                 <span>{formatDateTime(visibleRevisionDetail.createdAt)}</span>
                 <button className="button ghost compact" type="button" onClick={() => setRevisionDetail(null)}>
                   返回当前版本
@@ -1131,12 +1398,12 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
               <ShortStoryContent content={revisionContent ?? ""} emptyLabel="该历史版本没有可显示的完整内容。" />
             </div>
           ) : null}
-          {!initialLoading && aggregate !== null && !visibleRevisionDetail && activePane === "outline" ? renderOutlineCanvas() : null}
-          {!initialLoading && aggregate !== null && !visibleRevisionDetail && activePane === "draft" ? renderDraftCanvas() : null}
-          {!initialLoading && activePane === "formal" ? renderFormalCanvas() : null}
+          {!initialLoading && aggregate !== null && !projectVersionDetail && !visibleRevisionDetail && activePane === "outline" ? renderOutlineCanvas() : null}
+          {!initialLoading && aggregate !== null && !projectVersionDetail && !visibleRevisionDetail && activePane === "draft" ? renderDraftCanvas() : null}
+          {!initialLoading && !projectVersionDetail && activePane === "formal" ? renderFormalCanvas() : null}
         </section>
 
-        <aside className="panel short-story-review-rail" aria-label="版本与审核操作">
+        <aside className="panel short-story-review-rail" aria-label="旧版操作区" hidden aria-hidden="true">
           <div className="short-story-review-scroll stack">
             <section className="stack short-story-settings">
               <h2 className="title-sm">作品信息</h2>
@@ -1192,6 +1459,22 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
             {actionError ? <p className="short-story-error" role="alert">{actionError}</p> : null}
             {actionNotice ? <p className="short-story-notice" role="status">{actionNotice}</p> : null}
 
+            {activePane === "outline" && outlineArtifact ? (
+              <ShortStoryOutlineConversation
+                entries={outlineConversationEntries}
+                currentRevision={outlineArtifact.revision}
+                loading={outlineConversationLoading || revisionsLoading}
+                error={outlineConversationError}
+                value={outlineRevisionRequest}
+                canSubmit={actions.canDecideOutline && !outlineDirty && !interactionLocked}
+                submitting={interactionLocked}
+                readOnlyReason={outlineConversationReadOnlyReason}
+                onChange={setOutlineRevisionRequest}
+                onSubmit={submitOutlineRevisionRequest}
+                onSelectRevision={(revision) => void loadRevision(revision)}
+              />
+            ) : null}
+
             <section className="stack short-story-actions">
               <h2 className="title-sm">当前操作</h2>
               {aggregate === null ? (
@@ -1214,21 +1497,8 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
 
                   {outlineArtifact && activePane === "outline" && outlineArtifact.status === "awaiting_user" ? (
                     <>
-                      <textarea
-                        className="textarea"
-                        rows={4}
-                        value={outlineRevisionRequest}
-                        placeholder="例如：只修改第 3 节，让冲突更早爆发"
-                        onChange={(event) => setOutlineRevisionRequest(event.target.value)}
-                      />
                       {outlineDirty ? <p className="muted">请先保存直接编辑，才能批准或要求 Agent 返工。</p> : null}
                       <div className="short-story-action-grid">
-                        <button
-                          className="button secondary"
-                          type="button"
-                          disabled={!actions.canDecideOutline || outlineDirty || !outlineRevisionRequest.trim() || interactionLocked}
-                          onClick={() => decideArtifact(outlineArtifact, "revise", outlineRevisionRequest)}
-                        >按要求修改大纲</button>
                         <button
                           className="button primary"
                           type="button"
@@ -1299,7 +1569,7 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
               <section className="stack short-story-history">
                 <div className="short-story-section-toolbar">
                   <h2 className="title-sm">版本历史</h2>
-                  <span className="badge">当前 {outlineArtifact.revision}</span>
+                  <span className="badge">当前{formatShortStoryVersion(outlineArtifact.revision)}</span>
                 </div>
                 {revisionsLoading ? <p className="muted">正在读取版本…</p> : null}
                 {!revisionsLoading && visibleRevisions.length === 0 ? <p className="muted">暂无可查看版本。</p> : null}
@@ -1311,7 +1581,7 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
                     disabled={revisionLoading}
                     onClick={() => loadRevision(revision.revision)}
                   >
-                    <strong>revision {revision.revision}</strong>
+                    <strong>{formatShortStoryVersion(revision.revision)}</strong>
                     <span>{revision.summary || "无修改摘要"}</span>
                     <small>{formatDateTime(revision.createdAt)}</small>
                   </button>
@@ -1324,12 +1594,26 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
                       type="button"
                       disabled={legacyMultiChapter || interactionLocked || outlineDirty}
                       onClick={restoreRevision}
-                    >恢复此版本为新 revision</button>
+                    >恢复此版本为新版本</button>
                   ) : null}
               </section>
             ) : null}
           </div>
         </aside>
+        <ShortStoryChatPane
+          novelId={novel.id}
+          chapterId={currentChapter?.id ?? ""}
+          targetWordCount={targetWordCount}
+          initialSessionId={aggregate?.workflowSession?.id ?? null}
+          references={chatReferences}
+          disabled={legacyMultiChapter || interactionLocked || !currentChapter}
+          onRemoveReference={(reference) => setChatReferences((current) => current.filter((item) => !(
+            item.reference.kind === reference.kind
+            && item.reference.artifactId === reference.artifactId
+            && item.reference.revision === reference.revision
+          )))}
+          onSubmitted={() => void refreshAggregate()}
+        />
       </div>
     </main>
   );

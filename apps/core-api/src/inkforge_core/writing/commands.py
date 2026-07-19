@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Literal, cast
 
 from inkforge_contracts.jobs import AgentJobStatus, WritingJobPayload
 from inkforge_contracts.short_story import (
+    ShortStoryChapterDraft,
     ShortStoryOutlineDraft,
+    ShortStoryVersionReference,
     canonical_short_outline_hash,
 )
 from sqlalchemy import and_, func, or_, select
@@ -18,6 +22,8 @@ from ..db.base import utc_now
 from ..db.models import (
     Chapter,
     Novel,
+    ReviewArtifact,
+    ReviewArtifactRevision,
     WritingBible,
     WritingMessage,
     WritingRunCommand,
@@ -25,7 +31,10 @@ from ..db.models import (
     WritingTask,
 )
 from ..errors import ApiError
-from ..short_story_artifacts import latest_short_story_outline_artifact
+from ..short_story_artifacts import (
+    adopted_short_story_outline_revision,
+    exact_short_story_outline_revision,
+)
 from .message_metadata import workflow_message_metadata
 from .records import TaskRecord
 from .recovery import validate_resume_session_binding
@@ -136,6 +145,10 @@ class WritingRunCommandRepository:
                                     task.id,
                                     event_type="user",
                                     content=request.userMessage,
+                                    version_references=cast(
+                                        list[dict[str, object]],
+                                        identity["versionReferences"],
+                                    ),
                                 ),
                             )
                         )
@@ -872,6 +885,7 @@ async def _resolve_start_workflow_identity(
                 bible.targetTotalWordCount if bible is not None else None
             ),
             "source": None,
+            "versionReferences": [],
         }
 
     target = bible.targetTotalWordCount if bible is not None else None
@@ -896,6 +910,18 @@ async def _resolve_start_workflow_identity(
             code="SHORT_STORY_CHAPTER_INVALID",
             message="中短篇必须使用小说创建时的唯一正文承载章节",
         )
+    await _validate_short_story_version_references(
+        session,
+        request.novelId,
+        request.versionReferences,
+    )
+    version_references = await _resolve_named_short_story_version_references(
+        session,
+        request.novelId,
+        request.userMessage,
+        request.versionReferences,
+    )
+    source: dict[str, Any] | None
     if request.operation == "develop_short_outline":
         inspiration = (novel.summary or "").strip()
         if not inspiration:
@@ -904,23 +930,88 @@ async def _resolve_start_workflow_identity(
                 code="SHORT_STORY_INSPIRATION_MISSING",
                 message="中短篇缺少原始灵感",
             )
-        source: dict[str, Any] = {
+        source = {
             "kind": "short_outline_inspiration",
             "originalInspiration": inspiration,
         }
-    else:
-        artifact = await latest_short_story_outline_artifact(
-            session,
-            request.novelId,
+    elif request.operation == "write_short_story":
+        outline_references = [
+            item for item in version_references if item.kind == "outline"
+        ]
+        if len(outline_references) > 1:
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_OUTLINE_SOURCE_AMBIGUOUS",
+                message="生成正文时只能指定一个基线大纲版本",
+            )
+        body_references = [
+            item for item in version_references if item.kind == "body"
+        ]
+        if len(body_references) > 1:
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_BODY_BASE_AMBIGUOUS",
+                message="修改正文时只能指定一个正文基线版本",
+            )
+        body_source: tuple[str, int] | None = None
+        if not outline_references and body_references:
+            body_record = await session.scalar(
+                select(ReviewArtifactRevision).where(
+                    ReviewArtifactRevision.artifactId
+                    == body_references[0].artifactId,
+                    ReviewArtifactRevision.revision == body_references[0].revision,
+                )
+            )
+            if body_record is None:
+                raise ApiError(
+                    status_code=409,
+                    code="SHORT_STORY_VERSION_REFERENCE_CONFLICT",
+                    message="指定的正文基线版本不存在",
+                )
+            try:
+                body_payload = ShortStoryChapterDraft.model_validate_json(
+                    body_record.payloadJson
+                )
+            except (ValueError, TypeError):
+                raise ApiError(
+                    status_code=409,
+                    code="SHORT_STORY_VERSION_REFERENCE_CONFLICT",
+                    message="指定的正文基线版本载荷无效",
+                ) from None
+            body_source = (
+                body_payload.metadata.sourceOutlineArtifactId,
+                body_payload.metadata.sourceOutlineRevision,
+            )
+        selected = (
+            await exact_short_story_outline_revision(
+                session,
+                request.novelId,
+                (
+                    outline_references[0].artifactId
+                    if outline_references
+                    else cast(tuple[str, int], body_source)[0]
+                ),
+                (
+                    outline_references[0].revision
+                    if outline_references
+                    else cast(tuple[str, int], body_source)[1]
+                ),
+            )
+            if outline_references or body_source is not None
+            else await adopted_short_story_outline_revision(
+                session,
+                request.novelId,
+            )
         )
-        if artifact is None or artifact.status != "applied":
+        if selected is None:
             raise ApiError(
                 status_code=409,
                 code="SHORT_STORY_OUTLINE_NOT_APPROVED",
                 message="生成完整正文前必须先批准中短篇大纲",
             )
         try:
-            outline = ShortStoryOutlineDraft.model_validate(json.loads(artifact.payloadJson))
+            artifact, revision = selected
+            outline = ShortStoryOutlineDraft.model_validate(json.loads(revision.payloadJson))
         except (json.JSONDecodeError, ValueError, TypeError):
             raise ApiError(
                 status_code=409,
@@ -930,15 +1021,179 @@ async def _resolve_start_workflow_identity(
         source = {
             "kind": "approved_short_outline",
             "outlineArtifactId": artifact.id,
-            "outlineRevision": artifact.revision,
+            "outlineRevision": revision.revision,
             "outlineHash": canonical_short_outline_hash(outline),
         }
+    else:
+        source = None
     return {
         "workflowKind": "short_medium",
         "operation": request.operation,
         "targetTotalWordCount": target,
         "source": source,
+        "versionReferences": [
+            item.model_dump(mode="json") for item in version_references
+        ],
     }
+
+
+_NAMED_SHORT_STORY_VERSION_PATTERNS = {
+    "outline": re.compile(
+        r"大纲(?:\s*[vV]\s*(\d+)|\s*第\s*(\d+)\s*版|\s*(\d+)\s*版)"
+    ),
+    "body": re.compile(
+        r"(?:正文|整稿)(?:\s*[vV]\s*(\d+)|\s*第\s*(\d+)\s*版|\s*(\d+)\s*版)"
+    ),
+}
+
+
+def _named_short_story_versions(message: str) -> list[tuple[Literal["outline", "body"], int]]:
+    result: list[tuple[Literal["outline", "body"], int]] = []
+    for raw_kind, pattern in _NAMED_SHORT_STORY_VERSION_PATTERNS.items():
+        kind = cast(Literal["outline", "body"], raw_kind)
+        for match in pattern.finditer(message):
+            raw_version = next(value for value in match.groups() if value is not None)
+            value = (kind, int(raw_version))
+            if value not in result:
+                result.append(value)
+    return result
+
+
+async def _resolve_named_short_story_version_references(
+    session: AsyncSession,
+    novel_id: str,
+    message: str,
+    explicit: list[ShortStoryVersionReference],
+) -> list[ShortStoryVersionReference]:
+    named = _named_short_story_versions(message)
+    if not named:
+        return list(explicit)
+    rows = list(
+        (
+            await session.execute(
+                select(ReviewArtifactRevision, ReviewArtifact)
+                .join(
+                    ReviewArtifact,
+                    ReviewArtifact.id == ReviewArtifactRevision.artifactId,
+                )
+                .where(
+                    ReviewArtifact.novelId == novel_id,
+                    ReviewArtifact.kind.in_(("outline_draft", "chapter_draft")),
+                )
+                .order_by(
+                    ReviewArtifactRevision.createdAt,
+                    ReviewArtifactRevision.artifactId,
+                    ReviewArtifactRevision.revision,
+                )
+            )
+        ).all()
+    )
+    counters = {"outline": 0, "body": 0}
+    indexed: dict[tuple[str, int], ShortStoryVersionReference] = {}
+    for revision, artifact in rows:
+        try:
+            raw = json.loads(revision.payloadJson)
+            if artifact.kind == "outline_draft":
+                kind: Literal["outline", "body"] = "outline"
+                outline_payload = ShortStoryOutlineDraft.model_validate(raw)
+                typed: ShortStoryOutlineDraft | ShortStoryChapterDraft = outline_payload
+                version_hash = canonical_short_outline_hash(outline_payload)
+            else:
+                kind = "body"
+                typed = ShortStoryChapterDraft.model_validate(raw)
+                canonical = json.dumps(
+                    typed.model_dump(mode="json"),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                version_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        except (json.JSONDecodeError, ValueError, TypeError):
+            continue
+        counters[kind] += 1
+        indexed[(kind, counters[kind])] = ShortStoryVersionReference(
+            kind=kind,
+            artifactId=artifact.id,
+            revision=revision.revision,
+            hash=version_hash,
+        )
+    result = list(explicit)
+    for key in named:
+        reference = indexed.get(key)
+        if reference is None:
+            label = "大纲" if key[0] == "outline" else "正文"
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_NAMED_VERSION_NOT_FOUND",
+                message=f"你指定的{label} v{key[1]} 不存在，请从左侧版本列表选择",
+            )
+        if reference not in result:
+            result.append(reference)
+    return result
+
+
+async def _validate_short_story_version_references(
+    session: AsyncSession,
+    novel_id: str,
+    references: list[ShortStoryVersionReference],
+) -> None:
+    for reference in references:
+        row = (
+            await session.execute(
+                select(ReviewArtifactRevision, ReviewArtifact)
+                .join(
+                    ReviewArtifact,
+                    ReviewArtifact.id == ReviewArtifactRevision.artifactId,
+                )
+                .where(
+                    ReviewArtifactRevision.artifactId == reference.artifactId,
+                    ReviewArtifactRevision.revision == reference.revision,
+                    ReviewArtifact.novelId == novel_id,
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_VERSION_REFERENCE_CONFLICT",
+                message="指定的中短篇版本不存在",
+            )
+        revision, artifact = cast(
+            tuple[ReviewArtifactRevision, ReviewArtifact], row
+        )
+        try:
+            raw_payload = json.loads(revision.payloadJson)
+            payload = (
+                ShortStoryOutlineDraft.model_validate(raw_payload)
+                if reference.kind == "outline"
+                else ShortStoryChapterDraft.model_validate(raw_payload)
+            )
+        except (json.JSONDecodeError, ValueError, TypeError):
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_VERSION_REFERENCE_CONFLICT",
+                message="指定的中短篇版本载荷无效",
+            ) from None
+        expected_artifact_kind = (
+            "outline_draft" if reference.kind == "outline" else "chapter_draft"
+        )
+        canonical = json.dumps(
+            payload.model_dump(mode="json"),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        actual_hash = (
+            canonical_short_outline_hash(payload)
+            if isinstance(payload, ShortStoryOutlineDraft)
+            else hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        )
+        if artifact.kind != expected_artifact_kind or actual_hash != reference.hash:
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_VERSION_REFERENCE_CONFLICT",
+                message="指定的中短篇版本类型或内容校验失败",
+            )
 
 
 async def _latest_workflow_identity(
@@ -951,11 +1206,12 @@ async def _latest_workflow_identity(
         .order_by(WritingRunCommand.createdAt.desc(), WritingRunCommand.id.desc())
         .limit(1)
     )
-    legacy = {
+    legacy: dict[str, Any] = {
         "workflowKind": "long_serial",
         "operation": None,
         "targetTotalWordCount": None,
         "source": None,
+        "versionReferences": [],
     }
     if serialized is None:
         return legacy
@@ -988,6 +1244,9 @@ async def _latest_workflow_identity(
         "operation": parsed.operation,
         "targetTotalWordCount": parsed.targetTotalWordCount,
         "source": parsed.source.model_dump(mode="json") if parsed.source is not None else None,
+        "versionReferences": [
+            item.model_dump(mode="json") for item in parsed.versionReferences
+        ],
     }
 
 

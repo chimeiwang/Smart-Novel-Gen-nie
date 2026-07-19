@@ -82,6 +82,13 @@ class ArtifactHydrationPort(Protocol):
         run_artifact: Mapping[str, Any],
     ) -> None: ...
 
+    def hydrate_short_story_revision_base(
+        self,
+        resource: RunResource,
+        state: Mapping[str, Any],
+        project_artifact: Mapping[str, Any],
+    ) -> None: ...
+
 
 class WritingJobHandler:
     def __init__(
@@ -120,7 +127,20 @@ class WritingJobHandler:
                 ),
             )
         context = await self._core.call_tool(resource, "写作", "get_writing_context", {})
-        _validate_job_context_identity(job, payload, context)
+        try:
+            _validate_job_context_identity(job, payload, context)
+        except ValueError as exc:
+            message = str(exc) or "写作运行准备失败"
+            self._record_state(job.runId, "准备异常", {"错误": message})
+            self._finish_log(job.runId, "错误")
+            await self._core.fail(
+                resource,
+                sequence=1,
+                code="AGENT_PREPARATION_FAILED",
+                message=message,
+                recoverable=True,
+            )
+            raise NonRetryableJobError("写作运行失败已上报核心服务") from exc
         current_job_state = _current_job_snapshot(job, context)
         owned_artifact_id: str | None = None
         if current_job_state is not None:
@@ -401,15 +421,24 @@ class WritingJobHandler:
             raise RuntimeError("ACTIVE_ARTIFACT_CONTEXT_MISSING：Core 缺少规划上下文")
         if state.get("explicitOperation") == "write_short_story":
             run_artifact = planning.get("shortStoryRunArtifact")
+            project_artifact = planning.get("shortStoryProjectBodyArtifact")
+            if isinstance(run_artifact, dict) and run_artifact.get("id") == artifact_id:
+                self._artifacts.hydrate_short_story(resource, state, run_artifact)
+                return artifact_id
             if (
-                not isinstance(run_artifact, dict)
-                or run_artifact.get("id") != artifact_id
+                isinstance(project_artifact, dict)
+                and project_artifact.get("id") == artifact_id
             ):
+                self._artifacts.hydrate_short_story_revision_base(
+                    resource,
+                    state,
+                    project_artifact,
+                )
+                return artifact_id
+            else:
                 raise RuntimeError(
                     "ACTIVE_ARTIFACT_CONTEXT_MISSING：当前恢复状态缺少匹配的中短篇正文草案"
                 )
-            self._artifacts.hydrate_short_story(resource, state, run_artifact)
-            return artifact_id
         active_artifact = planning.get("activeArtifact")
         if (
             not isinstance(active_artifact, dict)
@@ -507,6 +536,17 @@ class WritingJobHandler:
         )
         _apply_planning_history(state, planning)
         _attach_short_story_run_identity(state, planning, payload)
+        if payload.operation == "develop_short_outline":
+            outline_authority = planning.get("activeArtifact")
+            if (
+                isinstance(outline_authority, Mapping)
+                and outline_authority.get("kind") == "outline_draft"
+                and isinstance(outline_authority.get("id"), str)
+                and outline_authority.get("id")
+            ):
+                state["activeArtifactId"] = str(outline_authority["id"])
+                state["artifactIteration"] = 1
+                state["artifactStatus"] = "revision_requested"
         if payload.operation is not None:
             state["currentOperation"] = _explicit_operation(
                 payload.operation,
@@ -607,6 +647,20 @@ def _attach_short_story_run_identity(
         return
     run_artifact = planning.get("shortStoryRunArtifact")
     if run_artifact is None:
+        project_artifact = planning.get("shortStoryProjectBodyArtifact")
+        if project_artifact is None:
+            return
+        if not isinstance(project_artifact, Mapping):
+            raise ValueError(
+                "SHORT_STORY_PROJECT_BODY_INVALID：Core 项目正文版本投影无效"
+            )
+        artifact_id = project_artifact.get("id")
+        if not isinstance(artifact_id, str) or not artifact_id:
+            raise ValueError(
+                "SHORT_STORY_PROJECT_BODY_INVALID：Core 项目正文版本身份无效"
+            )
+        state["activeArtifactId"] = artifact_id
+        state["artifactStatus"] = "revision_requested"
         return
     if not isinstance(run_artifact, Mapping):
         raise ValueError(
@@ -718,6 +772,9 @@ def _validate_job_context_identity(
         "source": (
             payload.source.model_dump(mode="json") if payload.source is not None else None
         ),
+        "versionReferences": [
+            item.model_dump(mode="json") for item in payload.versionReferences
+        ],
     }
     for key, expected in identity_values.items():
         actual = planning.get(key)

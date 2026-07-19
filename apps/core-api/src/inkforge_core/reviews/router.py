@@ -18,6 +18,8 @@ from .schemas import (
     ReviewArtifactRevisionSummary,
     SaveShortStoryOutlineRequest,
     ShortStoryArtifactsResponse,
+    ShortStoryVersionDetail,
+    ShortStoryVersionListItem,
 )
 
 router = APIRouter(tags=["待审核草案"])
@@ -68,6 +70,32 @@ async def get_short_story_artifacts(
     repository: Repository,
 ) -> ShortStoryArtifactsResponse:
     return await repository.get_short_story_artifacts(user.id, novel_id)
+
+
+@router.get(
+    "/novels/{novel_id}/short-story/versions",
+    response_model=list[ShortStoryVersionListItem],
+)
+async def list_short_story_versions(
+    novel_id: str,
+    user: User,
+    repository: Repository,
+) -> list[ShortStoryVersionListItem]:
+    return await repository.list_short_story_versions(user.id, novel_id)
+
+
+@router.get(
+    "/novels/{novel_id}/short-story/versions/{kind}/{revision}",
+    response_model=ShortStoryVersionDetail,
+)
+async def get_short_story_version(
+    novel_id: str,
+    kind: str,
+    revision: int,
+    user: User,
+    repository: Repository,
+) -> ShortStoryVersionDetail:
+    return await repository.get_short_story_version(user.id, novel_id, kind, revision)
 
 
 @router.get("/review-artifacts/{artifact_id}", response_model=ReviewArtifactResponse)

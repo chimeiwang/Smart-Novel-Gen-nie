@@ -9,6 +9,7 @@ from ..operations.contracts import CreativeOperationKind
 from ..operations.definitions import OPERATION_DEFINITIONS, OperationDefinition
 
 AgentExecutionMode = Literal["primary", "reviewer", "reviser", "quality"]
+WorkflowKind = Literal["long_serial", "short_medium"]
 QUALITY_AGENT_ID: AgentId = "校验"
 
 _REVIEWER_TOOLS = frozenset({"submit_evaluation"})
@@ -26,6 +27,7 @@ class ExecutionToolContract:
 def resolve_execution_contract(
     mode: AgentExecutionMode,
     operation_kind: CreativeOperationKind | None,
+    workflow_kind: WorkflowKind = "long_serial",
 ) -> ExecutionToolContract:
     if mode == "quality":
         if operation_kind is not None:
@@ -40,6 +42,8 @@ def resolve_execution_contract(
         )
     if mode == "reviewer":
         return ExecutionToolContract(mode, operation, _REVIEWER_TOOLS, _REVIEWER_TOOLS)
+    if workflow_kind == "short_medium" and operation_kind == "answer_question":
+        return ExecutionToolContract(mode, operation, frozenset(), frozenset())
     return ExecutionToolContract(
         mode,
         operation,

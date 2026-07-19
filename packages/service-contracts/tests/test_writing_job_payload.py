@@ -130,3 +130,30 @@ def test_long_job_rejects_removed_sync_lore_operation() -> None:
                 "source": None,
             }
         )
+
+
+def test_short_story_discussion_accepts_exact_version_references_without_source() -> None:
+    payload = WritingJobPayload.model_validate(
+        {
+            "version": 1,
+            "resume": False,
+            "chapterId": "chapter-1",
+            "writingSessionId": "session-1",
+            "resumeInput": None,
+            "workflowKind": "short_medium",
+            "operation": "answer_question",
+            "targetTotalWordCount": None,
+            "source": None,
+            "versionReferences": [
+                {
+                    "kind": "outline",
+                    "artifactId": "outline-1",
+                    "revision": 2,
+                    "hash": "a" * 64,
+                }
+            ],
+        }
+    )
+
+    assert payload.operation == "answer_question"
+    assert payload.versionReferences[0].revision == 2

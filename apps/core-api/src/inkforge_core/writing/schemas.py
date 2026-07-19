@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal, Self
 
+from inkforge_contracts import ShortStoryVersionReference
 from inkforge_contracts.runs import CreativeOperationKind, WritingWorkflowKind
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
@@ -107,12 +108,14 @@ class StartWritingRunRequest(WritingSchema):
     targetWordCount: int | None = Field(default=None, ge=1, le=10_000_000)
     selectedAgents: list[CoreAgentId] = Field(default_factory=_default_agents)
     userMessage: str = Field(min_length=1)
+    versionReferences: list[ShortStoryVersionReference] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_workflow_operation(self) -> Self:
         short_operations = {"develop_short_outline", "write_short_story"}
+        short_allowed_operations = short_operations | {"answer_question"}
         if self.workflowKind == "short_medium":
-            if self.operation not in short_operations:
+            if self.operation not in short_allowed_operations:
                 raise ValueError("中短篇必须指定专用 Operation")
             if self.targetWordCount is not None and not (
                 6_000 <= self.targetWordCount <= 80_000
@@ -126,6 +129,8 @@ class StartWritingRunRequest(WritingSchema):
             if "targetWordCount" in self.model_fields_set:
                 raise ValueError("长篇章节目标字数不能为 null")
             self.targetWordCount = 4000
+        if self.workflowKind == "long_serial" and self.versionReferences:
+            raise ValueError("长篇不能携带中短篇版本引用")
         return self
 
 
