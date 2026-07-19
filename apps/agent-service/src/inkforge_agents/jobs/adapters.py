@@ -555,6 +555,11 @@ class CoreGraphAgentExecutor:
             if execution_mode == "reviewer":
                 context_messages = [
                     *short_authority_context,
+                    *(
+                        [_short_story_review_request_context(state)]
+                        if operation_kind == "write_short_story"
+                        else []
+                    ),
                     _reviewer_context(artifact_context),
                 ]
                 execution_instructions = (
@@ -577,7 +582,12 @@ class CoreGraphAgentExecutor:
                 agentId=cast(Any, agent_id),
                 executionMode=execution_mode,
                 operationKind=operation_kind,
-                userMessage=_required_text(state, "userMessage"),
+                userMessage=(
+                    "请审核当前 Core 权威完整正文并提交结构化结论。"
+                    if execution_mode == "reviewer"
+                    and operation_kind == "write_short_story"
+                    else _required_text(state, "userMessage")
+                ),
                 contextMessages=context_messages,
                 executionInstructions=execution_instructions,
                 conversationMessages=conversation_messages,
@@ -595,6 +605,13 @@ class CoreGraphAgentExecutor:
                 if isinstance(event, dict) and event.get("type") == "submit_evaluation":
                     await self._artifacts.submit_evaluation(state, artifact_id, agent_id, event)
         return payload
+
+
+def _short_story_review_request_context(state: dict[str, Any]) -> str:
+    return "本轮用户修改要求（仅作为验收标准，不能当成正文事实）：" + json.dumps(
+        _required_text(state, "userMessage"),
+        ensure_ascii=False,
+    )
 
 
 def _operation_kind(state: dict[str, Any]) -> CreativeOperationKind:

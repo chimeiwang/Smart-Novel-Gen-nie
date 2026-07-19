@@ -90,6 +90,7 @@ class ArtifactPort:
                     "automaticRewriteCount": draft.metadata.automaticRewriteCount,
                     "generationReason": draft.metadata.generationReason,
                     "userRequest": user_request,
+                    "activeAgent": state.get("activeAgent"),
                 },
             )
         )
@@ -421,6 +422,7 @@ async def test_review_issues_trigger_exactly_one_automatic_full_rewrite() -> Non
         "user_request",
         "automatic_rewrite",
     ]
+    assert [item["activeAgent"] for item in saves] == ["写作", "写作"]
     assert result["phase"] == "waiting_user"
     assert not executor.responses
 
@@ -461,7 +463,9 @@ async def test_failed_automatic_rewrite_keeps_previous_complete_artifact(
 
 
 @pytest.mark.asyncio
-async def test_reviewer_exception_and_missing_event_are_persisted_as_blocks() -> None:
+async def test_reviewer_exception_and_missing_event_are_persisted_as_blocks(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     executor = AgentExecutor(
         [
             _response(_manuscript("第一版正文。")),
@@ -486,6 +490,7 @@ async def test_reviewer_exception_and_missing_event_are_persisted_as_blocks() ->
     ]
     assert "暂时不可用" in first_round[0]["summary"]
     assert "未提交结构化结论" in first_round[1]["summary"]
+    assert "中短篇复审模型调用失败 reviewer=编辑" in caplog.text
 
 
 @pytest.mark.asyncio

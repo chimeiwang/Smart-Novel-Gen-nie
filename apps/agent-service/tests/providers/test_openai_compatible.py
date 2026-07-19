@@ -13,13 +13,22 @@ class StubModel:
     def __init__(self, response: AIMessage) -> None:
         self._response = response
         self.bound_tools: list[dict[str, object]] = []
+        self.tool_choice: str | None = None
+        self.invoke_kwargs: dict[str, object] = {}
 
-    def bind_tools(self, tools: list[dict[str, object]]) -> StubModel:
+    def bind_tools(
+        self,
+        tools: list[dict[str, object]],
+        *,
+        tool_choice: str | None = None,
+    ) -> StubModel:
         self.bound_tools = tools
+        self.tool_choice = tool_choice
         return self
 
     async def ainvoke(self, messages: object, **kwargs: object) -> AIMessage:
-        del messages, kwargs
+        del messages
+        self.invoke_kwargs = kwargs
         return self._response
 
 
@@ -96,6 +105,29 @@ async def test_complete_turn_passes_object_schema_to_provider() -> None:
     model = provider._model  # type: ignore[attr-defined]
     parameters = model.bound_tools[0]["function"]["parameters"]
     assert parameters["type"] == "object"
+
+
+@pytest.mark.asyncio
+async def test_complete_turn_forces_explicit_required_tool() -> None:
+    provider = provider_with_response(
+        AIMessage(content="", response_metadata={"finish_reason": "tool_calls"})
+    )
+    tool = build_default_registry().require("submit_evaluation").as_model_tool()
+
+    await provider.complete_turn(
+        ModelTurnRequest(
+            messages=[{"role": "user", "content": "复审"}],
+            tools=[tool],
+            requiredToolName="submit_evaluation",
+            maxOutputTokens=128,
+        )
+    )
+
+    model = provider._model  # type: ignore[attr-defined]
+    assert model.tool_choice == "submit_evaluation"
+    assert model.invoke_kwargs["extra_body"] == {
+        "thinking": {"type": "disabled"}
+    }
 
 
 @pytest.mark.asyncio

@@ -85,6 +85,7 @@ class AgentRunner:
             context=request.toolContext,
             max_iterations=request.maxIterations or definition.maxIterations,
             terminal_control_tools=execution.terminalControlTools,
+            require_terminal_tool=request.executionMode in {"reviewer", "quality"},
             model_context=ModelCallContext(
                 userId=request.toolContext.userId,
                 novelId=request.toolContext.novelId,

@@ -341,6 +341,39 @@ async def test_current_short_story_failure_callback_restores_artifact_for_user_d
 
 
 @pytest.mark.asyncio
+async def test_dispatch_terminal_failure_restores_revised_outline_for_retry(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    await _seed_failure_target(
+        session_factory,
+        kind="outline_draft",
+        status="draft",
+        short_medium=True,
+        command_artifact_id="artifact-1",
+        snapshot_active_artifact_id="artifact-1",
+    )
+
+    record = await WritingRunCommandRepository(
+        session_factory
+    ).settle_dispatch_terminal("command-1", "failed")
+
+    async with session_factory() as session:
+        artifact = await session.get(ReviewArtifact, "artifact-1")
+        task = await session.get(WritingTask, "task-1")
+
+    assert record.status == "failed"
+    assert artifact is not None and artifact.status == "awaiting_user"
+    assert artifact.revision == 4
+    assert task is not None and task.phase == "awaiting_user_review"
+    assert task.graphStateJson is not None
+    snapshot = json.loads(task.graphStateJson)
+    assert snapshot["phase"] == "awaiting_user_review"
+    assert snapshot["activeArtifactId"] == "artifact-1"
+    assert snapshot["artifactStatus"] == "awaiting_user"
+    assert snapshot.get("errorMessage") is None
+
+
+@pytest.mark.asyncio
 async def test_recovered_snapshot_advances_past_failure_event_sequence(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> None:

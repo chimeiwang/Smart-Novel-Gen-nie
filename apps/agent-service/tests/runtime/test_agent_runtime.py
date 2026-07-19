@@ -198,6 +198,75 @@ async def test_runtime_captures_control_events_in_model_order() -> None:
 
 
 @pytest.mark.asyncio
+async def test_runtime_requires_the_only_terminal_control_tool() -> None:
+    provider = ScriptedProvider(
+        [
+            turn(
+                "",
+                (
+                    "call-1",
+                    "submit_evaluation",
+                    {
+                        "artifactKey": "task-1:write_chapter",
+                        "verdict": "pass",
+                        "summary": "复审通过",
+                    },
+                ),
+            )
+        ]
+    )
+    registry = build_default_registry(RecordingGateway())
+    runtime = make_agent_runtime(ModelRuntime(provider), registry)
+
+    await runtime.run(
+        messages=[{"role": "user", "content": "复审"}],
+        exposed_tools=registry.for_agent(
+            agent_id="校验",
+            capabilities={"control.evaluation"},
+        ),
+        context=context("校验"),
+        terminal_control_tools={"submit_evaluation"},
+        require_terminal_tool=True,
+    )
+
+    assert provider.requests[0].requiredToolName == "submit_evaluation"
+
+
+@pytest.mark.asyncio
+async def test_runtime_does_not_force_terminal_tool_without_explicit_contract() -> None:
+    provider = ScriptedProvider(
+        [
+            turn(
+                "",
+                (
+                    "call-1",
+                    "submit_evaluation",
+                    {
+                        "artifactKey": "task-1:write_chapter",
+                        "verdict": "pass",
+                        "summary": "复审通过",
+                    },
+                ),
+            )
+        ]
+    )
+    registry = build_default_registry(RecordingGateway())
+    runtime = make_agent_runtime(ModelRuntime(provider), registry)
+
+    await runtime.run(
+        messages=[{"role": "user", "content": "普通创作"}],
+        exposed_tools=registry.for_agent(
+            agent_id="校验",
+            capabilities={"control.evaluation"},
+        ),
+        context=context("校验"),
+        terminal_control_tools={"submit_evaluation"},
+    )
+
+    assert provider.requests[0].requiredToolName is None
+
+
+@pytest.mark.asyncio
 async def test_runtime_constrains_update_builder_lifecycle() -> None:
     provider = ScriptedProvider(
         [

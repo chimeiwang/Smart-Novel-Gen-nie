@@ -1,8 +1,15 @@
 from __future__ import annotations
 
-from typing import Literal, Protocol
+from typing import Literal, Protocol, Self
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, NonNegativeInt
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    NonNegativeInt,
+    model_validator,
+)
 
 ModelFinishReason = Literal[
     "stop",
@@ -44,7 +51,16 @@ class ModelTurnRequest(BaseModel):
 
     messages: list[ModelMessage]
     tools: list[ModelTool]
+    requiredToolName: str | None = None
     maxOutputTokens: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def validate_required_tool(self) -> Self:
+        if self.requiredToolName is not None and self.requiredToolName not in {
+            tool.name for tool in self.tools
+        }:
+            raise ValueError("requiredToolName 必须指向当前模型请求已暴露的工具")
+        return self
 
 
 class ModelUsage(BaseModel):

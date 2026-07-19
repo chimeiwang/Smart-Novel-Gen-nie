@@ -36,7 +36,10 @@ from .schemas import (
     StartWritingRunRequest,
     WritingRunResponse,
 )
-from .tasks import mark_task_failed_state
+from .tasks import (
+    mark_task_failed_state,
+    restore_short_story_artifact_after_failure,
+)
 
 WritingCommandKind = Literal["start", "resume", "artifact_decision"]
 WritingCommandStatus = Literal["pending", "submitted", "processing", "succeeded", "failed"]
@@ -597,8 +600,14 @@ class WritingRunCommandRepository:
                 command.lastError = None if task.phase == "completed" else code
                 if command.resultJson is None:
                     command.resultJson = _dump_json({"code": code, "agentStatus": agent_status})
-                if task.phase not in {"completed", "error"}:
-                    mark_task_failed_state(task, code)
+                if task.phase != "completed":
+                    recovered = await restore_short_story_artifact_after_failure(
+                        session,
+                        task,
+                        command,
+                    )
+                    if not recovered and task.phase != "error":
+                        mark_task_failed_state(task, code)
                 await session.flush()
                 return _command_record(command, task, owner_id)
 

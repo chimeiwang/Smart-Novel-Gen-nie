@@ -635,10 +635,11 @@ class WritingTaskRepository:
                         already_applied=accepted,
                         rejection_code=None if accepted else STATE_NOOP_CODE,
                     )
-                recovered = await _restore_short_story_artifact_after_failure(
+                recovered = await restore_short_story_artifact_after_failure(
                     session,
-                    target,
-                    sequence,
+                    target.task,
+                    target.command,
+                    sequence=sequence,
                 )
                 if not recovered:
                     mark_task_failed_state(target.task, code)
@@ -1010,12 +1011,13 @@ def _persisted_event_sequence(task: WritingTask) -> int:
     return cast(int, value)
 
 
-async def _restore_short_story_artifact_after_failure(
+async def restore_short_story_artifact_after_failure(
     session: AsyncSession,
-    target: _CallbackTarget,
-    sequence: int,
+    task: WritingTask,
+    command: WritingRunCommand | None,
+    *,
+    sequence: int | None = None,
 ) -> bool:
-    command = target.command
     if command is None:
         return False
     try:
@@ -1032,11 +1034,11 @@ async def _restore_short_story_artifact_after_failure(
     else:
         return False
     base_conditions = [
-        ReviewArtifact.taskId == target.task.id,
+        ReviewArtifact.taskId == task.id,
         ReviewArtifact.kind == expected_kind,
         ReviewArtifact.status.in_(("draft", "under_review", "awaiting_user")),
     ]
-    exact_artifact_id = _failure_recovery_artifact_id(target.task, command)
+    exact_artifact_id = _failure_recovery_artifact_id(task, command)
     if command.kind == "artifact_decision" and exact_artifact_id is None:
         return False
     if exact_artifact_id is not None:
@@ -1063,18 +1065,18 @@ async def _restore_short_story_artifact_after_failure(
         return False
     serialized = await _recoverable_short_story_snapshot(
         session,
-        target.task,
+        task,
         command,
         command_payload,
         artifact.id,
-        sequence,
+        _persisted_event_sequence(task) if sequence is None else sequence,
     )
     if serialized is None:
         return False
     artifact.status = "awaiting_user"
-    target.task.graphStateJson = serialized
-    target.task.phase = "awaiting_user_review"
-    target.task.updatedAt = utc_now()
+    task.graphStateJson = serialized
+    task.phase = "awaiting_user_review"
+    task.updatedAt = utc_now()
     return True
 
 

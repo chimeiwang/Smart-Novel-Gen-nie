@@ -64,6 +64,9 @@ class OpenAICompatibleProvider:
     async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
         model: Any = self._model
         if request.tools:
+            bind_kwargs: dict[str, str] = {}
+            if request.requiredToolName is not None:
+                bind_kwargs["tool_choice"] = request.requiredToolName
             model = model.bind_tools(
                 [
                     {
@@ -75,7 +78,8 @@ class OpenAICompatibleProvider:
                         },
                     }
                     for tool in request.tools
-                ]
+                ],
+                **bind_kwargs,
             )
         messages: list[BaseMessage] = []
         for message in request.messages:
@@ -108,12 +112,14 @@ class OpenAICompatibleProvider:
                 )
             else:
                 raise ValueError("工具消息缺少 toolCallId")
+        invoke_kwargs: dict[str, Any] = {
+            "max_tokens": request.maxOutputTokens,
+        }
+        if request.requiredToolName is not None:
+            invoke_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
         response = cast(
             AIMessage,
-            await model.ainvoke(
-                messages,
-                max_tokens=request.maxOutputTokens,
-            ),
+            await model.ainvoke(messages, **invoke_kwargs),
         )
         if not isinstance(response.content, str):
             raise ValueError("模型返回了不支持的非文本可见内容")

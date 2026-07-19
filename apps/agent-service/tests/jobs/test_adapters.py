@@ -605,7 +605,7 @@ async def test_short_story_reviewers_receive_same_revision_with_separate_scopes(
         "chapterId": "chapter-1",
         "activeArtifactId": "artifact-story",
         "currentOperation": {"kind": "write_short_story", "primaryAgent": "写作"},
-        "userMessage": "审核完整正文",
+        "userMessage": "删除结尾后的重复解释段落",
         "contextMessages": ["中短篇整稿权威上下文：批准大纲、锚点和必要设定"],
         "shortStoryReviews": [
             {
@@ -646,6 +646,8 @@ async def test_short_story_reviewers_receive_same_revision_with_separate_scopes(
     editor, validator = runner.requests
     assert editor.contextMessages == validator.contextMessages
     assert "中短篇整稿权威上下文" in editor.contextMessages[0]
+    assert "仅作为验收标准" in editor.contextMessages[-2]
+    assert "删除结尾后的重复解释段落" in editor.contextMessages[-2]
     assert "完整中短篇正文" in editor.contextMessages[-1]
     assert "这条编辑结论不能进入校验上下文" not in validator.contextMessages[0]
     assert "结构、节奏、高潮和结局兑现" in "\n".join(editor.executionInstructions)
@@ -653,6 +655,11 @@ async def test_short_story_reviewers_receive_same_revision_with_separate_scopes(
         validator.executionInstructions
     )
     assert editor.maxIterations == validator.maxIterations == 1
+    assert (
+        editor.userMessage
+        == validator.userMessage
+        == "请审核当前 Core 权威完整正文并提交结构化结论。"
+    )
 
 
 @pytest.mark.asyncio

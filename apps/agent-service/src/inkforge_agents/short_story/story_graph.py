@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -25,6 +26,7 @@ _COMPLETE_OUTPUT = re.compile(
     re.DOTALL,
 )
 _REVIEWERS: tuple[AgentId, AgentId] = ("编辑", "校验")
+logger = logging.getLogger(__name__)
 
 
 class ShortStoryAgentExecutorPort(Protocol):
@@ -234,7 +236,7 @@ def build_short_story_graph(
             )
         content = extract_complete_short_story(str(turn.get("visibleContent", "")))
         draft = _build_draft(
-            state,
+            generation_state,
             content,
             automatic_rewrite_count=cast(Literal[0, 1], automatic_count),
             generation_reason=cast(
@@ -250,7 +252,7 @@ def build_short_story_graph(
             else None
         )
         saved_id = await dependencies.artifacts.save_short_story(
-            dict(state), draft, user_request=user_request
+            generation_state, draft, user_request=user_request
         )
         authority = dependencies.artifacts.review_context(saved_id)
         revision = _required_positive_int(authority, "revision")
@@ -395,6 +397,7 @@ async def _run_reviewer(
             operation_kind="write_short_story",
         )
     except Exception:
+        logger.exception("中短篇复审模型调用失败 reviewer=%s", reviewer)
         event = {
             "type": "submit_evaluation",
             "verdict": "block",
