@@ -14,7 +14,12 @@ class GraphState(TypedDict, total=False):
     userId: str
     novelId: str
     chapterId: str
-    targetWordCount: int
+    targetWordCount: int | None
+    workflowKind: Literal["long_serial", "short_medium"]
+    explicitOperation: str | None
+    commandId: str
+    targetTotalWordCount: int | None
+    commandSource: dict[str, Any] | None
     phase: Literal["idle", "active", "waiting_user", "completed", "error"]
     userMessage: str
     currentOperation: dict[str, Any] | None
@@ -37,6 +42,13 @@ class GraphState(TypedDict, total=False):
     errorMessage: str | None
     finalResponse: str
     eventSequence: int
+    shortStoryDecision: str | None
+    shortStoryNeedsGeneration: bool
+    shortStoryAutomaticRewriteCount: int
+    shortStoryGenerationReason: str | None
+    shortStoryUserRequest: str | None
+    shortStoryArtifactRevision: int | None
+    shortStoryReviews: list[dict[str, Any]]
 
 
 def create_initial_state(
@@ -46,7 +58,12 @@ def create_initial_state(
     novel_id: str,
     chapter_id: str,
     user_message: str,
-    target_word_count: int = 4000,
+    target_word_count: int | None = 4000,
+    workflow_kind: Literal["long_serial", "short_medium"] = "long_serial",
+    explicit_operation: str | None = None,
+    command_id: str = "legacy-command",
+    target_total_word_count: int | None = None,
+    command_source: dict[str, Any] | None = None,
 ) -> GraphState:
     return GraphState(
         taskId=task_id,
@@ -54,6 +71,11 @@ def create_initial_state(
         novelId=novel_id,
         chapterId=chapter_id,
         targetWordCount=target_word_count,
+        workflowKind=workflow_kind,
+        explicitOperation=explicit_operation,
+        commandId=command_id,
+        targetTotalWordCount=target_total_word_count,
+        commandSource=command_source,
         phase="idle",
         userMessage=user_message,
         currentOperation=None,

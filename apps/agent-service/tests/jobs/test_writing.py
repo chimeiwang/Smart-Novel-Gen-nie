@@ -73,6 +73,10 @@ class Graph:
 class ArtifactHydration:
     def __init__(self) -> None:
         self.hydrated: list[tuple[Any, dict[str, Any], dict[str, Any]]] = []
+        self.short_hydrated: list[tuple[Any, dict[str, Any], dict[str, Any]]] = []
+        self.project_body_hydrated: list[
+            tuple[Any, dict[str, Any], dict[str, Any]]
+        ] = []
         self.released: list[tuple[str, Any]] = []
 
     def hydrate(
@@ -85,6 +89,22 @@ class ArtifactHydration:
 
     def release(self, artifact_id: str, resource: Any) -> None:
         self.released.append((artifact_id, resource))
+
+    def hydrate_short_story(
+        self,
+        resource: Any,
+        state: dict[str, Any],
+        run_artifact: dict[str, Any],
+    ) -> None:
+        self.short_hydrated.append((resource, state, run_artifact))
+
+    def hydrate_short_story_revision_base(
+        self,
+        resource: Any,
+        state: dict[str, Any],
+        project_artifact: dict[str, Any],
+    ) -> None:
+        self.project_body_hydrated.append((resource, state, project_artifact))
 
 
 def _active_artifact() -> dict[str, Any]:
@@ -121,7 +141,16 @@ class WorkflowLog:
         self.entries.append(("结束", (run_id, status)))
 
 
-def _job(*, resume: bool = False, resume_input: dict[str, Any] | None = None) -> QueueJob:
+def _job(
+    *,
+    resume: bool = False,
+    resume_input: dict[str, Any] | None = None,
+    workflow_kind: str = "long_serial",
+    operation: str | None = None,
+    target_total_word_count: int | None = None,
+    source: dict[str, Any] | None = None,
+    version_references: list[dict[str, Any]] | None = None,
+) -> QueueJob:
     return QueueJob(
         jobId="job-1",
         kind="writing",
@@ -131,10 +160,16 @@ def _job(*, resume: bool = False, resume_input: dict[str, Any] | None = None) ->
         userId="user-1",
         priority=10,
         payload={
+            "version": 1,
             "resume": resume,
             "chapterId": "chapter-1",
             "writingSessionId": "session-1",
             "resumeInput": resume_input,
+            "workflowKind": workflow_kind,
+            "operation": operation,
+            "targetTotalWordCount": target_total_word_count,
+            "source": source,
+            "versionReferences": version_references or [],
         },
         createdAt=datetime.now(UTC),
     )
@@ -272,6 +307,578 @@ async def test_resume_writing_job_uses_flat_snapshot_and_continues_sequence() ->
     assert artifacts.hydrated[0][0].jobId == "job-1"
     assert artifacts.hydrated[0][2]["id"] == "artifact-1"
     assert [item[0] for item in artifacts.released] == ["artifact-1"]
+
+
+def _short_context(
+    *,
+    operation: str = "develop_short_outline",
+    target_total_word_count: int | None = 6000,
+    compatibility_task_word_count: int | None = 6000,
+) -> dict[str, Any]:
+    source: dict[str, Any] = {
+        "kind": "short_outline_inspiration",
+        "originalInspiration": "城市每天忘记一个人",
+    }
+    return {
+        "workspace": {
+            "writingBible": {
+                "storyLengthProfile": "short_medium",
+                "targetTotalWordCount": target_total_word_count,
+            }
+        },
+        "planning": {
+            "taskId": "task-1",
+            "commandId": "job-1",
+            "novelId": "novel-1",
+            "chapterId": "chapter-1",
+            "targetWordCount": compatibility_task_word_count,
+            "workflowKind": "short_medium",
+            "operation": operation,
+            "targetTotalWordCount": target_total_word_count,
+            "source": source,
+            "versionReferences": [],
+            "conversationHistory": [],
+            "userMessage": "根据灵感生成大纲",
+            "shortStoryContext": {
+                "referencedVersions": [],
+                "directEdit": None,
+                "revisionRequest": "根据灵感生成大纲",
+                "anchors": None,
+                "currentOutline": None,
+                "originalInspiration": "城市每天忘记一个人",
+                "recentConversation": [],
+            },
+            "graphState": None,
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_short_discussion_uses_operation_graph_without_creating_artifact() -> None:
+    context = _short_context(operation="answer_question", target_total_word_count=None)
+    context["planning"]["source"] = None
+    operation = Graph({"phase": "completed", "finalResponse": "第二版结尾更克制。"})
+    handler = WritingJobHandler(
+        CoreClient(context),
+        parent_graph=Graph({}),
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
+
+    await handler(
+        _job(
+            workflow_kind="short_medium",
+            operation="answer_question",
+            target_total_word_count=None,
+            source=None,
+        )
+    )
+
+    assert operation.inputs[0]["currentOperation"]["kind"] == "answer_question"
+    assert operation.inputs[0]["workflowKind"] == "short_medium"
+
+
+@pytest.mark.asyncio
+async def test_short_version_reference_identity_mismatch_fails_before_graph() -> None:
+    context = _short_context(operation="answer_question", target_total_word_count=None)
+    context["planning"]["source"] = None
+    reference = {
+        "kind": "outline",
+        "artifactId": "outline-1",
+        "revision": 2,
+        "hash": "a" * 64,
+    }
+    operation = Graph({})
+    core = CoreClient(context)
+    handler = WritingJobHandler(
+        core,
+        parent_graph=Graph({}),
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
+
+    with pytest.raises(NonRetryableJobError, match="写作运行失败已上报核心服务"):
+        await handler(
+            _job(
+                workflow_kind="short_medium",
+                operation="answer_question",
+                target_total_word_count=None,
+                source=None,
+                version_references=[reference],
+            )
+        )
+
+    assert operation.inputs == []
+    assert len(core.failures) == 1
+    assert core.failures[0]["sequence"] == 1
+    assert core.failures[0]["code"] == "AGENT_PREPARATION_FAILED"
+    assert "WRITING_JOB_IDENTITY_MISMATCH" in core.failures[0]["message"]
+    assert core.failures[0]["recoverable"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["develop_short_outline", "write_short_story"])
+async def test_short_job_accepts_null_reference_without_exposing_compatibility_target(
+    operation: str,
+) -> None:
+    context = _short_context(
+        operation=operation,
+        target_total_word_count=None,
+        compatibility_task_word_count=80_000,
+    )
+    source = context["planning"]["source"]
+    if operation == "write_short_story":
+        source = {
+            "kind": "approved_short_outline",
+            "outlineArtifactId": "outline-1",
+            "outlineRevision": 2,
+            "outlineHash": "a" * 64,
+        }
+        context["planning"]["source"] = source
+        context["planning"]["shortStoryContext"].update(
+            {
+                "approvedOutline": {
+                    "artifactId": "outline-1",
+                    "revision": 2,
+                    "hash": "a" * 64,
+                    "payload": {"kind": "short_story_outline"},
+                },
+                "targetChapter": {
+                    "id": "chapter-1",
+                    "baseContentHash": "b" * 64,
+                },
+            }
+        )
+    graph = Graph({"phase": "completed"})
+    handler = WritingJobHandler(
+        CoreClient(context),
+        parent_graph=Graph({}),
+        operation_graph=graph if operation == "develop_short_outline" else Graph({}),
+        short_story_graph=graph if operation == "write_short_story" else Graph({}),
+        artifacts=ArtifactHydration(),
+    )
+
+    await handler(
+        _job(
+            workflow_kind="short_medium",
+            operation=operation,
+            target_total_word_count=None,
+            source=source,
+        )
+    )
+
+    state = graph.inputs[0]
+    assert state["targetWordCount"] is None
+    assert state["targetTotalWordCount"] is None
+    model_planning = state["runtimeContext"]["coreContext"]["planning"]
+    assert "targetWordCount" not in model_planning
+    assert model_planning["targetTotalWordCount"] is None
+    assert model_planning["shortStoryContext"]["targetTotalWordCount"] is None
+
+
+@pytest.mark.asyncio
+async def test_short_outline_job_bypasses_parent_and_uses_explicit_operation() -> None:
+    context = _short_context()
+    parent = Graph({"phase": "completed", "finalResponse": "不应调用"})
+    operation = Graph({"phase": "completed", "finalResponse": "短篇大纲完成"})
+    handler = WritingJobHandler(
+        CoreClient(context),
+        parent_graph=parent,
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
+
+    await handler(
+        _job(
+            workflow_kind="short_medium",
+            operation="develop_short_outline",
+            target_total_word_count=6000,
+            source=context["planning"]["source"],
+        )
+    )
+
+    assert parent.inputs == []
+    assert operation.inputs[0]["currentOperation"]["kind"] == "develop_short_outline"
+    assert operation.inputs[0]["currentOperation"]["confidence"] == 1
+    assert operation.inputs[0]["workflowKind"] == "short_medium"
+    assert operation.inputs[0]["explicitOperation"] == "develop_short_outline"
+    assert operation.inputs[0]["commandId"] == "job-1"
+
+
+@pytest.mark.asyncio
+async def test_new_short_outline_task_hydrates_project_outline_as_revision_base() -> None:
+    context = _short_context()
+    context["planning"]["activeArtifact"] = {
+        "id": "outline-1",
+        "taskId": "old-task",
+        "novelId": "novel-1",
+        "chapterId": "chapter-1",
+        "workflowRunId": None,
+        "artifactKey": "old-outline-key",
+        "kind": "outline_draft",
+        "status": "applied",
+        "title": "中短篇大纲",
+        "summary": "已采用版本",
+        "payload": {"kind": "outline_draft"},
+        "diff": None,
+        "createdByAgent": "剧情",
+        "reviewerAgent": None,
+        "revision": 3,
+    }
+    operation = Graph({"phase": "waiting_user", "activeArtifactId": "outline-1"})
+    artifacts = ArtifactHydration()
+    handler = WritingJobHandler(
+        CoreClient(context),
+        parent_graph=Graph({}),
+        operation_graph=operation,
+        artifacts=artifacts,
+    )
+
+    await handler(
+        _job(
+            workflow_kind="short_medium",
+            operation="develop_short_outline",
+            target_total_word_count=6000,
+            source=context["planning"]["source"],
+        )
+    )
+
+    assert operation.inputs[0]["activeArtifactId"] == "outline-1"
+    assert operation.inputs[0]["artifactIteration"] == 1
+    assert artifacts.hydrated[0][2]["revision"] == 3
+
+
+@pytest.mark.asyncio
+async def test_short_identity_mismatch_fails_before_any_graph_call() -> None:
+    context = _short_context()
+    context["planning"]["targetTotalWordCount"] = 7000
+    parent = Graph({})
+    operation = Graph({})
+    core = CoreClient(context)
+    handler = WritingJobHandler(
+        core,
+        parent_graph=parent,
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
+
+    with pytest.raises(NonRetryableJobError, match="写作运行失败已上报核心服务"):
+        await handler(
+            _job(
+                workflow_kind="short_medium",
+                operation="develop_short_outline",
+                target_total_word_count=6000,
+                source=context["planning"]["source"],
+            )
+        )
+
+    assert parent.inputs == []
+    assert operation.inputs == []
+    assert core.failures[0]["code"] == "AGENT_PREPARATION_FAILED"
+    assert "WRITING_JOB_IDENTITY_MISMATCH" in core.failures[0]["message"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "operation", ["develop_short_outline", "write_short_story"]
+)
+async def test_short_workflow_graph_exception_reports_failure_callback(
+    operation: str,
+) -> None:
+    class RaisingGraph(Graph):
+        async def ainvoke(self, value: dict[str, Any]) -> dict[str, Any]:
+            self.inputs.append(value)
+            raise RuntimeError("中短篇图执行失败")
+
+    context = _short_context(operation=operation)
+    source = context["planning"]["source"]
+    if operation == "write_short_story":
+        source = {
+            "kind": "approved_short_outline",
+            "outlineArtifactId": "outline-1",
+            "outlineRevision": 2,
+            "outlineHash": "a" * 64,
+        }
+        context["planning"]["source"] = source
+    core = CoreClient(context)
+    raising = RaisingGraph({})
+    handler = WritingJobHandler(
+        core,
+        parent_graph=Graph({}),
+        operation_graph=raising if operation == "develop_short_outline" else Graph({}),
+        short_story_graph=raising if operation == "write_short_story" else Graph({}),
+        artifacts=ArtifactHydration(),
+    )
+
+    with pytest.raises(NonRetryableJobError, match="写作运行失败已上报核心服务"):
+        await handler(
+            _job(
+                workflow_kind="short_medium",
+                operation=operation,
+                target_total_word_count=6000,
+                source=source,
+            )
+        )
+
+    assert core.completions == []
+    assert core.failures == [
+        {
+            "sequence": 2,
+            "code": "AGENT_RUN_FAILED",
+            "message": "中短篇图执行失败",
+            "recoverable": True,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_short_story_job_uses_only_dedicated_graph() -> None:
+    context = _short_context(operation="write_short_story")
+    source = {
+        "kind": "approved_short_outline",
+        "outlineArtifactId": "artifact-1",
+        "outlineRevision": 2,
+        "outlineHash": "a" * 64,
+    }
+    context["planning"]["source"] = source
+    parent = Graph({})
+    operation = Graph({})
+    short_story = Graph({"phase": "waiting_user", "activeArtifactId": "artifact-story"})
+    core = CoreClient(context)
+    artifacts = ArtifactHydration()
+    handler = WritingJobHandler(
+        core,
+        parent_graph=parent,
+        operation_graph=operation,
+        short_story_graph=short_story,
+        artifacts=artifacts,
+    )
+
+    await handler(
+        _job(
+            workflow_kind="short_medium",
+            operation="write_short_story",
+            target_total_word_count=6000,
+            source=source,
+        )
+    )
+
+    assert parent.inputs == []
+    assert operation.inputs == []
+    assert short_story.inputs[0]["currentOperation"]["kind"] == "write_short_story"
+    assert core.events == [(1, "agent_start"), (2, "artifact_awaiting_user_approval")]
+    assert core.checkpoints[0][1]["phase"] == "awaiting_user_review"
+    assert core.completions == []
+    assert core.failures == []
+    assert artifacts.hydrated == []
+
+
+@pytest.mark.asyncio
+async def test_short_story_current_command_hydrates_persistent_run_artifact() -> None:
+    context = _short_context(operation="write_short_story")
+    source = {
+        "kind": "approved_short_outline",
+        "outlineArtifactId": "outline-1",
+        "outlineRevision": 2,
+        "outlineHash": "a" * 64,
+    }
+    context["planning"]["source"] = source
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="生成完整正文",
+        target_word_count=6000,
+        workflow_kind="short_medium",
+        explicit_operation="write_short_story",
+        command_id="job-1",
+        target_total_word_count=6000,
+        command_source=source,
+    )
+    state["currentOperation"] = {
+        "kind": "write_short_story",
+        "userGoal": "生成完整正文",
+    }
+    state["activeArtifactId"] = "artifact-story"
+    state["phase"] = "active"
+    snapshot = to_typescript_snapshot(serialize_snapshot(state))
+    snapshot["callbackJobId"] = "job-1"
+    context["planning"]["graphState"] = snapshot
+    context["planning"]["shortStoryRunArtifact"] = {
+        "id": "artifact-story",
+        "taskId": "task-1",
+        "artifactKey": "short-story-key",
+        "status": "under_review",
+        "revision": 1,
+        "payload": {"kind": "chapter_draft"},
+        "evaluations": [],
+    }
+    short_story = Graph(
+        {"phase": "waiting_user", "activeArtifactId": "artifact-story"}
+    )
+    artifacts = ArtifactHydration()
+    handler = WritingJobHandler(
+        CoreClient(context),
+        parent_graph=Graph({}),
+        operation_graph=Graph({}),
+        short_story_graph=short_story,
+        artifacts=artifacts,
+    )
+
+    await handler(
+        _job(
+            workflow_kind="short_medium",
+            operation="write_short_story",
+            target_total_word_count=6000,
+            source=source,
+        )
+    )
+
+    assert len(short_story.inputs) == 1
+    assert len(artifacts.short_hydrated) == 1
+    assert artifacts.short_hydrated[0][2]["id"] == "artifact-story"
+
+
+@pytest.mark.asyncio
+async def test_new_short_story_task_hydrates_project_body_as_revision_base() -> None:
+    context = _short_context(operation="write_short_story")
+    source = {
+        "kind": "approved_short_outline",
+        "outlineArtifactId": "outline-1",
+        "outlineRevision": 2,
+        "outlineHash": "a" * 64,
+    }
+    context["planning"]["source"] = source
+    context["planning"]["shortStoryProjectBodyArtifact"] = {
+        "id": "artifact-story",
+        "taskId": "old-task",
+        "artifactKey": "project-body-key",
+        "status": "applied",
+        "revision": 4,
+        "payload": {"kind": "chapter_draft"},
+    }
+    short_story = Graph({"phase": "completed"})
+    artifacts = ArtifactHydration()
+    handler = WritingJobHandler(
+        CoreClient(context),
+        parent_graph=Graph({}),
+        operation_graph=Graph({}),
+        short_story_graph=short_story,
+        artifacts=artifacts,
+    )
+
+    await handler(
+        _job(
+            workflow_kind="short_medium",
+            operation="write_short_story",
+            target_total_word_count=6000,
+            source=source,
+        )
+    )
+
+    assert short_story.inputs[0]["activeArtifactId"] == "artifact-story"
+    assert short_story.inputs[0]["artifactStatus"] == "revision_requested"
+    assert artifacts.project_body_hydrated[0][2]["revision"] == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["approve", "discard"])
+async def test_short_story_terminal_decision_skips_all_artifact_hydration(
+    decision: str,
+) -> None:
+    context = _short_context(operation="write_short_story")
+    source = {
+        "kind": "approved_short_outline",
+        "outlineArtifactId": "outline-1",
+        "outlineRevision": 2,
+        "outlineHash": "a" * 64,
+    }
+    context["planning"]["source"] = source
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="旧命令",
+        target_word_count=6000,
+        workflow_kind="short_medium",
+        explicit_operation="write_short_story",
+        command_id="old-command",
+        target_total_word_count=6000,
+        command_source=source,
+    )
+    state["currentOperation"] = {"kind": "write_short_story", "userGoal": "旧命令"}
+    state["artifactStatus"] = "awaiting_user"
+    state["phase"] = "waiting_user"
+    context["planning"]["graphState"] = to_typescript_snapshot(
+        serialize_snapshot(state)
+    )
+    context["planning"]["shortStoryRunArtifact"] = {
+        "id": "artifact-story",
+        "taskId": "task-1",
+        "artifactKey": "short-story-key",
+        "status": "awaiting_user",
+        "revision": 2,
+        "payload": {"kind": "chapter_draft"},
+        "evaluations": [],
+    }
+    short_story = Graph({"phase": "completed", "artifactStatus": "applied"})
+    artifacts = ArtifactHydration()
+    handler = WritingJobHandler(
+        CoreClient(context),
+        parent_graph=Graph({}),
+        operation_graph=Graph({}),
+        short_story_graph=short_story,
+        artifacts=artifacts,
+    )
+
+    await handler(
+        _job(
+            resume=True,
+            resume_input={"decision": decision, "artifactId": "artifact-story"},
+            workflow_kind="short_medium",
+            operation="write_short_story",
+            target_total_word_count=6000,
+            source=source,
+        )
+    )
+
+    assert len(short_story.inputs) == 1
+    assert artifacts.hydrated == []
+    assert artifacts.short_hydrated == []
+
+
+@pytest.mark.asyncio
+async def test_long_explicit_operation_bypasses_parent() -> None:
+    context = {
+        "workspace": {},
+        "planning": {
+            "taskId": "task-1",
+            "commandId": "job-1",
+            "novelId": "novel-1",
+            "chapterId": "chapter-1",
+            "targetWordCount": 4000,
+            "workflowKind": "long_serial",
+            "operation": "write_chapter",
+            "targetTotalWordCount": None,
+            "source": None,
+            "conversationHistory": [],
+            "userMessage": "写正文",
+            "graphState": None,
+        },
+    }
+    parent = Graph({"phase": "completed"})
+    operation = Graph({"phase": "completed"})
+    handler = WritingJobHandler(
+        CoreClient(context),
+        parent_graph=parent,
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
+    await handler(_job(operation="write_chapter"))
+    assert parent.inputs == []
+    assert operation.inputs[0]["currentOperation"]["kind"] == "write_chapter"
 
 
 @pytest.mark.asyncio
@@ -675,6 +1282,267 @@ async def test_initial_job_retry_replays_its_terminal_checkpoint_without_rerunni
     assert core.completions == [
         (3, {"finalResponse": "首次执行已经完成的正文"})
     ]
+
+
+def _foreign_recovery_context(state: dict[str, Any]) -> dict[str, Any]:
+    snapshot = to_typescript_snapshot(serialize_snapshot(state))
+    snapshot["callbackJobId"] = "old-job"
+    return {
+        "workspace": {},
+        "planning": {
+            "taskId": "task-1",
+            "commandId": "job-1",
+            "novelId": "novel-1",
+            "chapterId": "chapter-1",
+            "targetWordCount": 4000,
+            "conversationHistory": [],
+            "userMessage": "故障恢复",
+            "graphState": snapshot,
+        },
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["completed", "error"])
+async def test_new_reconciliation_job_replays_foreign_terminal_snapshot_without_graph(
+    phase: str,
+) -> None:
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="旧请求",
+    )
+    state["phase"] = phase  # type: ignore[typeddict-item]
+    state["eventSequence"] = 7
+    state["finalResponse"] = "原始完成结果"
+    state["errorMessage"] = "原始失败原因"
+    core = CoreClient(_foreign_recovery_context(state))
+    parent = Graph({"phase": "completed", "finalResponse": "不得生成"})
+    operation = Graph({"phase": "completed", "finalResponse": "不得恢复"})
+    artifacts = ArtifactHydration()
+    handler = WritingJobHandler(
+        core,
+        parent_graph=parent,
+        operation_graph=operation,
+        artifacts=artifacts,
+    )
+
+    if phase == "error":
+        with pytest.raises(NonRetryableJobError):
+            await handler(_job(resume=True))
+    else:
+        await handler(_job(resume=True))
+
+    assert parent.inputs == []
+    assert operation.inputs == []
+    assert artifacts.hydrated == []
+    assert core.events == []
+    assert core.checkpoints == []
+    if phase == "completed":
+        assert core.completions == [(8, {"finalResponse": "原始完成结果"})]
+        assert core.failures == []
+    else:
+        assert core.completions == []
+        assert core.failures == [
+            {
+                "sequence": 8,
+                "code": "AGENT_RUN_FAILED",
+                "message": "原始失败原因",
+                "recoverable": True,
+            }
+        ]
+
+
+@pytest.mark.asyncio
+async def test_new_reconciliation_job_rebinds_foreign_waiting_snapshot_without_graph() -> None:
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="旧请求",
+    )
+    state["phase"] = "waiting_user"
+    state["eventSequence"] = 7
+    state["activeAgent"] = "剧情"
+    state["activeArtifactId"] = "artifact-1"
+    state["artifactStatus"] = "awaiting_user"
+    context = _foreign_recovery_context(state)
+    context["planning"]["activeArtifact"] = _active_artifact()
+    core = CoreClient(context)
+    parent = Graph({"phase": "completed"})
+    operation = Graph({"phase": "completed"})
+    artifacts = ArtifactHydration()
+    handler = WritingJobHandler(
+        core,
+        parent_graph=parent,
+        operation_graph=operation,
+        artifacts=artifacts,
+    )
+
+    await handler(_job(resume=True))
+
+    assert parent.inputs == []
+    assert operation.inputs == []
+    assert artifacts.hydrated == []
+    assert core.events == [(8, "artifact_awaiting_user_approval")]
+    assert core.event_payloads == [
+        {"agentId": "剧情", "artifactId": "artifact-1"}
+    ]
+    assert "content" not in core.event_payloads[0]
+    assert core.checkpoints[0][0] == 9
+    checkpoint = core.checkpoints[0][1]
+    assert checkpoint["phase"] == "awaiting_user_review"
+    assert checkpoint["activeArtifactId"] == "artifact-1"
+    assert checkpoint["artifactStatus"] == "awaiting_user"
+    assert checkpoint["eventSequence"] == 9
+    assert checkpoint["commandId"] == "job-1"
+    assert core.completions == []
+    assert core.failures == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "active_artifact",
+    [
+        None,
+        {**_active_artifact(), "id": "artifact-other"},
+        {**_active_artifact(), "status": "applied"},
+    ],
+)
+async def test_waiting_rebind_requires_matching_authoritative_awaiting_artifact(
+    active_artifact: dict[str, Any] | None,
+) -> None:
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="旧请求",
+    )
+    state["phase"] = "waiting_user"
+    state["activeArtifactId"] = "artifact-1"
+    state["artifactStatus"] = "awaiting_user"
+    context = _foreign_recovery_context(state)
+    context["planning"]["activeArtifact"] = active_artifact
+    core = CoreClient(context)
+    operation = Graph({})
+    handler = WritingJobHandler(
+        core,
+        parent_graph=Graph({}),
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
+
+    with pytest.raises(ValueError, match="WAITING_ARTIFACT_CONTEXT_MISMATCH"):
+        await handler(_job(resume=True))
+
+    assert operation.inputs == []
+    assert core.events == []
+    assert core.checkpoints == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["approve", "revise", "discard"])
+async def test_foreign_waiting_snapshot_with_user_decision_still_enters_operation_graph(
+    decision: str,
+) -> None:
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="旧请求",
+    )
+    state["phase"] = "waiting_user"
+    state["eventSequence"] = 7
+    state["activeArtifactId"] = "artifact-1"
+    state["artifactStatus"] = "awaiting_user"
+    context = _foreign_recovery_context(state)
+    context["planning"]["activeArtifact"] = (
+        _active_artifact() if decision == "revise" else None
+    )
+    operation = Graph({"phase": "completed", "finalResponse": "决定已处理"})
+    handler = WritingJobHandler(
+        CoreClient(context),
+        parent_graph=Graph({}),
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
+
+    await handler(
+        _job(
+            resume=True,
+            resume_input={"decision": decision, "artifactId": "artifact-1"},
+        )
+    )
+
+    assert len(operation.inputs) == 1
+    assert operation.inputs[0]["resumeDecision"] == {
+        "decision": decision,
+        "artifactId": "artifact-1",
+    }
+
+
+@pytest.mark.asyncio
+async def test_foreign_waiting_decision_rejects_mismatched_artifact_before_graph() -> None:
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="旧请求",
+    )
+    state["phase"] = "waiting_user"
+    state["activeArtifactId"] = "artifact-1"
+    state["artifactStatus"] = "awaiting_user"
+    context = _foreign_recovery_context(state)
+    operation = Graph({})
+    core = CoreClient(context)
+    handler = WritingJobHandler(
+        core,
+        parent_graph=Graph({}),
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
+
+    with pytest.raises(ValueError, match="RESUME_ARTIFACT_IDENTITY_MISMATCH"):
+        await handler(
+            _job(
+                resume=True,
+                resume_input={"decision": "approve", "artifactId": "artifact-other"},
+            )
+        )
+
+    assert operation.inputs == []
+    assert core.events == []
+    assert core.checkpoints == []
+
+
+@pytest.mark.asyncio
+async def test_foreign_active_snapshot_without_input_still_runs_fault_recovery_graph() -> None:
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="旧请求",
+    )
+    state["phase"] = "active"
+    state["eventSequence"] = 7
+    operation = Graph({"phase": "completed", "finalResponse": "恢复完成"})
+    handler = WritingJobHandler(
+        CoreClient(_foreign_recovery_context(state)),
+        parent_graph=Graph({}),
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
+
+    await handler(_job(resume=True))
+
+    assert len(operation.inputs) == 1
 
 
 @pytest.mark.asyncio

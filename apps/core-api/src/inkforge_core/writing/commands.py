@@ -1,12 +1,20 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Literal, cast
 
-from inkforge_contracts.jobs import AgentJobStatus
-from sqlalchemy import and_, or_, select
+from inkforge_contracts.jobs import AgentJobStatus, WritingJobPayload
+from inkforge_contracts.short_story import (
+    ShortStoryChapterDraft,
+    ShortStoryOutlineDraft,
+    ShortStoryVersionReference,
+    canonical_short_outline_hash,
+)
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -14,28 +22,40 @@ from ..db.base import utc_now
 from ..db.models import (
     Chapter,
     Novel,
+    ReviewArtifact,
+    ReviewArtifactRevision,
+    WritingBible,
     WritingMessage,
     WritingRunCommand,
     WritingSession,
     WritingTask,
 )
 from ..errors import ApiError
+from ..short_story_artifacts import (
+    adopted_short_story_outline_revision,
+    exact_short_story_outline_revision,
+)
 from .message_metadata import workflow_message_metadata
 from .records import TaskRecord
 from .recovery import validate_resume_session_binding
 from .schemas import (
+    SHORT_STORY_INTERNAL_TASK_WORD_COUNT,
     ResumeWritingRunRequest,
     ResumeWritingRunResponse,
     StartWritingRunRequest,
     WritingRunResponse,
 )
-from .tasks import mark_task_failed_state
+from .tasks import (
+    mark_task_failed_state,
+    restore_short_story_artifact_after_failure,
+)
 
 WritingCommandKind = Literal["start", "resume", "artifact_decision"]
 WritingCommandStatus = Literal["pending", "submitted", "processing", "succeeded", "failed"]
 
 ACTIVE_COMMAND_STATUSES = frozenset({"pending", "submitted", "processing"})
 TERMINAL_COMMAND_STATUSES = frozenset({"succeeded", "failed"})
+_RESUME_SESSION_UNSET = object()
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,6 +91,9 @@ class WritingRunCommandRepository:
         self, user_id: str, request: StartWritingRunRequest
     ) -> WritingRunResponse:
         key = command_idempotency_key(user_id, request.clientRequestId)
+        existing_record = await self.get_by_idempotency_key(user_id, request.clientRequestId)
+        if existing_record is not None:
+            _assert_start_command_semantics(existing_record, request)
         existing = await self._get_existing_response(user_id, request.clientRequestId)
         if isinstance(existing, WritingRunResponse):
             return existing
@@ -80,9 +103,12 @@ class WritingRunCommandRepository:
                     existing_row = await self._get_by_idempotency_key(session, key)
                     if existing_row is not None:
                         command, task, _owner_id = existing_row
+                        _assert_start_command_semantics(
+                            _command_record(command, task, _owner_id), request
+                        )
                         return _run_response(task, command)
-                    await _require_chapter(
-                        session, user_id, request.novelId, request.chapterId
+                    identity = await _resolve_start_workflow_identity(
+                        session, user_id, request
                     )
                     if request.writingSessionId is not None:
                         await _require_session_binding(
@@ -97,7 +123,11 @@ class WritingRunCommandRepository:
                         chapterId=request.chapterId,
                         writingSessionId=request.writingSessionId,
                         phase="idle",
-                        targetWordCount=request.targetWordCount,
+                        targetWordCount=(
+                            request.targetWordCount
+                            if request.targetWordCount is not None
+                            else SHORT_STORY_INTERNAL_TASK_WORD_COUNT
+                        ),
                         selectedAgents=",".join(request.selectedAgents),
                         conversationHistory=_dump_json(
                             [{"role": "user", "content": request.userMessage}]
@@ -115,6 +145,10 @@ class WritingRunCommandRepository:
                                     task.id,
                                     event_type="user",
                                     content=request.userMessage,
+                                    version_references=cast(
+                                        list[dict[str, object]],
+                                        identity["versionReferences"],
+                                    ),
                                 ),
                             )
                         )
@@ -123,18 +157,27 @@ class WritingRunCommandRepository:
                         task,
                         kind="start",
                         key=key,
-                        payload={
-                            "version": 1,
-                            "resume": False,
-                            "chapterId": task.chapterId,
-                            "writingSessionId": task.writingSessionId,
-                            "resumeInput": None,
-                        },
+                        payload=WritingJobPayload.model_validate(
+                            {
+                                "version": 1,
+                                "resume": False,
+                                "chapterId": task.chapterId,
+                                "writingSessionId": task.writingSessionId,
+                                "resumeInput": None,
+                                **identity,
+                                "startRequest": request.model_dump(mode="json"),
+                            }
+                        ).model_dump(mode="json"),
                     )
                     session.add(command)
                     await session.flush()
                     return _run_response(task, command)
         except IntegrityError as exc:
+            raced_record = await self.get_by_idempotency_key(
+                user_id, request.clientRequestId
+            )
+            if raced_record is not None:
+                _assert_start_command_semantics(raced_record, request)
             raced = await self._get_existing_response(user_id, request.clientRequestId)
             if isinstance(raced, WritingRunResponse):
                 return raced
@@ -151,22 +194,41 @@ class WritingRunCommandRepository:
         request: ResumeWritingRunRequest,
     ) -> ResumeWritingRunResponse:
         key = command_idempotency_key(user_id, request.clientRequestId)
-        existing = await self._get_existing_response(user_id, request.clientRequestId)
-        if isinstance(existing, ResumeWritingRunResponse):
-            return existing
+        resume_input = _resume_request_input(request)
+        existing_record = await self.get_by_idempotency_key(
+            user_id, request.clientRequestId
+        )
+        if existing_record is not None:
+            _assert_resume_command_semantics(
+                existing_record,
+                task_id=task_id,
+                resume_input=resume_input,
+                writing_session_id=request.writingSessionId,
+            )
+            return _resume_record_response(existing_record)
         try:
             async with self._session_factory() as session:
                 async with session.begin():
                     existing_row = await self._get_by_idempotency_key(session, key)
                     if existing_row is not None:
-                        command, _task, _owner_id = existing_row
+                        command, existing_task, owner_id = existing_row
+                        _assert_resume_command_semantics(
+                            _command_record(command, existing_task, owner_id),
+                            task_id=task_id,
+                            resume_input=resume_input,
+                            writing_session_id=request.writingSessionId,
+                        )
                         return _resume_response(command)
-                    task, _owner_id = await self._require_owned_task(
-                        session, user_id, task_id
-                    )
+                    task, _owner_id = await self._require_owned_task(session, user_id, task_id)
                     existing_row = await self._get_by_idempotency_key(session, key)
                     if existing_row is not None:
-                        command, _task, _owner_id = existing_row
+                        command, existing_task, owner_id = existing_row
+                        _assert_resume_command_semantics(
+                            _command_record(command, existing_task, owner_id),
+                            task_id=task_id,
+                            resume_input=resume_input,
+                            writing_session_id=request.writingSessionId,
+                        )
                         return _resume_response(command)
                     if task.phase in {"completed", "error"}:
                         raise ApiError(
@@ -185,45 +247,50 @@ class WritingRunCommandRepository:
                             message=str(exc),
                         ) from exc
                     await self._require_no_active_command(session, task_id)
-                    visible_message = (request.userMessage or "").strip()
-                    if visible_message and task.writingSessionId is not None:
+                    identity = await _latest_workflow_identity(session, task_id)
+                    raw_user_message = request.userMessage or ""
+                    if raw_user_message.strip() and task.writingSessionId is not None:
                         session.add(
                             WritingMessage(
                                 sessionId=task.writingSessionId,
                                 role="user",
-                                content=visible_message,
+                                content=raw_user_message,
                                 metadata_=workflow_message_metadata(
                                     task.id,
                                     event_type="user",
-                                    content=visible_message,
+                                    content=raw_user_message,
                                 ),
                             )
                         )
                         await _touch_writing_session(session, task.writingSessionId)
-                    resume_input = request.model_dump(
-                        mode="json",
-                        exclude={"clientRequestId", "writingSessionId"},
-                        exclude_none=True,
-                    )
                     command = _new_command(
                         task,
                         kind="resume",
                         key=key,
-                        payload={
-                            "version": 1,
-                            "resume": True,
-                            "chapterId": task.chapterId,
-                            "writingSessionId": task.writingSessionId,
-                            "resumeInput": resume_input,
-                        },
+                        payload=WritingJobPayload.model_validate(
+                            {
+                                "version": 1,
+                                "resume": True,
+                                "chapterId": task.chapterId,
+                                "writingSessionId": request.writingSessionId,
+                                "resumeInput": resume_input,
+                                **identity,
+                            }
+                        ).model_dump(mode="json"),
                     )
                     session.add(command)
                     await session.flush()
                     return _resume_response(command)
         except IntegrityError as exc:
-            raced = await self._get_existing_response(user_id, request.clientRequestId)
-            if isinstance(raced, ResumeWritingRunResponse):
-                return raced
+            raced = await self.get_by_idempotency_key(user_id, request.clientRequestId)
+            if raced is not None:
+                _assert_resume_command_semantics(
+                    raced,
+                    task_id=task_id,
+                    resume_input=resume_input,
+                    writing_session_id=request.writingSessionId,
+                )
+                return _resume_record_response(raced)
             raise _active_command_error(task_id) from exc
 
     async def create_resume(
@@ -238,17 +305,36 @@ class WritingRunCommandRepository:
             async with session.begin():
                 existing = await self._get_by_idempotency_key(session, key)
                 if existing is not None:
-                    return _command_record(*existing)
+                    record = _command_record(*existing)
+                    _assert_resume_command_semantics(
+                        record,
+                        task_id=task_id,
+                        resume_input=resume_input,
+                    )
+                    return record
 
                 task, owner_id = await self._require_owned_task(session, user_id, task_id)
+                raced = await self._get_by_idempotency_key(session, key)
+                if raced is not None:
+                    record = _command_record(*raced)
+                    _assert_resume_command_semantics(
+                        record,
+                        task_id=task_id,
+                        resume_input=resume_input,
+                    )
+                    return record
                 await self._require_no_active_command(session, task_id)
-                payload = {
-                    "version": 1,
-                    "resume": True,
-                    "chapterId": task.chapterId,
-                    "writingSessionId": task.writingSessionId,
-                    "resumeInput": resume_input,
-                }
+                identity = await _latest_workflow_identity(session, task_id)
+                payload = WritingJobPayload.model_validate(
+                    {
+                        "version": 1,
+                        "resume": True,
+                        "chapterId": task.chapterId,
+                        "writingSessionId": task.writingSessionId,
+                        "resumeInput": resume_input,
+                        **identity,
+                    }
+                ).model_dump(mode="json")
                 command = WritingRunCommand(
                     taskId=task.id,
                     kind="resume",
@@ -265,13 +351,20 @@ class WritingRunCommandRepository:
                 except IntegrityError as exc:
                     raced = await self._get_by_idempotency_key(session, key)
                     if raced is not None:
-                        return _command_record(*raced)
+                        record = _command_record(*raced)
+                        _assert_resume_command_semantics(
+                            record,
+                            task_id=task_id,
+                            resume_input=resume_input,
+                        )
+                        return record
                     raise _active_command_error(task_id) from exc
                 return _command_record(command, task, owner_id)
 
     async def require_owned_task(self, user_id: str, task_id: str) -> TaskRecord:
         async with self._session_factory() as session:
-            task, owner_id = await self._require_owned_task(session, user_id, task_id)
+            async with session.begin():
+                task, owner_id = await self._require_owned_task(session, user_id, task_id)
         return _task_record(task, owner_id)
 
     async def create_artifact_decision(
@@ -291,10 +384,25 @@ class WritingRunCommandRepository:
             async with session.begin():
                 existing = await self._get_by_idempotency_key(session, key)
                 if existing is not None:
-                    return _command_record(*existing)
-                task, owner_id = await self._require_owned_task(
-                    session, user_id, task_id
-                )
+                    record = _command_record(*existing)
+                    _assert_artifact_decision_semantics(
+                        record,
+                        artifact_id=artifact_id,
+                        decision=decision,
+                        payload=payload,
+                    )
+                    return record
+                task, owner_id = await self._require_owned_task(session, user_id, task_id)
+                raced = await self._get_by_idempotency_key(session, key)
+                if raced is not None:
+                    record = _command_record(*raced)
+                    _assert_artifact_decision_semantics(
+                        record,
+                        artifact_id=artifact_id,
+                        decision=decision,
+                        payload=payload,
+                    )
+                    return record
                 if task.phase in {"completed", "error"}:
                     raise ApiError(
                         status_code=409,
@@ -302,6 +410,73 @@ class WritingRunCommandRepository:
                         message="终态写作任务不能受理草案决定",
                     )
                 await self._require_no_active_command(session, task_id)
+                identity = await _latest_workflow_identity(session, task_id)
+                decision_request = payload.get("decisionRequest")
+                if not isinstance(decision_request, dict):
+                    decision_request = {}
+                raw_user_message = decision_request.get("userMessage")
+                source_revision = decision_request.get("expectedRevision")
+                if (
+                    decision == "revise"
+                    and isinstance(raw_user_message, str)
+                    and raw_user_message.strip()
+                    and isinstance(source_revision, int)
+                    and not isinstance(source_revision, bool)
+                ):
+                    if task.writingSessionId is None:
+                        writing_session = WritingSession(
+                            novelId=task.novelId,
+                            chapterId=task.chapterId,
+                            title="草案修改",
+                            phase="idle",
+                        )
+                        session.add(writing_session)
+                        await session.flush()
+                        task.writingSessionId = writing_session.id
+                        payload["writingSessionId"] = writing_session.id
+                        writing_session_id = writing_session.id
+                    else:
+                        writing_session_id = task.writingSessionId
+                    session.add(
+                        WritingMessage(
+                            sessionId=writing_session_id,
+                            role="user",
+                            content=raw_user_message,
+                            intent="revision_focus",
+                            metadata_=workflow_message_metadata(
+                                task.id,
+                                event_type="revision_focus",
+                                content=raw_user_message,
+                                artifact_id=artifact_id,
+                                source_revision=source_revision,
+                                intent="revision_focus",
+                            ),
+                        )
+                    )
+                    await _touch_writing_session(session, writing_session_id)
+                resume_input = payload.get("resumeInput")
+                if not isinstance(resume_input, dict):
+                    resume_input = {
+                        "artifactId": artifact_id,
+                        "decision": decision,
+                    }
+                    if isinstance(source_revision, int) and not isinstance(
+                        source_revision, bool
+                    ):
+                        resume_input["expectedRevision"] = source_revision
+                    if isinstance(raw_user_message, str):
+                        resume_input["userMessage"] = raw_user_message
+                payload = WritingJobPayload.model_validate(
+                    {
+                        **payload,
+                        "version": 1,
+                        "resume": True,
+                        "chapterId": task.chapterId,
+                        "writingSessionId": task.writingSessionId,
+                        "resumeInput": resume_input,
+                        **identity,
+                    }
+                ).model_dump(mode="json")
                 command = WritingRunCommand(
                     id=command_id,
                     taskId=task_id,
@@ -354,11 +529,8 @@ class WritingRunCommandRepository:
                                     WritingRunCommand.nextAttemptAt <= now,
                                 ),
                                 and_(
-                                    WritingRunCommand.status.in_(
-                                        ("submitted", "processing")
-                                    ),
-                                    WritingRunCommand.updatedAt
-                                    <= active_stale_before,
+                                    WritingRunCommand.status.in_(("submitted", "processing")),
+                                    WritingRunCommand.updatedAt <= active_stale_before,
                                 ),
                             ),
                             Novel.userId.is_not(None),
@@ -373,8 +545,7 @@ class WritingRunCommandRepository:
                     )
                 ).all()
                 return [
-                    _command_record(command, task, owner_id)
-                    for command, task, owner_id in rows
+                    _command_record(command, task, owner_id) for command, task, owner_id in rows
                 ]
 
     async def mark_agent_active(self, command_id: str) -> WritingCommandRecord:
@@ -441,11 +612,15 @@ class WritingRunCommandRepository:
                 command.updatedAt = now
                 command.lastError = None if task.phase == "completed" else code
                 if command.resultJson is None:
-                    command.resultJson = _dump_json(
-                        {"code": code, "agentStatus": agent_status}
+                    command.resultJson = _dump_json({"code": code, "agentStatus": agent_status})
+                if task.phase != "completed":
+                    recovered = await restore_short_story_artifact_after_failure(
+                        session,
+                        task,
+                        command,
                     )
-                if task.phase not in {"completed", "error"}:
-                    mark_task_failed_state(task, code)
+                    if not recovered and task.phase != "error":
+                        mark_task_failed_state(task, code)
                 await session.flush()
                 return _command_record(command, task, owner_id)
 
@@ -604,6 +779,477 @@ def _active_command_error(task_id: str) -> ApiError:
     )
 
 
+def _assert_artifact_decision_semantics(
+    command: WritingCommandRecord,
+    *,
+    artifact_id: str,
+    decision: str,
+    payload: dict[str, Any],
+) -> None:
+    if (
+        command.kind != "artifact_decision"
+        or command.artifact_id != artifact_id
+        or command.decision != decision
+        or command.payload.get("decisionRequest") != payload.get("decisionRequest")
+    ):
+        raise ApiError(
+            status_code=409,
+            code="IDEMPOTENCY_KEY_REUSED",
+            message="客户端请求标识已用于其他操作",
+        )
+
+
+def _assert_start_command_semantics(
+    command: WritingCommandRecord,
+    request: StartWritingRunRequest,
+) -> None:
+    if (
+        command.kind != "start"
+        or command.payload.get("startRequest") != request.model_dump(mode="json")
+    ):
+        raise ApiError(
+            status_code=409,
+            code="IDEMPOTENCY_KEY_REUSED",
+            message="客户端请求标识已用于其他操作",
+        )
+
+
+def _resume_request_input(request: ResumeWritingRunRequest) -> dict[str, Any]:
+    return request.model_dump(
+        mode="json",
+        exclude={"clientRequestId", "writingSessionId"},
+        exclude_none=True,
+    )
+
+
+def _assert_resume_command_semantics(
+    command: WritingCommandRecord,
+    *,
+    task_id: str,
+    resume_input: dict[str, Any],
+    writing_session_id: str | None | object = _RESUME_SESSION_UNSET,
+) -> None:
+    if (
+        command.kind != "resume"
+        or command.task.id != task_id
+        or (
+            writing_session_id is not _RESUME_SESSION_UNSET
+            and command.payload.get("writingSessionId") != writing_session_id
+        )
+        or command.payload.get("resumeInput") != resume_input
+    ):
+        raise ApiError(
+            status_code=409,
+            code="IDEMPOTENCY_KEY_REUSED",
+            message="客户端请求标识已用于其他操作",
+        )
+
+
+async def _resolve_start_workflow_identity(
+    session: AsyncSession,
+    user_id: str,
+    request: StartWritingRunRequest,
+) -> dict[str, Any]:
+    row = (
+        await session.execute(
+            select(Novel, Chapter, WritingBible)
+            .join(Chapter, Chapter.novelId == Novel.id)
+            .outerjoin(WritingBible, WritingBible.novelId == Novel.id)
+            .where(
+                Novel.id == request.novelId,
+                Novel.userId == user_id,
+                Chapter.id == request.chapterId,
+                Chapter.novelId == request.novelId,
+            )
+        )
+    ).one_or_none()
+    if row is None:
+        raise ApiError(
+            status_code=404,
+            code="CHAPTER_NOT_FOUND",
+            message="章节不存在或不属于该小说",
+        )
+    novel, chapter, bible = cast(tuple[Novel, Chapter, WritingBible | None], row)
+    persisted_profile = bible.storyLengthProfile if bible is not None else "long_serial"
+    if request.workflowKind != persisted_profile:
+        raise ApiError(
+            status_code=409,
+            code="WRITING_WORKFLOW_MISMATCH",
+            message="写作请求篇幅类型与作品圣经不一致",
+        )
+    if persisted_profile == "long_serial":
+        return {
+            "workflowKind": "long_serial",
+            "operation": request.operation,
+            "targetTotalWordCount": (
+                bible.targetTotalWordCount if bible is not None else None
+            ),
+            "source": None,
+            "versionReferences": [],
+        }
+
+    target = bible.targetTotalWordCount if bible is not None else None
+    if target is not None and not 6_000 <= target <= 80_000:
+        raise ApiError(
+            status_code=409,
+            code="SHORT_STORY_TARGET_INVALID",
+            message="中短篇篇幅参考必须先清空或修正为 6000～80000",
+        )
+    if request.targetWordCount != target:
+        raise ApiError(
+            status_code=409,
+            code="SHORT_STORY_TARGET_MISMATCH",
+            message="写作请求目标字数与作品圣经不一致",
+        )
+    chapter_count = await session.scalar(
+        select(func.count(Chapter.id)).where(Chapter.novelId == request.novelId)
+    )
+    if chapter_count != 1:
+        raise ApiError(
+            status_code=409,
+            code="SHORT_STORY_CHAPTER_INVALID",
+            message="中短篇必须使用小说创建时的唯一正文承载章节",
+        )
+    await _validate_short_story_version_references(
+        session,
+        request.novelId,
+        request.versionReferences,
+    )
+    version_references = await _resolve_named_short_story_version_references(
+        session,
+        request.novelId,
+        request.userMessage,
+        request.versionReferences,
+    )
+    source: dict[str, Any] | None
+    if request.operation == "develop_short_outline":
+        inspiration = (novel.summary or "").strip()
+        if not inspiration:
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_INSPIRATION_MISSING",
+                message="中短篇缺少原始灵感",
+            )
+        source = {
+            "kind": "short_outline_inspiration",
+            "originalInspiration": inspiration,
+        }
+    elif request.operation == "write_short_story":
+        outline_references = [
+            item for item in version_references if item.kind == "outline"
+        ]
+        if len(outline_references) > 1:
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_OUTLINE_SOURCE_AMBIGUOUS",
+                message="生成正文时只能指定一个基线大纲版本",
+            )
+        body_references = [
+            item for item in version_references if item.kind == "body"
+        ]
+        if len(body_references) > 1:
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_BODY_BASE_AMBIGUOUS",
+                message="修改正文时只能指定一个正文基线版本",
+            )
+        body_source: tuple[str, int] | None = None
+        if not outline_references and body_references:
+            body_record = await session.scalar(
+                select(ReviewArtifactRevision).where(
+                    ReviewArtifactRevision.artifactId
+                    == body_references[0].artifactId,
+                    ReviewArtifactRevision.revision == body_references[0].revision,
+                )
+            )
+            if body_record is None:
+                raise ApiError(
+                    status_code=409,
+                    code="SHORT_STORY_VERSION_REFERENCE_CONFLICT",
+                    message="指定的正文基线版本不存在",
+                )
+            try:
+                body_payload = ShortStoryChapterDraft.model_validate_json(
+                    body_record.payloadJson
+                )
+            except (ValueError, TypeError):
+                raise ApiError(
+                    status_code=409,
+                    code="SHORT_STORY_VERSION_REFERENCE_CONFLICT",
+                    message="指定的正文基线版本载荷无效",
+                ) from None
+            body_source = (
+                body_payload.metadata.sourceOutlineArtifactId,
+                body_payload.metadata.sourceOutlineRevision,
+            )
+        selected = (
+            await exact_short_story_outline_revision(
+                session,
+                request.novelId,
+                (
+                    outline_references[0].artifactId
+                    if outline_references
+                    else cast(tuple[str, int], body_source)[0]
+                ),
+                (
+                    outline_references[0].revision
+                    if outline_references
+                    else cast(tuple[str, int], body_source)[1]
+                ),
+            )
+            if outline_references or body_source is not None
+            else await adopted_short_story_outline_revision(
+                session,
+                request.novelId,
+            )
+        )
+        if selected is None:
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_OUTLINE_NOT_APPROVED",
+                message="生成完整正文前必须先批准中短篇大纲",
+            )
+        try:
+            artifact, revision = selected
+            outline = ShortStoryOutlineDraft.model_validate(json.loads(revision.payloadJson))
+        except (json.JSONDecodeError, ValueError, TypeError):
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_OUTLINE_INVALID",
+                message="已批准中短篇大纲载荷无效",
+            ) from None
+        source = {
+            "kind": "approved_short_outline",
+            "outlineArtifactId": artifact.id,
+            "outlineRevision": revision.revision,
+            "outlineHash": canonical_short_outline_hash(outline),
+        }
+    else:
+        source = None
+    return {
+        "workflowKind": "short_medium",
+        "operation": request.operation,
+        "targetTotalWordCount": target,
+        "source": source,
+        "versionReferences": [
+            item.model_dump(mode="json") for item in version_references
+        ],
+    }
+
+
+_NAMED_SHORT_STORY_VERSION_PATTERNS = {
+    "outline": re.compile(
+        r"大纲(?:\s*[vV]\s*(\d+)|\s*第\s*(\d+)\s*版|\s*(\d+)\s*版)"
+    ),
+    "body": re.compile(
+        r"(?:正文|整稿)(?:\s*[vV]\s*(\d+)|\s*第\s*(\d+)\s*版|\s*(\d+)\s*版)"
+    ),
+}
+
+
+def _named_short_story_versions(message: str) -> list[tuple[Literal["outline", "body"], int]]:
+    result: list[tuple[Literal["outline", "body"], int]] = []
+    for raw_kind, pattern in _NAMED_SHORT_STORY_VERSION_PATTERNS.items():
+        kind = cast(Literal["outline", "body"], raw_kind)
+        for match in pattern.finditer(message):
+            raw_version = next(value for value in match.groups() if value is not None)
+            value = (kind, int(raw_version))
+            if value not in result:
+                result.append(value)
+    return result
+
+
+async def _resolve_named_short_story_version_references(
+    session: AsyncSession,
+    novel_id: str,
+    message: str,
+    explicit: list[ShortStoryVersionReference],
+) -> list[ShortStoryVersionReference]:
+    named = _named_short_story_versions(message)
+    if not named:
+        return list(explicit)
+    rows = list(
+        (
+            await session.execute(
+                select(ReviewArtifactRevision, ReviewArtifact)
+                .join(
+                    ReviewArtifact,
+                    ReviewArtifact.id == ReviewArtifactRevision.artifactId,
+                )
+                .where(
+                    ReviewArtifact.novelId == novel_id,
+                    ReviewArtifact.kind.in_(("outline_draft", "chapter_draft")),
+                )
+                .order_by(
+                    ReviewArtifactRevision.createdAt,
+                    ReviewArtifactRevision.artifactId,
+                    ReviewArtifactRevision.revision,
+                )
+            )
+        ).all()
+    )
+    counters = {"outline": 0, "body": 0}
+    indexed: dict[tuple[str, int], ShortStoryVersionReference] = {}
+    for revision, artifact in rows:
+        try:
+            raw = json.loads(revision.payloadJson)
+            if artifact.kind == "outline_draft":
+                kind: Literal["outline", "body"] = "outline"
+                outline_payload = ShortStoryOutlineDraft.model_validate(raw)
+                typed: ShortStoryOutlineDraft | ShortStoryChapterDraft = outline_payload
+                version_hash = canonical_short_outline_hash(outline_payload)
+            else:
+                kind = "body"
+                typed = ShortStoryChapterDraft.model_validate(raw)
+                canonical = json.dumps(
+                    typed.model_dump(mode="json"),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                version_hash = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        except (json.JSONDecodeError, ValueError, TypeError):
+            continue
+        counters[kind] += 1
+        indexed[(kind, counters[kind])] = ShortStoryVersionReference(
+            kind=kind,
+            artifactId=artifact.id,
+            revision=revision.revision,
+            hash=version_hash,
+        )
+    result = list(explicit)
+    for key in named:
+        reference = indexed.get(key)
+        if reference is None:
+            label = "大纲" if key[0] == "outline" else "正文"
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_NAMED_VERSION_NOT_FOUND",
+                message=f"你指定的{label} v{key[1]} 不存在，请从左侧版本列表选择",
+            )
+        if reference not in result:
+            result.append(reference)
+    return result
+
+
+async def _validate_short_story_version_references(
+    session: AsyncSession,
+    novel_id: str,
+    references: list[ShortStoryVersionReference],
+) -> None:
+    for reference in references:
+        row = (
+            await session.execute(
+                select(ReviewArtifactRevision, ReviewArtifact)
+                .join(
+                    ReviewArtifact,
+                    ReviewArtifact.id == ReviewArtifactRevision.artifactId,
+                )
+                .where(
+                    ReviewArtifactRevision.artifactId == reference.artifactId,
+                    ReviewArtifactRevision.revision == reference.revision,
+                    ReviewArtifact.novelId == novel_id,
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_VERSION_REFERENCE_CONFLICT",
+                message="指定的中短篇版本不存在",
+            )
+        revision, artifact = cast(
+            tuple[ReviewArtifactRevision, ReviewArtifact], row
+        )
+        try:
+            raw_payload = json.loads(revision.payloadJson)
+            payload = (
+                ShortStoryOutlineDraft.model_validate(raw_payload)
+                if reference.kind == "outline"
+                else ShortStoryChapterDraft.model_validate(raw_payload)
+            )
+        except (json.JSONDecodeError, ValueError, TypeError):
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_VERSION_REFERENCE_CONFLICT",
+                message="指定的中短篇版本载荷无效",
+            ) from None
+        expected_artifact_kind = (
+            "outline_draft" if reference.kind == "outline" else "chapter_draft"
+        )
+        canonical = json.dumps(
+            payload.model_dump(mode="json"),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        actual_hash = (
+            canonical_short_outline_hash(payload)
+            if isinstance(payload, ShortStoryOutlineDraft)
+            else hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+        )
+        if artifact.kind != expected_artifact_kind or actual_hash != reference.hash:
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_VERSION_REFERENCE_CONFLICT",
+                message="指定的中短篇版本类型或内容校验失败",
+            )
+
+
+async def _latest_workflow_identity(
+    session: AsyncSession,
+    task_id: str,
+) -> dict[str, Any]:
+    serialized = await session.scalar(
+        select(WritingRunCommand.payloadJson)
+        .where(WritingRunCommand.taskId == task_id)
+        .order_by(WritingRunCommand.createdAt.desc(), WritingRunCommand.id.desc())
+        .limit(1)
+    )
+    legacy: dict[str, Any] = {
+        "workflowKind": "long_serial",
+        "operation": None,
+        "targetTotalWordCount": None,
+        "source": None,
+        "versionReferences": [],
+    }
+    if serialized is None:
+        return legacy
+    try:
+        value = json.loads(serialized)
+    except (json.JSONDecodeError, TypeError):
+        raise ApiError(
+            status_code=409,
+            code="WRITING_COMMAND_PAYLOAD_INVALID",
+            message="最近写作命令载荷无效",
+        ) from None
+    if not isinstance(value, dict):
+        raise ApiError(
+            status_code=409,
+            code="WRITING_COMMAND_PAYLOAD_INVALID",
+            message="最近写作命令载荷无效",
+        )
+    if "workflowKind" not in value:
+        return legacy
+    try:
+        parsed = WritingJobPayload.model_validate(value)
+    except ValueError:
+        raise ApiError(
+            status_code=409,
+            code="WRITING_COMMAND_IDENTITY_INVALID",
+            message="最近写作命令身份无效",
+        ) from None
+    return {
+        "workflowKind": parsed.workflowKind,
+        "operation": parsed.operation,
+        "targetTotalWordCount": parsed.targetTotalWordCount,
+        "source": parsed.source.model_dump(mode="json") if parsed.source is not None else None,
+        "versionReferences": [
+            item.model_dump(mode="json") for item in parsed.versionReferences
+        ],
+    }
+
+
 def _new_command(
     task: WritingTask,
     *,
@@ -644,6 +1290,15 @@ def _resume_response(command: WritingRunCommand) -> ResumeWritingRunResponse:
         taskId=command.taskId,
         commandId=command.id,
         commandStatus=cast(WritingCommandStatus, command.status),
+    )
+
+
+def _resume_record_response(command: WritingCommandRecord) -> ResumeWritingRunResponse:
+    return ResumeWritingRunResponse(
+        accepted=True,
+        taskId=command.task.id,
+        commandId=command.id,
+        commandStatus=command.status,
     )
 
 

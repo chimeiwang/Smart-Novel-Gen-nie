@@ -52,6 +52,16 @@ def build_operation_context(
         "novel": novel,
     }
 
+    if (
+        planning.get("workflowKind") == "short_medium"
+        and definition.kind == "answer_question"
+    ):
+        short_story = planning.get("shortStoryContext")
+        if not isinstance(short_story, Mapping):
+            raise ValueError("中短篇讨论缺少 Core 权威上下文")
+        projection["shortStory"] = dict(short_story)
+        return projection
+
     if definition.contextStrategy == "brief":
         projection["chapter"] = _select(current, _CHAPTER_SUMMARY_FIELDS)
         return projection
@@ -76,6 +86,12 @@ def build_operation_context(
         projection["currentChapter"] = dict(current)
         projection["chapterGoal"] = planning.get("chapterGoal")
         projection["beatPlan"] = planning.get("approvedBeatPlan")
+        return projection
+    if definition.contextStrategy in {"short_outline", "short_story"}:
+        short_story = planning.get("shortStoryContext")
+        if not isinstance(short_story, Mapping):
+            raise ValueError("中短篇 Operation 缺少 Core 权威上下文")
+        projection["shortStory"] = dict(short_story)
         return projection
     raise ValueError(f"未知 Operation 上下文策略：{definition.contextStrategy}")
 

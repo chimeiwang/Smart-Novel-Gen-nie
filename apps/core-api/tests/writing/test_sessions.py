@@ -1,7 +1,9 @@
+import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest
+from inkforge_core.writing.message_metadata import workflow_message_metadata
 from inkforge_core.writing.schemas import (
     CreateMessageRequest,
     CreateWritingSessionRequest,
@@ -10,6 +12,26 @@ from inkforge_core.writing.schemas import (
 )
 from inkforge_core.writing.service import WritingService
 from pydantic import ValidationError
+
+
+def test_workflow_user_message_metadata_keeps_exact_short_story_references() -> None:
+    reference = {
+        "kind": "outline",
+        "artifactId": "outline-1",
+        "revision": 2,
+        "hash": "a" * 64,
+    }
+
+    metadata = json.loads(
+        workflow_message_metadata(
+            "task-1",
+            event_type="user",
+            content="比较大纲 v2",
+            version_references=[reference],
+        )
+    )
+
+    assert metadata["versionReferences"] == [reference]
 
 
 class QueryResult:
@@ -136,6 +158,109 @@ def test_writing_run_requests_require_stable_client_request_id() -> None:
         {"clientRequestId": "request-00000001", "userMessage": "继续"}
     )
     assert valid.clientRequestId == "request-00000001"
+
+
+@pytest.mark.parametrize("target", [None, 6000, 80000])
+def test_short_writing_run_accepts_nullable_reference_boundaries(
+    target: int | None,
+) -> None:
+    request = StartWritingRunRequest.model_validate(
+        {
+            "clientRequestId": "request-00000001",
+            "novelId": "novel-1",
+            "chapterId": "chapter-1",
+            "workflowKind": "short_medium",
+            "operation": "develop_short_outline",
+            "targetWordCount": target,
+            "userMessage": "根据灵感生成大纲",
+        }
+    )
+    assert request.targetWordCount == target
+
+
+@pytest.mark.parametrize("target", [5999, 80001])
+def test_short_writing_run_rejects_out_of_range_target(target: int) -> None:
+    with pytest.raises(ValidationError):
+        StartWritingRunRequest.model_validate(
+            {
+                "clientRequestId": "request-00000001",
+                "novelId": "novel-1",
+                "chapterId": "chapter-1",
+                "workflowKind": "short_medium",
+                "operation": "develop_short_outline",
+                "targetWordCount": target,
+                "userMessage": "根据灵感生成大纲",
+            }
+        )
+
+
+def test_short_discussion_accepts_exact_version_attachments() -> None:
+    request = StartWritingRunRequest.model_validate(
+        {
+            "clientRequestId": "request-00000001",
+            "novelId": "novel-1",
+            "chapterId": "chapter-1",
+            "writingSessionId": "session-1",
+            "workflowKind": "short_medium",
+            "operation": "answer_question",
+            "targetWordCount": None,
+            "userMessage": "比较这个版本和当前大纲的结尾",
+            "versionReferences": [
+                {
+                    "kind": "outline",
+                    "artifactId": "outline-1",
+                    "revision": 2,
+                    "hash": "a" * 64,
+                }
+            ],
+        }
+    )
+
+    assert request.operation == "answer_question"
+    assert request.versionReferences[0].kind == "outline"
+
+
+def test_long_writing_run_keeps_default_and_rejects_explicit_null_target() -> None:
+    base = {
+        "clientRequestId": "request-00000001",
+        "novelId": "novel-1",
+        "chapterId": "chapter-1",
+        "workflowKind": "long_serial",
+        "operation": "write_chapter",
+        "userMessage": "开始写作",
+    }
+
+    request = StartWritingRunRequest.model_validate(base)
+    assert request.targetWordCount == 4000
+    with pytest.raises(ValidationError):
+        StartWritingRunRequest.model_validate({**base, "targetWordCount": None})
+
+
+@pytest.mark.parametrize(
+    ("workflow_kind", "operation"),
+    [
+        ("short_medium", None),
+        ("short_medium", "write_chapter"),
+        ("long_serial", "develop_short_outline"),
+        ("long_serial", "write_short_story"),
+        ("long_serial", "sync_lore"),
+    ],
+)
+def test_writing_run_rejects_cross_profile_operation(
+    workflow_kind: str, operation: str | None
+) -> None:
+    with pytest.raises(ValidationError):
+        StartWritingRunRequest.model_validate(
+            {
+                "clientRequestId": "request-00000001",
+                "novelId": "novel-1",
+                "chapterId": "chapter-1",
+                "workflowKind": workflow_kind,
+                "operation": operation,
+                "targetWordCount": 6000,
+                "userMessage": "开始",
+            }
+        )
 
 
 @pytest.mark.asyncio

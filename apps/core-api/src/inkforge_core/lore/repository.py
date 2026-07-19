@@ -57,6 +57,18 @@ class LoreRepository:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
 
+    async def get_writing_bible_profile(
+        self, novel_id: str, user_id: str
+    ) -> str | None:
+        async with self._session_factory() as session:
+            await self._require_owner(session, novel_id, user_id)
+            profile = await session.scalar(
+                select(WritingBible.storyLengthProfile).where(
+                    WritingBible.novelId == novel_id
+                )
+            )
+        return profile
+
     async def list_entities(self, novel_id: str, user_id: str, kind: str) -> list[dict[str, Any]]:
         model = self._entity_model(kind)
         async with self._session_factory() as session:
@@ -331,6 +343,16 @@ class LoreRepository:
                         status_code=404, code="LORE_KIND_NOT_FOUND", message="设定类型不存在"
                     )
                 fields = content if kind == "writing-bible" else {"content": content}
+                if kind == "writing-bible" and "targetTotalWordCount" in fields:
+                    profile = await session.scalar(
+                        select(WritingBible.storyLengthProfile).where(
+                            WritingBible.novelId == novel_id
+                        )
+                    )
+                    self._require_target_for_profile(
+                        profile,
+                        fields["targetTotalWordCount"],
+                    )
                 if kind != "writing-bible" and content is None:
                     raise ApiError(
                         status_code=422, code="LORE_CONTENT_REQUIRED", message="内容不能为 null"
@@ -343,6 +365,19 @@ class LoreRepository:
                 )
                 value = (await session.scalars(statement)).one()
                 return _model_dict(value)
+
+    @staticmethod
+    def _require_target_for_profile(profile: str | None, target: object) -> None:
+        if profile == "short_medium" and target is not None and (
+            not isinstance(target, int)
+            or isinstance(target, bool)
+            or not 6_000 <= target <= 80_000
+        ):
+            raise ApiError(
+                status_code=422,
+                code="SHORT_STORY_TARGET_WORD_COUNT_INVALID",
+                message="中短篇篇幅参考必须为空或在 6000 到 80000 之间",
+            )
 
     async def _validate_entity_links(
         self,

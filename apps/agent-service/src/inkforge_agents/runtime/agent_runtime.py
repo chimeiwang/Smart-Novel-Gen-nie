@@ -49,6 +49,7 @@ class AgentRuntime:
         context: ToolContext,
         max_iterations: int = 10,
         terminal_control_tools: set[str] | frozenset[str] = frozenset(),
+        require_terminal_tool: bool = False,
         model_context: ModelCallContext | None = None,
     ) -> AgentTurnResult:
         conversation = [
@@ -68,10 +69,18 @@ class AgentRuntime:
                 for tool in exposed_tools
                 if not (active_builder_key is not None and tool.name == "start_update_builder")
             ]
+            required_tool_name: str | None = None
+            if require_terminal_tool and len(terminal_control_tools) == 1:
+                required_tool_name = next(iter(terminal_control_tools))
+                if required_tool_name not in {tool.name for tool in available_tools}:
+                    raise RuntimeError(
+                        "AGENT_TERMINAL_TOOL_NOT_EXPOSED：唯一终止工具未向模型暴露"
+                    )
             response = await self._model_runtime.run_turn(
                 ModelTurnRequest(
                     messages=conversation,
                     tools=[tool.as_model_tool() for tool in available_tools],
+                    requiredToolName=required_tool_name,
                     maxOutputTokens=self._max_output_tokens,
                 ),
                 context=model_context,

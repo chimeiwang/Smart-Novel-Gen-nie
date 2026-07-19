@@ -7,13 +7,23 @@ from datetime import datetime, timedelta
 
 import pytest
 from inkforge_core.db.base import utc_now
-from inkforge_core.db.models import WritingRunCommand, WritingTask
+from inkforge_core.db.models import (
+    Chapter,
+    Novel,
+    WritingBible,
+    WritingMessage,
+    WritingRunCommand,
+    WritingSession,
+    WritingTask,
+)
 from inkforge_core.errors import ApiError
 from inkforge_core.writing.commands import (
     WritingRunCommandRepository,
     command_idempotency_key,
 )
+from inkforge_core.writing.schemas import ResumeWritingRunRequest, StartWritingRunRequest
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import IntegrityError
 
 
 class RowResult:
@@ -65,11 +75,42 @@ class CommandSession:
             raise AssertionError("收到未预期的数据库查询")
         return self.execute_results.pop(0)
 
+    async def scalar(self, statement: object) -> object | None:
+        result = await self.execute(statement)
+        if not isinstance(result, RowResult):
+            raise AssertionError("scalar 查询必须返回 RowResult")
+        if result._row is None:
+            return None
+        return result._row[0]
+
     def add(self, value: object) -> None:
         self.added.append(value)
 
     async def flush(self) -> None:
         return None
+
+    async def get(self, _model: object, _identifier: str) -> None:
+        return None
+
+
+class RacingCommandSession(CommandSession):
+    async def flush(self) -> None:
+        if any(isinstance(item, WritingRunCommand) for item in self.added):
+            raise IntegrityError("INSERT", {}, RuntimeError("duplicate"))
+
+
+class StartCommandSession(CommandSession):
+    async def flush(self) -> None:
+        now = utc_now()
+        for item in self.added:
+            if isinstance(item, WritingTask):
+                item.id = item.id or "task-1"
+                item.createdAt = item.createdAt or now
+                item.updatedAt = item.updatedAt or now
+            elif isinstance(item, WritingRunCommand):
+                item.id = item.id or "command-1"
+                item.createdAt = item.createdAt or now
+                item.updatedAt = item.updatedAt or now
 
 
 class SessionFactory:
@@ -120,12 +161,77 @@ def command(
 
 
 @pytest.mark.asyncio
+async def test_null_short_reference_uses_stable_internal_task_word_count() -> None:
+    novel = Novel(id="novel-1", userId="user-1", name="中短篇", summary="灵感")
+    chapter = Chapter(id="chapter-1", novelId="novel-1", title="正文", order=1)
+    bible = WritingBible(
+        id="bible-1",
+        novelId="novel-1",
+        storyLengthProfile="short_medium",
+        targetTotalWordCount=None,
+    )
+    transaction = StartCommandSession(
+        [RowResult(None), RowResult((novel, chapter, bible)), RowResult((1,))]
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory(
+            [
+                CommandSession([RowResult(None)]),
+                CommandSession([RowResult(None)]),
+                transaction,
+            ]
+        )
+    )
+
+    response = await repository.create_start_with_task(
+        "user-1",
+        StartWritingRunRequest(
+            clientRequestId="request-00000001",
+            novelId="novel-1",
+            chapterId="chapter-1",
+            workflowKind="short_medium",
+            operation="develop_short_outline",
+            targetWordCount=None,
+            userMessage="生成大纲",
+        ),
+    )
+
+    task_model = next(
+        item for item in transaction.added if isinstance(item, WritingTask)
+    )
+    command_model = next(
+        item for item in transaction.added if isinstance(item, WritingRunCommand)
+    )
+    assert response.targetWordCount == 80_000
+    assert task_model.targetWordCount == 80_000
+    assert json.loads(command_model.payloadJson)["targetTotalWordCount"] is None
+
+
+@pytest.mark.asyncio
+async def test_require_owned_task_keeps_lock_in_enclosing_transaction() -> None:
+    owned_task = task()
+    session = CommandSession([RowResult((owned_task, "user-1"))])
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    result = await repository.require_owned_task("user-1", "task-1")
+
+    assert result.id == "task-1"
+    assert session.committed is True
+    rendered = str(session.statements[0].compile(dialect=postgresql.dialect()))
+    assert 'FOR UPDATE OF "WritingTask"' in rendered
+
+
+@pytest.mark.asyncio
 async def test_same_client_request_returns_existing_command() -> None:
     owned_task = task()
     first_session = CommandSession(
         [
             RowResult(None),
             RowResult((owned_task, "user-1")),
+            RowResult(None),
+            RowResult(None),
             RowResult(None),
         ]
     )
@@ -147,12 +253,42 @@ async def test_same_client_request_returns_existing_command() -> None:
 
 
 @pytest.mark.asyncio
+async def test_internal_resume_idempotency_ignores_later_task_session_binding() -> None:
+    rebound_task = task()
+    rebound_task.writingSessionId = "session-later"
+    existing = command()
+    existing.payloadJson = json.dumps(
+        {
+            "version": 1,
+            "resume": True,
+            "writingSessionId": None,
+            "resumeInput": {"userMessage": "继续"},
+        }
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory(
+            [CommandSession([RowResult((existing, rebound_task, "user-1"))])]
+        )
+    )
+
+    result = await repository.create_resume(
+        "user-1",
+        "task-1",
+        "request-00000001",
+        {"userMessage": "继续"},
+    )
+
+    assert result.id == existing.id
+
+
+@pytest.mark.asyncio
 async def test_task_allows_only_one_active_command() -> None:
     owned_task = task()
     session = CommandSession(
         [
             RowResult(None),
             RowResult((owned_task, "user-1")),
+            RowResult(None),
             RowResult(("command-active",)),
         ]
     )
@@ -168,6 +304,295 @@ async def test_task_allows_only_one_active_command() -> None:
     assert captured.value.status_code == 409
     assert captured.value.code == "WRITING_COMMAND_ACTIVE"
     assert session.rolled_back is True
+
+
+@pytest.mark.asyncio
+async def test_resume_with_message_rejects_same_key_with_different_raw_message() -> None:
+    existing = command()
+    existing.payloadJson = json.dumps(
+        {
+            "version": 1,
+            "resume": True,
+            "resumeInput": {"userMessage": "只修改第二节"},
+        },
+        ensure_ascii=False,
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([CommandSession([RowResult((existing, task(), "user-1"))])])
+    )
+
+    with pytest.raises(ApiError) as caught:
+        await repository.create_resume_with_message(
+            "user-1",
+            "task-1",
+            ResumeWritingRunRequest(
+                clientRequestId="request-00000001",
+                writingSessionId="session-1",
+                userMessage="只修改第三节",
+            ),
+        )
+
+    assert caught.value.code == "IDEMPOTENCY_KEY_REUSED"
+
+
+@pytest.mark.asyncio
+async def test_resume_with_message_same_key_session_and_message_returns_existing() -> None:
+    existing = command()
+    existing.payloadJson = json.dumps(
+        {
+            "version": 1,
+            "resume": True,
+            "writingSessionId": "session-1",
+            "resumeInput": {"userMessage": "继续"},
+        }
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([CommandSession([RowResult((existing, task(), "user-1"))])])
+    )
+
+    result = await repository.create_resume_with_message(
+        "user-1",
+        "task-1",
+        ResumeWritingRunRequest(
+            clientRequestId="request-00000001",
+            writingSessionId="session-1",
+            userMessage="继续",
+        ),
+    )
+
+    assert result.commandId == existing.id
+    assert result.commandStatus == existing.status
+
+
+@pytest.mark.asyncio
+async def test_resume_with_message_rejects_same_key_with_different_session() -> None:
+    existing = command()
+    existing.payloadJson = json.dumps(
+        {
+            "version": 1,
+            "resume": True,
+            "writingSessionId": "session-1",
+            "resumeInput": {"userMessage": "继续"},
+        }
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([CommandSession([RowResult((existing, task(), "user-1"))])])
+    )
+
+    with pytest.raises(ApiError) as caught:
+        await repository.create_resume_with_message(
+            "user-1",
+            "task-1",
+            ResumeWritingRunRequest(
+                clientRequestId="request-00000001",
+                writingSessionId="session-2",
+                userMessage="继续",
+            ),
+        )
+
+    assert caught.value.code == "IDEMPOTENCY_KEY_REUSED"
+
+
+@pytest.mark.asyncio
+async def test_resume_session_semantics_are_rechecked_after_task_lock() -> None:
+    owned_task = task()
+    owned_task.writingSessionId = "session-2"
+    existing = command()
+    existing.payloadJson = json.dumps(
+        {
+            "version": 1,
+            "resume": True,
+            "writingSessionId": "session-1",
+            "resumeInput": {"userMessage": "继续"},
+        }
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory(
+            [
+                CommandSession([RowResult(None)]),
+                CommandSession(
+                    [
+                        RowResult(None),
+                        RowResult((owned_task, "user-1")),
+                        RowResult((existing, owned_task, "user-1")),
+                    ]
+                ),
+            ]
+        )
+    )
+
+    with pytest.raises(ApiError) as caught:
+        await repository.create_resume_with_message(
+            "user-1",
+            "task-1",
+            ResumeWritingRunRequest(
+                clientRequestId="request-00000001",
+                writingSessionId="session-2",
+                userMessage="继续",
+            ),
+        )
+
+    assert caught.value.code == "IDEMPOTENCY_KEY_REUSED"
+
+
+@pytest.mark.asyncio
+async def test_resume_session_semantics_are_rechecked_after_integrity_race() -> None:
+    owned_task = task()
+    owned_task.writingSessionId = "session-2"
+    raced = command()
+    raced.payloadJson = json.dumps(
+        {
+            "version": 1,
+            "resume": True,
+            "writingSessionId": "session-1",
+            "resumeInput": {"userMessage": "继续"},
+        }
+    )
+    creation_session = RacingCommandSession(
+        [
+            RowResult(None),
+            RowResult((owned_task, "user-1")),
+            RowResult(None),
+            RowResult(None),
+            RowResult(None),
+        ]
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory(
+            [
+                CommandSession([RowResult(None)]),
+                creation_session,
+                CommandSession([RowResult((raced, owned_task, "user-1"))]),
+            ]
+        )
+    )
+
+    with pytest.raises(ApiError) as caught:
+        await repository.create_resume_with_message(
+            "user-1",
+            "task-1",
+            ResumeWritingRunRequest(
+                clientRequestId="request-00000001",
+                writingSessionId="session-2",
+                userMessage="继续",
+            ),
+        )
+
+    assert caught.value.code == "IDEMPOTENCY_KEY_REUSED"
+
+
+@pytest.mark.asyncio
+async def test_resume_with_message_persists_unmodified_user_text() -> None:
+    owned_task = task()
+    creation_session = CommandSession(
+        [
+            RowResult(None),
+            RowResult((owned_task, "user-1")),
+            RowResult(None),
+            RowResult(None),
+            RowResult(None),
+        ]
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory(
+            [
+                CommandSession([RowResult(None)]),
+                creation_session,
+            ]
+        )
+    )
+
+    await repository.create_resume_with_message(
+        "user-1",
+        "task-1",
+        ResumeWritingRunRequest(
+            clientRequestId="request-00000001",
+            writingSessionId="session-1",
+            userMessage="  只修改第二节，不要改结尾。  ",
+        ),
+    )
+
+    message = next(
+        item for item in creation_session.added if isinstance(item, WritingMessage)
+    )
+    persisted_command = next(
+        item for item in creation_session.added if isinstance(item, WritingRunCommand)
+    )
+    assert message.content == "  只修改第二节，不要改结尾。  "
+    assert json.loads(persisted_command.payloadJson)["resumeInput"]["userMessage"] == (
+        "  只修改第二节，不要改结尾。  "
+    )
+
+
+@pytest.mark.asyncio
+async def test_resume_rechecks_semantics_after_task_lock() -> None:
+    owned_task = task()
+    existing = command()
+    existing.payloadJson = json.dumps(
+        {
+            "version": 1,
+            "resume": True,
+            "resumeInput": {"userMessage": "旧修改要求"},
+        },
+        ensure_ascii=False,
+    )
+    session = CommandSession(
+        [
+            RowResult(None),
+            RowResult((owned_task, "user-1")),
+            RowResult((existing, owned_task, "user-1")),
+        ]
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    with pytest.raises(ApiError) as caught:
+        await repository.create_resume(
+            "user-1",
+            "task-1",
+            "request-00000001",
+            {"userMessage": "新修改要求"},
+        )
+
+    assert caught.value.code == "IDEMPOTENCY_KEY_REUSED"
+
+
+@pytest.mark.asyncio
+async def test_resume_integrity_race_rechecks_full_semantics() -> None:
+    owned_task = task()
+    raced = command()
+    raced.payloadJson = json.dumps(
+        {
+            "version": 1,
+            "resume": True,
+            "resumeInput": {"userMessage": "竞争请求"},
+        },
+        ensure_ascii=False,
+    )
+    session = RacingCommandSession(
+        [
+            RowResult(None),
+            RowResult((owned_task, "user-1")),
+            RowResult(None),
+            RowResult(None),
+            RowResult(None),
+            RowResult((raced, owned_task, "user-1")),
+        ]
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    with pytest.raises(ApiError) as caught:
+        await repository.create_resume(
+            "user-1",
+            "task-1",
+            "request-00000001",
+            {"userMessage": "当前请求"},
+        )
+
+    assert caught.value.code == "IDEMPOTENCY_KEY_REUSED"
 
 
 @pytest.mark.asyncio
@@ -219,8 +644,7 @@ async def test_agent_terminal_settles_active_command_and_task(status: str) -> No
         "智能体运行失败：AGENT_JOB_TERMINAL_FAILED"
     )
     rendered = [
-        str(statement.compile(dialect=postgresql.dialect()))
-        for statement in session.statements
+        str(statement.compile(dialect=postgresql.dialect())) for statement in session.statements
     ]
     assert 'FOR UPDATE OF "WritingTask"' in rendered[0]
     assert 'FOR UPDATE OF "WritingRunCommand"' in rendered[1]
@@ -315,9 +739,7 @@ async def test_dispatch_failure_records_only_error_code_and_backs_off() -> None:
         SessionFactory([session])
     )
 
-    record = await repository.record_dispatch_failure(
-        "command-1", "AgentRunSubmitFailed"
-    )
+    record = await repository.record_dispatch_failure("command-1", "AgentRunSubmitFailed")
 
     assert record.status == "pending"
     assert record.attempt_count == 1
@@ -351,3 +773,201 @@ def test_command_idempotency_key_is_user_scoped() -> None:
     assert command_idempotency_key("user-2", "request-1") != command_idempotency_key(
         "user-1", "request-1"
     )
+
+
+@pytest.mark.asyncio
+async def test_revise_decision_persists_raw_revision_focus_once_with_command() -> None:
+    owned_task = task()
+    session = CommandSession(
+        [
+            RowResult(None),
+            RowResult((owned_task, "user-1")),
+            RowResult(None),
+            RowResult(None),
+            RowResult(None),
+        ]
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+    payload = {
+        "version": 1,
+        "resume": True,
+        "resumeInput": {
+            "artifactId": "artifact-1",
+            "decision": "revise",
+            "expectedRevision": 3,
+            "userMessage": "  第三节不要让主角妥协。  ",
+        },
+        "decisionRequest": {
+            "artifactId": "artifact-1",
+            "decision": "revise",
+            "expectedRevision": 3,
+            "editedContent": None,
+            "selectedUpdateRefs": None,
+            "userMessage": "  第三节不要让主角妥协。  ",
+        },
+    }
+
+    await repository.create_artifact_decision(
+        command_id="command-1",
+        user_id="user-1",
+        task_id="task-1",
+        artifact_id="artifact-1",
+        decision="revise",
+        client_request_id="request-00000001",
+        payload=payload,
+        result={"artifactId": "artifact-1"},
+    )
+
+    messages = [item for item in session.added if isinstance(item, WritingMessage)]
+    commands = [item for item in session.added if isinstance(item, WritingRunCommand)]
+    assert len(messages) == 1
+    assert len(commands) == 1
+    assert messages[0].content == "  第三节不要让主角妥协。  "
+    metadata = json.loads(messages[0].metadata_ or "{}")
+    assert metadata["eventType"] == "revision_focus"
+    assert metadata["intent"] == "revision_focus"
+    assert metadata["artifactId"] == "artifact-1"
+    assert metadata["sourceRevision"] == 3
+    assert metadata["taskId"] == "task-1"
+    assert metadata["contentHash"]
+
+
+@pytest.mark.asyncio
+async def test_non_revise_decision_does_not_persist_revision_focus_message() -> None:
+    owned_task = task()
+    session = CommandSession(
+        [
+            RowResult(None),
+            RowResult((owned_task, "user-1")),
+            RowResult(None),
+            RowResult(None),
+            RowResult(None),
+        ]
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+    await repository.create_artifact_decision(
+        command_id="command-1",
+        user_id="user-1",
+        task_id="task-1",
+        artifact_id="artifact-1",
+        decision="approve",
+        client_request_id="request-00000001",
+        payload={
+            "decisionRequest": {
+                "artifactId": "artifact-1",
+                "decision": "approve",
+                "expectedRevision": 1,
+                "userMessage": "批准",
+            }
+        },
+        result={"artifactId": "artifact-1"},
+    )
+    assert not any(isinstance(item, WritingMessage) for item in session.added)
+
+
+@pytest.mark.asyncio
+async def test_artifact_decision_repository_rejects_raced_semantic_key_reuse() -> None:
+    existing = command()
+    existing.kind = "artifact_decision"
+    existing.artifactId = "artifact-1"
+    existing.decision = "discard"
+    existing.payloadJson = json.dumps(
+        {
+            "decisionRequest": {
+                "artifactId": "artifact-1",
+                "decision": "discard",
+                "expectedRevision": 1,
+                "userMessage": None,
+            }
+        }
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([CommandSession([RowResult((existing, task(), "user-1"))])])
+    )
+
+    with pytest.raises(ApiError) as caught:
+        await repository.create_artifact_decision(
+            command_id="command-2",
+            user_id="user-1",
+            task_id="task-1",
+            artifact_id="artifact-1",
+            decision="approve",
+            client_request_id="request-00000001",
+            payload={
+                "decisionRequest": {
+                    "artifactId": "artifact-1",
+                    "decision": "approve",
+                    "expectedRevision": 1,
+                    "userMessage": None,
+                }
+            },
+            result={"artifactId": "artifact-1"},
+        )
+    assert caught.value.code == "IDEMPOTENCY_KEY_REUSED"
+
+
+@pytest.mark.asyncio
+async def test_revise_decision_creates_and_binds_session_before_persisting_raw_message() -> None:
+    owned_task = task()
+    owned_task.writingSessionId = None
+    first_session = CommandSession(
+        [
+            RowResult(None),
+            RowResult((owned_task, "user-1")),
+            RowResult(None),
+            RowResult(None),
+            RowResult(None),
+        ]
+    )
+    factory = SessionFactory([first_session])
+    repository = WritingRunCommandRepository(factory)  # type: ignore[arg-type]
+    payload = {
+        "version": 1,
+        "resume": True,
+        "writingSessionId": None,
+        "decisionRequest": {
+            "artifactId": "artifact-1",
+            "decision": "revise",
+            "expectedRevision": 4,
+            "userMessage": "  保留原始空格，不要牺牲结尾。  ",
+        },
+    }
+
+    first = await repository.create_artifact_decision(
+        command_id="command-1",
+        user_id="user-1",
+        task_id="task-1",
+        artifact_id="artifact-1",
+        decision="revise",
+        client_request_id="request-00000001",
+        payload=payload,
+        result={"artifactId": "artifact-1"},
+    )
+
+    sessions = [item for item in first_session.added if isinstance(item, WritingSession)]
+    messages = [item for item in first_session.added if isinstance(item, WritingMessage)]
+    commands = [item for item in first_session.added if isinstance(item, WritingRunCommand)]
+    assert len(sessions) == len(messages) == len(commands) == 1
+    assert owned_task.writingSessionId == sessions[0].id
+    assert messages[0].sessionId == sessions[0].id
+    assert messages[0].content == "  保留原始空格，不要牺牲结尾。  "
+    assert first.payload["writingSessionId"] == sessions[0].id
+
+    second_session = CommandSession([RowResult((commands[0], owned_task, "user-1"))])
+    factory.sessions.append(second_session)
+    second = await repository.create_artifact_decision(
+        command_id="command-other",
+        user_id="user-1",
+        task_id="task-1",
+        artifact_id="artifact-1",
+        decision="revise",
+        client_request_id="request-00000001",
+        payload=payload,
+        result={"artifactId": "artifact-1"},
+    )
+    assert second.id == first.id
+    assert second_session.added == []

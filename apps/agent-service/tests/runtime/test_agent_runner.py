@@ -152,22 +152,36 @@ async def test_reviser_keeps_required_changes_out_of_system_messages() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("agent_id", "mode", "operation_kind", "expected"),
+    ("agent_id", "mode", "operation_kind", "expected", "required_tool"),
     [
         (
             "写作",
             "primary",
             "write_chapter",
             OPERATION_DEFINITIONS["write_chapter"].allowedToolNames,
+            None,
         ),
-        ("校验", "reviewer", "write_chapter", frozenset({"submit_evaluation"})),
+        (
+            "校验",
+            "reviewer",
+            "write_chapter",
+            frozenset({"submit_evaluation"}),
+            "submit_evaluation",
+        ),
         (
             "写作",
             "reviser",
             "write_chapter",
             OPERATION_DEFINITIONS["write_chapter"].allowedToolNames,
+            None,
         ),
-        (QUALITY_AGENT_ID, "quality", None, frozenset({"submit_quality_report"})),
+        (
+            QUALITY_AGENT_ID,
+            "quality",
+            None,
+            frozenset({"submit_quality_report"}),
+            "submit_quality_report",
+        ),
     ],
 )
 async def test_runner_exposes_exact_execution_mode_tools(
@@ -175,6 +189,7 @@ async def test_runner_exposes_exact_execution_mode_tools(
     mode: str,
     operation_kind: str | None,
     expected: frozenset[str],
+    required_tool: str | None,
 ) -> None:
     provider = CapturingProvider()
     registry = build_default_registry()
@@ -186,6 +201,24 @@ async def test_runner_exposes_exact_execution_mode_tools(
 
     assert len(provider.requests) == 1
     assert {tool.name for tool in provider.requests[0].tools} == expected
+    assert provider.requests[0].requiredToolName == required_tool
+
+
+@pytest.mark.asyncio
+async def test_short_discussion_does_not_expose_long_story_read_tools() -> None:
+    provider = CapturingProvider()
+    registry = build_default_registry()
+    runner = AgentRunner(make_agent_runtime(ModelRuntime(provider), registry), registry)
+    short_request = request(
+        agent_id="编辑",
+        mode="primary",
+        operation_kind="answer_question",
+    )
+    short_request.workflowKind = "short_medium"
+
+    await runner.run(short_request)
+
+    assert provider.requests[0].tools == []
 
 
 @pytest.mark.asyncio

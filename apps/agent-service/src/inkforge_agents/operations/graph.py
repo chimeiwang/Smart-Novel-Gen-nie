@@ -233,7 +233,11 @@ def build_operation_graph(
         if state.get("errorMessage"):
             return "suggestNextAction"
         operation = _operation(state)
-        return "reviewArtifact" if operation.reviewers else "markArtifactAwaitingUser"
+        return (
+            "reviewArtifact"
+            if _operation_reviewers(operation)
+            else "markArtifactAwaitingUser"
+        )
 
     async def review_artifact(state: GraphState) -> dict[str, Any]:
         return {
@@ -243,7 +247,7 @@ def build_operation_graph(
         }
 
     def route_review_workers(state: GraphState) -> list[Send] | str:
-        reviewers = _operation(state).reviewers
+        reviewers = _operation_reviewers(_operation(state))
         if not reviewers:
             return "mergeArtifactReviews"
         return [
@@ -497,6 +501,12 @@ def _operation_definition(operation: CreativeOperation) -> OperationDefinition:
     if definition is None:
         raise ValueError(f"不支持的创作操作：{operation.kind}")
     return definition
+
+
+def _operation_reviewers(operation: CreativeOperation) -> tuple[AgentId, ...]:
+    if operation.kind == "develop_short_outline":
+        return _operation_definition(operation).reviewers
+    return tuple(operation.reviewers)
 
 
 def _evaluation_event(events: object) -> dict[str, Any] | None:

@@ -9,6 +9,7 @@ from ..operations.contracts import CreativeOperationKind
 from ..operations.definitions import OPERATION_DEFINITIONS, OperationDefinition
 
 AgentExecutionMode = Literal["primary", "reviewer", "reviser", "quality"]
+WorkflowKind = Literal["long_serial", "short_medium"]
 QUALITY_AGENT_ID: AgentId = "校验"
 
 _REVIEWER_TOOLS = frozenset({"submit_evaluation"})
@@ -26,6 +27,7 @@ class ExecutionToolContract:
 def resolve_execution_contract(
     mode: AgentExecutionMode,
     operation_kind: CreativeOperationKind | None,
+    workflow_kind: WorkflowKind = "long_serial",
 ) -> ExecutionToolContract:
     if mode == "quality":
         if operation_kind is not None:
@@ -40,6 +42,8 @@ def resolve_execution_contract(
         )
     if mode == "reviewer":
         return ExecutionToolContract(mode, operation, _REVIEWER_TOOLS, _REVIEWER_TOOLS)
+    if workflow_kind == "short_medium" and operation_kind == "answer_question":
+        return ExecutionToolContract(mode, operation, frozenset(), frozenset())
     return ExecutionToolContract(
         mode,
         operation,
@@ -80,7 +84,10 @@ def build_execution_brief(
     if mode == "reviewer" and operation is not None:
         goal = "复审当前 Operation 对应的 Core 权威草案。"
     elif mode == "reviser" and operation is not None:
-        goal = f"完整重写 {operation.label} 对应的待审核草案。"
+        if operation.kind == "develop_short_outline":
+            goal = "基于当前 Core 权威大纲提交局部结构修改。"
+        else:
+            goal = f"完整重写 {operation.label} 对应的待审核草案。"
     else:
         goal = operation.executionBrief if operation is not None else "提交一致性质量报告。"
     lines = [
@@ -94,6 +101,10 @@ def build_execution_brief(
                 "完成后只调用一次 submit_evaluation；需要修改时统一提出完整 rewrite 意见。",
             )
         )
+        if operation is not None and operation.kind == "write_short_story":
+            lines.append(
+                "targetTotalWordCount 只是可空篇幅参考；不得仅因实际篇幅偏离参考值要求返工。"
+            )
     elif mode == "quality":
         lines.extend(
             (
@@ -117,6 +128,21 @@ def _operation_protocol(
     mode: AgentExecutionMode,
     operation: OperationDefinition,
 ) -> list[str]:
+    if operation.kind == "write_short_story":
+        lines = [
+            "必须在一次模型响应中输出完整正文，严格使用独占行 "
+            "ARTIFACT_OUTPUT_START 与 ARTIFACT_OUTPUT_END 包裹；边界外不得输出正文或说明。",
+            "实际篇幅由批准大纲、故事完整性、结构、节奏、高潮与结局兑现共同决定，"
+            "并保持在六千至八万字范围内。",
+            "权威上下文 targetTotalWordCount 是可空篇幅参考：为空时不得假定固定目标；"
+            "非空时也只表示篇幅倾向，不要求接近或命中，不得为了接近或命中参考值而凑字或压字。",
+            "正文可以按故事需要自然分节，但不得拆成章节任务，不得续写半稿、拼接多轮输出或自动补尾。",
+        ]
+        if mode == "reviser":
+            lines.append(
+                "依据只读权威整稿以及用户要求或全稿审核意见完成一次完整重写。"
+            )
+        return lines
     if not operation.terminalControlTools:
         return ["本次没有产物终止工具，请用普通正文直接完成回答。"]
     tools = "、".join(sorted(operation.terminalControlTools))
@@ -132,6 +158,19 @@ def _operation_protocol(
             "冲突、角色、伏笔引用、预估字数和验收标准，整体还要明确转折、代价、"
             "结果与余波。"
         )
+    elif operation.kind == "develop_short_outline":
+        if mode == "primary":
+            lines.append(
+                "首次生成只能调用 submit_short_story_outline 并提交 mode=full；"
+                "只提交核心前提、创作锚点、自然分节及修改摘要。原始灵感和稳定 ID "
+                "由服务端补全，不得提交分节字数、固定节数或章节映射。"
+            )
+        else:
+            lines.append(
+                "修改只能调用 submit_short_story_outline 并提交 mode=patch；"
+                "sourceRevision 必须等于只读权威草案 revision，使用稳定分节 ID "
+                "执行 update/insert/move/delete，未涉及分节不得重写。"
+            )
     elif operation.artifactPolicy == "agent_updates":
         middle_tools = sorted(
             operation.allowedToolNames
@@ -151,7 +190,7 @@ def _operation_protocol(
         lines.append(
             "构建链必须沿用同一 artifactKey；Runtime 与产物校验器会拒绝身份变化。"
         )
-    if mode == "reviser":
+    if mode == "reviser" and operation.kind != "develop_short_outline":
         lines.append(
             "根据只读资料中的 Core 权威草案完成完整重写，使用当前 Operation 的产物"
             "提交工具，保持原产物类型和权威 artifactKey。"

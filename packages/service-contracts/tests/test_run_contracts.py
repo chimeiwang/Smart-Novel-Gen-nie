@@ -41,6 +41,8 @@ def test_protocol_version_and_literal_sets_are_exact() -> None:
         "review_chapter",
         "sync_lore",
         "manage_foreshadowing",
+        "develop_short_outline",
+        "write_short_story",
     }
 
 

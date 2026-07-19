@@ -2,23 +2,11 @@ from __future__ import annotations
 
 from typing import Literal
 
+from inkforge_contracts.runs import CreativeOperationKind as CreativeOperationKind
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..definitions.agents import AgentId
 
-CreativeOperationKind = Literal[
-    "answer_question",
-    "create_lore",
-    "revise_lore",
-    "create_outline",
-    "revise_outline",
-    "plan_chapter",
-    "write_chapter",
-    "rewrite_scene",
-    "review_chapter",
-    "sync_lore",
-    "manage_foreshadowing",
-]
 TargetType = Literal[
     "novel",
     "chapter",

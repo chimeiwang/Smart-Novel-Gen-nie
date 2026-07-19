@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal, Protocol
 
+from ..errors import ApiError
 from .updates import filter_agent_updates_by_selection
 
 ApplyTarget = Literal["agent_updates", "outline_content", "chapter_content", "beat_plan"]
@@ -22,6 +23,9 @@ def resolve_apply_target(payload: dict[str, Any]) -> ApplyTarget | None:
 
 class ApplicableArtifactPort(Protocol):
     @property
+    def id(self) -> str: ...
+
+    @property
     def payload(self) -> dict[str, Any]: ...
 
     @property
@@ -29,6 +33,12 @@ class ApplicableArtifactPort(Protocol):
 
     @property
     def chapter_id(self) -> str | None: ...
+
+    @property
+    def task_id(self) -> str | None: ...
+
+    @property
+    def revision(self) -> int: ...
 
 
 class FormalWritePort(Protocol):
@@ -68,6 +78,16 @@ class FormalArtifactApplier:
         selected_update_refs: list[dict[str, object]] | None,
     ) -> int:
         payload = artifact.payload
+        if (
+            payload.get("kind") == "chapter_draft"
+            and payload.get("storyLengthProfile") == "short_medium"
+            and (edited_content is not None or selected_update_refs is not None)
+        ):
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_DRAFT_DIRECT_EDIT_FORBIDDEN",
+                message="中短篇完整正文必须按当前精确版本批准，不能在批准时直接改写或部分应用",
+            )
         target = resolve_apply_target(payload)
         if target is None:
             raise ValueError("该草案类型不能写入正式数据")

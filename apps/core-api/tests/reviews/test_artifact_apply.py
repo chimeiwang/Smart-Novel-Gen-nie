@@ -46,8 +46,9 @@ class FakeReviewRepository:
 
 
 class FakeApplier:
-    def __init__(self, *, fail: bool = False) -> None:
+    def __init__(self, *, fail: bool = False, api_error: ApiError | None = None) -> None:
         self.fail = fail
+        self.api_error = api_error
         self.payload: dict[str, object] | None = None
 
     async def apply(
@@ -60,6 +61,8 @@ class FakeApplier:
     ) -> int:
         del user_id, edited_content, selected_update_refs
         self.payload = artifact.payload
+        if self.api_error is not None:
+            raise self.api_error
         if self.fail:
             raise ValueError("正式写入失败")
         return 1
@@ -89,6 +92,27 @@ async def test_apply_failure_returns_artifact_to_awaiting_user() -> None:
         await service.decide("user-1", "artifact-1", "approve")
 
     assert error.value.status_code == 409
+    assert repository.transitions[-1] == ("applying", "awaiting_user")
+
+
+@pytest.mark.asyncio
+async def test_apply_preserves_specific_api_error_after_restoring_status() -> None:
+    repository = FakeReviewRepository()
+    service = ReviewService(
+        repository,
+        FakeApplier(
+            api_error=ApiError(
+                status_code=409,
+                code="SHORT_STORY_CHAPTER_BASE_CHANGED",
+                message="正文基线已变化",
+            )
+        ),
+    )
+
+    with pytest.raises(ApiError) as caught:
+        await service.decide("user-1", "artifact-1", "approve")
+
+    assert caught.value.code == "SHORT_STORY_CHAPTER_BASE_CHANGED"
     assert repository.transitions[-1] == ("applying", "awaiting_user")
 
 

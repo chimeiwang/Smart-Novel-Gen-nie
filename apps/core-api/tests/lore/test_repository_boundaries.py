@@ -16,6 +16,12 @@ class ScalarSession:
         del statement
         return self.values.popleft()
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        del exc_type, exc, traceback
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
@@ -72,6 +78,21 @@ async def test_null_owner_is_always_rejected() -> None:
     with pytest.raises(ApiError) as caught:
         await LoreRepository._require_owner(session, "novel-1", "user-1")  # type: ignore[arg-type]
     assert caught.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_missing_writing_bible_profile_is_returned_as_legacy_missing_state() -> None:
+    session = ScalarSession(["user-1", None])
+    repository = LoreRepository(lambda: session)  # type: ignore[arg-type]
+
+    profile = await repository.get_writing_bible_profile("novel-1", "user-1")
+
+    assert profile is None
+
+
+def test_missing_writing_bible_uses_long_serial_target_rules() -> None:
+    LoreRepository._require_target_for_profile(None, None)
+    LoreRepository._require_target_for_profile(None, 1_000_000)
 
 
 @pytest.mark.parametrize("method_name", ["create_entity", "update_entity"])

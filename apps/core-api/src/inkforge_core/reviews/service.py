@@ -23,6 +23,12 @@ class ArtifactPort(Protocol):
     @property
     def chapter_id(self) -> str | None: ...
 
+    @property
+    def task_id(self) -> str | None: ...
+
+    @property
+    def revision(self) -> int: ...
+
 
 class ReviewRepositoryPort(Protocol):
     async def require_artifact(self, user_id: str, artifact_id: str) -> ArtifactPort: ...
@@ -89,6 +95,9 @@ class ReviewService:
                 edited_content=edited_content,
                 selected_update_refs=selected_update_refs,
             )
+        except ApiError:
+            await self._transition(artifact_id, "applying", "awaiting_user")
+            raise
         except Exception:
             await self._transition(artifact_id, "applying", "awaiting_user")
             raise ApiError(

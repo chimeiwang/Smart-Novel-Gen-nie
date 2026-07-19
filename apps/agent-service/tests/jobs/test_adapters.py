@@ -8,6 +8,11 @@ from inkforge_agents.jobs.adapters import CoreArtifactPort, CoreGraphAgentExecut
 from inkforge_agents.providers.base import ModelUsage
 from inkforge_agents.runtime.agent_runner import AgentRunRequest, AgentRunResult
 from inkforge_agents.tools.registry import ToolContext
+from inkforge_contracts import (
+    ShortStoryChapterDraft,
+    ShortStoryDraftMetadata,
+    count_short_story_text_length,
+)
 
 
 class CoreClient:
@@ -90,6 +95,60 @@ def _runtime_context() -> dict[str, Any]:
             "runId": "run-1",
             "jobId": "job-1",
         },
+    }
+
+
+def _short_runtime_context() -> dict[str, Any]:
+    context = _runtime_context()
+    context["coreContext"] = {
+        "workspace": {},
+        "planning": {
+            "shortStoryContext": {
+                "directEdit": None,
+                "revisionRequest": "根据灵感生成大纲",
+                "anchors": None,
+                "currentOutline": None,
+                "originalInspiration": "城市每天忘记一个人",
+                "recentConversation": [],
+            }
+        },
+    }
+    return context
+
+
+def _short_state() -> dict[str, Any]:
+    return {
+        "userId": "user-1",
+        "novelId": "novel-1",
+        "taskId": "task-1",
+        "chapterId": "chapter-1",
+        "activeAgent": "剧情",
+        "userMessage": "根据灵感生成大纲",
+        "currentOperation": {
+            "kind": "develop_short_outline",
+            "primaryAgent": "剧情",
+        },
+        "runtimeContext": _short_runtime_context(),
+    }
+
+
+def _short_full_event() -> dict[str, Any]:
+    return {
+        "type": "submit_short_story_outline",
+        "kind": "outline_draft",
+        "artifactKey": "short-outline-key",
+        "mode": "full",
+        "corePremise": "记者试图保住一名被城市遗忘的人。",
+        "anchors": {
+            "mustKeep": ["被遗忘者主动选择消失"],
+            "confirmed": [],
+            "avoid": ["梦境反转"],
+        },
+        "sections": [
+            {"title": "失踪", "events": "记者发现同事从所有记录中消失。"},
+            {"title": "选择", "events": "记者查明真相并完成告别。"},
+        ],
+        "changeSummary": "形成首版完整大纲。",
     }
 
 
@@ -204,6 +263,76 @@ def test_artifact_port_rejects_release_without_owned_record() -> None:
 
     with pytest.raises(RuntimeError, match="缺少待审核草案上下文"):
         port.release("artifact-1", _resource())
+
+
+def test_artifact_port_hydrates_minimal_short_story_run_artifact() -> None:
+    port = CoreArtifactPort(CoreClient())  # type: ignore[arg-type]
+    state = {
+        **_hydration_state(),
+        "currentOperation": {"kind": "write_short_story", "primaryAgent": "写作"},
+        "activeArtifactId": "artifact-story",
+    }
+    run_artifact = {
+        "id": "artifact-story",
+        "taskId": "task-1",
+        "artifactKey": "short-story-key",
+        "status": "under_review",
+        "revision": 2,
+        "payload": _short_story_draft().model_dump(mode="json"),
+        "evaluations": [],
+    }
+
+    port.hydrate_short_story(_resource(), state, run_artifact)
+
+    context = port.review_context("artifact-story")
+    assert context["chapterId"] == "chapter-1"
+    assert context["revision"] == 2
+    assert context["payload"]["metadata"]["generationCommandId"] == "job-1"
+
+
+@pytest.mark.asyncio
+async def test_artifact_port_submits_and_revises_typed_short_story_with_raw_diff() -> None:
+    core = CoreClient()
+    port = CoreArtifactPort(core)
+    state = {
+        "userId": "user-1",
+        "novelId": "novel-1",
+        "taskId": "task-1",
+        "chapterId": "chapter-1",
+        "commandId": "job-1",
+        "activeAgent": "写作",
+        "activeArtifactId": None,
+        "currentOperation": {"kind": "write_short_story", "primaryAgent": "写作"},
+        "runtimeContext": _runtime_context(),
+    }
+
+    artifact_id = await port.save_short_story(
+        state,
+        _short_story_draft(),
+        user_request="请生成完整正文",
+    )
+    state["activeArtifactId"] = artifact_id
+    await port.save_short_story(
+        state,
+        _short_story_draft(
+            automatic_rewrite_count=1,
+            generation_reason="automatic_rewrite",
+        ),
+        user_request=None,
+    )
+
+    created, revised = core.artifacts
+    assert created["kind"] == "chapter_draft"
+    assert created["payload"]["storyLengthProfile"] == "short_medium"
+    assert created["diff"] is None
+    assert revised["expectedRevision"] == 1
+    assert revised["artifactKey"] == created["artifactKey"]
+    assert revised["diff"] == {
+        "sourceRevision": 1,
+        "generationCommandId": "job-1",
+        "automaticRewriteCount": 1,
+        "generationReason": "automatic_rewrite",
+    }
 
 
 @pytest.mark.asyncio
@@ -439,6 +568,143 @@ async def test_executor_marks_primary_and_reviser_modes_explicitly() -> None:
 
 
 @pytest.mark.asyncio
+async def test_short_story_executor_forces_one_model_iteration_and_zero_tools() -> None:
+    runner = RecordingRunner()
+    executor = CoreGraphAgentExecutor(runner, CoreArtifactPort(CoreClient()))  # type: ignore[arg-type]
+    state = {
+        "userId": "user-1",
+        "novelId": "novel-1",
+        "taskId": "task-1",
+        "chapterId": "chapter-1",
+        "userMessage": "生成完整中短篇正文",
+        "contextMessages": ["中短篇整稿权威上下文"],
+        "currentOperation": {"kind": "write_short_story", "primaryAgent": "写作"},
+        "runtimeContext": _runtime_context(),
+    }
+
+    await executor.run(
+        "写作",
+        state,
+        execution_mode="primary",
+        operation_kind="write_short_story",
+    )
+
+    request = runner.requests[-1]
+    assert request.maxIterations == 1
+    assert request.operationKind == "write_short_story"
+
+
+@pytest.mark.asyncio
+async def test_short_story_reviewers_receive_same_revision_with_separate_scopes() -> None:
+    core = CoreClient()
+    artifacts = CoreArtifactPort(core)
+    state = {
+        "taskId": "task-1",
+        "userId": "user-1",
+        "novelId": "novel-1",
+        "chapterId": "chapter-1",
+        "activeArtifactId": "artifact-story",
+        "currentOperation": {"kind": "write_short_story", "primaryAgent": "写作"},
+        "userMessage": "删除结尾后的重复解释段落",
+        "contextMessages": ["中短篇整稿权威上下文：批准大纲、锚点和必要设定"],
+        "shortStoryReviews": [
+            {
+                "revision": 2,
+                "evaluatorAgent": "编辑",
+                "verdict": "revise",
+                "summary": "这条编辑结论不能进入校验上下文",
+            }
+        ],
+        "runtimeContext": _runtime_context(),
+    }
+    run_artifact = {
+        "id": "artifact-story",
+        "taskId": "task-1",
+        "artifactKey": "short-story-key",
+        "status": "under_review",
+        "revision": 2,
+        "payload": _short_story_draft().model_dump(mode="json"),
+        "evaluations": [],
+    }
+    artifacts.hydrate_short_story(_resource(), state, run_artifact)
+    runner = RecordingRunner()
+    executor = CoreGraphAgentExecutor(runner, artifacts)  # type: ignore[arg-type]
+
+    await executor.run(
+        "编辑",
+        state,
+        execution_mode="reviewer",
+        operation_kind="write_short_story",
+    )
+    await executor.run(
+        "校验",
+        state,
+        execution_mode="reviewer",
+        operation_kind="write_short_story",
+    )
+
+    editor, validator = runner.requests
+    assert editor.contextMessages == validator.contextMessages
+    assert "中短篇整稿权威上下文" in editor.contextMessages[0]
+    assert "仅作为验收标准" in editor.contextMessages[-2]
+    assert "删除结尾后的重复解释段落" in editor.contextMessages[-2]
+    assert "完整中短篇正文" in editor.contextMessages[-1]
+    assert "这条编辑结论不能进入校验上下文" not in validator.contextMessages[0]
+    assert "结构、节奏、高潮和结局兑现" in "\n".join(editor.executionInstructions)
+    assert "人物、规则、时间线、因果和伏笔" in "\n".join(
+        validator.executionInstructions
+    )
+    assert editor.maxIterations == validator.maxIterations == 1
+    assert (
+        editor.userMessage
+        == validator.userMessage
+        == "请审核当前 Core 权威完整正文并提交结构化结论。"
+    )
+
+
+@pytest.mark.asyncio
+async def test_short_story_reviser_receives_authority_context_and_current_full_draft() -> None:
+    artifacts = CoreArtifactPort(CoreClient())  # type: ignore[arg-type]
+    state = {
+        "taskId": "task-1",
+        "userId": "user-1",
+        "novelId": "novel-1",
+        "chapterId": "chapter-1",
+        "activeArtifactId": "artifact-story",
+        "currentOperation": {"kind": "write_short_story", "primaryAgent": "写作"},
+        "userMessage": "把结局改得更克制",
+        "contextMessages": ["中短篇整稿权威上下文：批准大纲和创作锚点"],
+        "pendingRevision": {"requiredChanges": "完整重写并兑现结局"},
+        "runtimeContext": _runtime_context(),
+    }
+    run_artifact = {
+        "id": "artifact-story",
+        "taskId": "task-1",
+        "artifactKey": "short-story-key",
+        "status": "under_review",
+        "revision": 2,
+        "payload": _short_story_draft().model_dump(mode="json"),
+        "evaluations": [],
+    }
+    artifacts.hydrate_short_story(_resource(), state, run_artifact)
+    runner = RecordingRunner()
+    executor = CoreGraphAgentExecutor(runner, artifacts)  # type: ignore[arg-type]
+
+    await executor.run(
+        "写作",
+        state,
+        execution_mode="reviser",
+        operation_kind="write_short_story",
+    )
+
+    request = runner.requests[0]
+    assert "中短篇整稿权威上下文" in request.contextMessages[0]
+    assert "当前返工草案权威内容" in request.contextMessages[-1]
+    assert "完整中短篇正文" in request.contextMessages[-1]
+    assert "完整重写并兑现结局" in request.contextMessages[-1]
+
+
+@pytest.mark.asyncio
 async def test_executor_rejects_missing_operation_kind() -> None:
     runner = RecordingRunner()
     executor = CoreGraphAgentExecutor(runner, CoreArtifactPort(CoreClient()))  # type: ignore[arg-type]
@@ -549,3 +815,202 @@ async def test_revision_rejects_core_returning_different_artifact_id() -> None:
             },
             "返工正文",
         )
+
+
+@pytest.mark.asyncio
+async def test_revision_sends_authoritative_expected_revision_to_core() -> None:
+    core = CoreClient()
+    port = CoreArtifactPort(core)
+    state = {
+        "chapterId": "chapter-1",
+        "activeAgent": "写作",
+        "userMessage": "  第三节不要让主角妥协。  ",
+        "runtimeContext": _runtime_context(),
+    }
+    artifact_id = await port.submit(
+        state,
+        {
+            "type": "begin_artifact_output",
+            "kind": "chapter_draft",
+            "summary": "初稿",
+            "artifactKey": "authority-key",
+        },
+        "正文",
+    )
+    state["activeArtifactId"] = artifact_id
+
+    await port.revise(
+        state,
+        {
+            "type": "begin_artifact_output",
+            "kind": "chapter_draft",
+            "summary": "返工",
+            "artifactKey": "authority-key",
+        },
+        "返工正文",
+    )
+
+    assert core.artifacts[1]["expectedRevision"] == 1
+    assert core.artifacts[1]["diff"] == {
+        "sourceRevision": 1,
+        "userRequest": "  第三节不要让主角妥协。  ",
+        "changeSummary": "返工",
+    }
+
+
+def _short_story_draft(
+    *,
+    command_id: str = "job-1",
+    automatic_rewrite_count: int = 0,
+    generation_reason: str = "user_request",
+) -> ShortStoryChapterDraft:
+    content = "完整中短篇正文，尾声明确存在。"
+    return ShortStoryChapterDraft(
+        content=content,
+        metadata=ShortStoryDraftMetadata(
+            sourceOutlineArtifactId="outline-1",
+            sourceOutlineRevision=3,
+            sourceOutlineHash="a" * 64,
+            targetWordCount=6000,
+            actualWordCount=count_short_story_text_length(content),
+            targetChapterId="chapter-1",
+            baseChapterHash="b" * 64,
+            generationCommandId=command_id,
+            automaticRewriteCount=automatic_rewrite_count,
+            generationReason=generation_reason,  # type: ignore[arg-type]
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_short_outline_initial_submission_sends_complete_typed_payload_to_core() -> None:
+    core = CoreClient()
+    port = CoreArtifactPort(core)
+
+    artifact_id = await port.submit(_short_state(), _short_full_event(), "模型可见说明")
+
+    assert artifact_id == "artifact-1"
+    request = core.artifacts[0]
+    assert request["kind"] == "outline_draft"
+    assert request["title"] == "中短篇大纲"
+    assert request["summary"] == "形成首版完整大纲。"
+    assert request["reviewerAgent"] is None
+    assert request["diff"] is None
+    payload = request["payload"]
+    assert payload["kind"] == "outline_draft"
+    assert payload["storyLengthProfile"] == "short_medium"
+    assert payload["originalInspiration"] == "城市每天忘记一个人"
+    assert [section["title"] for section in payload["sections"]] == ["失踪", "选择"]
+    assert all(section["id"].startswith("short-section-") for section in payload["sections"])
+    assert "模型可见说明" not in payload["content"]
+    assert "第 2 节：选择" in payload["content"]
+
+
+@pytest.mark.asyncio
+async def test_short_outline_patch_merges_full_payload_and_preserves_raw_diff() -> None:
+    core = CoreClient()
+    port = CoreArtifactPort(core)
+    state = _short_state()
+    artifact_id = await port.submit(state, _short_full_event(), "")
+    current = port.review_context(artifact_id)
+    current_payload = current["payload"]
+    first_id = current_payload["sections"][0]["id"]
+    second_id = current_payload["sections"][1]["id"]
+    state["activeArtifactId"] = artifact_id
+    state["userMessage"] = "  只修改第一节，并在结尾前加一节。  "
+
+    await port.revise(
+        state,
+        {
+            "type": "submit_short_story_outline",
+            "kind": "outline_draft",
+            "artifactKey": "short-outline-key",
+            "mode": "patch",
+            "sourceRevision": 1,
+            "sectionOperations": [
+                {"operation": "update", "sectionId": first_id, "events": "记者收到匿名空白信。"},
+                {
+                    "operation": "insert",
+                    "beforeSectionId": second_id,
+                    "title": "名单",
+                    "events": "记者找到历年被遗忘者名单。",
+                },
+            ],
+            "changeSummary": "修改开场线索并补入名单。",
+        },
+        "",
+    )
+
+    request = core.artifacts[1]
+    assert request["expectedRevision"] == 1
+    assert request["payload"]["sections"][0] == {
+        "id": first_id,
+        "title": "失踪",
+        "events": "记者收到匿名空白信。",
+    }
+    assert request["payload"]["sections"][-1] == current_payload["sections"][-1]
+    assert request["diff"]["userRequest"] == "  只修改第一节，并在结尾前加一节。  "
+    assert request["diff"]["sourceRevision"] == 1
+    assert request["diff"]["changeSummary"] == "修改开场线索并补入名单。"
+    assert request["diff"]["outlinePatch"]["mode"] == "patch"
+    assert request["diff"]["outlinePatch"]["sectionOperations"][0]["sectionId"] == first_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid_mode", ["full", "patch"])
+async def test_short_outline_rejects_wrong_generation_mode_before_core_call(
+    invalid_mode: str,
+) -> None:
+    core = CoreClient()
+    port = CoreArtifactPort(core)
+    state = _short_state()
+    if invalid_mode == "patch":
+        event = {
+            "type": "submit_short_story_outline",
+            "kind": "outline_draft",
+            "artifactKey": "short-outline-key",
+            "mode": "patch",
+            "sourceRevision": 1,
+            "corePremise": "错误初稿 patch",
+            "changeSummary": "错误模式。",
+        }
+        with pytest.raises(ValueError, match="首次生成.*full"):
+            await port.submit(state, event, "")
+        assert core.artifacts == []
+        return
+
+    artifact_id = await port.submit(state, _short_full_event(), "")
+    state["activeArtifactId"] = artifact_id
+    before = len(core.artifacts)
+    with pytest.raises(ValueError, match="修改.*patch"):
+        await port.revise(state, _short_full_event(), "")
+    assert len(core.artifacts) == before
+
+
+@pytest.mark.asyncio
+async def test_short_outline_merge_error_does_not_call_core() -> None:
+    core = CoreClient()
+    port = CoreArtifactPort(core)
+    state = _short_state()
+    artifact_id = await port.submit(state, _short_full_event(), "")
+    state["activeArtifactId"] = artifact_id
+    before = len(core.artifacts)
+
+    with pytest.raises(ValueError, match="未知分节"):
+        await port.revise(
+            state,
+            {
+                "type": "submit_short_story_outline",
+                "kind": "outline_draft",
+                "artifactKey": "short-outline-key",
+                "mode": "patch",
+                "sourceRevision": 1,
+                "sectionOperations": [
+                    {"operation": "delete", "sectionId": "unknown-section"}
+                ],
+                "changeSummary": "错误删除。",
+            },
+            "",
+        )
+
+    assert len(core.artifacts) == before

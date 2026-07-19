@@ -1,23 +1,46 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, cast
+from typing import Any, Literal, cast
 
+from inkforge_contracts import (
+    ShortStoryAnchors,
+    ShortStoryChapterDraft,
+    ShortStoryOutlineDraft,
+    ShortStoryVersionReference,
+    canonical_short_outline_hash,
+    count_short_story_text_length,
+)
+from inkforge_contracts.jobs import ApprovedShortOutlineSource, WritingJobPayload
+from pydantic import ValidationError
 from sqlalchemy import delete, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ..chapters.content_state import content_sha256
 from ..db.base import utc_now
 from ..db.models import (
+    Chapter,
     Novel,
+    Outline,
     ReviewArtifact,
     ReviewArtifactEvaluation,
     ReviewArtifactRevision,
+    WritingBible,
+    WritingRunCommand,
+    WritingSession,
     WritingTask,
 )
 from ..errors import ApiError
+from ..short_story_artifacts import (
+    exact_short_story_outline_revision,
+    latest_short_story_outline_artifact,
+    lock_writing_bible,
+)
+from ..writing.schemas import SHORT_STORY_INTERNAL_TASK_WORD_COUNT
 from .schemas import (
     ArtifactEvaluationResponse,
     ArtifactKind,
@@ -25,6 +48,15 @@ from .schemas import (
     CreateArtifactRequest,
     EvaluationVerdict,
     ReviewArtifactResponse,
+    ReviewArtifactRevisionDetail,
+    ReviewArtifactRevisionSummary,
+    SaveShortStoryOutlineRequest,
+    ShortStoryArtifactResponse,
+    ShortStoryArtifactsResponse,
+    ShortStoryTaskStatus,
+    ShortStoryVersionDetail,
+    ShortStoryVersionListItem,
+    ShortStoryWorkflowSession,
     SubmitArtifactEvaluationRequest,
     assert_status_transition,
 )
@@ -66,6 +98,91 @@ class ReviewRepository:
                     message="无权访问该待审核草案",
                 )
             return _record(artifact)
+
+    async def require_artifact_revision(
+        self,
+        user_id: str,
+        artifact_id: str,
+        expected_revision: int,
+    ) -> ArtifactRecord:
+        async with self._session_factory() as session:
+            async with session.begin():
+                artifact = await _lock_owned_artifact(session, user_id, artifact_id)
+                _assert_expected_revision(artifact, expected_revision)
+                return _record(artifact)
+
+    async def lock_short_story_decision_bible(
+        self,
+        user_id: str,
+        novel_id: str,
+    ) -> None:
+        """在任务锁之前取得中短篇决定的作品级互斥锁。"""
+
+        async with self._session_factory() as session:
+            async with session.begin():
+                bible = await lock_writing_bible(
+                    session,
+                    novel_id,
+                    user_id=user_id,
+                )
+                if bible is None or bible.storyLengthProfile != "short_medium":
+                    raise ApiError(
+                        status_code=409,
+                        code="SHORT_STORY_PROFILE_REQUIRED",
+                        message="该草案不属于中短篇作品",
+                    )
+
+    async def require_short_story_artifact_revision(
+        self,
+        user_id: str,
+        artifact_id: str,
+        expected_revision: int,
+        *,
+        decision: Literal["approve", "discard", "revise"],
+    ) -> ArtifactRecord:
+        """按 Bible、任务、草案的固定顺序锁定中短篇决定目标。"""
+
+        async with self._session_factory() as session:
+            async with session.begin():
+                owned = await _owned_artifact(session, user_id, artifact_id)
+                if owned is None:
+                    raise ApiError(
+                        status_code=403,
+                        code="REVIEW_ARTIFACT_FORBIDDEN",
+                        message="无权访问该待审核草案",
+                    )
+                bible = await lock_writing_bible(
+                    session,
+                    owned.novelId,
+                    user_id=user_id,
+                )
+                if bible is None or bible.storyLengthProfile != "short_medium":
+                    raise ApiError(
+                        status_code=409,
+                        code="SHORT_STORY_PROFILE_REQUIRED",
+                        message="该草案不属于中短篇作品",
+                    )
+                artifact = await _lock_owned_artifact(session, user_id, artifact_id)
+                _assert_short_story_decision_artifact(artifact)
+                _assert_expected_revision(artifact, expected_revision)
+                if artifact.kind == "outline_draft" and decision == "approve":
+                    latest = await latest_short_story_outline_artifact(
+                        session,
+                        artifact.novelId,
+                        for_update=True,
+                    )
+                    if (
+                        latest is None
+                        or latest.id != artifact.id
+                        or latest.revision != artifact.revision
+                    ):
+                        raise ApiError(
+                            status_code=409,
+                            code="SHORT_OUTLINE_NOT_LATEST",
+                            message="只能批准当前最新的中短篇大纲版本",
+                        )
+                    _parse_short_outline(latest.payloadJson)
+                return _record(artifact)
 
     async def get_response(self, user_id: str, artifact_id: str) -> ReviewArtifactResponse:
         async with self._session_factory() as session:
@@ -126,6 +243,458 @@ class ReviewRepository:
                 )
             ).scalars()
             return _response(artifact, list(evaluations))
+
+    async def get_short_story_artifacts(
+        self,
+        user_id: str,
+        novel_id: str,
+    ) -> ShortStoryArtifactsResponse:
+        """返回中短篇工作区刷新所需的单一权威读模型。"""
+
+        versions = await self.list_short_story_versions(user_id, novel_id)
+        async with self._session_factory() as session:
+            bible = await session.scalar(
+                select(WritingBible)
+                .join(Novel, Novel.id == WritingBible.novelId)
+                .where(
+                    WritingBible.novelId == novel_id,
+                    Novel.userId == user_id,
+                )
+            )
+            if bible is None:
+                raise ApiError(
+                    status_code=403,
+                    code="NOVEL_FORBIDDEN",
+                    message="无权访问该小说",
+                )
+            if bible.storyLengthProfile != "short_medium":
+                raise ApiError(
+                    status_code=409,
+                    code="SHORT_STORY_PROFILE_REQUIRED",
+                    message="该接口只支持中短篇作品",
+                )
+            outline = await latest_short_story_outline_artifact(session, novel_id)
+            chapter_draft = await _latest_short_story_artifact_by_kind(
+                session, novel_id, "chapter_draft"
+            )
+            outline_response = (
+                await _short_story_artifact_response(session, outline)
+                if outline is not None
+                else None
+            )
+            draft_response = (
+                await _short_story_artifact_response(session, chapter_draft)
+                if chapter_draft is not None
+                else None
+            )
+            tasks = list(
+                (
+                    await session.scalars(
+                        select(WritingTask)
+                        .where(WritingTask.novelId == novel_id)
+                        .order_by(WritingTask.updatedAt.desc(), WritingTask.id.desc())
+                    )
+                ).all()
+            )
+            summaries: list[tuple[WritingTask, ShortStoryTaskStatus]] = []
+            for task in tasks:
+                command = await session.scalar(
+                    select(WritingRunCommand)
+                    .where(WritingRunCommand.taskId == task.id)
+                    .order_by(
+                        WritingRunCommand.createdAt.desc(),
+                        WritingRunCommand.id.desc(),
+                    )
+                    .limit(1)
+                )
+                if command is None:
+                    continue
+                try:
+                    payload = _parse_writing_job_payload(command.payloadJson)
+                except ApiError:
+                    continue
+                if (
+                    payload.workflowKind != "short_medium"
+                    or payload.operation not in {
+                        "develop_short_outline",
+                        "write_short_story",
+                    }
+                ):
+                    continue
+                active_artifact_id = _task_active_artifact_id(task)
+                if active_artifact_id is None and command.artifactId is not None:
+                    active_artifact_id = command.artifactId
+                if active_artifact_id is None:
+                    for candidate in (chapter_draft, outline):
+                        if (
+                            candidate is not None
+                            and candidate.taskId == task.id
+                            and candidate.status
+                            in {"draft", "under_review", "awaiting_user", "applying"}
+                        ):
+                            active_artifact_id = candidate.id
+                            break
+                summaries.append(
+                    (
+                        task,
+                        ShortStoryTaskStatus(
+                            id=task.id,
+                            phase=task.phase,
+                            operation=cast(Any, payload.operation),
+                            activeArtifactId=active_artifact_id,
+                            latestCommandId=command.id,
+                            latestCommandStatus=cast(Any, command.status),
+                            updatedAt=task.updatedAt,
+                        ),
+                    )
+                )
+
+            recoverable_phases = {"active", "waiting_call", "awaiting_user_review"}
+            preferred = next(
+                (
+                    item
+                    for item in summaries
+                    if item[0].phase in recoverable_phases
+                    or item[1].latestCommandStatus
+                    in {"pending", "submitted", "processing"}
+                ),
+                summaries[0] if summaries else None,
+            )
+            latest_task = preferred[1] if preferred is not None else None
+            workflow_session = None
+            if preferred is not None and preferred[0].writingSessionId is not None:
+                session_record = await session.scalar(
+                    select(WritingSession).where(
+                        WritingSession.id == preferred[0].writingSessionId,
+                        WritingSession.novelId == novel_id,
+                    )
+                )
+                if session_record is not None:
+                    session_summaries = [
+                        summary
+                        for task, summary in summaries
+                        if task.writingSessionId == session_record.id
+                    ]
+                    current = next(
+                        (
+                            item
+                            for item in session_summaries
+                            if item.phase in recoverable_phases
+                            or item.latestCommandStatus
+                            in {"pending", "submitted", "processing"}
+                        ),
+                        None,
+                    )
+                    last = next(
+                        (
+                            item
+                            for item in session_summaries
+                            if item.phase in {"completed", "error"}
+                            and item is not current
+                        ),
+                        None,
+                    )
+                    workflow_session = ShortStoryWorkflowSession(
+                        id=session_record.id,
+                        phase=session_record.phase,
+                        currentTask=current,
+                        lastTask=last,
+                    )
+            return ShortStoryArtifactsResponse(
+                outline=outline_response,
+                chapterDraft=draft_response,
+                outlineVersions=[item for item in versions if item.kind == "outline"],
+                bodyVersions=[item for item in versions if item.kind == "body"],
+                latestTask=latest_task,
+                workflowSession=workflow_session,
+            )
+
+    async def list_short_story_versions(
+        self,
+        user_id: str,
+        novel_id: str,
+    ) -> list[ShortStoryVersionListItem]:
+        """列出项目级中短篇版本，并将旧项目的多个 Artifact 归并为连续版本号。"""
+
+        async with self._session_factory() as session:
+            bible = await session.scalar(
+                select(WritingBible)
+                .join(Novel, Novel.id == WritingBible.novelId)
+                .where(
+                    WritingBible.novelId == novel_id,
+                    Novel.userId == user_id,
+                )
+            )
+            if bible is None:
+                raise ApiError(
+                    status_code=403,
+                    code="NOVEL_FORBIDDEN",
+                    message="无权访问该小说",
+                )
+            if bible.storyLengthProfile != "short_medium":
+                raise ApiError(
+                    status_code=409,
+                    code="SHORT_STORY_PROFILE_REQUIRED",
+                    message="该接口只支持中短篇作品",
+                )
+            artifacts = list(
+                (
+                    await session.scalars(
+                        select(ReviewArtifact)
+                        .where(
+                            ReviewArtifact.novelId == novel_id,
+                            ReviewArtifact.kind.in_(("outline_draft", "chapter_draft")),
+                        )
+                        .order_by(ReviewArtifact.createdAt, ReviewArtifact.id)
+                    )
+                ).all()
+            )
+            if not artifacts:
+                return []
+            artifact_by_id = {item.id: item for item in artifacts}
+            revisions = list(
+                (
+                    await session.scalars(
+                        select(ReviewArtifactRevision)
+                        .where(
+                            ReviewArtifactRevision.artifactId.in_(artifact_by_id)
+                        )
+                        .order_by(
+                            ReviewArtifactRevision.createdAt,
+                            ReviewArtifactRevision.artifactId,
+                            ReviewArtifactRevision.revision,
+                        )
+                    )
+                ).all()
+            )
+            outline = await session.scalar(
+                select(Outline).where(Outline.novelId == novel_id)
+            )
+            chapter = await session.scalar(
+                select(Chapter)
+                .where(Chapter.novelId == novel_id)
+                .order_by(Chapter.order, Chapter.id)
+                .limit(1)
+            )
+            task_ids = {item.taskId for item in artifacts if item.taskId is not None}
+            tasks = (
+                list(
+                    (
+                        await session.scalars(
+                            select(WritingTask).where(WritingTask.id.in_(task_ids))
+                        )
+                    ).all()
+                )
+                if task_ids
+                else []
+            )
+            session_by_task = {item.id: item.writingSessionId for item in tasks}
+
+            indexed: list[dict[str, Any]] = []
+            counters = {"outline": 0, "body": 0}
+            for record in revisions:
+                artifact = artifact_by_id[record.artifactId]
+                payload = _typed_payload(_parse_json(record.payloadJson, {}))
+                if not isinstance(payload, (ShortStoryOutlineDraft, ShortStoryChapterDraft)):
+                    continue
+                kind: Literal["outline", "body"] = (
+                    "outline" if isinstance(payload, ShortStoryOutlineDraft) else "body"
+                )
+                counters[kind] += 1
+                diff = _parse_json(record.diffJson, None)
+                source_session_id = (
+                    diff.get("sourceSessionId")
+                    if isinstance(diff, dict)
+                    and isinstance(diff.get("sourceSessionId"), str)
+                    else (
+                        session_by_task.get(artifact.taskId)
+                        if record.revision == artifact.revision
+                        and artifact.taskId is not None
+                        else None
+                    )
+                )
+                indexed.append(
+                    {
+                        "kind": kind,
+                        "artifact": artifact,
+                        "record": record,
+                        "payload": payload,
+                        "version": counters[kind],
+                        "hash": _short_story_version_hash(payload),
+                        "sourceSessionId": source_session_id,
+                    }
+                )
+
+            adopted_outline_version = max(
+                (
+                    item["version"]
+                    for item in indexed
+                    if item["kind"] == "outline"
+                    and outline is not None
+                    and item["payload"].content == outline.content
+                ),
+                default=None,
+            )
+            formal_body_version = max(
+                (
+                    item["version"]
+                    for item in indexed
+                    if item["kind"] == "body"
+                    and chapter is not None
+                    and item["payload"].content == chapter.content
+                ),
+                default=None,
+            )
+            outline_version_by_revision = {
+                (item["artifact"].id, item["record"].revision): item["version"]
+                for item in indexed
+                if item["kind"] == "outline"
+            }
+            result: list[ShortStoryVersionListItem] = []
+            for item in reversed(indexed):
+                artifact = item["artifact"]
+                record = item["record"]
+                payload = item["payload"]
+                kind = item["kind"]
+                version = item["version"]
+                status: Literal["adopted", "formal", "pending", "history"] = "history"
+                if kind == "outline" and version == adopted_outline_version:
+                    status = "adopted"
+                elif kind == "body" and version == formal_body_version:
+                    status = "formal"
+                elif record.revision == artifact.revision and artifact.status != "applied":
+                    status = "pending"
+                summary = record.summary
+                if summary is None and isinstance(payload, ShortStoryOutlineDraft):
+                    summary = payload.changeSummary or None
+                result.append(
+                    ShortStoryVersionListItem(
+                        kind=kind,
+                        artifactId=record.artifactId,
+                        version=version,
+                        revision=record.revision,
+                        hash=item["hash"],
+                        status=status,
+                        summary=summary,
+                        sourceSessionId=item["sourceSessionId"],
+                        sourceOutlineRevision=(
+                            payload.metadata.sourceOutlineRevision
+                            if isinstance(payload, ShortStoryChapterDraft)
+                            else None
+                        ),
+                        sourceOutlineVersion=(
+                            outline_version_by_revision.get(
+                                (
+                                    payload.metadata.sourceOutlineArtifactId,
+                                    payload.metadata.sourceOutlineRevision,
+                                )
+                            )
+                            if isinstance(payload, ShortStoryChapterDraft)
+                            else None
+                        ),
+                        createdAt=record.createdAt,
+                    )
+                )
+            return result
+
+    async def get_short_story_version(
+        self,
+        user_id: str,
+        novel_id: str,
+        kind: str,
+        version: int,
+    ) -> ShortStoryVersionDetail:
+        if kind not in {"outline", "body"} or version < 1:
+            raise ApiError(
+                status_code=404,
+                code="SHORT_STORY_VERSION_NOT_FOUND",
+                message="指定的中短篇版本不存在",
+            )
+        versions = await self.list_short_story_versions(user_id, novel_id)
+        item = next(
+            (
+                candidate
+                for candidate in versions
+                if candidate.kind == kind and candidate.version == version
+            ),
+            None,
+        )
+        if item is None:
+            raise ApiError(
+                status_code=404,
+                code="SHORT_STORY_VERSION_NOT_FOUND",
+                message="指定的中短篇版本不存在",
+            )
+        async with self._session_factory() as session:
+            record = await session.scalar(
+                select(ReviewArtifactRevision).where(
+                    ReviewArtifactRevision.artifactId == item.artifactId,
+                    ReviewArtifactRevision.revision == item.revision,
+                )
+            )
+            if record is None:
+                raise ApiError(
+                    status_code=404,
+                    code="SHORT_STORY_VERSION_NOT_FOUND",
+                    message="指定的中短篇版本不存在",
+                )
+            payload = _typed_payload(_parse_json(record.payloadJson, {}))
+            if not isinstance(payload, (ShortStoryOutlineDraft, ShortStoryChapterDraft)):
+                raise ApiError(
+                    status_code=409,
+                    code="SHORT_STORY_VERSION_INVALID",
+                    message="中短篇版本载荷无效",
+                )
+            evaluations = list(
+                (
+                    await session.scalars(
+                        select(ReviewArtifactEvaluation)
+                        .where(
+                            ReviewArtifactEvaluation.artifactId == item.artifactId,
+                            ReviewArtifactEvaluation.revision == item.revision,
+                        )
+                        .order_by(
+                            ReviewArtifactEvaluation.createdAt,
+                            ReviewArtifactEvaluation.id,
+                        )
+                    )
+                ).all()
+            )
+            return ShortStoryVersionDetail(
+                **item.model_dump(),
+                payload=payload,
+                evaluations=[_evaluation_response(value) for value in evaluations],
+            )
+
+    async def require_short_story_version_reference(
+        self,
+        user_id: str,
+        novel_id: str,
+        reference: ShortStoryVersionReference,
+    ) -> ShortStoryVersionDetail:
+        versions = await self.list_short_story_versions(user_id, novel_id)
+        item = next(
+            (
+                candidate
+                for candidate in versions
+                if candidate.kind == reference.kind
+                and candidate.artifactId == reference.artifactId
+                and candidate.revision == reference.revision
+            ),
+            None,
+        )
+        if item is None or item.hash != reference.hash:
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_VERSION_REFERENCE_CONFLICT",
+                message="指定的中短篇版本已不存在或内容校验失败",
+            )
+        return await self.get_short_story_version(
+            user_id,
+            novel_id,
+            item.kind,
+            item.version,
+        )
 
     async def list_task_artifacts(
         self,
@@ -213,6 +782,12 @@ class ReviewRepository:
     ) -> ReviewArtifactResponse:
         async with self._session_factory() as session:
             async with session.begin():
+                bible = await lock_writing_bible(
+                    session,
+                    request.novelId,
+                    user_id=user_id,
+                )
+                profile = bible.storyLengthProfile if bible is not None else None
                 task = await session.scalar(
                     select(WritingTask)
                     .join(Novel, Novel.id == WritingTask.novelId)
@@ -221,6 +796,7 @@ class ReviewRepository:
                         WritingTask.novelId == request.novelId,
                         Novel.userId == user_id,
                     )
+                    .with_for_update()
                 )
                 if task is None or (
                     request.chapterId is not None and task.chapterId != request.chapterId
@@ -230,24 +806,71 @@ class ReviewRepository:
                         code="ARTIFACT_TASK_MISMATCH",
                         message="待审核草案与写作任务资源不匹配",
                     )
+                payload = _validate_payload_for_profile(
+                    profile,
+                    request.kind,
+                    _payload_dict(request.payload),
+                )
                 existing: ReviewArtifact | None = None
                 if request.artifactKey is not None:
+                    artifact_conditions = [
+                        ReviewArtifact.novelId == request.novelId,
+                        ReviewArtifact.artifactKey == request.artifactKey,
+                    ]
+                    if profile == "short_medium" and request.kind in {
+                        "outline_draft",
+                        "chapter_draft",
+                    }:
+                        artifact_conditions = [
+                            ReviewArtifact.novelId == request.novelId,
+                            ReviewArtifact.kind == request.kind,
+                        ]
+                    else:
+                        artifact_conditions.append(
+                            ReviewArtifact.taskId == request.taskId
+                        )
                     existing = await session.scalar(
                         select(ReviewArtifact)
-                        .where(
-                            ReviewArtifact.novelId == request.novelId,
-                            ReviewArtifact.taskId == request.taskId,
-                            ReviewArtifact.artifactKey == request.artifactKey,
-                            ReviewArtifact.status.in_(("draft", "under_review", "awaiting_user")),
+                        .where(*artifact_conditions)
+                        .order_by(
+                            ReviewArtifact.revision.desc(),
+                            ReviewArtifact.updatedAt.desc(),
+                            ReviewArtifact.id.desc(),
                         )
+                        .limit(1)
                         .with_for_update()
                     )
-                payload_json = json.dumps(request.payload, ensure_ascii=False)
-                diff_json = (
-                    json.dumps(request.diff, ensure_ascii=False)
-                    if request.diff is not None
-                    else None
-                )
+                if existing is not None and existing.kind != request.kind:
+                    raise ApiError(
+                        status_code=409,
+                        code="ARTIFACT_KIND_CONFLICT",
+                        message="同一草案标识不能变更草案类型",
+                    )
+                if profile == "short_medium" and request.kind == "outline_draft":
+                    target_outline = ShortStoryOutlineDraft.model_validate(payload)
+                    anchor_changes = (
+                        []
+                        if existing is None
+                        else _describe_anchor_changes(
+                            _parse_short_outline(existing.payloadJson).anchors,
+                            target_outline.anchors,
+                        )
+                    )
+                    payload = target_outline.model_copy(
+                        update={"anchorChanges": anchor_changes}
+                    ).model_dump(mode="json")
+                if profile == "short_medium" and request.kind == "chapter_draft":
+                    await _validate_short_story_draft_submission(
+                        session,
+                        bible=bible,
+                        task=task,
+                        request=request,
+                        payload=ShortStoryChapterDraft.model_validate(payload),
+                        existing=existing,
+                    )
+                payload_json = _dump_json(payload)
+                diff_json = _dump_json(request.diff) if request.diff is not None else None
+                content_changed = False
                 if existing is None:
                     artifact = ReviewArtifact(
                         novelId=request.novelId,
@@ -269,41 +892,271 @@ class ReviewRepository:
                     session.add(artifact)
                     await session.flush()
                 else:
-                    if existing.kind != request.kind:
-                        raise ApiError(
-                            status_code=409,
-                            code="ARTIFACT_KIND_CONFLICT",
-                            message="同一草案标识不能变更草案类型",
+                    starts_new_short_cycle = (
+                        profile == "short_medium"
+                        and request.kind in {"outline_draft", "chapter_draft"}
+                        and existing.taskId != request.taskId
+                    )
+                    existing_payload = _parse_json(existing.payloadJson, {})
+                    if profile == "short_medium" and request.kind == "outline_draft":
+                        existing_outline = _parse_short_outline(existing.payloadJson)
+                        target_outline = ShortStoryOutlineDraft.model_validate(payload)
+                        content_changed = (
+                            existing_outline.semantic_content_signature()
+                            != target_outline.semantic_content_signature()
                         )
-                    try:
-                        assert_status_transition(existing.status, request.status)
-                    except ValueError as exc:
-                        raise ApiError(
-                            status_code=409,
-                            code="ARTIFACT_STATUS_CONFLICT",
-                            message=str(exc),
-                        ) from exc
-                    existing.status = request.status
-                    existing.kind = request.kind
-                    existing.title = request.title
-                    existing.summary = request.summary
-                    existing.payloadJson = payload_json
-                    existing.diffJson = diff_json
+                    else:
+                        content_changed = (
+                            existing.title != request.title
+                            or existing.summary != request.summary
+                            or existing_payload != payload
+                        )
+                    if content_changed:
+                        if request.expectedRevision is None:
+                            raise ApiError(
+                                status_code=409,
+                                code="ARTIFACT_EXPECTED_REVISION_REQUIRED",
+                                message="修改草案内容时必须提供当前修订号",
+                            )
+                        _assert_expected_revision(existing, request.expectedRevision)
+                        if not starts_new_short_cycle:
+                            _assert_transition(existing.status, request.status)
+                        existing.status = request.status
+                        existing.title = request.title
+                        existing.summary = request.summary
+                        existing.payloadJson = payload_json
+                        existing.diffJson = diff_json
+                        existing.revision += 1
+                    else:
+                        existing.status = (
+                            request.status
+                            if starts_new_short_cycle
+                            else _non_regressive_callback_status(
+                                existing.status, request.status
+                            )
+                        )
+                    if starts_new_short_cycle:
+                        existing.taskId = request.taskId
+                        existing.workflowRunId = request.workflowRunId
+                        existing.artifactKey = request.artifactKey
+                        existing.appliedAt = None
                     existing.updatedByAgent = request.createdByAgent
                     existing.reviewerAgent = request.reviewerAgent
-                    existing.revision += 1
                     artifact = existing
+                if existing is None or content_changed:
+                    session.add(
+                        ReviewArtifactRevision(
+                            artifactId=artifact.id,
+                            revision=artifact.revision,
+                            summary=request.summary,
+                            payloadJson=payload_json,
+                            diffJson=diff_json,
+                            createdByAgent=request.createdByAgent,
+                        )
+                    )
+                if (
+                    profile == "short_medium"
+                    and request.kind == "chapter_draft"
+                    and request.status == "awaiting_user"
+                ):
+                    await _require_short_story_dual_review(
+                        session,
+                        artifact_id=artifact.id,
+                        revision=artifact.revision,
+                        error_code="SHORT_STORY_REVIEWS_INCOMPLETE",
+                        message="中短篇正文必须完成编辑和校验两份全稿审核后才能交给用户",
+                    )
+        return await self.get_response(user_id, artifact.id)
+
+    async def list_revisions(
+        self, user_id: str, artifact_id: str
+    ) -> list[ReviewArtifactRevisionSummary]:
+        async with self._session_factory() as session:
+            await _require_short_outline(session, user_id, artifact_id)
+            revisions = list(
+                (
+                    await session.scalars(
+                        select(ReviewArtifactRevision)
+                        .where(ReviewArtifactRevision.artifactId == artifact_id)
+                        .order_by(ReviewArtifactRevision.revision.desc())
+                    )
+                ).all()
+            )
+        return [_revision_summary(item) for item in revisions]
+
+    async def get_revision(
+        self, user_id: str, artifact_id: str, revision: int
+    ) -> ReviewArtifactRevisionDetail:
+        async with self._session_factory() as session:
+            await _require_short_outline(session, user_id, artifact_id)
+            record = await session.scalar(
+                select(ReviewArtifactRevision).where(
+                    ReviewArtifactRevision.artifactId == artifact_id,
+                    ReviewArtifactRevision.revision == revision,
+                )
+            )
+            if record is None:
+                raise ApiError(
+                    status_code=404,
+                    code="ARTIFACT_REVISION_NOT_FOUND",
+                    message="待审核草案版本不存在",
+                )
+            return _revision_detail(record)
+
+    async def save_short_story_outline(
+        self,
+        user_id: str,
+        artifact_id: str,
+        request: SaveShortStoryOutlineRequest,
+    ) -> ReviewArtifactResponse:
+        async with self._session_factory() as session:
+            async with session.begin():
+                artifact = await _lock_short_outline(session, user_id, artifact_id)
+                _assert_short_outline_editable(artifact)
+                current = _parse_short_outline(artifact.payloadJson)
+                current_section_ids = {item.id for item in current.sections}
+                unknown_section_ids = {
+                    item.id
+                    for item in request.sections
+                    if item.id is not None and item.id not in current_section_ids
+                }
+                if unknown_section_ids:
+                    if artifact.revision != request.expectedRevision:
+                        _assert_expected_revision(artifact, request.expectedRevision)
+                    raise ApiError(
+                        status_code=422,
+                        code="SHORT_OUTLINE_SECTION_ID_UNKNOWN",
+                        message="中短篇大纲包含不属于当前版本的分节 ID",
+                    )
+                sections = [
+                    {
+                        "id": item.id
+                        or _deterministic_section_id(
+                            artifact_id,
+                            request.expectedRevision,
+                            index,
+                            item.title,
+                            item.events,
+                        ),
+                        "title": item.title,
+                        "events": item.events,
+                    }
+                    for index, item in enumerate(request.sections)
+                ]
+                try:
+                    target = ShortStoryOutlineDraft.model_validate(
+                        {
+                            "kind": "outline_draft",
+                            "storyLengthProfile": "short_medium",
+                            "originalInspiration": current.originalInspiration,
+                            "corePremise": request.corePremise,
+                            "anchors": request.anchors,
+                            "sections": sections,
+                            "content": "",
+                            "changeSummary": request.changeSummary,
+                            "anchorChanges": _describe_anchor_changes(
+                                current.anchors,
+                                request.anchors,
+                            ),
+                        }
+                    )
+                except ValidationError as exc:
+                    raise ApiError(
+                        status_code=422,
+                        code="SHORT_OUTLINE_INVALID",
+                        message="中短篇大纲结构无效",
+                    ) from exc
+                target_payload = target.model_dump(mode="json")
+                if (
+                    current.semantic_content_signature()
+                    == target.semantic_content_signature()
+                ):
+                    return _response(artifact, [])
+                _assert_expected_revision(artifact, request.expectedRevision)
+                artifact.payloadJson = _dump_json(target_payload)
+                artifact.summary = request.changeSummary or artifact.summary
+                artifact.diffJson = _dump_json(
+                    {
+                        "type": "user_edit",
+                        "sourceRevision": request.expectedRevision,
+                    }
+                )
+                artifact.updatedByAgent = None
+                artifact.revision += 1
                 session.add(
                     ReviewArtifactRevision(
                         artifactId=artifact.id,
                         revision=artifact.revision,
-                        summary=request.summary,
-                        payloadJson=payload_json,
-                        diffJson=diff_json,
-                        createdByAgent=request.createdByAgent,
+                        summary=artifact.summary,
+                        payloadJson=artifact.payloadJson,
+                        diffJson=artifact.diffJson,
+                        createdByAgent=None,
                     )
                 )
-        return await self.get_response(user_id, artifact.id)
+        return await self.get_response(user_id, artifact_id)
+
+    async def restore_revision(
+        self,
+        user_id: str,
+        artifact_id: str,
+        revision: int,
+        *,
+        expected_revision: int,
+    ) -> ReviewArtifactResponse:
+        async with self._session_factory() as session:
+            async with session.begin():
+                artifact = await _lock_short_outline(session, user_id, artifact_id)
+                _assert_short_outline_editable(artifact)
+                source = await session.scalar(
+                    select(ReviewArtifactRevision).where(
+                        ReviewArtifactRevision.artifactId == artifact_id,
+                        ReviewArtifactRevision.revision == revision,
+                    )
+                )
+                if source is None:
+                    raise ApiError(
+                        status_code=404,
+                        code="ARTIFACT_REVISION_NOT_FOUND",
+                        message="待审核草案版本不存在",
+                    )
+                source_outline = _parse_short_outline(source.payloadJson)
+                current = _parse_short_outline(artifact.payloadJson)
+                if (
+                    current.semantic_content_signature()
+                    == source_outline.semantic_content_signature()
+                ):
+                    return _response(artifact, [])
+                _assert_expected_revision(artifact, expected_revision)
+                source_payload = source_outline.model_copy(
+                    update={
+                        "anchorChanges": _describe_anchor_changes(
+                            current.anchors,
+                            source_outline.anchors,
+                        )
+                    }
+                ).model_dump(mode="json")
+                artifact.payloadJson = _dump_json(source_payload)
+                artifact.summary = source.summary
+                artifact.diffJson = _dump_json(
+                    {
+                        "type": "restore",
+                        "sourceRevision": revision,
+                        "sourceDiff": _parse_json(source.diffJson, None),
+                    }
+                )
+                artifact.updatedByAgent = None
+                artifact.revision += 1
+                session.add(
+                    ReviewArtifactRevision(
+                        artifactId=artifact.id,
+                        revision=artifact.revision,
+                        summary=artifact.summary,
+                        payloadJson=artifact.payloadJson,
+                        diffJson=artifact.diffJson,
+                        createdByAgent=None,
+                    )
+                )
+        return await self.get_response(user_id, artifact_id)
 
     async def submit_evaluation(
         self,
@@ -336,6 +1189,39 @@ class ReviewRepository:
                         code="ARTIFACT_REVISION_CONFLICT",
                         message="复审结论对应的草案修订号已过期",
                     )
+                profile = await session.scalar(
+                    select(WritingBible.storyLengthProfile).where(
+                        WritingBible.novelId == artifact.novelId
+                    )
+                )
+                is_short_story_draft = (
+                    profile == "short_medium"
+                    and artifact.kind == "chapter_draft"
+                    and _parse_json(artifact.payloadJson, {}).get("storyLengthProfile")
+                    == "short_medium"
+                )
+                if is_short_story_draft:
+                    _parse_short_story_draft(artifact.payloadJson)
+                    if request.evaluatorAgent not in {"编辑", "校验"}:
+                        raise ApiError(
+                            status_code=409,
+                            code="SHORT_STORY_REVIEWER_INVALID",
+                            message="中短篇全稿只接受编辑和校验审核",
+                        )
+                    if request.evaluatorAgent == "校验":
+                        editor = await session.scalar(
+                            select(ReviewArtifactEvaluation.id).where(
+                                ReviewArtifactEvaluation.artifactId == artifact_id,
+                                ReviewArtifactEvaluation.revision == request.revision,
+                                ReviewArtifactEvaluation.evaluatorAgent == "编辑",
+                            )
+                        )
+                        if editor is None:
+                            raise ApiError(
+                                status_code=409,
+                                code="SHORT_STORY_EDITOR_REVIEW_REQUIRED",
+                                message="中短篇全稿必须先完成编辑审核，再提交校验结论",
+                            )
                 existing = await session.scalar(
                     select(ReviewArtifactEvaluation).where(
                         ReviewArtifactEvaluation.artifactId == artifact_id,
@@ -367,6 +1253,597 @@ class ReviewRepository:
                         )
                     )
         return await self.get_response(user_id, artifact_id)
+
+
+def _payload_dict(payload: object) -> dict[str, Any]:
+    if isinstance(payload, (ShortStoryOutlineDraft, ShortStoryChapterDraft)):
+        return payload.model_dump(mode="json")
+    if isinstance(payload, dict):
+        return payload
+    raise TypeError("草案载荷必须是对象")
+
+
+def _validate_payload_for_profile(
+    profile: str | None,
+    kind: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    if kind == "chapter_draft":
+        if profile == "short_medium":
+            try:
+                return ShortStoryChapterDraft.model_validate(payload).model_dump(mode="json")
+            except ValidationError as exc:
+                raise ApiError(
+                    status_code=422,
+                    code="SHORT_STORY_DRAFT_PAYLOAD_INVALID",
+                    message="中短篇作品只能保存强类型完整正文",
+                ) from exc
+        if payload.get("storyLengthProfile") == "short_medium":
+            raise ApiError(
+                status_code=409,
+                code="ARTIFACT_PROFILE_MISMATCH",
+                message="中短篇正文不能写入长篇作品",
+            )
+        return payload
+    if kind != "outline_draft":
+        return payload
+    if profile == "short_medium":
+        try:
+            return ShortStoryOutlineDraft.model_validate(payload).model_dump(mode="json")
+        except ValidationError as exc:
+            raise ApiError(
+                status_code=422,
+                code="SHORT_OUTLINE_PAYLOAD_INVALID",
+                message="中短篇作品只能保存强类型完整大纲",
+            ) from exc
+    if payload.get("storyLengthProfile") == "short_medium":
+        raise ApiError(
+            status_code=409,
+            code="ARTIFACT_PROFILE_MISMATCH",
+            message="中短篇大纲不能写入长篇作品",
+        )
+    return payload
+
+
+async def _validate_short_story_draft_submission(
+    session: AsyncSession,
+    *,
+    bible: WritingBible | None,
+    task: WritingTask,
+    request: CreateArtifactRequest,
+    payload: ShortStoryChapterDraft,
+    existing: ReviewArtifact | None,
+) -> None:
+    """在持久化前重新核对中短篇整稿的全部权威来源。"""
+
+    if (
+        bible is None
+        or bible.storyLengthProfile != "short_medium"
+    ):
+        raise ApiError(
+            status_code=409,
+            code="SHORT_STORY_TARGET_MISMATCH",
+            message="中短篇正文只能提交到中短篇作品",
+        )
+    chapters = list(
+        (
+            await session.scalars(
+                select(Chapter)
+                .where(Chapter.novelId == request.novelId)
+                .order_by(Chapter.order, Chapter.id)
+                .with_for_update()
+            )
+        ).all()
+    )
+    if len(chapters) != 1:
+        raise ApiError(
+            status_code=409,
+            code="SHORT_STORY_CHAPTER_INVALID",
+            message="中短篇必须使用小说创建时的唯一正文承载章节",
+        )
+    chapter = chapters[0]
+    if (
+        request.chapterId != chapter.id
+        or task.chapterId != chapter.id
+        or payload.metadata.targetChapterId != chapter.id
+    ):
+        raise ApiError(
+            status_code=409,
+            code="SHORT_STORY_TARGET_CHAPTER_MISMATCH",
+            message="中短篇正文目标章节与唯一正文承载章节不一致",
+        )
+    if payload.metadata.baseChapterHash != content_sha256(chapter.content):
+        raise ApiError(
+            status_code=409,
+            code="SHORT_STORY_CHAPTER_BASE_CHANGED",
+            message="中短篇正式正文基线已经变化，请重新生成整稿",
+        )
+    actual_count = count_short_story_text_length(payload.content)
+    if (
+        payload.metadata.actualWordCount != actual_count
+        or not 6_000 <= actual_count <= 80_000
+    ):
+        raise ApiError(
+            status_code=422,
+            code="SHORT_STORY_ACTUAL_WORD_COUNT_INVALID",
+            message="中短篇正文实际字数必须为 6000～80000，且与元数据一致",
+        )
+
+    command = await session.scalar(
+        select(WritingRunCommand)
+        .where(
+            WritingRunCommand.taskId == task.id,
+            WritingRunCommand.status.in_(("pending", "submitted", "processing")),
+        )
+        .order_by(WritingRunCommand.createdAt.desc(), WritingRunCommand.id.desc())
+        .limit(1)
+        .with_for_update()
+    )
+    if command is None or command.id != payload.metadata.generationCommandId:
+        raise ApiError(
+            status_code=409,
+            code="SHORT_STORY_COMMAND_MISMATCH",
+            message="中短篇正文生成命令与当前活动命令不一致",
+        )
+    command_payload = _parse_writing_job_payload(command.payloadJson)
+    source = command_payload.source
+    expected_task_target = (
+        command_payload.targetTotalWordCount
+        if command_payload.targetTotalWordCount is not None
+        else SHORT_STORY_INTERNAL_TASK_WORD_COUNT
+    )
+    if (
+        payload.metadata.targetWordCount != command_payload.targetTotalWordCount
+        or task.targetWordCount != expected_task_target
+    ):
+        raise ApiError(
+            status_code=409,
+            code="SHORT_STORY_TARGET_MISMATCH",
+            message="中短篇正文篇幅参考与生成命令快照不一致",
+        )
+    if (
+        command_payload.workflowKind != "short_medium"
+        or command_payload.operation != "write_short_story"
+        or not isinstance(source, ApprovedShortOutlineSource)
+    ):
+        raise ApiError(
+            status_code=409,
+            code="SHORT_STORY_COMMAND_MISMATCH",
+            message="当前活动命令不是同一中短篇整稿流程",
+        )
+
+    selected_outline = await exact_short_story_outline_revision(
+        session,
+        request.novelId,
+        source.outlineArtifactId,
+        source.outlineRevision,
+        for_update=True,
+    )
+    if (
+        selected_outline is None
+        or payload.metadata.sourceOutlineArtifactId != source.outlineArtifactId
+        or payload.metadata.sourceOutlineRevision != source.outlineRevision
+    ):
+        raise ApiError(
+            status_code=409,
+            code="SHORT_STORY_OUTLINE_SOURCE_CHANGED",
+            message="中短篇正文来源大纲已经变化，请重新生成整稿",
+        )
+    outline = _parse_short_outline(selected_outline[1].payloadJson)
+    authoritative_hash = canonical_short_outline_hash(outline)
+    if (
+        source.outlineHash != authoritative_hash
+        or payload.metadata.sourceOutlineHash != authoritative_hash
+    ):
+        raise ApiError(
+            status_code=409,
+            code="SHORT_STORY_OUTLINE_SOURCE_CHANGED",
+            message="中短篇正文来源大纲哈希已经变化，请重新生成整稿",
+        )
+
+    metadata = payload.metadata
+    if existing is None:
+        if metadata.automaticRewriteCount != 0 or metadata.generationReason != "user_request":
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_INITIAL_GENERATION_INVALID",
+                message="中短篇首版正文必须由当前用户请求生成",
+            )
+        return
+
+    current = _parse_short_story_draft(existing.payloadJson)
+    if metadata.generationCommandId == current.metadata.generationCommandId:
+        if payload == current:
+            return
+        if not (
+            current.metadata.automaticRewriteCount == 0
+            and metadata.automaticRewriteCount == 1
+            and metadata.generationReason == "automatic_rewrite"
+        ):
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_AUTOMATIC_REWRITE_LIMIT",
+                message="同一用户请求最多自动完整返工一次",
+            )
+        await _require_short_story_dual_review(
+            session,
+            artifact_id=existing.id,
+            revision=existing.revision,
+            error_code="SHORT_STORY_AUTOMATIC_REWRITE_REVIEW_REQUIRED",
+            message="首版正文必须完成编辑和校验审核后才能自动完整返工",
+        )
+        rewrite_requested = await session.scalar(
+            select(ReviewArtifactEvaluation.id)
+            .where(
+                ReviewArtifactEvaluation.artifactId == existing.id,
+                ReviewArtifactEvaluation.revision == existing.revision,
+                ReviewArtifactEvaluation.evaluatorAgent.in_(("编辑", "校验")),
+                ReviewArtifactEvaluation.verdict.in_(("revise", "block")),
+            )
+            .limit(1)
+        )
+        if rewrite_requested is None:
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_AUTOMATIC_REWRITE_NOT_REQUIRED",
+                message="首轮双审核均已通过，不能触发自动完整返工",
+            )
+        return
+
+    explicit_existing_revision = (
+        metadata.automaticRewriteCount == 0
+        and metadata.generationReason == "user_request"
+        and command.kind == "artifact_decision"
+        and command.decision == "revise"
+        and command.artifactId == existing.id
+    )
+    new_conversation_revision = (
+        metadata.automaticRewriteCount == 0
+        and metadata.generationReason == "user_request"
+        and command.kind == "start"
+        and existing.taskId != task.id
+        and request.expectedRevision == existing.revision
+    )
+    if not (explicit_existing_revision or new_conversation_revision):
+        raise ApiError(
+            status_code=409,
+            code="SHORT_STORY_USER_REVISION_COMMAND_REQUIRED",
+            message="新的中短篇整稿版本必须来自用户明确改稿或新对话改稿请求",
+        )
+
+
+def _parse_writing_job_payload(serialized: str) -> WritingJobPayload:
+    try:
+        value = json.loads(serialized)
+        return WritingJobPayload.model_validate(value)
+    except (json.JSONDecodeError, ValidationError, TypeError):
+        raise ApiError(
+            status_code=409,
+            code="SHORT_STORY_COMMAND_MISMATCH",
+            message="中短篇正文活动命令身份无效",
+        ) from None
+
+
+async def _require_short_story_dual_review(
+    session: AsyncSession,
+    *,
+    artifact_id: str,
+    revision: int,
+    error_code: str,
+    message: str,
+) -> None:
+    evaluators = set(
+        (
+            await session.scalars(
+                select(ReviewArtifactEvaluation.evaluatorAgent).where(
+                    ReviewArtifactEvaluation.artifactId == artifact_id,
+                    ReviewArtifactEvaluation.revision == revision,
+                    ReviewArtifactEvaluation.evaluatorAgent.in_(("编辑", "校验")),
+                )
+            )
+        ).all()
+    )
+    if evaluators != {"编辑", "校验"}:
+        raise ApiError(status_code=409, code=error_code, message=message)
+
+
+def _parse_short_story_draft(payload_json: str) -> ShortStoryChapterDraft:
+    try:
+        return ShortStoryChapterDraft.model_validate(_parse_json(payload_json, {}))
+    except ValidationError as exc:
+        raise ApiError(
+            status_code=409,
+            code="SHORT_STORY_DRAFT_PAYLOAD_INVALID",
+            message="中短篇正文持久化内容不符合强类型契约",
+        ) from exc
+
+
+def _assert_short_story_decision_artifact(artifact: ReviewArtifact) -> None:
+    payload = _parse_json(artifact.payloadJson, {})
+    if payload.get("storyLengthProfile") != "short_medium":
+        raise ApiError(
+            status_code=409,
+            code="SHORT_STORY_ARTIFACT_REQUIRED",
+            message="该决定锁只支持显式中短篇草案",
+        )
+    if artifact.kind == "outline_draft":
+        _parse_short_outline(artifact.payloadJson)
+        return
+    if artifact.kind == "chapter_draft":
+        _parse_short_story_draft(artifact.payloadJson)
+        return
+    raise ApiError(
+        status_code=409,
+        code="SHORT_STORY_ARTIFACT_REQUIRED",
+        message="该决定锁只支持中短篇大纲或完整正文",
+    )
+
+
+def _dump_json(value: object) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _assert_expected_revision(artifact: ReviewArtifact, expected_revision: int) -> None:
+    if artifact.revision != expected_revision:
+        raise ApiError(
+            status_code=409,
+            code="ARTIFACT_REVISION_CONFLICT",
+            message="待审核草案修订号已过期",
+        )
+
+
+def _assert_transition(current: str, target: str) -> None:
+    try:
+        assert_status_transition(current, target)
+    except ValueError as exc:
+        raise ApiError(
+            status_code=409,
+            code="ARTIFACT_STATUS_CONFLICT",
+            message=str(exc),
+        ) from exc
+
+
+def _non_regressive_callback_status(current: str, requested: str) -> str:
+    order = {
+        "draft": 0,
+        "under_review": 1,
+        "awaiting_user": 2,
+        "applying": 3,
+        "applied": 4,
+    }
+    if order.get(requested, -1) < order.get(current, -1):
+        return current
+    _assert_transition(current, requested)
+    return requested
+
+
+def _describe_anchor_changes(
+    current: ShortStoryAnchors,
+    target: ShortStoryAnchors,
+) -> list[str]:
+    changes: list[str] = []
+    fields = (
+        ("必须保留", current.mustKeep, target.mustKeep),
+        ("已经确认", current.confirmed, target.confirmed),
+        ("明确不要", current.avoid, target.avoid),
+    )
+    for label, current_items, target_items in fields:
+        changes.extend(
+            f"{label}新增：{item}" for item in target_items if item not in current_items
+        )
+        changes.extend(
+            f"{label}移除：{item}" for item in current_items if item not in target_items
+        )
+    return changes
+
+
+def _deterministic_section_id(
+    artifact_id: str,
+    expected_revision: int,
+    index: int,
+    title: str,
+    events: str,
+) -> str:
+    source = f"{artifact_id}\0{expected_revision}\0{index}\0{title.strip()}\0{events.strip()}"
+    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()[:24]
+    return f"short-section-{digest}"
+
+
+def _assert_short_outline_editable(artifact: ReviewArtifact) -> None:
+    if artifact.status != "awaiting_user":
+        raise ApiError(
+            status_code=409,
+            code="SHORT_OUTLINE_NOT_AWAITING_USER",
+            message="只有等待用户确认的中短篇大纲可以直接编辑或恢复",
+        )
+
+
+def _parse_short_outline(payload_json: str) -> ShortStoryOutlineDraft:
+    try:
+        return ShortStoryOutlineDraft.model_validate(_parse_json(payload_json, {}))
+    except ValidationError as exc:
+        raise ApiError(
+            status_code=409,
+            code="SHORT_OUTLINE_PAYLOAD_INVALID",
+            message="中短篇大纲持久化内容不符合强类型契约",
+        ) from exc
+
+
+async def _require_short_outline(
+    session: AsyncSession,
+    user_id: str,
+    artifact_id: str,
+) -> ReviewArtifact:
+    owned = await _owned_artifact(session, user_id, artifact_id)
+    if owned is None:
+        raise ApiError(
+            status_code=403,
+            code="REVIEW_ARTIFACT_FORBIDDEN",
+            message="无权访问该待审核草案",
+        )
+    profile = await session.scalar(
+        select(WritingBible.storyLengthProfile).where(WritingBible.novelId == owned.novelId)
+    )
+    if (
+        profile != "short_medium"
+        or owned.kind != "outline_draft"
+        or _parse_json(owned.payloadJson, {}).get("storyLengthProfile") != "short_medium"
+    ):
+        raise ApiError(
+            status_code=409,
+            code="SHORT_OUTLINE_REQUIRED",
+            message="该接口只支持中短篇大纲草案",
+        )
+    _parse_short_outline(owned.payloadJson)
+    return owned
+
+
+async def _lock_short_outline(
+    session: AsyncSession,
+    user_id: str,
+    artifact_id: str,
+) -> ReviewArtifact:
+    owned = await _owned_artifact(session, user_id, artifact_id)
+    if owned is None:
+        raise ApiError(
+            status_code=403,
+            code="REVIEW_ARTIFACT_FORBIDDEN",
+            message="无权访问该待审核草案",
+        )
+    bible = await lock_writing_bible(
+        session,
+        owned.novelId,
+        user_id=user_id,
+    )
+    if bible is None or bible.storyLengthProfile != "short_medium":
+        raise ApiError(
+            status_code=409,
+            code="SHORT_OUTLINE_REQUIRED",
+            message="该接口只支持中短篇大纲草案",
+        )
+    if owned.taskId is None:
+        raise ApiError(
+            status_code=409,
+            code="ARTIFACT_TASK_MISSING",
+            message="中短篇大纲没有关联写作任务",
+        )
+    task_id = await session.scalar(
+        select(WritingTask.id).where(WritingTask.id == owned.taskId).with_for_update()
+    )
+    if task_id is None:
+        raise ApiError(
+            status_code=409,
+            code="ARTIFACT_TASK_MISSING",
+            message="中短篇大纲关联写作任务不存在",
+        )
+    artifact = await session.scalar(
+        select(ReviewArtifact)
+        .where(
+            ReviewArtifact.id == artifact_id,
+            ReviewArtifact.novelId == owned.novelId,
+            ReviewArtifact.kind == "outline_draft",
+        )
+        .with_for_update(of=ReviewArtifact)
+    )
+    if artifact is None:
+        raise ApiError(
+            status_code=409,
+            code="SHORT_OUTLINE_REQUIRED",
+            message="该接口只支持中短篇大纲草案",
+        )
+    _parse_short_outline(artifact.payloadJson)
+    return artifact
+
+
+async def _lock_owned_artifact(
+    session: AsyncSession,
+    user_id: str,
+    artifact_id: str,
+) -> ReviewArtifact:
+    owned = await _owned_artifact(session, user_id, artifact_id)
+    if owned is None:
+        raise ApiError(
+            status_code=403,
+            code="REVIEW_ARTIFACT_FORBIDDEN",
+            message="无权访问该待审核草案",
+        )
+    if owned.taskId is not None:
+        task_id = await session.scalar(
+            select(WritingTask.id).where(WritingTask.id == owned.taskId).with_for_update()
+        )
+        if task_id is None:
+            raise ApiError(
+                status_code=409,
+                code="ARTIFACT_TASK_MISSING",
+                message="待审核草案关联写作任务不存在",
+            )
+    artifact = await session.scalar(
+        select(ReviewArtifact)
+        .join(Novel, Novel.id == ReviewArtifact.novelId)
+        .where(
+            ReviewArtifact.id == artifact_id,
+            Novel.userId == user_id,
+        )
+        .with_for_update()
+    )
+    if artifact is None:
+        raise ApiError(
+            status_code=409,
+            code="ARTIFACT_CHANGED_DURING_DECISION",
+            message="待审核草案在决定受理前已发生变化",
+        )
+    return artifact
+
+
+def _revision_summary(record: ReviewArtifactRevision) -> ReviewArtifactRevisionSummary:
+    return ReviewArtifactRevisionSummary(
+        artifactId=record.artifactId,
+        revision=record.revision,
+        summary=record.summary,
+        createdByAgent=record.createdByAgent,
+        createdAt=record.createdAt,
+    )
+
+
+def _revision_detail(record: ReviewArtifactRevision) -> ReviewArtifactRevisionDetail:
+    summary = _revision_summary(record)
+    return ReviewArtifactRevisionDetail(
+        **summary.model_dump(),
+        payload=_typed_payload(_parse_json(record.payloadJson, {})),
+        diff=_parse_json(record.diffJson, None),
+    )
+
+
+def _short_story_version_hash(
+    payload: ShortStoryOutlineDraft | ShortStoryChapterDraft,
+) -> str:
+    if isinstance(payload, ShortStoryOutlineDraft):
+        return canonical_short_outline_hash(payload)
+    canonical = json.dumps(
+        payload.model_dump(mode="json"),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _evaluation_response(record: ReviewArtifactEvaluation) -> ArtifactEvaluationResponse:
+    return ArtifactEvaluationResponse(
+        id=record.id,
+        artifactId=record.artifactId,
+        revision=record.revision,
+        evaluatorAgent=record.evaluatorAgent,
+        verdict=cast(EvaluationVerdict, record.verdict),
+        summary=record.summary,
+        requiredChanges=record.requiredChanges,
+        createdAt=record.createdAt,
+    )
 
 
 async def _owned_artifact(
@@ -439,25 +1916,118 @@ def _response(
         status=cast(ArtifactStatus, record.status),
         title=record.title,
         summary=record.summary,
-        payload=record.payload,
+        payload=_typed_payload(record.payload),
         diff=record.diff,
         createdByAgent=record.created_by_agent,
         updatedByAgent=record.updated_by_agent,
         reviewerAgent=record.reviewer_agent,
         revision=record.revision,
-        evaluations=[
-            ArtifactEvaluationResponse(
-                id=item.id,
-                artifactId=item.artifactId,
-                revision=item.revision,
-                evaluatorAgent=item.evaluatorAgent,
-                verdict=cast(EvaluationVerdict, item.verdict),
-                summary=item.summary,
-                requiredChanges=item.requiredChanges,
-                createdAt=item.createdAt,
-            )
-            for item in evaluations
-        ],
+        evaluations=[_evaluation_response(item) for item in evaluations],
         createdAt=record.created_at,
         updatedAt=record.updated_at,
     )
+
+
+def _typed_payload(
+    payload: dict[str, Any],
+) -> ShortStoryOutlineDraft | ShortStoryChapterDraft | dict[str, Any]:
+    if (
+        payload.get("kind") == "outline_draft"
+        and payload.get("storyLengthProfile") == "short_medium"
+    ):
+        try:
+            return ShortStoryOutlineDraft.model_validate(payload)
+        except ValidationError as exc:
+            raise ApiError(
+                status_code=409,
+                code="SHORT_OUTLINE_PAYLOAD_INVALID",
+                message="中短篇大纲持久化内容不符合强类型契约",
+            ) from exc
+    if (
+        payload.get("kind") == "chapter_draft"
+        and payload.get("storyLengthProfile") == "short_medium"
+    ):
+        try:
+            return ShortStoryChapterDraft.model_validate(payload)
+        except ValidationError as exc:
+            raise ApiError(
+                status_code=409,
+                code="SHORT_STORY_DRAFT_PAYLOAD_INVALID",
+                message="中短篇正文持久化内容不符合强类型契约",
+            ) from exc
+    return payload
+
+
+async def _latest_short_story_artifact_by_kind(
+    session: AsyncSession,
+    novel_id: str,
+    kind: str,
+) -> ReviewArtifact | None:
+    candidates = list(
+        (
+            await session.scalars(
+                select(ReviewArtifact)
+                .where(
+                    ReviewArtifact.novelId == novel_id,
+                    ReviewArtifact.kind == kind,
+                )
+                .order_by(ReviewArtifact.updatedAt.desc(), ReviewArtifact.id.desc())
+            )
+        ).all()
+    )
+    for artifact in candidates:
+        payload = _parse_json(artifact.payloadJson, {})
+        if (
+            isinstance(payload, dict)
+            and payload.get("storyLengthProfile") == "short_medium"
+        ):
+            return artifact
+    return None
+
+
+async def _short_story_artifact_response(
+    session: AsyncSession,
+    artifact: ReviewArtifact,
+) -> ShortStoryArtifactResponse:
+    evaluations = list(
+        (
+            await session.scalars(
+                select(ReviewArtifactEvaluation)
+                .where(
+                    ReviewArtifactEvaluation.artifactId == artifact.id,
+                    ReviewArtifactEvaluation.revision == artifact.revision,
+                )
+                .order_by(
+                    ReviewArtifactEvaluation.createdAt.desc(),
+                    ReviewArtifactEvaluation.id.desc(),
+                )
+            )
+        ).all()
+    )
+    response = _response(artifact, evaluations)
+    try:
+        return ShortStoryArtifactResponse.model_validate(response.model_dump())
+    except ValidationError as exc:
+        raise ApiError(
+            status_code=409,
+            code="SHORT_STORY_ARTIFACT_INVALID",
+            message="中短篇工作区草案载荷无效",
+        ) from exc
+
+
+def _task_active_artifact_id(task: WritingTask) -> str | None:
+    if not task.graphStateJson:
+        return None
+    try:
+        snapshot = json.loads(task.graphStateJson)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(snapshot, dict):
+        return None
+    artifact_review = snapshot.get("artifactReview")
+    if isinstance(artifact_review, dict):
+        value = artifact_review.get("activeArtifactId")
+        if isinstance(value, str) and value:
+            return value
+    value = snapshot.get("activeArtifactId")
+    return value if isinstance(value, str) and value else None

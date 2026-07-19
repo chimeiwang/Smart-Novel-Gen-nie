@@ -1869,6 +1869,8 @@ export function WritingConversation({
           selectedAgents,
           userMessage,
           writingSessionId: sessionIdForRequest,
+          workflowKind: "long_serial",
+          operation: null,
         },
       }));
       setTaskId(run.id);
@@ -2705,6 +2707,7 @@ export function WritingConversation({
             body: {
               clientRequestId: crypto.randomUUID(),
               decision,
+              expectedRevision: artifact.revision,
               editedContent: decision === "approve" ? editedContent ?? null : null,
               selectedUpdateRefs: decision === "approve" ? selectedUpdateRefs ?? null : null,
               userMessage: userMessage ?? (decision === "revise" ? "继续修改待确认变更" : null),

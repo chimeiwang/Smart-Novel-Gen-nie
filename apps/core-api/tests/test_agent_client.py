@@ -118,6 +118,10 @@ async def test_writing_job_id_is_stable_per_checkpoint_and_changes_on_resume() -
 
     assert captured[0].jobId == captured[1].jobId
     assert captured[0].jobId != captured[2].jobId
+    assert captured[0].payload["version"] == 1
+    assert captured[0].payload["workflowKind"] == "long_serial"
+    assert captured[0].payload["operation"] is None
+    assert captured[0].payload["source"] is None
 
 
 @pytest.mark.asyncio

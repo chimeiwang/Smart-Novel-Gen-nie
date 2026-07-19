@@ -119,6 +119,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/novels/{novel_id}/title": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Novel Title */
+        patch: operations["update_novel_title_api_v1_novels__novel_id__title_patch"];
+        trace?: never;
+    };
     "/api/v1/novels/{novel_id}/workspace": {
         parameters: {
             query?: never;
@@ -1098,6 +1115,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/novels/{novel_id}/short-story/artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Short Story Artifacts */
+        get: operations["get_short_story_artifacts_api_v1_novels__novel_id__short_story_artifacts_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/novels/{novel_id}/short-story/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Short Story Versions */
+        get: operations["list_short_story_versions_api_v1_novels__novel_id__short_story_versions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/novels/{novel_id}/short-story/versions/{kind}/{revision}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Short Story Version */
+        get: operations["get_short_story_version_api_v1_novels__novel_id__short_story_versions__kind___revision__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/review-artifacts/{artifact_id}": {
         parameters: {
             query?: never;
@@ -1125,6 +1193,74 @@ export interface paths {
         /** Get Task Review Artifact */
         get: operations["get_task_review_artifact_api_v1_writing_tasks__task_id__artifact_get"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/review-artifacts/{artifact_id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Review Artifact Revisions */
+        get: operations["list_review_artifact_revisions_api_v1_review_artifacts__artifact_id__revisions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/review-artifacts/{artifact_id}/revisions/{revision}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Review Artifact Revision */
+        get: operations["get_review_artifact_revision_api_v1_review_artifacts__artifact_id__revisions__revision__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/review-artifacts/{artifact_id}/revisions/{revision}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore Review Artifact Revision */
+        post: operations["restore_review_artifact_revision_api_v1_review_artifacts__artifact_id__revisions__revision__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/review-artifacts/{artifact_id}/outline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save Short Story Outline */
+        put: operations["save_short_story_outline_api_v1_review_artifacts__artifact_id__outline_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -1767,26 +1903,6 @@ export interface components {
             /** Parentid */
             parentId?: string | null;
         };
-        /** CreateNovelRequest */
-        CreateNovelRequest: {
-            /** Name */
-            name: string;
-            /** Summary */
-            summary?: string | null;
-            storyLengthProfile: components["schemas"]["StoryLengthProfile"];
-            /** Targettotalwordcount */
-            targetTotalWordCount?: number | null;
-            /** Genre */
-            genre?: string | null;
-            /** Protagonist */
-            protagonist?: string | null;
-            /** Coresellingpoint */
-            coreSellingPoint?: string | null;
-            /** Readerpromise */
-            readerPromise?: string | null;
-            /** Firstchaptergoal */
-            firstChapterGoal?: string | null;
-        };
         /** CreateNovelResponse */
         CreateNovelResponse: {
             /** Novelid */
@@ -1865,6 +1981,9 @@ export interface components {
             name: string;
             /** Summary */
             summary: string | null;
+            storyLengthProfile: components["schemas"]["StoryLengthProfile"];
+            /** Targettotalwordcount */
+            targetTotalWordCount: number | null;
             /**
              * Updatedat
              * Format: date-time
@@ -2223,6 +2342,30 @@ export interface components {
              */
             password: string;
         };
+        /** LongSerialCreateNovelRequest */
+        LongSerialCreateNovelRequest: {
+            /** Name */
+            name: string;
+            /** Summary */
+            summary?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            storyLengthProfile: "long_serial";
+            /** Targettotalwordcount */
+            targetTotalWordCount?: number | null;
+            /** Genre */
+            genre?: string | null;
+            /** Protagonist */
+            protagonist?: string | null;
+            /** Coresellingpoint */
+            coreSellingPoint?: string | null;
+            /** Readerpromise */
+            readerPromise?: string | null;
+            /** Firstchaptergoal */
+            firstChapterGoal?: string | null;
+        };
         /** MessageResponse */
         MessageResponse: {
             /** Id */
@@ -2258,6 +2401,9 @@ export interface components {
             storyProgress: string | null;
             /** Appliedstyleid */
             appliedStyleId: string | null;
+            storyLengthProfile: components["schemas"]["StoryLengthProfile"];
+            /** Targettotalwordcount */
+            targetTotalWordCount: number | null;
             /**
              * Createdat
              * Format: date-time
@@ -2709,6 +2855,11 @@ export interface components {
         };
         /** @enum {string} */
         RelationType: "family" | "master_student" | "friend" | "enemy" | "ally" | "lover" | "rival" | "subordinate" | "acquaintance" | "other";
+        /** RestoreArtifactRevisionRequest */
+        RestoreArtifactRevisionRequest: {
+            /** Expectedrevision */
+            expectedRevision: number;
+        };
         /** ResumeWritingRunRequest */
         ResumeWritingRunRequest: {
             /** Clientrequestid */
@@ -2748,6 +2899,8 @@ export interface components {
              * @enum {string}
              */
             decision: "approve" | "discard" | "revise";
+            /** Expectedrevision */
+            expectedRevision: number;
             /** Editedcontent */
             editedContent?: string | null;
             /** Selectedupdaterefs */
@@ -2784,7 +2937,7 @@ export interface components {
             /** Summary */
             summary: string | null;
             /** Payload */
-            payload: {
+            payload: components["schemas"]["ShortStoryOutlineDraft"] | components["schemas"]["ShortStoryChapterDraft"] | {
                 [key: string]: components["schemas"]["JsonValue"];
             };
             diff: components["schemas"]["JsonValue"] | null;
@@ -2809,6 +2962,43 @@ export interface components {
              */
             updatedAt: string;
         };
+        /** ReviewArtifactRevisionDetail */
+        ReviewArtifactRevisionDetail: {
+            /** Artifactid */
+            artifactId: string;
+            /** Revision */
+            revision: number;
+            /** Summary */
+            summary: string | null;
+            /** Createdbyagent */
+            createdByAgent: string | null;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Payload */
+            payload: components["schemas"]["ShortStoryOutlineDraft"] | components["schemas"]["ShortStoryChapterDraft"] | {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            diff: components["schemas"]["JsonValue"] | null;
+        };
+        /** ReviewArtifactRevisionSummary */
+        ReviewArtifactRevisionSummary: {
+            /** Artifactid */
+            artifactId: string;
+            /** Revision */
+            revision: number;
+            /** Summary */
+            summary: string | null;
+            /** Createdbyagent */
+            createdByAgent: string | null;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
         /** RunQualityCheckRequest */
         RunQualityCheckRequest: {
             /** Taskid */
@@ -2824,6 +3014,23 @@ export interface components {
             checkId: string;
             /** Taskid */
             taskId: string;
+        };
+        /** SaveShortStoryOutlineRequest */
+        SaveShortStoryOutlineRequest: {
+            /** Expectedrevision */
+            expectedRevision: number;
+            /** Corepremise */
+            corePremise: string;
+            anchors: components["schemas"]["ShortStoryAnchors"];
+            /** Sections */
+            sections: components["schemas"]["ShortStoryOutlineSectionEdit"][];
+            /**
+             * Changesummary
+             * @default 用户直接编辑
+             */
+            changeSummary: string;
+            /** Anchorchanges */
+            anchorChanges?: string[];
         };
         /** SceneBeatDto */
         SceneBeatDto: {
@@ -2844,6 +3051,312 @@ export interface components {
             /** Acceptancecriteria */
             acceptanceCriteria: string;
         };
+        /** ShortMediumCreateNovelRequest */
+        ShortMediumCreateNovelRequest: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            storyLengthProfile: "short_medium";
+            /** Inspiration */
+            inspiration: string;
+            /** Targettotalwordcount */
+            targetTotalWordCount?: number | null;
+            /** Name */
+            name?: string | null;
+        };
+        /** ShortStoryAnchors */
+        ShortStoryAnchors: {
+            /** Mustkeep */
+            mustKeep?: string[];
+            /** Confirmed */
+            confirmed?: string[];
+            /** Avoid */
+            avoid?: string[];
+        };
+        /** ShortStoryArtifactResponse */
+        ShortStoryArtifactResponse: {
+            /** Id */
+            id: string;
+            /** Novelid */
+            novelId: string;
+            /** Chapterid */
+            chapterId: string | null;
+            /** Taskid */
+            taskId: string | null;
+            /** Workflowrunid */
+            workflowRunId: string | null;
+            /** Artifactkey */
+            artifactKey: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "outline_draft" | "chapter_draft";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "draft" | "under_review" | "awaiting_user" | "applying" | "applied";
+            /** Title */
+            title: string | null;
+            /** Summary */
+            summary: string | null;
+            /** Payload */
+            payload: components["schemas"]["ShortStoryOutlineDraft"] | components["schemas"]["ShortStoryChapterDraft"];
+            diff: components["schemas"]["JsonValue"] | null;
+            /** Createdbyagent */
+            createdByAgent: string | null;
+            /** Updatedbyagent */
+            updatedByAgent: string | null;
+            /** Revieweragent */
+            reviewerAgent: string | null;
+            /** Revision */
+            revision: number;
+            /** Evaluations */
+            evaluations?: components["schemas"]["ArtifactEvaluationResponse"][];
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
+        /** ShortStoryArtifactsResponse */
+        ShortStoryArtifactsResponse: {
+            outline: components["schemas"]["ShortStoryArtifactResponse"] | null;
+            chapterDraft: components["schemas"]["ShortStoryArtifactResponse"] | null;
+            /** Outlineversions */
+            outlineVersions?: components["schemas"]["ShortStoryVersionListItem"][];
+            /** Bodyversions */
+            bodyVersions?: components["schemas"]["ShortStoryVersionListItem"][];
+            latestTask: components["schemas"]["ShortStoryTaskStatus"] | null;
+            workflowSession: components["schemas"]["ShortStoryWorkflowSession"] | null;
+        };
+        /** ShortStoryChapterDraft */
+        ShortStoryChapterDraft: {
+            /**
+             * Kind
+             * @default chapter_draft
+             * @constant
+             */
+            kind: "chapter_draft";
+            /**
+             * Storylengthprofile
+             * @default short_medium
+             * @constant
+             */
+            storyLengthProfile: "short_medium";
+            /** Content */
+            content: string;
+            metadata: components["schemas"]["ShortStoryDraftMetadata"];
+        };
+        /** ShortStoryDraftMetadata */
+        ShortStoryDraftMetadata: {
+            /** Sourceoutlineartifactid */
+            sourceOutlineArtifactId: string;
+            /** Sourceoutlinerevision */
+            sourceOutlineRevision: number;
+            /** Sourceoutlinehash */
+            sourceOutlineHash: string;
+            /** Targetwordcount */
+            targetWordCount?: number | null;
+            /** Actualwordcount */
+            actualWordCount: number;
+            /** Targetchapterid */
+            targetChapterId: string;
+            /** Basechapterhash */
+            baseChapterHash: string;
+            /** Generationcommandid */
+            generationCommandId: string;
+            /** Automaticrewritecount */
+            automaticRewriteCount: number;
+            /**
+             * Generationreason
+             * @enum {string}
+             */
+            generationReason: "user_request" | "automatic_rewrite";
+        };
+        /** ShortStoryOutlineDraft */
+        ShortStoryOutlineDraft: {
+            /**
+             * Kind
+             * @default outline_draft
+             * @constant
+             */
+            kind: "outline_draft";
+            /**
+             * Storylengthprofile
+             * @default short_medium
+             * @constant
+             */
+            storyLengthProfile: "short_medium";
+            /** Originalinspiration */
+            originalInspiration: string;
+            /** Corepremise */
+            corePremise: string;
+            anchors: components["schemas"]["ShortStoryAnchors"];
+            /** Sections */
+            sections: components["schemas"]["ShortStoryOutlineSection"][];
+            /**
+             * Content
+             * @default
+             */
+            content: string;
+            /**
+             * Changesummary
+             * @default
+             */
+            changeSummary: string;
+            /** Anchorchanges */
+            anchorChanges?: string[];
+        };
+        /** ShortStoryOutlineSection */
+        ShortStoryOutlineSection: {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /** Events */
+            events: string;
+        };
+        /** ShortStoryOutlineSectionEdit */
+        ShortStoryOutlineSectionEdit: {
+            /** Id */
+            id?: string | null;
+            /** Title */
+            title: string;
+            /** Events */
+            events: string;
+        };
+        /** ShortStoryTaskStatus */
+        ShortStoryTaskStatus: {
+            /** Id */
+            id: string;
+            /** Phase */
+            phase: string;
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "develop_short_outline" | "write_short_story";
+            /** Activeartifactid */
+            activeArtifactId: string | null;
+            /** Latestcommandid */
+            latestCommandId: string;
+            /**
+             * Latestcommandstatus
+             * @enum {string}
+             */
+            latestCommandStatus: "pending" | "submitted" | "processing" | "succeeded" | "failed";
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
+        /** ShortStoryVersionDetail */
+        ShortStoryVersionDetail: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "outline" | "body";
+            /** Artifactid */
+            artifactId: string;
+            /** Version */
+            version: number;
+            /** Revision */
+            revision: number;
+            /** Hash */
+            hash: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "adopted" | "formal" | "pending" | "history";
+            /** Summary */
+            summary: string | null;
+            /** Sourcesessionid */
+            sourceSessionId: string | null;
+            /** Sourceoutlinerevision */
+            sourceOutlineRevision?: number | null;
+            /** Sourceoutlineversion */
+            sourceOutlineVersion?: number | null;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /** Payload */
+            payload: components["schemas"]["ShortStoryOutlineDraft"] | components["schemas"]["ShortStoryChapterDraft"];
+            /** Evaluations */
+            evaluations?: components["schemas"]["ArtifactEvaluationResponse"][];
+        };
+        /** ShortStoryVersionListItem */
+        ShortStoryVersionListItem: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "outline" | "body";
+            /** Artifactid */
+            artifactId: string;
+            /** Version */
+            version: number;
+            /** Revision */
+            revision: number;
+            /** Hash */
+            hash: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "adopted" | "formal" | "pending" | "history";
+            /** Summary */
+            summary: string | null;
+            /** Sourcesessionid */
+            sourceSessionId: string | null;
+            /** Sourceoutlinerevision */
+            sourceOutlineRevision?: number | null;
+            /** Sourceoutlineversion */
+            sourceOutlineVersion?: number | null;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
+        /**
+         * ShortStoryVersionReference
+         * @description 指向同一作品中某个不可变中短篇版本的内容寻址引用。
+         */
+        ShortStoryVersionReference: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "outline" | "body";
+            /** Artifactid */
+            artifactId: string;
+            /** Revision */
+            revision: number;
+            /** Hash */
+            hash: string;
+        };
+        /** ShortStoryWorkflowSession */
+        ShortStoryWorkflowSession: {
+            /** Id */
+            id: string;
+            /** Phase */
+            phase: string;
+            currentTask: components["schemas"]["ShortStoryTaskStatus"] | null;
+            lastTask: components["schemas"]["ShortStoryTaskStatus"] | null;
+        };
         /** StartWritingRunRequest */
         StartWritingRunRequest: {
             /** Clientrequestid */
@@ -2855,14 +3368,20 @@ export interface components {
             /** Writingsessionid */
             writingSessionId?: string | null;
             /**
-             * Targetwordcount
-             * @default 4000
+             * Workflowkind
+             * @enum {string}
              */
-            targetWordCount: number;
+            workflowKind: "long_serial" | "short_medium";
+            /** Operation */
+            operation: ("answer_question" | "create_lore" | "revise_lore" | "create_outline" | "revise_outline" | "plan_chapter" | "write_chapter" | "rewrite_scene" | "review_chapter" | "sync_lore" | "manage_foreshadowing" | "develop_short_outline" | "write_short_story") | null;
+            /** Targetwordcount */
+            targetWordCount?: number | null;
             /** Selectedagents */
             selectedAgents?: ("设定" | "剧情" | "写作" | "校验" | "编辑")[];
             /** Usermessage */
             userMessage: string;
+            /** Versionreferences */
+            versionReferences?: components["schemas"]["ShortStoryVersionReference"][];
         };
         /** @enum {string} */
         StoryLengthProfile: "short_medium" | "long_serial";
@@ -3084,6 +3603,26 @@ export interface components {
             /** Description */
             description?: string | null;
         };
+        /** UpdateNovelTitleRequest */
+        UpdateNovelTitleRequest: {
+            /** Name */
+            name: string;
+            /**
+             * Expectedupdatedat
+             * Format: date-time
+             */
+            expectedUpdatedAt: string;
+        };
+        /** UpdateNovelTitleResponse */
+        UpdateNovelTitleResponse: {
+            /** Name */
+            name: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
         /** UpdateOutlineNodeRequest */
         UpdateOutlineNodeRequest: {
             /** Title */
@@ -3202,6 +3741,9 @@ export interface components {
         /** WorkspaceBootstrapResponse */
         WorkspaceBootstrapResponse: {
             novel: components["schemas"]["WorkspaceNovel"];
+            storyLengthProfile: components["schemas"]["StoryLengthProfile"];
+            /** Targettotalwordcount */
+            targetTotalWordCount: number | null;
             /** Chapters */
             chapters: components["schemas"]["WorkspaceChapterSummary"][];
             currentChapter: components["schemas"]["WorkspaceChapter"] | null;
@@ -3281,6 +3823,9 @@ export interface components {
             storyProgress: string | null;
             /** Appliedstyleid */
             appliedStyleId: string | null;
+            storyLengthProfile: components["schemas"]["StoryLengthProfile"];
+            /** Targettotalwordcount */
+            targetTotalWordCount: number | null;
             /**
              * Createdat
              * Format: date-time
@@ -3378,8 +3923,6 @@ export interface components {
         };
         /** WritingBibleRequest */
         WritingBibleRequest: {
-            /** Storylengthprofile */
-            storyLengthProfile?: ("short_medium" | "long_serial") | null;
             /** Targettotalwordcount */
             targetTotalWordCount?: number | null;
             /** Genre */
@@ -3401,11 +3944,6 @@ export interface components {
         };
         /** WritingBibleResponse */
         WritingBibleResponse: {
-            /**
-             * Storylengthprofile
-             * @enum {string}
-             */
-            storyLengthProfile: "short_medium" | "long_serial";
             /** Targettotalwordcount */
             targetTotalWordCount?: number | null;
             /** Genre */
@@ -3426,6 +3964,11 @@ export interface components {
             notes?: string | null;
             /** Id */
             id: string;
+            /**
+             * Storylengthprofile
+             * @enum {string}
+             */
+            storyLengthProfile: "short_medium" | "long_serial";
             /**
              * Createdat
              * Format: date-time
@@ -4261,7 +4804,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CreateNovelRequest"];
+                "application/json": components["schemas"]["ShortMediumCreateNovelRequest"] | components["schemas"]["LongSerialCreateNovelRequest"];
             };
         };
         responses: {
@@ -4386,6 +4929,124 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NovelResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    update_novel_title_api_v1_novels__novel_id__title_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                novel_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateNovelTitleRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateNovelTitleResponse"];
                 };
             };
             /** @description 统一错误响应 */
@@ -14097,6 +14758,350 @@ export interface operations {
             };
         };
     };
+    get_short_story_artifacts_api_v1_novels__novel_id__short_story_artifacts_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                novel_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShortStoryArtifactsResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_short_story_versions_api_v1_novels__novel_id__short_story_versions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                novel_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShortStoryVersionListItem"][];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_short_story_version_api_v1_novels__novel_id__short_story_versions__kind___revision__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                novel_id: string;
+                kind: string;
+                revision: number;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShortStoryVersionDetail"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_review_artifact_api_v1_review_artifacts__artifact_id__get: {
         parameters: {
             query?: never;
@@ -14231,6 +15236,472 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReviewArtifactResponse"] | null;
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_review_artifact_revisions_api_v1_review_artifacts__artifact_id__revisions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifact_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewArtifactRevisionSummary"][];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_review_artifact_revision_api_v1_review_artifacts__artifact_id__revisions__revision__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifact_id: string;
+                revision: number;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewArtifactRevisionDetail"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    restore_review_artifact_revision_api_v1_review_artifacts__artifact_id__revisions__revision__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifact_id: string;
+                revision: number;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RestoreArtifactRevisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewArtifactResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    save_short_story_outline_api_v1_review_artifacts__artifact_id__outline_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                artifact_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveShortStoryOutlineRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewArtifactResponse"];
                 };
             };
             /** @description 统一错误响应 */

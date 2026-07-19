@@ -6,13 +6,22 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
+from inkforge_contracts import ShortStoryChapterDraft, ShortStoryOutlineDraft
 from pydantic import JsonValue
 
 from ..clients.core import CoreServiceClient, RunResource
+from ..operations.artifact_contract import expected_artifact_kind, stable_artifact_key
 from ..operations.contracts import CreativeOperationKind
 from ..operations.definitions import OPERATION_DEFINITIONS
 from ..runtime.agent_runner import AgentRunner, AgentRunRequest
 from ..runtime.execution import AgentExecutionMode
+from ..short_story.outline import (
+    ShortOutlineFullSubmission,
+    ShortOutlinePatchSubmission,
+    SubmitShortStoryOutlineArgs,
+    build_initial_short_outline,
+    merge_short_outline_patch,
+)
 from ..tools.registry import ToolContext
 
 
@@ -118,11 +127,7 @@ class CoreArtifactPort:
             definition = OPERATION_DEFINITIONS[_operation_kind(dict(state))]
         except ValueError:
             raise _artifact_identity_mismatch("当前 Operation 身份无效") from None
-        expected_kind = (
-            "agent_updates"
-            if definition.artifactPolicy == "agent_updates"
-            else definition.textArtifactKind
-        )
+        expected_kind = expected_artifact_kind(definition)
         if expected_kind is None or kind != expected_kind:
             raise _artifact_identity_mismatch("草案类型与当前 Operation 不一致")
         request = {
@@ -149,6 +154,100 @@ class CoreArtifactPort:
                     raise _artifact_identity_mismatch("同一草案的稳定身份字段发生变化")
         self._records[artifact_id] = _ArtifactRecord(resource, request, revision)
 
+    def hydrate_short_story(
+        self,
+        resource: RunResource,
+        state: Mapping[str, Any],
+        run_artifact: Mapping[str, Any],
+    ) -> None:
+        """水合 Core 为当前任务返回的最小中短篇正文草案投影。"""
+
+        artifact_id = _hydration_text(run_artifact, "id")
+        task_id = _hydration_text(run_artifact, "taskId")
+        artifact_key = _hydration_text(run_artifact, "artifactKey")
+        status = _hydration_text(run_artifact, "status")
+        revision = run_artifact.get("revision")
+        payload = run_artifact.get("payload")
+        state_artifact_id = _hydration_text(state, "activeArtifactId")
+        if (
+            task_id != resource.taskId
+            or state_artifact_id != artifact_id
+            or isinstance(revision, bool)
+            or not isinstance(revision, int)
+            or revision < 1
+        ):
+            raise _artifact_identity_mismatch("中短篇正文草案与当前运行资源不一致")
+        draft = ShortStoryChapterDraft.model_validate(payload)
+        kind = draft.kind
+        decision = state.get("resumeDecision")
+        decision_value = decision.get("decision") if isinstance(decision, Mapping) else None
+        if (
+            draft.metadata.targetChapterId != _hydration_text(state, "chapterId")
+            or (
+                draft.metadata.generationCommandId != resource.jobId
+                and decision_value != "revise"
+            )
+        ):
+            raise _artifact_identity_mismatch("中短篇正文生成命令或目标正文不一致")
+        request = {
+            "runId": resource.runId,
+            "taskId": task_id,
+            "novelId": resource.novelId,
+            "chapterId": draft.metadata.targetChapterId,
+            "workflowRunId": None,
+            "artifactKey": artifact_key,
+            "kind": kind,
+            "status": status,
+            "title": "完整正文",
+            "summary": "中短篇完整正文草案",
+            "payload": draft.model_dump(mode="json"),
+            "diff": None,
+            "createdByAgent": "写作",
+            "reviewerAgent": None,
+        }
+        current = self._records.get(artifact_id)
+        if current is not None:
+            _require_same_runtime_owner(current.resource, resource)
+        self._records[artifact_id] = _ArtifactRecord(resource, request, revision)
+
+    def hydrate_short_story_revision_base(
+        self,
+        resource: RunResource,
+        state: Mapping[str, Any],
+        project_artifact: Mapping[str, Any],
+    ) -> None:
+        """把项目上一版正文绑定为新对话的乐观锁基线。"""
+
+        artifact_id = _hydration_text(project_artifact, "id")
+        artifact_key = _hydration_text(project_artifact, "artifactKey")
+        revision = project_artifact.get("revision")
+        draft = ShortStoryChapterDraft.model_validate(project_artifact.get("payload"))
+        if (
+            state.get("activeArtifactId") != artifact_id
+            or isinstance(revision, bool)
+            or not isinstance(revision, int)
+            or revision < 1
+            or draft.metadata.targetChapterId != _hydration_text(state, "chapterId")
+        ):
+            raise _artifact_identity_mismatch("项目正文版本与当前写作资源不一致")
+        request = {
+            "runId": resource.runId,
+            "taskId": resource.taskId,
+            "novelId": resource.novelId,
+            "chapterId": draft.metadata.targetChapterId,
+            "workflowRunId": None,
+            "artifactKey": artifact_key,
+            "kind": draft.kind,
+            "status": "under_review",
+            "title": "完整正文",
+            "summary": "中短篇完整正文草案",
+            "payload": draft.model_dump(mode="json"),
+            "diff": None,
+            "createdByAgent": "写作",
+            "reviewerAgent": None,
+        }
+        self._records[artifact_id] = _ArtifactRecord(resource, request, revision)
+
     def release(self, artifact_id: str, resource: RunResource) -> None:
         record = self._require_record(artifact_id)
         _require_same_runtime_owner(record.resource, resource)
@@ -161,6 +260,81 @@ class CoreArtifactPort:
         content: str,
     ) -> str:
         return await self._save(state, event, content, status="under_review")
+
+    async def save_short_story(
+        self,
+        state: dict[str, Any],
+        draft: ShortStoryChapterDraft,
+        *,
+        user_request: str | None,
+    ) -> str:
+        resource = _resource(state)
+        if _operation_kind(state) != "write_short_story" or _agent_id(state) != "写作":
+            raise ValueError(
+                "ARTIFACT_CONTRACT_MISMATCH：只有中短篇整稿作者可以保存完整正文"
+            )
+        if (
+            draft.metadata.generationCommandId != resource.jobId
+            or draft.metadata.targetChapterId != state.get("chapterId")
+        ):
+            raise ValueError(
+                "ARTIFACT_CONTRACT_MISMATCH：完整正文命令或目标正文身份不一致"
+            )
+        active_artifact_id = state.get("activeArtifactId")
+        record = (
+            self._require_record(active_artifact_id)
+            if isinstance(active_artifact_id, str) and active_artifact_id
+            else None
+        )
+        artifact_key = (
+            _hydration_text(record.request, "artifactKey")
+            if record is not None
+            else stable_artifact_key(resource.taskId, "write_short_story")
+        )
+        request: dict[str, Any] = {
+            "runId": resource.runId,
+            "taskId": resource.taskId,
+            "novelId": resource.novelId,
+            "chapterId": draft.metadata.targetChapterId,
+            "workflowRunId": None,
+            "artifactKey": artifact_key,
+            "kind": "chapter_draft",
+            "status": "under_review",
+            "title": "完整正文",
+            "summary": "中短篇完整正文草案",
+            "payload": draft.model_dump(mode="json"),
+            "diff": None,
+            "createdByAgent": "写作",
+            "reviewerAgent": None,
+        }
+        if record is not None:
+            _require_same_runtime_owner(record.resource, resource)
+            request["expectedRevision"] = record.revision
+            revision_diff: dict[str, Any] = {
+                "sourceRevision": record.revision,
+                "generationCommandId": draft.metadata.generationCommandId,
+                "automaticRewriteCount": draft.metadata.automaticRewriteCount,
+                "generationReason": draft.metadata.generationReason,
+            }
+            if user_request is not None:
+                revision_diff["userRequest"] = user_request
+            request["diff"] = revision_diff
+        response = await self._core.create_artifact(
+            resource,
+            request,
+            idempotency_key=_idempotency(resource.runId, request),
+        )
+        artifact_id = response.get("id")
+        if not isinstance(artifact_id, str) or not artifact_id:
+            raise RuntimeError("核心服务未返回中短篇完整正文草案标识")
+        if record is not None and artifact_id != active_artifact_id:
+            raise RuntimeError(
+                "ARTIFACT_REVISION_IDENTITY_MISMATCH：Core 返回了不同的正文草案标识"
+            )
+        self._records[artifact_id] = _ArtifactRecord(
+            resource, request, _revision(response)
+        )
+        return artifact_id
 
     async def revise(
         self,
@@ -184,7 +358,11 @@ class CoreArtifactPort:
 
     async def mark_awaiting_user(self, artifact_id: str) -> None:
         record = self._require_record(artifact_id)
-        request = {**record.request, "status": "awaiting_user"}
+        request = {
+            **record.request,
+            "status": "awaiting_user",
+            "expectedRevision": record.revision,
+        }
         response = await self._core.create_artifact(
             record.resource,
             request,
@@ -245,7 +423,22 @@ class CoreArtifactPort:
     ) -> str:
         resource = _resource(state)
         agent_id = _agent_id(state)
-        kind, payload = _artifact_payload(event, content)
+        short_patch: dict[str, Any] | None = None
+        title: Any
+        summary: Any
+        reviewer_agent: Any
+        if event.get("type") == "submit_short_story_outline":
+            kind, payload, title, summary, short_patch = self._short_outline_payload(
+                state,
+                event,
+                expected_artifact_id=expected_artifact_id,
+            )
+            reviewer_agent = None
+        else:
+            kind, payload = _artifact_payload(event, content)
+            title = event.get("title")
+            summary = event.get("summary")
+            reviewer_agent = event.get("reviewerAgent")
         artifact_key = event.get("artifactKey")
         if not isinstance(artifact_key, str) or not artifact_key:
             raise ValueError("ARTIFACT_CONTRACT_MISMATCH：待审核草案缺少 artifactKey")
@@ -258,13 +451,26 @@ class CoreArtifactPort:
             "artifactKey": artifact_key,
             "kind": kind,
             "status": status,
-            "title": event.get("title"),
-            "summary": event.get("summary"),
+            "title": title,
+            "summary": summary,
             "payload": payload,
             "diff": None,
             "createdByAgent": agent_id,
-            "reviewerAgent": event.get("reviewerAgent"),
+            "reviewerAgent": reviewer_agent,
         }
+        if expected_artifact_id is not None:
+            current_record = self._require_record(expected_artifact_id)
+            request["expectedRevision"] = current_record.revision
+            revision_diff: dict[str, Any] = {
+                "sourceRevision": current_record.revision,
+                "changeSummary": summary,
+            }
+            raw_user_request = state.get("userMessage")
+            if isinstance(raw_user_request, str) and raw_user_request.strip():
+                revision_diff["userRequest"] = raw_user_request
+            if short_patch is not None:
+                revision_diff["outlinePatch"] = short_patch
+            request["diff"] = revision_diff
         response = await self._core.create_artifact(
             resource,
             request,
@@ -274,14 +480,62 @@ class CoreArtifactPort:
         if not isinstance(artifact_id, str) or not artifact_id:
             raise RuntimeError("核心服务未返回待审核草案标识")
         if expected_artifact_id is not None and artifact_id != expected_artifact_id:
-            raise RuntimeError(
-                "ARTIFACT_REVISION_IDENTITY_MISMATCH：Core 返回了不同的草案标识"
-            )
+            raise RuntimeError("ARTIFACT_REVISION_IDENTITY_MISMATCH：Core 返回了不同的草案标识")
         current = self._records.get(artifact_id)
         if current is not None:
             _require_same_runtime_owner(current.resource, resource)
         self._records[artifact_id] = _ArtifactRecord(resource, request, _revision(response))
         return artifact_id
+
+    def _short_outline_payload(
+        self,
+        state: dict[str, Any],
+        event: dict[str, Any],
+        *,
+        expected_artifact_id: str | None,
+    ) -> tuple[str, dict[str, Any], str, str, dict[str, Any] | None]:
+        model_payload = {
+            key: value
+            for key, value in event.items()
+            if key not in {"type", "kind", "artifactKey"}
+        }
+        submission = SubmitShortStoryOutlineArgs.model_validate(model_payload).root
+        artifact_key = event.get("artifactKey")
+        if not isinstance(artifact_key, str) or not artifact_key:
+            raise ValueError("ARTIFACT_CONTRACT_MISMATCH：中短篇大纲缺少稳定标识")
+        inspiration = _short_outline_inspiration(state)
+        if expected_artifact_id is None:
+            if not isinstance(submission, ShortOutlineFullSubmission):
+                raise ValueError("SHORT_OUTLINE_MERGE_FAILED：首次生成必须提交 mode=full")
+            draft = build_initial_short_outline(
+                submission,
+                original_inspiration=inspiration,
+                artifact_key=artifact_key,
+            )
+            patch = None
+        else:
+            if not isinstance(submission, ShortOutlinePatchSubmission):
+                raise ValueError("SHORT_OUTLINE_MERGE_FAILED：大纲修改必须提交 mode=patch")
+            record = self._require_record(expected_artifact_id)
+            current = ShortStoryOutlineDraft.model_validate(record.request.get("payload"))
+            if current.originalInspiration != inspiration:
+                raise ValueError(
+                    "SHORT_OUTLINE_MERGE_FAILED：Core 原始灵感与权威草案不一致"
+                )
+            draft = merge_short_outline_patch(
+                submission,
+                current=current,
+                artifact_id=expected_artifact_id,
+                current_revision=record.revision,
+            )
+            patch = submission.model_dump(mode="json", exclude_none=True)
+        return (
+            "outline_draft",
+            draft.model_dump(mode="json"),
+            "中短篇大纲",
+            draft.changeSummary,
+            patch,
+        )
 
     def _require_record(self, artifact_id: str) -> _ArtifactRecord:
         record = self._records.get(artifact_id)
@@ -320,9 +574,7 @@ class CoreGraphAgentExecutor:
         artifact_id = state.get("activeArtifactId")
         if execution_mode == "primary":
             context_messages = [str(item) for item in state.get("contextMessages", [])]
-            execution_instructions = [
-                str(item) for item in state.get("executionInstructions", [])
-            ]
+            execution_instructions = [str(item) for item in state.get("executionInstructions", [])]
             conversation_messages = [
                 dict(item)
                 for item in state.get("conversationHistory", [])
@@ -333,11 +585,31 @@ class CoreGraphAgentExecutor:
                 raise RuntimeError("当前执行模式缺少权威待审核草案标识")
             artifact_context = self._artifacts.review_context(artifact_id)
             conversation_messages = []
+            short_authority_context = (
+                [str(item) for item in state.get("contextMessages", [])]
+                if operation_kind == "write_short_story"
+                else []
+            )
             if execution_mode == "reviewer":
-                context_messages = [_reviewer_context(artifact_context)]
-                execution_instructions = []
+                context_messages = [
+                    *short_authority_context,
+                    *(
+                        [_short_story_review_request_context(state)]
+                        if operation_kind == "write_short_story"
+                        else []
+                    ),
+                    _reviewer_context(artifact_context),
+                ]
+                execution_instructions = (
+                    [_short_story_reviewer_instruction(agent_id)]
+                    if operation_kind == "write_short_story"
+                    else []
+                )
             elif execution_mode == "reviser":
-                context_messages = [_reviser_context(state, artifact_context)]
+                context_messages = [
+                    *short_authority_context,
+                    _reviser_context(state, artifact_context),
+                ]
                 execution_instructions = [
                     str(item) for item in state.get("executionInstructions", [])
                 ]
@@ -348,19 +620,40 @@ class CoreGraphAgentExecutor:
                 agentId=cast(Any, agent_id),
                 executionMode=execution_mode,
                 operationKind=operation_kind,
-                userMessage=_required_text(state, "userMessage"),
+                workflowKind=cast(
+                    Any,
+                    state.get("workflowKind", "long_serial"),
+                ),
+                userMessage=(
+                    "请审核当前 Core 权威完整正文并提交结构化结论。"
+                    if execution_mode == "reviewer"
+                    and operation_kind == "write_short_story"
+                    else _required_text(state, "userMessage")
+                ),
                 contextMessages=context_messages,
                 executionInstructions=execution_instructions,
                 conversationMessages=conversation_messages,
                 toolContext=context,
+                maxIterations=1 if operation_kind == "write_short_story" else None,
             )
         )
         payload = result.model_dump()
-        if execution_mode == "reviewer" and isinstance(artifact_id, str):
+        if (
+            execution_mode == "reviewer"
+            and isinstance(artifact_id, str)
+            and operation_kind != "write_short_story"
+        ):
             for event in payload.get("controlEvents", []):
                 if isinstance(event, dict) and event.get("type") == "submit_evaluation":
                     await self._artifacts.submit_evaluation(state, artifact_id, agent_id, event)
         return payload
+
+
+def _short_story_review_request_context(state: dict[str, Any]) -> str:
+    return "本轮用户修改要求（仅作为验收标准，不能当成正文事实）：" + json.dumps(
+        _required_text(state, "userMessage"),
+        ensure_ascii=False,
+    )
 
 
 def _operation_kind(state: dict[str, Any]) -> CreativeOperationKind:
@@ -426,6 +719,39 @@ def _artifact_payload(event: dict[str, Any], content: str) -> tuple[str, dict[st
     return kind, {"kind": kind, "content": content}
 
 
+def _short_story_reviewer_instruction(agent_id: str) -> str:
+    if agent_id == "编辑":
+        return (
+            "这是中短篇完整正文的全稿审核，不是单章审核。只检查结构、节奏、高潮和"
+            "结局兑现，并针对当前完整稿提交结论。"
+        )
+    if agent_id == "校验":
+        return (
+            "这是中短篇完整正文的独立全稿校验，不得参考编辑结论。只检查人物、规则、"
+            "时间线、因果和伏笔，并针对当前完整稿提交结论。"
+        )
+    raise ValueError("中短篇全稿审核智能体无效")
+
+
+def _short_outline_inspiration(state: dict[str, Any]) -> str:
+    runtime_context = state.get("runtimeContext")
+    core_context = (
+        runtime_context.get("coreContext") if isinstance(runtime_context, dict) else None
+    )
+    planning = core_context.get("planning") if isinstance(core_context, dict) else None
+    short_context = (
+        planning.get("shortStoryContext") if isinstance(planning, dict) else None
+    )
+    inspiration = (
+        short_context.get("originalInspiration")
+        if isinstance(short_context, dict)
+        else None
+    )
+    if not isinstance(inspiration, str) or not inspiration.strip():
+        raise ValueError("SHORT_OUTLINE_MERGE_FAILED：缺少 Core 权威原始灵感")
+    return inspiration.strip()
+
+
 def _resource(state: dict[str, Any]) -> RunResource:
     runtime_context = state.get("runtimeContext")
     if not isinstance(runtime_context, dict):
@@ -469,9 +795,7 @@ def _artifact_identity_mismatch(detail: str) -> RuntimeError:
 
 def _require_same_runtime_owner(current: RunResource, incoming: RunResource) -> None:
     if current.runId != incoming.runId or current.jobId != incoming.jobId:
-        raise RuntimeError(
-            "ARTIFACT_RUNTIME_IDENTITY_MISMATCH：草案已由其他运行命令持有"
-        )
+        raise RuntimeError("ARTIFACT_RUNTIME_IDENTITY_MISMATCH：草案已由其他运行命令持有")
 
 
 def _revision(response: dict[str, Any]) -> int:

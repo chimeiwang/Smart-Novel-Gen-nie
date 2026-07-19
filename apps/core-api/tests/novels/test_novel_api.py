@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -12,10 +12,16 @@ from inkforge_core.app import create_app
 from inkforge_core.auth.dependencies import get_current_user
 from inkforge_core.auth.repository import AuthUser
 from inkforge_core.errors import ApiError
-from inkforge_core.novels.schemas import CreateNovelRequest
+from inkforge_core.novels.schemas import (
+    CreateNovelRequest,
+    LongSerialCreateNovelRequest,
+    ShortMediumCreateNovelRequest,
+    UpdateNovelTitleRequest,
+    UpdateNovelTitleResponse,
+)
 from inkforge_core.novels.service import NovelCreation as ServiceNovelCreation
 from inkforge_core.novels.service import NovelService
-from pydantic import ValidationError
+from pydantic import TypeAdapter, ValidationError
 
 
 @dataclass
@@ -25,7 +31,7 @@ class NovelCreation:
     summary: str | None
     story_progress: str | None
     story_length_profile: str
-    target_total_word_count: int
+    target_total_word_count: int | None
     genre: str | None
     core_selling_point: str | None
     reader_promise: str | None
@@ -40,29 +46,101 @@ class NovelCreation:
 class RecordingNovelRepository:
     def __init__(self) -> None:
         self.creation: NovelCreation | None = None
+        self.title_update: tuple[str, str, str, datetime] | None = None
 
     async def create_novel(self, creation: NovelCreation):
         self.creation = creation
         return {"novelId": "novel-1", "chapterId": "chapter-1"}
 
+    async def update_title(
+        self,
+        novel_id: str,
+        user_id: str,
+        name: str,
+        expected_updated_at: datetime,
+    ) -> UpdateNovelTitleResponse:
+        self.title_update = (novel_id, user_id, name, expected_updated_at)
+        return UpdateNovelTitleResponse(name=name, updatedAt=expected_updated_at)
+
+
+@pytest.mark.parametrize("target", [6_000, 80_000])
+def test_short_medium_create_accepts_target_boundaries(target: int) -> None:
+    request = TypeAdapter(CreateNovelRequest).validate_python(
+        {
+            "storyLengthProfile": "short_medium",
+            "inspiration": "一个没有影子的人开始追查自己的过去。",
+            "targetTotalWordCount": target,
+        }
+    )
+    assert isinstance(request, ShortMediumCreateNovelRequest)
+    assert request.targetTotalWordCount == target
+
+
+def test_short_medium_create_accepts_missing_reference_word_count() -> None:
+    request = TypeAdapter(CreateNovelRequest).validate_python(
+        {
+            "storyLengthProfile": "short_medium",
+            "inspiration": "一个完整灵感",
+        }
+    )
+
+    assert isinstance(request, ShortMediumCreateNovelRequest)
+    assert request.targetTotalWordCount is None
+
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("profile", "expected_words"),
-    [("short_medium", 80_000), ("long_serial", 1_000_000)],
-)
-async def test_create_novel_builds_all_required_defaults(
-    profile: str,
-    expected_words: int,
-) -> None:
+async def test_short_medium_create_persists_null_reference_word_count() -> None:
+    repository = RecordingNovelRepository()
+
+    await NovelService(repository).create_novel(  # type: ignore[arg-type]
+        "user-1",
+        ShortMediumCreateNovelRequest(
+            storyLengthProfile="short_medium",
+            inspiration="一个完整灵感",
+            targetTotalWordCount=None,
+        ),
+    )
+
+    assert repository.creation is not None
+    assert repository.creation.target_total_word_count is None
+
+
+@pytest.mark.parametrize("target", [5_999, 80_001])
+def test_short_medium_create_rejects_target_outside_boundaries(target: int) -> None:
+    with pytest.raises(ValidationError):
+        TypeAdapter(CreateNovelRequest).validate_python(
+            {
+                "storyLengthProfile": "short_medium",
+                "inspiration": "灵感",
+                "targetTotalWordCount": target,
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_short_medium_create_requires_non_blank_inspiration() -> None:
+    request = ShortMediumCreateNovelRequest(
+        storyLengthProfile="short_medium",
+        inspiration="   ",
+        targetTotalWordCount=6_000,
+    )
+
+    with pytest.raises(ApiError) as caught:
+        await NovelService(RecordingNovelRepository()).create_novel("user-1", request)  # type: ignore[arg-type]
+
+    assert caught.value.code == "SHORT_STORY_INSPIRATION_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_create_long_novel_builds_all_required_defaults() -> None:
     repository = RecordingNovelRepository()
     service = NovelService(repository)  # type: ignore[arg-type]
 
     result = await service.create_novel(
         "user-1",
-        CreateNovelRequest(
+        LongSerialCreateNovelRequest(
             name="  新作品  ",
-            storyLengthProfile=profile,  # type: ignore[arg-type]
+            storyLengthProfile="long_serial",
             firstChapterGoal="  主角离开故乡  ",
             protagonist="  林川  ",
         ),
@@ -77,14 +155,56 @@ async def test_create_novel_builds_all_required_defaults(
     assert repository.creation.outline_content == ""
     assert repository.creation.current_stage == "开篇"
     assert repository.creation.current_goal == "主角离开故乡"
-    assert repository.creation.target_total_word_count == expected_words
+    assert repository.creation.target_total_word_count == 1_000_000
     assert repository.creation.notes == "主角起点：林川\n第一章目标：主角离开故乡"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", [5_999, 80_001])
+async def test_service_rejects_constructed_short_target_outside_boundaries(
+    target: int,
+) -> None:
+    repository = RecordingNovelRepository()
+    request = ShortMediumCreateNovelRequest.model_construct(
+        storyLengthProfile="short_medium",
+        inspiration="灵感",
+        targetTotalWordCount=target,
+        name=None,
+    )
+
+    with pytest.raises(ApiError) as caught:
+        await NovelService(repository).create_novel("user-1", request)  # type: ignore[arg-type]
+
+    assert caught.value.code == "SHORT_STORY_TARGET_WORD_COUNT_INVALID"
+    assert repository.creation is None
+
+
+@pytest.mark.asyncio
+async def test_update_title_trims_name_and_passes_expected_version() -> None:
+    repository = RecordingNovelRepository()
+    service = NovelService(repository)  # type: ignore[arg-type]
+    expected = datetime(2026, 7, 18, tzinfo=UTC)
+
+    response = await service.update_title(
+        "user-1",
+        "novel-1",
+        UpdateNovelTitleRequest(name="  新标题  ", expectedUpdatedAt=expected),
+    )
+
+    assert response.name == "新标题"
+    assert repository.title_update == ("novel-1", "user-1", "新标题", expected)
 
 
 def test_create_novel_request_rejects_unknown_fields() -> None:
     with pytest.raises(ValidationError, match="extra_forbidden"):
-        CreateNovelRequest.model_validate(
-            {"name": "作品", "storyLengthProfile": "short_medium", "userId": "越权"}
+        ShortMediumCreateNovelRequest.model_validate(
+            {
+                "name": "作品",
+                "inspiration": "灵感",
+                "targetTotalWordCount": 6000,
+                "storyLengthProfile": "short_medium",
+                "userId": "越权",
+            }
         )
 
 
@@ -95,24 +215,34 @@ def test_create_novel_request_rejects_unknown_fields() -> None:
 def test_create_novel_request_rejects_coerced_values(field: str, value: object) -> None:
     body: dict[str, object] = {
         "name": "作品",
+        "inspiration": "灵感",
         "storyLengthProfile": "short_medium",
+        "targetTotalWordCount": 6000,
         field: value,
     }
     with pytest.raises(ValidationError):
-        CreateNovelRequest.model_validate(body)
+        ShortMediumCreateNovelRequest.model_validate(body)
 
 
 class ApiNovelService:
     def __init__(self) -> None:
         self.user_id: str | None = None
         self.workspace_calls: list[tuple[str, str, str | None]] = []
+        self.title_user_id: str | None = None
 
-    async def create_novel(self, user_id: str, body: CreateNovelRequest):
+    async def create_novel(self, user_id: str, body: object):
         self.user_id = user_id
         assert not hasattr(body, "userId")
         from inkforge_core.novels.schemas import CreateNovelResponse
 
         return CreateNovelResponse(novelId="novel-1", chapterId="chapter-1")
+
+    async def update_title(
+        self, user_id: str, novel_id: str, body: UpdateNovelTitleRequest
+    ) -> UpdateNovelTitleResponse:
+        del novel_id
+        self.title_user_id = user_id
+        return UpdateNovelTitleResponse(name=body.name, updatedAt=body.expectedUpdatedAt)
 
     async def get_workspace_bootstrap(
         self, user_id: str, novel_id: str, chapter_id: str | None
@@ -126,10 +256,14 @@ class ApiNovelService:
                 "summary": None,
                 "storyProgress": None,
                 "appliedStyleId": None,
+                "storyLengthProfile": "short_medium",
+                "targetTotalWordCount": 6000,
                 "createdAt": now,
                 "updatedAt": now,
                 "appliedStyle": None,
             },
+            "storyLengthProfile": "short_medium",
+            "targetTotalWordCount": 6000,
             "chapters": [],
             "currentChapter": None,
             "currentChapterId": None,
@@ -184,7 +318,12 @@ async def test_create_novel_api_only_uses_cookie_owner() -> None:
     async with novel_api_client(service) as client:
         response = await client.post(
             "/api/v1/novels",
-            json={"name": "作品", "storyLengthProfile": "short_medium"},
+            json={
+                "name": "作品",
+                "storyLengthProfile": "short_medium",
+                "inspiration": "一封来自未来的信",
+                "targetTotalWordCount": 6000,
+            },
         )
 
     assert response.status_code == 201
@@ -200,6 +339,8 @@ async def test_novel_api_rejects_owner_and_unknown_fields() -> None:
             json={
                 "name": "作品",
                 "storyLengthProfile": "short_medium",
+                "inspiration": "灵感",
+                "targetTotalWordCount": 6000,
                 "userId": "attacker",
             },
         )
@@ -216,11 +357,29 @@ async def test_novel_http_rejects_string_encoded_number() -> None:
             json={
                 "name": "作品",
                 "storyLengthProfile": "short_medium",
+                "inspiration": "灵感",
                 "targetTotalWordCount": "80000",
             },
         )
     assert response.status_code == 422
     assert response.json()["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.asyncio
+async def test_update_novel_title_api_uses_cookie_owner() -> None:
+    service = ApiNovelService()
+    async with novel_api_client(service) as client:
+        response = await client.patch(
+            "/api/v1/novels/novel-1/title",
+            json={
+                "name": "暂定标题",
+                "expectedUpdatedAt": "2026-07-18T00:00:00Z",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["name"] == "暂定标题"
+    assert service.title_user_id == "cookie-user"
 
 
 def test_domain_openapi_has_routes_and_does_not_publish_owner_input() -> None:
@@ -232,8 +391,12 @@ def test_domain_openapi_has_routes_and_does_not_publish_owner_input() -> None:
     assert "/api/v1/novels/{novel_id}/workspace/resources" in schema["paths"]
     assert "/api/v1/chapters/{chapter_id}/progress" in schema["paths"]
     assert "/api/v1/quality-checks/{check_id}/run" in schema["paths"]
-    properties = schema["components"]["schemas"]["CreateNovelRequest"]["properties"]
-    assert "userId" not in properties
+    request_schema = schema["paths"]["/api/v1/novels"]["post"]["requestBody"]["content"][
+        "application/json"
+    ]["schema"]
+    assert request_schema["discriminator"]["propertyName"] == "storyLengthProfile"
+    assert len(request_schema["oneOf"]) == 2
+    assert "userId" not in str(request_schema)
 
 
 @pytest.mark.asyncio
@@ -266,6 +429,8 @@ def test_workspace_group_openapi_has_strict_response_boundaries() -> None:
     schemas = create_app(testing=True).openapi()["components"]["schemas"]
     assert set(schemas["WorkspaceBootstrapResponse"]["properties"]) == {
         "novel",
+        "storyLengthProfile",
+        "targetTotalWordCount",
         "chapters",
         "currentChapter",
         "currentChapterId",
@@ -296,7 +461,9 @@ def test_workspace_group_openapi_has_strict_response_boundaries() -> None:
 @pytest.mark.parametrize("profile", ["short", "serial", "LONG_SERIAL", ""])
 def test_create_novel_rejects_invalid_profile(profile: str) -> None:
     with pytest.raises(ValidationError):
-        CreateNovelRequest.model_validate({"name": "作品", "storyLengthProfile": profile})
+        LongSerialCreateNovelRequest.model_validate(
+            {"name": "作品", "storyLengthProfile": profile}
+        )
 
 
 @pytest.mark.asyncio
@@ -305,7 +472,7 @@ async def test_explicit_target_words_override_profile_default() -> None:
     service = NovelService(repository)  # type: ignore[arg-type]
     await service.create_novel(
         "user-1",
-        CreateNovelRequest(
+        LongSerialCreateNovelRequest(
             name="作品",
             storyLengthProfile="long_serial",
             targetTotalWordCount=345_678,
@@ -321,28 +488,29 @@ async def test_blank_optional_inputs_are_saved_as_null() -> None:
     service = NovelService(repository)  # type: ignore[arg-type]
     await service.create_novel(
         "user-1",
-        CreateNovelRequest(
-            name="作品",
-            summary="  ",
+        ShortMediumCreateNovelRequest(
+            name=None,
+            inspiration="  雨夜里，一台旧收音机播报明天的新闻。  ",
             storyLengthProfile="short_medium",
-            genre="  ",
-            firstChapterGoal="  ",
+            targetTotalWordCount=6000,
         ),
     )
     assert repository.creation is not None
-    assert repository.creation.summary is None
+    assert repository.creation.name == "未命名中短篇"
+    assert repository.creation.summary == "雨夜里，一台旧收音机播报明天的新闻。"
     assert repository.creation.genre is None
     assert repository.creation.story_progress is None
     assert repository.creation.notes is None
+    assert repository.creation.first_chapter_title == "正文"
 
 
 @pytest.mark.asyncio
-async def test_blank_novel_name_is_rejected_after_normalization() -> None:
+async def test_blank_long_novel_name_is_rejected_after_normalization() -> None:
     service = NovelService(RecordingNovelRepository())  # type: ignore[arg-type]
     with pytest.raises(ApiError, match="名称不能为空") as caught:
         await service.create_novel(
             "user-1",
-            CreateNovelRequest(name="   ", storyLengthProfile="short_medium"),
+            LongSerialCreateNovelRequest(name="   ", storyLengthProfile="long_serial"),
         )
     assert caught.value.status_code == 422
 
@@ -437,6 +605,22 @@ async def test_repository_creates_five_initial_records_in_one_transaction() -> N
 
 
 @pytest.mark.asyncio
+async def test_repository_persists_null_short_reference_word_count() -> None:
+    from inkforge_core.db.models import WritingBible
+    from inkforge_core.novels.repository import NovelRepository
+
+    session = TransactionSession()
+    repository = NovelRepository(lambda: session)  # type: ignore[arg-type]
+
+    await repository.create_novel(
+        replace(complete_creation(), target_total_word_count=None)
+    )
+
+    bible = next(value for value in session.added if isinstance(value, WritingBible))
+    assert bible.targetTotalWordCount is None
+
+
+@pytest.mark.asyncio
 async def test_repository_rolls_back_all_initial_records_on_failure() -> None:
     from inkforge_core.novels.repository import NovelRepository
 
@@ -447,6 +631,123 @@ async def test_repository_rolls_back_all_initial_records_on_failure() -> None:
 
     assert session.committed is False
     assert session.rolled_back is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("target", [5_999, 80_001])
+async def test_repository_defensively_rejects_invalid_short_target(target: int) -> None:
+    from inkforge_core.novels.repository import NovelRepository
+
+    session = TransactionSession()
+    repository = NovelRepository(lambda: session)  # type: ignore[arg-type]
+
+    with pytest.raises(ApiError) as caught:
+        await repository.create_novel(
+            replace(complete_creation(), target_total_word_count=target)
+        )
+
+    assert caught.value.code == "SHORT_STORY_TARGET_WORD_COUNT_INVALID"
+    assert session.added == []
+    assert session.rolled_back is True
+
+
+class TitleSession:
+    def __init__(self, novel: object) -> None:
+        self.novel = novel
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        del exc_type, exc, traceback
+
+    @asynccontextmanager
+    async def begin(self):
+        yield
+
+    async def scalar(self, statement):
+        del statement
+        return self.novel
+
+    async def flush(self) -> None:
+        return None
+
+
+@pytest.mark.asyncio
+async def test_repository_update_title_rejects_stale_expected_version() -> None:
+    from inkforge_core.db.models import Novel
+    from inkforge_core.novels.repository import NovelRepository
+
+    current = datetime(2026, 7, 18, 12, tzinfo=UTC)
+    novel = Novel(
+        id="novel-1",
+        userId="user-1",
+        name="旧标题",
+        summary=None,
+        createdAt=current,
+        updatedAt=current,
+    )
+    repository = NovelRepository(lambda: TitleSession(novel))  # type: ignore[arg-type]
+
+    with pytest.raises(ApiError) as caught:
+        await repository.update_title(
+            "novel-1",
+            "user-1",
+            "新标题",
+            datetime(2026, 7, 18, 11, tzinfo=UTC),
+        )
+
+    assert caught.value.code == "NOVEL_VERSION_CONFLICT"
+    assert novel.name == "旧标题"
+
+
+@pytest.mark.asyncio
+async def test_repository_update_title_rejects_stale_version_even_when_name_is_unchanged() -> None:
+    from inkforge_core.db.models import Novel
+    from inkforge_core.novels.repository import NovelRepository
+
+    current = datetime(2026, 7, 18, 12, tzinfo=UTC)
+    novel = Novel(
+        id="novel-1",
+        userId="user-1",
+        name="旧标题",
+        summary=None,
+        createdAt=current,
+        updatedAt=current,
+    )
+    repository = NovelRepository(lambda: TitleSession(novel))  # type: ignore[arg-type]
+
+    with pytest.raises(ApiError) as caught:
+        await repository.update_title(
+            "novel-1",
+            "user-1",
+            "旧标题",
+            datetime(2026, 7, 18, 11, tzinfo=UTC),
+        )
+
+    assert caught.value.code == "NOVEL_VERSION_CONFLICT"
+
+
+@pytest.mark.asyncio
+async def test_repository_update_title_checks_owner() -> None:
+    from inkforge_core.db.models import Novel
+    from inkforge_core.novels.repository import NovelRepository
+
+    current = datetime(2026, 7, 18, 12, tzinfo=UTC)
+    novel = Novel(
+        id="novel-1",
+        userId="user-2",
+        name="旧标题",
+        summary=None,
+        createdAt=current,
+        updatedAt=current,
+    )
+    repository = NovelRepository(lambda: TitleSession(novel))  # type: ignore[arg-type]
+
+    with pytest.raises(ApiError) as caught:
+        await repository.update_title("novel-1", "user-1", "新标题", current)
+
+    assert caught.value.code == "NOVEL_FORBIDDEN"
 
 
 class ScalarRows:
@@ -480,9 +781,11 @@ class WorkspaceSession:
         return ScalarRows(self.reference_rows)
 
     async def scalar(self, statement):
-        del statement
         self.query_count += 1
-        return None
+        from inkforge_core.db.models import WritingBible
+
+        entity = statement.column_descriptions[0].get("entity")
+        return workspace_bible() if entity is WritingBible else None
 
     async def get(self, model, identity):
         del model, identity
@@ -560,6 +863,52 @@ def workspace_novel():
     )
 
 
+def workspace_bible():
+    from datetime import UTC, datetime
+
+    from inkforge_core.db.models import WritingBible
+
+    now = datetime(2026, 7, 11, tzinfo=UTC)
+    return WritingBible(
+        id="bible-1",
+        novelId="novel-1",
+        storyLengthProfile="short_medium",
+        targetTotalWordCount=60_000,
+        createdAt=now,
+        updatedAt=now,
+    )
+
+
+@pytest.mark.asyncio
+async def test_legacy_novel_without_bible_uses_long_profile_in_bootstrap_and_detail() -> None:
+    from inkforge_core.db.models import WritingBible
+    from inkforge_core.novels.repository import NovelRepository
+
+    class LegacyWorkspaceSession(WorkspaceSession):
+        async def scalar(self, statement):
+            entity = statement.column_descriptions[0].get("entity")
+            if entity is WritingBible:
+                return None
+            return await super().scalar(statement)
+
+    repository = NovelRepository(lambda: None)  # type: ignore[arg-type]
+    novel = workspace_novel()
+    bootstrap = await repository._load_workspace_bootstrap(
+        LegacyWorkspaceSession(workspace_chapters(1)),
+        novel,
+        None,
+        user_id="user-1",
+    )
+    detail = repository._novel_dict(novel, None)
+
+    assert bootstrap["storyLengthProfile"] == "long_serial"
+    assert bootstrap["targetTotalWordCount"] is None
+    assert bootstrap["novel"]["storyLengthProfile"] == "long_serial"
+    assert bootstrap["novel"]["targetTotalWordCount"] is None
+    assert detail["storyLengthProfile"] == "long_serial"
+    assert detail["targetTotalWordCount"] is None
+
+
 def workspace_chapters(count: int, content: str = "正文") -> list[object]:
     from datetime import UTC, datetime
 
@@ -615,7 +964,6 @@ async def test_workspace_bootstrap_does_not_query_deferred_groups() -> None:
         "Glossary",
         "StoryBackground",
         "WorldSetting",
-        "WritingBible",
         "Outline",
         "OutlineNode",
         "PlotProgress",
@@ -623,7 +971,17 @@ async def test_workspace_bootstrap_does_not_query_deferred_groups() -> None:
         "RagDocument",
     ):
         assert table not in source
-    assert set(result) == {"novel", "chapters", "currentChapter", "currentChapterId"}
+    assert "WritingBible" in source
+    assert set(result) == {
+        "novel",
+        "storyLengthProfile",
+        "targetTotalWordCount",
+        "chapters",
+        "currentChapter",
+        "currentChapterId",
+    }
+    assert result["storyLengthProfile"] == "short_medium"
+    assert result["targetTotalWordCount"] == 60_000
 
 
 @pytest.mark.asyncio
@@ -846,6 +1204,8 @@ def test_public_datetime_serializes_as_utc_z() -> None:
         summary=None,
         storyProgress=None,
         appliedStyleId=None,
+        storyLengthProfile="long_serial",
+        targetTotalWordCount=1_000_000,
         createdAt=datetime(2026, 7, 11, tzinfo=UTC),
         updatedAt=datetime(2026, 7, 11, tzinfo=UTC),
     )
@@ -869,7 +1229,7 @@ def test_task7_source_contains_no_database_definition_or_migration_call() -> Non
 async def test_dashboard_uses_stable_order_and_ordered_chapter_projection() -> None:
     from datetime import UTC, datetime
 
-    from inkforge_core.db.models import Chapter, Novel, WritingStyle
+    from inkforge_core.db.models import Chapter, Novel, WritingBible, WritingStyle
     from inkforge_core.novels.repository import NovelRepository
 
     now = datetime(2026, 7, 11, tzinfo=UTC)
@@ -882,6 +1242,7 @@ async def test_dashboard_uses_stable_order_and_ordered_chapter_projection() -> N
         createdAt=now,
     )
     chapters = workspace_chapters(3)
+    bible = workspace_bible()
 
     class Session:
         def __init__(self) -> None:
@@ -896,8 +1257,16 @@ async def test_dashboard_uses_stable_order_and_ordered_chapter_projection() -> N
         async def scalars(self, statement):
             self.statements.append(str(statement))
             entity = statement.column_descriptions[0].get("entity")
-            values = [novel] if entity is Novel else chapters if entity is Chapter else []
-            assert entity in {Novel, Chapter, WritingStyle}
+            values = (
+                [novel]
+                if entity is Novel
+                else chapters
+                if entity is Chapter
+                else [bible]
+                if entity is WritingBible
+                else []
+            )
+            assert entity in {Novel, Chapter, WritingBible, WritingStyle}
             return ScalarRows(values)
 
     session = Session()
@@ -909,13 +1278,14 @@ async def test_dashboard_uses_stable_order_and_ordered_chapter_projection() -> N
     ]
     assert '"Novel"."updatedAt" DESC' in session.statements[0]
     assert '"Novel".id ASC' in session.statements[0]
-    assert '"Chapter"."order" ASC' in session.statements[1]
-    assert '"Chapter".id ASC' in session.statements[1]
+    chapter_statement = next(value for value in session.statements if '"Chapter"' in value)
+    assert '"Chapter"."order" ASC' in chapter_statement
+    assert '"Chapter".id ASC' in chapter_statement
 
 
 @pytest.mark.asyncio
 async def test_workspace_sets_read_only_repeatable_read_before_authorization_query() -> None:
-    from inkforge_core.db.models import Novel
+    from inkforge_core.db.models import Novel, WritingBible
     from inkforge_core.novels.repository import NovelRepository
 
     novel = workspace_novel()
@@ -950,7 +1320,13 @@ async def test_workspace_sets_read_only_repeatable_read_before_authorization_que
         async def scalar(self, statement):
             self.operations.append(f"查询:{statement}")
             entity = statement.column_descriptions[0].get("entity")
-            return novel if entity is Novel else None
+            return (
+                novel
+                if entity is Novel
+                else workspace_bible()
+                if entity is WritingBible
+                else None
+            )
 
         async def scalars(self, statement):
             self.operations.append(f"查询:{statement}")

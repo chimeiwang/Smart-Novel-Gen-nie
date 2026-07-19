@@ -3,6 +3,12 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
+from inkforge_contracts import (
+    ShortStoryAnchors,
+    ShortStoryChapterDraft,
+    ShortStoryOutlineDraft,
+    ShortStoryVersionReference,
+)
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 ArtifactStatus = Literal["draft", "under_review", "awaiting_user", "applying", "applied"]
@@ -59,7 +65,7 @@ class ReviewArtifactResponse(ReviewSchema):
     status: ArtifactStatus
     title: str | None
     summary: str | None
-    payload: dict[str, JsonValue]
+    payload: ShortStoryOutlineDraft | ShortStoryChapterDraft | dict[str, JsonValue]
     diff: JsonValue | None
     createdByAgent: str | None
     updatedByAgent: str | None
@@ -78,6 +84,7 @@ class ArtifactSelectionRef(ReviewSchema):
 class ReviewArtifactDecisionRequest(ReviewSchema):
     clientRequestId: str = Field(min_length=16, max_length=128)
     decision: Literal["approve", "discard", "revise"]
+    expectedRevision: int = Field(ge=1)
     editedContent: str | None = None
     selectedUpdateRefs: list[ArtifactSelectionRef] | None = None
     userMessage: str | None = None
@@ -111,16 +118,61 @@ class CreateArtifactRequest(ReviewSchema):
     status: Literal["draft", "under_review", "awaiting_user"]
     title: str | None = None
     summary: str | None = None
-    payload: dict[str, JsonValue]
+    payload: ShortStoryOutlineDraft | ShortStoryChapterDraft | dict[str, JsonValue]
     diff: JsonValue | None = None
     createdByAgent: Literal["设定", "剧情", "写作", "校验", "编辑"]
     reviewerAgent: Literal["设定", "剧情", "写作", "校验", "编辑"] | None = None
+    expectedRevision: int | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def validate_payload_kind(self) -> CreateArtifactRequest:
-        if self.payload.get("kind") != self.kind:
+        payload = (
+            self.payload.model_dump(mode="json")
+            if isinstance(
+                self.payload,
+                (ShortStoryOutlineDraft, ShortStoryChapterDraft),
+            )
+            else self.payload
+        )
+        if payload.get("kind") != self.kind:
             raise ValueError("草案 kind 必须与 payload.kind 一致")
+        if self.kind == "outline_draft" and payload.get("storyLengthProfile") == "short_medium":
+            self.payload = ShortStoryOutlineDraft.model_validate(payload)
+        if self.kind == "chapter_draft" and payload.get("storyLengthProfile") == "short_medium":
+            self.payload = ShortStoryChapterDraft.model_validate(payload)
         return self
+
+
+class ShortStoryOutlineSectionEdit(ReviewSchema):
+    id: str | None = Field(default=None, min_length=1, max_length=128)
+    title: str = Field(min_length=1, max_length=200)
+    events: str = Field(min_length=1)
+
+
+class SaveShortStoryOutlineRequest(ReviewSchema):
+    expectedRevision: int = Field(ge=1)
+    corePremise: str = Field(min_length=1)
+    anchors: ShortStoryAnchors
+    sections: list[ShortStoryOutlineSectionEdit] = Field(min_length=1)
+    changeSummary: str = "用户直接编辑"
+    anchorChanges: list[str] = Field(default_factory=list)
+
+
+class RestoreArtifactRevisionRequest(ReviewSchema):
+    expectedRevision: int = Field(ge=1)
+
+
+class ReviewArtifactRevisionSummary(ReviewSchema):
+    artifactId: str
+    revision: int
+    summary: str | None
+    createdByAgent: str | None
+    createdAt: datetime
+
+
+class ReviewArtifactRevisionDetail(ReviewArtifactRevisionSummary):
+    payload: ShortStoryOutlineDraft | ShortStoryChapterDraft | dict[str, JsonValue]
+    diff: JsonValue | None
 
 
 class SubmitArtifactEvaluationRequest(ReviewSchema):
@@ -138,3 +190,67 @@ class SubmitArtifactEvaluationRequest(ReviewSchema):
         if self.verdict == "revise" and not self.requiredChanges:
             raise ValueError("要求修改时必须提供 requiredChanges")
         return self
+
+
+class ShortStoryArtifactResponse(ReviewArtifactResponse):
+    kind: Literal["outline_draft", "chapter_draft"]
+    payload: ShortStoryOutlineDraft | ShortStoryChapterDraft
+
+
+ShortStoryVersionStatus = Literal["adopted", "formal", "pending", "history"]
+
+
+class ShortStoryVersionListItem(ReviewSchema):
+    kind: Literal["outline", "body"]
+    artifactId: str
+    version: int = Field(ge=1)
+    revision: int = Field(ge=1)
+    hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    status: ShortStoryVersionStatus
+    summary: str | None
+    sourceSessionId: str | None
+    sourceOutlineRevision: int | None = Field(default=None, ge=1)
+    sourceOutlineVersion: int | None = Field(default=None, ge=1)
+    createdAt: datetime
+
+    @property
+    def reference(self) -> ShortStoryVersionReference:
+        return ShortStoryVersionReference(
+            kind=self.kind,
+            artifactId=self.artifactId,
+            revision=self.revision,
+            hash=self.hash,
+        )
+
+
+class ShortStoryVersionDetail(ShortStoryVersionListItem):
+    payload: ShortStoryOutlineDraft | ShortStoryChapterDraft
+    evaluations: list[ArtifactEvaluationResponse] = Field(default_factory=list)
+
+
+class ShortStoryTaskStatus(ReviewSchema):
+    id: str
+    phase: str
+    operation: Literal["develop_short_outline", "write_short_story"]
+    activeArtifactId: str | None
+    latestCommandId: str
+    latestCommandStatus: Literal[
+        "pending", "submitted", "processing", "succeeded", "failed"
+    ]
+    updatedAt: datetime
+
+
+class ShortStoryWorkflowSession(ReviewSchema):
+    id: str
+    phase: str
+    currentTask: ShortStoryTaskStatus | None
+    lastTask: ShortStoryTaskStatus | None
+
+
+class ShortStoryArtifactsResponse(ReviewSchema):
+    outline: ShortStoryArtifactResponse | None
+    chapterDraft: ShortStoryArtifactResponse | None
+    outlineVersions: list[ShortStoryVersionListItem] = Field(default_factory=list)
+    bodyVersions: list[ShortStoryVersionListItem] = Field(default_factory=list)
+    latestTask: ShortStoryTaskStatus | None
+    workflowSession: ShortStoryWorkflowSession | None

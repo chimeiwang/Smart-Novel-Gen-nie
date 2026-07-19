@@ -267,6 +267,66 @@ def test_chapter_context_preserves_selected_full_text_without_truncation() -> No
     assert context["currentChapter"]["content"] == long_text
 
 
+def test_short_outline_context_uses_core_authority_order_without_long_outline_projection() -> None:
+    source = _core_context()
+    short_context = {
+        "directEdit": {"sections": [{"id": "section-2", "events": "直接编辑"}]},
+        "revisionRequest": "只修改第二节",
+        "anchors": {"mustKeep": ["结局"], "confirmed": [], "avoid": []},
+        "currentOutline": {"kind": "outline_draft", "content": "完整大纲"},
+        "originalInspiration": "原始灵感",
+        "recentConversation": [{"role": "user", "content": "它指第二节"}],
+    }
+    source["planning"]["shortStoryContext"] = short_context
+
+    context = build_operation_context(
+        OPERATION_DEFINITIONS["develop_short_outline"], source
+    )
+
+    assert context["shortStory"] == short_context
+    assert list(context["shortStory"]) == list(short_context)
+    assert "outline" not in context
+
+
+def test_short_discussion_context_uses_exact_core_version_references() -> None:
+    source = _core_context()
+    source["planning"]["workflowKind"] = "short_medium"
+    short_context = {
+        "referencedVersions": [
+            {
+                "kind": "outline",
+                "artifactId": "outline-v1",
+                "revision": 1,
+                "hash": "a" * 64,
+                "content": "大纲第一版完整内容",
+            },
+            {
+                "kind": "outline",
+                "artifactId": "outline-v2",
+                "revision": 2,
+                "hash": "b" * 64,
+                "content": "大纲第二版完整内容",
+            },
+        ],
+        "directEdit": None,
+        "revisionRequest": "比较大纲 v1 和大纲 v2",
+        "anchors": None,
+        "currentOutline": None,
+        "originalInspiration": "一间替人保管遗失明天的失物招领处",
+        "recentConversation": [],
+    }
+    source["planning"]["shortStoryContext"] = short_context
+
+    context = build_operation_context(
+        OPERATION_DEFINITIONS["answer_question"], source
+    )
+
+    assert context["shortStory"] == short_context
+    assert "chapter" not in context
+    assert "大纲第一版完整内容" in repr(context)
+    assert "大纲第二版完整内容" in repr(context)
+
+
 def test_chapter_target_parser_distinguishes_current_and_next_chapter() -> None:
     assert parse_chapter_target("请重写当前章") == "current_chapter"
     assert parse_chapter_target("继续写下一章") == "next_chapter"

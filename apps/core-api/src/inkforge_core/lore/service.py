@@ -9,6 +9,10 @@ from .schemas import ContentRequest
 
 
 class LoreRepositoryPort(Protocol):
+    async def get_writing_bible_profile(
+        self, novel_id: str, user_id: str
+    ) -> str | None: ...
+
     async def list_entities(
         self, novel_id: str, user_id: str, kind: str
     ) -> list[dict[str, Any]]: ...
@@ -124,11 +128,14 @@ class LoreService:
         if kind == "writing-bible":
             content: Any = request.model_dump(exclude_unset=True)
             self._require_update_fields(content)
-            if "storyLengthProfile" in content and content["storyLengthProfile"] is None:
-                raise ApiError(
-                    status_code=422,
-                    code="WRITING_BIBLE_PROFILE_REQUIRED",
-                    message="作品篇幅模式不能为 null",
+            if "targetTotalWordCount" in content:
+                profile = await self._repository.get_writing_bible_profile(
+                    novel_id,
+                    user_id,
+                )
+                self._require_target_for_profile(
+                    profile,
+                    content["targetTotalWordCount"],
                 )
         else:
             if not isinstance(request, ContentRequest):
@@ -166,3 +173,16 @@ class LoreService:
     def _require_update_fields(fields: dict[str, Any]) -> None:
         if not fields:
             raise ApiError(status_code=422, code="EMPTY_UPDATE", message="至少需要提供一个更新字段")
+
+    @staticmethod
+    def _require_target_for_profile(profile: str | None, target: object) -> None:
+        if profile == "short_medium" and target is not None and (
+            not isinstance(target, int)
+            or isinstance(target, bool)
+            or not 6_000 <= target <= 80_000
+        ):
+            raise ApiError(
+                status_code=422,
+                code="SHORT_STORY_TARGET_WORD_COUNT_INVALID",
+                message="中短篇篇幅参考必须为空或在 6000 到 80000 之间",
+            )

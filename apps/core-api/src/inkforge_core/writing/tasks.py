@@ -11,12 +11,20 @@ from inkforge_contracts.events import (
     RunCompletionCallback,
     RunFailureCallback,
 )
-from inkforge_contracts.jobs import AgentJobStatus
+from inkforge_contracts.jobs import AgentJobStatus, WritingJobPayload
 from sqlalchemy import exists, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..db.base import utc_now
-from ..db.models import Novel, WritingMessage, WritingRunCommand, WritingSession, WritingTask
+from ..db.models import (
+    Novel,
+    ReviewArtifact,
+    WritingBible,
+    WritingMessage,
+    WritingRunCommand,
+    WritingSession,
+    WritingTask,
+)
 from ..errors import ApiError
 from .job_identity import build_writing_job_id
 from .message_metadata import workflow_message_metadata
@@ -26,6 +34,7 @@ from .recovery import (
     deserialize_graph_snapshot,
 )
 from .schemas import (
+    SHORT_STORY_INTERNAL_TASK_WORD_COUNT,
     ResumeWritingRunRequest,
     ResumeWritingRunResponse,
     StartWritingRunRequest,
@@ -43,6 +52,94 @@ ALREADY_APPLIED_CODE = "WRITING_CALLBACK_ALREADY_APPLIED"
 STATE_NOOP_CODE = "WRITING_CALLBACK_STATE_NOOP"
 CHECKPOINT_CONFLICT_CODE = "WRITING_CHECKPOINT_CONFLICT"
 logger = logging.getLogger(__name__)
+
+
+async def _reconciliation_workflow_identity(
+    session: AsyncSession,
+    task: WritingTask,
+) -> dict[str, Any]:
+    bible = await session.scalar(
+        select(WritingBible).where(WritingBible.novelId == task.novelId)
+    )
+    serialized = await session.scalar(
+        select(WritingRunCommand.payloadJson)
+        .where(WritingRunCommand.taskId == task.id)
+        .order_by(WritingRunCommand.createdAt.desc(), WritingRunCommand.id.desc())
+        .limit(1)
+    )
+    persisted_profile = bible.storyLengthProfile if bible is not None else "long_serial"
+    legacy_long_identity = {
+        "workflowKind": "long_serial",
+        "operation": None,
+        "targetTotalWordCount": (
+            bible.targetTotalWordCount if bible is not None else None
+        ),
+        "source": None,
+    }
+    if serialized is None:
+        if persisted_profile == "short_medium":
+            raise _reconciliation_identity_missing()
+        return legacy_long_identity
+    try:
+        raw_payload = json.loads(serialized)
+    except (json.JSONDecodeError, TypeError):
+        raise _reconciliation_identity_invalid() from None
+    if not isinstance(raw_payload, dict):
+        raise _reconciliation_identity_invalid()
+    if "workflowKind" not in raw_payload:
+        if persisted_profile == "short_medium":
+            raise _reconciliation_identity_missing()
+        return legacy_long_identity
+    try:
+        latest = WritingJobPayload.model_validate(raw_payload)
+    except ValueError:
+        raise _reconciliation_identity_invalid() from None
+    if latest.chapterId != task.chapterId or latest.workflowKind != persisted_profile:
+        raise _reconciliation_identity_mismatch()
+    if latest.workflowKind == "short_medium":
+        target = bible.targetTotalWordCount if bible is not None else None
+        expected_task_target = (
+            target if target is not None else SHORT_STORY_INTERNAL_TASK_WORD_COUNT
+        )
+        if (
+            latest.targetTotalWordCount != target
+            or task.targetWordCount != expected_task_target
+        ):
+            raise _reconciliation_identity_mismatch()
+    return {
+        "workflowKind": latest.workflowKind,
+        "operation": latest.operation,
+        "targetTotalWordCount": latest.targetTotalWordCount,
+        "source": (
+            latest.source.model_dump(mode="json")
+            if latest.source is not None
+            else None
+        ),
+    }
+
+
+def _reconciliation_identity_missing() -> ApiError:
+    return ApiError(
+        status_code=409,
+        code="WRITING_RECONCILIATION_IDENTITY_MISSING",
+        message="中短篇遗留任务缺少可验证的持久写作身份，不能自动对账",
+    )
+
+
+def _reconciliation_identity_invalid() -> ApiError:
+    return ApiError(
+        status_code=409,
+        code="WRITING_RECONCILIATION_IDENTITY_INVALID",
+        message="最近写作命令载荷无效，不能自动对账",
+    )
+
+
+def _reconciliation_identity_mismatch() -> ApiError:
+    return ApiError(
+        status_code=409,
+        code="WRITING_RECONCILIATION_IDENTITY_MISMATCH",
+        message="最近写作命令与作品篇幅身份不一致，不能自动对账",
+    )
 
 
 class WritingCommandRepositoryPort(Protocol):
@@ -225,6 +322,7 @@ class WritingTaskRepository:
                 )
                 if active_command_id is not None:
                     return False
+                identity = await _reconciliation_workflow_identity(session, task)
                 resume = task.graphStateJson is not None
                 command_id = build_writing_job_id(
                     task.id,
@@ -238,14 +336,17 @@ class WritingTaskRepository:
                 )
                 if existing is not None:
                     return False
-                payload = {
-                    "version": 1,
-                    "resume": resume,
-                    "chapterId": task.chapterId,
-                    "writingSessionId": task.writingSessionId,
-                    "resumeInput": None,
-                    "force": True,
-                }
+                payload = WritingJobPayload.model_validate(
+                    {
+                        "version": 1,
+                        "resume": resume,
+                        "chapterId": task.chapterId,
+                        "writingSessionId": task.writingSessionId,
+                        "resumeInput": None,
+                        **identity,
+                        "force": True,
+                    }
+                ).model_dump(mode="json")
                 session.add(
                     WritingRunCommand(
                         id=command_id,
@@ -534,7 +635,14 @@ class WritingTaskRepository:
                         already_applied=accepted,
                         rejection_code=None if accepted else STATE_NOOP_CODE,
                     )
-                mark_task_failed_state(target.task, code)
+                recovered = await restore_short_story_artifact_after_failure(
+                    session,
+                    target.task,
+                    target.command,
+                    sequence=sequence,
+                )
+                if not recovered:
+                    mark_task_failed_state(target.task, code)
                 _transition_callback_command(
                     target.command,
                     "failed",
@@ -901,6 +1009,265 @@ def _persisted_event_sequence(task: WritingTask) -> int:
             message="持久写作快照事件序号无效",
         )
     return cast(int, value)
+
+
+async def restore_short_story_artifact_after_failure(
+    session: AsyncSession,
+    task: WritingTask,
+    command: WritingRunCommand | None,
+    *,
+    sequence: int | None = None,
+) -> bool:
+    if command is None:
+        return False
+    try:
+        command_payload = WritingJobPayload.model_validate_json(command.payloadJson)
+    except ValueError:
+        return False
+    if command_payload.workflowKind != "short_medium":
+        return False
+    operation = command_payload.operation
+    if operation == "develop_short_outline":
+        expected_kind = "outline_draft"
+    elif operation == "write_short_story":
+        expected_kind = "chapter_draft"
+    else:
+        return False
+    base_conditions = [
+        ReviewArtifact.taskId == task.id,
+        ReviewArtifact.kind == expected_kind,
+        ReviewArtifact.status.in_(("draft", "under_review", "awaiting_user")),
+    ]
+    exact_artifact_id = _failure_recovery_artifact_id(task, command)
+    if command.kind == "artifact_decision" and exact_artifact_id is None:
+        return False
+    if exact_artifact_id is not None:
+        artifact = await session.scalar(
+            select(ReviewArtifact)
+            .where(
+                *base_conditions,
+                ReviewArtifact.id == exact_artifact_id,
+            )
+            .with_for_update()
+        )
+    else:
+        candidates = list(
+            await session.scalars(
+                select(ReviewArtifact)
+                .where(*base_conditions)
+                .with_for_update()
+            )
+        )
+        artifact = candidates[0] if len(candidates) == 1 else None
+    if artifact is None:
+        return False
+    if not _is_typed_short_story_artifact(artifact, expected_kind):
+        return False
+    serialized = await _recoverable_short_story_snapshot(
+        session,
+        task,
+        command,
+        command_payload,
+        artifact.id,
+        _persisted_event_sequence(task) if sequence is None else sequence,
+    )
+    if serialized is None:
+        return False
+    artifact.status = "awaiting_user"
+    task.graphStateJson = serialized
+    task.phase = "awaiting_user_review"
+    task.updatedAt = utc_now()
+    return True
+
+
+def _failure_recovery_artifact_id(
+    task: WritingTask,
+    command: WritingRunCommand,
+) -> str | None:
+    if command.artifactId is not None:
+        return command.artifactId
+    if not task.graphStateJson:
+        return None
+    try:
+        snapshot = json.loads(task.graphStateJson)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(snapshot, dict):
+        return None
+    artifact_review = snapshot.get("artifactReview")
+    if isinstance(artifact_review, dict):
+        value = artifact_review.get("activeArtifactId")
+        if isinstance(value, str) and value:
+            return value
+    value = snapshot.get("activeArtifactId")
+    return value if isinstance(value, str) and value else None
+
+
+def _is_typed_short_story_artifact(
+    artifact: ReviewArtifact,
+    expected_kind: str,
+) -> bool:
+    try:
+        artifact_payload = json.loads(artifact.payloadJson)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    if (
+        not isinstance(artifact_payload, dict)
+        or artifact_payload.get("storyLengthProfile") != "short_medium"
+        or artifact_payload.get("kind") != expected_kind
+    ):
+        return False
+    return True
+
+
+async def _recoverable_short_story_snapshot(
+    session: AsyncSession,
+    task: WritingTask,
+    command: WritingRunCommand,
+    command_payload: WritingJobPayload,
+    artifact_id: str,
+    sequence: int,
+) -> str | None:
+    owner_id = await session.scalar(
+        select(Novel.userId).where(Novel.id == task.novelId)
+    )
+    if not isinstance(owner_id, str) or not owner_id:
+        return None
+    snapshot = _load_snapshot_object(task.graphStateJson)
+    history = _snapshot_conversation_history(snapshot, task.conversationHistory)
+    operation = command_payload.operation
+    if operation not in {"develop_short_outline", "write_short_story"}:
+        return None
+    persisted_operation = snapshot.get("currentOperation")
+    persisted_goal = (
+        persisted_operation.get("userGoal")
+        if isinstance(persisted_operation, dict)
+        else None
+    )
+    current_operation = _short_story_recovery_operation(
+        operation,
+        (
+            persisted_goal
+            if isinstance(persisted_goal, str) and persisted_goal.strip()
+            else _latest_user_message(history)
+        ),
+    )
+    snapshot.update(
+        {
+            "taskId": task.id,
+            "userId": owner_id,
+            "novelId": task.novelId,
+            "chapterId": task.chapterId,
+            "targetWordCount": command_payload.targetTotalWordCount,
+            "conversationHistory": history,
+            "currentOperation": current_operation,
+            "operationStage": "等待用户决策",
+            "operationStep": "await_user_decision",
+            "workflowKind": "short_medium",
+            "explicitOperation": operation,
+            "commandId": command.id,
+            "targetTotalWordCount": command_payload.targetTotalWordCount,
+            "commandSource": (
+                command_payload.source.model_dump(mode="json")
+                if command_payload.source is not None
+                else None
+            ),
+            "phase": "awaiting_user_review",
+            "activeArtifactId": artifact_id,
+            "artifactStatus": "awaiting_user",
+            "pendingUserResponse": True,
+            "artifactMode": "review_loop",
+            "eventSequence": sequence,
+        }
+    )
+    snapshot.pop("errorMessage", None)
+    artifact_review = snapshot.get("artifactReview")
+    review_state = dict(artifact_review) if isinstance(artifact_review, dict) else {}
+    review_state.update(
+        {
+            "activeArtifactId": artifact_id,
+            "status": "awaiting_user",
+        }
+    )
+    snapshot["artifactReview"] = review_state
+    serialized = json.dumps(snapshot, ensure_ascii=False)
+    try:
+        deserialize_graph_snapshot(
+            serialized,
+            expected_task_id=task.id,
+            expected_user_id=owner_id,
+            expected_novel_id=task.novelId,
+            expected_chapter_id=task.chapterId,
+        )
+    except InvalidGraphSnapshotError:
+        return None
+    return serialized
+
+
+def _load_snapshot_object(serialized: str | None) -> dict[str, Any]:
+    if not serialized:
+        return {}
+    try:
+        value = json.loads(serialized)
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _snapshot_conversation_history(
+    snapshot: dict[str, Any],
+    serialized_history: str | None,
+) -> list[dict[str, Any]]:
+    value = snapshot.get("conversationHistory")
+    if isinstance(value, list):
+        return [dict(item) for item in value if isinstance(item, dict)]
+    if serialized_history:
+        try:
+            persisted = json.loads(serialized_history)
+        except (json.JSONDecodeError, TypeError):
+            persisted = None
+        if isinstance(persisted, list):
+            return [dict(item) for item in persisted if isinstance(item, dict)]
+    return []
+
+
+def _latest_user_message(history: list[dict[str, Any]]) -> str:
+    for item in reversed(history):
+        content = item.get("content")
+        if item.get("role") == "user" and isinstance(content, str) and content.strip():
+            return content
+    return "继续处理中短篇草案"
+
+
+def _short_story_recovery_operation(
+    operation: str,
+    user_goal: str,
+) -> dict[str, Any]:
+    if operation == "develop_short_outline":
+        return {
+            "kind": operation,
+            "targetType": "outline",
+            "userGoal": user_goal,
+            "primaryAgent": "剧情",
+            "reviewers": [],
+            "outputKind": "outline_proposal",
+            "requiresArtifact": True,
+            "requiresUserApproval": True,
+            "confidence": 1,
+            "reasoning": "根据 Core 持久化的中短篇 Operation 恢复用户决策。",
+        }
+    return {
+        "kind": operation,
+        "targetType": "chapter",
+        "userGoal": user_goal,
+        "primaryAgent": "写作",
+        "reviewers": ["编辑", "校验"],
+        "outputKind": "chapter_text",
+        "requiresArtifact": True,
+        "requiresUserApproval": True,
+        "confidence": 1,
+        "reasoning": "根据 Core 持久化的中短篇 Operation 恢复用户决策。",
+    }
 
 
 async def _lock_callback_target(

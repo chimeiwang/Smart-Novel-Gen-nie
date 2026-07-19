@@ -3,11 +3,14 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Protocol, cast
 
+from inkforge_contracts.jobs import WritingJobPayload
 from pydantic import JsonValue
 
 from ..clients.core import RunResource
 from ..graph.snapshots import deserialize_snapshot, serialize_snapshot, to_typescript_snapshot
 from ..graph.state import GraphState, create_initial_state
+from ..operations.contracts import CreativeOperation
+from ..operations.definitions import OPERATION_DEFINITIONS
 from ..queue.consumer import NonRetryableJobError
 from ..queue.repository import QueueJob
 from .workflow_log import WorkflowLogPort
@@ -72,6 +75,20 @@ class ArtifactHydrationPort(Protocol):
 
     def release(self, artifact_id: str, resource: RunResource) -> None: ...
 
+    def hydrate_short_story(
+        self,
+        resource: RunResource,
+        state: Mapping[str, Any],
+        run_artifact: Mapping[str, Any],
+    ) -> None: ...
+
+    def hydrate_short_story_revision_base(
+        self,
+        resource: RunResource,
+        state: Mapping[str, Any],
+        project_artifact: Mapping[str, Any],
+    ) -> None: ...
+
 
 class WritingJobHandler:
     def __init__(
@@ -80,18 +97,21 @@ class WritingJobHandler:
         *,
         parent_graph: GraphPort,
         operation_graph: GraphPort,
+        short_story_graph: GraphPort | None = None,
         artifacts: ArtifactHydrationPort,
         workflow_log: WorkflowLogPort | None = None,
     ) -> None:
         self._core = core
         self._parent_graph = parent_graph
         self._operation_graph = operation_graph
+        self._short_story_graph = short_story_graph
         self._artifacts = artifacts
         self._workflow_log = workflow_log
 
     async def __call__(self, job: QueueJob) -> None:
         if job.kind != "writing":
             raise ValueError("写作处理器收到非写作任务")
+        payload = _job_payload(job)
         resource = _resource(job)
         if self._workflow_log is not None:
             self._workflow_log.start_run(
@@ -107,9 +127,28 @@ class WritingJobHandler:
                 ),
             )
         context = await self._core.call_tool(resource, "写作", "get_writing_context", {})
+        try:
+            _validate_job_context_identity(job, payload, context)
+        except ValueError as exc:
+            message = str(exc) or "写作运行准备失败"
+            self._record_state(job.runId, "准备异常", {"错误": message})
+            self._finish_log(job.runId, "错误")
+            await self._core.fail(
+                resource,
+                sequence=1,
+                code="AGENT_PREPARATION_FAILED",
+                message=message,
+                recoverable=True,
+            )
+            raise NonRetryableJobError("写作运行失败已上报核心服务") from exc
         current_job_state = _current_job_snapshot(job, context)
         owned_artifact_id: str | None = None
         if current_job_state is not None:
+            _validate_stable_identity(
+                current_job_state,
+                payload,
+                current_command_id=job.jobId,
+            )
             current_job_state = _attach_runtime_context(
                 current_job_state,
                 context,
@@ -127,12 +166,20 @@ class WritingJobHandler:
                 owned_artifact_id,
             ):
                 return
+        if await self._settle_foreign_snapshot_without_input(
+            job,
+            payload,
+            context,
+            resource,
+        ):
+            return
         state, graph = self._prepare_state(
             job,
             context,
             current_job_state=current_job_state,
+            payload=payload,
         )
-        if current_job_state is None:
+        if owned_artifact_id is None:
             owned_artifact_id = self._hydrate_for_state(resource, state, context)
         input_artifact_id = state.get("activeArtifactId")
         self._record_state(
@@ -283,6 +330,76 @@ class WritingJobHandler:
             return True
         return False
 
+    async def _settle_foreign_snapshot_without_input(
+        self,
+        job: QueueJob,
+        payload: WritingJobPayload,
+        context: dict[str, Any],
+        resource: RunResource,
+    ) -> bool:
+        if not payload.resume or payload.resumeInput is not None:
+            return False
+        planning = context.get("planning")
+        if not isinstance(planning, dict):
+            return False
+        snapshot = planning.get("graphState")
+        if (
+            not isinstance(snapshot, dict)
+            or snapshot.get("callbackJobId") == job.jobId
+        ):
+            return False
+        state = deserialize_snapshot(snapshot)
+        phase = state.get("phase")
+        if phase not in {"completed", "error", "waiting_user"}:
+            return False
+        _validate_stable_identity(state, payload)
+        if phase == "waiting_user":
+            _validate_waiting_artifact_context(planning, state)
+        _apply_planning_history(state, planning)
+        _apply_command_identity(state, payload, job.jobId)
+        if phase in {"completed", "error"}:
+            return await self._settle_recovered_state(resource, job.runId, state)
+        await self._rebind_foreign_waiting_snapshot(resource, job.runId, state)
+        return True
+
+    async def _rebind_foreign_waiting_snapshot(
+        self,
+        resource: RunResource,
+        run_id: str,
+        state: GraphState,
+    ) -> None:
+        artifact_id = state.get("activeArtifactId")
+        if not isinstance(artifact_id, str) or not artifact_id:
+            raise ValueError("WAITING_ARTIFACT_MISSING：等待用户确认的快照缺少草案身份")
+        event_sequence = int(state.get("eventSequence", 0)) + 1
+        active_agent = state.get("activeAgent")
+        await self._core.send_event(
+            resource,
+            sequence=event_sequence,
+            event="artifact_awaiting_user_approval",
+            data={
+                "agentId": active_agent if isinstance(active_agent, str) else "系统",
+                "artifactId": artifact_id,
+            },
+        )
+        checkpoint_sequence = event_sequence + 1
+        state["eventSequence"] = checkpoint_sequence
+        checkpoint = to_typescript_snapshot(serialize_snapshot(state))
+        self._record_state(
+            run_id,
+            "重绑等待确认快照",
+            {
+                "阶段": checkpoint.get("phase"),
+                "草案": artifact_id,
+            },
+        )
+        await self._core.save_checkpoint(
+            resource,
+            sequence=checkpoint_sequence,
+            checkpoint=checkpoint,
+        )
+        self._finish_log(run_id, "等待用户确认")
+
     def _hydrate_for_state(
         self,
         resource: RunResource,
@@ -300,7 +417,29 @@ class WritingJobHandler:
         }:
             return None
         planning = context.get("planning")
-        active_artifact = planning.get("activeArtifact") if isinstance(planning, dict) else None
+        if not isinstance(planning, dict):
+            raise RuntimeError("ACTIVE_ARTIFACT_CONTEXT_MISSING：Core 缺少规划上下文")
+        if state.get("explicitOperation") == "write_short_story":
+            run_artifact = planning.get("shortStoryRunArtifact")
+            project_artifact = planning.get("shortStoryProjectBodyArtifact")
+            if isinstance(run_artifact, dict) and run_artifact.get("id") == artifact_id:
+                self._artifacts.hydrate_short_story(resource, state, run_artifact)
+                return artifact_id
+            if (
+                isinstance(project_artifact, dict)
+                and project_artifact.get("id") == artifact_id
+            ):
+                self._artifacts.hydrate_short_story_revision_base(
+                    resource,
+                    state,
+                    project_artifact,
+                )
+                return artifact_id
+            else:
+                raise RuntimeError(
+                    "ACTIVE_ARTIFACT_CONTEXT_MISSING：当前恢复状态缺少匹配的中短篇正文草案"
+                )
+        active_artifact = planning.get("activeArtifact")
         if (
             not isinstance(active_artifact, dict)
             or active_artifact.get("id") != artifact_id
@@ -321,6 +460,7 @@ class WritingJobHandler:
         context: dict[str, Any],
         *,
         current_job_state: GraphState | None = None,
+        payload: WritingJobPayload,
     ) -> tuple[GraphState, GraphPort]:
         planning = context.get("planning")
         if not isinstance(planning, dict):
@@ -328,35 +468,54 @@ class WritingJobHandler:
         snapshot = planning.get("graphState")
         if current_job_state is not None:
             _apply_planning_history(current_job_state, planning)
+            _apply_command_identity(current_job_state, payload, job.jobId)
+            _attach_short_story_run_identity(current_job_state, planning, payload)
             return (
                 _attach_runtime_context(current_job_state, context, _resource(job)),
-                self._operation_graph,
+                self._graph_for_payload(payload),
             )
         is_resume = job.payload.get("resume") is True
         if is_resume:
             if not isinstance(snapshot, dict):
                 raise ValueError("恢复写作任务缺少稳定快照")
             state = deserialize_snapshot(snapshot)
+            _validate_stable_identity(state, payload)
+            _attach_short_story_run_identity(state, planning, payload)
             resume_input = job.payload.get("resumeInput")
             if isinstance(resume_input, dict):
+                _validate_resume_artifact_identity(state, resume_input)
                 state["resumeDecision"] = dict(resume_input)
                 message = resume_input.get("userMessage")
                 if isinstance(message, str) and message:
                     state["userMessage"] = message
             _apply_planning_history(state, planning)
+            _apply_command_identity(state, payload, job.jobId)
             return (
                 _attach_runtime_context(state, context, _resource(job)),
-                self._operation_graph,
+                self._graph_for_payload(payload),
             )
 
         chapter_id = planning.get("chapterId")
         user_message = planning.get("userMessage")
-        target_word_count = planning.get("targetWordCount", 4000)
+        target_word_count = (
+            payload.targetTotalWordCount
+            if payload.workflowKind == "short_medium"
+            else planning.get("targetWordCount", 4000)
+        )
         if not isinstance(chapter_id, str) or not chapter_id:
             raise ValueError("写作上下文缺少章节标识")
         if not isinstance(user_message, str) or not user_message:
             raise ValueError("写作上下文缺少用户请求")
-        if isinstance(target_word_count, bool) or not isinstance(target_word_count, int):
+        if (
+            target_word_count is None
+            and payload.workflowKind != "short_medium"
+        ) or (
+            target_word_count is not None
+            and (
+                isinstance(target_word_count, bool)
+                or not isinstance(target_word_count, int)
+            )
+        ):
             raise ValueError("写作上下文目标字数无效")
         state = create_initial_state(
             task_id=job.taskId,
@@ -365,12 +524,52 @@ class WritingJobHandler:
             chapter_id=chapter_id,
             user_message=user_message,
             target_word_count=target_word_count,
+            workflow_kind=payload.workflowKind,
+            explicit_operation=payload.operation,
+            command_id=job.jobId,
+            target_total_word_count=payload.targetTotalWordCount,
+            command_source=(
+                payload.source.model_dump(mode="json")
+                if payload.source is not None
+                else None
+            ),
         )
         _apply_planning_history(state, planning)
+        _attach_short_story_run_identity(state, planning, payload)
+        if payload.operation == "develop_short_outline":
+            outline_authority = planning.get("activeArtifact")
+            if (
+                isinstance(outline_authority, Mapping)
+                and outline_authority.get("kind") == "outline_draft"
+                and isinstance(outline_authority.get("id"), str)
+                and outline_authority.get("id")
+            ):
+                state["activeArtifactId"] = str(outline_authority["id"])
+                state["artifactIteration"] = 1
+                state["artifactStatus"] = "revision_requested"
+        if payload.operation is not None:
+            state["currentOperation"] = _explicit_operation(
+                payload.operation,
+                user_message,
+            ).model_dump(mode="json")
+            state["activeAgent"] = OPERATION_DEFINITIONS[payload.operation].primaryAgent
+            return (
+                _attach_runtime_context(state, context, _resource(job)),
+                self._graph_for_payload(payload),
+            )
         return (
             _attach_runtime_context(state, context, _resource(job)),
             self._parent_graph,
         )
+
+    def _graph_for_payload(self, payload: WritingJobPayload) -> GraphPort:
+        if payload.operation != "write_short_story":
+            return self._operation_graph
+        if self._short_story_graph is None:
+            raise ValueError(
+                "SHORT_STORY_GRAPH_NOT_CONFIGURED：中短篇整稿专用图尚未配置"
+            )
+        return self._short_story_graph
 
 
 def _current_job_snapshot(
@@ -402,10 +601,30 @@ def _attach_runtime_context(
     resource: RunResource,
 ) -> GraphState:
     state["runtimeContext"] = {
-        "coreContext": context,
+        "coreContext": _model_core_context(state, context),
         "runResource": resource.model_dump(),
     }
     return state
+
+
+def _model_core_context(
+    state: GraphState,
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    if state.get("workflowKind") != "short_medium":
+        return context
+    planning = context.get("planning")
+    if not isinstance(planning, dict):
+        return context
+    model_planning = dict(planning)
+    model_planning.pop("targetWordCount", None)
+    short_story_context = model_planning.get("shortStoryContext")
+    if isinstance(short_story_context, Mapping):
+        model_planning["shortStoryContext"] = {
+            **short_story_context,
+            "targetTotalWordCount": state.get("targetTotalWordCount"),
+        }
+    return {**context, "planning": model_planning}
 
 
 def _apply_planning_history(
@@ -419,6 +638,91 @@ def _apply_planning_history(
         ]
 
 
+def _attach_short_story_run_identity(
+    state: GraphState,
+    planning: Mapping[str, Any],
+    payload: WritingJobPayload,
+) -> None:
+    if payload.operation != "write_short_story":
+        return
+    run_artifact = planning.get("shortStoryRunArtifact")
+    if run_artifact is None:
+        project_artifact = planning.get("shortStoryProjectBodyArtifact")
+        if project_artifact is None:
+            return
+        if not isinstance(project_artifact, Mapping):
+            raise ValueError(
+                "SHORT_STORY_PROJECT_BODY_INVALID：Core 项目正文版本投影无效"
+            )
+        artifact_id = project_artifact.get("id")
+        if not isinstance(artifact_id, str) or not artifact_id:
+            raise ValueError(
+                "SHORT_STORY_PROJECT_BODY_INVALID：Core 项目正文版本身份无效"
+            )
+        state["activeArtifactId"] = artifact_id
+        state["artifactStatus"] = "revision_requested"
+        return
+    if not isinstance(run_artifact, Mapping):
+        raise ValueError(
+            "SHORT_STORY_RUN_ARTIFACT_INVALID：Core 中短篇正文草案投影无效"
+        )
+    artifact_id = run_artifact.get("id")
+    task_id = run_artifact.get("taskId")
+    existing_id = state.get("activeArtifactId")
+    if (
+        not isinstance(artifact_id, str)
+        or not artifact_id
+        or task_id != state.get("taskId")
+        or (
+            isinstance(existing_id, str)
+            and existing_id
+            and existing_id != artifact_id
+        )
+    ):
+        raise ValueError(
+            "SHORT_STORY_RUN_ARTIFACT_INVALID：Core 中短篇正文草案身份不一致"
+        )
+    state["activeArtifactId"] = artifact_id
+
+
+def _validate_resume_artifact_identity(
+    state: Mapping[str, Any],
+    resume_input: Mapping[str, Any],
+) -> None:
+    if resume_input.get("decision") not in {"approve", "revise", "discard"}:
+        return
+    if (
+        not isinstance(resume_input.get("artifactId"), str)
+        or resume_input.get("artifactId") != state.get("activeArtifactId")
+    ):
+        raise ValueError(
+            "RESUME_ARTIFACT_IDENTITY_MISMATCH：用户决定与稳定快照草案不一致"
+        )
+
+
+def _validate_waiting_artifact_context(
+    planning: Mapping[str, Any],
+    state: Mapping[str, Any],
+) -> None:
+    artifact_id = state.get("activeArtifactId")
+    active_artifact = (
+        planning.get("shortStoryRunArtifact")
+        if state.get("explicitOperation") == "write_short_story"
+        else planning.get("activeArtifact")
+    )
+    if (
+        not isinstance(artifact_id, str)
+        or not artifact_id
+        or state.get("artifactStatus") != "awaiting_user"
+        or not isinstance(active_artifact, dict)
+        or active_artifact.get("id") != artifact_id
+        or active_artifact.get("status") != "awaiting_user"
+    ):
+        raise ValueError(
+            "WAITING_ARTIFACT_CONTEXT_MISMATCH：等待快照与 Core 权威草案不一致"
+        )
+
+
 def _artifact_id_from_interrupt(interrupts: object) -> str | None:
     if not isinstance(interrupts, (list, tuple)):
         return None
@@ -430,3 +734,129 @@ def _artifact_id_from_interrupt(interrupts: object) -> str | None:
         if isinstance(artifact_id, str) and artifact_id:
             return artifact_id
     return None
+
+
+def _job_payload(job: QueueJob) -> WritingJobPayload:
+    try:
+        return WritingJobPayload.model_validate(job.payload)
+    except ValueError as exc:
+        raise ValueError("WRITING_JOB_PAYLOAD_INVALID：写作队列载荷身份无效") from exc
+
+
+def _validate_job_context_identity(
+    job: QueueJob,
+    payload: WritingJobPayload,
+    context: dict[str, Any],
+) -> None:
+    planning = context.get("planning")
+    workspace = context.get("workspace")
+    if not isinstance(planning, dict) or not isinstance(workspace, dict):
+        raise ValueError("WRITING_JOB_IDENTITY_MISMATCH：Core 上下文结构无效")
+    short = payload.workflowKind == "short_medium"
+    required = {
+        "taskId": job.taskId,
+        "novelId": job.novelId,
+        "chapterId": payload.chapterId,
+    }
+    if any(planning.get(key) != value for key, value in required.items()):
+        raise ValueError("WRITING_JOB_IDENTITY_MISMATCH：任务资源身份不一致")
+    command_id = planning.get("commandId")
+    if command_id is not None and command_id != job.jobId:
+        raise ValueError("WRITING_JOB_IDENTITY_MISMATCH：持久命令身份不一致")
+    if short and command_id != job.jobId:
+        raise ValueError("WRITING_JOB_IDENTITY_MISMATCH：中短篇缺少持久命令身份")
+    identity_values = {
+        "workflowKind": payload.workflowKind,
+        "operation": payload.operation,
+        "targetTotalWordCount": payload.targetTotalWordCount,
+        "source": (
+            payload.source.model_dump(mode="json") if payload.source is not None else None
+        ),
+        "versionReferences": [
+            item.model_dump(mode="json") for item in payload.versionReferences
+        ],
+    }
+    for key, expected in identity_values.items():
+        actual = planning.get(key)
+        if short or key in planning:
+            if actual != expected:
+                raise ValueError(f"WRITING_JOB_IDENTITY_MISMATCH：{key} 不一致")
+    bible = workspace.get("writingBible")
+    if short:
+        if (
+            not isinstance(bible, dict)
+            or bible.get("storyLengthProfile") != "short_medium"
+            or bible.get("targetTotalWordCount") != payload.targetTotalWordCount
+        ):
+            raise ValueError("WRITING_JOB_IDENTITY_MISMATCH：作品圣经与中短篇命令不一致")
+    elif isinstance(bible, dict) and bible.get("storyLengthProfile") != "long_serial":
+        raise ValueError("WRITING_JOB_IDENTITY_MISMATCH：作品圣经与长篇命令不一致")
+
+
+def _validate_stable_identity(
+    state: Mapping[str, Any],
+    payload: WritingJobPayload,
+    *,
+    current_command_id: str | None = None,
+) -> None:
+    workflow = state.get("workflowKind")
+    explicit = state.get("explicitOperation")
+    if workflow != payload.workflowKind and (
+        workflow is not None or payload.workflowKind == "short_medium"
+    ):
+        raise ValueError("WRITING_JOB_IDENTITY_MISMATCH：稳定快照篇幅身份不一致")
+    if explicit != payload.operation and (
+        explicit is not None or payload.workflowKind == "short_medium"
+    ):
+        raise ValueError("WRITING_JOB_IDENTITY_MISMATCH：稳定快照显式 Operation 不一致")
+    if payload.workflowKind == "short_medium":
+        expected_source = (
+            payload.source.model_dump(mode="json")
+            if payload.source is not None
+            else None
+        )
+        if (
+            state.get("targetTotalWordCount") != payload.targetTotalWordCount
+            or state.get("commandSource") != expected_source
+        ):
+            raise ValueError("WRITING_JOB_IDENTITY_MISMATCH：稳定快照中短篇来源不一致")
+        if (
+            current_command_id is not None
+            and state.get("commandId") != current_command_id
+        ):
+            raise ValueError("WRITING_JOB_IDENTITY_MISMATCH：稳定快照持久命令不一致")
+    if payload.workflowKind == "short_medium" or payload.operation is not None:
+        operation = state.get("currentOperation")
+        kind = operation.get("kind") if isinstance(operation, dict) else None
+        if kind != payload.operation:
+            raise ValueError("WRITING_JOB_IDENTITY_MISMATCH：稳定快照当前 Operation 不一致")
+
+
+def _apply_command_identity(
+    state: GraphState,
+    payload: WritingJobPayload,
+    command_id: str,
+) -> None:
+    state["workflowKind"] = payload.workflowKind
+    state["explicitOperation"] = payload.operation
+    state["commandId"] = command_id
+    state["targetTotalWordCount"] = payload.targetTotalWordCount
+    state["commandSource"] = (
+        payload.source.model_dump(mode="json") if payload.source is not None else None
+    )
+
+
+def _explicit_operation(kind: str, user_message: str) -> CreativeOperation:
+    definition = OPERATION_DEFINITIONS[kind]  # type: ignore[index]
+    return CreativeOperation(
+        kind=definition.kind,
+        targetType=definition.targetType,
+        userGoal=user_message,
+        primaryAgent=definition.primaryAgent,
+        reviewers=list(definition.reviewers),
+        outputKind=definition.outputKind,
+        requiresArtifact=definition.requiresArtifact,
+        requiresUserApproval=definition.requiresUserApproval,
+        confidence=1,
+        reasoning="由 Core 持久命令显式指定，不经过关键词或模型分类。",
+    )

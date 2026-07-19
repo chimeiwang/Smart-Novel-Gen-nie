@@ -47,7 +47,11 @@ stateDiagram-v2
 | beat_plan | 结构化 Beat Plan |
 | freeform_markdown | 自由 Markdown 文本 |
 
+中短篇复用 `outline_draft` 和 `chapter_draft`，但使用强类型 JSON 载荷：大纲保存原始灵感、核心前提、创作锚点、带稳定 ID 的有序分节、完整可读 content 和修改摘要；正文保存来源大纲 ID/revision/hash、生成时可选篇幅参考、实际字数、目标 Chapter 和正文基线 hash。篇幅参考不参与审核通过门槛，实际字数必须与正文一致。分节不成为独立 Artifact 或 Chapter。详细契约见 `docs/specs/2026-07-18-short-medium-writing-workflow.md`。
+
 ## 草案审核主流程
+
+下图的 Reviewer 并行扇出适用于 `long_serial` 和其他非中短篇草案。`short_medium` 大纲不自动复审；中短篇整稿固定串行执行“编辑 → 校验”，最多自动完整返工一次后再串行复审。
 
 ~~~mermaid
 flowchart TD
@@ -80,11 +84,15 @@ flowchart TD
 
 公开入口是 `POST /api/v1/review-artifacts/{artifactId}/decision`。请求必须携带 clientRequestId，Core 先按该标识检查幂等结果，再在一个数据库事务中完成正式写入或草案变化并创建 `artifact_decision` 命令，成功返回 202。前端随后只连接该任务 SSE，不再额外调用恢复接口。
 
+所有 ReviewArtifact 决策，包括 `approve`、`revise`、`discard`，都必须携带 `expectedRevision`；Core 必须在正式应用、状态变化或删除前校验其等于当前 revision。直接编辑和恢复历史等内容变更请求同样必须携带并校验 `expectedRevision`。内容实际变化才增加 revision；状态切换、相同内容重放和幂等重试不增加。用户直接编辑大纲必须先保存为新 revision 再批准；恢复历史版本会复制为新的当前 revision，不回退版本号。过期 revision 返回冲突。用户修改要求原文必须保存在 WritingMessage、持久命令和 revision diff 中。
+
 前端需求：
 
 - 聊天流显示草案卡片。
 - 用户点击后打开审核弹窗。
 - 文本草案可在弹窗内本地编辑，点击应用时提交 editedContent。
+- 中短篇大纲提供锚点和分节直接编辑、自然语言修改、完整版本列表/详情、历史恢复和当前版本批准；内部 patch 合并后仍展示完整大纲。
+- 中短篇自然语言改纲必须呈现为可刷新恢复的连续对话：逐轮展示 WritingMessage 中的用户原话和对应 revision 结果；批准后保留只读历史。一次性输入框和独立版本列表不能替代该对话。
 - 生成正文预览必须保留完整正文并使用统一字数统计；有限桌面高度内通过纵向滚动查看尾部，不得以隐藏、渐变遮挡或裁切替代完整显示。该显示方式不改变 ReviewArtifact 状态机、草案编辑、采纳动作或 Core 正式应用流程。
 - agent_updates 草案支持勾选部分 section/item 后应用。
 - 应用、丢弃或修改过程中需要展示 pending、success、error 状态。
@@ -123,6 +131,8 @@ flowchart TD
 - 写入 Outline.content；
 - 标记 applied。
 
+中短篇大纲修改不自动进入编辑或 OOC 复审。局部修改按稳定 section ID 合并，未涉及部分原样保留；全局重排必须明确记录被改变的创作锚点。大纲批准后才允许启动完整正文生成。
+
 ### beat_plan / beat_plan_draft
 
 应用方式：
@@ -141,6 +151,12 @@ flowchart TD
 - 应用后确保章节一致性终检项。
 - existing_chapter 应用后必须退回 drafting 并清空 completedAt；正文实际变化时复用章节编辑路径，使旧质量结果失效并取消活动质量运行。
 - 标记 applied。
+
+中短篇 `chapter_draft` 只能写入创建时的唯一“正文”Chapter。应用前必须复核来源大纲 ID/revision/hash 和目标正文基线 hash；任一来源变化都拒绝旧草案。模型 `finishReason=length`、内容过滤、边界标记不完整或尾部缺失时不得创建草案，也不得自动续写或拼接。
+
+中短篇全稿复审固定串行执行“编辑 → 校验”，不使用长篇并行扇出。首轮要求修改时最多自动完整返工一次，再串行执行第二轮双审核；仍有问题立即停止自动循环并交给用户。用户主动发起新的整稿修改不限制次数。
+
+若最终校验明确通过，正式应用后可以把现有章节一致性检查记录为“已由中短篇全稿审核覆盖”；否则必须保持待处理，不得伪造完成或跳过。
 
 正文草案目标：
 
@@ -273,6 +289,11 @@ WorkflowStep 记录运行步骤：
 - Agent 正式变更必须先生成 ReviewArtifact。
 - 草案状态流转符合契约，不允许非法跳转。
 - 用户可以批准、丢弃或继续修改草案。
+- 中短篇大纲可以无限次局部或整体修改，未涉及分节不因局部 patch 改变，并可按版本恢复为新的 revision。
+- 中短篇整稿只在已批准大纲后生成，编辑和校验串行执行，最多自动完整返工一次。
+- 中短篇正文来源过期时不能应用；只有最终校验明确通过才能标记全稿审核覆盖。
+- 中短篇大纲与正文版本跨 WritingSession 保持项目级单调递增；“当前最新待确认版本”和“当前采用/正式版本”必须分别计算，确认后继续修改不能让已采用版本失效。
+- 历史版本引用必须按精确 Artifact、revision 和 hash 校验；正文版本同时保留真实来源大纲版本。
 - 用户批准后，不同 payload 类型能写入正确正式数据。
 - 用户选择部分 agent_updates 时，只应用被选择的变更。
 - 章节送审后能创建一致性终检。
@@ -289,7 +310,7 @@ WorkflowStep 记录运行步骤：
 - 草案执行显式区分 primary、reviewer 和 reviser：reviewer 无读取工具，只读取注入的 Core 权威草案并提交一次 evaluation；reviser 获得原 payload、revision、artifactKey 和合并后的 requiredChanges，按原 Operation 产物契约生成同类新 revision。
 - 草案完成复审并进入 `awaiting_user` 后，Agent Service 必须发送草案等待确认事件，前端再通过 Core 查询权威草案内容，不能依赖进程内状态猜测。
 - 服务重启或新命令恢复自动复审/返工前，Agent Service 必须从 Core `planning.activeArtifact` 水合权威草案；approve/discard 已由 Core 事务完成，不依赖草案继续存在。等待态只在事件与 checkpoint 成功后、完成态和错误态只在相应回调成功后，按当前 QueueJob 的 `runId/jobId` 释放进程内记录。
-- 首版跨服务复审不实现局部草案 patch；所有修改结论归一为完整 rewrite，同时保留原 requiredChanges 和 patch 意图。不能把完整返工描述为局部修订，也不能因此直接写正式小说数据。
+- 长篇跨服务复审不实现局部草案 patch；所有 reviewer 修改结论归一为完整 rewrite，同时保留原 requiredChanges 和 patch 意图。中短篇改纲是显式例外：主责 Agent 可输出按稳定 section ID 定位的内部 patch，由服务层合并并保存完整新 revision；该 patch 不来自 reviewer，也不能直接写正式小说数据。
 - 一致性终检由“校验”Agent 的 quality 模式执行，并通过共享严格报告契约保存完整 WorkflowRun 输出；旧商业评分列不承载一致性数据。
 - 正文、大纲、Beat Plan 和 `agent_updates` 只有在 `awaiting_user` 状态下由用户批准后才能正式写入；应用失败会恢复为等待用户确认。
 - `revision_brief` 永远不能正式应用，部分 `agent_updates` 只执行用户明确选择的 section 或 item。

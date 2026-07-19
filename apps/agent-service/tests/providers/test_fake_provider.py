@@ -1,6 +1,12 @@
 import pytest
 from inkforge_agents.providers.base import ModelTurnRequest
 from inkforge_agents.providers.fake import FakeModelProvider
+from inkforge_agents.runtime.agent_runner import AgentRunner, AgentRunRequest
+from inkforge_agents.runtime.agent_runtime import AgentRuntime
+from inkforge_agents.runtime.model_runtime import ModelRuntime
+from inkforge_agents.short_story.story_graph import extract_complete_short_story
+from inkforge_agents.tools.registry import ToolContext, build_default_registry
+from inkforge_contracts import count_short_story_text_length
 
 
 @pytest.mark.asyncio
@@ -47,6 +53,73 @@ async def test_fake_provider_without_tools_returns_full_visible_text() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("target_word_count", [None, 6000, 80000])
+async def test_fake_provider_returns_stable_complete_story_without_filling_to_reference(
+    target_word_count: int | None,
+) -> None:
+    reference = (
+        "null" if target_word_count is None else str(target_word_count)
+    )
+    result = await FakeModelProvider().complete_turn(
+        ModelTurnRequest(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "当前执行契约：operation=write_short_story，mode=primary。",
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        "生成完整中短篇正文；权威上下文："
+                        f'{{"targetTotalWordCount":{reference}}}'
+                    ),
+                },
+            ],
+            tools=[],
+            maxOutputTokens=256,
+        )
+    )
+
+    assert result.toolCalls == []
+    assert result.finishReason == "stop"
+    assert result.content.startswith("ARTIFACT_OUTPUT_START\n")
+    assert result.content.endswith("\nARTIFACT_OUTPUT_END")
+    assert "【模拟整稿尾部】" in result.content
+    actual = count_short_story_text_length(
+        extract_complete_short_story(result.content)
+    )
+    assert 6000 <= actual <= 80000
+    if target_word_count is not None:
+        assert actual != target_word_count
+    paragraphs = extract_complete_short_story(result.content).split("\n\n")
+    assert len(paragraphs) == len(set(paragraphs))
+
+
+@pytest.mark.asyncio
+async def test_fake_provider_short_story_is_independent_of_length_reference() -> None:
+    async def generate(reference: str) -> str:
+        result = await FakeModelProvider().complete_turn(
+            ModelTurnRequest(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "当前执行契约：operation=write_short_story，mode=primary。",
+                    },
+                    {
+                        "role": "user",
+                        "content": f'{{"targetTotalWordCount":{reference}}}',
+                    },
+                ],
+                tools=[],
+                maxOutputTokens=256,
+            )
+        )
+        return result.content
+
+    assert await generate("null") == await generate("6000") == await generate("80000")
+
+
+@pytest.mark.asyncio
 async def test_fake_provider_finishes_after_tool_result() -> None:
     result = await FakeModelProvider().complete_turn(
         ModelTurnRequest(
@@ -72,6 +145,90 @@ async def test_fake_provider_finishes_after_tool_result() -> None:
 
     assert result.toolCalls == []
     assert result.finishReason == "stop"
+
+
+@pytest.mark.asyncio
+async def test_fake_provider_can_trigger_one_e2e_editor_rewrite() -> None:
+    class CapturingFakeProvider(FakeModelProvider):
+        def __init__(self) -> None:
+            self.requests: list[ModelTurnRequest] = []
+
+        async def complete_turn(self, request: ModelTurnRequest):
+            self.requests.append(request)
+            return await super().complete_turn(request)
+
+    provider = CapturingFakeProvider()
+    registry = build_default_registry()
+    runner = AgentRunner(
+        AgentRuntime(
+            ModelRuntime(provider),
+            registry,
+            max_output_tokens=16_384,
+        ),
+        registry,
+    )
+
+    async def review(count: int, agent_id: str, instruction: str):
+        result = await runner.run(
+            AgentRunRequest(
+                agentId=agent_id,
+                executionMode="reviewer",
+                operationKind="write_short_story",
+                userMessage="审核当前完整中短篇正文",
+                contextMessages=[
+                    (
+                        "中短篇整稿权威上下文："
+                        '{"originalInspiration":"[E2E_AUTO_REWRITE_ONCE] 守夜人敲钟"}'
+                    ),
+                    (
+                        "当前待审核草案权威内容："
+                        f'{{"payload":{{"metadata":{{"automaticRewriteCount":{count}}}}}}}'
+                    ),
+                ],
+                executionInstructions=[instruction],
+                toolContext=ToolContext(
+                    userId="user-1",
+                    novelId="novel-1",
+                    taskId="task-1",
+                    runId="run-1",
+                    agentId=agent_id,
+                ),
+                maxIterations=1,
+            )
+        )
+        return result, provider.requests[-1]
+
+    first_editor, first_request = await review(
+        0,
+        "编辑",
+        "这是中短篇完整正文的全稿审核，只检查结构、节奏、高潮和结局兑现。",
+    )
+    validator, _ = await review(
+        0,
+        "校验",
+        "这是中短篇完整正文的独立全稿校验，只检查人物、规则、时间线、因果和伏笔。",
+    )
+    second_editor, _ = await review(
+        1,
+        "编辑",
+        "这是中短篇完整正文的全稿审核，只检查结构、节奏、高潮和结局兑现。",
+    )
+
+    runtime_message = "\n".join(message.content for message in first_request.messages)
+    assert "[E2E_AUTO_REWRITE_ONCE]" in runtime_message
+    assert '"automaticRewriteCount":0' in runtime_message
+    assert "operation=write_short_story" in runtime_message
+    assert "mode=reviewer" in runtime_message
+    assert "结构、节奏、高潮和结局兑现" in runtime_message
+    assert first_editor.controlEvents[0] == {
+        "type": "submit_evaluation",
+        "artifactKey": "fake-artifact",
+        "verdict": "revise",
+        "summary": "模拟编辑要求执行一次自动完整返工。",
+        "requiredChanges": "强化开场危机，并保持结局兑现不变。",
+    }
+    assert validator.controlEvents[0]["verdict"] == "pass"
+    assert second_editor.controlEvents[0]["verdict"] == "pass"
 
 
 @pytest.mark.asyncio
@@ -132,3 +289,105 @@ async def test_fake_provider_returns_complete_quality_report_from_tool_scope() -
         "report": "一致性终检未发现冲突。",
         "rewriteBrief": None,
     }
+
+
+@pytest.mark.asyncio
+async def test_fake_provider_submits_valid_full_short_outline() -> None:
+    result = await FakeModelProvider().complete_turn(
+        ModelTurnRequest(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "当前执行契约：operation=develop_short_outline，mode=primary。",
+                },
+                {"role": "user", "content": "城市每天忘记一个人"},
+            ],
+            tools=[
+                {
+                    "name": "submit_short_story_outline",
+                    "description": "提交中短篇大纲",
+                    "parameters": {"type": "object", "properties": {}},
+                }
+            ],
+            maxOutputTokens=256,
+        )
+    )
+
+    arguments = result.toolCalls[0].arguments
+    assert result.toolCalls[0].name == "submit_short_story_outline"
+    assert arguments["mode"] == "full"
+    assert "originalInspiration" not in arguments
+    assert all("id" not in section for section in arguments["sections"])
+
+
+@pytest.mark.asyncio
+async def test_fake_provider_submits_patch_against_authoritative_revision_and_id() -> None:
+    result = await FakeModelProvider().complete_turn(
+        ModelTurnRequest(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "当前执行契约：operation=develop_short_outline，mode=reviser。",
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        '当前返工草案权威内容：{"revision":7,"payload":'
+                        '{"sections":[{"id":"short-section-authority","title":"开端",'
+                        '"events":"旧事件"}]}}'
+                    ),
+                },
+            ],
+            tools=[
+                {
+                    "name": "submit_short_story_outline",
+                    "description": "提交中短篇大纲",
+                    "parameters": {"type": "object", "properties": {}},
+                }
+            ],
+            maxOutputTokens=256,
+        )
+    )
+
+    arguments = result.toolCalls[0].arguments
+    assert arguments["mode"] == "patch"
+    assert arguments["sourceRevision"] == 7
+    assert arguments["sectionOperations"][0]["sectionId"] == "short-section-authority"
+
+
+@pytest.mark.asyncio
+async def test_fake_provider_only_updates_the_requested_outline_section() -> None:
+    result = await FakeModelProvider().complete_turn(
+        ModelTurnRequest(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "当前执行契约：operation=develop_short_outline，mode=reviser。",
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        '当前返工草案权威内容：{"revision":8,"payload":'
+                        '{"corePremise":"保持原核心前提","sections":['
+                        '{"id":"short-section-one","title":"第一节","events":"第一节旧事件"},'
+                        '{"id":"short-section-two","title":"第二节","events":"第二节旧事件"},'
+                        '{"id":"short-section-three","title":"第三节","events":"第三节旧事件"}]}}；'
+                        '本轮修改要求原文：{"requiredChanges":'
+                        '"只修改第 2 节，让冲突更早爆发；保留第 1 和第 3 节。"}'
+                    ),
+                },
+            ],
+            tools=[
+                {
+                    "name": "submit_short_story_outline",
+                    "description": "提交中短篇大纲",
+                    "parameters": {"type": "object", "properties": {}},
+                }
+            ],
+            maxOutputTokens=256,
+        )
+    )
+
+    arguments = result.toolCalls[0].arguments
+    assert arguments["sectionOperations"][0]["sectionId"] == "short-section-two"
+    assert "corePremise" not in arguments

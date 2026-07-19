@@ -27,6 +27,7 @@ AGENT_CAPABILITIES: dict[str, frozenset[str]] = {
             "control.builder",
             "control.artifact",
             "control.beat",
+            "control.short_outline",
         }
     ),
     "写作": frozenset(

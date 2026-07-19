@@ -35,6 +35,7 @@ from .service_auth import (
     create_core_request_verifier,
     install_service_auth_error_handler,
 )
+from .short_story.story_graph import ShortStoryGraphDependencies, build_short_story_graph
 from .supervision import CoroutineSupervisor
 from .tools.registry import build_default_registry
 
@@ -283,6 +284,12 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                         ParentGraphDependencies(operation=dependencies)
                     ),
                     operation_graph=build_operation_graph(dependencies),
+                    short_story_graph=build_short_story_graph(
+                        ShortStoryGraphDependencies(
+                            agentExecutor=dependencies.agentExecutor,
+                            artifacts=artifacts,
+                        )
+                    ),
                     artifacts=artifacts,
                     workflow_log=workflow_log,
                 )

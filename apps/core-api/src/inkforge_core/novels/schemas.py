@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 
 class StrictModel(BaseModel):
@@ -36,16 +36,29 @@ type OutlineNodeKind = Literal["stage", "plot_unit", "chapter_group"]
 type OutlineNodeStatus = Literal["planned", "in_progress", "completed", "skipped"]
 
 
-class CreateNovelRequest(StrictModel):
+class ShortMediumCreateNovelRequest(StrictModel):
+    storyLengthProfile: Literal["short_medium"]
+    inspiration: str = Field(min_length=1)
+    targetTotalWordCount: int | None = Field(default=None, ge=6_000, le=80_000)
+    name: str | None = None
+
+
+class LongSerialCreateNovelRequest(StrictModel):
     name: str = Field(min_length=1)
     summary: str | None = None
-    storyLengthProfile: StoryLengthProfile
+    storyLengthProfile: Literal["long_serial"]
     targetTotalWordCount: int | None = Field(default=None, gt=0)
     genre: str | None = None
     protagonist: str | None = None
     coreSellingPoint: str | None = None
     readerPromise: str | None = None
     firstChapterGoal: str | None = None
+
+
+CreateNovelRequest = Annotated[
+    ShortMediumCreateNovelRequest | LongSerialCreateNovelRequest,
+    Field(discriminator="storyLengthProfile"),
+]
 
 
 class CreateNovelResponse(StrictModel):
@@ -73,6 +86,8 @@ class DashboardNovel(StrictModel):
     id: str
     name: str
     summary: str | None
+    storyLengthProfile: StoryLengthProfile
+    targetTotalWordCount: int | None
     updatedAt: datetime
     chapters: list[ChapterIdSummary]
     appliedStyle: AppliedStyleSummary | None
@@ -88,6 +103,8 @@ class NovelResponse(StrictModel):
     summary: str | None
     storyProgress: str | None
     appliedStyleId: str | None
+    storyLengthProfile: StoryLengthProfile
+    targetTotalWordCount: int | None
     createdAt: datetime
     updatedAt: datetime
 
@@ -361,9 +378,30 @@ class WorkspaceChapterSummary(StrictModel):
 
 class WorkspaceBootstrapResponse(StrictModel):
     novel: WorkspaceNovel
+    storyLengthProfile: StoryLengthProfile
+    targetTotalWordCount: int | None
     chapters: list[WorkspaceChapterSummary]
     currentChapter: WorkspaceChapter | None
     currentChapterId: str | None
+
+
+def _parse_json_datetime(value: object) -> object:
+    if isinstance(value, str):
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return value
+
+
+JsonDatetime = Annotated[datetime, BeforeValidator(_parse_json_datetime)]
+
+
+class UpdateNovelTitleRequest(StrictModel):
+    name: str = Field(min_length=1)
+    expectedUpdatedAt: JsonDatetime
+
+
+class UpdateNovelTitleResponse(StrictModel):
+    name: str
+    updatedAt: datetime
 
 
 class WorkspaceLoreResponse(StrictModel):

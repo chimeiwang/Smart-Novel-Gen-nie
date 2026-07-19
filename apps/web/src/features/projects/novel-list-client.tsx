@@ -1,21 +1,15 @@
 "use client";
 
+import type { components } from "@inkforge/api-client";
 import Link from "next/link";
 import { useState } from "react";
 
 import { CreateNovelModal } from "@/features/projects/create-novel-modal";
 import { LogoutButton } from "@/features/auth/user-menu";
-
-type NovelItem = {
-  id: string;
-  name: string;
-  summary: string | null;
-  chapters: Array<{ id: string }>;
-  appliedStyle: { name: string } | null;
-};
+import { STORY_LENGTH_PROFILE_CONFIG } from "@/shared/contracts/story-length-profile";
 
 interface NovelListClientProps {
-  novels: NovelItem[];
+  novels: components["schemas"]["DashboardNovel"][];
 }
 
 export function NovelListClient({ novels }: NovelListClientProps) {
@@ -61,7 +55,15 @@ export function NovelListClient({ novels }: NovelListClientProps) {
                     className="card novel-card"
                   >
                     <div className="meta">
-                      <span className="badge">{novel.chapters.length} 章</span>
+                      <span className="badge">
+                        {STORY_LENGTH_PROFILE_CONFIG[novel.storyLengthProfile].label}
+                      </span>
+                      {novel.targetTotalWordCount ? (
+                        <span className="badge">目标 {novel.targetTotalWordCount} 字</span>
+                      ) : null}
+                      {novel.storyLengthProfile === "long_serial" ? (
+                        <span className="badge">{novel.chapters.length} 章</span>
+                      ) : null}
                       {novel.appliedStyle && (
                         <span className="badge">文风：{novel.appliedStyle.name}</span>
                       )}

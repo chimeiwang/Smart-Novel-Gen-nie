@@ -1,9 +1,18 @@
 import pytest
+from inkforge_contracts import ShortStoryChapterDraft, ShortStoryOutlineDraft
+from inkforge_core.app import create_app
 from inkforge_core.errors import ApiError
 from inkforge_core.reviews.apply import resolve_apply_target
 from inkforge_core.reviews.diff import ArtifactPatchError, apply_text_replace_patch
 from inkforge_core.reviews.repository import ReviewRepository
-from inkforge_core.reviews.schemas import CreateArtifactRequest, assert_status_transition
+from inkforge_core.reviews.schemas import (
+    CreateArtifactRequest,
+    ReviewArtifactDecisionRequest,
+    SaveShortStoryOutlineRequest,
+    ShortStoryVersionDetail,
+    ShortStoryVersionListItem,
+    assert_status_transition,
+)
 from inkforge_core.reviews.updates import filter_agent_updates_by_selection
 from pydantic import ValidationError
 
@@ -135,3 +144,175 @@ def test_internal_artifact_request_is_strict_and_kind_matches_payload() -> None:
                 "unexpected": True,
             }
         )
+
+
+def _short_outline_payload() -> dict[str, object]:
+    return {
+        "kind": "outline_draft",
+        "storyLengthProfile": "short_medium",
+        "originalInspiration": "一封来自未来的信。",
+        "corePremise": "主人公必须决定是否相信未来的自己。",
+        "anchors": {"mustKeep": ["未来来信"], "confirmed": [], "avoid": []},
+        "sections": [{"id": "sec-1", "title": "来信", "events": "主人公收到信。"}],
+        "content": "服务端将重建此字段",
+        "changeSummary": "首次生成",
+        "anchorChanges": [],
+    }
+
+
+def test_short_outline_payload_is_strongly_validated_without_breaking_legacy_outline() -> None:
+    request = CreateArtifactRequest.model_validate(
+        {
+            "runId": "run-1",
+            "taskId": "task-1",
+            "novelId": "novel-1",
+            "artifactKey": "outline-1",
+            "kind": "outline_draft",
+            "status": "awaiting_user",
+            "payload": _short_outline_payload(),
+            "createdByAgent": "剧情",
+        }
+    )
+    assert isinstance(request.payload, ShortStoryOutlineDraft)
+    assert request.payload.content.startswith("# 原始灵感")
+
+    with pytest.raises(ValidationError):
+        CreateArtifactRequest.model_validate(
+            {
+                **request.model_dump(mode="json"),
+                "payload": {**_short_outline_payload(), "targetWordCount": 1000},
+            }
+        )
+
+    legacy = CreateArtifactRequest.model_validate(
+        {
+            "runId": "run-1",
+            "taskId": "task-1",
+            "novelId": "novel-1",
+            "kind": "outline_draft",
+            "status": "draft",
+            "payload": {"kind": "outline_draft", "content": "旧长篇大纲"},
+            "createdByAgent": "剧情",
+        }
+    )
+    assert legacy.payload == {"kind": "outline_draft", "content": "旧长篇大纲"}
+
+
+def test_short_story_chapter_payload_is_strongly_typed() -> None:
+    content = "甲" * 6000
+    request = CreateArtifactRequest.model_validate(
+        {
+            "runId": "run-1",
+            "taskId": "task-1",
+            "novelId": "novel-1",
+            "chapterId": "chapter-1",
+            "artifactKey": "short-story-draft",
+            "kind": "chapter_draft",
+            "status": "under_review",
+            "payload": {
+                "kind": "chapter_draft",
+                "storyLengthProfile": "short_medium",
+                "content": content,
+                "metadata": {
+                    "sourceOutlineArtifactId": "outline-1",
+                    "sourceOutlineRevision": 1,
+                    "sourceOutlineHash": "a" * 64,
+                    "targetWordCount": 6000,
+                    "actualWordCount": 6000,
+                    "targetChapterId": "chapter-1",
+                    "baseChapterHash": "b" * 64,
+                    "generationCommandId": "command-1",
+                    "automaticRewriteCount": 0,
+                    "generationReason": "user_request",
+                },
+            },
+            "createdByAgent": "写作",
+        }
+    )
+
+    assert isinstance(request.payload, ShortStoryChapterDraft)
+    with pytest.raises(ValidationError):
+        CreateArtifactRequest.model_validate(
+            {
+                **request.model_dump(mode="json"),
+                "payload": {
+                    **request.payload.model_dump(mode="json"),
+                    "content": "字数被篡改",
+                },
+            }
+        )
+
+
+def test_decisions_require_revision_and_short_outline_edit_has_no_content_shortcut() -> None:
+    with pytest.raises(ValidationError):
+        ReviewArtifactDecisionRequest.model_validate(
+            {"clientRequestId": "request-00000001", "decision": "approve"}
+        )
+    decision = ReviewArtifactDecisionRequest.model_validate(
+        {
+            "clientRequestId": "request-00000001",
+            "decision": "approve",
+            "expectedRevision": 2,
+        }
+    )
+    assert decision.expectedRevision == 2
+
+    edit = SaveShortStoryOutlineRequest.model_validate(
+        {
+            "expectedRevision": 2,
+            "corePremise": "新的核心前提",
+            "anchors": {"mustKeep": [], "confirmed": [], "avoid": []},
+            "sections": [{"title": "开端", "events": "事件发生。"}],
+            "changeSummary": "用户直接编辑",
+        }
+    )
+    assert edit.sections[0].id is None
+    with pytest.raises(ValidationError):
+        SaveShortStoryOutlineRequest.model_validate(
+            {**edit.model_dump(), "content": "不接受用户维护派生全文"}
+        )
+
+
+def test_public_openapi_exposes_short_outline_and_revision_routes() -> None:
+    document = create_app(testing=True).openapi()
+    schemas = document["components"]["schemas"]
+    paths = document["paths"]
+
+    assert "ShortStoryOutlineDraft" in schemas
+    assert "ShortStoryOutlineSection" in schemas
+    assert "ShortStoryChapterDraft" in schemas
+    assert "ShortStoryArtifactsResponse" in schemas
+    assert "ShortStoryTaskStatus" in schemas
+    assert "ShortStoryVersionReference" in schemas
+    assert "ShortStoryVersionListItem" in schemas
+    assert "ShortStoryVersionDetail" in schemas
+    assert "/api/v1/review-artifacts/{artifact_id}/revisions" in paths
+    assert "/api/v1/review-artifacts/{artifact_id}/outline" in paths
+    assert "/api/v1/novels/{novel_id}/short-story/artifacts" in paths
+
+
+def test_short_story_version_schemas_distinguish_latest_and_adopted_state() -> None:
+    item = ShortStoryVersionListItem.model_validate(
+        {
+            "kind": "outline",
+            "artifactId": "outline-1",
+            "version": 2,
+            "revision": 2,
+            "hash": "a" * 64,
+            "status": "history",
+            "summary": "收紧第二节冲突",
+            "sourceSessionId": "session-1",
+            "sourceOutlineRevision": None,
+            "createdAt": "2026-07-19T00:00:00Z",
+        }
+    )
+    assert item.status == "history"
+
+    detail = ShortStoryVersionDetail.model_validate(
+        {
+            **item.model_dump(mode="json"),
+            "payload": _short_outline_payload(),
+            "evaluations": [],
+        }
+    )
+    assert isinstance(detail.payload, ShortStoryOutlineDraft)
