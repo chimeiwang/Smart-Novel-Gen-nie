@@ -6,6 +6,7 @@ type SessionSelectionCandidate = Pick<
   "id" | "phase" | "updatedAt"
 >;
 type SessionTitleCandidate = Pick<WritingSessionListItem, "title" | "lastMessage">;
+type SessionHistoryCandidate = Pick<WritingSessionListItem, "messageCount">;
 
 const ACTIVE_PHASES = new Set(["discussing", "generating", "recording"]);
 const DEFAULT_TITLE_LIMIT = 40;
@@ -16,6 +17,12 @@ export type PersistedWritingSessionPhase =
   | "generating"
   | "recording"
   | "completed";
+
+export function filterNonEmptyWritingSessions<T extends SessionHistoryCandidate>(
+  sessions: readonly T[],
+): T[] {
+  return sessions.filter((session) => session.messageCount > 0);
+}
 
 export function selectDefaultWritingSessionId(
   sessions: readonly SessionSelectionCandidate[],

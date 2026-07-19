@@ -3,6 +3,7 @@
 import type { components } from "@inkforge/api-client";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { filterNonEmptyWritingSessions } from "@/features/writing/session-presentation";
 import { browserApi } from "@/lib/api/browser";
 import { requireApiData } from "@/lib/api/response";
 
@@ -80,23 +81,37 @@ export function ShortStoryChatPane({
       params: { query: { novelId, chapterId } },
       cache: "no-store",
     }));
-    setSessions(values);
-    return values;
+    const visibleSessions = filterNonEmptyWritingSessions(values);
+    setSessions(visibleSessions);
+    return visibleSessions;
   }, [chapterId, novelId]);
 
   const selectSession = useCallback(async (sessionId: string) => {
     sessionIdRef.current = sessionId;
+    setSession(null);
+    setShowHistory(false);
     setLoading(true);
     setError(null);
     try {
       await loadSession(sessionId);
-      setShowHistory(false);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "读取对话失败");
+      if (sessionIdRef.current === sessionId) {
+        setError(cause instanceof Error ? cause.message : "读取对话失败");
+      }
     } finally {
-      setLoading(false);
+      if (sessionIdRef.current === sessionId) setLoading(false);
     }
   }, [loadSession]);
+
+  const startNewConversation = useCallback(() => {
+    sessionIdRef.current = null;
+    setSession(null);
+    setShowHistory(false);
+    setLoading(false);
+    setMessage("");
+    setOperation("answer_question");
+    setError(null);
+  }, []);
 
   const createSession = useCallback(async () => {
     setError(null);
@@ -232,7 +247,7 @@ export function ShortStoryChatPane({
           <button className="button ghost compact" type="button" onClick={() => setShowHistory((value) => !value)}>
             历史对话
           </button>
-          <button className="button secondary compact" type="button" disabled={sending} onClick={() => void createSession()}>
+          <button className="button secondary compact" type="button" disabled={sending} onClick={startNewConversation}>
             开始新对话
           </button>
         </div>

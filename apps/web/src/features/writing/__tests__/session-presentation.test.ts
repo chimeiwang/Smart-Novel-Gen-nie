@@ -5,6 +5,7 @@ import type { components } from "@inkforge/api-client";
 
 import {
   createWritingSessionTitle,
+  filterNonEmptyWritingSessions,
   formatSessionDisplayTitle,
   mapWritingPhaseToPersistentPhase,
   selectDefaultWritingSessionId,
@@ -55,6 +56,22 @@ describe("会话默认选择", () => {
 
     assert.equal(selectDefaultWritingSessionId(sessions), "newer");
     assert.equal(selectDefaultWritingSessionId([]), null);
+  });
+});
+
+describe("会话历史可见性", () => {
+  it("隐藏零消息会话并保持其余会话顺序", () => {
+    const sessions = [
+      session("empty-new", "2026-07-16T12:00:00Z"),
+      session("conversation-two", "2026-07-16T11:00:00Z", { messageCount: 2 }),
+      session("empty-old", "2026-07-16T10:00:00Z"),
+      session("conversation-one", "2026-07-16T09:00:00Z", { messageCount: 1 }),
+    ];
+
+    assert.deepEqual(
+      filterNonEmptyWritingSessions(sessions).map((item) => item.id),
+      ["conversation-two", "conversation-one"],
+    );
   });
 });
 
