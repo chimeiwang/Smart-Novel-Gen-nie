@@ -252,8 +252,8 @@
 }
 
 .short-story-chat-pane {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   min-height: 0;
   overflow: hidden;
 }
@@ -312,7 +312,9 @@
 
 .short-story-chat-messages {
   display: grid;
+  flex: 1;
   gap: 10px;
+  min-height: 0;
   overflow-y: auto;
   padding: 14px 2px;
   scroll-behavior: smooth;
@@ -345,8 +347,14 @@
 .short-story-chat-composer {
   border-top: 1px solid var(--border);
   display: grid;
+  flex: 0 0 auto;
   gap: 8px;
   padding-top: 12px;
+}
+
+.short-story-chat-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .short-story-chat-references,

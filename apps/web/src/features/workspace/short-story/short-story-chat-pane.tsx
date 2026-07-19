@@ -310,9 +310,11 @@ export function ShortStoryChatPane({
           }}
         />
         {error ? <p className="short-story-error" role="alert">{error}</p> : null}
-        <button className="button primary" type="button" disabled={!message.trim() || sending || processing || disabled} onClick={() => void send()}>
-          {sending ? "正在发送…" : processing ? "正在处理…" : "发送"}
-        </button>
+        <div className="short-story-chat-actions">
+          <button className="button primary" type="button" disabled={!message.trim() || sending || processing || disabled} onClick={() => void send()}>
+            {sending ? "正在发送…" : processing ? "正在处理…" : "发送"}
+          </button>
+        </div>
       </div>
     </aside>
   );

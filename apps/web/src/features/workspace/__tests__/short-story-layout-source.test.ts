@@ -33,3 +33,21 @@ test("隐藏的旧操作区不能被 panel 的 flex 样式重新显示", async (
     /\.short-story-review-rail\[hidden\]\s*{\s*display:\s*none;/,
   );
 });
+
+test("中短篇新对话输入区保持紧凑，只有消息区占用剩余高度", async () => {
+  const chatUrl = new URL("../short-story/short-story-chat-pane.tsx", import.meta.url);
+  const cssUrl = new URL("../short-story/short-story-workspace.css", import.meta.url);
+  const [chat, css] = await Promise.all([
+    readFile(chatUrl, "utf8"),
+    readFile(cssUrl, "utf8"),
+  ]);
+
+  assert.match(
+    css,
+    /\.short-story-chat-pane\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column;/,
+  );
+  assert.doesNotMatch(css, /\.short-story-chat-pane\s*\{[^}]*grid-template-rows/);
+  assert.match(css, /\.short-story-chat-messages\s*\{[^}]*flex:\s*1;[^}]*min-height:\s*0;/);
+  assert.match(chat, /className="short-story-chat-actions"[\s\S]*className="button primary"/);
+  assert.match(css, /\.short-story-chat-actions\s*\{[^}]*justify-content:\s*flex-end;/);
+});
