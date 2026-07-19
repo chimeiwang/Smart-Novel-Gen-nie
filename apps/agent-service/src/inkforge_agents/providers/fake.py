@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import re
 
-from inkforge_contracts import count_short_story_text_length
 from pydantic import JsonValue
 
 from .base import (
@@ -36,22 +35,62 @@ class FakeModelProvider:
         )
 
 
+def _fake_short_story() -> str:
+    phases = ("异常", "追索", "试探", "失去", "反击", "真相", "抉择", "余波")
+    locations = ("旧钟楼", "雨巷", "档案馆", "渡口", "废站", "市集", "天台", "晨雾中的广场")
+    clues = (
+        "褪色车票",
+        "停摆怀表",
+        "缺页名册",
+        "未寄出的信",
+        "反写门牌",
+        "录音残片",
+        "旧报剪影",
+        "带裂纹的铜铃",
+    )
+    costs = (
+        "失去一段记忆",
+        "暴露藏身处",
+        "误伤唯一盟友",
+        "放弃安全退路",
+        "承认旧日过错",
+        "承担陌生人的怀疑",
+        "交出关键证据",
+        "错过最后一班船",
+    )
+    paragraphs = [
+        "开端：城里每天黎明都会忘记一个人，只有守夜人林岚仍记得那些消失的名字。她在钟楼底层发现好友沈砚的照片正在褪色，于是决定在下一次钟响前查清遗忘的来源。"
+    ]
+    for index in range(72):
+        phase = phases[index % len(phases)]
+        location = locations[(index * 3) % len(locations)]
+        clue = clues[(index * 5) % len(clues)]
+        cost = costs[(index * 7) % len(costs)]
+        paragraphs.append(
+            f"{phase}·第{index + 1}次钟响。林岚抵达{location}，"
+            f"从{clue}留下的细节中确认遗忘并非自然发生。"
+            f"她先用自己的记录核对目击者的话，再逼迫幕后守门人回答前一夜的去向；对方试图用一段温柔的假记忆换走她的追问，她却选择{cost}。"
+            "这个选择让线索向前推进，也让她与沈砚的约定变得更难兑现。她没有绕开代价，而是把新发现写进随身册页，准备在下一处矛盾中验证。"
+        )
+    paragraphs.append(
+        "高潮：最后一次钟响前，林岚确认整座城市用集体遗忘维持虚假的安稳。她公开册页，让每个被遗忘者重新拥有名字，也接受自己会被所有人忘记的代价。沈砚在钟声落下时读出了她留下的第一句话，完成了两人的约定。"
+    )
+    paragraphs.append(
+        "尾声：清晨的人群仍不知道守夜人的面孔，却开始为无名者保留空椅。沈砚把册页放回钟楼，选择已经兑现，故事在这里完整结束。【模拟整稿尾部】"
+    )
+    return "\n\n".join(paragraphs)
+
+
+_FAKE_SHORT_STORY = _fake_short_story()
+
+
 def _build_response(request: ModelTurnRequest) -> tuple[str, list[ModelToolCall]]:
     content = "模拟模型已完成本轮处理。"
     message_text = "\n".join(message.content for message in request.messages)
     if not request.tools and "operation=write_short_story" in message_text:
-        target_match = re.search(
-            r'"targetTotalWordCount"\s*:\s*(\d+)', message_text
-        )
-        target = int(target_match.group(1)) if target_match is not None else 6000
-        target = min(max(target, 6000), 80000)
-        tail = "尾声：选择已经兑现，故事在这里完整结束。【模拟整稿尾部】"
-        filler_length = target - count_short_story_text_length(tail)
-        body = "文" * filler_length
         return (
             "ARTIFACT_OUTPUT_START\n"
-            f"{body}\n\n"
-            f"{tail}\n"
+            f"{_FAKE_SHORT_STORY}\n"
             "ARTIFACT_OUTPUT_END",
             [],
         )

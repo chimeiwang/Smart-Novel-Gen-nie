@@ -296,7 +296,12 @@ async def test_resume_writing_job_uses_flat_snapshot_and_continues_sequence() ->
     assert [item[0] for item in artifacts.released] == ["artifact-1"]
 
 
-def _short_context(*, operation: str = "develop_short_outline") -> dict[str, Any]:
+def _short_context(
+    *,
+    operation: str = "develop_short_outline",
+    target_total_word_count: int | None = 6000,
+    compatibility_task_word_count: int | None = 6000,
+) -> dict[str, Any]:
     source: dict[str, Any] = {
         "kind": "short_outline_inspiration",
         "originalInspiration": "城市每天忘记一个人",
@@ -305,7 +310,7 @@ def _short_context(*, operation: str = "develop_short_outline") -> dict[str, Any
         "workspace": {
             "writingBible": {
                 "storyLengthProfile": "short_medium",
-                "targetTotalWordCount": 6000,
+                "targetTotalWordCount": target_total_word_count,
             }
         },
         "planning": {
@@ -313,10 +318,10 @@ def _short_context(*, operation: str = "develop_short_outline") -> dict[str, Any
             "commandId": "job-1",
             "novelId": "novel-1",
             "chapterId": "chapter-1",
-            "targetWordCount": 6000,
+            "targetWordCount": compatibility_task_word_count,
             "workflowKind": "short_medium",
             "operation": operation,
-            "targetTotalWordCount": 6000,
+            "targetTotalWordCount": target_total_word_count,
             "source": source,
             "conversationHistory": [],
             "userMessage": "根据灵感生成大纲",
@@ -331,6 +336,66 @@ def _short_context(*, operation: str = "develop_short_outline") -> dict[str, Any
             "graphState": None,
         },
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("operation", ["develop_short_outline", "write_short_story"])
+async def test_short_job_accepts_null_reference_without_exposing_compatibility_target(
+    operation: str,
+) -> None:
+    context = _short_context(
+        operation=operation,
+        target_total_word_count=None,
+        compatibility_task_word_count=80_000,
+    )
+    source = context["planning"]["source"]
+    if operation == "write_short_story":
+        source = {
+            "kind": "approved_short_outline",
+            "outlineArtifactId": "outline-1",
+            "outlineRevision": 2,
+            "outlineHash": "a" * 64,
+        }
+        context["planning"]["source"] = source
+        context["planning"]["shortStoryContext"].update(
+            {
+                "approvedOutline": {
+                    "artifactId": "outline-1",
+                    "revision": 2,
+                    "hash": "a" * 64,
+                    "payload": {"kind": "short_story_outline"},
+                },
+                "targetChapter": {
+                    "id": "chapter-1",
+                    "baseContentHash": "b" * 64,
+                },
+            }
+        )
+    graph = Graph({"phase": "completed"})
+    handler = WritingJobHandler(
+        CoreClient(context),
+        parent_graph=Graph({}),
+        operation_graph=graph if operation == "develop_short_outline" else Graph({}),
+        short_story_graph=graph if operation == "write_short_story" else Graph({}),
+        artifacts=ArtifactHydration(),
+    )
+
+    await handler(
+        _job(
+            workflow_kind="short_medium",
+            operation=operation,
+            target_total_word_count=None,
+            source=source,
+        )
+    )
+
+    state = graph.inputs[0]
+    assert state["targetWordCount"] is None
+    assert state["targetTotalWordCount"] is None
+    model_planning = state["runtimeContext"]["coreContext"]["planning"]
+    assert "targetWordCount" not in model_planning
+    assert model_planning["targetTotalWordCount"] is None
+    assert model_planning["shortStoryContext"]["targetTotalWordCount"] is None
 
 
 @pytest.mark.asyncio

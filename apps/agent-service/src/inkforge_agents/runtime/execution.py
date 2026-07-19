@@ -97,6 +97,10 @@ def build_execution_brief(
                 "完成后只调用一次 submit_evaluation；需要修改时统一提出完整 rewrite 意见。",
             )
         )
+        if operation is not None and operation.kind == "write_short_story":
+            lines.append(
+                "targetTotalWordCount 只是可空篇幅参考；不得仅因实际篇幅偏离参考值要求返工。"
+            )
     elif mode == "quality":
         lines.extend(
             (
@@ -124,8 +128,10 @@ def _operation_protocol(
         lines = [
             "必须在一次模型响应中输出完整正文，严格使用独占行 "
             "ARTIFACT_OUTPUT_START 与 ARTIFACT_OUTPUT_END 包裹；边界外不得输出正文或说明。",
-            "以权威上下文 targetTotalWordCount 为全文目标，实际正文必须保持在"
-            "六千至八万字范围内。",
+            "实际篇幅由批准大纲、故事完整性、结构、节奏、高潮与结局兑现共同决定，"
+            "并保持在六千至八万字范围内。",
+            "权威上下文 targetTotalWordCount 是可空篇幅参考：为空时不得假定固定目标；"
+            "非空时也只表示篇幅倾向，不要求接近或命中，不得为了接近或命中参考值而凑字或压字。",
             "正文可以按故事需要自然分节，但不得拆成章节任务，不得续写半稿、拼接多轮输出或自动补尾。",
         ]
         if mode == "reviser":

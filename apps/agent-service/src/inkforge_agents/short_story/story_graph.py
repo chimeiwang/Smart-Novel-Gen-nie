@@ -487,12 +487,12 @@ def _build_draft(
     if not isinstance(target_chapter, Mapping):
         raise ValueError("SHORT_STORY_TARGET_INVALID：整稿上下文缺少目标正文")
     target_word_count = state.get("targetTotalWordCount")
-    if (
+    if target_word_count is not None and (
         isinstance(target_word_count, bool)
         or not isinstance(target_word_count, int)
         or not 6000 <= target_word_count <= 80000
     ):
-        raise ValueError("SHORT_STORY_TARGET_INVALID：中短篇目标总字数无效")
+        raise ValueError("SHORT_STORY_TARGET_INVALID：中短篇篇幅参考无效")
     return ShortStoryChapterDraft(
         content=content,
         metadata=ShortStoryDraftMetadata(

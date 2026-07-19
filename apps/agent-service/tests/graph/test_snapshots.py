@@ -62,6 +62,39 @@ def test_snapshot_accepts_core_flat_compatibility_state() -> None:
     assert restored["activeArtifactId"] == "artifact-1"
 
 
+def test_short_story_snapshot_round_trips_null_length_reference() -> None:
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="生成完整正文",
+        target_word_count=None,
+        workflow_kind="short_medium",
+        explicit_operation="write_short_story",
+        target_total_word_count=None,
+    )
+
+    restored = deserialize_snapshot(serialize_snapshot(state))
+
+    assert restored["targetWordCount"] is None
+    assert restored["targetTotalWordCount"] is None
+
+
+def test_long_story_snapshot_still_rejects_null_chapter_target() -> None:
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="续写长篇",
+    )
+    state["targetWordCount"] = None
+
+    with pytest.raises(ValueError, match="长篇目标字数无效"):
+        deserialize_snapshot(serialize_snapshot(state))
+
+
 @pytest.mark.parametrize(
     "forbidden",
     [

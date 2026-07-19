@@ -14,7 +14,7 @@ class GraphState(TypedDict, total=False):
     userId: str
     novelId: str
     chapterId: str
-    targetWordCount: int
+    targetWordCount: int | None
     workflowKind: Literal["long_serial", "short_medium"]
     explicitOperation: str | None
     commandId: str
@@ -58,7 +58,7 @@ def create_initial_state(
     novel_id: str,
     chapter_id: str,
     user_message: str,
-    target_word_count: int = 4000,
+    target_word_count: int | None = 4000,
     workflow_kind: Literal["long_serial", "short_medium"] = "long_serial",
     explicit_operation: str | None = None,
     command_id: str = "legacy-command",

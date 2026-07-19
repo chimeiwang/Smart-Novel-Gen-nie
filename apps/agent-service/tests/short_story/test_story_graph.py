@@ -148,6 +148,7 @@ def _state(
     command_id: str = "job-1",
     run_artifact: dict[str, Any] | None = None,
     resume_decision: dict[str, Any] | None = None,
+    target_total_word_count: int | None = 6000,
 ) -> dict[str, Any]:
     source = {
         "kind": "approved_short_outline",
@@ -161,11 +162,11 @@ def _state(
         novel_id="novel-1",
         chapter_id="chapter-1",
         user_message="请生成完整中短篇正文",
-        target_word_count=6000,
+        target_word_count=target_total_word_count,
         workflow_kind="short_medium",
         explicit_operation="write_short_story",
         command_id=command_id,
-        target_total_word_count=6000,
+        target_total_word_count=target_total_word_count,
         command_source=source,
     )
     state["currentOperation"] = {
@@ -193,7 +194,7 @@ def _state(
                         "hash": "a" * 64,
                         "payload": {"kind": "short_story_outline"},
                     },
-                    "targetTotalWordCount": 6000,
+                    "targetTotalWordCount": target_total_word_count,
                     "targetChapter": {
                         "id": "chapter-1",
                         "baseContentHash": "b" * 64,
@@ -309,6 +310,29 @@ async def test_initial_story_uses_one_writer_call_then_serial_reviews_same_revis
     assert "尾声完整" not in repr(result)
     assert result.get("agentOutputs") == {}
     assert result.get("finalResponse") == ""
+
+
+@pytest.mark.asyncio
+async def test_null_length_reference_is_preserved_with_exact_actual_word_count() -> None:
+    content = "开端保留选择。\n\n高潮兑现代价。\n\n结局完整落下。"
+    executor = AgentExecutor(
+        [
+            _response(_manuscript(content)),
+            _evaluation(summary="编辑通过"),
+            _evaluation(summary="校验通过"),
+        ]
+    )
+    artifacts = ArtifactPort()
+    graph = build_short_story_graph(
+        ShortStoryGraphDependencies(agentExecutor=executor, artifacts=artifacts)
+    )
+
+    await graph.ainvoke(_state(target_total_word_count=None))
+
+    assert artifacts.artifact is not None
+    metadata = artifacts.artifact["payload"]["metadata"]
+    assert metadata["targetWordCount"] is None
+    assert metadata["actualWordCount"] == count_short_story_text_length(content)
 
 
 @pytest.mark.asyncio

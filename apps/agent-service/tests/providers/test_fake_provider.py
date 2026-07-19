@@ -53,10 +53,13 @@ async def test_fake_provider_without_tools_returns_full_visible_text() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("target_word_count", [6000, 80000])
-async def test_fake_provider_returns_exact_length_short_story_with_visible_tail(
-    target_word_count: int,
+@pytest.mark.parametrize("target_word_count", [None, 6000, 80000])
+async def test_fake_provider_returns_stable_complete_story_without_filling_to_reference(
+    target_word_count: int | None,
 ) -> None:
+    reference = (
+        "null" if target_word_count is None else str(target_word_count)
+    )
     result = await FakeModelProvider().complete_turn(
         ModelTurnRequest(
             messages=[
@@ -68,7 +71,7 @@ async def test_fake_provider_returns_exact_length_short_story_with_visible_tail(
                     "role": "user",
                     "content": (
                         "生成完整中短篇正文；权威上下文："
-                        f'{{"targetTotalWordCount":{target_word_count}}}'
+                        f'{{"targetTotalWordCount":{reference}}}'
                     ),
                 },
             ],
@@ -85,7 +88,35 @@ async def test_fake_provider_returns_exact_length_short_story_with_visible_tail(
     actual = count_short_story_text_length(
         extract_complete_short_story(result.content)
     )
-    assert actual == target_word_count
+    assert 6000 <= actual <= 80000
+    if target_word_count is not None:
+        assert actual != target_word_count
+    paragraphs = extract_complete_short_story(result.content).split("\n\n")
+    assert len(paragraphs) == len(set(paragraphs))
+
+
+@pytest.mark.asyncio
+async def test_fake_provider_short_story_is_independent_of_length_reference() -> None:
+    async def generate(reference: str) -> str:
+        result = await FakeModelProvider().complete_turn(
+            ModelTurnRequest(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "当前执行契约：operation=write_short_story，mode=primary。",
+                    },
+                    {
+                        "role": "user",
+                        "content": f'{{"targetTotalWordCount":{reference}}}',
+                    },
+                ],
+                tools=[],
+                maxOutputTokens=256,
+            )
+        )
+        return result.content
+
+    assert await generate("null") == await generate("6000") == await generate("80000")
 
 
 @pytest.mark.asyncio

@@ -63,7 +63,14 @@ def deserialize_snapshot(serialized: str | Mapping[str, Any]) -> GraphState:
         raise ValueError("稳定快照包含仅运行时字段")
     if state.get("phase") == "awaiting_user_review":
         state = {**state, "phase": "waiting_user"}
-    return TypeAdapter(GraphState).validate_python(state)
+    restored = TypeAdapter(GraphState).validate_python(state)
+    target_word_count = restored.get("targetWordCount")
+    if restored.get("workflowKind") != "short_medium" and (
+        isinstance(target_word_count, bool)
+        or not isinstance(target_word_count, int)
+    ):
+        raise ValueError("长篇目标字数无效")
+    return restored
 
 
 def to_typescript_snapshot(serialized: str | Mapping[str, Any]) -> dict[str, Any]:

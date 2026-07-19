@@ -149,10 +149,21 @@ def test_short_story_brief_requires_one_complete_boundary_response_without_chapt
         assert "完整正文" in brief
         assert "targetTotalWordCount" in brief
         assert "六千至八万字" in brief
+        assert "故事完整性" in brief
+        assert "结构、节奏、高潮与结局兑现" in brief
+        assert "为空时不得假定固定目标" in brief
+        assert "只表示篇幅倾向" in brief
+        assert "不得为了接近或命中参考值而凑字或压字" in brief
         assert "不得续写半稿" in brief
         assert "Beat Plan" not in brief
         assert "逐章" not in brief
     assert "用户要求或全稿审核意见" in reviser
+
+
+def test_short_story_reviewers_cannot_request_rework_only_for_reference_deviation() -> None:
+    brief = build_execution_brief("reviewer", "write_short_story")
+
+    assert "不得仅因实际篇幅偏离参考值要求返工" in brief
 
 
 def test_structured_update_brief_is_scoped_to_operation_builder_tools() -> None:

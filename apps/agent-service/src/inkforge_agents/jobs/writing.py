@@ -468,12 +468,25 @@ class WritingJobHandler:
 
         chapter_id = planning.get("chapterId")
         user_message = planning.get("userMessage")
-        target_word_count = planning.get("targetWordCount", 4000)
+        target_word_count = (
+            payload.targetTotalWordCount
+            if payload.workflowKind == "short_medium"
+            else planning.get("targetWordCount", 4000)
+        )
         if not isinstance(chapter_id, str) or not chapter_id:
             raise ValueError("写作上下文缺少章节标识")
         if not isinstance(user_message, str) or not user_message:
             raise ValueError("写作上下文缺少用户请求")
-        if isinstance(target_word_count, bool) or not isinstance(target_word_count, int):
+        if (
+            target_word_count is None
+            and payload.workflowKind != "short_medium"
+        ) or (
+            target_word_count is not None
+            and (
+                isinstance(target_word_count, bool)
+                or not isinstance(target_word_count, int)
+            )
+        ):
             raise ValueError("写作上下文目标字数无效")
         state = create_initial_state(
             task_id=job.taskId,
@@ -548,10 +561,30 @@ def _attach_runtime_context(
     resource: RunResource,
 ) -> GraphState:
     state["runtimeContext"] = {
-        "coreContext": context,
+        "coreContext": _model_core_context(state, context),
         "runResource": resource.model_dump(),
     }
     return state
+
+
+def _model_core_context(
+    state: GraphState,
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    if state.get("workflowKind") != "short_medium":
+        return context
+    planning = context.get("planning")
+    if not isinstance(planning, dict):
+        return context
+    model_planning = dict(planning)
+    model_planning.pop("targetWordCount", None)
+    short_story_context = model_planning.get("shortStoryContext")
+    if isinstance(short_story_context, Mapping):
+        model_planning["shortStoryContext"] = {
+            **short_story_context,
+            "targetTotalWordCount": state.get("targetTotalWordCount"),
+        }
+    return {**context, "planning": model_planning}
 
 
 def _apply_planning_history(
