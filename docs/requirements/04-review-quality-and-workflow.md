@@ -47,7 +47,7 @@ stateDiagram-v2
 | beat_plan | 结构化 Beat Plan |
 | freeform_markdown | 自由 Markdown 文本 |
 
-中短篇复用 `outline_draft` 和 `chapter_draft`，但使用强类型 JSON 载荷：大纲保存原始灵感、核心前提、创作锚点、带稳定 ID 的有序分节、完整可读 content 和修改摘要；正文保存来源大纲 ID/revision/hash、目标与实际字数、目标 Chapter 和正文基线 hash。分节不成为独立 Artifact 或 Chapter。详细契约见 `docs/specs/2026-07-18-short-medium-writing-workflow.md`。
+中短篇复用 `outline_draft` 和 `chapter_draft`，但使用强类型 JSON 载荷：大纲保存原始灵感、核心前提、创作锚点、带稳定 ID 的有序分节、完整可读 content 和修改摘要；正文保存来源大纲 ID/revision/hash、生成时可选篇幅参考、实际字数、目标 Chapter 和正文基线 hash。篇幅参考不参与审核通过门槛，实际字数必须与正文一致。分节不成为独立 Artifact 或 Chapter。详细契约见 `docs/specs/2026-07-18-short-medium-writing-workflow.md`。
 
 ## 草案审核主流程
 

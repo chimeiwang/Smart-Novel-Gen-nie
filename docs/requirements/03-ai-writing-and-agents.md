@@ -157,7 +157,7 @@ flowchart TD
 
 - novelId 和 chapterId 必填。
 - workflowKind、operation 必须与 WritingBible 的 `storyLengthProfile` 匹配，并写入持久命令和稳定快照；不匹配时在模型调用前拒绝。
-- `short_medium` 只接受 `develop_short_outline`、`write_short_story`，目标总字数必须为 6000～80000；`long_serial` 继续支持现有操作和聊天路由。
+- `short_medium` 只接受 `develop_short_outline`、`write_short_story`；篇幅参考可以为空，填写时必须为 6000～80000。实际正文由故事完整性决定并保持中短篇类型边界；`long_serial` 继续支持现有操作和聊天路由。
 - 用户必须登录。
 - 小说必须属于当前用户。
 - 如果传 writingSessionId，会话必须属于同一小说、同一章节和当前用户。
@@ -288,7 +288,7 @@ Agent Runtime 是唯一多轮 tool-call loop。
 
 Operation 的 `contextStrategy` 只生成最小投影：`brief` 提供任务、小说和章节摘要；`lore` 提供设定摘要索引；`outline` 提供大纲、节点、剧情进度、章节组、outlinePath 和伏笔摘要；`chapter` 提供当前章、相邻章摘要、章节目标、已批准 Beat Plan、outlinePath 和相关人物摘要；`review` 提供当前章及必要审阅资料。详细内容由只读工具按需获取，完整聚合 `workspace` 不进入稳定快照。
 
-中短篇使用独立的最小上下文组装器。改纲时按“用户本轮直接编辑、修改要求原文、已确认锚点、当前完整大纲、原始灵感、最近对话”的顺序裁决；最近对话只用于理解指代，不能覆盖前五项。全部历史继续持久化，但不把几十轮聊天全部注入模型。整稿只读取已批准大纲、锚点、必要设定、文风、目标总字数和本轮整稿修改要求。
+中短篇使用独立的最小上下文组装器。改纲时按“用户本轮直接编辑、修改要求原文、已确认锚点、当前完整大纲、原始灵感、最近对话”的顺序裁决；最近对话只用于理解指代，不能覆盖前五项。全部历史继续持久化，但不把几十轮聊天全部注入模型。整稿只读取已批准大纲、锚点、必要设定、文风、可选篇幅参考、6000～80000 类型边界和本轮整稿修改要求；篇幅参考不得成为凑字或压字指令。
 
 `get_recent_chapters` 是按需读取最近章节正文的只读工具，必须由 Agent 显式调用；`count` 可选且范围为 `1..20`，省略时 Core 默认读取 3 章。基础上下文不自动注入任何最近章节正文。该工具不扩大现有 RAG 每份资料 64 块容量或 `topK`，也不改变 embedding 回调协议。
 

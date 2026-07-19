@@ -18,7 +18,7 @@
 
 - 新建作品时先由用户明确选择 `short_medium` 或 `long_serial`，界面不默认选中任一模式。
 - 为 `short_medium` 提供“灵感 → 可反复修改的大纲 → 完整正文 → 全稿审核与返工 → 用户确认”的专用流程。
-- 由 Core 强制校验中短篇目标总字数为 6000～80000 字。
+- 中短篇仍以 6000～80000 字作为成稿类型边界；目标总字数改为可选的篇幅参考，未填写时由故事和批准大纲决定实际篇幅，填写后也不得为了贴近数字而灌水或删减。
 - 大纲一次展示完整、适合人阅读；允许长期反复修改局部或整体，并可靠保留用户确认的创作重点。
 - 正文的每个整稿生成轮次只调用一次作家模型并输出完整正文，不逐节生成、不自动续写、不拼接截断内容；一次用户发起的整稿运行最多包含首稿和一次自动返工，即最多两个整稿生成轮次、两次作家调用。
 - 完整正文保存到创建项目时的唯一正文 Chapter；“节”只属于大纲和正文的阅读结构。
@@ -45,12 +45,12 @@
 | `short_medium` | 6000～80000 字中短篇 | 单一完整稿件 | 大纲反复修改、整稿生成、全稿审核 |
 | `long_serial` | 长篇连载 | 章节 | Beat Plan、逐章生成、逐章审核 |
 
-Profile 在项目创建后锁定。作品圣经可以继续修改目标总字数、文风和创作信息，但不能直接修改 `storyLengthProfile`。
+Profile 在项目创建后锁定。作品圣经可以继续填写、修改或清空篇幅参考，并修改文风和创作信息，但不能直接修改 `storyLengthProfile`。
 
 ### 中短篇持久化映射
 
 - 原始灵感保存到现有 `Novel.summary`。
-- Profile 和目标总字数继续保存到现有 WritingBible 字段。
+- Profile 和可选篇幅参考继续保存到现有 WritingBible 字段；不新增数据库字段，不修改 PostgreSQL schema。
 - 创建中短篇时仍创建一个 Chapter，标题为“正文”；最终完整正文写入该 Chapter。
 - 中短篇大纲和整稿继续复用现有 `ReviewArtifact(kind=outline_draft)` 与 `ReviewArtifact(kind=chapter_draft)`。
 - 大纲版本、内部 patch、原始修改要求和整稿来源元数据写入现有 ReviewArtifact 及 revision JSON 载荷。
@@ -66,7 +66,7 @@ Profile 在项目创建后锁定。作品圣经可以继续修改目标总字数
 short_medium:
   storyLengthProfile = "short_medium"
   inspiration: 非空，必填
-  targetTotalWordCount: 6000..80000，必填
+  targetTotalWordCount: null 或 6000..80000，可选篇幅参考
   name: 暂定标题，可选
 
 long_serial:
@@ -76,7 +76,7 @@ long_serial:
 
 中短篇未填写标题时，Core 使用“未命名中短篇”作为可修改的占位标题；不能因为标题为空拒绝创建。中短篇灵感写入 `Novel.summary`，不能只停留在前端或命令快照。
 
-Core 在 Pydantic 边界和业务事务内都校验 `targetTotalWordCount`。`5999`、`80001` 必须被拒绝，`6000`、`80000` 必须被接受。长篇目标范围继续遵循现有规则，不能套用中短篇边界。
+Core 在 Pydantic 边界和业务事务内都校验可选 `targetTotalWordCount`：`null`、`6000`、`80000` 必须被接受，填写 `5999` 或 `80001` 时必须被拒绝。该字段只表示篇幅倾向，不是正文验收目标。长篇目标范围继续遵循现有规则，不能套用中短篇语义。
 
 ### 1.2 创建后的动作
 
@@ -90,7 +90,7 @@ Core 在 Pydantic 边界和业务事务内都校验 `targetTotalWordCount`。`59
 - Dashboard 小说列表和 Workspace Bootstrap 返回 `storyLengthProfile`、`targetTotalWordCount`。
 - 前端只依据权威响应选择中短篇或长篇工作区，不根据标题、章节数或正文关键词猜测。
 - 对 WritingBible 引入前创建、因而没有 WritingBible 的历史作品，统一按 `long_serial` 返回，`targetTotalWordCount` 返回 `null`；不得根据标题、章节数或正文内容猜测 Profile。
-- 旧中短篇项目允许继续打开。若现有目标小于 6000 或大于 80000，工作区允许查看和修正目标，但禁止启动新的中短篇 Operation，并明确提示先修正目标。
+- 旧中短篇项目允许继续打开。若现有篇幅参考小于 6000 或大于 80000，工作区允许查看，并允许清空或修正；保存为合法值或 `null` 后即可启动新的中短篇 Operation。
 - 新增小说标题修改公开接口，校验登录、归属、非空标题和并发版本，使中短篇暂定标题可后续修改。
 
 ## 2. 显式 Workflow 与 Operation
@@ -109,9 +109,9 @@ Core 在 Pydantic 边界和业务事务内都校验 `targetTotalWordCount`。`59
 Core 必须：
 
 - 校验请求 Profile、WritingBible Profile、Operation 和目标 Chapter 相互一致；
-- 校验中短篇目标总字数处于 6000～80000；
+- 校验中短篇篇幅参考为 `null` 或 6000～80000，并在启动时与 WritingBible 当前值一致；
 - 在创建模型任务前拒绝缺失、不支持或跨 Profile 的组合；
-- 将 `workflowKind`、`operation`、目标总字数和来源标识写入持久命令及稳定任务快照。
+- 将 `workflowKind`、`operation`、可选篇幅参考和来源标识写入持久命令及稳定任务快照。数据库中非空的 `WritingTask.targetWordCount` 仅作为内部兼容执行值，不得注入模型充当成稿目标。
 
 Agent Service 对中短篇直接执行 Core 指定的 Operation。缺少显式 Operation、快照不一致或 Profile 不匹配时，必须在模型调用前失败；不得根据“短篇”“整稿”“全文”“修改第 N 节”等关键词猜测 Operation。
 
@@ -128,7 +128,7 @@ Agent Service 对中短篇直接执行 Core 指定的 Operation。缺少显式 O
 
 全部 WritingMessage 和版本历史继续持久化，但模型上下文不注入几十轮完整聊天。上下文组装器只投影当前任务需要的权威内容，并在冲突时按上述顺序裁决。任何模型摘要都不能替代用户修改要求原文。
 
-`write_short_story` 的权威输入为已批准大纲及锚点、原始灵感、必要设定、文风、目标总字数、目标 Chapter 和用户本轮整稿修改要求；未批准大纲不得启动首次整稿生成。
+`write_short_story` 的权威输入为已批准大纲及锚点、原始灵感、必要设定、文风、可选篇幅参考、6000～80000 的成稿类型边界、目标 Chapter 和用户本轮整稿修改要求；未批准大纲不得启动首次整稿生成。
 
 ## 3. 可反复修改的大纲
 
@@ -190,7 +190,9 @@ ShortStoryOutlineDraft:
 - 命令保存来源 outline Artifact ID、revision 和内容哈希；运行前再次核对，来源变化时拒绝使用旧大纲生成或应用正文。
 - 每个首稿或自动返工轮次只执行一次正文模型调用，并要求模型返回带现有完整正文边界标记的单一完整稿件；一次用户发起的 `write_short_story` 运行最多执行首稿和一次自动返工，即最多两个整稿生成轮次、两次作家调用。
 - 模型可按叙事需要自然分节，但分节不产生额外任务、Artifact、Chapter 或确认点。
-- 不要求正文恰好等于目标字数；实际字数完整记录并由产品提示偏差。中短篇目标本身仍必须位于 6000～80000。
+- 实际篇幅由故事完整性、结构、节奏、高潮和结局兑现共同决定，并保持在 6000～80000 的中短篇类型边界内。
+- 未提供篇幅参考时，模型不得自行假定某个固定目标；提供参考时也只作为倾向，不要求接近或命中，审核不得仅因偏离参考值要求返工。
+- 正文元数据保存可空的 `targetWordCount` 作为生成时参考快照，并始终精确保存 `actualWordCount`。正式应用只核验正文完整、实际计数一致和类型边界，不因当前作品圣经参考值变化而拒绝用户已经批准的正文。
 
 ### 4.2 完整性边界
 
@@ -284,7 +286,7 @@ Workspace Bootstrap 的 Profile 决定渲染路径：
 ## 9. 失败、幂等与兼容规则
 
 - 项目创建和首次任务启动是两个可恢复阶段；创建成功不能因队列失败而丢失。
-- Profile/Operation 不匹配、目标字数越界、未批准大纲、过期 revision、来源 hash 变化和正文基线变化都在模型调用或正式应用前明确失败。
+- Profile/Operation 不匹配、非空篇幅参考越界、未批准大纲、过期 revision、来源 hash 变化和正文基线变化都在模型调用或正式应用前明确失败。
 - Artifact 状态重放、等待事件重发和同命令回调不得制造空 revision。
 - Agent Service 仍不连接 PostgreSQL，只通过 Core 内部工具网关读取权威大纲、写入草案和审核结果。
 - 稳定快照只保存必要上下文和来源标识，不保存全量 Workspace 或仅运行时身份。
@@ -309,7 +311,7 @@ Workspace Bootstrap 的 Profile 决定渲染路径：
 - 完整 Python 测试：1550 项通过，3 项按环境跳过。
 - Web 与 API Client：Web 238 项、API Client 3 项通过。
 - `uv run ruff check .`、Mypy、API 客户端重新生成与一致性检查、TypeScript、ESLint、Next.js 生产构建全部通过。
-- 两条中短篇 E2E 场景已覆盖 6000 与 80000 边界，通过 TypeScript 严格编译并可被 Playwright 正确枚举；当前 Windows 环境未安装 Docker，无法启动完整服务栈，因此尚未进行浏览器实跑。
+- 原两条中短篇 E2E 场景覆盖了 6000 与 80000 的必填目标边界；该结论已被“可选篇幅参考”修订替代，需要改为覆盖空参考和非空软参考。
 - 数据库 schema 文件 SHA256 仍为 `F8EB9D76D35DBC75C874E136750D4AD0CCB53367C5626B0C835822BBCA7675FF`，与实施前一致。
 
 ## 11. 验收标准
@@ -318,7 +320,7 @@ Workspace Bootstrap 的 Profile 决定渲染路径：
 
 - [x] 新建入口无默认 Profile，未选择时不能提交。
 - [x] 中短篇和长篇显示各自条件表单，长篇行为不回归。
-- [x] 中短篇 `5999/80001` 被拒绝，`6000/80000` 被接受。
+- [ ] 中短篇篇幅参考 `null/6000/80000` 被接受，非空 `5999/80001` 被拒绝。
 - [x] 中短篇创建唯一标题为“正文”的 Chapter，并立即尝试生成大纲。
 - [x] 首次任务失败时项目保留且可重试。
 - [x] Profile 创建后不能修改；旧越界中短篇可打开但不能启动新流程。
@@ -344,7 +346,7 @@ Workspace Bootstrap 的 Profile 决定渲染路径：
 - [x] 大纲批准前不能生成正文。
 - [x] 每个整稿生成轮次只调用一次作家模型并输出完整正文；一次用户发起运行最多首稿加一次自动返工，不逐节、不续写、不拼接。
 - [x] `finishReason=length` 不创建 Artifact，完整尾部标记可见。
-- [x] 正文元数据保存大纲来源、目标/实际字数、目标 Chapter 和正文基线。
+- [ ] 正文元数据保存大纲来源、可选篇幅参考、实际字数、目标 Chapter 和正文基线。
 - [x] 编辑与校验固定串行，最多自动完整返工一次；第二轮仍有问题时等待用户。
 - [x] 用户可继续发起任意次数的整稿修改。
 - [x] 来源大纲或正文基线变化时，旧草案不能正式应用。
@@ -355,6 +357,6 @@ Workspace Bootstrap 的 Profile 决定渲染路径：
 - [x] Core 覆盖边界、Profile 锁定、显式 Operation、幂等版本、过期 revision、历史恢复、来源变化和应用事务测试。
 - [x] Agent 覆盖上下文优先级、局部 patch、单次整稿、截断失败、串行双审核和一次自动返工测试。
 - [x] Web 覆盖无默认模式、两套表单、专用工作区、大纲编辑/恢复/批准门禁和完整正文尾部。
-- [ ] E2E 覆盖“灵感 → 多次改纲 → 批准 → 整稿 → 审核返工 → 批准 → 正式正文”，并使用 6000、80000 边界样本；测试已实现并通过静态校验，待完整服务环境实跑。
+- [ ] E2E 覆盖“灵感 → 多次改纲 → 批准 → 整稿 → 审核返工 → 批准 → 正式正文”，分别使用空篇幅参考和非空软参考；正文只断言完整、实际计数一致和类型边界，不断言命中参考值。
 - [x] 相关 pytest、全量 `uv run pytest`、Ruff、Mypy、`npm run api:generate`、`npm run api:check`、`npm run test:web`、typecheck、lint 和 build 全部通过。
 - [x] 数据库 schema 指纹与实施前完全一致。
