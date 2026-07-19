@@ -128,6 +128,11 @@ def test_short_story_contracts_are_strict_and_validate_metadata() -> None:
     with pytest.raises(ValidationError):
         ShortStoryDraftMetadata.model_validate({**metadata.model_dump(), "targetWordCount": 80001})
 
+    without_reference = ShortStoryDraftMetadata.model_validate(
+        {**metadata.model_dump(), "targetWordCount": None}
+    )
+    assert without_reference.targetWordCount is None
+
 
 def test_short_story_chapter_draft_is_strict_and_keeps_complete_content() -> None:
     content = "甲 乙\n丙😀"

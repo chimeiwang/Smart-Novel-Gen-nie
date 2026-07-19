@@ -34,6 +34,7 @@ from .recovery import (
     deserialize_graph_snapshot,
 )
 from .schemas import (
+    SHORT_STORY_INTERNAL_TASK_WORD_COUNT,
     ResumeWritingRunRequest,
     ResumeWritingRunResponse,
     StartWritingRunRequest,
@@ -97,10 +98,12 @@ async def _reconciliation_workflow_identity(
         raise _reconciliation_identity_mismatch()
     if latest.workflowKind == "short_medium":
         target = bible.targetTotalWordCount if bible is not None else None
+        expected_task_target = (
+            target if target is not None else SHORT_STORY_INTERNAL_TASK_WORD_COUNT
+        )
         if (
-            target is None
-            or latest.targetTotalWordCount != target
-            or task.targetWordCount != target
+            latest.targetTotalWordCount != target
+            or task.targetWordCount != expected_task_target
         ):
             raise _reconciliation_identity_mismatch()
     return {
@@ -1153,7 +1156,7 @@ async def _recoverable_short_story_snapshot(
             "userId": owner_id,
             "novelId": task.novelId,
             "chapterId": task.chapterId,
-            "targetWordCount": task.targetWordCount,
+            "targetWordCount": command_payload.targetTotalWordCount,
             "conversationHistory": history,
             "currentOperation": current_operation,
             "operationStage": "等待用户决策",

@@ -135,7 +135,7 @@ class ShortStoryDraftMetadata(ShortStoryContract):
     sourceOutlineArtifactId: str = Field(min_length=1, max_length=256)
     sourceOutlineRevision: int = Field(ge=1)
     sourceOutlineHash: str = Field(min_length=64, max_length=64)
-    targetWordCount: int = Field(ge=6000, le=80000)
+    targetWordCount: int | None = Field(default=None, ge=6000, le=80000)
     actualWordCount: int = Field(ge=0)
     targetChapterId: str = Field(min_length=1, max_length=256)
     baseChapterHash: str = Field(min_length=64, max_length=64)

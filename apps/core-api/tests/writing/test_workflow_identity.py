@@ -62,7 +62,7 @@ class IdentitySession:
 
 
 def _request(
-    *, operation: str = "develop_short_outline", target: int = 6000
+    *, operation: str = "develop_short_outline", target: int | None = 6000
 ) -> StartWritingRunRequest:
     return StartWritingRunRequest.model_validate(
         {
@@ -112,6 +112,17 @@ async def test_core_resolves_short_outline_identity_from_persisted_bible(target:
             "originalInspiration": "原始灵感",
         },
     }
+
+
+@pytest.mark.asyncio
+async def test_core_resolves_null_short_reference_from_persisted_bible() -> None:
+    identity = await _resolve_start_workflow_identity(
+        IdentitySession(_rows(target=None), scalars=[1]),  # type: ignore[arg-type]
+        "user-1",
+        _request(target=None),
+    )
+
+    assert identity["targetTotalWordCount"] is None
 
 
 @pytest.mark.asyncio

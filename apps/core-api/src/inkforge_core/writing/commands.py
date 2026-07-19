@@ -30,6 +30,7 @@ from .message_metadata import workflow_message_metadata
 from .records import TaskRecord
 from .recovery import validate_resume_session_binding
 from .schemas import (
+    SHORT_STORY_INTERNAL_TASK_WORD_COUNT,
     ResumeWritingRunRequest,
     ResumeWritingRunResponse,
     StartWritingRunRequest,
@@ -110,7 +111,11 @@ class WritingRunCommandRepository:
                         chapterId=request.chapterId,
                         writingSessionId=request.writingSessionId,
                         phase="idle",
-                        targetWordCount=request.targetWordCount,
+                        targetWordCount=(
+                            request.targetWordCount
+                            if request.targetWordCount is not None
+                            else SHORT_STORY_INTERNAL_TASK_WORD_COUNT
+                        ),
                         selectedAgents=",".join(request.selectedAgents),
                         conversationHistory=_dump_json(
                             [{"role": "user", "content": request.userMessage}]
@@ -861,11 +866,11 @@ async def _resolve_start_workflow_identity(
         }
 
     target = bible.targetTotalWordCount if bible is not None else None
-    if target is None or not 6_000 <= target <= 80_000:
+    if target is not None and not 6_000 <= target <= 80_000:
         raise ApiError(
             status_code=409,
             code="SHORT_STORY_TARGET_INVALID",
-            message="中短篇目标总字数必须先修正为 6000～80000",
+            message="中短篇篇幅参考必须先清空或修正为 6000～80000",
         )
     if request.targetWordCount != target:
         raise ApiError(

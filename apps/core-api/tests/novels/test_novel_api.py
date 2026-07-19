@@ -31,7 +31,7 @@ class NovelCreation:
     summary: str | None
     story_progress: str | None
     story_length_profile: str
-    target_total_word_count: int
+    target_total_word_count: int | None
     genre: str | None
     core_selling_point: str | None
     reader_promise: str | None
@@ -74,6 +74,35 @@ def test_short_medium_create_accepts_target_boundaries(target: int) -> None:
     )
     assert isinstance(request, ShortMediumCreateNovelRequest)
     assert request.targetTotalWordCount == target
+
+
+def test_short_medium_create_accepts_missing_reference_word_count() -> None:
+    request = TypeAdapter(CreateNovelRequest).validate_python(
+        {
+            "storyLengthProfile": "short_medium",
+            "inspiration": "一个完整灵感",
+        }
+    )
+
+    assert isinstance(request, ShortMediumCreateNovelRequest)
+    assert request.targetTotalWordCount is None
+
+
+@pytest.mark.asyncio
+async def test_short_medium_create_persists_null_reference_word_count() -> None:
+    repository = RecordingNovelRepository()
+
+    await NovelService(repository).create_novel(  # type: ignore[arg-type]
+        "user-1",
+        ShortMediumCreateNovelRequest(
+            storyLengthProfile="short_medium",
+            inspiration="一个完整灵感",
+            targetTotalWordCount=None,
+        ),
+    )
+
+    assert repository.creation is not None
+    assert repository.creation.target_total_word_count is None
 
 
 @pytest.mark.parametrize("target", [5_999, 80_001])
@@ -573,6 +602,22 @@ async def test_repository_creates_five_initial_records_in_one_transaction() -> N
     }
     assert str(result["novelId"]).startswith("c")
     assert str(result["chapterId"]).startswith("c")
+
+
+@pytest.mark.asyncio
+async def test_repository_persists_null_short_reference_word_count() -> None:
+    from inkforge_core.db.models import WritingBible
+    from inkforge_core.novels.repository import NovelRepository
+
+    session = TransactionSession()
+    repository = NovelRepository(lambda: session)  # type: ignore[arg-type]
+
+    await repository.create_novel(
+        replace(complete_creation(), target_total_word_count=None)
+    )
+
+    bible = next(value for value in session.added if isinstance(value, WritingBible))
+    assert bible.targetTotalWordCount is None
 
 
 @pytest.mark.asyncio

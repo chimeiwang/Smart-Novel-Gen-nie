@@ -28,7 +28,7 @@ class NovelCreation:
     summary: str | None
     story_progress: str | None
     story_length_profile: str
-    target_total_word_count: int
+    target_total_word_count: int | None
     genre: str | None
     core_selling_point: str | None
     reader_promise: str | None
@@ -40,17 +40,17 @@ class NovelCreation:
     current_goal: str | None
 
 
-def require_valid_creation_target(profile: str, target: int) -> None:
+def require_valid_creation_target(profile: str, target: int | None) -> None:
     if profile == "short_medium":
-        if not 6_000 <= target <= 80_000:
+        if target is not None and not 6_000 <= target <= 80_000:
             raise ApiError(
                 status_code=422,
                 code="SHORT_STORY_TARGET_WORD_COUNT_INVALID",
-                message="中短篇目标总字数必须在 6000 到 80000 之间",
+                message="中短篇篇幅参考必须为空或在 6000 到 80000 之间",
             )
         return
     if profile == "long_serial":
-        if target <= 0:
+        if target is None or target <= 0:
             raise ApiError(
                 status_code=422,
                 code="NOVEL_TARGET_WORD_COUNT_INVALID",

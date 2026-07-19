@@ -105,7 +105,7 @@ def _draft_request(
     source_artifact_id: str = "outline-1",
     source_revision: int = 1,
     target_chapter_id: str = "chapter-1",
-    target_word_count: int = 6000,
+    target_word_count: int | None = 6000,
 ) -> CreateArtifactRequest:
     value = content or ("甲" * 6000)
     outline = _outline()
@@ -347,6 +347,60 @@ async def test_initial_short_story_draft_rechecks_all_authoritative_sources(
         with pytest.raises(ApiError) as caught:
             await repository.create_or_revise("user-1", request)
         assert caught.value.code == code
+
+
+@pytest.mark.asyncio
+async def test_short_story_draft_accepts_null_reference_snapshot(
+    repository: ReviewRepository,
+) -> None:
+    async with repository._session_factory() as session:  # noqa: SLF001
+        async with session.begin():
+            bible = await session.get(WritingBible, "bible-1")
+            task = await session.get(WritingTask, "task-1")
+            command = await session.get(WritingRunCommand, "command-1")
+            assert bible is not None and task is not None and command is not None
+            bible.targetTotalWordCount = None
+            task.targetWordCount = 80_000
+            payload = _command_payload()
+            payload["targetTotalWordCount"] = None
+            command.payloadJson = json.dumps(payload, ensure_ascii=False)
+
+    created = await repository.create_or_revise(
+        "user-1", _draft_request(target_word_count=None)
+    )
+
+    assert created.payload.metadata.targetWordCount is None  # type: ignore[union-attr]
+    await repository.submit_evaluation("user-1", created.id, _evaluation("编辑"))
+    await repository.submit_evaluation("user-1", created.id, _evaluation("校验"))
+    await repository.create_or_revise(
+        "user-1",
+        _draft_request(target_word_count=None, status="awaiting_user"),
+    )
+    artifact = await repository.require_artifact("user-1", created.id)
+    await repository.transition(created.id, "awaiting_user", "applying")
+
+    applied = await FormalWriteRepository(repository._session_factory).apply_chapter(  # noqa: SLF001
+        artifact,
+        "user-1",
+        "甲" * 6000,
+    )
+
+    assert applied == 1
+
+
+@pytest.mark.asyncio
+async def test_short_story_draft_uses_command_snapshot_after_bible_reference_changes(
+    repository: ReviewRepository,
+) -> None:
+    async with repository._session_factory() as session:  # noqa: SLF001
+        async with session.begin():
+            bible = await session.get(WritingBible, "bible-1")
+            assert bible is not None
+            bible.targetTotalWordCount = 7_000
+
+    created = await repository.create_or_revise("user-1", _draft_request())
+
+    assert created.payload.metadata.targetWordCount == 6_000  # type: ignore[union-attr]
 
 
 @pytest.mark.asyncio
@@ -645,6 +699,33 @@ async def test_short_story_apply_rechecks_and_writes_only_unique_chapter(
     assert check.summary == expected_summary
     if validator_verdict == "pass":
         assert json.loads(check.result or "{}")["artifactId"] == created.id
+
+
+@pytest.mark.asyncio
+async def test_short_story_apply_ignores_later_bible_reference_change(
+    repository: ReviewRepository,
+) -> None:
+    created = await repository.create_or_revise("user-1", _draft_request())
+    await repository.submit_evaluation("user-1", created.id, _evaluation("编辑"))
+    await repository.submit_evaluation("user-1", created.id, _evaluation("校验"))
+    await repository.create_or_revise(
+        "user-1", _draft_request(status="awaiting_user")
+    )
+    artifact = await repository.require_artifact("user-1", created.id)
+    await repository.transition(created.id, "awaiting_user", "applying")
+    async with repository._session_factory() as session:  # noqa: SLF001
+        async with session.begin():
+            bible = await session.get(WritingBible, "bible-1")
+            assert bible is not None
+            bible.targetTotalWordCount = None
+
+    result = await FormalWriteRepository(repository._session_factory).apply_chapter(  # noqa: SLF001
+        artifact,
+        "user-1",
+        "甲" * 6000,
+    )
+
+    assert result == 1
 
 
 @pytest.mark.asyncio

@@ -138,8 +138,10 @@ def test_writing_run_requests_require_stable_client_request_id() -> None:
     assert valid.clientRequestId == "request-00000001"
 
 
-@pytest.mark.parametrize("target", [6000, 80000])
-def test_short_writing_run_accepts_target_boundaries(target: int) -> None:
+@pytest.mark.parametrize("target", [None, 6000, 80000])
+def test_short_writing_run_accepts_nullable_reference_boundaries(
+    target: int | None,
+) -> None:
     request = StartWritingRunRequest.model_validate(
         {
             "clientRequestId": "request-00000001",
@@ -168,6 +170,22 @@ def test_short_writing_run_rejects_out_of_range_target(target: int) -> None:
                 "userMessage": "根据灵感生成大纲",
             }
         )
+
+
+def test_long_writing_run_keeps_default_and_rejects_explicit_null_target() -> None:
+    base = {
+        "clientRequestId": "request-00000001",
+        "novelId": "novel-1",
+        "chapterId": "chapter-1",
+        "workflowKind": "long_serial",
+        "operation": "write_chapter",
+        "userMessage": "开始写作",
+    }
+
+    request = StartWritingRunRequest.model_validate(base)
+    assert request.targetWordCount == 4000
+    with pytest.raises(ValidationError):
+        StartWritingRunRequest.model_validate({**base, "targetWordCount": None})
 
 
 @pytest.mark.parametrize(

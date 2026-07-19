@@ -55,11 +55,10 @@ class WritingJobPayload(BaseModel):
         if self.workflowKind == "short_medium":
             if self.operation not in SHORT_STORY_OPERATIONS:
                 raise ValueError("中短篇写作命令必须指定专用 Operation")
-            if (
-                self.targetTotalWordCount is None
-                or not 6_000 <= self.targetTotalWordCount <= 80_000
+            if self.targetTotalWordCount is not None and not (
+                6_000 <= self.targetTotalWordCount <= 80_000
             ):
-                raise ValueError("中短篇目标总字数必须为 6000～80000")
+                raise ValueError("中短篇篇幅参考必须为空或为 6000～80000")
             if self.operation == "develop_short_outline" and not isinstance(
                 self.source, ShortOutlineInspirationSource
             ):

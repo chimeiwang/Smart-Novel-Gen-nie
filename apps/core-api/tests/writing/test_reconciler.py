@@ -429,9 +429,11 @@ async def test_reconciliation_creates_single_command_and_invalidates_old_legacy_
         ),
     ],
 )
+@pytest.mark.parametrize("target", [None, 6000])
 async def test_short_reconciliation_copies_latest_persisted_workflow_identity(
     operation: str,
     source: dict[str, object],
+    target: int | None,
 ) -> None:
     latest_payload = json.dumps(
         {
@@ -442,7 +444,7 @@ async def test_short_reconciliation_copies_latest_persisted_workflow_identity(
             "resumeInput": None,
             "workflowKind": "short_medium",
             "operation": operation,
-            "targetTotalWordCount": 6000,
+            "targetTotalWordCount": target,
             "source": source,
         },
         ensure_ascii=False,
@@ -454,7 +456,7 @@ async def test_short_reconciliation_copies_latest_persisted_workflow_identity(
         writingSessionId="session-1",
         phase="active",
         selectedAgents="剧情",
-        targetWordCount=6000,
+        targetWordCount=target or 80_000,
         graphStateJson='{"phase":"active"}',
     )
     expected = TaskRecord(
@@ -472,7 +474,7 @@ async def test_short_reconciliation_copies_latest_persisted_workflow_identity(
             id="bible-1",
             novelId="novel-1",
             storyLengthProfile="short_medium",
-            targetTotalWordCount=6000,
+            targetTotalWordCount=target,
         ),
         latest_payload=latest_payload,
     )
@@ -484,7 +486,7 @@ async def test_short_reconciliation_copies_latest_persisted_workflow_identity(
     payload = json.loads(command.payloadJson)
     assert payload["workflowKind"] == "short_medium"
     assert payload["operation"] == operation
-    assert payload["targetTotalWordCount"] == 6000
+    assert payload["targetTotalWordCount"] == target
     assert payload["source"] == source
 
 

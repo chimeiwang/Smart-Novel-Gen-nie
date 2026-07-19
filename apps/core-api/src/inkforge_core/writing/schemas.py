@@ -10,6 +10,7 @@ CoreAgentId = Literal["设定", "剧情", "写作", "校验", "编辑"]
 WritingCommandStatus = Literal[
     "pending", "submitted", "processing", "succeeded", "failed"
 ]
+SHORT_STORY_INTERNAL_TASK_WORD_COUNT = 80_000
 
 
 def _default_agents() -> list[CoreAgentId]:
@@ -103,7 +104,7 @@ class StartWritingRunRequest(WritingSchema):
     writingSessionId: str | None = Field(default=None, min_length=1, max_length=256)
     workflowKind: WritingWorkflowKind
     operation: CreativeOperationKind | None
-    targetWordCount: int = Field(default=4000, ge=1, le=10_000_000)
+    targetWordCount: int | None = Field(default=None, ge=1, le=10_000_000)
     selectedAgents: list[CoreAgentId] = Field(default_factory=_default_agents)
     userMessage: str = Field(min_length=1)
 
@@ -113,12 +114,18 @@ class StartWritingRunRequest(WritingSchema):
         if self.workflowKind == "short_medium":
             if self.operation not in short_operations:
                 raise ValueError("中短篇必须指定专用 Operation")
-            if not 6_000 <= self.targetWordCount <= 80_000:
-                raise ValueError("中短篇目标总字数必须为 6000～80000")
+            if self.targetWordCount is not None and not (
+                6_000 <= self.targetWordCount <= 80_000
+            ):
+                raise ValueError("中短篇篇幅参考必须为空或为 6000～80000")
         elif self.operation in short_operations:
             raise ValueError("长篇不能使用中短篇 Operation")
         elif self.operation == "sync_lore":
             raise ValueError("同步设定 Operation 已移除")
+        elif self.targetWordCount is None:
+            if "targetWordCount" in self.model_fields_set:
+                raise ValueError("长篇章节目标字数不能为 null")
+            self.targetWordCount = 4000
         return self
 
 

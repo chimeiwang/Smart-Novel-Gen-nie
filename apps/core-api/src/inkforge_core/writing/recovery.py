@@ -76,8 +76,15 @@ def deserialize_graph_snapshot(
         if not isinstance(value, str) or not value:
             raise InvalidGraphSnapshotError("写作任务快照缺少资源身份")
         identities[key] = value
-    target_word_count = parsed.get("targetWordCount")
-    if isinstance(target_word_count, bool) or not isinstance(target_word_count, int):
+    if "targetWordCount" not in parsed:
+        raise InvalidGraphSnapshotError("写作任务快照缺少目标字数")
+    target_word_count = parsed["targetWordCount"]
+    is_short_reference = (
+        parsed.get("workflowKind") == "short_medium" and target_word_count is None
+    )
+    if not is_short_reference and (
+        isinstance(target_word_count, bool) or not isinstance(target_word_count, int)
+    ):
         raise InvalidGraphSnapshotError("写作任务快照缺少目标字数")
     if not isinstance(parsed.get("conversationHistory"), list):
         raise InvalidGraphSnapshotError("写作任务快照缺少会话历史")

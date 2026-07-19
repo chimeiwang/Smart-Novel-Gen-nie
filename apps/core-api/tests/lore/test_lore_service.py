@@ -104,8 +104,8 @@ def test_writing_bible_update_does_not_expose_profile_switch() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("target", [5_999, 80_001, None])
-async def test_short_writing_bible_rejects_invalid_target(target: int | None) -> None:
+@pytest.mark.parametrize("target", [5_999, 80_001])
+async def test_short_writing_bible_rejects_invalid_target(target: int) -> None:
     repository = RecordingRepository(story_length_profile="short_medium")
     service = LoreService(repository)  # type: ignore[arg-type]
 
@@ -122,8 +122,10 @@ async def test_short_writing_bible_rejects_invalid_target(target: int | None) ->
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("target", [6_000, 80_000])
-async def test_short_writing_bible_accepts_target_boundaries(target: int) -> None:
+@pytest.mark.parametrize("target", [None, 6_000, 80_000])
+async def test_short_writing_bible_accepts_nullable_reference_boundaries(
+    target: int | None,
+) -> None:
     repository = RecordingRepository(story_length_profile="short_medium")
     service = LoreService(repository)  # type: ignore[arg-type]
 

@@ -39,7 +39,7 @@ type OutlineNodeStatus = Literal["planned", "in_progress", "completed", "skipped
 class ShortMediumCreateNovelRequest(StrictModel):
     storyLengthProfile: Literal["short_medium"]
     inspiration: str = Field(min_length=1)
-    targetTotalWordCount: int = Field(ge=6_000, le=80_000)
+    targetTotalWordCount: int | None = Field(default=None, ge=6_000, le=80_000)
     name: str | None = None
 
 

@@ -155,14 +155,11 @@ class FormalWriteRepository:
                 if (
                     bible is None
                     or bible.storyLengthProfile != "short_medium"
-                    or bible.targetTotalWordCount != draft.metadata.targetWordCount
-                    or bible.targetTotalWordCount is None
-                    or not 6_000 <= bible.targetTotalWordCount <= 80_000
                 ):
                     raise ApiError(
                         status_code=409,
                         code="SHORT_STORY_TARGET_MISMATCH",
-                        message="中短篇正文目标字数与作品圣经不一致",
+                        message="中短篇正文只能应用到中短篇作品",
                     )
                 latest_outline = await latest_short_story_outline_artifact(
                     session,

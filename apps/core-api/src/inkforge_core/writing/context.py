@@ -40,6 +40,7 @@ from ..db.models import (
 from ..errors import ApiError
 from ..short_story_artifacts import latest_short_story_outline_artifact
 from .recovery import InvalidGraphSnapshotError, deserialize_graph_snapshot
+from .schemas import SHORT_STORY_INTERNAL_TASK_WORD_COUNT
 
 
 @dataclass(frozen=True, slots=True)
@@ -256,7 +257,11 @@ class WritingContextRepository:
                 "foreshadowingSummaries": foreshadowing_summaries,
                 "activeArtifact": active_artifact,
                 "phase": task.phase,
-                "targetWordCount": task.targetWordCount,
+                "targetWordCount": (
+                    command_payload.targetTotalWordCount
+                    if command_payload.workflowKind == "short_medium"
+                    else task.targetWordCount
+                ),
                 "workflowKind": command_payload.workflowKind,
                 "operation": command_payload.operation,
                 "targetTotalWordCount": command_payload.targetTotalWordCount,
@@ -449,11 +454,13 @@ class WritingContextRepository:
         if persisted_profile == "long_serial":
             return
         target = bible.targetTotalWordCount if bible is not None else None
+        expected_task_target = (
+            target if target is not None else SHORT_STORY_INTERNAL_TASK_WORD_COUNT
+        )
         if (
-            target is None
-            or not 6_000 <= target <= 80_000
+            (target is not None and not 6_000 <= target <= 80_000)
             or payload.targetTotalWordCount != target
-            or task.targetWordCount != target
+            or task.targetWordCount != expected_task_target
         ):
             raise _context_identity_mismatch()
         chapter_count = await session.scalar(

@@ -255,7 +255,7 @@ async def test_short_context_bypasses_long_planning_and_prioritizes_direct_edit(
         chapterId="chapter-1",
         writingSessionId=None,
         phase="active",
-        targetWordCount=6000,
+        targetWordCount=80000,
         selectedAgents="剧情",
         conversationHistory="[]",
     )
@@ -267,7 +267,7 @@ async def test_short_context_bypasses_long_planning_and_prioritizes_direct_edit(
         id="bible-1",
         novelId="novel-1",
         storyLengthProfile="short_medium",
-        targetTotalWordCount=6000,
+        targetTotalWordCount=None,
     )
     command = WritingRunCommand(
         id="command-1",
@@ -284,7 +284,7 @@ async def test_short_context_bypasses_long_planning_and_prioritizes_direct_edit(
                 "resumeInput": {"userMessage": "只修改第二节"},
                 "workflowKind": "short_medium",
                 "operation": "develop_short_outline",
-                "targetTotalWordCount": 6000,
+                "targetTotalWordCount": None,
                 "source": {
                     "kind": "short_outline_inspiration",
                     "originalInspiration": "原始灵感",
@@ -336,6 +336,8 @@ async def test_short_context_bypasses_long_planning_and_prioritizes_direct_edit(
     assert result["chapterGroup"] is None
     assert result["approvedBeatPlan"] is None
     assert result["outlinePath"] == []
+    assert result["targetWordCount"] is None
+    assert result["targetTotalWordCount"] is None
 
 
 @pytest.mark.asyncio

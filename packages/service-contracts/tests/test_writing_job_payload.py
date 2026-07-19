@@ -28,6 +28,27 @@ def test_short_outline_job_requires_explicit_consistent_identity() -> None:
     assert payload.targetTotalWordCount == 6000
 
 
+def test_short_outline_job_accepts_null_reference_word_count() -> None:
+    payload = WritingJobPayload.model_validate(
+        {
+            "version": 1,
+            "resume": False,
+            "chapterId": "chapter-1",
+            "writingSessionId": None,
+            "resumeInput": None,
+            "workflowKind": "short_medium",
+            "operation": "develop_short_outline",
+            "targetTotalWordCount": None,
+            "source": {
+                "kind": "short_outline_inspiration",
+                "originalInspiration": "灵感",
+            },
+        }
+    )
+
+    assert payload.targetTotalWordCount is None
+
+
 @pytest.mark.parametrize(
     "change",
     [

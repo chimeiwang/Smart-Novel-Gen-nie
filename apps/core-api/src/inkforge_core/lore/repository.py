@@ -368,7 +368,7 @@ class LoreRepository:
 
     @staticmethod
     def _require_target_for_profile(profile: str | None, target: object) -> None:
-        if profile == "short_medium" and (
+        if profile == "short_medium" and target is not None and (
             not isinstance(target, int)
             or isinstance(target, bool)
             or not 6_000 <= target <= 80_000
@@ -376,7 +376,7 @@ class LoreRepository:
             raise ApiError(
                 status_code=422,
                 code="SHORT_STORY_TARGET_WORD_COUNT_INVALID",
-                message="中短篇目标总字数必须在 6000 到 80000 之间",
+                message="中短篇篇幅参考必须为空或在 6000 到 80000 之间",
             )
 
     async def _validate_entity_links(

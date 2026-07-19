@@ -37,6 +37,7 @@ from ..short_story_artifacts import (
     latest_short_story_outline_artifact,
     lock_writing_bible,
 )
+from ..writing.schemas import SHORT_STORY_INTERNAL_TASK_WORD_COUNT
 from .schemas import (
     ArtifactEvaluationResponse,
     ArtifactKind,
@@ -992,15 +993,11 @@ async def _validate_short_story_draft_submission(
     if (
         bible is None
         or bible.storyLengthProfile != "short_medium"
-        or bible.targetTotalWordCount is None
-        or not 6_000 <= bible.targetTotalWordCount <= 80_000
-        or task.targetWordCount != bible.targetTotalWordCount
-        or payload.metadata.targetWordCount != bible.targetTotalWordCount
     ):
         raise ApiError(
             status_code=409,
             code="SHORT_STORY_TARGET_MISMATCH",
-            message="中短篇正文目标字数与作品圣经不一致",
+            message="中短篇正文只能提交到中短篇作品",
         )
     chapters = list(
         (
@@ -1064,10 +1061,23 @@ async def _validate_short_story_draft_submission(
         )
     command_payload = _parse_writing_job_payload(command.payloadJson)
     source = command_payload.source
+    expected_task_target = (
+        command_payload.targetTotalWordCount
+        if command_payload.targetTotalWordCount is not None
+        else SHORT_STORY_INTERNAL_TASK_WORD_COUNT
+    )
+    if (
+        payload.metadata.targetWordCount != command_payload.targetTotalWordCount
+        or task.targetWordCount != expected_task_target
+    ):
+        raise ApiError(
+            status_code=409,
+            code="SHORT_STORY_TARGET_MISMATCH",
+            message="中短篇正文篇幅参考与生成命令快照不一致",
+        )
     if (
         command_payload.workflowKind != "short_medium"
         or command_payload.operation != "write_short_story"
-        or command_payload.targetTotalWordCount != bible.targetTotalWordCount
         or not isinstance(source, ApprovedShortOutlineSource)
     ):
         raise ApiError(

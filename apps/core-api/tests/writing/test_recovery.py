@@ -61,6 +61,38 @@ def test_snapshot_accepts_explicit_short_story_operations(operation: str) -> Non
     assert result.current_operation == {"kind": operation}
 
 
+def test_short_story_snapshot_accepts_null_reference_word_count() -> None:
+    result = deserialize_graph_snapshot(
+        _snapshot(
+            workflowKind="short_medium",
+            currentOperation={"kind": "write_short_story"},
+            targetWordCount=None,
+        )
+    )
+
+    assert result.current_operation == {"kind": "write_short_story"}
+
+
+def test_short_story_snapshot_still_requires_reference_field() -> None:
+    value = json.loads(
+        _snapshot(
+            workflowKind="short_medium",
+            currentOperation={"kind": "write_short_story"},
+        )
+    )
+    value.pop("targetWordCount")
+
+    with pytest.raises(InvalidGraphSnapshotError, match="目标字数"):
+        deserialize_graph_snapshot(json.dumps(value, ensure_ascii=False))
+
+
+def test_long_story_snapshot_still_requires_integer_target_word_count() -> None:
+    with pytest.raises(InvalidGraphSnapshotError, match="目标字数"):
+        deserialize_graph_snapshot(
+            _snapshot(workflowKind="long_serial", targetWordCount=None)
+        )
+
+
 def test_recovery_separates_resumable_and_terminal_tasks() -> None:
     now = datetime(2026, 7, 11, 12, 0, 0)
     state = select_recovery_state(

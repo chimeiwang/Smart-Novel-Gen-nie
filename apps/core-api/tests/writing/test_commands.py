@@ -8,6 +8,9 @@ from datetime import datetime, timedelta
 import pytest
 from inkforge_core.db.base import utc_now
 from inkforge_core.db.models import (
+    Chapter,
+    Novel,
+    WritingBible,
     WritingMessage,
     WritingRunCommand,
     WritingSession,
@@ -18,7 +21,7 @@ from inkforge_core.writing.commands import (
     WritingRunCommandRepository,
     command_idempotency_key,
 )
-from inkforge_core.writing.schemas import ResumeWritingRunRequest
+from inkforge_core.writing.schemas import ResumeWritingRunRequest, StartWritingRunRequest
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 
@@ -96,6 +99,20 @@ class RacingCommandSession(CommandSession):
             raise IntegrityError("INSERT", {}, RuntimeError("duplicate"))
 
 
+class StartCommandSession(CommandSession):
+    async def flush(self) -> None:
+        now = utc_now()
+        for item in self.added:
+            if isinstance(item, WritingTask):
+                item.id = item.id or "task-1"
+                item.createdAt = item.createdAt or now
+                item.updatedAt = item.updatedAt or now
+            elif isinstance(item, WritingRunCommand):
+                item.id = item.id or "command-1"
+                item.createdAt = item.createdAt or now
+                item.updatedAt = item.updatedAt or now
+
+
 class SessionFactory:
     def __init__(self, sessions: list[CommandSession]) -> None:
         self.sessions = sessions
@@ -141,6 +158,53 @@ def command(
         createdAt=now,
         updatedAt=now,
     )
+
+
+@pytest.mark.asyncio
+async def test_null_short_reference_uses_stable_internal_task_word_count() -> None:
+    novel = Novel(id="novel-1", userId="user-1", name="中短篇", summary="灵感")
+    chapter = Chapter(id="chapter-1", novelId="novel-1", title="正文", order=1)
+    bible = WritingBible(
+        id="bible-1",
+        novelId="novel-1",
+        storyLengthProfile="short_medium",
+        targetTotalWordCount=None,
+    )
+    transaction = StartCommandSession(
+        [RowResult(None), RowResult((novel, chapter, bible)), RowResult((1,))]
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory(
+            [
+                CommandSession([RowResult(None)]),
+                CommandSession([RowResult(None)]),
+                transaction,
+            ]
+        )
+    )
+
+    response = await repository.create_start_with_task(
+        "user-1",
+        StartWritingRunRequest(
+            clientRequestId="request-00000001",
+            novelId="novel-1",
+            chapterId="chapter-1",
+            workflowKind="short_medium",
+            operation="develop_short_outline",
+            targetWordCount=None,
+            userMessage="生成大纲",
+        ),
+    )
+
+    task_model = next(
+        item for item in transaction.added if isinstance(item, WritingTask)
+    )
+    command_model = next(
+        item for item in transaction.added if isinstance(item, WritingRunCommand)
+    )
+    assert response.targetWordCount == 80_000
+    assert task_model.targetWordCount == 80_000
+    assert json.loads(command_model.payloadJson)["targetTotalWordCount"] is None
 
 
 @pytest.mark.asyncio
