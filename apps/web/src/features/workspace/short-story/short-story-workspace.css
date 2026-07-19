@@ -311,6 +311,7 @@
 }
 
 .short-story-chat-messages {
+  align-content: start;
   display: grid;
   flex: 1;
   gap: 10px;

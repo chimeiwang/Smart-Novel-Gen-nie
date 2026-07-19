@@ -51,3 +51,13 @@ test("中短篇新对话输入区保持紧凑，只有消息区占用剩余高�
   assert.match(chat, /className="short-story-chat-actions"[\s\S]*className="button primary"/);
   assert.match(css, /\.short-story-chat-actions\s*\{[^}]*justify-content:\s*flex-end;/);
 });
+
+test("中短篇消息按内容自然高度从顶部排列", async () => {
+  const cssUrl = new URL("../short-story/short-story-workspace.css", import.meta.url);
+  const css = await readFile(cssUrl, "utf8");
+
+  assert.match(
+    css,
+    /\.short-story-chat-messages\s*\{[^}]*align-content:\s*start;[^}]*display:\s*grid;/,
+  );
+});
