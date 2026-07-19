@@ -33,6 +33,18 @@ export function getStoryLengthProfileConfig(profile: StoryLengthProfile): StoryL
   return STORY_LENGTH_PROFILE_CONFIG[profile];
 }
 
+export function parseOptionalShortStoryTarget(value: string): number | null {
+  const normalized = value.trim();
+  return normalized ? Number(normalized) : null;
+}
+
+export function isValidShortStoryTargetReference(targetWordCount: number | null): boolean {
+  return targetWordCount === null
+    || (Number.isInteger(targetWordCount)
+      && targetWordCount >= 6_000
+      && targetWordCount <= 80_000);
+}
+
 export function formatStoryLengthProfile(profile: StoryLengthProfile, targetTotalWordCount?: number | null): string {
   const config = STORY_LENGTH_PROFILE_CONFIG[profile];
   const [minWords, maxWords] = config.targetWords;

@@ -17,6 +17,26 @@ test("新建作品入口不默认选择篇幅并按篇幅显示两套表单", as
   assert.doesNotMatch(source, /chapterCount/);
 });
 
+test("中短篇只要求灵感，空篇幅参考显式提交 null", async () => {
+  const modalUrl = new URL("../../projects/create-novel-modal.tsx", import.meta.url);
+  const source = await readFile(modalUrl, "utf8");
+  const shortForm = source.match(/storyLengthProfile === "short_medium"[\s\S]*?storyLengthProfile === "long_serial"/)?.[0] ?? "";
+
+  assert.match(source, /parseOptionalShortStoryTarget/);
+  assert.match(source, /篇幅参考（可选）/);
+  assert.match(source, /留空.*故事.*大纲.*决定/);
+  assert.match(shortForm, /targetTotalWordCount:\s*shortTarget/);
+  assert.doesNotMatch(shortForm, /targetTotalWordCount:\s*Number\(/);
+});
+
+test("长篇目标总字数继续沿用原有空值转换", async () => {
+  const modalUrl = new URL("../../projects/create-novel-modal.tsx", import.meta.url);
+  const source = await readFile(modalUrl, "utf8");
+
+  assert.match(source, /const longTarget = Number\(targetTotalWordCount\)/);
+  assert.match(source, /targetTotalWordCount:\s*longTarget \|\| null/);
+});
+
 test("中短篇创建后显式建立会话并启动大纲任务", async () => {
   const modalUrl = new URL("../../projects/create-novel-modal.tsx", import.meta.url);
   const source = await readFile(modalUrl, "utf8");

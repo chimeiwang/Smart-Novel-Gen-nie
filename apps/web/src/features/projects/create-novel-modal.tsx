@@ -6,6 +6,8 @@ import { useState } from "react";
 import { browserApi } from "@/lib/api/browser";
 import { requireApiData } from "@/lib/api/response";
 import {
+  isValidShortStoryTargetReference,
+  parseOptionalShortStoryTarget,
   STORY_LENGTH_PROFILE_CONFIG,
   type StoryLengthProfile,
 } from "@/shared/contracts/story-length-profile";
@@ -35,20 +37,21 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
     setPending(true);
     setError(null);
     try {
-      const target = Number(targetTotalWordCount);
+      const shortTarget = parseOptionalShortStoryTarget(targetTotalWordCount);
+      const longTarget = Number(targetTotalWordCount);
       const result = requireApiData(await browserApi.POST("/api/v1/novels", {
         body: storyLengthProfile === "short_medium"
           ? {
               storyLengthProfile: "short_medium",
               name: name.trim() || null,
               inspiration: inspiration.trim(),
-              targetTotalWordCount: target,
+              targetTotalWordCount: shortTarget,
             }
           : {
               storyLengthProfile: "long_serial",
               name: String(formData.get("name") ?? ""),
               summary: String(formData.get("summary") ?? "") || null,
-              targetTotalWordCount: target || null,
+              targetTotalWordCount: longTarget || null,
               genre: genre || null,
               protagonist: protagonist || null,
               coreSellingPoint: coreSellingPoint || null,
@@ -74,7 +77,7 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
               writingSessionId: session.id,
               workflowKind: "short_medium",
               operation: "develop_short_outline",
-              targetWordCount: target,
+              targetWordCount: shortTarget,
               userMessage: "请根据创建时的灵感生成可供确认的完整中短篇大纲。",
             },
           }));
@@ -99,11 +102,9 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
     setError(null);
   };
 
-  const shortTarget = Number(targetTotalWordCount);
+  const shortTarget = parseOptionalShortStoryTarget(targetTotalWordCount);
   const shortFormValid = inspiration.trim().length > 0
-    && Number.isInteger(shortTarget)
-    && shortTarget >= 6_000
-    && shortTarget <= 80_000;
+    && isValidShortStoryTargetReference(shortTarget);
   const canSubmit = storyLengthProfile === "short_medium"
     ? shortFormValid
     : storyLengthProfile === "long_serial" && name.trim().length > 0;
@@ -168,7 +169,7 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
                   />
                 </label>
                 <label className="stack">
-                  <span>目标总字数</span>
+                  <span>篇幅参考（可选）</span>
                   <input
                     className="input"
                     name="targetTotalWordCount"
@@ -176,11 +177,11 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
                     inputMode="numeric"
                     min={6_000}
                     max={80_000}
-                    required
                     placeholder="6000-80000"
                     value={targetTotalWordCount}
                     onChange={(event) => setTargetTotalWordCount(event.target.value)}
                   />
+                  <small className="muted">留空时由模型根据故事和大纲决定；填写后也只作为创作倾向。</small>
                 </label>
               </>
             ) : null}

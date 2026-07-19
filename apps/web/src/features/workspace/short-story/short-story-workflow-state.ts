@@ -2,6 +2,7 @@ import type {
   ShortStoryArtifactStatus,
   ShortStoryCommandStatus,
 } from "./short-story-polling";
+import { isValidShortStoryTargetReference } from "../../../shared/contracts/story-length-profile";
 
 type ShortStoryActionState = {
   canRetryOutline: boolean;
@@ -22,11 +23,8 @@ const ACTIVE_COMMAND_STATUSES = new Set<ShortStoryCommandStatus>([
 ]);
 const ACTIVE_TASK_PHASES = new Set(["active", "waiting_call"]);
 
-export function isValidShortStoryTarget(targetWordCount: number | null): targetWordCount is number {
-  return targetWordCount !== null
-    && Number.isInteger(targetWordCount)
-    && targetWordCount >= 6_000
-    && targetWordCount <= 80_000;
+export function isValidShortStoryTarget(targetWordCount: number | null): boolean {
+  return isValidShortStoryTargetReference(targetWordCount);
 }
 
 export function deriveShortStoryActions({

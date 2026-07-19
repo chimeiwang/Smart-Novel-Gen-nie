@@ -5,7 +5,7 @@ type WritingBibleRequest = components["schemas"]["WritingBibleRequest"];
 
 export function buildWritingBibleTargetUpdate(
   writingBible: WritingBible,
-  targetTotalWordCount: number,
+  targetTotalWordCount: number | null,
 ): WritingBibleRequest {
   return {
     targetTotalWordCount,
@@ -19,4 +19,3 @@ export function buildWritingBibleTargetUpdate(
     notes: writingBible.notes,
   };
 }
-

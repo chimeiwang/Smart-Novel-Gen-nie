@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LogoutButton } from "@/features/auth/user-menu";
 import { browserApi } from "@/lib/api/browser";
 import { CoreApiPageError, requireApiData } from "@/lib/api/response";
+import { parseOptionalShortStoryTarget } from "@/shared/contracts/story-length-profile";
 import { countTextLength } from "@/shared/lib/word-count";
 import { buildWorkspaceChapterHref } from "../workspace-view";
 import {
@@ -500,7 +501,7 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
   const startOperation = (operation: "develop_short_outline" | "write_short_story") => {
     const operationLabel = operation === "develop_short_outline" ? "生成完整大纲" : "生成完整初稿";
     const operationRevision = aggregateRef.current?.outline?.revision ?? 0;
-    const actionKey = `start:${operation}:${operationRevision}:${targetWordCount ?? "invalid"}`;
+    const actionKey = `start:${operation}:${operationRevision}:${targetWordCount ?? "unset"}`;
     void runMutation(actionKey, async () => {
       if (!aggregateRef.current) {
         throw new Error("尚未读取到权威工作流状态，请先重试读取状态");
@@ -509,7 +510,7 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
         throw new Error("需整理为单一正文后才能启动新中短篇流程");
       }
       if (!isValidShortStoryTarget(targetWordCount)) {
-        throw new Error("请先把目标字数修正到 6000～80000 字并保存");
+        throw new Error("请先把篇幅参考修正到 6000～80000 字并保存，或清空该字段");
       }
       if (!currentChapter) throw new Error("中短篇正文占位章节不存在");
 
@@ -638,13 +639,13 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
   };
 
   const saveTargetWordCount = () => {
-    const target = Number(targetInput);
+    const target = parseOptionalShortStoryTarget(targetInput);
     if (aggregateRef.current === null) {
       setActionError("尚未读取到权威写作状态，请先重试读取状态");
       return;
     }
     if (!isValidShortStoryTarget(target)) {
-      setActionError("中短篇目标字数必须是 6000～80000 的整数");
+      setActionError("中短篇篇幅参考必须留空，或填写 6000～80000 的整数");
       return;
     }
     void runMutation(`target:${target}`, async () => {
@@ -660,10 +661,12 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
           body: buildWritingBibleTargetUpdate(planning.writingBible, target),
         },
       ));
-      const savedTarget = result.targetTotalWordCount ?? target;
+      const savedTarget = result.targetTotalWordCount === undefined
+        ? target
+        : result.targetTotalWordCount;
       setTargetWordCount(savedTarget);
-      setTargetInput(String(savedTarget));
-      setActionNotice("目标字数已更新。");
+      setTargetInput(savedTarget === null ? "" : String(savedTarget));
+      setActionNotice(savedTarget === null ? "篇幅参考已清空。" : "篇幅参考已更新。");
     });
   };
 
@@ -948,7 +951,9 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
     return (
       <div className="stack short-story-draft-view">
         <div className="meta short-story-draft-meta">
-          <span className="badge">目标 {draftPayload.metadata.targetWordCount} 字</span>
+          {typeof draftPayload.metadata.targetWordCount === "number" ? (
+            <span className="badge">篇幅参考约 {draftPayload.metadata.targetWordCount} 字</span>
+          ) : null}
           <span className="badge">实际 {draftTextLength} 字</span>
           <span className="badge">来源大纲 revision {draftPayload.metadata.sourceOutlineRevision}</span>
           <span className="badge">自动返工 {draftPayload.metadata.automaticRewriteCount}/1</span>
@@ -1001,7 +1006,9 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
           <h1 className="title-lg">{displayTitle}</h1>
           <div className="meta">
             <span className="badge">中短篇</span>
-            <span className="badge">目标 {targetWordCount ?? "未设置"} 字</span>
+            {targetWordCount !== null ? (
+              <span className="badge">篇幅参考约 {targetWordCount} 字</span>
+            ) : null}
             {latestTask ? <span className="badge">{latestTask.operation} · {latestTask.phase}</span> : null}
           </div>
         </div>
@@ -1153,7 +1160,7 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
                 >刷新页面同步标题</button>
               ) : null}
               <label className="stack short-story-field">
-                <span className="label">目标总字数（6000～80000）</span>
+                <span className="label">篇幅参考（可选）</span>
                 <div className="short-story-inline-form">
                   <input
                     className="input"
@@ -1167,15 +1174,16 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
                     disabled={
                       !actions.canUpdateTargetWordCount
                       || interactionLocked
-                      || !isValidShortStoryTarget(Number(targetInput))
+                      || !isValidShortStoryTarget(parseOptionalShortStoryTarget(targetInput))
                     }
                     onClick={saveTargetWordCount}
                   >更新</button>
                 </div>
               </label>
+              <p className="muted">留空时由模型根据故事和大纲决定；填写后也只作为创作倾向，允许 6000～80000 的整数。</p>
               {!actions.targetWordCountValid ? (
                 <p className="short-story-error" role="alert">
-                  当前目标字数不在 6000～80000 范围内，新流程已阻止；请先修正并更新。
+                  当前篇幅参考不在 6000～80000 范围内，新流程已阻止；请修正或清空后更新。
                 </p>
               ) : null}
             </section>

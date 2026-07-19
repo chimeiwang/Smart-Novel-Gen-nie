@@ -29,6 +29,27 @@ test("没有大纲且没有进行中任务时只开放重试生成大纲", () =>
   );
 });
 
+test("未填写篇幅参考时不阻止生成大纲或完整正文", () => {
+  const withoutOutline = deriveShortStoryActions({
+    targetWordCount: null,
+    outlineStatus: null,
+    draftStatus: null,
+    commandStatus: null,
+    taskPhase: null,
+  });
+  const withOutline = deriveShortStoryActions({
+    targetWordCount: null,
+    outlineStatus: "applied",
+    draftStatus: null,
+    commandStatus: "succeeded",
+    taskPhase: "completed",
+  });
+
+  assert.equal(withoutOutline.targetWordCountValid, true);
+  assert.equal(withoutOutline.canRetryOutline, true);
+  assert.equal(withOutline.canGenerateDraft, true);
+});
+
 test("大纲等待用户时允许编辑与决策，但未批准前不允许生成正文", () => {
   const actions = deriveShortStoryActions({
     targetWordCount: 20_000,
@@ -79,8 +100,8 @@ test("完整正文等待用户时开放返工和决策", () => {
   assert.equal(actions.canDecideDraft, true);
 });
 
-test("越界目标字数阻止启动大纲或正文", () => {
-  for (const targetWordCount of [null, 5_999, 80_001]) {
+test("只有非空且越界的篇幅参考会阻止启动大纲或正文", () => {
+  for (const targetWordCount of [5_999, 80_001]) {
     const withoutOutline = deriveShortStoryActions({
       targetWordCount,
       outlineStatus: null,

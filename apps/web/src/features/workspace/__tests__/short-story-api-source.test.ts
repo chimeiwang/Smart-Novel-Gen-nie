@@ -35,6 +35,16 @@ test("正文工作区呈现编辑与校验两类全稿审核结论", async () =>
   assert.match(source, /evaluations/);
 });
 
+test("中短篇工作区可保存、修改和清空篇幅参考", async () => {
+  const workspaceUrl = new URL("../short-story/short-story-workspace.tsx", import.meta.url);
+  const source = await readFile(workspaceUrl, "utf8");
+
+  assert.match(source, /parseOptionalShortStoryTarget\(targetInput\)/);
+  assert.match(source, /buildWritingBibleTargetUpdate\(planning\.writingBible, target\)/);
+  assert.match(source, /篇幅参考（可选）/);
+  assert.match(source, /typeof draftPayload\.metadata\.targetWordCount === "number"[\s\S]{0,160}篇幅参考约/);
+});
+
 test("旧中短篇多 Chapter 仍可打开但明确阻断新流程", async () => {
   const workspaceUrl = new URL("../short-story/short-story-workspace.tsx", import.meta.url);
   const source = await readFile(workspaceUrl, "utf8");

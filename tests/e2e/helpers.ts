@@ -59,7 +59,7 @@ export async function createNovelWithApi(
 
 export async function createShortNovelWithApi(
   page: Page,
-  targetTotalWordCount = 50_000,
+  targetTotalWordCount: number | null = null,
   name = `端到端中短篇-${Date.now()}`,
 ): Promise<NovelIdentity> {
   const response = await page.request.post("/api/v1/novels", {
@@ -103,7 +103,7 @@ export async function startShortStoryOperationWithApi(
   identity: NovelIdentity,
   writingSessionId: string,
   operation: ShortStoryOperation,
-  targetWordCount: number,
+  targetWordCount: number | null,
   userMessage: string,
 ): Promise<ShortStoryRunAccepted> {
   const response = await page.request.post("/api/v1/writing/runs", {

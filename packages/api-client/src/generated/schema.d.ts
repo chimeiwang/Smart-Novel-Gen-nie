@@ -3027,7 +3027,7 @@ export interface components {
             /** Inspiration */
             inspiration: string;
             /** Targettotalwordcount */
-            targetTotalWordCount: number;
+            targetTotalWordCount?: number | null;
             /** Name */
             name?: string | null;
         };
@@ -3126,7 +3126,7 @@ export interface components {
             /** Sourceoutlinehash */
             sourceOutlineHash: string;
             /** Targetwordcount */
-            targetWordCount: number;
+            targetWordCount?: number | null;
             /** Actualwordcount */
             actualWordCount: number;
             /** Targetchapterid */
@@ -3247,11 +3247,8 @@ export interface components {
             workflowKind: "long_serial" | "short_medium";
             /** Operation */
             operation: ("answer_question" | "create_lore" | "revise_lore" | "create_outline" | "revise_outline" | "plan_chapter" | "write_chapter" | "rewrite_scene" | "review_chapter" | "sync_lore" | "manage_foreshadowing" | "develop_short_outline" | "write_short_story") | null;
-            /**
-             * Targetwordcount
-             * @default 4000
-             */
-            targetWordCount: number;
+            /** Targetwordcount */
+            targetWordCount?: number | null;
             /** Selectedagents */
             selectedAgents?: ("设定" | "剧情" | "写作" | "校验" | "编辑")[];
             /** Usermessage */
