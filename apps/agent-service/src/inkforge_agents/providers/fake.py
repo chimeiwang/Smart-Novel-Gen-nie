@@ -88,15 +88,23 @@ def _select_tool(
             source_revision = (
                 int(revision_match.group(1)) if revision_match is not None else 1
             )
-            section_match = re.search(
+            section_ids = re.findall(
                 r'"id"\s*:\s*"(short-section-[^"]+)"', message_text
             )
+            requested_section_match = re.search(
+                r"(?:修改|强化|调整|重写)第\s*(\d+)\s*节", message_text
+            )
+            requested_section_index = (
+                int(requested_section_match.group(1)) - 1
+                if requested_section_match is not None
+                else 0
+            )
             section_operations: list[JsonValue] = []
-            if section_match is not None:
+            if 0 <= requested_section_index < len(section_ids):
                 section_operations.append(
                     {
                         "operation": "update",
-                        "sectionId": section_match.group(1),
+                        "sectionId": section_ids[requested_section_index],
                         "events": f"模拟模型根据第 {source_revision} 版和用户意见更新了本节事件。",
                     }
                 )
@@ -105,7 +113,6 @@ def _select_tool(
                 {
                     "mode": "patch",
                     "sourceRevision": source_revision,
-                    "corePremise": f"模拟模型基于第 {source_revision} 版调整后的核心前提。",
                     "sectionOperations": section_operations,
                     "changeSummary": "模拟模型完成了本轮大纲修改。",
                 },

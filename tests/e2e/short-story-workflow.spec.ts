@@ -130,6 +130,12 @@ test("6000 字中短篇可从灵感多次改纲、完整返工并批准为唯一
   );
   const firstRevision = requireOutline(firstRevisionAggregate.outline);
   expect(firstRevision.payload.sections.map((section) => section.id)).toEqual(stableSectionIds);
+  expect(firstRevision.payload.corePremise).toBe(initialOutline.payload.corePremise);
+  expect(firstRevision.payload.sections[0]).toEqual(initialOutline.payload.sections[0]);
+  expect(firstRevision.payload.sections[1].events).not.toBe(
+    initialOutline.payload.sections[1].events,
+  );
+  expect(firstRevision.payload.sections[2]).toEqual(initialOutline.payload.sections[2]);
   expect(firstRevision.payload.changeSummary).toContain("本轮大纲修改");
 
   const secondOutlineRequest = "保留前两节，只强化第 3 节的最终选择和结局兑现。";
@@ -149,6 +155,12 @@ test("6000 字中短篇可从灵感多次改纲、完整返工并批准为唯一
   const secondRevision = requireOutline(secondRevisionAggregate.outline);
   expect(secondRevision.payload.sections.map((section) => section.id)).toEqual(stableSectionIds);
   expect(secondRevision.payload.sections).toHaveLength(initialOutline.payload.sections.length);
+  expect(secondRevision.payload.corePremise).toBe(initialOutline.payload.corePremise);
+  expect(secondRevision.payload.sections[0]).toEqual(firstRevision.payload.sections[0]);
+  expect(secondRevision.payload.sections[1]).toEqual(firstRevision.payload.sections[1]);
+  expect(secondRevision.payload.sections[2].events).not.toBe(
+    firstRevision.payload.sections[2].events,
+  );
 
   const writingSessionId = secondRevisionAggregate.workflowSession?.id;
   if (!writingSessionId) throw new Error("中短篇改纲没有关联写作会话");

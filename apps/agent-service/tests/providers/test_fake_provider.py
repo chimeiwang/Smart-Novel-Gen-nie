@@ -322,3 +322,41 @@ async def test_fake_provider_submits_patch_against_authoritative_revision_and_id
     assert arguments["mode"] == "patch"
     assert arguments["sourceRevision"] == 7
     assert arguments["sectionOperations"][0]["sectionId"] == "short-section-authority"
+
+
+@pytest.mark.asyncio
+async def test_fake_provider_only_updates_the_requested_outline_section() -> None:
+    result = await FakeModelProvider().complete_turn(
+        ModelTurnRequest(
+            messages=[
+                {
+                    "role": "system",
+                    "content": "当前执行契约：operation=develop_short_outline，mode=reviser。",
+                },
+                {
+                    "role": "user",
+                    "content": (
+                        '当前返工草案权威内容：{"revision":8,"payload":'
+                        '{"corePremise":"保持原核心前提","sections":['
+                        '{"id":"short-section-one","title":"第一节","events":"第一节旧事件"},'
+                        '{"id":"short-section-two","title":"第二节","events":"第二节旧事件"},'
+                        '{"id":"short-section-three","title":"第三节","events":"第三节旧事件"}]}}；'
+                        '本轮修改要求原文：{"requiredChanges":'
+                        '"只修改第 2 节，让冲突更早爆发；保留第 1 和第 3 节。"}'
+                    ),
+                },
+            ],
+            tools=[
+                {
+                    "name": "submit_short_story_outline",
+                    "description": "提交中短篇大纲",
+                    "parameters": {"type": "object", "properties": {}},
+                }
+            ],
+            maxOutputTokens=256,
+        )
+    )
+
+    arguments = result.toolCalls[0].arguments
+    assert arguments["sectionOperations"][0]["sectionId"] == "short-section-two"
+    assert "corePremise" not in arguments
