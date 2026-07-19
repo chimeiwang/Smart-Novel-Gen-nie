@@ -56,6 +56,7 @@ import {
   type ShortStoryPane,
 } from "./short-story-revision-policy";
 import { buildWritingBibleTargetUpdate } from "./short-story-settings";
+import { ShortStoryResizableLayout } from "./short-story-resizable-layout";
 import {
   deriveShortStoryActions,
   isShortStoryInteractionLocked,
@@ -1164,7 +1165,7 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
         <LogoutButton />
       </header>
 
-      <div className="short-story-grid">
+      <ShortStoryResizableLayout novelId={novel.id}>
         <aside className="panel short-story-workflow" aria-label="中短篇写作流程">
           <h2 className="title-sm">写作进度</h2>
           <ol>
@@ -1614,7 +1615,7 @@ export function ShortStoryWorkspace({ bootstrap }: ShortStoryWorkspaceProps) {
           )))}
           onSubmitted={() => void refreshAggregate()}
         />
-      </div>
+      </ShortStoryResizableLayout>
     </main>
   );
 }
