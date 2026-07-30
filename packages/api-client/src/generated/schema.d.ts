@@ -1064,6 +1064,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/writing/runs/{task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Writing Run Status */
+        get: operations["get_writing_run_status_api_v1_writing_runs__task_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/writing/runs/{task_id}/resume": {
         parameters: {
             query?: never;
@@ -1143,6 +1160,109 @@ export interface paths {
         put?: never;
         /** Decide Review Artifact */
         post: operations["decide_review_artifact_api_v1_review_artifacts__artifact_id__decision_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/novels/{novel_id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Versions */
+        get: operations["list_versions_api_v1_novels__novel_id__versions_get"];
+        put?: never;
+        /** Submit Manual Version */
+        post: operations["submit_manual_version_api_v1_novels__novel_id__versions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/novels/{novel_id}/versions/{version_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Version */
+        get: operations["get_version_api_v1_novels__novel_id__versions__version_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/novels/{novel_id}/version-diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Version Diff */
+        get: operations["get_version_diff_api_v1_novels__novel_id__version_diff_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/novels/{novel_id}/versions/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Preview Version */
+        post: operations["preview_version_api_v1_novels__novel_id__versions_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/novels/{novel_id}/versions/{version_id}/adopt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Adopt Candidate Version */
+        post: operations["adopt_candidate_version_api_v1_novels__novel_id__versions__version_id__adopt_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/novels/{novel_id}/versions/{version_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore Historical Version */
+        post: operations["restore_historical_version_api_v1_novels__novel_id__versions__version_id__restore_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1884,6 +2004,73 @@ export interface components {
             /** Novels */
             novels: components["schemas"]["DashboardNovel"][];
         };
+        /** DiffBlock */
+        DiffBlock: {
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "insert" | "delete" | "replace";
+            /** Oldstart */
+            oldStart: number;
+            /** Oldend */
+            oldEnd: number;
+            /** Newstart */
+            newStart: number;
+            /** Newend */
+            newEnd: number;
+            /** Oldtext */
+            oldText?: string | null;
+            /** Newtext */
+            newText?: string | null;
+        };
+        /** @enum {string} */
+        DocumentType: "outline" | "manuscript";
+        /** DocumentVersionPayload */
+        DocumentVersionPayload: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "outline_draft" | "chapter_draft";
+            documentType: components["schemas"]["DocumentType"];
+            /** Versionnumber */
+            versionNumber: number;
+            /** Baseversionid */
+            baseVersionId?: string | null;
+            /** Clientrequestid */
+            clientRequestId?: string | null;
+            source: components["schemas"]["VersionSource"];
+            /** Content */
+            content: string;
+            /** Contenthash */
+            contentHash: string;
+            /** Sourcetaskid */
+            sourceTaskId?: string | null;
+            /** Sourcejobid */
+            sourceJobId?: string | null;
+            /** Sourceoutlineversionid */
+            sourceOutlineVersionId?: string | null;
+            /** Userinstruction */
+            userInstruction?: string | null;
+            /** Sourcekind */
+            sourceKind?: ("idea" | "opening" | "ending" | "outline" | "mixed") | null;
+            /** Sourcetext */
+            sourceText?: string | null;
+            /** Restoredfromversionid */
+            restoredFromVersionId?: string | null;
+            /**
+             * Createdfromselection
+             * @default false
+             */
+            createdFromSelection: boolean;
+            /** Selectionstart */
+            selectionStart?: number | null;
+            /** Selectionend */
+            selectionEnd?: number | null;
+            /** Selectedtexthash */
+            selectedTextHash?: string | null;
+        };
         /** ErrorResponse */
         ErrorResponse: {
             /** Code */
@@ -2227,6 +2414,27 @@ export interface components {
              * Format: password
              */
             password: string;
+        };
+        /** ManualVersionRequest */
+        ManualVersionRequest: {
+            documentType: components["schemas"]["DocumentType"];
+            /** Chapterid */
+            chapterId?: string | null;
+            /** Clientrequestid */
+            clientRequestId: string;
+            /** Baseversionid */
+            baseVersionId?: string | null;
+            /**
+             * Expectedupdatedat
+             * Format: date-time
+             */
+            expectedUpdatedAt: string;
+            /** Contenthash */
+            contentHash: string;
+            /** Confirmationhash */
+            confirmationHash: string;
+            /** Summary */
+            summary?: string | null;
         };
         /** MessageResponse */
         MessageResponse: {
@@ -2861,6 +3069,42 @@ export interface components {
         };
         /** @enum {string} */
         ShortMediumSourceKind: "idea" | "opening" | "ending" | "outline" | "mixed";
+        /** ShortMediumStartWritingRunRequest */
+        ShortMediumStartWritingRunRequest: {
+            /** Clientrequestid */
+            clientRequestId: string;
+            /**
+             * Workflow
+             * @constant
+             */
+            workflow: "short_medium";
+            /** Novelid */
+            novelId: string;
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "generate_outline" | "generate_manuscript" | "replace_selection" | "full_check";
+            /**
+             * Documenttype
+             * @enum {string}
+             */
+            documentType: "outline" | "manuscript";
+            /** Chapterid */
+            chapterId?: string | null;
+            /** Baseversionid */
+            baseVersionId?: string | null;
+            /** Sourceoutlineversionid */
+            sourceOutlineVersionId?: string | null;
+            /** Selectionstart */
+            selectionStart?: number | null;
+            /** Selectionend */
+            selectionEnd?: number | null;
+            /** Selectedtexthash */
+            selectedTextHash?: string | null;
+            /** Userinstruction */
+            userInstruction?: string | null;
+        };
         /** StartWritingRunRequest */
         StartWritingRunRequest: {
             /** Clientrequestid */
@@ -3184,6 +3428,149 @@ export interface components {
             /** Creditbalancemicros */
             creditBalanceMicros: string;
         };
+        /** VersionActionRequest */
+        VersionActionRequest: {
+            documentType: components["schemas"]["DocumentType"];
+            /** Chapterid */
+            chapterId?: string | null;
+            /** Clientrequestid */
+            clientRequestId: string;
+            /** Baseversionid */
+            baseVersionId?: string | null;
+            /** Confirmationhash */
+            confirmationHash: string;
+        };
+        /** VersionDetailResponse */
+        VersionDetailResponse: {
+            /** Id */
+            id: string;
+            /** Novelid */
+            novelId: string;
+            /** Chapterid */
+            chapterId: string | null;
+            /** Artifactkey */
+            artifactKey: string;
+            status: components["schemas"]["VersionStatus"];
+            /** Summary */
+            summary: string | null;
+            payload: components["schemas"]["DocumentVersionPayload"];
+            documentType: components["schemas"]["DocumentType"];
+            /** Versionnumber */
+            versionNumber: number;
+            source: components["schemas"]["VersionSource"];
+            /** Content */
+            content: string;
+            /** Contenthash */
+            contentHash: string;
+            /** Baseversionid */
+            baseVersionId: string | null;
+            /** Sourceoutlineversionid */
+            sourceOutlineVersionId: string | null;
+            /** Restoredfromversionid */
+            restoredFromVersionId: string | null;
+            diff: components["schemas"]["VersionDiffResponse"] | null;
+            /** Createdbyagent */
+            createdByAgent: string | null;
+            /** Taskid */
+            taskId: string | null;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+            /** Appliedat */
+            appliedAt: string | null;
+        };
+        /** VersionDiffResponse */
+        VersionDiffResponse: {
+            /** Fromversionid */
+            fromVersionId: string | null;
+            /** Toversionid */
+            toVersionId: string | null;
+            /** Fromwordcount */
+            fromWordCount: number;
+            /** Towordcount */
+            toWordCount: number;
+            /** Wordcountdelta */
+            wordCountDelta: number;
+            /** Blocks */
+            blocks: components["schemas"]["DiffBlock"][];
+            /** Confirmationhash */
+            confirmationHash: string;
+        };
+        /** VersionListItem */
+        VersionListItem: {
+            /** Id */
+            id: string;
+            documentType: components["schemas"]["DocumentType"];
+            /** Versionnumber */
+            versionNumber: number;
+            status: components["schemas"]["VersionStatus"];
+            source: components["schemas"]["VersionSource"];
+            /** Wordcount */
+            wordCount: number;
+            /** Baseversionid */
+            baseVersionId: string | null;
+            /** Sourceoutlineversionid */
+            sourceOutlineVersionId: string | null;
+            /** Restoredfromversionid */
+            restoredFromVersionId: string | null;
+            /** Summary */
+            summary: string | null;
+            /** Createdbyagent */
+            createdByAgent: string | null;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+            /** Appliedat */
+            appliedAt: string | null;
+        };
+        /** VersionPreviewRequest */
+        VersionPreviewRequest: {
+            documentType: components["schemas"]["DocumentType"];
+            /** Chapterid */
+            chapterId?: string | null;
+            /** Baseversionid */
+            baseVersionId?: string | null;
+        };
+        /** VersionPreviewResponse */
+        VersionPreviewResponse: {
+            documentType: components["schemas"]["DocumentType"];
+            /** Chapterid */
+            chapterId: string | null;
+            /** Baseversionid */
+            baseVersionId: string | null;
+            /**
+             * Expectedupdatedat
+             * Format: date-time
+             */
+            expectedUpdatedAt: string;
+            /** Contenthash */
+            contentHash: string;
+            /** Dirty */
+            dirty: boolean;
+            /** Confirmationsummary */
+            confirmationSummary: string;
+            /** Confirmationhash */
+            confirmationHash: string;
+            diff: components["schemas"]["VersionDiffResponse"];
+        };
+        /** @enum {string} */
+        VersionSource: "agent" | "manual" | "restore";
+        /** @enum {string} */
+        VersionStatus: "awaiting_user" | "applied";
         /** WorkflowRunDetailResponse */
         WorkflowRunDetailResponse: {
             summary: components["schemas"]["WorkflowRunSummary"];
@@ -3490,6 +3877,38 @@ export interface components {
              * @enum {string}
              */
             commandStatus: "pending" | "submitted" | "processing" | "succeeded" | "failed";
+        };
+        /** WritingRunStatusResponse */
+        WritingRunStatusResponse: {
+            /** Taskid */
+            taskId: string;
+            /** Novelid */
+            novelId: string;
+            /** Chapterid */
+            chapterId: string;
+            /** Phase */
+            phase: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+            /** Commandid */
+            commandId: string | null;
+            /** Commandstatus */
+            commandStatus: ("pending" | "submitted" | "processing" | "succeeded" | "failed") | null;
+            /** Operation */
+            operation: ("generate_outline" | "generate_manuscript" | "replace_selection" | "full_check") | null;
+            /** Candidateversionid */
+            candidateVersionId: string | null;
+            /** Checkreport */
+            checkReport: {
+                [key: string]: components["schemas"]["JsonValue"];
+            } | null;
+            /** Error */
+            error: {
+                [key: string]: components["schemas"]["JsonValue"];
+            } | null;
         };
         /** WritingSessionDetail */
         WritingSessionDetail: {
@@ -13782,7 +14201,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["StartWritingRunRequest"];
+                "application/json": components["schemas"]["StartWritingRunRequest"] | components["schemas"]["ShortMediumStartWritingRunRequest"];
             };
         };
         responses: {
@@ -13793,6 +14212,120 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WritingRunResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_writing_run_status_api_v1_writing_runs__task_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WritingRunStatusResponse"];
                 };
             };
             /** @description 统一错误响应 */
@@ -14371,6 +14904,829 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ArtifactDecisionAcceptedResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_versions_api_v1_novels__novel_id__versions_get: {
+        parameters: {
+            query: {
+                documentType: components["schemas"]["DocumentType"];
+                chapterId?: string | null;
+            };
+            header?: never;
+            path: {
+                novel_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionListItem"][];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    submit_manual_version_api_v1_novels__novel_id__versions_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                novel_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualVersionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionDetailResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_version_api_v1_novels__novel_id__versions__version_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                novel_id: string;
+                version_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionDetailResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_version_diff_api_v1_novels__novel_id__version_diff_get: {
+        parameters: {
+            query: {
+                fromVersionId: string;
+                toVersionId: string;
+            };
+            header?: never;
+            path: {
+                novel_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionDiffResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    preview_version_api_v1_novels__novel_id__versions_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                novel_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VersionPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionPreviewResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    adopt_candidate_version_api_v1_novels__novel_id__versions__version_id__adopt_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                novel_id: string;
+                version_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VersionActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionDetailResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    restore_historical_version_api_v1_novels__novel_id__versions__version_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                novel_id: string;
+                version_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VersionActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VersionDetailResponse"];
                 };
             };
             /** @description 统一错误响应 */

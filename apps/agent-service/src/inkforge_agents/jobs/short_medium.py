@@ -345,6 +345,20 @@ def _build_request(
     index: int,
     segment_count: int,
 ) -> ModelTurnRequest:
+    fixed_source_brief = ""
+    if payload.operation == "generate_manuscript":
+        if payload.sourceKind == "opening":
+            fixed_source_brief = (
+                "起始素材必须逐字作为完整正文前缀；"
+                if index == 0
+                else "固定开头已经包含在已完成正文中，本段不得重复或改写它；"
+            )
+        elif payload.sourceKind == "ending":
+            fixed_source_brief = (
+                "起始素材必须逐字作为完整正文后缀；"
+                if index == segment_count - 1
+                else "固定结尾只能出现在最终一段，本段不得提前输出或改写它；"
+            )
     operation_brief = {
         "generate_outline": (
             "输出一份完整、可人工编辑的故事蓝图，不使用长篇卷、阶段或章节组。"
@@ -353,6 +367,7 @@ def _build_request(
         ),
         "generate_manuscript": (
             f"只输出正文内部第 {index + 1}/{segment_count} 段；"
+            f"{fixed_source_brief}"
             "使用场景、行动、误判和后果呈现信息，避免先解释世界再开始故事；"
             "与已完成正文自然衔接，不总结、不重复既有段落。"
         ),

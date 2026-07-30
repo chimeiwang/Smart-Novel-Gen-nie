@@ -245,7 +245,7 @@ class CoreArtifactPort:
     ) -> str:
         resource = _resource(state)
         agent_id = _agent_id(state)
-        kind, payload = _artifact_payload(event, content)
+        kind, payload = _artifact_payload(event, content, state)
         artifact_key = event.get("artifactKey")
         if not isinstance(artifact_key, str) or not artifact_key:
             raise ValueError("ARTIFACT_CONTRACT_MISMATCH：待审核草案缺少 artifactKey")
@@ -413,10 +413,18 @@ def _reviser_context(state: dict[str, Any], artifact: dict[str, Any]) -> str:
     )
 
 
-def _artifact_payload(event: dict[str, Any], content: str) -> tuple[str, dict[str, Any]]:
+def _artifact_payload(
+    event: dict[str, Any],
+    content: str,
+    state: Mapping[str, Any],
+) -> tuple[str, dict[str, Any]]:
     event_type = event.get("type")
     if event_type == "propose_updates":
-        return "agent_updates", {"kind": "agent_updates", "updates": event.get("updates", {})}
+        payload = {"kind": "agent_updates", "updates": event.get("updates", {})}
+        base_outline_updated_at = _base_outline_updated_at(state)
+        if base_outline_updated_at is not None:
+            payload["baseOutlineUpdatedAt"] = base_outline_updated_at
+        return "agent_updates", payload
     if event_type == "submit_beat_plan":
         beat_plan = {key: value for key, value in event.items() if key not in {"type"}}
         return "beat_plan", {"kind": "beat_plan", "beatPlan": beat_plan}
@@ -424,6 +432,31 @@ def _artifact_payload(event: dict[str, Any], content: str) -> tuple[str, dict[st
     if not isinstance(kind, str) or not kind:
         raise ValueError("待审核草案控制事件缺少 kind")
     return kind, {"kind": kind, "content": content}
+
+
+def _base_outline_updated_at(state: Mapping[str, Any]) -> str | None:
+    messages = state.get("contextMessages")
+    if not isinstance(messages, list):
+        return None
+    for raw_message in messages:
+        if not isinstance(raw_message, str):
+            continue
+        try:
+            context = json.loads(raw_message)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(context, dict):
+            continue
+        workspace_outline = context.get("outline")
+        if not isinstance(workspace_outline, dict):
+            continue
+        outline = workspace_outline.get("outline")
+        if not isinstance(outline, dict):
+            continue
+        value = outline.get("updatedAt")
+        if isinstance(value, str) and value:
+            return value
+    return None
 
 
 def _resource(state: dict[str, Any]) -> RunResource:

@@ -268,6 +268,12 @@ class WritingContextRepository:
         if not task.graphStateJson:
             return None
         try:
+            raw_snapshot = json.loads(task.graphStateJson)
+        except (json.JSONDecodeError, TypeError):
+            raw_snapshot = None
+        if isinstance(raw_snapshot, dict) and raw_snapshot.get("workflow") == "short_medium":
+            return None
+        try:
             snapshot = deserialize_graph_snapshot(
                 task.graphStateJson,
                 expected_task_id=task.id,

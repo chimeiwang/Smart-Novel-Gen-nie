@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime
 from typing import Any, Protocol
 
 ARRAY_SECTIONS = (
@@ -104,7 +105,13 @@ class OutlineUpdatesPort(Protocol):
     async def update_foreshadowing(
         self, novel_id: str, user_id: str, foreshadowing_id: str, fields: dict[str, Any]
     ) -> dict[str, Any]: ...
-    async def upsert_outline(self, novel_id: str, user_id: str, content: str) -> dict[str, Any]: ...
+    async def upsert_outline(
+        self,
+        novel_id: str,
+        user_id: str,
+        content: str,
+        expected_updated_at: datetime | None = None,
+    ) -> dict[str, Any]: ...
     async def create_node(
         self, novel_id: str, user_id: str, fields: dict[str, Any]
     ) -> dict[str, Any]: ...
@@ -139,7 +146,14 @@ class AgentUpdatesExecutor:
         self._outlines = outlines
         self._references = references
 
-    async def apply(self, novel_id: str, user_id: str, updates: dict[str, object]) -> int:
+    async def apply(
+        self,
+        novel_id: str,
+        user_id: str,
+        updates: dict[str, object],
+        *,
+        expected_outline_updated_at: datetime | None = None,
+    ) -> int:
         count = 0
         for section, (kind, id_fields, name_field) in _ENTITY_CONFIG.items():
             items = updates.get(section)
@@ -172,7 +186,12 @@ class AgentUpdatesExecutor:
             if not isinstance(content, str):
                 raise ValueError(f"{section} 必须是完整文本")
             if kind == "outline":
-                await self._outlines.upsert_outline(novel_id, user_id, content)
+                await self._outlines.upsert_outline(
+                    novel_id,
+                    user_id,
+                    content,
+                    expected_outline_updated_at,
+                )
             else:
                 await self._lore.upsert_content(novel_id, user_id, kind, content)
             count += 1

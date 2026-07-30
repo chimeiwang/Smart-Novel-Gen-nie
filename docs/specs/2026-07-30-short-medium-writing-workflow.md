@@ -856,6 +856,8 @@ full_check
 - 只读取固定的来源大纲版本。
 - 不读取未提交工作稿。
 - 首次从 `opening` 生成时保留已提交开头正文作为固定前缀，从 `ending` 生成时保留起始结尾作为固定后缀。
+- Agent 提示必须明确固定前缀/后缀约束；Core 在完成回调内再次逐字校验。模型删除、改写或移动
+  `opening` 前缀或 `ending` 后缀时，任务失败且不创建候选版本。
 - 重新生成是用户显式发起的完整候选版本；除已确认的开头、结尾约束外，不承诺保留旧正文的未选中区域。
 - 内部分段时保持一个用户任务和一个最终候选版本。
 - 不自动编辑或校验返工。
@@ -877,6 +879,17 @@ full_check
 提示词必须保持“短静态身份 + Operation brief + 当前权威内容”，不能为本功能把所有版本和修改规则堆入五个全局 system prompt。
 
 ### 15. 错误与并发
+
+- Core 在小说行锁内检查同一用户、同一小说的活动中短篇文档任务。已有
+  `generate_outline`、`generate_manuscript` 或 `replace_selection` 命令处于
+  `pending/submitted/processing` 时，不同 `clientRequestId` 的新启动返回 409；相同请求 ID
+  仍按原命令幂等重放。
+- 中短篇 checkpoint 的 workflow 和 operation 只能由锁定后的当前
+  `WritingRunCommand.payloadJson` 决定。回调中的同名字段必须与命令一致，不能靠回调自报身份
+  绕过长篇快照校验。
+- 新产生的旧版 Agent `agent_updates` 大纲草案保存其读取到的 `Outline.updatedAt`，采用时执行
+  CAS。历史草案没有该前置条件时，只有目标内容与当前内容完全一致才允许幂等成功；任何实际覆盖
+  都明确返回冲突，不能因仓储参数可选而静默覆盖。
 
 - 工作稿版本冲突：返回 409，保留本地输入并要求用户处理。
 - 提交版本时基础版本已变化：返回 409，不创建版本。

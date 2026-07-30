@@ -8,6 +8,19 @@
 
 ReviewArtifact 是 Agent 产物正式落库前的持久中间层。
 
+## 中短篇不可变版本
+
+中短篇复用 ReviewArtifact 和 Revision 持久化蓝图、正文版本及完整 Diff，不新增 PostgreSQL
+表。人工提交和历史恢复创建 `applied` 版本；Agent 文档任务创建 `awaiting_user` 候选。候选只有
+在作者查看完整 Diff 并确认与该 Diff 绑定的 `confirmationHash` 后才能采用。
+
+版本预览、提交、采用和恢复都必须校验文档类型、章节、基础版本、当前工作稿更新时间或内容哈希。
+过期摘要、dirty 工作稿、过期基础版本和重复采用返回冲突，不能自动变基或静默覆盖。网络结果不
+确定时依靠 `clientRequestId`、taskId 或 jobId 对账并幂等重放；版本内容和 Diff 不得截断。
+
+Agent 完成回调必须在同一 Core 事务中创建候选或保存检查报告，并收敛 WritingTask 与命令终态。
+任一步失败都整体回滚，不能出现“任务完成但候选不存在”或“候选存在但任务仍运行”的状态。
+
 ### 状态
 
 | 状态 | 含义 |

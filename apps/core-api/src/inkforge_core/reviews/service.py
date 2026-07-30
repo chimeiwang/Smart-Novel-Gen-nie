@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Literal, Protocol
 
 from ..errors import ApiError
+from ..short_medium.repository import is_short_medium_artifact_key
 from .apply import resolve_apply_target
 from .schemas import ArtifactDecisionResponse, assert_status_transition
 
@@ -22,6 +23,9 @@ class ArtifactPort(Protocol):
 
     @property
     def chapter_id(self) -> str | None: ...
+
+    @property
+    def artifact_key(self) -> str | None: ...
 
 
 class ReviewRepositoryPort(Protocol):
@@ -58,6 +62,12 @@ class ReviewService:
         selected_update_refs: list[dict[str, object]] | None = None,
     ) -> ArtifactDecisionResponse:
         artifact = await self._repository.require_artifact(user_id, artifact_id)
+        if is_short_medium_artifact_key(artifact.artifact_key):
+            raise ApiError(
+                status_code=409,
+                code="SHORT_MEDIUM_VERSION_ROUTE_REQUIRED",
+                message="中短篇版本只能通过专用版本接口操作",
+            )
         if decision == "discard":
             await self._repository.discard(user_id, artifact_id)
             return ArtifactDecisionResponse(

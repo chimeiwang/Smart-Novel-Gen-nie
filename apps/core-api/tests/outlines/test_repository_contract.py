@@ -19,9 +19,9 @@ def test_every_outline_mutation_uses_transaction_and_owner_recheck() -> None:
         assert "_require_owner" in source
 
 
-def test_outline_save_checks_expected_timestamp_before_content_equality() -> None:
+def test_outline_save_checks_safe_precondition_before_content_equality() -> None:
     source = inspect.getsource(OutlineRepository.upsert_outline)
-    assert source.index("_require_expected_updated_at(") < source.index(
+    assert source.index("_require_safe_outline_precondition(") < source.index(
         "if outline.content != content:"
     )
 
@@ -115,3 +115,24 @@ def test_outline_request_accepts_json_datetime_without_relaxing_strict_fields() 
     )
 
     assert request.expectedUpdatedAt == datetime(2026, 7, 30, tzinfo=UTC)
+
+
+def test_legacy_outline_write_without_precondition_cannot_change_content() -> None:
+    from inkforge_core.outlines.repository import _require_safe_outline_precondition
+
+    current = datetime(2026, 7, 30, tzinfo=UTC)
+    with pytest.raises(ApiError) as caught:
+        _require_safe_outline_precondition(
+            current,
+            None,
+            current_content="当前大纲",
+            requested_content="旧草案覆盖",
+        )
+
+    assert caught.value.code == "OUTLINE_PRECONDITION_REQUIRED"
+    _require_safe_outline_precondition(
+        current,
+        None,
+        current_content="当前大纲",
+        requested_content="当前大纲",
+    )

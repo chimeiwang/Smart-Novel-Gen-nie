@@ -351,3 +351,29 @@ def test_command_idempotency_key_is_user_scoped() -> None:
     assert command_idempotency_key("user-2", "request-1") != command_idempotency_key(
         "user-1", "request-1"
     )
+
+
+@pytest.mark.asyncio
+async def test_short_medium_start_rejects_another_active_document_run() -> None:
+    active = command(status="processing")
+    active.payloadJson = json.dumps(
+        {
+            "workflow": "short_medium",
+            "operation": "generate_outline",
+            "documentType": "outline",
+        }
+    )
+    session = CommandSession([RowsResult([(active.payloadJson,)])])
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    with pytest.raises(ApiError) as captured:
+        await repository._require_no_active_short_medium_document_run(
+            session, "user-1", "novel-1"
+        )
+
+    assert captured.value.code == "SHORT_MEDIUM_DOCUMENT_RUN_ACTIVE"
+    rendered = str(session.statements[0].compile(dialect=postgresql.dialect()))
+    assert '"Novel"."userId"' in rendered
+    assert '"WritingTask"."novelId"' in rendered

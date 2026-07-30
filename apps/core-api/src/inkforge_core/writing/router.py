@@ -14,9 +14,10 @@ from .schemas import (
     MessageResponse,
     ResumeWritingRunRequest,
     ResumeWritingRunResponse,
-    StartWritingRunRequest,
     UpdateWritingSessionRequest,
     WritingRunResponse,
+    WritingRunStartRequest,
+    WritingRunStatusResponse,
     WritingSessionDetail,
     WritingSessionListItem,
     WritingSessionResponse,
@@ -145,11 +146,20 @@ async def add_writing_message(
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def start_writing_run(
-    body: StartWritingRunRequest,
+    body: WritingRunStartRequest,
     user: User,
     service: TaskService,
 ) -> WritingRunResponse:
     return await service.start(user.id, body)
+
+
+@router.get("/runs/{task_id}", response_model=WritingRunStatusResponse)
+async def get_writing_run_status(
+    task_id: str,
+    user: User,
+    service: TaskService,
+) -> WritingRunStatusResponse:
+    return await service.get_status(user.id, task_id)
 
 
 @router.post(

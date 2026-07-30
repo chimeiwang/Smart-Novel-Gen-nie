@@ -14,6 +14,16 @@ Agent Service 负责：
 
 Agent Service 不负责浏览器认证、数据库查询、正式业务写入、草案最终应用或计费落账。它不得接收 `DATABASE_URL`，不得导入 SQLAlchemy、asyncpg 或其他数据库客户端。
 
+### 中短篇运行
+
+- `short_medium` 只执行 `generate_outline`、`generate_manuscript`、`replace_selection` 和
+  `full_check` 四种专用操作，不复用长篇多 Agent 自动评审链。
+- 运行只信任 Core 随 QueueJob 提供的不可变来源、基础版本、当前蓝图和正文快照；不得用可变
+  `coreContext` 覆盖它们。
+- 6000 到 15000 字正文单次生成，超过 15000 字时按蓝图顺序串行分段并保存检查点。
+- 选区操作只能返回 replacement；Agent Service 不负责拼接全文。文档运行只回传一个最终候选
+  结果，全文检查只回传报告。
+
 ## 关键入口
 
 - 应用工厂：`src/inkforge_agents/app.py`

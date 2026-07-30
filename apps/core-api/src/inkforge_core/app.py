@@ -72,6 +72,9 @@ from .service_auth import (
     create_core_request_signer,
     install_service_auth_error_handler,
 )
+from .short_medium.repository import ShortMediumVersionRepository
+from .short_medium.router import router as short_medium_router
+from .short_medium.service import ShortMediumVersionService
 from .styles.internal_router import router as styles_internal_router
 from .styles.portrait_dispatcher import PortraitTaskDispatcher
 from .styles.repository import StyleRepository
@@ -148,6 +151,7 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
     billing_repository = BillingRepository(session_factory)
     writing_repository = WritingRepository(session_factory)
     review_repository = ReviewRepository(session_factory)
+    short_medium_version_repository = ShortMediumVersionRepository(session_factory)
     context_repository = WritingContextRepository(session_factory)
     writing_task_repository = WritingTaskRepository(session_factory)
     writing_command_repository = WritingRunCommandRepository(session_factory)
@@ -221,6 +225,9 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
     )
     app.state.review_repository = review_repository
     app.state.review_service = ReviewService(review_repository, artifact_applier)
+    app.state.short_medium_version_service = ShortMediumVersionService(
+        short_medium_version_repository
+    )
     context_service = WritingContextService(context_repository, novel_repository)
     app.state.writing_context_service = context_service
     tool_gateway = ToolGateway(context_repository)
@@ -420,6 +427,7 @@ def create_app(
     app.include_router(billing_router, prefix="/api/v1")
     app.include_router(writing_router, prefix="/api/v1")
     app.include_router(reviews_router, prefix="/api/v1")
+    app.include_router(short_medium_router, prefix="/api/v1")
     app.include_router(debug_router, prefix="/api/v1")
     app.include_router(references_internal_router, include_in_schema=False)
     app.include_router(styles_internal_router, include_in_schema=False)

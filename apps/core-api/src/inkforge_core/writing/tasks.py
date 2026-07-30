@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ..db.base import utc_now
 from ..db.models import Novel, WritingMessage, WritingRunCommand, WritingSession, WritingTask
 from ..errors import ApiError
+from ..short_medium.completion import finalize_short_medium_completion
 from .job_identity import build_writing_job_id
 from .message_metadata import workflow_message_metadata
 from .records import TaskRecord
@@ -28,8 +29,9 @@ from .recovery import (
 from .schemas import (
     ResumeWritingRunRequest,
     ResumeWritingRunResponse,
-    StartWritingRunRequest,
     WritingRunResponse,
+    WritingRunStartRequest,
+    WritingRunStatusResponse,
 )
 from .sse import EventSequenceGap, WritingEvent
 
@@ -47,8 +49,12 @@ logger = logging.getLogger(__name__)
 
 class WritingCommandRepositoryPort(Protocol):
     async def create_start_with_task(
-        self, user_id: str, request: StartWritingRunRequest
+        self, user_id: str, request: WritingRunStartRequest
     ) -> WritingRunResponse: ...
+
+    async def get_run_status(
+        self, user_id: str, task_id: str
+    ) -> WritingRunStatusResponse: ...
 
     async def create_resume_with_message(
         self,
@@ -354,6 +360,12 @@ class WritingTaskRepository:
                         persisted_sequence,
                         rejection_code=ALREADY_APPLIED_CODE,
                     )
+                phase = _checkpoint_phase_for_locked_command(
+                    target.command,
+                    target.task,
+                    serialized,
+                    fallback_phase=phase,
+                )
                 target.task.graphStateJson = serialized
                 target.task.phase = phase
                 target.task.updatedAt = utc_now()
@@ -456,6 +468,16 @@ class WritingTaskRepository:
                         persisted_sequence,
                         rejection_code=STATE_NOOP_CODE,
                     )
+                if (
+                    target.command is not None
+                    and _is_short_medium_command(target.command)
+                ):
+                    result = await finalize_short_medium_completion(
+                        session,
+                        task,
+                        target.command,
+                        result,
+                    )
                 if visible_response:
                     await _persist_workflow_message(
                         session,
@@ -552,10 +574,17 @@ class WritingTaskService:
         self._repository = repository
         self._dispatcher = dispatcher
 
-    async def start(self, user_id: str, request: StartWritingRunRequest) -> WritingRunResponse:
+    async def start(
+        self, user_id: str, request: WritingRunStartRequest
+    ) -> WritingRunResponse:
         response = await self._repository.create_start_with_task(user_id, request)
         await self._kick_dispatcher()
         return response
+
+    async def get_status(
+        self, user_id: str, task_id: str
+    ) -> WritingRunStatusResponse:
+        return await self._repository.get_run_status(user_id, task_id)
 
     async def resume(
         self,
@@ -622,19 +651,33 @@ class WritingCallbackService:
         checkpoint = dict(body.checkpoint)
         checkpoint[CALLBACK_JOB_ID_FIELD] = body.jobId
         serialized = json.dumps(checkpoint, ensure_ascii=False)
-        try:
-            deserialize_graph_snapshot(
-                serialized,
-                expected_task_id=body.taskId,
-                expected_user_id=user_id,
-                expected_novel_id=novel_id,
-            )
-        except InvalidGraphSnapshotError as exc:
-            raise ApiError(
-                status_code=409,
-                code="WRITING_SNAPSHOT_INVALID",
-                message=str(exc),
-            ) from exc
+        is_short_medium = checkpoint.get("workflow") == "short_medium"
+        if is_short_medium:
+            if checkpoint.get("operation") not in {
+                "generate_outline",
+                "generate_manuscript",
+                "replace_selection",
+                "full_check",
+            } or checkpoint.get("phase") not in {"generating", "completed"}:
+                raise ApiError(
+                    status_code=409,
+                    code="WRITING_SNAPSHOT_INVALID",
+                    message="中短篇检查点格式无效",
+                )
+        else:
+            try:
+                deserialize_graph_snapshot(
+                    serialized,
+                    expected_task_id=body.taskId,
+                    expected_user_id=user_id,
+                    expected_novel_id=novel_id,
+                )
+            except InvalidGraphSnapshotError as exc:
+                raise ApiError(
+                    status_code=409,
+                    code="WRITING_SNAPSHOT_INVALID",
+                    message=str(exc),
+                ) from exc
         checkpoint_sequence = _checkpoint_event_sequence(checkpoint)
         if checkpoint_sequence != body.sequence:
             raise ApiError(
@@ -643,7 +686,11 @@ class WritingCallbackService:
                 message="检查点事件序号与回调序号不一致",
             )
         phase = checkpoint.get("phase")
-        persisted_phase = phase if isinstance(phase, str) else "active"
+        persisted_phase = (
+            "active"
+            if is_short_medium
+            else phase if isinstance(phase, str) else "active"
+        )
         preparation = await self._prepare_callback(
             task_id=body.taskId,
             job_id=body.jobId,
@@ -1059,6 +1106,85 @@ def _transition_callback_command(
             sort_keys=True,
             separators=(",", ":"),
         )
+
+
+def _is_short_medium_command(command: WritingRunCommand) -> bool:
+    try:
+        payload = json.loads(command.payloadJson)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    return isinstance(payload, dict) and payload.get("workflow") == "short_medium"
+
+
+def _checkpoint_phase_for_locked_command(
+    command: WritingRunCommand | None,
+    task: WritingTask,
+    serialized: str,
+    *,
+    fallback_phase: str,
+) -> str:
+    try:
+        checkpoint = json.loads(serialized)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ApiError(
+            status_code=409,
+            code="WRITING_SNAPSHOT_INVALID",
+            message="持久写作快照不是有效 JSON",
+        ) from exc
+    if not isinstance(checkpoint, dict):
+        raise ApiError(
+            status_code=409,
+            code="WRITING_SNAPSHOT_INVALID",
+            message="持久写作快照格式无效",
+        )
+    command_payload: dict[str, Any] = {}
+    if command is not None:
+        try:
+            value = json.loads(command.payloadJson)
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise ApiError(
+                status_code=409,
+                code="WRITING_COMMAND_PAYLOAD_INVALID",
+                message="写作命令载荷无效",
+            ) from exc
+        if isinstance(value, dict):
+            command_payload = value
+    command_is_short = command_payload.get("workflow") == "short_medium"
+    checkpoint_is_short = checkpoint.get("workflow") == "short_medium"
+    if command_is_short != checkpoint_is_short:
+        raise ApiError(
+            status_code=409,
+            code="WRITING_CHECKPOINT_COMMAND_MISMATCH",
+            message="检查点 workflow 与锁定命令不一致",
+        )
+    if command_is_short:
+        if checkpoint.get("operation") != command_payload.get("operation"):
+            raise ApiError(
+                status_code=409,
+                code="WRITING_CHECKPOINT_COMMAND_MISMATCH",
+                message="检查点 operation 与锁定命令不一致",
+            )
+        if checkpoint.get("phase") not in {"generating", "completed"}:
+            raise ApiError(
+                status_code=409,
+                code="WRITING_SNAPSHOT_INVALID",
+                message="中短篇检查点阶段无效",
+            )
+        return "active"
+    try:
+        deserialize_graph_snapshot(
+            serialized,
+            expected_task_id=task.id,
+            expected_novel_id=task.novelId,
+            expected_chapter_id=task.chapterId,
+        )
+    except InvalidGraphSnapshotError as exc:
+        raise ApiError(
+            status_code=409,
+            code="WRITING_SNAPSHOT_INVALID",
+            message=str(exc),
+        ) from exc
+    return fallback_phase
 
 
 def mark_task_failed_state(task: WritingTask, code: str) -> None:

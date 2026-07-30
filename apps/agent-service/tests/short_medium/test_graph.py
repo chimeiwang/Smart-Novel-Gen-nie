@@ -206,6 +206,31 @@ async def test_prompt_uses_run_snapshot_instead_of_mutable_core_document_context
     assert "Core 权威内容" not in prompt
 
 
+@pytest.mark.parametrize(
+    ("source_kind", "required_text"),
+    [
+        ("opening", "逐字作为完整正文前缀"),
+        ("ending", "逐字作为完整正文后缀"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_prompt_marks_opening_and_ending_as_fixed_boundaries(
+    source_kind: str,
+    required_text: str,
+) -> None:
+    core = Core()
+    generator = Generator(["固定素材" + "甲" * 6_000])
+    handler = ShortMediumWritingJobHandler(core, generator)
+    job = manuscript_job(15_000)
+    job.payload["sourceKind"] = source_kind
+    job.payload["sourceText"] = "固定素材"
+
+    await handler(job)
+
+    prompt = "\n".join(message.content for message in generator.requests[0].messages)
+    assert required_text in prompt
+
+
 @pytest.mark.asyncio
 async def test_full_check_returns_report_without_document_candidate() -> None:
     core = Core()

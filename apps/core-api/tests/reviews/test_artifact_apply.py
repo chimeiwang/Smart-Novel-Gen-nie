@@ -17,6 +17,7 @@ class Artifact:
     id: str = "artifact-1"
     status: str = "awaiting_user"
     kind: str = "chapter_draft"
+    artifact_key: str | None = None
     payload: dict[str, object] | None = None
 
     def __post_init__(self) -> None:
@@ -114,6 +115,23 @@ async def test_revision_brief_cannot_be_approved() -> None:
     assert repository.transitions == []
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["approve", "revise", "discard"])
+async def test_generic_decision_rejects_short_medium_versions(decision: str) -> None:
+    repository = FakeReviewRepository(
+        Artifact(artifact_key="short-medium:manuscript:chapter-1")
+    )
+
+    with pytest.raises(ApiError) as error:
+        await ReviewService(repository, FakeApplier()).decide(
+            "user-1", "artifact-1", decision  # type: ignore[arg-type]
+        )
+
+    assert error.value.code == "SHORT_MEDIUM_VERSION_ROUTE_REQUIRED"
+    assert repository.transitions == []
+    assert repository.deleted is False
+
+
 class FakeFormalWrites:
     def __init__(self) -> None:
         self.content: str | None = None
@@ -140,9 +158,17 @@ class FakeUpdatesExecutor:
     def __init__(self) -> None:
         self.updates: dict[str, object] | None = None
 
-    async def apply(self, novel_id: str, user_id: str, updates: dict[str, object]) -> int:
+    async def apply(
+        self,
+        novel_id: str,
+        user_id: str,
+        updates: dict[str, object],
+        *,
+        expected_outline_updated_at: datetime | None = None,
+    ) -> int:
         del novel_id, user_id
         self.updates = updates
+        self.expected_outline_updated_at = expected_outline_updated_at
         return 1
 
 
@@ -192,6 +218,33 @@ async def test_formal_applier_filters_selected_agent_updates() -> None:
     )
 
     assert executor.updates == {"characters": [{"action": "update", "name": "乙"}]}
+
+
+@pytest.mark.asyncio
+async def test_formal_applier_forwards_outline_cas_from_artifact() -> None:
+    executor = FakeUpdatesExecutor()
+    applier = FormalArtifactApplier(FakeFormalWrites(), executor)
+    artifact = Artifact(
+        kind="agent_updates",
+        payload={
+            "kind": "agent_updates",
+            "baseOutlineUpdatedAt": "2026-07-30T00:00:00Z",
+            "updates": {"outlineContent": "候选大纲"},
+        },
+    )
+    artifact.novel_id = "novel-1"
+    artifact.chapter_id = None
+
+    await applier.apply(
+        artifact,
+        user_id="user-1",
+        edited_content=None,
+        selected_update_refs=None,
+    )
+
+    assert executor.expected_outline_updated_at == datetime(
+        2026, 7, 30, tzinfo=UTC
+    )
 
 
 class FormalWriteSession:

@@ -121,7 +121,7 @@ class OutlineRepository:
         novel_id: str,
         user_id: str,
         content: str,
-        expected_updated_at: datetime,
+        expected_updated_at: datetime | None = None,
     ) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
@@ -138,9 +138,11 @@ class OutlineRepository:
                         message="小说大纲不存在",
                     )
                 current_updated_at = _required_updated_at(outline.updatedAt)
-                _require_expected_updated_at(
+                _require_safe_outline_precondition(
                     current_updated_at,
                     expected_updated_at,
+                    current_content=outline.content,
+                    requested_content=content,
                 )
                 if outline.content != content:
                     outline.content = content
@@ -407,6 +409,25 @@ def _required_updated_at(value: datetime | None) -> datetime:
 def _next_updated_at(current: datetime) -> datetime:
     current_naive = current.astimezone(UTC).replace(tzinfo=None)
     return max(utc_now(), current_naive + timedelta(milliseconds=1))
+
+
+def _require_safe_outline_precondition(
+    current: datetime,
+    expected: datetime | None,
+    *,
+    current_content: str,
+    requested_content: str,
+) -> None:
+    if expected is None:
+        if current_content != requested_content:
+            raise ApiError(
+                status_code=409,
+                code="OUTLINE_PRECONDITION_REQUIRED",
+                message="旧版大纲草案缺少并发前置条件，不能覆盖当前大纲",
+                details={"currentUpdatedAt": current.isoformat()},
+            )
+        return
+    _require_expected_updated_at(current, expected)
 
 
 def _require_expected_updated_at(current: datetime, expected: datetime) -> None:

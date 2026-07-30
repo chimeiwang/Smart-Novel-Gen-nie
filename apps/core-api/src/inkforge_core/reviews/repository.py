@@ -18,6 +18,7 @@ from ..db.models import (
     WritingTask,
 )
 from ..errors import ApiError
+from ..short_medium.repository import is_short_medium_artifact_key
 from .schemas import (
     ArtifactEvaluationResponse,
     ArtifactKind,
@@ -204,6 +205,12 @@ class ReviewRepository:
                 artifact = await _owned_artifact(session, user_id, artifact_id)
                 if artifact is None:
                     return
+                if is_short_medium_artifact_key(artifact.artifactKey):
+                    raise ApiError(
+                        status_code=409,
+                        code="SHORT_MEDIUM_VERSION_ROUTE_REQUIRED",
+                        message="中短篇版本只能通过专用版本接口操作",
+                    )
                 await session.execute(
                     delete(ReviewArtifact).where(ReviewArtifact.id == artifact_id)
                 )
@@ -211,6 +218,12 @@ class ReviewRepository:
     async def create_or_revise(
         self, user_id: str, request: CreateArtifactRequest
     ) -> ReviewArtifactResponse:
+        if is_short_medium_artifact_key(request.artifactKey):
+            raise ApiError(
+                status_code=409,
+                code="SHORT_MEDIUM_VERSION_ROUTE_REQUIRED",
+                message="中短篇版本只能通过专用版本接口创建",
+            )
         async with self._session_factory() as session:
             async with session.begin():
                 task = await session.scalar(

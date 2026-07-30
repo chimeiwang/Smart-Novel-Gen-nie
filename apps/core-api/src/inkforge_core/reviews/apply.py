@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Literal, Protocol
 
 from .updates import filter_agent_updates_by_selection
@@ -49,7 +50,14 @@ class FormalWritePort(Protocol):
 
 
 class AgentUpdatesApplyPort(Protocol):
-    async def apply(self, novel_id: str, user_id: str, updates: dict[str, object]) -> int: ...
+    async def apply(
+        self,
+        novel_id: str,
+        user_id: str,
+        updates: dict[str, object],
+        *,
+        expected_outline_updated_at: datetime | None = None,
+    ) -> int: ...
 
 
 class FormalArtifactApplier:
@@ -81,7 +89,16 @@ class FormalArtifactApplier:
             )
             if not updates:
                 raise ValueError("没有选择任何可应用更新")
-            return await self._updates_executor.apply(artifact.novel_id, user_id, updates)
+            expected_outline_updated_at = _optional_datetime(
+                payload.get("baseOutlineUpdatedAt"),
+                field="baseOutlineUpdatedAt",
+            )
+            return await self._updates_executor.apply(
+                artifact.novel_id,
+                user_id,
+                updates,
+                expected_outline_updated_at=expected_outline_updated_at,
+            )
 
         content = edited_content if edited_content is not None else payload.get("content")
         if target in {"outline_content", "chapter_content"}:
@@ -117,3 +134,14 @@ def _beat_plan_from_text(content: str) -> dict[str, object]:
             }
         ],
     }
+
+
+def _optional_datetime(value: object, *, field: str) -> datetime | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{field} 必须是 ISO 8601 时间")
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{field} 必须是 ISO 8601 时间") from exc

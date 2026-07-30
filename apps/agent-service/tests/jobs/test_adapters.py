@@ -366,6 +366,38 @@ async def test_reviewer_receives_submitted_artifact_without_read_tools() -> None
 
 
 @pytest.mark.asyncio
+async def test_agent_updates_artifact_carries_outline_cas_identity() -> None:
+    core = CoreClient()
+    port = CoreArtifactPort(core)
+    state = {
+        "userId": "user-1",
+        "novelId": "novel-1",
+        "taskId": "task-1",
+        "chapterId": "chapter-1",
+        "activeAgent": "剧情",
+        "contextMessages": [
+            '{"outline":{"outline":{"id":"outline-1","content":"旧大纲",'
+            '"updatedAt":"2026-07-30T00:00:00Z"}}}'
+        ],
+        "runtimeContext": _runtime_context(),
+    }
+
+    await port.submit(
+        state,
+        {
+            "type": "propose_updates",
+            "artifactKey": "task-1:outline",
+            "updates": {"outlineContent": "新大纲"},
+        },
+        "",
+    )
+
+    assert core.artifacts[0]["payload"]["baseOutlineUpdatedAt"] == (
+        "2026-07-30T00:00:00Z"
+    )
+
+
+@pytest.mark.asyncio
 async def test_executor_marks_primary_and_reviser_modes_explicitly() -> None:
     runner = RecordingRunner()
     executor = CoreGraphAgentExecutor(runner, CoreArtifactPort(CoreClient()))  # type: ignore[arg-type]

@@ -20,14 +20,20 @@ from ..db.models import (
     WritingTask,
 )
 from ..errors import ApiError
+from ..short_medium.completion import (
+    assemble_short_medium_run_payload,
+    load_short_medium_run_source,
+)
 from .message_metadata import workflow_message_metadata
 from .records import TaskRecord
 from .recovery import validate_resume_session_binding
 from .schemas import (
     ResumeWritingRunRequest,
     ResumeWritingRunResponse,
-    StartWritingRunRequest,
+    ShortMediumStartWritingRunRequest,
     WritingRunResponse,
+    WritingRunStartRequest,
+    WritingRunStatusResponse,
 )
 from .tasks import mark_task_failed_state
 
@@ -68,7 +74,7 @@ class WritingRunCommandRepository:
         return _command_record(*row) if row is not None else None
 
     async def create_start_with_task(
-        self, user_id: str, request: StartWritingRunRequest
+        self, user_id: str, request: WritingRunStartRequest
     ) -> WritingRunResponse:
         key = command_idempotency_key(user_id, request.clientRequestId)
         existing = await self._get_existing_response(user_id, request.clientRequestId)
@@ -81,6 +87,10 @@ class WritingRunCommandRepository:
                     if existing_row is not None:
                         command, task, _owner_id = existing_row
                         return _run_response(task, command)
+                    if isinstance(request, ShortMediumStartWritingRunRequest):
+                        return await self._create_short_medium_start(
+                            session, user_id, request, key
+                        )
                     await _require_chapter(
                         session, user_id, request.novelId, request.chapterId
                     )
@@ -143,6 +153,167 @@ class WritingRunCommandRepository:
                 code="WRITING_COMMAND_CONFLICT",
                 message="写作启动请求发生并发冲突",
             ) from exc
+
+    async def _create_short_medium_start(
+        self,
+        session: AsyncSession,
+        user_id: str,
+        request: ShortMediumStartWritingRunRequest,
+        key: str,
+    ) -> WritingRunResponse:
+        source = await load_short_medium_run_source(session, user_id, request)
+        await self._require_no_active_short_medium_document_run(
+            session, user_id, request.novelId
+        )
+        payload = assemble_short_medium_run_payload(request, source)
+        agents_by_operation = {
+            "generate_outline": "剧情",
+            "generate_manuscript": "写作",
+            "replace_selection": "编辑",
+            "full_check": "校验",
+        }
+        task = WritingTask(
+            novelId=request.novelId,
+            chapterId=source.chapter_id,
+            writingSessionId=None,
+            phase="idle",
+            targetWordCount=source.target_total_word_count,
+            selectedAgents=agents_by_operation[request.operation],
+            conversationHistory=_dump_json(
+                [
+                    {
+                        "role": "user",
+                        "content": request.userInstruction
+                        or _short_medium_operation_label(request.operation),
+                    }
+                ]
+            ),
+            graphStateJson=_dump_json(
+                {
+                    **payload.model_dump(mode="json"),
+                    "eventSequence": 0,
+                    "phase": "active",
+                }
+            ),
+        )
+        session.add(task)
+        await session.flush()
+        command = _new_command(
+            task,
+            kind="start",
+            key=key,
+            payload=payload.model_dump(mode="json"),
+        )
+        session.add(command)
+        await session.flush()
+        return _run_response(task, command)
+
+    async def _require_no_active_short_medium_document_run(
+        self,
+        session: AsyncSession,
+        user_id: str,
+        novel_id: str,
+    ) -> None:
+        rows = (
+            await session.execute(
+                select(WritingRunCommand.payloadJson)
+                .join(WritingTask, WritingTask.id == WritingRunCommand.taskId)
+                .join(Novel, Novel.id == WritingTask.novelId)
+                .where(
+                    Novel.userId == user_id,
+                    WritingTask.novelId == novel_id,
+                    WritingRunCommand.status.in_(ACTIVE_COMMAND_STATUSES),
+                )
+                .with_for_update(of=WritingRunCommand)
+            )
+        ).all()
+        for row in rows:
+            payload_json = row[0]
+            if not isinstance(payload_json, str):
+                continue
+            payload = _load_json_object(payload_json, field="payloadJson")
+            if payload.get("workflow") == "short_medium" and payload.get(
+                "operation"
+            ) in {
+                "generate_outline",
+                "generate_manuscript",
+                "replace_selection",
+            }:
+                raise ApiError(
+                    status_code=409,
+                    code="SHORT_MEDIUM_DOCUMENT_RUN_ACTIVE",
+                    message="该中短篇作品已有文档任务正在处理",
+                )
+
+    async def get_run_status(
+        self, user_id: str, task_id: str
+    ) -> WritingRunStatusResponse:
+        async with self._session_factory() as session:
+            task, _owner_id = await self._require_owned_task(
+                session, user_id, task_id
+            )
+            command = await session.scalar(
+                select(WritingRunCommand)
+                .where(
+                    WritingRunCommand.taskId == task.id,
+                    WritingRunCommand.kind.in_(("start", "resume")),
+                )
+                .order_by(
+                    WritingRunCommand.createdAt.desc(),
+                    WritingRunCommand.id.desc(),
+                )
+                .limit(1)
+            )
+        payload = (
+            _load_json_object(command.payloadJson, field="payloadJson")
+            if command is not None
+            else {}
+        )
+        result = (
+            _load_json_object(command.resultJson, field="resultJson")
+            if command is not None and command.resultJson is not None
+            else {}
+        )
+        operation = payload.get("operation")
+        if operation not in {
+            "generate_outline",
+            "generate_manuscript",
+            "replace_selection",
+            "full_check",
+        }:
+            operation = None
+        error: dict[str, Any] | None = None
+        if command is not None and command.status == "failed":
+            error = {
+                "code": command.lastError
+                or result.get("code")
+                or "WRITING_RUN_FAILED"
+            }
+            if isinstance(result.get("message"), str):
+                error["message"] = result["message"]
+        candidate_version_id = result.get("candidateVersionId")
+        check_report = result.get("checkReport")
+        return WritingRunStatusResponse(
+            taskId=task.id,
+            novelId=task.novelId,
+            chapterId=task.chapterId,
+            phase=task.phase,
+            updatedAt=task.updatedAt,
+            commandId=command.id if command is not None else None,
+            commandStatus=(
+                cast(WritingCommandStatus, command.status)
+                if command is not None
+                else None
+            ),
+            operation=cast(Any, operation),
+            candidateVersionId=(
+                candidate_version_id
+                if isinstance(candidate_version_id, str)
+                else None
+            ),
+            checkReport=check_report if isinstance(check_report, dict) else None,
+            error=error,
+        )
 
     async def create_resume_with_message(
         self,
@@ -765,3 +936,12 @@ def _dump_json(value: Any) -> str:
         sort_keys=True,
         separators=(",", ":"),
     )
+
+
+def _short_medium_operation_label(operation: str) -> str:
+    return {
+        "generate_outline": "生成中短篇大纲",
+        "generate_manuscript": "生成中短篇正文",
+        "replace_selection": "修改中短篇选区",
+        "full_check": "检查中短篇全文",
+    }[operation]

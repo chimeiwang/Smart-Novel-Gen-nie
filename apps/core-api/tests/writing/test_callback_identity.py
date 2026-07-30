@@ -194,6 +194,170 @@ async def test_checkpoint_sequence_cannot_move_persisted_snapshot_backwards() ->
 
 
 @pytest.mark.asyncio
+async def test_checkpoint_cannot_self_report_short_workflow_for_long_command() -> None:
+    task = _task(sequence=20)
+    task.phase = "active"
+    command = _command("command-current", "processing")
+    session = CallbackSession(
+        task,
+        {command.id: command},
+        active_command_id=command.id,
+    )
+    repository = WritingTaskRepository(lambda: session)  # type: ignore[arg-type]
+
+    with pytest.raises(ApiError) as error:
+        await repository.save_checkpoint(
+            task.id,
+            command.id,
+            json.dumps(
+                {
+                    "workflow": "short_medium",
+                    "operation": "generate_outline",
+                    "phase": "generating",
+                    "eventSequence": 21,
+                }
+            ),
+            "active",
+            21,
+        )
+
+    assert error.value.code == "WRITING_CHECKPOINT_COMMAND_MISMATCH"
+    assert task.phase == "active"
+
+
+@pytest.mark.asyncio
+async def test_short_checkpoint_operation_must_match_locked_command() -> None:
+    task = _task(sequence=20)
+    task.phase = "active"
+    command = _command("command-current", "processing")
+    command.payloadJson = json.dumps(
+        {
+            "workflow": "short_medium",
+            "operation": "generate_outline",
+            "documentType": "outline",
+        }
+    )
+    session = CallbackSession(
+        task,
+        {command.id: command},
+        active_command_id=command.id,
+    )
+    repository = WritingTaskRepository(lambda: session)  # type: ignore[arg-type]
+
+    with pytest.raises(ApiError) as error:
+        await repository.save_checkpoint(
+            task.id,
+            command.id,
+            json.dumps(
+                {
+                    "workflow": "short_medium",
+                    "operation": "generate_manuscript",
+                    "phase": "generating",
+                    "eventSequence": 21,
+                }
+            ),
+            "active",
+            21,
+        )
+
+    assert error.value.code == "WRITING_CHECKPOINT_COMMAND_MISMATCH"
+    assert task.phase == "active"
+
+
+@pytest.mark.asyncio
+async def test_short_medium_completion_finalizes_candidate_and_terminal_state_together(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task = _task(sequence=20)
+    task.phase = "active"
+    command = _command("command-current", "processing")
+    command.payloadJson = json.dumps(
+        {"workflow": "short_medium", "operation": "generate_outline"}
+    )
+    session = CallbackSession(
+        task,
+        {command.id: command},
+        active_command_id=command.id,
+    )
+    repository = WritingTaskRepository(lambda: session)  # type: ignore[arg-type]
+    finalized_with: list[object] = []
+
+    async def finalize(
+        received_session: object,
+        received_task: WritingTask,
+        received_command: WritingRunCommand,
+        result: dict[str, Any],
+    ) -> dict[str, Any]:
+        finalized_with.extend(
+            [received_session, received_task, received_command, result]
+        )
+        return {**result, "candidateVersionId": "candidate-1"}
+
+    monkeypatch.setattr(
+        "inkforge_core.writing.tasks.finalize_short_medium_completion",
+        finalize,
+    )
+
+    acceptance = await repository.complete_with_message_and_command(
+        task.id,
+        command.id,
+        {"resultType": "short_medium_document"},
+        "",
+        21,
+    )
+
+    assert acceptance.accepted is True
+    assert finalized_with[:3] == [session, task, command]
+    assert task.phase == "completed"
+    assert command.status == "succeeded"
+    assert json.loads(command.resultJson or "{}")["candidateVersionId"] == "candidate-1"
+
+
+@pytest.mark.asyncio
+async def test_short_medium_finalize_failure_leaves_task_and_command_non_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    task = _task(sequence=20)
+    task.phase = "active"
+    command = _command("command-current", "processing")
+    command.payloadJson = json.dumps(
+        {"workflow": "short_medium", "operation": "generate_outline"}
+    )
+    session = CallbackSession(
+        task,
+        {command.id: command},
+        active_command_id=command.id,
+    )
+    repository = WritingTaskRepository(lambda: session)  # type: ignore[arg-type]
+
+    async def reject(*args: object, **kwargs: object) -> dict[str, Any]:
+        del args, kwargs
+        raise ApiError(
+            status_code=409,
+            code="SHORT_MEDIUM_BASE_VERSION_CONFLICT",
+            message="基础版本冲突",
+        )
+
+    monkeypatch.setattr(
+        "inkforge_core.writing.tasks.finalize_short_medium_completion",
+        reject,
+    )
+
+    with pytest.raises(ApiError, match="基础版本冲突"):
+        await repository.complete_with_message_and_command(
+            task.id,
+            command.id,
+            {"resultType": "short_medium_document"},
+            "",
+            21,
+        )
+
+    assert task.phase == "active"
+    assert command.status == "processing"
+    assert command.resultJson is None
+
+
+@pytest.mark.asyncio
 async def test_only_latest_terminal_command_can_retry_callback() -> None:
     task = _task(sequence=20)
     task.phase = "completed"

@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+
 import pytest
 from inkforge_core.reviews.updates import AgentUpdatesExecutor
 
@@ -30,10 +32,25 @@ class FakeLore:
 class FakeOutlines:
     def __init__(self) -> None:
         self.replaced: list[dict] | None = None
+        self.outline_write: tuple[str, str, str, datetime | None] | None = None
 
     async def replace_nodes(self, novel_id: str, user_id: str, adjustments: list[dict]):
         del novel_id, user_id
         self.replaced = adjustments
+
+    async def upsert_outline(
+        self,
+        novel_id: str,
+        user_id: str,
+        content: str,
+        expected_updated_at: datetime | None = None,
+    ):
+        self.outline_write = (
+            novel_id,
+            user_id,
+            content,
+            expected_updated_at,
+        )
 
 
 class FakeReferences:
@@ -98,6 +115,28 @@ async def test_replace_outline_tree_uses_single_repository_operation() -> None:
 
     assert count == 1
     assert outlines.replaced == adjustments
+
+
+@pytest.mark.asyncio
+async def test_outline_content_forwards_expected_updated_at() -> None:
+    outlines = FakeOutlines()
+    executor = AgentUpdatesExecutor(FakeLore(), outlines, FakeReferences())
+    expected = datetime(2026, 7, 30, tzinfo=UTC)
+
+    count = await executor.apply(
+        "novel-1",
+        "user-1",
+        {"outlineContent": "候选大纲"},
+        expected_outline_updated_at=expected,
+    )
+
+    assert count == 1
+    assert outlines.outline_write == (
+        "novel-1",
+        "user-1",
+        "候选大纲",
+        expected,
+    )
 
 
 @pytest.mark.asyncio
