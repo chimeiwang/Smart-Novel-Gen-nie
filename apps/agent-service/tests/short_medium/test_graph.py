@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from datetime import UTC, datetime
 from pathlib import Path
@@ -39,7 +40,7 @@ class Core:
         self.events: list[tuple[str | None, int, str]] = []
         self.checkpoints: list[tuple[str | None, int, dict[str, Any]]] = []
         self.completions: list[tuple[str | None, int, dict[str, Any]]] = []
-        self.failures: list[tuple[str | None, int, str]] = []
+        self.failures: list[tuple[str | None, int, str, bool]] = []
 
     async def call_tool(
         self,
@@ -98,8 +99,8 @@ class Core:
         message: str,
         recoverable: bool = True,
     ) -> None:
-        del message, recoverable
-        self.failures.append((resource.jobId, sequence, code))
+        del message
+        self.failures.append((resource.jobId, sequence, code, recoverable))
         if self.callback_failure is not None:
             raise self.callback_failure
 
@@ -139,7 +140,7 @@ class Generator:
 
 
 class RaisingGenerator:
-    def __init__(self, failure: Exception) -> None:
+    def __init__(self, failure: BaseException) -> None:
         self.failure = failure
 
     async def generate(
@@ -149,6 +150,38 @@ class RaisingGenerator:
     ) -> ModelTurnResult:
         del resource, request
         raise self.failure
+
+
+class FaultyWorkflowLog:
+    def __init__(
+        self,
+        *,
+        start_failure: Exception | None = None,
+        finish_failure: Exception | None = None,
+    ) -> None:
+        self.start_failure = start_failure
+        self.finish_failure = finish_failure
+        self.started = 0
+        self.finished: list[tuple[str, str]] = []
+
+    def start_run(self, **kwargs: object) -> None:
+        del kwargs
+        self.started += 1
+        if self.start_failure is not None:
+            raise self.start_failure
+
+    def finish_run(self, run_id: str, status: str) -> None:
+        self.finished.append((run_id, status))
+        if self.finish_failure is not None:
+            raise self.finish_failure
+
+    def record_state(
+        self,
+        run_id: str,
+        node: str,
+        changes: dict[str, Any],
+    ) -> None:
+        del run_id, node, changes
 
 
 def manuscript_job(target: int) -> QueueJob:
@@ -239,7 +272,7 @@ async def test_unknown_runtime_failure_is_reported_with_next_sequence(
 
     assert core.completions == []
     assert core.failures == [
-        ("job-short-1", 2, "SHORT_MEDIUM_RUN_FAILED")
+        ("job-short-1", 2, "SHORT_MEDIUM_RUN_FAILED", False)
     ]
     assert workflow_log.list_runs("user-1")[0].status == "错误"
 
@@ -279,11 +312,12 @@ async def test_explicit_retry_failure_is_preserved_and_retry_appends_log_segment
 
 @pytest.mark.asyncio
 async def test_failure_callback_transport_error_remains_recoverable(
-    tmp_path: Path,
 ) -> None:
     callback_failure = CoreServiceError("核心服务暂时不可用", recoverable=True)
     core = Core(callback_failure=callback_failure)
-    workflow_log = HumanWorkflowLog(tmp_path)
+    workflow_log = FaultyWorkflowLog(
+        finish_failure=LookupError("运行日志不存在"),
+    )
     handler = ShortMediumWritingJobHandler(
         core,
         RaisingGenerator(RuntimeError("模型运行异常")),
@@ -295,9 +329,9 @@ async def test_failure_callback_transport_error_remains_recoverable(
 
     assert caught.value is callback_failure
     assert core.failures == [
-        ("job-short-1", 2, "SHORT_MEDIUM_RUN_FAILED")
+        ("job-short-1", 2, "SHORT_MEDIUM_RUN_FAILED", False)
     ]
-    assert workflow_log.list_runs("user-1")[0].status == "错误"
+    assert workflow_log.finished == [("run-short-1", "错误")]
 
 
 @pytest.mark.parametrize(
@@ -331,8 +365,71 @@ async def test_pre_run_failure_is_reported_instead_of_leaving_processing(
     with pytest.raises(NonRetryableJobError):
         await handler(job)
 
-    assert core.failures == [("job-short-1", 1, expected_code)]
+    assert core.failures == [("job-short-1", 1, expected_code, False)]
     assert workflow_log.list_runs("user-1")[0].status == "错误"
+
+
+@pytest.mark.asyncio
+async def test_start_log_failure_settles_core_without_running_model() -> None:
+    core = Core()
+    generator = Generator([])
+    workflow_log = FaultyWorkflowLog(
+        start_failure=OSError("日志目录不可写"),
+        finish_failure=LookupError("运行日志不存在"),
+    )
+    handler = ShortMediumWritingJobHandler(
+        core,
+        generator,
+        workflow_log=workflow_log,
+    )
+
+    with pytest.raises(NonRetryableJobError):
+        await handler(outline_job())
+
+    assert generator.requests == []
+    assert core.failures == [
+        ("job-short-1", 1, "SHORT_MEDIUM_RUN_FAILED", False)
+    ]
+    assert workflow_log.finished == [("run-short-1", "错误")]
+
+
+@pytest.mark.asyncio
+async def test_finish_log_failure_does_not_override_completed_result() -> None:
+    core = Core()
+    workflow_log = FaultyWorkflowLog(
+        finish_failure=LookupError("运行日志不存在"),
+    )
+    handler = ShortMediumWritingJobHandler(
+        core,
+        Generator(["故事蓝图"]),
+        workflow_log=workflow_log,
+    )
+
+    await handler(outline_job())
+
+    assert len(core.completions) == 1
+    assert core.failures == []
+    assert workflow_log.finished == [("run-short-1", "完成")]
+
+
+@pytest.mark.asyncio
+async def test_cancelled_error_is_preserved_without_failure_or_fake_finish() -> None:
+    core = Core()
+    cancellation = asyncio.CancelledError()
+    workflow_log = FaultyWorkflowLog()
+    handler = ShortMediumWritingJobHandler(
+        core,
+        RaisingGenerator(cancellation),
+        workflow_log=workflow_log,
+    )
+
+    with pytest.raises(asyncio.CancelledError) as caught:
+        await handler(outline_job())
+
+    assert caught.value is cancellation
+    assert core.failures == []
+    assert workflow_log.started == 1
+    assert workflow_log.finished == []
 
 
 @pytest.mark.asyncio

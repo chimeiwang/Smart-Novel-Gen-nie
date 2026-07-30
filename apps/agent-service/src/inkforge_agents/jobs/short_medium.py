@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import re
 from collections.abc import Awaitable, Callable, Mapping
@@ -21,6 +22,8 @@ from ..queue.consumer import NonRetryableJobError
 from ..queue.repository import QueueJob
 from ..runtime.model_runtime import ModelCallContext, ModelRuntime
 from .workflow_log import WorkflowLogPort
+
+logger = logging.getLogger(__name__)
 
 _SINGLE_CALL_LIMIT = 15_000
 _STATIC_PROMPT = """你是 InkForge 的中短篇写作执行器，只处理 6000 到 80000 字作品。
@@ -142,10 +145,10 @@ class ShortMediumWritingJobHandler:
     async def __call__(self, job: QueueJob) -> None:
         if job.kind != "writing":
             raise ValueError("中短篇处理器收到非写作任务")
-        self._start_log(job)
         resource = _resource(job)
         snapshot: dict[str, Any] | None = None
         try:
+            self._start_log(job)
             try:
                 payload = ShortMediumRunPayload.model_validate(job.payload)
             except ValidationError as exc:
@@ -316,8 +319,12 @@ class ShortMediumWritingJobHandler:
         )
 
     def _finish_log(self, run_id: str, status: str) -> None:
-        if self._workflow_log is not None:
+        if self._workflow_log is None:
+            return
+        try:
             self._workflow_log.finish_run(run_id, status)
+        except Exception:
+            logger.exception("结束中短篇运行日志失败")
 
 
 def _resource(job: QueueJob) -> RunResource:
