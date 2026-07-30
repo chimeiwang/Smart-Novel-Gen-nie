@@ -308,6 +308,7 @@ short-medium:manuscript:{chapterId}
 - 通用 ReviewArtifact 的 `approve`、`revise` 和 `discard` 接口遇到这两个前缀必须拒绝并引导到文档版本接口；
 - 文档版本不允许使用通用 `discard` 物理删除；
 - 采用候选版本时，Core 必须在同一数据库事务中锁定候选 Artifact 和 Outline/Chapter，完成工作文档写入、候选状态推进及 `appliedAt` 更新。
+- Agent 候选版本创建、`WritingTask.phase=completed` 和对应 `WritingRunCommand` 成功必须在同一数据库事务中完成；候选持久化失败时任务不能先进入成功终态。
 
 #### 4.2 版本载荷
 
@@ -323,6 +324,7 @@ source: agent | manual | restore
 content
 contentHash
 sourceTaskId
+sourceJobId
 sourceOutlineVersionId
 userInstruction
 sourceKind
@@ -336,7 +338,7 @@ selectedTextHash
 
 字段规则：
 
-- `sourceTaskId` 只在 Agent 版本中必填。
+- `sourceTaskId` 和 `sourceJobId` 只在 Agent 版本中必填；`sourceJobId` 对应实际投递的 `WritingRunCommand.id`。
 - `clientRequestId` 在人工提交和恢复产生的新版本中必填；Agent 候选版本按 `taskId/jobId` 去重。
 - `sourceOutlineVersionId` 在所有正文版本中必填。
 - `userInstruction` 保存 Agent 任务的用户原话；人工提交可以为空。
