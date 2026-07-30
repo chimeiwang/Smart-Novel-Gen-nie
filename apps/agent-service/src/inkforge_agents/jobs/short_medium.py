@@ -20,6 +20,7 @@ from ..providers.base import ModelMessage, ModelTurnRequest, ModelTurnResult
 from ..queue.consumer import NonRetryableJobError
 from ..queue.repository import QueueJob
 from ..runtime.model_runtime import ModelCallContext, ModelRuntime
+from .workflow_log import WorkflowLogPort
 
 _SINGLE_CALL_LIMIT = 15_000
 _STATIC_PROMPT = """你是 InkForge 的中短篇写作执行器，只处理 6000 到 80000 字作品。
@@ -127,41 +128,77 @@ class ModelShortMediumGenerator:
         )
 
 class ShortMediumWritingJobHandler:
-    def __init__(self, core: CoreClientPort, generator: GeneratorPort) -> None:
+    def __init__(
+        self,
+        core: CoreClientPort,
+        generator: GeneratorPort,
+        *,
+        workflow_log: WorkflowLogPort | None = None,
+    ) -> None:
         self._core = core
         self._generator = generator
+        self._workflow_log = workflow_log
 
     async def __call__(self, job: QueueJob) -> None:
         if job.kind != "writing":
             raise ValueError("中短篇处理器收到非写作任务")
-        try:
-            payload = ShortMediumRunPayload.model_validate(job.payload)
-        except ValidationError as exc:
-            raise NonRetryableJobError("中短篇任务载荷无效") from exc
-
+        self._start_log(job)
         resource = _resource(job)
-        context = await self._core.call_tool(
-            resource,
-            "写作",
-            "get_writing_context",
-            {},
-        )
-        snapshot = _owned_snapshot(context, job)
+        snapshot: dict[str, Any] | None = None
         try:
+            try:
+                payload = ShortMediumRunPayload.model_validate(job.payload)
+            except ValidationError as exc:
+                raise _ShortMediumFailure(
+                    "SHORT_MEDIUM_PAYLOAD_INVALID",
+                    "中短篇任务载荷无效",
+                    sequence=1,
+                ) from exc
+            context = await self._core.call_tool(
+                resource,
+                "写作",
+                "get_writing_context",
+                {},
+            )
+            snapshot = _owned_snapshot(context, job)
             if snapshot is not None and snapshot.get("phase") == "completed":
                 await self._replay_completed(resource, snapshot)
-                return
-            await self._run(resource, payload, snapshot)
+            else:
+                await self._run(resource, payload, snapshot)
         except _ShortMediumFailure as exc:
-            sequence = exc.sequence or _next_sequence(snapshot)
-            await self._core.fail(
-                resource,
-                sequence=sequence,
-                code=exc.code,
-                message=str(exc),
-                recoverable=False,
-            )
+            try:
+                await self._core.fail(
+                    resource,
+                    sequence=exc.sequence or _next_sequence(snapshot),
+                    code=exc.code,
+                    message=str(exc),
+                    recoverable=False,
+                )
+            finally:
+                self._finish_log(job.runId, "错误")
             raise NonRetryableJobError("中短篇运行失败已上报核心服务") from exc
+        except Exception as exc:
+            if _is_explicitly_retryable(exc):
+                self._finish_log(job.runId, "等待重试")
+                raise
+            failure = _ShortMediumFailure(
+                "SHORT_MEDIUM_RUN_FAILED",
+                str(exc) or "中短篇运行失败",
+                sequence=_next_sequence(snapshot),
+            )
+            try:
+                await self._core.fail(
+                    resource,
+                    sequence=cast(int, failure.sequence),
+                    code=failure.code,
+                    message=str(failure),
+                    recoverable=False,
+                )
+            finally:
+                self._finish_log(job.runId, "错误")
+            raise NonRetryableJobError("中短篇运行失败已上报核心服务") from failure
+        else:
+            self._finish_log(job.runId, "完成")
 
     async def _run(
         self,
@@ -178,18 +215,14 @@ class ShortMediumWritingJobHandler:
                     "SEGMENT_CHECKPOINT_INVALID",
                     "分段 checkpoint 与当前任务目标不一致",
                 )
-        except _ShortMediumFailure as exc:
-            exc.sequence = sequence + 1
-            raise
 
-        sequence += 1
-        await self._core.send_event(
-            resource,
-            sequence=sequence,
-            event="agent_start",
-            data={"agentId": "写作", "operation": payload.operation},
-        )
-        try:
+            sequence += 1
+            await self._core.send_event(
+                resource,
+                sequence=sequence,
+                event="agent_start",
+                data={"agentId": "写作", "operation": payload.operation},
+            )
             for index in range(len(segments), segment_count):
                 request = _build_request(payload, segments, index, segment_count)
                 turn = await self._generator.generate(resource, request)
@@ -215,13 +248,21 @@ class ShortMediumWritingJobHandler:
                     sequence=sequence,
                     checkpoint=checkpoint,
                 )
+
+            result = _build_result(payload, segments)
+            sequence += 1
+            await self._core.complete(resource, sequence=sequence, result=result)
         except _ShortMediumFailure as exc:
             exc.sequence = sequence + 1
             raise
-
-        result = _build_result(payload, segments)
-        sequence += 1
-        await self._core.complete(resource, sequence=sequence, result=result)
+        except Exception as exc:
+            if _is_explicitly_retryable(exc):
+                raise
+            raise _ShortMediumFailure(
+                "SHORT_MEDIUM_RUN_FAILED",
+                str(exc) or "中短篇运行失败",
+                sequence=sequence + 1,
+            ) from exc
 
     async def _replay_completed(
         self,
@@ -259,6 +300,25 @@ class ShortMediumWritingJobHandler:
             result=result,
         )
 
+    def _start_log(self, job: QueueJob) -> None:
+        if self._workflow_log is None:
+            return
+        operation = job.payload.get("operation")
+        operation_name = operation if isinstance(operation, str) else "unknown"
+        chapter_id = job.payload.get("chapterId")
+        self._workflow_log.start_run(
+            run_id=job.runId,
+            task_id=job.taskId,
+            run_kind=f"中短篇：{operation_name}",
+            user_id=job.userId,
+            novel_id=job.novelId,
+            chapter_id=chapter_id if isinstance(chapter_id, str) else None,
+        )
+
+    def _finish_log(self, run_id: str, status: str) -> None:
+        if self._workflow_log is not None:
+            self._workflow_log.finish_run(run_id, status)
+
 
 def _resource(job: QueueJob) -> RunResource:
     return RunResource(
@@ -292,6 +352,14 @@ def _next_sequence(snapshot: Mapping[str, Any] | None) -> int:
         return 1
     value = snapshot.get("eventSequence", 0)
     return int(value) + 1 if isinstance(value, int) else 1
+
+
+def _is_explicitly_retryable(exc: Exception) -> bool:
+    return getattr(exc, "retryable", None) is True or getattr(
+        exc,
+        "recoverable",
+        None,
+    ) is True
 
 
 def _segment_count(payload: ShortMediumRunPayload) -> int:
@@ -461,7 +529,13 @@ def _count_text_length(content: str) -> int:
 
 
 class _ShortMediumFailure(RuntimeError):
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        sequence: int | None = None,
+    ) -> None:
         super().__init__(message)
         self.code = code
-        self.sequence: int | None = None
+        self.sequence = sequence

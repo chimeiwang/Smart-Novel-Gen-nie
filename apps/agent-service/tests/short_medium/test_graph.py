@@ -2,27 +2,40 @@ from __future__ import annotations
 
 import hashlib
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import pytest
-from inkforge_agents.clients.core import RunResource
+from inkforge_agents.clients.core import CoreServiceError, RunResource
 from inkforge_agents.jobs.short_medium import (
     ModelShortMediumGenerator,
     ShortMediumWritingJobHandler,
 )
+from inkforge_agents.observability.human_workflow_log import HumanWorkflowLog
+from inkforge_agents.observability.model_observer import WorkflowModelObserver
 from inkforge_agents.providers.base import (
     ModelMessage,
     ModelTurnRequest,
     ModelTurnResult,
     ModelUsage,
 )
+from inkforge_agents.providers.fake import FakeModelProvider
 from inkforge_agents.queue.consumer import NonRetryableJobError
 from inkforge_agents.queue.repository import QueueJob
+from inkforge_agents.runtime.model_runtime import ModelRuntime
 
 
 class Core:
-    def __init__(self, graph_state: dict[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        graph_state: dict[str, Any] | None = None,
+        *,
+        context_failure: Exception | None = None,
+        callback_failure: Exception | None = None,
+    ) -> None:
         self.graph_state = graph_state
+        self.context_failure = context_failure
+        self.callback_failure = callback_failure
         self.events: list[tuple[str | None, int, str]] = []
         self.checkpoints: list[tuple[str | None, int, dict[str, Any]]] = []
         self.completions: list[tuple[str | None, int, dict[str, Any]]] = []
@@ -36,6 +49,8 @@ class Core:
         arguments: dict[str, object],
     ) -> dict[str, Any]:
         del resource, arguments
+        if self.context_failure is not None:
+            raise self.context_failure
         assert agent_id == "写作"
         assert tool_name == "get_writing_context"
         return {
@@ -85,6 +100,8 @@ class Core:
     ) -> None:
         del message, recoverable
         self.failures.append((resource.jobId, sequence, code))
+        if self.callback_failure is not None:
+            raise self.callback_failure
 
 
 class Generator:
@@ -121,6 +138,19 @@ class Generator:
         )
 
 
+class RaisingGenerator:
+    def __init__(self, failure: Exception) -> None:
+        self.failure = failure
+
+    async def generate(
+        self,
+        resource: object,
+        request: object,
+    ) -> ModelTurnResult:
+        del resource, request
+        raise self.failure
+
+
 def manuscript_job(target: int) -> QueueJob:
     source_outline_content = "不可变蓝图"
     return QueueJob(
@@ -145,6 +175,164 @@ def manuscript_job(target: int) -> QueueJob:
         },
         createdAt=datetime.now(UTC),
     )
+
+
+def outline_job() -> QueueJob:
+    return manuscript_job(15_000).model_copy(
+        update={
+            "payload": {
+                "workflow": "short_medium",
+                "operation": "generate_outline",
+                "documentType": "outline",
+                "targetTotalWordCount": 15_000,
+                "sourceKind": "idea",
+                "sourceText": "一段灵感",
+            }
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_real_model_runtime_chain_writes_and_finishes_workflow_log(
+    tmp_path: Path,
+) -> None:
+    core = Core()
+    workflow_log = HumanWorkflowLog(tmp_path)
+    runtime = ModelRuntime(
+        FakeModelProvider(),
+        observer=WorkflowModelObserver(workflow_log),
+    )
+    handler = ShortMediumWritingJobHandler(
+        core,
+        ModelShortMediumGenerator(runtime, max_output_tokens=12_345),
+        workflow_log=workflow_log,
+    )
+
+    await handler(outline_job())
+
+    runs = workflow_log.list_runs("user-1")
+    assert len(core.checkpoints) == 1
+    assert len(core.completions) == 1
+    assert core.failures == []
+    assert len(runs) == 1
+    assert runs[0].status == "完成"
+    assert "模拟模型已完成本轮处理。" in workflow_log.read_run(
+        "run-short-1",
+        "user-1",
+    ).content
+
+
+@pytest.mark.asyncio
+async def test_unknown_runtime_failure_is_reported_with_next_sequence(
+    tmp_path: Path,
+) -> None:
+    core = Core()
+    workflow_log = HumanWorkflowLog(tmp_path)
+    handler = ShortMediumWritingJobHandler(
+        core,
+        RaisingGenerator(RuntimeError("模型运行异常")),
+        workflow_log=workflow_log,
+    )
+
+    with pytest.raises(NonRetryableJobError):
+        await handler(manuscript_job(15_000))
+
+    assert core.completions == []
+    assert core.failures == [
+        ("job-short-1", 2, "SHORT_MEDIUM_RUN_FAILED")
+    ]
+    assert workflow_log.list_runs("user-1")[0].status == "错误"
+
+
+@pytest.mark.parametrize("attribute", ["recoverable", "retryable"])
+@pytest.mark.asyncio
+async def test_explicit_retry_failure_is_preserved_and_retry_appends_log_segment(
+    tmp_path: Path,
+    attribute: str,
+) -> None:
+    failure_type = type("RetryFailure", (RuntimeError,), {attribute: True})
+    failure = failure_type("依赖服务暂时不可用")
+    core = Core()
+    workflow_log = HumanWorkflowLog(tmp_path)
+    handler = ShortMediumWritingJobHandler(
+        core,
+        RaisingGenerator(failure),
+        workflow_log=workflow_log,
+    )
+
+    with pytest.raises(failure_type) as caught:
+        await handler(outline_job())
+
+    assert caught.value is failure
+    assert core.failures == []
+    assert workflow_log.list_runs("user-1")[0].status == "等待重试"
+    await ShortMediumWritingJobHandler(
+        core,
+        Generator(["故事蓝图"]),
+        workflow_log=workflow_log,
+    )(outline_job())
+
+    detail = workflow_log.read_run("run-short-1", "user-1")
+    assert detail.summary.status == "完成"
+    assert detail.content.count("中短篇：generate_outline") == 2
+
+
+@pytest.mark.asyncio
+async def test_failure_callback_transport_error_remains_recoverable(
+    tmp_path: Path,
+) -> None:
+    callback_failure = CoreServiceError("核心服务暂时不可用", recoverable=True)
+    core = Core(callback_failure=callback_failure)
+    workflow_log = HumanWorkflowLog(tmp_path)
+    handler = ShortMediumWritingJobHandler(
+        core,
+        RaisingGenerator(RuntimeError("模型运行异常")),
+        workflow_log=workflow_log,
+    )
+
+    with pytest.raises(CoreServiceError) as caught:
+        await handler(manuscript_job(15_000))
+
+    assert caught.value is callback_failure
+    assert core.failures == [
+        ("job-short-1", 2, "SHORT_MEDIUM_RUN_FAILED")
+    ]
+    assert workflow_log.list_runs("user-1")[0].status == "错误"
+
+
+@pytest.mark.parametrize(
+    ("stage", "expected_code"),
+    [
+        ("payload", "SHORT_MEDIUM_PAYLOAD_INVALID"),
+        ("context", "SHORT_MEDIUM_RUN_FAILED"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_pre_run_failure_is_reported_instead_of_leaving_processing(
+    tmp_path: Path,
+    stage: str,
+    expected_code: str,
+) -> None:
+    core = Core(
+        context_failure=(
+            RuntimeError("上下文响应异常") if stage == "context" else None
+        )
+    )
+    workflow_log = HumanWorkflowLog(tmp_path)
+    job = outline_job()
+    if stage == "payload":
+        job.payload.pop("operation")
+    handler = ShortMediumWritingJobHandler(
+        core,
+        Generator([]),
+        workflow_log=workflow_log,
+    )
+
+    with pytest.raises(NonRetryableJobError):
+        await handler(job)
+
+    assert core.failures == [("job-short-1", 1, expected_code)]
+    assert workflow_log.list_runs("user-1")[0].status == "错误"
 
 
 @pytest.mark.asyncio
@@ -281,7 +469,9 @@ async def test_15001_chars_uses_serial_segments_and_only_intermediate_checkpoint
 
 
 @pytest.mark.asyncio
-async def test_completed_checkpoint_replays_callback_without_model_call() -> None:
+async def test_completed_checkpoint_replays_callback_without_model_call(
+    tmp_path: Path,
+) -> None:
     result = {
         "resultType": "short_medium_document",
         "operation": "generate_manuscript",
@@ -301,12 +491,18 @@ async def test_completed_checkpoint_replays_callback_without_model_call() -> Non
         }
     )
     generator = Generator([])
-    handler = ShortMediumWritingJobHandler(core, generator)
+    workflow_log = HumanWorkflowLog(tmp_path)
+    handler = ShortMediumWritingJobHandler(
+        core,
+        generator,
+        workflow_log=workflow_log,
+    )
 
     await handler(manuscript_job(15_000))
 
     assert generator.requests == []
     assert core.completions == [("job-short-1", 8, result)]
+    assert workflow_log.list_runs("user-1")[0].status == "完成"
 
 
 @pytest.mark.asyncio
