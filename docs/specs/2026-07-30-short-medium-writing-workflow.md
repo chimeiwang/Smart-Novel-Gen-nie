@@ -3,10 +3,10 @@
 ## 状态
 
 - 日期：2026-07-30
-- 状态：设计方向已确认，规格待用户复核
-- 实施基线：`codex/short-medium-writers-room` 分支的 `942d734`
+- 状态：设计与 Codex 协作方式已确认，进入实现
+- 实施基线：`codex/short-medium-writers-room` 分支的 `043ffac`
 - 数据库：禁止修改 PostgreSQL schema
-- 范围：6000～80000 字中短篇的创建、可编辑大纲、完整正文、选区 AI 修改、显式版本、恢复和 Diff
+- 范围：6000～80000 字中短篇的创建、可编辑大纲、完整正文、选区 AI 修改、显式版本、恢复、Diff，以及使用同一公开 API 的本地认证 CLI 和 Codex Skill
 
 ## 背景
 
@@ -72,6 +72,9 @@
 - 用户能够比较任意两个版本、采用候选版本并恢复历史版本。
 - 正文生成只读取最新已提交并采用的大纲版本。
 - 每个正文版本必须记录其来源大纲版本。
+- 用户完成一次交互式登录后，可以让 Codex 通过本地 CLI 操作同一作品、工作稿、Agent 任务和版本历史。
+- CLI 与 Web 使用同一 Core 公共 API、登录身份、归属校验、并发控制和版本语义，不提供旁路能力。
+- Codex Skill 必须把自然语言要求约束为“拉取内容、限定修改范围、保存工作稿、展示 Diff、等待确认、提交或采用”的协作流程。
 - 长篇连载现有章节、Beat Plan、逐章写作和审核行为保持不变。
 - 不修改 PostgreSQL schema。
 
@@ -89,6 +92,9 @@
 - 不新增或修改 PostgreSQL 枚举。
 - 不提供 `short_medium` 与 `long_serial` 的自动双向迁移。
 - 不实现多人实时协作编辑。
+- 不建立常驻本地代理、MCP 服务或浏览器自动化来代替第一期 CLI。
+- 不允许 Codex 接收、读取、打印或记录用户密码、Cookie、JWT 或其他登录凭据。
+- 不允许 CLI 访问 Agent Service、PostgreSQL、`DATABASE_URL` 或 `/internal/v1/**`。
 
 ## 核心术语
 
@@ -689,6 +695,22 @@ Diff 层级：
 
 ### 13. 公共 API
 
+#### 13.0 作品列表与创建
+
+扩展现有接口，不注册 CLI 专用业务路由：
+
+```text
+GET /api/v1/novels?storyLengthProfile=short_medium
+POST /api/v1/novels
+```
+
+- 列表项返回 `storyLengthProfile` 和 `targetTotalWordCount`，使 Web 与 CLI 不需要根据字数或标题猜测篇幅 Profile。
+- 创建请求新增 `sourceKind=idea|opening|ending|outline|mixed`、完整 `sourceText` 和 `clientRequestId`。
+- Core 对 `short_medium` 执行 6000～80000 校验，并在同一事务中初始化 Novel、Outline、WritingBible 和唯一“全文” Chapter。
+- `sourceText` 不得静默截断。Core 统一创建一个 `kind=freeform_markdown`、`status=applied`、`artifactKey=short-medium:source:{novelId}` 的不可变来源 Artifact，payload 保存 `sourceKind` 和完整 `sourceText`；它不是大纲或正文版本。
+- `opening` 额外初始化正文工作稿，`outline` 额外初始化大纲工作稿；其他素材不在创建时猜测应写入哪一份用户文档。
+- 相同用户和 `clientRequestId` 的创建重试返回第一次结果，不重复创建作品。
+
 #### 13.1 版本读取
 
 新增：
@@ -705,13 +727,16 @@ GET /api/v1/novels/{novelId}/version-diff?fromVersionId=...&toVersionId=...
 
 #### 13.2 人工提交
 
-新增：
+新增预览和提交：
 
 ```text
+POST /api/v1/novels/{novelId}/versions/preview
 POST /api/v1/novels/{novelId}/versions
 ```
 
-请求至少包含：
+预览请求至少包含 `documentType`、可空 `chapterId` 和 `baseVersionId`。Core 从已保存工作稿读取完整内容，返回相对当前版本的完整 Diff、字数变化、`expectedUpdatedAt`、`contentHash` 和一次性确认摘要；预览不创建版本。
+
+提交请求至少包含：
 
 ```text
 clientRequestId
@@ -724,6 +749,7 @@ summary
 ```
 
 Core 从当前 Outline 或 Chapter 读取完整工作稿，客户端不重复上传另一个可能漂移的完整正文副本。
+提交时必须重新核对预览返回的 `baseVersionId`、`expectedUpdatedAt` 和 `contentHash`；任一变化都返回 409，不创建版本。
 
 #### 13.3 候选版本操作
 
@@ -766,6 +792,31 @@ npm run api:check
 ```
 
 Web 只能使用生成客户端类型，不手写重复 DTO。
+
+#### 13.6 显式短篇任务与持久终态
+
+扩展现有写作任务接口，不根据自由文本猜测短篇操作：
+
+```text
+POST /api/v1/writing/runs
+GET /api/v1/writing/runs/{taskId}
+GET /api/v1/writing/runs/{taskId}/events
+```
+
+短篇请求使用可判别 Operation：
+
+```text
+generate_outline
+generate_manuscript
+replace_selection
+full_check
+```
+
+- `generate_manuscript` 固定携带 `sourceOutlineVersionId`。
+- `replace_selection` 固定携带 `documentType`、`baseVersionId`、完整内容 hash、Unicode 码点起止位置和选区 hash。
+- `full_check` 固定携带正文版本 ID，只生成持久检查报告。
+- `GET /writing/runs/{taskId}` 是任务终态权威，返回状态、错误、Operation、候选版本 ID 或检查报告。
+- SSE 用于增量观察；断线重连后必须读取持久终态对账，不能因为丢失结束事件重复启动任务。
 
 ### 14. Agent 运行与提示词
 
@@ -866,6 +917,95 @@ Web 只能使用生成客户端类型，不手写重复 DTO。
 - Agent 运行期间禁用冲突操作，但不清空用户尚未提交的输入。
 - 同一上下文只突出一个主按钮。
 
+### 17. 本地 CLI 与 Codex Skill
+
+#### 17.1 角色分工
+
+- CLI 是 Core 公共 API 的本地、可测试、JSON-first 客户端，不包含另一套业务规则。
+- Skill 是 Codex 的操作协议，负责把用户自然语言映射为 CLI 命令、修改范围和人工确认门禁。
+- Web 和 CLI 共享服务端工作稿、任务和版本历史；任一端修改后，另一端重新拉取即可继续。
+- CLI 不替代产品 Agent。Codex 可以直接编辑本地快照并保存人工工作稿，也可以启动产品 Agent 获得候选版本，两种来源必须保持不同版本语义。
+
+#### 17.2 登录与凭据
+
+- 用户只在真实 TTY 中执行一次 `auth.login`，密码使用隐藏输入。
+- `auth.login` 调用现有 `POST /api/v1/auth/login`，不得支持 `--password`、环境变量密码、stdin JSON 密码或管道密码。
+- 会话 Cookie 只写入操作系统安全凭据库；Windows 使用 Windows Credential Manager。没有安全后端时登录失败，不回退到明文文件。
+- 非敏感配置只保存 profile、规范化后的 Core origin 和最近登录用户名。
+- 远程 Core origin 必须使用 HTTPS；HTTP 只允许 loopback。
+- Codex 只可执行 `auth.whoami` 验证身份。遇到 401 时立即停止并要求用户在真实终端重新登录。
+- `auth.logout` 先调用公开退出接口，再删除本机凭据；Cookie、JWT 和密码不得进入参数、JSON、stdout、日志或错误栈。
+
+#### 17.3 进程与交换协议
+
+- 第一版采用仓库内一次性 CLI 进程，不增加常驻服务或 MCP。
+- 除交互式登录外，每次调用从 stdin 接收一个 UTF-8 JSON 对象，stdout 只输出一个 JSON 对象。
+- `short.agent.watch` 输出 JSONL；日志和人类提示只写 stderr。
+- 大纲、正文和完整 Diff 通过 UTF-8 文件交换；stdout 只返回绝对路径、hash 和 manifest，禁止为了终端方便截断长文本。
+- 同一次写请求使用稳定 `clientRequestId`。网络结果不确定时只查询或重放同一 ID，不生成新 ID。
+
+#### 17.4 最小命令面
+
+```text
+auth.login
+auth.whoami
+auth.logout
+
+short.list
+short.create
+short.pull
+short.draft.save
+
+short.version.preview
+short.version.submit
+short.version.list
+short.version.get
+short.version.diff
+short.version.adopt
+short.version.restore
+
+short.agent.start
+short.agent.watch
+```
+
+- `short.pull` 导出 `outline.md`、`manuscript.txt` 和 `manifest.json`；如果目标目录已有未同步本地修改则拒绝覆盖。
+- `short.draft.save` 只保存工作稿，绝不创建版本。
+- `short.version.preview` 只计算服务端已保存工作稿相对当前版本的 Diff。
+- `short.version.submit` 只在用户看过预览并明确确认同一摘要后执行。
+- `short.agent.start` 只接受 `outline|manuscript|selection|full_check`，不开放任意 Agent 组合。
+- `short.agent.watch` 监听同一 taskId，并用持久任务读取接口核对终态。
+- `short.version.adopt` 和 `short.version.restore` 都必须先显示完整 Diff，再获得独立确认。
+
+#### 17.5 Codex 协作门禁
+
+- 每次写操作前执行 `auth.whoami`；身份或作品归属不匹配立即停止。
+- “保存”“先记下来”“改到工作稿”只能执行 `short.draft.save`，不能解释为提交版本。
+- “让 Agent 修改”只授权启动一次候选任务，不能解释为自动采用候选。
+- “恢复某版本”先授权查看 Diff；查看完成后必须获得针对目标版本和当前版本的独立确认才可恢复。
+- 用户限定选区时，Codex 只能修改该范围；发现选区外问题只能报告，不能顺手修复。
+- 有未提交工作稿时，不启动依赖 current 版本的 Agent、不采用候选、不恢复历史。
+- 409 时保留本地文件并报告冲突，不自动覆盖、合并、变基或切换到最新版本重试。
+- 不把一次要求扩展成“生成蓝图、自动采用、生成正文、自动采用”的无人值守流水线。
+
+#### 17.6 Skill 部署
+
+重写现有同名本机 Skill `inkforge-short-story-operator`，不并存第二个相似触发 Skill。最小结构：
+
+```text
+inkforge-short-story-operator/
+├── SKILL.md
+├── agents/openai.yaml
+├── scripts/operator.ps1
+└── references/
+    ├── cli-contract.md
+    └── recovery.md
+```
+
+- `operator.ps1` 只负责定位仓库、保证 UTF-8/TTY 并启动 CLI，不包含业务判断。
+- `SKILL.md` 保持简短，只描述触发条件、固定边界和标准协作顺序。
+- 命令字段、文件 manifest 和错误恢复细节放入 references。
+- Skill 必须先用旧 Skill 运行压力场景并记录错误行为，再重写并重复相同场景，证明不会自动成版、自动采用、越过选区或绕过登录。
+
 ## 影响范围
 
 ### `apps/web`
@@ -902,6 +1042,18 @@ Web 只能使用生成客户端类型，不手写重复 DTO。
 ### `packages/api-client`
 
 - 由 Core OpenAPI 重新生成版本与 Outline 保存类型。
+
+### `tools/inkforge-cli`
+
+- 新增一次性 Python CLI、公开 API 客户端、系统凭据适配、JSON/JSONL 输出和文件 manifest。
+- CLI 只依赖公开 Core origin；不得导入 Core 数据库仓储或 Agent Service 运行时。
+- Windows 提供薄 PowerShell 入口，供用户和 Codex 使用同一命令。
+
+### 本机 Codex Skill
+
+- 原位重写 `%CODEX_HOME%/skills/inkforge-short-story-operator` 的操作语义和 wrapper。
+- 删除旧 Skill 的 `/short-story/**`、立即成为 current、lore 写入和 quality skip/complete 等失效或越界说明。
+- 使用场景测试验证人工确认、选区限制、冲突恢复和凭据边界。
 
 ### 文档
 
@@ -989,6 +1141,29 @@ Web 只能使用生成客户端类型，不手写重复 DTO。
 - [ ] 8 万字正文 Diff 可以查看到尾部。
 - [ ] Diff 和版本内容不静默截断。
 
+### CLI 与登录
+
+- [ ] `auth.login` 只能在 TTY 隐藏输入密码，凭据只进入 Windows Credential Manager。
+- [ ] 密码参数、环境变量密码、JSON 密码和管道密码均被拒绝。
+- [ ] 无安全凭据后端时登录失败，磁盘上不存在 Cookie/JWT 明文回退文件。
+- [ ] 非 loopback HTTP Core origin 被拒绝。
+- [ ] CLI 只访问 `/api/v1/**`，不会读取 `DATABASE_URL` 或访问 Agent Service 和 `/internal/v1/**`。
+- [ ] 除 watch 外每次调用严格输出一个 JSON；watch 输出可逐行解析 JSONL。
+- [ ] 8 万字正文和完整 Diff 通过 UTF-8 文件返回且可读到末尾。
+- [ ] `short.pull` 不覆盖有本地修改的快照。
+- [ ] 401 时 Codex 停止并要求用户重新登录，不尝试从浏览器、日志或配置中提取会话。
+
+### Codex Skill
+
+- [ ] “保存改好的大纲”只保存工作稿，不创建版本。
+- [ ] “让 Agent 改这段”只创建候选版本，不自动采用。
+- [ ] 人工提交严格执行保存工作稿、预览 Diff、用户确认、提交版本。
+- [ ] 候选采用和历史恢复都在展示完整 Diff 后要求一次独立确认。
+- [ ] 选区修改后未选中内容逐字不变；发现选区外问题只报告。
+- [ ] 版本 409 冲突不会触发自动覆盖、自动合并或切换基础版本重试。
+- [ ] 网络超时使用原 `clientRequestId` 对账，不重复创建任务或版本。
+- [ ] 未登录、身份不匹配或凭据失效时不调用任何写接口。
+
 ### 恢复与并发
 
 - [ ] Agent 任务可从最后 checkpoint 恢复且不重复生成版本。
@@ -1017,8 +1192,9 @@ Web 只能使用生成客户端类型，不手写重复 DTO。
 - 完成中短篇创建和唯一“全文” Chapter。
 - 完成可编辑 Outline、工作稿自动保存和人工提交版本。
 - 完成版本列表、详情、当前版本和基础 Diff。
+- 完成 CLI 登录、作品列表、拉取、工作稿保存、版本预览、人工提交和恢复。
 
-第一阶段结束时，用户不依赖 Agent 也能完成大纲、正文、提交版本、查看历史和恢复。
+第一阶段结束时，用户不依赖 Agent 且可以选择 Web 或 Codex，完成大纲、正文、提交版本、查看历史和恢复。
 
 ### 第二阶段：Agent 候选版本与选区修改
 
@@ -1026,6 +1202,7 @@ Web 只能使用生成客户端类型，不手写重复 DTO。
 - 完成采用、暂不采用和过期候选恢复处理。
 - 完成选区请求、只返回替换文本、Core 确定性合并。
 - 完成 Agent 版本 Diff。
+- 完成 CLI 启动/观察任务，以及 Skill 的候选采用和选区协作流程。
 
 ### 第三阶段：长正文生成与真实验收
 
@@ -1033,5 +1210,6 @@ Web 只能使用生成客户端类型，不手写重复 DTO。
 - 完成正文来源大纲版本绑定和过期提示。
 - 完成可选全文检查报告。
 - 使用四类起始素材运行真实端到端流程。
+- 完成 Skill 压力场景复测和 Codex 真实端到端协作验收。
 
 每个阶段都必须形成可运行、可测试的纵向能力。不得先铺设大量不可使用的协议和 UI，再等待最后一次性联调。
