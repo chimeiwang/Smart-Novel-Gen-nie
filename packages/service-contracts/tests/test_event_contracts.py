@@ -232,3 +232,71 @@ def test_callbacks_reject_naive_datetime(model: type[BaseModel]) -> None:
 
     with pytest.raises(ValidationError):
         model.model_validate(payload)
+
+
+def test_completion_callback_validates_short_medium_result() -> None:
+    payload = {
+        "protocolVersion": "1.1",
+        "eventId": "event-1",
+        "jobId": "job-1",
+        "runId": "run-1",
+        "taskId": "task-1",
+        "sequence": 1,
+        "result": {
+            "resultType": "short_medium_replacement",
+            "operation": "replace_selection",
+            "documentType": "manuscript",
+            "replacement": "新文本",
+            "baseVersionId": "version-1",
+            "baseContentHash": "a" * 64,
+            "selectionStart": 1,
+            "selectionEnd": 3,
+            "selectedTextHash": "b" * 64,
+        },
+        "occurredAt": OCCURRED_AT,
+    }
+
+    assert RunCompletionCallback.model_validate(payload).result["replacement"] == "新文本"
+
+    payload["result"] = {**payload["result"], "content": "不允许携带完整正文"}
+    with pytest.raises(ValidationError):
+        RunCompletionCallback.model_validate(payload)
+
+
+def test_completion_callback_rejects_unknown_short_medium_result_type() -> None:
+    payload = {
+        "protocolVersion": "1.1",
+        "eventId": "event-1",
+        "jobId": "job-1",
+        "runId": "run-1",
+        "taskId": "task-1",
+        "sequence": 1,
+        "result": {
+            "resultType": "short_medium_unknown",
+            "operation": "generate_outline",
+        },
+        "occurredAt": OCCURRED_AT,
+    }
+
+    with pytest.raises(ValidationError):
+        RunCompletionCallback.model_validate(payload)
+
+
+def test_completion_callback_rejects_short_medium_operation_without_result_type() -> None:
+    payload = {
+        "protocolVersion": "1.1",
+        "eventId": "event-1",
+        "jobId": "job-1",
+        "runId": "run-1",
+        "taskId": "task-1",
+        "sequence": 1,
+        "result": {
+            "operation": "generate_outline",
+            "documentType": "outline",
+            "content": "大纲",
+        },
+        "occurredAt": OCCURRED_AT,
+    }
+
+    with pytest.raises(ValidationError):
+        RunCompletionCallback.model_validate(payload)

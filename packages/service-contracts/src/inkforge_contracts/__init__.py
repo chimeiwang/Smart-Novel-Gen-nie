@@ -11,6 +11,14 @@ from .quality import (
     ConsistencyScores,
 )
 from .runs import CreativeOperationKind, RunAccepted, RunRequest, RunStatusResponse
+from .short_medium import (
+    ShortMediumCheckResult,
+    ShortMediumDocumentResult,
+    ShortMediumDocumentType,
+    ShortMediumOperation,
+    ShortMediumReplacementResult,
+    ShortMediumRunPayload,
+)
 from .tools import ToolCallRequest, ToolCallResult
 from .version import PROTOCOL_VERSION
 
@@ -33,6 +41,12 @@ __all__ = [
     "RunFailureCallback",
     "RunRequest",
     "RunStatusResponse",
+    "ShortMediumCheckResult",
+    "ShortMediumDocumentResult",
+    "ShortMediumDocumentType",
+    "ShortMediumOperation",
+    "ShortMediumReplacementResult",
+    "ShortMediumRunPayload",
     "ServiceJwtClaims",
     "ServiceScope",
     "ToolCallRequest",
