@@ -434,6 +434,31 @@ def _build_request(
                 if index == segment_count - 1
                 else "固定结尾只能出现在最终一段，本段不得提前输出或改写它；"
             )
+    manuscript_mode_brief = (
+        "存在正文基础版本：以 baseContent 为底稿进行全文修订，保留仍然有效的内容，"
+        "只为满足本轮 userInstruction 和当前蓝图进行必要改动；"
+        "本轮最终产物是修订后的完整正文，不输出补丁或修改说明；"
+        if payload.baseVersionId is not None
+        else "不存在正文基础版本：依据当前蓝图和本轮 userInstruction 创作新正文；"
+    )
+    manuscript_segment_brief = (
+        "本次为单段生成，一次性输出完整正文；"
+        if segment_count == 1
+        else (
+            f"本次为多段生成，只输出完整正文的第 {index + 1}/{segment_count} 个连续单元；"
+            + (
+                "completedContent 为空，从正文开头写起；"
+                if index == 0
+                else "completedContent 是本轮新正文已经完成的连续前缀，"
+                "紧接其后写当前单元，不总结、不重复；"
+            )
+            + (
+                "本单元在自然场景边界结束，不提前完成蓝图结尾；"
+                if index < segment_count - 1
+                else "本单元承接 completedContent 并完成蓝图结尾；"
+            )
+        )
+    )
     operation_brief = {
         "generate_outline": (
             "输出一份完整、可人工编辑的故事蓝图，不使用长篇卷、阶段或章节组。"
@@ -441,10 +466,16 @@ def _build_request(
             "实际代价和结尾兑现；所有节点写清前因后果，不写空泛创作建议。"
         ),
         "generate_manuscript": (
-            f"只输出正文内部第 {index + 1}/{segment_count} 段；"
+            f"{manuscript_mode_brief}"
+            f"{manuscript_segment_brief}"
             f"{fixed_source_brief}"
-            "使用场景、行动、误判和后果呈现信息，避免先解释世界再开始故事；"
-            "与已完成正文自然衔接，不总结、不重复既有段落。"
+            "在固定前后缀等硬约束内，冲突时依次服从本轮 userInstruction、"
+            "当前 sourceOutlineContent、baseContent 和通用创作原则；"
+            "先在内部映射蓝图节点与正文职责，同一事件只完整叙述一次，确保时间、空间和因果成立；"
+            "目标字数和蓝图局部估算只用于控制结构比例，不通过重复说明凑字，也不因接近目标而截断场景；"
+            "除非本轮 userInstruction 或蓝图明确要求，只输出作品正文，"
+            "不输出幕、高潮、写作说明等蓝图标签；"
+            "完成蓝图指定的核心兑现和结尾动作后立即结束，不追加总结性尾声。"
         ),
         "replace_selection": (
             "只返回替换文本，不返回完整大纲或正文，不复述前后文，选区外内容不得改变。"

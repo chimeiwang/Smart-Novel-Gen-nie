@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -449,6 +450,50 @@ async def test_15000_chars_uses_one_model_call_and_one_final_result() -> None:
 
 
 @pytest.mark.asyncio
+async def test_single_call_manuscript_prompt_uses_complete_creation_contract() -> None:
+    core = Core()
+    generator = Generator(["甲" * 6_000])
+    handler = ShortMediumWritingJobHandler(core, generator)
+
+    await handler(manuscript_job(8_000))
+
+    prompt_context = json.loads(generator.requests[0].messages[1].content)
+    operation_brief = prompt_context["operationBrief"]
+    assert "一次性输出完整正文" in operation_brief
+    assert "同一事件只完整叙述一次" in operation_brief
+    assert "目标字数和蓝图局部估算只用于控制结构比例" in operation_brief
+    assert "只输出作品正文" in operation_brief
+
+
+@pytest.mark.asyncio
+async def test_manuscript_prompt_uses_base_content_as_revision_draft() -> None:
+    core = Core()
+    generator = Generator(["乙" * 6_000])
+    handler = ShortMediumWritingJobHandler(core, generator)
+    base_content = "原正文"
+    user_instruction = "压缩重复内容并修复因果"
+    job = manuscript_job(8_000)
+    job.payload.update(
+        {
+            "baseVersionId": "manuscript-version-1",
+            "baseContent": base_content,
+            "baseContentHash": hashlib.sha256(
+                base_content.encode("utf-8")
+            ).hexdigest(),
+            "userInstruction": user_instruction,
+        }
+    )
+
+    await handler(job)
+
+    prompt_context = json.loads(generator.requests[0].messages[1].content)
+    assert "全文修订" in prompt_context["operationBrief"]
+    assert "保留仍然有效的内容" in prompt_context["operationBrief"]
+    assert prompt_context["request"]["baseContent"] == base_content
+    assert prompt_context["request"]["userInstruction"] == user_instruction
+
+
+@pytest.mark.asyncio
 async def test_generate_outline_returns_one_document_result() -> None:
     core = Core()
     generator = Generator(["故事蓝图"])
@@ -563,6 +608,12 @@ async def test_15001_chars_uses_serial_segments_and_only_intermediate_checkpoint
     assert [item[2]["completedSegmentCount"] for item in core.checkpoints] == [1, 2]
     assert core.checkpoints[0][2]["phase"] == "generating"
     assert core.checkpoints[1][2]["phase"] == "completed"
+    first_context = json.loads(generator.requests[0].messages[1].content)
+    second_context = json.loads(generator.requests[1].messages[1].content)
+    assert "第 1/2 个连续单元" in first_context["operationBrief"]
+    assert first_context["completedContent"] == ""
+    assert "第 2/2 个连续单元" in second_context["operationBrief"]
+    assert second_context["completedContent"] == "甲" * 3_000
 
 
 @pytest.mark.asyncio
