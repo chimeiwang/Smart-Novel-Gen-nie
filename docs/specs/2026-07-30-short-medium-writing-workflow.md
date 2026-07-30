@@ -903,6 +903,24 @@ full_check
 - 版本内容或 Diff 不得静默截断。
 - 通用 ReviewArtifact 创建、批准、返工或丢弃命中 `short-medium:*` 时返回明确错误，不能绕过版本服务。
 
+#### 15.1 中短篇运行日志与异常收敛
+
+- 中短篇写作处理器必须复用现有 `WorkflowLogPort`。在读取上下文和首次模型调用前，以
+  `runId/taskId/userId/novelId/chapterId` 和当前 Operation 初始化一次运行记录；恢复执行时在同一
+  `runId` 日志中追加新的运行段，不能让模型观察器在没有运行记录时写入。
+- 正常完成、已完成 checkpoint 回放、业务校验失败和未预期运行异常都必须结束本次运行日志，并写入
+  与实际结果一致的状态。
+- `_ShortMediumFailure` 继续使用稳定错误码向 Core 回调失败，并作为不可重试作业结束。
+- 模型、计费、日志观察器或其他运行层抛出的未分类 `Exception` 不能直接越过业务结算。处理器必须先用
+  稳定错误码 `SHORT_MEDIUM_RUN_FAILED` 向 Core 回调失败，再把当前队列作业结算为不可重试失败，
+  避免出现 Agent 队列已经终态但 Core 任务仍停在 `processing`。
+- 如果失败回调本身因可恢复的 Core 基础设施错误失败，则保留现有异常的 `recoverable` 属性交给队列
+  重试；再次执行时必须读取最后一个持久 checkpoint，不能重复已经保存的分段。
+- Agent 进程被取消或直接终止时不得伪造业务失败。未确认完成的队列租约依赖现有过期恢复机制重新领取，
+  并从 Core 持久 checkpoint 继续。
+- Core 的持久命令对账仍是最终兜底：当 Agent 队列已返回 `failed/cancelled` 且回调没有成功写入时，
+  对账必须把命令和任务收敛到错误终态，不能永久保留活动命令。
+
 ### 16. 前端设计
 
 中短篇在现有 WorkspaceShell 内使用简化外壳，不复制失败实现中的大型独立作家室。
@@ -1204,6 +1222,12 @@ inkforge-short-story-operator/
 ### 恢复与并发
 
 - [ ] Agent 任务可从最后 checkpoint 恢复且不重复生成版本。
+- [ ] 中短篇模型调用使用真实 `ModelRuntime + WorkflowModelObserver` 时，首个模型响应可以写入已初始化的
+  人工运行日志，不因缺少 `start_run` 失败。
+- [ ] 中短篇正常完成、完成 checkpoint 回放和失败路径都结束运行日志；恢复尝试在同一日志中追加运行段。
+- [ ] 中短篇未分类运行异常会向 Core 写入 `SHORT_MEDIUM_RUN_FAILED` 并结束命令，不能遗留
+  `processing` 任务。
+- [ ] 失败回调暂时不可用时，队列从最后 checkpoint 重试；已保存分段只生成一次。
 - [ ] 同一文档并发提交只允许一个基于当前版本成功。
 - [ ] 人工提交和恢复的 `clientRequestId` 重试返回第一次创建的版本。
 - [ ] 候选采用的 `clientRequestId` 重试返回第一次采用结果。
