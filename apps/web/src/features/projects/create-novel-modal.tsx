@@ -15,6 +15,16 @@ interface CreateNovelModalProps {
   onClose: () => void;
 }
 
+type ShortMediumSourceKind = "idea" | "opening" | "ending" | "outline" | "mixed";
+
+const SHORT_SOURCE_OPTIONS: Array<{ value: ShortMediumSourceKind; label: string }> = [
+  { value: "idea", label: "一段灵感" },
+  { value: "opening", label: "已有开头" },
+  { value: "ending", label: "已有结尾" },
+  { value: "outline", label: "简略大纲" },
+  { value: "mixed", label: "混合素材" },
+];
+
 export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
   const router = useRouter();
   const [pending, setPending] = useState(false);
@@ -27,6 +37,12 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
   const [coreSellingPoint, setCoreSellingPoint] = useState("");
   const [readerPromise, setReaderPromise] = useState("");
   const [firstChapterGoal, setFirstChapterGoal] = useState("");
+  const [sourceKind, setSourceKind] = useState<ShortMediumSourceKind>("idea");
+  const [sourceText, setSourceText] = useState("");
+  const [clientRequestId, setClientRequestId] = useState(
+    () => globalThis.crypto.randomUUID(),
+  );
+  const shortMedium = storyLengthProfile === "short_medium";
 
   const handleSubmit = async (formData: FormData) => {
     setPending(true);
@@ -34,16 +50,20 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
       const result = requireApiData(await browserApi.POST("/api/v1/novels", {
         body: {
           name: String(formData.get("name") ?? ""),
-          summary: String(formData.get("summary") ?? "") || null,
+          summary: shortMedium ? null : String(formData.get("summary") ?? "") || null,
           storyLengthProfile,
           targetTotalWordCount: Number(targetTotalWordCount) || null,
+          clientRequestId: shortMedium ? clientRequestId : null,
+          sourceKind: shortMedium ? sourceKind : null,
+          sourceText: shortMedium ? sourceText : null,
           genre: genre || null,
-          protagonist: protagonist || null,
-          coreSellingPoint: coreSellingPoint || null,
-          readerPromise: readerPromise || null,
-          firstChapterGoal: firstChapterGoal || null,
+          protagonist: shortMedium ? null : protagonist || null,
+          coreSellingPoint: shortMedium ? null : coreSellingPoint || null,
+          readerPromise: shortMedium ? null : readerPromise || null,
+          firstChapterGoal: shortMedium ? null : firstChapterGoal || null,
         },
       }));
+      setClientRequestId(globalThis.crypto.randomUUID());
       onClose();
       router.push(`/workspace/${result.novelId}`);
       router.refresh();
@@ -54,7 +74,7 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
 
   const selectStoryLengthProfile = (profile: StoryLengthProfile) => {
     setStoryLengthProfile(profile);
-    setTargetTotalWordCount(profile === "short_medium" ? "80000" : "1000000");
+    setTargetTotalWordCount(profile === "short_medium" ? "20000" : "1000000");
   };
 
   if (!isOpen) return null;
@@ -70,7 +90,11 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
         </div>
         <div className="modal-body">
           <form action={handleSubmit} className="stack">
-            <p className="muted">先补齐几个写作锚点。创建后会自动生成第一章、默认大纲、剧情进度和作品圣经。</p>
+            <p className="muted">
+              {shortMedium
+                ? "从灵感、开头、结尾或简略大纲开始。创建后由你决定何时把蓝图和正文提交成版本。"
+                : "先补齐几个写作锚点。创建后会自动生成第一章、默认大纲、剧情进度和作品圣经。"}
+            </p>
             <input type="hidden" name="storyLengthProfile" value={storyLengthProfile} />
             <label className="stack">
               <span>小说名称</span>
@@ -99,7 +123,10 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
                     >
                       <span>{config.label}</span>
                       <small>
-                        {config.targetWords[0]}-{config.targetWords[1]} 字 · {config.chapterCount[0]}-{config.chapterCount[1]} 章
+                        {config.targetWords[0]}-{config.targetWords[1]} 字
+                        {config.chapterCount
+                          ? ` · ${config.chapterCount[0]}-${config.chapterCount[1]} 章`
+                          : " · 蓝图 + 全文"}
                       </small>
                     </button>
                   );
@@ -112,10 +139,41 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
                 className="input"
                 name="targetTotalWordCount"
                 inputMode="numeric"
+                min={shortMedium ? 6000 : 1}
+                max={shortMedium ? 80000 : undefined}
+                required={shortMedium}
                 value={targetTotalWordCount}
                 onChange={(e) => setTargetTotalWordCount(e.target.value)}
               />
             </label>
+            {shortMedium ? (
+              <>
+                <label className="stack">
+                  <span>起始素材类型</span>
+                  <select
+                    className="input"
+                    name="sourceKind"
+                    value={sourceKind}
+                    onChange={(event) => setSourceKind(event.target.value as ShortMediumSourceKind)}
+                  >
+                    {SHORT_SOURCE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="stack">
+                  <span>完整起始素材</span>
+                  <textarea
+                    className="textarea short-source-text"
+                    name="sourceText"
+                    required
+                    placeholder="粘贴你的灵感、开头、结尾或简略大纲。内容会完整保存，不会自动截断。"
+                    value={sourceText}
+                    onChange={(event) => setSourceText(event.target.value)}
+                  />
+                </label>
+              </>
+            ) : null}
             <div className="onboarding-grid">
               <label className="stack">
                 <span>题材/频道</span>
@@ -127,7 +185,7 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
                   onChange={(e) => setGenre(e.target.value)}
                 />
               </label>
-              <label className="stack">
+              {!shortMedium ? <label className="stack">
                 <span>主角一句话</span>
                 <input
                   className="input"
@@ -136,9 +194,9 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
                   value={protagonist}
                   onChange={(e) => setProtagonist(e.target.value)}
                 />
-              </label>
+              </label> : null}
             </div>
-            <label className="stack">
+            {!shortMedium ? <label className="stack">
               <span>作品简介</span>
               <textarea
                 className="textarea"
@@ -147,8 +205,8 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
                 value={summary}
                 onChange={(e) => setSummary(e.target.value)}
               />
-            </label>
-            <label className="stack">
+            </label> : null}
+            {!shortMedium ? <label className="stack">
               <span>核心卖点</span>
               <input
                 className="input"
@@ -157,8 +215,8 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
                 value={coreSellingPoint}
                 onChange={(e) => setCoreSellingPoint(e.target.value)}
               />
-            </label>
-            <div className="onboarding-grid">
+            </label> : null}
+            {!shortMedium ? <div className="onboarding-grid">
               <label className="stack">
                 <span>读者承诺</span>
                 <input
@@ -179,9 +237,13 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
                   onChange={(e) => setFirstChapterGoal(e.target.value)}
                 />
               </label>
-            </div>
+            </div> : null}
             <div className="row">
-              <button className="button" type="submit" disabled={pending || !name.trim()}>
+              <button
+                className="button"
+                type="submit"
+                disabled={pending || !name.trim() || (shortMedium && !sourceText.trim())}
+              >
                 {pending ? "创建中..." : "新建小说"}
               </button>
               <button className="button ghost" type="button" onClick={onClose} disabled={pending}>

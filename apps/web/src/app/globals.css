@@ -3256,3 +3256,173 @@ body:has(.marketing-page) .user-info-bar {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+
+/* 中短篇使用双文档主画布和紧凑操作栏，不复用长篇章节编排三栏。 */
+.short-medium-shell {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(760px, 1fr) minmax(300px, 360px);
+  gap: 10px;
+  min-height: calc(100vh - 116px);
+}
+
+.short-medium-editor-panel,
+.short-medium-agent-panel {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.short-medium-toolbar,
+.short-version-drawer-header,
+.short-version-diff > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.short-document-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.short-document-tabs button {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.short-document-tabs button.active {
+  border-color: var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.short-medium-editor {
+  display: block;
+  width: 100%;
+  min-height: calc(100vh - 184px);
+  padding: 28px clamp(28px, 6vw, 92px);
+  resize: none;
+  border: 0;
+  border-radius: 0;
+  background: var(--panel);
+  font-size: 16px;
+  line-height: 1.8;
+}
+
+.short-medium-editor:focus {
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+
+.short-medium-agent-panel .panel-body {
+  position: sticky;
+  top: 0;
+}
+
+.short-agent-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.short-agent-actions .button {
+  justify-content: center;
+}
+
+.agent-running {
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-soft);
+  color: var(--muted);
+}
+
+.short-check-report {
+  max-height: 360px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-inset);
+  white-space: pre-wrap;
+}
+
+.short-version-drawer {
+  position: fixed;
+  z-index: 60;
+  top: 12px;
+  right: 12px;
+  bottom: 12px;
+  width: min(680px, calc(100vw - 40px));
+  overflow: auto;
+  box-shadow: var(--shadow-modal);
+}
+
+.short-version-list {
+  display: grid;
+  gap: 1px;
+  padding: 10px;
+  background: var(--border);
+}
+
+.short-version-item {
+  display: grid;
+  grid-template-columns: 64px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: 0;
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.short-version-item:hover {
+  background: var(--panel-soft);
+}
+
+.short-version-diff {
+  padding-bottom: 14px;
+}
+
+.short-version-diff-content {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.diff-block {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.diff-block pre {
+  margin: 0;
+  padding: 8px 10px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.diff-block pre[aria-label="删除内容"] {
+  background: var(--danger-soft);
+}
+
+.diff-block pre[aria-label="新增内容"] {
+  background: var(--success-soft);
+}
+
+.short-version-diff > .button {
+  margin: 0 12px;
+}

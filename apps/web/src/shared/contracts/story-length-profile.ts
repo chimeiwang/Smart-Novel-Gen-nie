@@ -5,9 +5,9 @@ export type StoryLengthProfile = typeof STORY_LENGTH_PROFILES[number];
 export type StoryLengthProfileConfig = {
   label: string;
   targetWords: [number, number];
-  chapterCount: [number, number];
-  plotUnits: [number, number];
-  chapterWords: [number, number];
+  chapterCount: [number, number] | null;
+  plotUnits: [number, number] | null;
+  chapterWords: [number, number] | null;
   planningFocus: string;
 };
 
@@ -16,11 +16,11 @@ export const DEFAULT_STORY_LENGTH_PROFILE: StoryLengthProfile = "long_serial";
 export const STORY_LENGTH_PROFILE_CONFIG: Record<StoryLengthProfile, StoryLengthProfileConfig> = {
   short_medium: {
     label: "中短篇",
-    targetWords: [30_000, 100_000],
-    chapterCount: [8, 25],
-    plotUnits: [3, 5],
-    chapterWords: [3_000, 5_000],
-    planningFocus: "先从一句灵感孵化故事核心，再收束为单主线、少量关键设定和完整结局承诺。",
+    targetWords: [6_000, 80_000],
+    chapterCount: null,
+    plotUnits: null,
+    chapterWords: null,
+    planningFocus: "围绕单一核心冲突组织蓝图和全文，压缩人物、线索与场景，并确保结尾兑现开篇承诺。",
   },
   long_serial: {
     label: "长篇连载",
@@ -47,5 +47,8 @@ export function formatStoryLengthProfile(profile: unknown, targetTotalWordCount?
   const config = STORY_LENGTH_PROFILE_CONFIG[normalized];
   const [minWords, maxWords] = config.targetWords;
   const target = targetTotalWordCount ? `目标约 ${targetTotalWordCount} 字` : `默认 ${minWords}-${maxWords} 字`;
-  return `${config.label}（${target}，${config.chapterCount[0]}-${config.chapterCount[1]} 章）`;
+  const structure = config.chapterCount
+    ? `，${config.chapterCount[0]}-${config.chapterCount[1]} 章`
+    : "，蓝图 + 全文";
+  return `${config.label}（${target}${structure}）`;
 }

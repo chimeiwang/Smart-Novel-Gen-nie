@@ -23,6 +23,15 @@ test("工作区外壳常驻挂载三类主要面板", async () => {
   assert.doesNotMatch(source, /check\.status === "pending" \|\| check\.status === "failed"/);
 });
 
+test("中短篇作品进入简化双文档工作台而不是长篇三栏流程", async () => {
+  const shellUrl = new URL("../workspace-shell.tsx", import.meta.url);
+  const source = await readFile(shellUrl, "utf8");
+
+  assert.match(source, /novel\.storyLengthProfile === "short_medium"/);
+  assert.match(source, /<ShortMediumWorkspace/);
+  assert.match(source, /targetTotalWordCount/);
+});
+
 test("审核内容与审核弹窗使用独立 portal host", async () => {
   const conversationUrl = new URL("../../writing/writing-conversation.tsx", import.meta.url);
   const source = await readFile(conversationUrl, "utf8");

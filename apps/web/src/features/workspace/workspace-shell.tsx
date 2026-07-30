@@ -9,6 +9,7 @@ import { ChapterList } from "@/features/chapters/chapter-list";
 import { ChapterEditor } from "@/features/editor/chapter-editor";
 import { flushActiveChapterSave } from "@/features/editor/chapter-save-navigation";
 import { countUnhandledQualityChecks } from "@/features/editor/quality-presentation";
+import { ShortMediumWorkspace } from "@/features/short-medium/short-medium-workspace";
 import { LibraryPane } from "./library-pane";
 import { SmartWritingPanel } from "./smart-writing-panel";
 import {
@@ -77,6 +78,37 @@ export function WorkspaceShell({
       setSwitchingView(null);
     }
   };
+
+  if (novel.storyLengthProfile === "short_medium" && currentChapter) {
+    return (
+      <main className="page stack workspace-page">
+        <header className="panel workspace-shell-header">
+          <div className="workspace-shell-summary">
+            <Link href="/" className="muted">← 返回</Link>
+            <div>
+              <h1 className="title-lg">{novel.name}</h1>
+              <div className="meta">
+                <span className="badge">中短篇</span>
+                <span className="badge">目标 {novel.targetTotalWordCount ?? 20_000} 字</span>
+              </div>
+            </div>
+          </div>
+          <LogoutButton />
+        </header>
+        <ShortMediumWorkspace
+          userId={currentUser.id}
+          novelId={novel.id}
+          targetTotalWordCount={novel.targetTotalWordCount ?? 20_000}
+          chapter={{
+            id: currentChapter.id,
+            title: currentChapter.title,
+            content: currentChapter.content,
+            updatedAt: currentChapter.updatedAt,
+          }}
+        />
+      </main>
+    );
+  }
 
   return (
     <main className="page stack workspace-page">

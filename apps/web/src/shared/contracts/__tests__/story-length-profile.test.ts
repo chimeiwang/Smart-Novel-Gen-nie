@@ -15,8 +15,8 @@ describe("story length profile contract", () => {
   });
 
   it("keeps novella and long serial planning ranges distinct", () => {
-    assert.deepEqual(STORY_LENGTH_PROFILE_CONFIG.short_medium.targetWords, [30_000, 100_000]);
-    assert.deepEqual(STORY_LENGTH_PROFILE_CONFIG.short_medium.chapterCount, [8, 25]);
+    assert.deepEqual(STORY_LENGTH_PROFILE_CONFIG.short_medium.targetWords, [6_000, 80_000]);
+    assert.equal(STORY_LENGTH_PROFILE_CONFIG.short_medium.chapterCount, null);
     assert.deepEqual(STORY_LENGTH_PROFILE_CONFIG.long_serial.targetWords, [300_000, 1_000_000]);
     assert.deepEqual(STORY_LENGTH_PROFILE_CONFIG.long_serial.chapterCount, [80, 300]);
   });
@@ -24,6 +24,7 @@ describe("story length profile contract", () => {
   it("formats target word count for Agent context", () => {
     assert.match(formatStoryLengthProfile("short_medium", 80_000), /中短篇/);
     assert.match(formatStoryLengthProfile("short_medium", 80_000), /80000/);
+    assert.doesNotMatch(formatStoryLengthProfile("short_medium", 80_000), /章/);
     assert.match(formatStoryLengthProfile("long_serial", null), /长篇连载/);
   });
 });
