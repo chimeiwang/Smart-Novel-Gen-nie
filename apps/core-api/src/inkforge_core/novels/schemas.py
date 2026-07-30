@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class StrictModel(BaseModel):
@@ -12,6 +12,7 @@ class StrictModel(BaseModel):
 
 type ChapterStatus = Literal["drafting", "review", "completed"]
 type StoryLengthProfile = Literal["short_medium", "long_serial"]
+type ShortMediumSourceKind = Literal["idea", "opening", "ending", "outline", "mixed"]
 type StyleSourceType = Literal["manual", "agent"]
 type ReferenceType = Literal["note", "web", "book", "image", "custom"]
 type RagDocumentStatus = Literal["disabled", "ready", "failed"]
@@ -41,11 +42,32 @@ class CreateNovelRequest(StrictModel):
     summary: str | None = None
     storyLengthProfile: StoryLengthProfile
     targetTotalWordCount: int | None = Field(default=None, gt=0)
+    clientRequestId: str | None = Field(default=None, min_length=16, max_length=128)
+    sourceKind: ShortMediumSourceKind | None = None
+    sourceText: str | None = None
     genre: str | None = None
     protagonist: str | None = None
     coreSellingPoint: str | None = None
     readerPromise: str | None = None
     firstChapterGoal: str | None = None
+
+    @model_validator(mode="after")
+    def validate_short_medium_source(self) -> CreateNovelRequest:
+        if self.storyLengthProfile == "short_medium":
+            if self.clientRequestId is None or self.sourceKind is None:
+                raise ValueError("中短篇创建必须提供请求标识和素材类型")
+            if self.sourceText is None or not self.sourceText.strip():
+                raise ValueError("中短篇创建必须提供起始素材")
+            if self.targetTotalWordCount is None:
+                raise ValueError("中短篇创建必须提供目标字数")
+            if not 6_000 <= self.targetTotalWordCount <= 80_000:
+                raise ValueError("中短篇目标字数必须在 6000 到 80000 之间")
+        elif any(
+            value is not None
+            for value in (self.clientRequestId, self.sourceKind, self.sourceText)
+        ):
+            raise ValueError("长篇创建不能携带中短篇起始素材字段")
+        return self
 
 
 class CreateNovelResponse(StrictModel):
@@ -88,6 +110,8 @@ class NovelResponse(StrictModel):
     summary: str | None
     storyProgress: str | None
     appliedStyleId: str | None
+    storyLengthProfile: StoryLengthProfile | None = None
+    targetTotalWordCount: int | None = None
     createdAt: datetime
     updatedAt: datetime
 

@@ -1776,6 +1776,11 @@ export interface components {
             storyLengthProfile: components["schemas"]["StoryLengthProfile"];
             /** Targettotalwordcount */
             targetTotalWordCount?: number | null;
+            /** Clientrequestid */
+            clientRequestId?: string | null;
+            sourceKind?: components["schemas"]["ShortMediumSourceKind"] | null;
+            /** Sourcetext */
+            sourceText?: string | null;
             /** Genre */
             genre?: string | null;
             /** Protagonist */
@@ -2258,6 +2263,9 @@ export interface components {
             storyProgress: string | null;
             /** Appliedstyleid */
             appliedStyleId: string | null;
+            storyLengthProfile?: components["schemas"]["StoryLengthProfile"] | null;
+            /** Targettotalwordcount */
+            targetTotalWordCount?: number | null;
             /**
              * Createdat
              * Format: date-time
@@ -2273,13 +2281,20 @@ export interface components {
         OutlineContentRequest: {
             /** Content */
             content: string;
+            /**
+             * Expectedupdatedat
+             * Format: date-time
+             */
+            expectedUpdatedAt: string;
         };
         /** OutlineContentResponse */
         OutlineContentResponse: {
-            /** Content */
-            content: string;
             /** Id */
             id: string;
+            /** Content */
+            content: string;
+            /** Contenthash */
+            contentHash: string;
             /**
              * Createdat
              * Format: date-time
@@ -2844,6 +2859,8 @@ export interface components {
             /** Acceptancecriteria */
             acceptanceCriteria: string;
         };
+        /** @enum {string} */
+        ShortMediumSourceKind: "idea" | "opening" | "ending" | "outline" | "mixed";
         /** StartWritingRunRequest */
         StartWritingRunRequest: {
             /** Clientrequestid */
@@ -3281,6 +3298,9 @@ export interface components {
             storyProgress: string | null;
             /** Appliedstyleid */
             appliedStyleId: string | null;
+            storyLengthProfile?: components["schemas"]["StoryLengthProfile"] | null;
+            /** Targettotalwordcount */
+            targetTotalWordCount?: number | null;
             /**
              * Createdat
              * Format: date-time
@@ -4140,7 +4160,9 @@ export interface operations {
     };
     list_novels_api_v1_novels_get: {
         parameters: {
-            query?: never;
+            query?: {
+                storyLengthProfile?: components["schemas"]["StoryLengthProfile"] | null;
+            };
             header?: never;
             path?: never;
             cookie?: {

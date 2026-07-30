@@ -25,6 +25,7 @@ type OutlinePanelProps = {
   novelId: string;
   outline: {
     content: string;
+    updatedAt: string;
   } | null;
   outlineNodes?: OutlineNodeDto[];
   onChanged?: () => void;
@@ -179,7 +180,10 @@ export function OutlinePanel({
       async () => {
         requireApiData(await browserApi.PUT("/api/v1/novels/{novel_id}/outline", {
           params: { path: { novel_id: novelId } },
-          body: { content },
+          body: {
+            content,
+            expectedUpdatedAt: outline?.updatedAt ?? "",
+          },
         }));
       },
       "总纲已保存",

@@ -20,6 +20,7 @@ from .schemas import (
 @dataclass(frozen=True, slots=True)
 class NovelCreation:
     user_id: str
+    client_request_id: str | None
     name: str
     summary: str | None
     story_progress: str | None
@@ -31,7 +32,10 @@ class NovelCreation:
     notes: str | None
     first_chapter_title: str
     first_chapter_order: int
+    chapter_content: str
     outline_content: str
+    source_kind: str | None
+    source_text: str | None
     current_stage: str
     current_goal: str | None
 
@@ -39,7 +43,9 @@ class NovelCreation:
 class NovelRepositoryPort(Protocol):
     async def create_novel(self, creation: NovelCreation) -> dict[str, str]: ...
     async def list_dashboard(self, user_id: str) -> DashboardResponse: ...
-    async def list_novels(self, user_id: str) -> list[NovelResponse]: ...
+    async def list_novels(
+        self, user_id: str, story_length_profile: str | None = None
+    ) -> list[NovelResponse]: ...
     async def get_novel(self, novel_id: str, user_id: str) -> NovelResponse: ...
     async def get_workspace(
         self, novel_id: str, user_id: str, chapter_id: str | None
@@ -90,23 +96,34 @@ class NovelService:
             )
             or None
         )
-        defaults = {"short_medium": 80_000, "long_serial": 1_000_000}
+        short_medium = request.storyLengthProfile == "short_medium"
+        source_kind = request.sourceKind if short_medium else None
+        source_text = request.sourceText if short_medium else None
+        initial_content = source_text or ""
+        target_total_word_count = request.targetTotalWordCount
+        if target_total_word_count is None:
+            if short_medium:
+                raise RuntimeError("中短篇请求通过校验后缺少目标字数")
+            target_total_word_count = 1_000_000
         result = await self._repository.create_novel(
             NovelCreation(
                 user_id=user_id,
+                client_request_id=request.clientRequestId,
                 name=name,
                 summary=_clean_optional(request.summary),
                 story_progress=f"第一章目标：{goal}" if goal else None,
                 story_length_profile=request.storyLengthProfile,
-                target_total_word_count=request.targetTotalWordCount
-                or defaults[request.storyLengthProfile],
+                target_total_word_count=target_total_word_count,
                 genre=_clean_optional(request.genre),
                 core_selling_point=_clean_optional(request.coreSellingPoint),
                 reader_promise=_clean_optional(request.readerPromise),
                 notes=notes,
-                first_chapter_title="第一章",
+                first_chapter_title="全文" if short_medium else "第一章",
                 first_chapter_order=1,
-                outline_content="",
+                chapter_content=initial_content if source_kind == "opening" else "",
+                outline_content=initial_content if source_kind == "outline" else "",
+                source_kind=source_kind,
+                source_text=source_text,
                 current_stage="开篇",
                 current_goal=goal,
             )
@@ -116,8 +133,10 @@ class NovelService:
     async def dashboard(self, user_id: str) -> DashboardResponse:
         return await self._repository.list_dashboard(user_id)
 
-    async def list_novels(self, user_id: str) -> list[NovelResponse]:
-        return await self._repository.list_novels(user_id)
+    async def list_novels(
+        self, user_id: str, story_length_profile: str | None = None
+    ) -> list[NovelResponse]:
+        return await self._repository.list_novels(user_id, story_length_profile)
 
     async def get_novel(self, user_id: str, novel_id: str) -> NovelResponse:
         return await self._repository.get_novel(novel_id, user_id)

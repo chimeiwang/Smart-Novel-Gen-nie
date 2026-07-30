@@ -371,7 +371,10 @@ uv run pytest apps/core-api/tests/writing/test_short_medium_runs.py apps/core-ap
   "baseVersionId": "version-id",
   "baseContentHash": "sha256",
   "sourceOutlineVersionId": "outline-version-id",
-  "selection": {"start": 1, "end": 3, "selectedTextHash": "sha256"},
+  "selectionStart": 1,
+  "selectionEnd": 3,
+  "selectedText": "原选区",
+  "selectedTextHash": "sha256",
   "userInstruction": "只加强冲突"
 }
 ```

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 OutlineKind = Literal["stage", "plot_unit", "chapter_group"]
 OutlineStatus = Literal["planned", "in_progress", "completed", "skipped"]
@@ -13,8 +13,18 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
+def _parse_json_datetime(value: object) -> object:
+    if isinstance(value, str):
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return value
+
+
+JsonDatetime = Annotated[datetime, BeforeValidator(_parse_json_datetime)]
+
+
 class OutlineContentRequest(StrictModel):
     content: str
+    expectedUpdatedAt: JsonDatetime
 
 
 class CreateOutlineNodeRequest(StrictModel):
@@ -70,8 +80,10 @@ class UpdateForeshadowingRequest(StrictModel):
     status: Literal["active", "paid_off", "abandoned"] | None = None
 
 
-class OutlineContentResponse(OutlineContentRequest):
+class OutlineContentResponse(StrictModel):
     id: str
+    content: str
+    contentHash: str
     createdAt: datetime
     updatedAt: datetime
 

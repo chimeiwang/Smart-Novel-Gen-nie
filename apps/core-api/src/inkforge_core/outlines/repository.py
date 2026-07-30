@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from sqlalchemy import delete, select, text, update
@@ -9,6 +9,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ..db.base import utc_now
 from ..db.models import Chapter, Foreshadowing, Novel, Outline, OutlineNode, PlotProgress
 from ..errors import ApiError
 from .validation import OutlineNodeSnapshot, validate_outline_node
@@ -115,8 +116,41 @@ class OutlineRepository:
                 if outcome.rowcount != 1:
                     raise self._foreshadowing_not_found()
 
-    async def upsert_outline(self, novel_id: str, user_id: str, content: str) -> dict[str, Any]:
-        return await self._upsert_singleton(novel_id, user_id, Outline, {"content": content})
+    async def upsert_outline(
+        self,
+        novel_id: str,
+        user_id: str,
+        content: str,
+        expected_updated_at: datetime,
+    ) -> dict[str, Any]:
+        async with self._session_factory() as session:
+            async with session.begin():
+                await self._require_owner(session, novel_id, user_id)
+                outline = await session.scalar(
+                    select(Outline)
+                    .where(Outline.novelId == novel_id)
+                    .with_for_update()
+                )
+                if outline is None:
+                    raise ApiError(
+                        status_code=404,
+                        code="OUTLINE_NOT_FOUND",
+                        message="小说大纲不存在",
+                    )
+                current_updated_at = _required_updated_at(outline.updatedAt)
+                _require_expected_updated_at(
+                    current_updated_at,
+                    expected_updated_at,
+                )
+                if outline.content != content:
+                    outline.content = content
+                    outline.updatedAt = _next_updated_at(current_updated_at)
+                    await session.flush()
+                result = _dict(outline)
+                result["contentHash"] = hashlib.sha256(
+                    outline.content.encode("utf-8")
+                ).hexdigest()
+        return result
 
     async def upsert_plot(
         self, novel_id: str, user_id: str, fields: dict[str, Any]
@@ -362,3 +396,27 @@ class OutlineRepository:
     @staticmethod
     def _foreshadowing_not_found() -> ApiError:
         return ApiError(status_code=404, code="FORESHADOWING_NOT_FOUND", message="伏笔不存在")
+
+
+def _required_updated_at(value: datetime | None) -> datetime:
+    if value is None:
+        raise RuntimeError("大纲更新时间缺失")
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _next_updated_at(current: datetime) -> datetime:
+    current_naive = current.astimezone(UTC).replace(tzinfo=None)
+    return max(utc_now(), current_naive + timedelta(milliseconds=1))
+
+
+def _require_expected_updated_at(current: datetime, expected: datetime) -> None:
+    normalized_expected = (
+        expected.replace(tzinfo=UTC) if expected.tzinfo is None else expected.astimezone(UTC)
+    )
+    if normalized_expected != current:
+        raise ApiError(
+            status_code=409,
+            code="OUTLINE_VERSION_CONFLICT",
+            message="大纲已在其他位置更新，请保留当前草稿并重新加载",
+            details={"currentUpdatedAt": current.isoformat()},
+        )

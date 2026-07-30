@@ -212,9 +212,9 @@ flowchart TD
 - `storyLengthProfile` 必须为 `short_medium`。
 - `targetTotalWordCount` 必须为 6000～80000。
 - 起始素材正文必须非空，禁止静默截断。
-- `Novel.summary` 兼容保存用户起始素材原文。
-- `WritingBible.notes` 使用稳定文本信封保存 `sourceKind` 和完整 `sourceText`，作为起始素材的权威备份，禁止静默截断。
-- 第一份大纲版本 payload 同时保存 `sourceKind` 和完整 `sourceText`，用于追溯蓝图来源。
+- `Novel.summary` 继续只保存用户主动填写的作品简介，不冒充起始素材存储。
+- Core 创建一个小说级、不可变的来源 Artifact，完整保存 `sourceKind` 和 `sourceText`，作为起始素材的权威记录。
+- 创建作品不会自动制造大纲或正文版本；首个版本仍由人工提交或 Agent 候选采用产生。
 - `opening` 同时初始化唯一“全文” Chapter 的工作稿内容。
 - `outline` 同时初始化 Outline 工作稿内容。
 - `ending` 只作为起始素材保存，不能错误写入正文开头。

@@ -21,6 +21,7 @@ from pydantic import ValidationError
 @dataclass
 class NovelCreation:
     user_id: str
+    client_request_id: str | None
     name: str
     summary: str | None
     story_progress: str | None
@@ -32,7 +33,10 @@ class NovelCreation:
     notes: str | None
     first_chapter_title: str
     first_chapter_order: int
+    chapter_content: str
     outline_content: str
+    source_kind: str | None
+    source_text: str | None
     current_stage: str
     current_goal: str | None
 
@@ -48,12 +52,13 @@ class RecordingNovelRepository:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("profile", "expected_words"),
-    [("short_medium", 80_000), ("long_serial", 1_000_000)],
+    ("profile", "expected_words", "expected_title"),
+    [("short_medium", 20_000, "全文"), ("long_serial", 1_000_000, "第一章")],
 )
 async def test_create_novel_builds_all_required_defaults(
     profile: str,
     expected_words: int,
+    expected_title: str,
 ) -> None:
     repository = RecordingNovelRepository()
     service = NovelService(repository)  # type: ignore[arg-type]
@@ -63,6 +68,12 @@ async def test_create_novel_builds_all_required_defaults(
         CreateNovelRequest(
             name="  新作品  ",
             storyLengthProfile=profile,  # type: ignore[arg-type]
+            targetTotalWordCount=20_000 if profile == "short_medium" else None,
+            clientRequestId="request-12345678" if profile == "short_medium" else None,
+            sourceKind="idea" if profile == "short_medium" else None,
+            sourceText="  一名旅人必须决定是否回乡。  "
+            if profile == "short_medium"
+            else None,
             firstChapterGoal="  主角离开故乡  ",
             protagonist="  林川  ",
         ),
@@ -72,9 +83,13 @@ async def test_create_novel_builds_all_required_defaults(
     assert repository.creation is not None
     assert repository.creation.name == "新作品"
     assert repository.creation.story_progress == "第一章目标：主角离开故乡"
-    assert repository.creation.first_chapter_title == "第一章"
+    assert repository.creation.first_chapter_title == expected_title
     assert repository.creation.first_chapter_order == 1
     assert repository.creation.outline_content == ""
+    assert repository.creation.chapter_content == ""
+    assert repository.creation.source_text == (
+        "  一名旅人必须决定是否回乡。  " if profile == "short_medium" else None
+    )
     assert repository.creation.current_stage == "开篇"
     assert repository.creation.current_goal == "主角离开故乡"
     assert repository.creation.target_total_word_count == expected_words
@@ -84,7 +99,15 @@ async def test_create_novel_builds_all_required_defaults(
 def test_create_novel_request_rejects_unknown_fields() -> None:
     with pytest.raises(ValidationError, match="extra_forbidden"):
         CreateNovelRequest.model_validate(
-            {"name": "作品", "storyLengthProfile": "short_medium", "userId": "越权"}
+            {
+                "name": "作品",
+                "storyLengthProfile": "short_medium",
+                "targetTotalWordCount": 20_000,
+                "clientRequestId": "request-12345678",
+                "sourceKind": "idea",
+                "sourceText": "灵感",
+                "userId": "越权",
+            }
         )
 
 
@@ -96,6 +119,10 @@ def test_create_novel_request_rejects_coerced_values(field: str, value: object) 
     body: dict[str, object] = {
         "name": "作品",
         "storyLengthProfile": "short_medium",
+        "targetTotalWordCount": 20_000,
+        "clientRequestId": "request-12345678",
+        "sourceKind": "idea",
+        "sourceText": "灵感",
         field: value,
     }
     with pytest.raises(ValidationError):
@@ -184,7 +211,14 @@ async def test_create_novel_api_only_uses_cookie_owner() -> None:
     async with novel_api_client(service) as client:
         response = await client.post(
             "/api/v1/novels",
-            json={"name": "作品", "storyLengthProfile": "short_medium"},
+            json={
+                "name": "作品",
+                "storyLengthProfile": "short_medium",
+                "targetTotalWordCount": 20_000,
+                "clientRequestId": "request-12345678",
+                "sourceKind": "idea",
+                "sourceText": "灵感",
+            },
         )
 
     assert response.status_code == 201
@@ -200,6 +234,10 @@ async def test_novel_api_rejects_owner_and_unknown_fields() -> None:
             json={
                 "name": "作品",
                 "storyLengthProfile": "short_medium",
+                "targetTotalWordCount": 20_000,
+                "clientRequestId": "request-12345678",
+                "sourceKind": "idea",
+                "sourceText": "灵感",
                 "userId": "attacker",
             },
         )
@@ -216,6 +254,9 @@ async def test_novel_http_rejects_string_encoded_number() -> None:
             json={
                 "name": "作品",
                 "storyLengthProfile": "short_medium",
+                "clientRequestId": "request-12345678",
+                "sourceKind": "idea",
+                "sourceText": "灵感",
                 "targetTotalWordCount": "80000",
             },
         )
@@ -299,6 +340,89 @@ def test_create_novel_rejects_invalid_profile(profile: str) -> None:
         CreateNovelRequest.model_validate({"name": "作品", "storyLengthProfile": profile})
 
 
+@pytest.mark.parametrize(
+    ("target", "accepted"),
+    [(5999, False), (6000, True), (80000, True), (80001, False)],
+)
+def test_short_medium_target_word_range(target: int, accepted: bool) -> None:
+    body = {
+        "name": "作品",
+        "storyLengthProfile": "short_medium",
+        "targetTotalWordCount": target,
+        "clientRequestId": "request-12345678",
+        "sourceKind": "idea",
+        "sourceText": "灵感",
+    }
+    if accepted:
+        assert CreateNovelRequest.model_validate(body).targetTotalWordCount == target
+    else:
+        with pytest.raises(ValidationError):
+            CreateNovelRequest.model_validate(body)
+
+
+def test_short_medium_requires_complete_source_identity() -> None:
+    with pytest.raises(ValidationError):
+        CreateNovelRequest.model_validate(
+            {
+                "name": "作品",
+                "storyLengthProfile": "short_medium",
+                "clientRequestId": "request-12345678",
+                "sourceKind": "opening",
+                "sourceText": "   ",
+            }
+        )
+
+
+def test_short_medium_requires_explicit_target_word_count() -> None:
+    with pytest.raises(ValidationError):
+        CreateNovelRequest.model_validate(
+            {
+                "name": "作品",
+                "storyLengthProfile": "short_medium",
+                "clientRequestId": "request-12345678",
+                "sourceKind": "idea",
+                "sourceText": "灵感",
+            }
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source_kind", "source_text", "outline_content", "chapter_content"),
+    [
+        ("opening", "固定开头", "", "固定开头"),
+        ("outline", "简略大纲", "简略大纲", ""),
+        ("ending", "固定结尾", "", ""),
+        ("idea", "一个灵感", "", ""),
+        ("mixed", "开头与结尾", "", ""),
+    ],
+)
+async def test_short_medium_initializes_only_authoritative_work_draft(
+    source_kind: str,
+    source_text: str,
+    outline_content: str,
+    chapter_content: str,
+) -> None:
+    repository = RecordingNovelRepository()
+    service = NovelService(repository)  # type: ignore[arg-type]
+
+    await service.create_novel(
+        "user-1",
+        CreateNovelRequest(
+            name="作品",
+            storyLengthProfile="short_medium",
+            targetTotalWordCount=20_000,
+            clientRequestId="request-12345678",
+            sourceKind=source_kind,  # type: ignore[arg-type]
+            sourceText=source_text,
+        ),
+    )
+
+    assert repository.creation is not None
+    assert repository.creation.outline_content == outline_content
+    assert repository.creation.chapter_content == chapter_content
+
+
 @pytest.mark.asyncio
 async def test_explicit_target_words_override_profile_default() -> None:
     repository = RecordingNovelRepository()
@@ -325,6 +449,10 @@ async def test_blank_optional_inputs_are_saved_as_null() -> None:
             name="作品",
             summary="  ",
             storyLengthProfile="short_medium",
+            targetTotalWordCount=20_000,
+            clientRequestId="request-12345678",
+            sourceKind="idea",
+            sourceText="灵感",
             genre="  ",
             firstChapterGoal="  ",
         ),
@@ -342,18 +470,33 @@ async def test_blank_novel_name_is_rejected_after_normalization() -> None:
     with pytest.raises(ApiError, match="名称不能为空") as caught:
         await service.create_novel(
             "user-1",
-            CreateNovelRequest(name="   ", storyLengthProfile="short_medium"),
+            CreateNovelRequest(
+                name="   ",
+                storyLengthProfile="short_medium",
+                targetTotalWordCount=20_000,
+                clientRequestId="request-12345678",
+                sourceKind="idea",
+                sourceText="灵感",
+            ),
         )
     assert caught.value.status_code == 422
 
 
 class TransactionSession:
-    def __init__(self, *, fail_on_flush: int | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        fail_on_flush: int | None = None,
+        existing_source: object | None = None,
+        existing_chapter_id: str | None = None,
+    ) -> None:
         self.added: list[object] = []
         self.flushes = 0
         self.committed = False
         self.rolled_back = False
         self.fail_on_flush = fail_on_flush
+        self.existing_source = existing_source
+        self.existing_chapter_id = existing_chapter_id
 
     async def __aenter__(self):
         return self
@@ -386,29 +529,52 @@ class TransactionSession:
             if typed_value.id is None:
                 typed_value.id = f"id-{type(value).__name__}"
 
+    async def scalar(self, statement):
+        from inkforge_core.db.models import Chapter, ReviewArtifact, User
+
+        entity = statement.column_descriptions[0].get("entity")
+        if entity is User:
+            return "user-1"
+        if entity is ReviewArtifact:
+            return self.existing_source
+        if entity is Chapter:
+            return self.existing_chapter_id
+        return None
+
+    async def scalars(self, statement):
+        from inkforge_core.db.models import ReviewArtifact
+
+        entity = statement.column_descriptions[0].get("entity")
+        values = [self.existing_source] if entity is ReviewArtifact and self.existing_source else []
+        return ScalarRows(values)
+
 
 def complete_creation() -> ServiceNovelCreation:
     return ServiceNovelCreation(
         user_id="user-1",
+        client_request_id="request-12345678",
         name="作品",
         summary=None,
         story_progress=None,
         story_length_profile="short_medium",
-        target_total_word_count=80_000,
+        target_total_word_count=20_000,
         genre=None,
         core_selling_point=None,
         reader_promise=None,
         notes=None,
-        first_chapter_title="第一章",
+        first_chapter_title="全文",
         first_chapter_order=1,
+        chapter_content="固定开头",
         outline_content="",
+        source_kind="opening",
+        source_text="固定开头",
         current_stage="开篇",
         current_goal=None,
     )
 
 
 @pytest.mark.asyncio
-async def test_repository_creates_five_initial_records_in_one_transaction() -> None:
+async def test_repository_creates_short_medium_source_and_documents_in_one_transaction() -> None:
     from inkforge_core.novels.repository import NovelRepository
 
     session = TransactionSession()
@@ -423,17 +589,72 @@ async def test_repository_creates_five_initial_records_in_one_transaction() -> N
         "Outline",
         "PlotProgress",
         "WritingBible",
+        "ReviewArtifact",
+        "ReviewArtifactRevision",
     ]
     chapter = cast(Any, session.added[1])
-    assert chapter.title == "第一章"
+    assert chapter.title == "全文"
     assert chapter.order == 1
+    assert chapter.content == "固定开头"
     novel = cast(Any, session.added[0])
+    source_artifact = cast(Any, session.added[5])
+    assert source_artifact.artifactKey == f"short-medium:source:{novel.id}"
+    assert source_artifact.chapterId is None
+    assert source_artifact.appliedAt is not None
+    assert '"sourceText": "固定开头"' in source_artifact.payloadJson
     assert result == {
         "novelId": novel.id,
         "chapterId": chapter.id,
     }
     assert str(result["novelId"]).startswith("c")
     assert str(result["chapterId"]).startswith("c")
+
+
+@pytest.mark.asyncio
+async def test_short_medium_create_retry_returns_original_novel_without_new_records() -> None:
+    import hashlib
+    import json
+
+    from inkforge_core.db.models import ReviewArtifact
+    from inkforge_core.novels.repository import NovelRepository
+
+    existing = ReviewArtifact(
+        id="source-1",
+        novelId="novel-original",
+        chapterId=None,
+        artifactKey="short-medium:source:novel-original",
+        kind="freeform_markdown",
+        status="applied",
+        title="中短篇起始素材",
+        summary="创建请求摘要："
+        + hashlib.sha256(b"request-12345678").hexdigest(),
+        payloadJson=json.dumps(
+            {
+                "kind": "freeform_markdown",
+                "profile": "short_medium",
+                "clientRequestId": "request-12345678",
+                "sourceKind": "opening",
+                "sourceText": "固定开头",
+                "contentHash": "a" * 64,
+            },
+            ensure_ascii=False,
+        ),
+        revision=1,
+    )
+    session = TransactionSession(
+        existing_source=existing,
+        existing_chapter_id="chapter-original",
+    )
+    repository = NovelRepository(lambda: session)  # type: ignore[arg-type]
+
+    result = await repository.create_novel(complete_creation())
+
+    assert result == {
+        "novelId": "novel-original",
+        "chapterId": "chapter-original",
+    }
+    assert session.added == []
+    assert session.flushes == 0
 
 
 @pytest.mark.asyncio
@@ -615,7 +836,6 @@ async def test_workspace_bootstrap_does_not_query_deferred_groups() -> None:
         "Glossary",
         "StoryBackground",
         "WorldSetting",
-        "WritingBible",
         "Outline",
         "OutlineNode",
         "PlotProgress",
@@ -623,6 +843,7 @@ async def test_workspace_bootstrap_does_not_query_deferred_groups() -> None:
         "RagDocument",
     ):
         assert table not in source
+    assert "WritingBible" in source
     assert set(result) == {"novel", "chapters", "currentChapter", "currentChapterId"}
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any, TypeVar, cast
@@ -8,6 +9,7 @@ from typing import Any, TypeVar, cast
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ..db.base import utc_now
 from ..db.models import (
     Chapter,
     ChapterBeatPlan,
@@ -26,8 +28,11 @@ from ..db.models import (
     PlotProgress,
     RagDocument,
     ReferenceMaterial,
+    ReviewArtifact,
+    ReviewArtifactRevision,
     SceneBeat,
     StoryBackground,
+    User,
     WorldSetting,
     WritingBible,
     WritingStyle,
@@ -65,6 +70,11 @@ def utc_datetime(value: datetime | None) -> datetime | None:
 
 def count_text_length(value: str) -> int:
     return len(value.translate(_TEXT_LENGTH_TRANSLATION))
+
+
+def _creation_request_summary(client_request_id: str) -> str:
+    digest = hashlib.sha256(client_request_id.encode("utf-8")).hexdigest()
+    return f"创建请求摘要：{digest}"
 
 
 def beat_plan_chapter_ids(
@@ -175,6 +185,19 @@ class NovelRepository:
     async def create_novel(self, creation: NovelCreation) -> dict[str, str]:
         async with self._session_factory() as session:
             async with session.begin():
+                if creation.client_request_id is not None:
+                    await session.scalar(
+                        select(User.id)
+                        .where(User.id == creation.user_id)
+                        .with_for_update()
+                    )
+                    existing = await self._find_short_medium_creation(
+                        session,
+                        creation.user_id,
+                        creation.client_request_id,
+                    )
+                    if existing is not None:
+                        return existing
                 novel = Novel(
                     userId=creation.user_id,
                     name=creation.name,
@@ -187,7 +210,7 @@ class NovelRepository:
                     novelId=novel.id,
                     title=creation.first_chapter_title,
                     order=creation.first_chapter_order,
-                    content="",
+                    content=creation.chapter_content,
                     status="drafting",
                 )
                 session.add_all(
@@ -211,8 +234,78 @@ class NovelRepository:
                     ]
                 )
                 await session.flush()
+                if creation.source_kind is not None and creation.source_text is not None:
+                    if creation.client_request_id is None:
+                        raise RuntimeError("中短篇来源素材缺少创建请求标识")
+                    source_payload = {
+                        "kind": "freeform_markdown",
+                        "profile": "short_medium",
+                        "clientRequestId": creation.client_request_id,
+                        "sourceKind": creation.source_kind,
+                        "sourceText": creation.source_text,
+                        "contentHash": hashlib.sha256(
+                            creation.source_text.encode("utf-8")
+                        ).hexdigest(),
+                    }
+                    payload_json = json.dumps(source_payload, ensure_ascii=False)
+                    source_artifact = ReviewArtifact(
+                        novelId=novel.id,
+                        chapterId=None,
+                        artifactKey=f"short-medium:source:{novel.id}",
+                        kind="freeform_markdown",
+                        status="applied",
+                        appliedAt=utc_now(),
+                        title="中短篇起始素材",
+                        summary=_creation_request_summary(creation.client_request_id),
+                        payloadJson=payload_json,
+                        createdByAgent=None,
+                        updatedByAgent=None,
+                        revision=1,
+                    )
+                    session.add(source_artifact)
+                    await session.flush()
+                    session.add(
+                        ReviewArtifactRevision(
+                            artifactId=source_artifact.id,
+                            revision=1,
+                            summary=source_artifact.summary,
+                            payloadJson=payload_json,
+                            diffJson=None,
+                            createdByAgent=None,
+                        )
+                    )
+                    await session.flush()
                 result = {"novelId": novel.id, "chapterId": chapter.id}
         return result
+
+    @staticmethod
+    async def _find_short_medium_creation(
+        session: AsyncSession,
+        user_id: str,
+        client_request_id: str,
+    ) -> dict[str, str] | None:
+        request_summary = _creation_request_summary(client_request_id)
+        artifact = await session.scalar(
+            select(ReviewArtifact)
+            .join(Novel, Novel.id == ReviewArtifact.novelId)
+            .where(
+                Novel.userId == user_id,
+                ReviewArtifact.artifactKey.like("short-medium:source:%"),
+                ReviewArtifact.summary == request_summary,
+            )
+            .limit(1)
+        )
+        if artifact is None:
+            return None
+        chapter_id = await session.scalar(
+            select(Chapter.id)
+            .where(Chapter.novelId == artifact.novelId)
+            .order_by(Chapter.order.asc(), Chapter.id.asc())
+            .limit(1)
+        )
+        if chapter_id is None:
+            raise RuntimeError("中短篇作品缺少全文章节")
+        return {"novelId": artifact.novelId, "chapterId": chapter_id}
 
     async def list_dashboard(self, user_id: str) -> DashboardResponse:
         async with self._session_factory() as session:
@@ -271,21 +364,31 @@ class NovelRepository:
             ]
         )
 
-    async def list_novels(self, user_id: str) -> list[NovelResponse]:
+    async def list_novels(
+        self, user_id: str, story_length_profile: str | None = None
+    ) -> list[NovelResponse]:
         async with self._session_factory() as session:
-            novels = (
-                await session.scalars(
-                    select(Novel)
-                    .where(Novel.userId == user_id)
-                    .order_by(Novel.updatedAt.desc(), Novel.id.asc())
+            statement = (
+                select(Novel, WritingBible)
+                .outerjoin(WritingBible, WritingBible.novelId == Novel.id)
+                .where(Novel.userId == user_id)
+                .order_by(Novel.updatedAt.desc(), Novel.id.asc())
+            )
+            if story_length_profile is not None:
+                statement = statement.where(
+                    WritingBible.storyLengthProfile == story_length_profile
                 )
-            ).all()
-        return [NovelResponse.model_validate(self._novel_dict(novel)) for novel in novels]
+            rows = (await session.execute(statement)).all()
+        return [
+            NovelResponse.model_validate(self._novel_dict(novel, bible))
+            for novel, bible in rows
+        ]
 
     async def get_novel(self, novel_id: str, user_id: str) -> NovelResponse:
         async with self._session_factory() as session:
             novel = await self._require_owner(session, novel_id, user_id)
-        return NovelResponse.model_validate(self._novel_dict(novel))
+            bible = await self._one_for_novel(session, WritingBible, novel_id)
+        return NovelResponse.model_validate(self._novel_dict(novel, bible))
 
     async def get_workspace(
         self, novel_id: str, user_id: str, chapter_id: str | None
@@ -369,7 +472,7 @@ class NovelRepository:
         resources = await self._load_resources(session, novel, user_id=owner_id)
         return {
             "novel": {
-                **self._novel_dict(novel),
+                **self._novel_dict_from_planning(novel, planning["writingBible"]),
                 "appliedStyle": resources["appliedStyle"],
             },
             "chapters": chapter_data["allChapters"],
@@ -397,9 +500,10 @@ class NovelRepository:
             session, novel.id, requested_chapter_id, include_all_details=False
         )
         applied_style = await self._load_applied_style(session, novel, user_id)
+        bible = await self._one_for_novel(session, WritingBible, novel.id)
         return {
             "novel": {
-                **self._novel_dict(novel),
+                **self._novel_dict(novel, bible),
                 "appliedStyle": (
                     {"id": applied_style.id, "name": applied_style.name}
                     if applied_style
@@ -933,8 +1037,10 @@ class NovelRepository:
         )
 
     @staticmethod
-    def _novel_dict(novel: Novel) -> dict[str, Any]:
-        return model_fields(
+    def _novel_dict(
+        novel: Novel, bible: WritingBible | None = None
+    ) -> dict[str, Any]:
+        result = model_fields(
             novel,
             "id",
             "name",
@@ -944,6 +1050,19 @@ class NovelRepository:
             "createdAt",
             "updatedAt",
         )
+        result["storyLengthProfile"] = bible.storyLengthProfile if bible else None
+        result["targetTotalWordCount"] = bible.targetTotalWordCount if bible else None
+        return result
+
+    @staticmethod
+    def _novel_dict_from_planning(
+        novel: Novel, bible: object | None
+    ) -> dict[str, Any]:
+        result = NovelRepository._novel_dict(novel)
+        if isinstance(bible, dict):
+            result["storyLengthProfile"] = bible.get("storyLengthProfile")
+            result["targetTotalWordCount"] = bible.get("targetTotalWordCount")
+        return result
 
     @staticmethod
     def _content_dict(value: Any | None) -> dict[str, Any] | None:

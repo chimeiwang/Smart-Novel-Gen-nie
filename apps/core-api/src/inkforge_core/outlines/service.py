@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Protocol
 
 from ..errors import ApiError
@@ -15,7 +16,13 @@ from .schemas import (
 
 class OutlineRepositoryPort(Protocol):
     async def list_nodes(self, novel_id: str, user_id: str) -> list[dict[str, Any]]: ...
-    async def upsert_outline(self, novel_id: str, user_id: str, content: str) -> dict[str, Any]: ...
+    async def upsert_outline(
+        self,
+        novel_id: str,
+        user_id: str,
+        content: str,
+        expected_updated_at: datetime,
+    ) -> dict[str, Any]: ...
     async def upsert_plot(
         self, novel_id: str, user_id: str, fields: dict[str, Any]
     ) -> dict[str, Any]: ...
@@ -49,7 +56,12 @@ class OutlineService:
     async def save_outline(
         self, user_id: str, novel_id: str, body: OutlineContentRequest
     ) -> dict[str, Any]:
-        return await self._repository.upsert_outline(novel_id, user_id, body.content)
+        return await self._repository.upsert_outline(
+            novel_id,
+            user_id,
+            body.content,
+            body.expectedUpdatedAt,
+        )
 
     async def save_plot(
         self, user_id: str, novel_id: str, body: PlotProgressRequest

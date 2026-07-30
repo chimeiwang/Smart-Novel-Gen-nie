@@ -12,6 +12,7 @@ from .schemas import (
     CreateNovelResponse,
     DashboardResponse,
     NovelResponse,
+    StoryLengthProfile,
     WorkspaceBootstrapResponse,
     WorkspaceLoreResponse,
     WorkspacePlanningResponse,
@@ -44,8 +45,11 @@ async def get_dashboard(
 async def list_novels(
     user: Annotated[AuthUser, Depends(get_current_user)],
     service: Annotated[NovelService, Depends(get_novel_service)],
+    story_length_profile: Annotated[
+        StoryLengthProfile | None, Query(alias="storyLengthProfile")
+    ] = None,
 ) -> list[NovelResponse]:
-    return await service.list_novels(user.id)
+    return await service.list_novels(user.id, story_length_profile)
 
 
 @router.post("/novels", response_model=CreateNovelResponse, status_code=status.HTTP_201_CREATED)
