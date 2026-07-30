@@ -17,6 +17,11 @@ from .jobs.adapters import CoreArtifactPort, CoreGraphAgentExecutor, CoreToolGat
 from .jobs.portrait import ModelPortraitGenerator, PortraitJobHandler
 from .jobs.quality import QualityJobHandler
 from .jobs.rag import OpenAIEmbeddingProvider, RagJobHandler
+from .jobs.short_medium import (
+    ModelShortMediumGenerator,
+    ShortMediumWritingJobHandler,
+    WritingJobDispatcher,
+)
 from .jobs.writing import WritingJobHandler
 from .observability import HumanWorkflowLog, WorkflowModelObserver
 from .observability.router import router as debug_router
@@ -277,7 +282,7 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                     agentExecutor=CoreGraphAgentExecutor(runner, artifacts),
                     artifacts=artifacts,
                 )
-                writing = WritingJobHandler(
+                long_serial_writing = WritingJobHandler(
                     core,
                     parent_graph=build_parent_graph(
                         ParentGraphDependencies(operation=dependencies)
@@ -285,6 +290,17 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                     operation_graph=build_operation_graph(dependencies),
                     artifacts=artifacts,
                     workflow_log=workflow_log,
+                )
+                short_medium_writing = ShortMediumWritingJobHandler(
+                    core,
+                    ModelShortMediumGenerator(
+                        model_runtime,
+                        max_output_tokens=settings.model_max_output_tokens,
+                    ),
+                )
+                writing = WritingJobDispatcher(
+                    long_serial_writing,
+                    short_medium_writing,
                 )
                 app.state.model_runtime = model_runtime
                 handlers: dict[JobKind, JobHandler] = {"writing": writing}

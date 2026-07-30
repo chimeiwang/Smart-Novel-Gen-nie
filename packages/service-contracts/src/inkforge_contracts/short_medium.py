@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from typing import Annotated, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, StringConstraints, model_validator
@@ -35,8 +36,11 @@ class ShortMediumRunPayload(BaseModel):
     documentType: ShortMediumDocumentType
     chapterId: Identifier | None = None
     baseVersionId: Identifier | None = None
+    baseContent: str | None = None
     baseContentHash: Sha256 | None = None
     sourceOutlineVersionId: Identifier | None = None
+    sourceOutlineContent: str | None = None
+    sourceOutlineContentHash: Sha256 | None = None
     selectionStart: int | None = Field(default=None, ge=0)
     selectionEnd: int | None = Field(default=None, ge=0)
     selectedText: str | None = None
@@ -57,6 +61,9 @@ class ShortMediumRunPayload(BaseModel):
                 raise ValueError("生成大纲必须绑定大纲文档")
             if self.chapterId is not None or self.sourceOutlineVersionId is not None:
                 raise ValueError("生成大纲不能绑定正文或来源大纲版本")
+            if self.sourceKind is None or self.sourceText is None or not self.sourceText.strip():
+                raise ValueError("生成大纲必须携带权威起始素材")
+            self._validate_optional_base_snapshot()
             if any(value is not None for value in selection_values):
                 raise ValueError("生成大纲不能携带选区字段")
             return self
@@ -66,6 +73,14 @@ class ShortMediumRunPayload(BaseModel):
                 raise ValueError("生成正文必须绑定正文文档")
             if self.chapterId is None or self.sourceOutlineVersionId is None:
                 raise ValueError("生成正文必须绑定全文章节和来源大纲版本")
+            if self.targetTotalWordCount is None:
+                raise ValueError("生成正文必须携带目标总字数")
+            self._validate_required_snapshot(
+                self.sourceOutlineContent,
+                self.sourceOutlineContentHash,
+                "来源大纲",
+            )
+            self._validate_optional_base_snapshot()
             if any(value is not None for value in selection_values):
                 raise ValueError("生成正文不能携带选区字段")
             return self
@@ -78,6 +93,8 @@ class ShortMediumRunPayload(BaseModel):
                 self.selectionEnd,
                 self.selectedText,
                 self.selectedTextHash,
+                self.contextBefore,
+                self.contextAfter,
                 self.userInstruction,
             )
             if any(value is None for value in required):
@@ -85,6 +102,11 @@ class ShortMediumRunPayload(BaseModel):
             if self.selectionStart is not None and self.selectionEnd is not None:
                 if self.selectionStart >= self.selectionEnd:
                     raise ValueError("选区结束位置必须大于开始位置")
+            self._validate_required_snapshot(
+                self.selectedText,
+                self.selectedTextHash,
+                "原始选区",
+            )
             if self.documentType == "manuscript":
                 if self.chapterId is None or self.sourceOutlineVersionId is None:
                     raise ValueError("正文选区修改必须绑定全文章节和来源大纲版本")
@@ -96,9 +118,38 @@ class ShortMediumRunPayload(BaseModel):
             raise ValueError("全文检查只能绑定正文文档")
         if self.chapterId is None or self.baseVersionId is None:
             raise ValueError("全文检查必须绑定全文章节和正文版本")
+        self._validate_required_snapshot(
+            self.baseContent,
+            self.baseContentHash,
+            "正文基础版本",
+        )
         if any(value is not None for value in selection_values):
             raise ValueError("全文检查不能携带选区字段")
         return self
+
+    def _validate_optional_base_snapshot(self) -> None:
+        values = (self.baseVersionId, self.baseContent, self.baseContentHash)
+        if all(value is None for value in values):
+            return
+        if any(value is None for value in values):
+            raise ValueError("基础版本 ID、完整内容和 hash 必须同时提供")
+        self._validate_required_snapshot(
+            self.baseContent,
+            self.baseContentHash,
+            "基础版本",
+        )
+
+    @staticmethod
+    def _validate_required_snapshot(
+        content: str | None,
+        content_hash: str | None,
+        label: str,
+    ) -> None:
+        if content is None or content_hash is None:
+            raise ValueError(f"{label}必须携带完整内容和 hash")
+        actual_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        if actual_hash != content_hash:
+            raise ValueError(f"{label} hash 与完整内容不匹配")
 
 
 class ShortMediumDocumentResult(BaseModel):

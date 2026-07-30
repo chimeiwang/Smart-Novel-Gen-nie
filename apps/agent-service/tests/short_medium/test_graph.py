@@ -1,0 +1,380 @@
+from __future__ import annotations
+
+import hashlib
+from datetime import UTC, datetime
+from typing import Any
+
+import pytest
+from inkforge_agents.clients.core import RunResource
+from inkforge_agents.jobs.short_medium import (
+    ModelShortMediumGenerator,
+    ShortMediumWritingJobHandler,
+)
+from inkforge_agents.providers.base import (
+    ModelMessage,
+    ModelTurnRequest,
+    ModelTurnResult,
+    ModelUsage,
+)
+from inkforge_agents.queue.consumer import NonRetryableJobError
+from inkforge_agents.queue.repository import QueueJob
+
+
+class Core:
+    def __init__(self, graph_state: dict[str, Any] | None = None) -> None:
+        self.graph_state = graph_state
+        self.events: list[tuple[str | None, int, str]] = []
+        self.checkpoints: list[tuple[str | None, int, dict[str, Any]]] = []
+        self.completions: list[tuple[str | None, int, dict[str, Any]]] = []
+        self.failures: list[tuple[str | None, int, str]] = []
+
+    async def call_tool(
+        self,
+        resource: object,
+        agent_id: str,
+        tool_name: str,
+        arguments: dict[str, object],
+    ) -> dict[str, Any]:
+        del resource, arguments
+        assert agent_id == "写作"
+        assert tool_name == "get_writing_context"
+        return {
+            "planning": {
+                "graphState": self.graph_state,
+                "authoritativeContent": "Core 权威内容",
+            }
+        }
+
+    async def send_event(
+        self,
+        resource: Any,
+        *,
+        sequence: int,
+        event: str,
+        data: dict[str, Any],
+    ) -> None:
+        del data
+        self.events.append((resource.jobId, sequence, event))
+
+    async def save_checkpoint(
+        self,
+        resource: Any,
+        *,
+        sequence: int,
+        checkpoint: dict[str, Any],
+    ) -> None:
+        self.checkpoints.append((resource.jobId, sequence, checkpoint))
+
+    async def complete(
+        self,
+        resource: Any,
+        *,
+        sequence: int,
+        result: dict[str, Any],
+    ) -> None:
+        self.completions.append((resource.jobId, sequence, result))
+
+    async def fail(
+        self,
+        resource: Any,
+        *,
+        sequence: int,
+        code: str,
+        message: str,
+        recoverable: bool = True,
+    ) -> None:
+        del message, recoverable
+        self.failures.append((resource.jobId, sequence, code))
+
+
+class Generator:
+    def __init__(
+        self,
+        outputs: list[str],
+        *,
+        finish_reason: str = "stop",
+        tool_calls: bool = False,
+    ) -> None:
+        self.outputs = list(outputs)
+        self.finish_reason = finish_reason
+        self.tool_calls = tool_calls
+        self.requests: list[Any] = []
+
+    async def generate(self, resource: object, request: Any) -> ModelTurnResult:
+        del resource
+        self.requests.append(request)
+        content = self.outputs.pop(0)
+        return ModelTurnResult(
+            content=content,
+            toolCalls=(
+                [{"id": "call-1", "name": "unexpected", "arguments": {}}]
+                if self.tool_calls
+                else []
+            ),
+            finishReason=self.finish_reason,
+            rawFinishReason=self.finish_reason,
+            usage=ModelUsage(
+                promptTokens=1,
+                completionTokens=len(content),
+                totalTokens=len(content) + 1,
+            ),
+        )
+
+
+def manuscript_job(target: int) -> QueueJob:
+    source_outline_content = "不可变蓝图"
+    return QueueJob(
+        jobId="job-short-1",
+        kind="writing",
+        runId="run-short-1",
+        taskId="task-short-1",
+        novelId="novel-1",
+        userId="user-1",
+        priority=10,
+        payload={
+            "workflow": "short_medium",
+            "operation": "generate_manuscript",
+            "documentType": "manuscript",
+            "chapterId": "chapter-1",
+            "sourceOutlineVersionId": "outline-version-1",
+            "sourceOutlineContent": source_outline_content,
+            "sourceOutlineContentHash": hashlib.sha256(
+                source_outline_content.encode("utf-8")
+            ).hexdigest(),
+            "targetTotalWordCount": target,
+        },
+        createdAt=datetime.now(UTC),
+    )
+
+
+@pytest.mark.asyncio
+async def test_15000_chars_uses_one_model_call_and_one_final_result() -> None:
+    core = Core()
+    generator = Generator(["甲" * 6_000])
+    handler = ShortMediumWritingJobHandler(core, generator)
+
+    await handler(manuscript_job(15_000))
+
+    assert len(generator.requests) == 1
+    assert len(core.completions) == 1
+    assert core.completions[0][2]["resultType"] == "short_medium_document"
+    assert core.completions[0][2]["content"] == "甲" * 6_000
+    assert all(job_id == "job-short-1" for job_id, _, _ in core.checkpoints)
+    assert all(job_id == "job-short-1" for job_id, _, _ in core.completions)
+
+
+@pytest.mark.asyncio
+async def test_generate_outline_returns_one_document_result() -> None:
+    core = Core()
+    generator = Generator(["故事蓝图"])
+    handler = ShortMediumWritingJobHandler(core, generator)
+    job = manuscript_job(15_000).model_copy(
+        update={
+            "payload": {
+                "workflow": "short_medium",
+                "operation": "generate_outline",
+                "documentType": "outline",
+                "targetTotalWordCount": 15_000,
+                "sourceKind": "idea",
+                "sourceText": "一段灵感",
+            }
+        }
+    )
+
+    await handler(job)
+
+    assert len(generator.requests) == 1
+    assert core.completions[0][2] == {
+        "resultType": "short_medium_document",
+        "operation": "generate_outline",
+        "documentType": "outline",
+        "content": "故事蓝图",
+        "sourceOutlineVersionId": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_prompt_uses_run_snapshot_instead_of_mutable_core_document_context() -> None:
+    core = Core()
+    generator = Generator(["甲" * 6_000])
+    handler = ShortMediumWritingJobHandler(core, generator)
+
+    await handler(manuscript_job(15_000))
+
+    prompt = "\n".join(message.content for message in generator.requests[0].messages)
+    assert "不可变蓝图" in prompt
+    assert "Core 权威内容" not in prompt
+
+
+@pytest.mark.asyncio
+async def test_full_check_returns_report_without_document_candidate() -> None:
+    core = Core()
+    generator = Generator(["高潮选择缺少铺垫"])
+    handler = ShortMediumWritingJobHandler(core, generator)
+    base_content = "正文基础版本"
+    job = manuscript_job(15_000).model_copy(
+        update={
+            "payload": {
+                "workflow": "short_medium",
+                "operation": "full_check",
+                "documentType": "manuscript",
+                "chapterId": "chapter-1",
+                "baseVersionId": "manuscript-version-1",
+                "baseContent": base_content,
+                "baseContentHash": hashlib.sha256(
+                    base_content.encode("utf-8")
+                ).hexdigest(),
+            }
+        }
+    )
+
+    await handler(job)
+
+    assert core.completions[0][2] == {
+        "resultType": "short_medium_check",
+        "operation": "full_check",
+        "documentType": "manuscript",
+        "baseVersionId": "manuscript-version-1",
+        "report": {"text": "高潮选择缺少铺垫"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_15001_chars_uses_serial_segments_and_only_intermediate_checkpoints() -> None:
+    core = Core()
+    generator = Generator(["甲" * 3_000, "乙" * 3_000])
+    handler = ShortMediumWritingJobHandler(core, generator)
+
+    await handler(manuscript_job(15_001))
+
+    assert len(generator.requests) == 2
+    assert len(core.completions) == 1
+    assert core.completions[0][2]["content"] == "甲" * 3_000 + "乙" * 3_000
+    assert [item[2]["completedSegmentCount"] for item in core.checkpoints] == [1, 2]
+    assert core.checkpoints[0][2]["phase"] == "generating"
+    assert core.checkpoints[1][2]["phase"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_completed_checkpoint_replays_callback_without_model_call() -> None:
+    result = {
+        "resultType": "short_medium_document",
+        "operation": "generate_manuscript",
+        "documentType": "manuscript",
+        "content": "甲" * 6_000,
+        "sourceOutlineVersionId": "outline-version-1",
+    }
+    core = Core(
+        {
+            "workflow": "short_medium",
+            "callbackJobId": "job-short-1",
+            "phase": "completed",
+            "eventSequence": 7,
+            "result": result,
+            "segmentCount": 1,
+            "segments": [{"index": 0, "content": "甲" * 6_000}],
+        }
+    )
+    generator = Generator([])
+    handler = ShortMediumWritingJobHandler(core, generator)
+
+    await handler(manuscript_job(15_000))
+
+    assert generator.requests == []
+    assert core.completions == [("job-short-1", 8, result)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "segments",
+    [
+        [{"index": 1, "content": "后段"}],
+        [{"index": 0, "content": "首段"}, {"index": 0, "content": "重复"}],
+        [{"index": 0, "content": "首段"}, {"index": 2, "content": "缺段"}],
+    ],
+)
+async def test_corrupt_segment_checkpoint_fails_without_model_run(
+    segments: list[dict[str, object]],
+) -> None:
+    core = Core(
+        {
+            "workflow": "short_medium",
+            "callbackJobId": "job-short-1",
+            "phase": "generating",
+            "eventSequence": 3,
+            "segmentCount": 3,
+            "segments": segments,
+        }
+    )
+    generator = Generator([])
+    handler = ShortMediumWritingJobHandler(core, generator)
+
+    with pytest.raises(NonRetryableJobError):
+        await handler(manuscript_job(45_000))
+
+    assert generator.requests == []
+    assert core.failures[0][0] == "job-short-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("finish_reason", ["length", "content_filter"])
+async def test_incomplete_model_finish_reason_fails(
+    finish_reason: str,
+) -> None:
+    core = Core()
+    generator = Generator(["半截正文"], finish_reason=finish_reason)
+    handler = ShortMediumWritingJobHandler(core, generator)
+
+    with pytest.raises(NonRetryableJobError):
+        await handler(manuscript_job(15_000))
+
+    assert core.completions == []
+    assert core.failures[0][2] in {
+        "MODEL_OUTPUT_TRUNCATED",
+        "MODEL_OUTPUT_FILTERED",
+    }
+    assert core.events[0][1] == 1
+    assert core.failures[0][1] == 2
+
+
+@pytest.mark.asyncio
+async def test_model_generator_uses_configured_output_limit() -> None:
+    class Runtime:
+        def __init__(self) -> None:
+            self.request: ModelTurnRequest | None = None
+
+        async def run_turn(
+            self,
+            request: ModelTurnRequest,
+            *,
+            context: object,
+        ) -> ModelTurnResult:
+            del context
+            self.request = request
+            return ModelTurnResult(
+                content="结果",
+                toolCalls=[],
+                finishReason="stop",
+                usage=ModelUsage(promptTokens=1, completionTokens=1, totalTokens=2),
+            )
+
+    runtime = Runtime()
+    generator = ModelShortMediumGenerator(runtime, max_output_tokens=12_345)  # type: ignore[arg-type]
+
+    await generator.generate(
+        RunResource(
+            userId="user-1",
+            novelId="novel-1",
+            taskId="task-1",
+            runId="run-1",
+            jobId="job-1",
+        ),
+        ModelTurnRequest(
+            messages=[ModelMessage(role="user", content="请求")],
+            tools=[],
+            maxOutputTokens=384_000,
+        ),
+    )
+
+    assert runtime.request is not None
+    assert runtime.request.maxOutputTokens == 12_345

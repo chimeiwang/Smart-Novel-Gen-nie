@@ -1,3 +1,5 @@
+import hashlib
+
 import pytest
 from inkforge_contracts.jobs import AgentJobAccepted, AgentJobRequest
 from pydantic import ValidationError
@@ -56,6 +58,7 @@ def test_agent_job_accepted_rejects_ambiguous_duplicate_status() -> None:
 
 
 def test_short_medium_writing_job_validates_structured_payload() -> None:
+    outline_content = "不可变蓝图"
     value = AgentJobRequest.model_validate(
         {
             "protocolVersion": "1.0",
@@ -72,6 +75,11 @@ def test_short_medium_writing_job_validates_structured_payload() -> None:
                 "documentType": "manuscript",
                 "chapterId": "chapter-1",
                 "sourceOutlineVersionId": "outline-version-1",
+                "sourceOutlineContent": outline_content,
+                "sourceOutlineContentHash": hashlib.sha256(
+                    outline_content.encode("utf-8")
+                ).hexdigest(),
+                "targetTotalWordCount": 20_000,
             },
         }
     )
