@@ -1,0 +1,18 @@
+[project]
+name = "inkforge-cli"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "httpx>=0.28,<1",
+    "keyring>=25.6,<26",
+]
+
+[project.scripts]
+inkforge = "inkforge_cli.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/inkforge_cli"]

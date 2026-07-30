@@ -10,6 +10,7 @@ dev = [
     "fakeredis[lua]>=2.31,<3",
     "hatchling>=1.27,<2",
     "langgraph-cli[inmem]>=0.4,<1",
+    "keyring>=25.6,<26",
     "mypy>=1.14,<2",
     "pytest>=8.3,<9",
     "pytest-asyncio>=0.25,<1",
@@ -23,6 +24,7 @@ members = [
     "apps/agent-service",
     "packages/service-contracts",
     "packages/service-auth",
+    "tools/inkforge-cli",
 ]
 
 [tool.pytest.ini_options]
@@ -34,6 +36,7 @@ testpaths = [
     "apps/agent-service/tests",
     "packages/service-contracts/tests",
     "packages/service-auth/tests",
+    "tools/inkforge-cli/tests",
 ]
 
 [tool.ruff]
