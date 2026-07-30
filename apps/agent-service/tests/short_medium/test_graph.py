@@ -459,10 +459,20 @@ async def test_single_call_manuscript_prompt_uses_complete_creation_contract() -
 
     prompt_context = json.loads(generator.requests[0].messages[1].content)
     operation_brief = prompt_context["operationBrief"]
+    assert "创作新正文" in operation_brief
+    assert "全文修订" not in operation_brief
     assert "一次性输出完整正文" in operation_brief
     assert "同一事件只完整叙述一次" in operation_brief
+    assert (
+        "依次服从本轮 userInstruction、当前 sourceOutlineContent、"
+        "baseContent 和通用创作原则"
+    ) in operation_brief
+    assert "确保时间、空间和因果成立" in operation_brief
     assert "目标字数和蓝图局部估算只用于控制结构比例" in operation_brief
+    assert "不因接近目标而截断场景" in operation_brief
     assert "只输出作品正文" in operation_brief
+    assert "不输出幕、高潮、写作说明等蓝图标签" in operation_brief
+    assert "完成蓝图指定的核心兑现和结尾动作后立即结束" in operation_brief
 
 
 @pytest.mark.asyncio
@@ -487,8 +497,13 @@ async def test_manuscript_prompt_uses_base_content_as_revision_draft() -> None:
     await handler(job)
 
     prompt_context = json.loads(generator.requests[0].messages[1].content)
-    assert "全文修订" in prompt_context["operationBrief"]
-    assert "保留仍然有效的内容" in prompt_context["operationBrief"]
+    operation_brief = prompt_context["operationBrief"]
+    assert "全文修订" in operation_brief
+    assert "保留仍然有效的内容" in operation_brief
+    assert "必要改动" in operation_brief
+    assert "修订后的完整正文" in operation_brief
+    assert "创作新正文" not in operation_brief
+    assert "不存在正文基础版本" not in operation_brief
     assert prompt_context["request"]["baseContent"] == base_content
     assert prompt_context["request"]["userInstruction"] == user_instruction
 
