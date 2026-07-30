@@ -943,13 +943,25 @@ full_check
 
 #### 17.2 登录与凭据
 
-- 用户只在真实 TTY 中执行一次 `auth.login`，密码使用隐藏输入。
-- `auth.login` 调用现有 `POST /api/v1/auth/login`，不得支持 `--password`、环境变量密码、stdin JSON 密码或管道密码。
+- 中短篇 Codex 操作员固定使用账号 `nie` 和本机 Core
+  `http://127.0.0.1:8000`，不接受命令行覆盖账号或 origin。
+- 用户凭据保存在仓库外的
+  `%LOCALAPPDATA%\InkForge\codex-operator\.env`。该文件只允许
+  `INKFORGE_OPERATOR_USERNAME`、`INKFORGE_OPERATOR_PASSWORD` 和
+  `INKFORGE_OPERATOR_ORIGIN` 三个键，禁止变量展开、命令替换或加载其他脚本。
+- `.env` 必须由用户在本机创建或填写，禁止提交 Git；安装和启动脚本必须拒绝位于仓库内、
+  缺少必填字段或账号不是 `nie` 的凭据文件。
+- `operator.ps1` 只把凭据注入当前 CLI 子进程；不得写入用户级或机器级环境变量，不得把密码放入
+  命令行、stdin JSON、stdout、stderr、日志或错误栈。
+- 每次操作先校验当前会话。会话不存在或失效时，CLI 使用本地环境凭据调用现有
+  `POST /api/v1/auth/login`，更新安全凭据库中的会话 Cookie，然后只重试一次身份校验。
 - 会话 Cookie 只写入操作系统安全凭据库；Windows 使用 Windows Credential Manager。没有安全后端时登录失败，不回退到明文文件。
-- 非敏感配置只保存 profile、规范化后的 Core origin 和最近登录用户名。
+- 非敏感配置只保存 profile、规范化后的 Core origin 和固定用户名。
 - 远程 Core origin 必须使用 HTTPS；HTTP 只允许 loopback。
-- Codex 只可执行 `auth.whoami` 验证身份。遇到 401 时立即停止并要求用户在真实终端重新登录。
-- `auth.logout` 先调用公开退出接口，再删除本机凭据；Cookie、JWT 和密码不得进入参数、JSON、stdout、日志或错误栈。
+- 自动续登成功后必须执行 `auth.whoami`，返回身份不是 `nie` 时立即停止，不调用任何业务接口。
+- 自动续登最多执行一次；账号密码错误、Core 不可用或再次收到 401 时立即停止，禁止循环重试。
+- `auth.logout` 只退出当前服务端会话并删除本机会话 Cookie，不删除 `.env`；删除长期凭据必须由
+  用户直接删除本地 `.env`。
 
 #### 17.3 进程与交换协议
 
@@ -963,6 +975,7 @@ full_check
 
 ```text
 auth.login
+auth.ensure
 auth.whoami
 auth.logout
 
@@ -993,7 +1006,8 @@ short.agent.watch
 
 #### 17.5 Codex 协作门禁
 
-- 每次写操作前执行 `auth.whoami`；身份或作品归属不匹配立即停止。
+- 每次接管和每次写操作前执行 `auth.ensure`，并核对其返回身份为 `nie`；身份或作品归属不匹配
+  立即停止。
 - “保存”“先记下来”“改到工作稿”只能执行 `short.draft.save`，不能解释为提交版本。
 - “让 Agent 修改”只授权启动一次候选任务，不能解释为自动采用候选。
 - “恢复某版本”先授权查看 Diff；查看完成后必须获得针对目标版本和当前版本的独立确认才可恢复。
@@ -1016,7 +1030,10 @@ inkforge-short-story-operator/
     └── recovery.md
 ```
 
-- `operator.ps1` 只负责定位仓库、保证 UTF-8/TTY 并启动 CLI，不包含业务判断。
+- `operator.ps1` 只负责定位仓库、解析固定本地 `.env`、保证 UTF-8/TTY、执行身份预检并启动
+  CLI，不包含小说业务判断。
+- Skill 禁止 Codex 打开、读取、打印、复制或修改 `.env`；缺少凭据时只能给出用户本机一次性
+  配置命令，等待用户完成后再继续。
 - `SKILL.md` 保持简短，只描述触发条件、固定边界和标准协作顺序。
 - 命令字段、文件 manifest 和错误恢复细节放入 references。
 - Skill 必须先用旧 Skill 运行压力场景并记录错误行为，再重写并重复相同场景，证明不会自动成版、自动采用、越过选区或绕过登录。
@@ -1158,15 +1175,20 @@ inkforge-short-story-operator/
 
 ### CLI 与登录
 
-- [ ] `auth.login` 只能在 TTY 隐藏输入密码，凭据只进入 Windows Credential Manager。
-- [ ] 密码参数、环境变量密码、JSON 密码和管道密码均被拒绝。
-- [ ] 无安全凭据后端时登录失败，磁盘上不存在 Cookie/JWT 明文回退文件。
+- [ ] 操作员只读取仓库外固定路径的本地 `.env`，Git 状态和构建产物不包含该文件。
+- [ ] `.env` 只接受三个白名单键，账号必须为 `nie`，origin 必须为本机 Core。
+- [ ] 密码不会进入命令行、stdin JSON、stdout、stderr、日志或错误栈。
+- [ ] 环境凭据只注入当前 CLI 子进程，不写入用户级或机器级环境变量。
+- [ ] 会话有效时不重新登录；会话失效时只自动续登一次并重新执行 `auth.whoami`。
+- [ ] 账号密码错误、身份不是 `nie` 或第二次 401 时停止，且不调用业务接口。
+- [ ] 会话 Cookie 只进入 Windows Credential Manager；无安全凭据后端时登录失败。
 - [ ] 非 loopback HTTP Core origin 被拒绝。
 - [ ] CLI 只访问 `/api/v1/**`，不会读取 `DATABASE_URL` 或访问 Agent Service 和 `/internal/v1/**`。
 - [ ] 除 watch 外每次调用严格输出一个 JSON；watch 输出可逐行解析 JSONL。
 - [ ] 8 万字正文和完整 Diff 通过 UTF-8 文件返回且可读到末尾。
 - [ ] `short.pull` 不覆盖有本地修改的快照。
-- [ ] 401 时 Codex 停止并要求用户重新登录，不尝试从浏览器、日志或配置中提取会话。
+- [ ] 自动续登后仍为 401 时 Codex 停止并要求用户检查本地 `.env`，不尝试从浏览器、日志或其他
+  配置中提取会话。
 
 ### Codex Skill
 
