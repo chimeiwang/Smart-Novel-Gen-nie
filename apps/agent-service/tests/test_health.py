@@ -367,11 +367,11 @@ async def test_rag_handler_requires_agent_side_feature_flag(
 
 
 @pytest.mark.asyncio
-async def test_应用装配向模型运行时传入相同输出预算(
+async def test_应用装配向模型运行时传入相同输出预算并复用工作流日志(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    captured: dict[str, int] = {}
+    captured: dict[str, object] = {}
 
     class CapturingAgentRuntime:
         def __init__(
@@ -394,6 +394,30 @@ async def test_应用装配向模型运行时传入相同输出预算(
             del model_runtime
             captured["portrait"] = max_output_tokens
 
+    class CapturingShortMediumGenerator:
+        def __init__(
+            self,
+            model_runtime: object,
+            *,
+            max_output_tokens: int,
+        ) -> None:
+            del model_runtime
+            captured["short"] = max_output_tokens
+
+    class CapturingShortMediumHandler:
+        def __init__(
+            self,
+            core: object,
+            generator: object,
+            *,
+            workflow_log: object | None = None,
+        ) -> None:
+            del core, generator
+            captured["short_log"] = workflow_log
+
+        async def __call__(self, job: object) -> None:
+            del job
+
     monkeypatch.setattr(
         app_module,
         "create_agent_callback_signer",
@@ -404,6 +428,16 @@ async def test_应用装配向模型运行时传入相同输出预算(
         app_module,
         "ModelPortraitGenerator",
         CapturingPortraitGenerator,
+    )
+    monkeypatch.setattr(
+        app_module,
+        "ModelShortMediumGenerator",
+        CapturingShortMediumGenerator,
+    )
+    monkeypatch.setattr(
+        app_module,
+        "ShortMediumWritingJobHandler",
+        CapturingShortMediumHandler,
     )
     settings = Settings.model_validate(
         {
@@ -417,6 +451,10 @@ async def test_应用装配向模型运行时传入相同输出预算(
 
     app = create_app(settings=settings, run_queue=object())  # type: ignore[arg-type]
     try:
-        assert captured == {"agent": 456_789, "portrait": 456_789}
+        assert captured["agent"] == 456_789
+        assert captured["portrait"] == 456_789
+        assert captured["short"] == 456_789
+        assert captured["short_log"] is not None
+        assert captured["short_log"] is app.state.workflow_log
     finally:
         await app.state.core_http.aclose()

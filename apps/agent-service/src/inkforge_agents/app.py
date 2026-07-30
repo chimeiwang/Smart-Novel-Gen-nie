@@ -297,6 +297,7 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                         model_runtime,
                         max_output_tokens=settings.model_max_output_tokens,
                     ),
+                    workflow_log=workflow_log,
                 )
                 writing = WritingJobDispatcher(
                     long_serial_writing,
