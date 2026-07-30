@@ -359,8 +359,8 @@ class _SqlDocumentTransaction:
                 taskId=candidate.task_id,
                 artifactId=candidate.id,
                 idempotencyKey=key,
-                kind="short_medium_adopt",
-                decision="adopt",
+                kind="artifact_decision",
+                decision="approve",
                 payloadJson=json.dumps(
                     {"artifactId": candidate.id}, ensure_ascii=False
                 ),

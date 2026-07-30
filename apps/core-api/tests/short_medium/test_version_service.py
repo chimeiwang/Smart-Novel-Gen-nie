@@ -33,6 +33,8 @@ class MemoryTransaction:
     document: WorkDocument
     versions: list[VersionRecord] = field(default_factory=list)
     adoption_replays: dict[str, str] = field(default_factory=dict)
+    replace_call_count: int = 0
+    adoption_replay_save_count: int = 0
 
     async def create_version(
         self,
@@ -67,6 +69,7 @@ class MemoryTransaction:
         return record
 
     async def replace_work_content(self, content: str) -> datetime:
+        self.replace_call_count += 1
         self.document.content = content
         self.document.updated_at += timedelta(milliseconds=1)
         return self.document.updated_at
@@ -88,6 +91,7 @@ class MemoryTransaction:
         self, key: str, candidate: VersionRecord, response_json: str
     ) -> None:
         del candidate
+        self.adoption_replay_save_count += 1
         self.adoption_replays[key] = response_json
 
 
@@ -305,21 +309,31 @@ async def test_first_candidate_detail_diff_can_be_adopted_and_replayed() -> None
     assert first.diff is not None
     assert tx.versions[-1].diff is not None
     assert tx.versions[-1].diff.confirmationHash == first.diff.confirmationHash
+    adopt_request = VersionActionRequest(
+        clientRequestId="request-adopt-first",
+        documentType="outline",
+        baseVersionId=base.id,
+        confirmationHash=first.diff.confirmationHash,
+    )
     adopted = await service.adopt(
         "user-1",
         "novel-1",
         first.id,
-        VersionActionRequest(
-            clientRequestId="request-adopt-first",
-            documentType="outline",
-            baseVersionId=base.id,
-            confirmationHash=first.diff.confirmationHash,
-        ),
+        adopt_request,
+    )
+    adopt_replay = await service.adopt(
+        "user-1",
+        "novel-1",
+        first.id,
+        adopt_request,
     )
 
     assert adopted.id == first.id
+    assert adopt_replay.id == adopted.id
     assert adopted.status == "applied"
     assert tx.document.content == "首个候选大纲"
+    assert tx.replace_call_count == 1
+    assert tx.adoption_replay_save_count == 1
 
 
 @pytest.mark.asyncio

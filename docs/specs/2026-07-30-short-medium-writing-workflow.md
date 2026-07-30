@@ -360,7 +360,7 @@ Core 在创建版本时：
 
 人工提交、Agent 完成回调和恢复操作必须调用同一个 Core 版本服务。Agent Service 不分配版本号，也不能绕过 Core 直接创建文档版本。
 
-候选采用继续使用现有 WritingRunCommand 的幂等键和结果记录，但只把它作为 Core 操作记录：命令绑定候选版本的 `sourceTaskId`，由 Core 原子完成采用，不恢复或再次调用 Agent。这样，即使采用成功后当前版本继续前进，原 `clientRequestId` 重试仍返回第一次采用结果。
+候选采用继续使用现有 WritingRunCommand 的幂等键和结果记录，但只把它作为 Core 操作记录：命令绑定候选版本的 `sourceTaskId`，由 Core 原子完成采用，不恢复或再次调用 Agent。该记录必须遵守既有数据库约束，使用 `kind=artifact_decision`、`decision=approve` 和终态 `status=succeeded`，不得引入 `short_medium_adopt` 或 `adopt` 等数据库契约之外的取值。这样，即使采用成功后当前版本继续前进，原 `clientRequestId` 重试仍返回第一次采用结果。
 
 版本号属于展示序列，ReviewArtifact 自身的 `revision` 继续用于 Artifact 内部并发和评审身份，二者不能混用。
 
