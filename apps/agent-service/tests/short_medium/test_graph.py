@@ -472,6 +472,14 @@ async def test_single_call_manuscript_prompt_uses_complete_creation_contract() -
     assert "不因接近目标而截断场景" in operation_brief
     assert "只输出作品正文" in operation_brief
     assert "不输出幕、高潮、写作说明等蓝图标签" in operation_brief
+    assert "正文换行属于硬性交付格式而非可选风格" in operation_brief
+    assert "相邻普通自然段必须用一个实际换行（\\n）直接分隔" in operation_brief
+    assert "禁止用两个连续换行（\\n\\n）形成空白行" in operation_brief
+    assert "只有叙事发生明确的场景或时间跳转时才使用一个空白行" in operation_brief
+    assert (
+        "不输出作品标题、Markdown 标题、分幕标题或结构编号"
+        in operation_brief
+    )
     assert "完成蓝图指定的核心兑现和结尾动作后立即结束" in operation_brief
 
 
@@ -499,11 +507,28 @@ async def test_manuscript_prompt_uses_base_content_as_revision_draft() -> None:
     prompt_context = json.loads(generator.requests[0].messages[1].content)
     operation_brief = prompt_context["operationBrief"]
     assert "全文修订" in operation_brief
-    assert "保留仍然有效的内容" in operation_brief
-    assert "必要改动" in operation_brief
+    assert "以 baseContent 为内容底稿" in operation_brief
+    assert "保留仍然有效的情节、事实和措辞" in operation_brief
+    assert "正文内容只为满足本轮 userInstruction 和当前蓝图进行必要改动" in operation_brief
     assert "修订后的完整正文" in operation_brief
     assert "创作新正文" not in operation_brief
     assert "不存在正文基础版本" not in operation_brief
+    assert "baseContent 只作为内容和叙事依据，不作为排版模板" in operation_brief
+    assert "现有空白行默认不表示场景或时间跳转" in operation_brief
+    assert "重新排版并完整输出" not in operation_brief
+    assert (
+        "除必须逐字保留的固定前后缀外，baseContent 中用于分隔普通自然段的"
+        "两个连续换行（\\n\\n）必须改为一个实际换行（\\n）"
+    ) in operation_brief
+    assert "正文内容即使无需改动也必须执行这项格式转换" in operation_brief
+    assert "正文换行属于硬性交付格式而非可选风格" in operation_brief
+    assert "相邻普通自然段必须用一个实际换行（\\n）直接分隔" in operation_brief
+    assert "禁止用两个连续换行（\\n\\n）形成空白行" in operation_brief
+    assert "只有叙事发生明确的场景或时间跳转时才使用一个空白行" in operation_brief
+    assert (
+        "不输出作品标题、Markdown 标题、分幕标题或结构编号"
+        in operation_brief
+    )
     assert prompt_context["request"]["baseContent"] == base_content
     assert prompt_context["request"]["userInstruction"] == user_instruction
 
