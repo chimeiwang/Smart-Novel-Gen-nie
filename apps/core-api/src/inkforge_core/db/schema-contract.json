@@ -222,13 +222,13 @@
       "version": "0.8.0"
     }
   ],
-  "fingerprint": "760609cdfc0b99fb0a57ecf94c292f06cddfc824694458cb2b95feaecbf39be4",
+  "fingerprint": "634329734e8a14d8c64e9dcb8f843deb252fc9d1a9f8a3a4677847d211a486aa",
   "schema": "public",
   "source": {
     "product": "PostgreSQL",
     "serverVersion": "14.23 (Ubuntu 14.23-0ubuntu0.22.04.1)",
     "serverVersionNum": 140023,
-    "sourceId": "9f54e2b9dde0f7e6dfdf3c57ceb419d331443b16b48a61fd259511f01b0e0249"
+    "sourceId": "d33459248991cfb51af4d8800bb9b9dfaa61d5f8d084ce7afab22ac81a3a36ab"
   },
   "tables": [
     {
@@ -7263,6 +7263,422 @@
         "deferrable": false,
         "initiallyDeferred": false,
         "name": "WritingConfig_pkey",
+        "validated": true
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "columns": [
+        {
+          "default": "0",
+          "formatType": "integer",
+          "name": "attemptCount",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "commandId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "dedupeKey",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "'pending'::text",
+          "formatType": "text",
+          "name": "deliveryState",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "durableBaseline",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "eventType",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "lastErrorCode",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "leaseExpiresAt",
+          "nullable": true,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "leaseToken",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "nextAttemptAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "payloadJson",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "publishedAt",
+          "nullable": true,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "redisEventId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "sourceEventId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "sourceSequence",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "taskId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "commandId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "WritingEventOutbox_commandId_fkey",
+          "onDelete": "SET NULL",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "WritingRunCommand",
+          "validated": true
+        },
+        {
+          "columns": [
+            "taskId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "WritingEventOutbox_taskId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "WritingTask",
+          "validated": true
+        }
+      ],
+      "indexes": [
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "dedupeKey",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
+          ],
+          "method": "btree",
+          "name": "WritingEventOutbox_dedupeKey_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "deliveryState",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "nextAttemptAt",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "timestamp_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "createdAt",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "timestamp_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 3
+            }
+          ],
+          "method": "btree",
+          "name": "WritingEventOutbox_due_idx",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": "(\"deliveryState\" = ANY (ARRAY['pending'::text, 'delivering'::text]))",
+          "ready": true,
+          "tablespace": null,
+          "unique": false,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
+          ],
+          "method": "btree",
+          "name": "WritingEventOutbox_pkey",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "publishedAt",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "timestamp_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
+          ],
+          "method": "btree",
+          "name": "WritingEventOutbox_publishedAt_idx",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": "(\"publishedAt\" IS NOT NULL)",
+          "ready": true,
+          "tablespace": null,
+          "unique": false,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "sourceEventId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
+          ],
+          "method": "btree",
+          "name": "WritingEventOutbox_sourceEventId_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "taskId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "sourceSequence",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "int4_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "WritingEventOutbox_taskId_sourceSequence_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "taskId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "sourceSequence",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "int4_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "WritingEventOutbox_task_sequence_idx",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": false,
+          "valid": true
+        }
+      ],
+      "name": "WritingEventOutbox",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "WritingEventOutbox_pkey",
         "validated": true
       },
       "uniqueConstraints": []

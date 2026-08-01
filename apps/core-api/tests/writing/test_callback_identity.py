@@ -13,9 +13,10 @@ from inkforge_contracts.events import (
     RunCompletionCallback,
     RunFailureCallback,
 )
-from inkforge_core.db.models import WritingRunCommand, WritingTask
+from inkforge_core.db.models import WritingEventOutbox, WritingRunCommand, WritingTask
 from inkforge_core.errors import ApiError
 from inkforge_core.writing.job_identity import build_writing_job_id
+from inkforge_core.writing.outbox import BoundaryEvent
 from inkforge_core.writing.sse import InMemoryWritingEventStore
 from inkforge_core.writing.tasks import (
     CallbackAcceptance,
@@ -75,11 +76,13 @@ class CallbackSession:
         *,
         active_command_id: str | None,
         latest_command_id: str | None = None,
+        outbox_rows: list[WritingEventOutbox] | None = None,
     ) -> None:
         self.task = task
         self.commands = commands
         self.active_command_id = active_command_id
         self.latest_command_id = latest_command_id
+        self.outbox_rows = outbox_rows or []
         self.added: list[object] = []
 
     async def __aenter__(self) -> CallbackSession:
@@ -106,17 +109,24 @@ class CallbackSession:
             return self.commands.get(identifier)
         raise AssertionError(model)
 
-    async def scalar(self, statement: object) -> str | None:
+    async def scalar(self, statement: object) -> object | None:
         query = str(statement)
+        if '"WritingEventOutbox"' in query:
+            return self.outbox_rows[0] if self.outbox_rows else None
         if "status" in query and "IN" in query:
             return self.active_command_id
         return self.latest_command_id
 
     def add(self, value: object) -> None:
         self.added.append(value)
+        if isinstance(value, WritingEventOutbox):
+            self.outbox_rows.append(value)
 
     async def execute(self, statement: object) -> None:
         del statement
+
+    async def flush(self) -> None:
+        return None
 
 
 @pytest.mark.asyncio
@@ -191,6 +201,487 @@ async def test_checkpoint_sequence_cannot_move_persisted_snapshot_backwards() ->
     assert acceptance.accepted is False
     assert task.graphStateJson == original_snapshot
     assert command.status == "processing"
+
+
+@pytest.mark.asyncio
+async def test_waiting_checkpoint_and_outbox_share_one_repository_transaction() -> None:
+    task = _task(sequence=20)
+    task.phase = "active"
+    command = _command("command-current", "processing")
+    session = CallbackSession(
+        task,
+        {command.id: command},
+        active_command_id=command.id,
+    )
+    repository = WritingTaskRepository(lambda: session)  # type: ignore[arg-type]
+    checkpoint = _checkpoint(21)
+    boundary = BoundaryEvent(
+        source_event_id="event-21",
+        source_sequence=21,
+        dedupe_key="writing:command-current:waiting:21",
+        event_type="artifact_awaiting_user_approval",
+        payload={"taskId": task.id},
+    )
+
+    acceptance = await repository.save_checkpoint(
+        task.id,
+        command.id,
+        json.dumps(checkpoint, ensure_ascii=False),
+        "awaiting_user_review",
+        21,
+        boundary,
+    )
+
+    outbox_rows = [
+        value for value in session.added if isinstance(value, WritingEventOutbox)
+    ]
+    assert acceptance.accepted is True
+    assert acceptance.task_phase == "awaiting_user_review"
+    assert acceptance.command_status == "succeeded"
+    assert acceptance.outbox_event_id == outbox_rows[0].id
+    assert task.phase == "awaiting_user_review"
+    assert command.status == "succeeded"
+    assert outbox_rows[0].taskId == task.id
+    assert outbox_rows[0].commandId == command.id
+    assert outbox_rows[0].durableBaseline == 20
+
+
+@pytest.mark.asyncio
+async def test_waiting_checkpoint_replay_reuses_original_outbox_baseline() -> None:
+    checkpoint = _checkpoint(21)
+    task = _task(sequence=21)
+    task.phase = "awaiting_user_review"
+    task.graphStateJson = json.dumps(checkpoint, ensure_ascii=False)
+    command = _command("command-current", "succeeded")
+    existing = WritingEventOutbox(
+        id="outbox-waiting",
+        taskId=task.id,
+        commandId=command.id,
+        sourceEventId="event-21",
+        sourceSequence=21,
+        durableBaseline=20,
+        dedupeKey="writing:command-current:waiting:21",
+        eventType="artifact_awaiting_user_approval",
+        payloadJson=json.dumps(
+            {"taskId": task.id},
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    )
+    session = CallbackSession(
+        task,
+        {command.id: command},
+        active_command_id=None,
+        latest_command_id=command.id,
+        outbox_rows=[existing],
+    )
+    repository = WritingTaskRepository(lambda: session)  # type: ignore[arg-type]
+    boundary = BoundaryEvent(
+        source_event_id="event-21",
+        source_sequence=21,
+        dedupe_key="writing:command-current:waiting:21",
+        event_type="artifact_awaiting_user_approval",
+        payload={"taskId": task.id},
+    )
+
+    acceptance = await repository.save_checkpoint(
+        task.id,
+        command.id,
+        json.dumps(checkpoint, ensure_ascii=False),
+        "awaiting_user_review",
+        21,
+        boundary,
+    )
+
+    assert acceptance.accepted is True
+    assert acceptance.already_applied is True
+    assert acceptance.outbox_event_id == existing.id
+    assert existing.durableBaseline == 20
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal", ["complete", "fail"])
+async def test_terminal_outbox_uses_locked_snapshot_baseline(terminal: str) -> None:
+    task = _task(sequence=20)
+    task.phase = "active"
+    command = _command("command-current", "processing")
+    session = CallbackSession(
+        task,
+        {command.id: command},
+        active_command_id=command.id,
+    )
+    repository = WritingTaskRepository(lambda: session)  # type: ignore[arg-type]
+    boundary = BoundaryEvent(
+        source_event_id=f"event-{terminal}-22",
+        source_sequence=22,
+        dedupe_key=f"writing:{command.id}:terminal",
+        event_type="completed" if terminal == "complete" else "error",
+        payload={"taskId": task.id},
+    )
+
+    if terminal == "complete":
+        acceptance = await repository.complete_with_message_and_command(
+            task.id,
+            command.id,
+            {"finalResponse": "完成"},
+            "完成",
+            22,
+            boundary,
+        )
+    else:
+        acceptance = await repository.fail_with_command(
+            task.id,
+            command.id,
+            "AGENT_RUN_FAILED",
+            22,
+            boundary,
+        )
+
+    row = next(
+        value for value in session.added if isinstance(value, WritingEventOutbox)
+    )
+    assert acceptance.accepted is True
+    assert row.sourceSequence == 22
+    assert row.durableBaseline == 20
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("snapshot_phase", ["completed", "error"])
+async def test_terminal_snapshot_does_not_make_task_terminal_before_callback(
+    snapshot_phase: str,
+) -> None:
+    task = _task(sequence=20)
+    task.phase = "active"
+    command = _command("command-current", "processing")
+    session = CallbackSession(
+        task,
+        {command.id: command},
+        active_command_id=command.id,
+    )
+    repository = WritingTaskRepository(lambda: session)  # type: ignore[arg-type]
+    checkpoint = _checkpoint(21)
+    checkpoint["phase"] = snapshot_phase
+
+    acceptance = await repository.save_checkpoint(
+        task.id,
+        command.id,
+        json.dumps(checkpoint, ensure_ascii=False),
+        snapshot_phase,
+        21,
+    )
+
+    assert acceptance.accepted is True
+    assert json.loads(task.graphStateJson or "{}")["phase"] == snapshot_phase
+    assert task.phase == "active"
+    assert command.status == "processing"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stored_status", "stored_result", "incoming_result", "failure_code"),
+    [
+        (
+            "succeeded",
+            {"finalResponse": "第一次结果"},
+            {"finalResponse": "被篡改的结果"},
+            None,
+        ),
+        (
+            "succeeded",
+            {"finalResponse": "第一次结果"},
+            {},
+            None,
+        ),
+        ("failed", {"code": "FIRST_FAILURE"}, None, "OTHER_FAILURE"),
+    ],
+)
+async def test_terminal_retry_with_different_business_result_is_rejected(
+    stored_status: str,
+    stored_result: dict[str, Any],
+    incoming_result: dict[str, Any] | None,
+    failure_code: str | None,
+) -> None:
+    task = _task(sequence=20)
+    task.phase = "completed" if stored_status == "succeeded" else "error"
+    command = _command("command-current", stored_status)
+    command.resultJson = json.dumps(stored_result, ensure_ascii=False)
+    session = CallbackSession(
+        task,
+        {command.id: command},
+        active_command_id=None,
+        latest_command_id=command.id,
+    )
+    repository = WritingTaskRepository(lambda: session)  # type: ignore[arg-type]
+
+    if incoming_result is not None:
+        acceptance = await repository.complete_with_message_and_command(
+            task.id,
+            command.id,
+            incoming_result,
+            str(incoming_result.get("finalResponse", "")),
+            21,
+        )
+    else:
+        assert failure_code is not None
+        acceptance = await repository.fail_with_command(
+            task.id,
+            command.id,
+            failure_code,
+            21,
+        )
+
+    assert acceptance.accepted is False
+    assert acceptance.rejection_code == "WRITING_CALLBACK_RESULT_CONFLICT"
+    assert command.resultJson == json.dumps(stored_result, ensure_ascii=False)
+
+
+@pytest.mark.asyncio
+async def test_short_medium_exact_completion_replay_ignores_only_core_enrichment() -> None:
+    task = _task(sequence=20)
+    task.phase = "completed"
+    command = _command("command-current", "succeeded")
+    command.payloadJson = json.dumps(
+        {
+            "workflow": "short_medium",
+            "operation": "generate_manuscript",
+        }
+    )
+    command.resultJson = json.dumps(
+        {
+            "resultType": "short_medium_document",
+            "content": "正文",
+            "candidateVersionId": "candidate-1",
+        },
+        ensure_ascii=False,
+    )
+    session = CallbackSession(
+        task,
+        {command.id: command},
+        active_command_id=None,
+        latest_command_id=command.id,
+    )
+    repository = WritingTaskRepository(lambda: session)  # type: ignore[arg-type]
+
+    acceptance = await repository.complete_with_message_and_command(
+        task.id,
+        command.id,
+        {
+            "resultType": "short_medium_document",
+            "content": "正文",
+        },
+        "",
+        21,
+    )
+
+    assert acceptance.accepted is True
+    assert acceptance.already_applied is True
+
+
+@pytest.mark.asyncio
+async def test_terminal_outbox_identity_conflict_returns_rejection() -> None:
+    task = _task(sequence=20)
+    task.phase = "completed"
+    command = _command("command-current", "succeeded")
+    command.resultJson = json.dumps({"finalResponse": "完成"}, ensure_ascii=False)
+    existing = WritingEventOutbox(
+        id="outbox-existing",
+        taskId=task.id,
+        commandId=command.id,
+        sourceEventId="event-original",
+        sourceSequence=21,
+        durableBaseline=20,
+        dedupeKey=f"writing:{command.id}:terminal",
+        eventType="completed",
+        payloadJson=json.dumps({"taskId": task.id}, separators=(",", ":")),
+    )
+    session = CallbackSession(
+        task,
+        {command.id: command},
+        active_command_id=None,
+        latest_command_id=command.id,
+        outbox_rows=[existing],
+    )
+    repository = WritingTaskRepository(lambda: session)  # type: ignore[arg-type]
+    conflicting_boundary = BoundaryEvent(
+        source_event_id="event-conflict",
+        source_sequence=21,
+        dedupe_key=f"writing:{command.id}:terminal",
+        event_type="completed",
+        payload={"taskId": task.id},
+    )
+
+    acceptance = await repository.complete_with_message_and_command(
+        task.id,
+        command.id,
+        {"finalResponse": "完成"},
+        "完成",
+        21,
+        conflicting_boundary,
+    )
+
+    assert acceptance.accepted is False
+    assert acceptance.rejection_code == "WRITING_OUTBOX_BOUNDARY_CONFLICT"
+    assert acceptance.outbox_event_id is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command_kind", ["resume", "artifact_decision"])
+async def test_exact_completion_replay_returns_existing_outbox(
+    command_kind: str,
+) -> None:
+    task = _task(sequence=20)
+    task.phase = "completed"
+    task.finalContent = "完成"
+    command = _command("command-current", "succeeded")
+    command.kind = command_kind
+    command.resultJson = json.dumps(
+        {"finalResponse": "完成"}
+        if command_kind == "resume"
+        else {"artifactId": "artifact-1", "accepted": True},
+        ensure_ascii=False,
+    )
+    existing = WritingEventOutbox(
+        id="outbox-completed",
+        taskId=task.id,
+        commandId=command.id,
+        sourceEventId="event-complete-21",
+        sourceSequence=21,
+        durableBaseline=20,
+        dedupeKey=f"writing:{command.id}:terminal",
+        eventType="completed",
+        payloadJson=json.dumps(
+            {"taskId": task.id},
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+    )
+    session = CallbackSession(
+        task,
+        {command.id: command},
+        active_command_id=None,
+        latest_command_id=command.id,
+        outbox_rows=[existing],
+    )
+    repository = WritingTaskRepository(lambda: session)  # type: ignore[arg-type]
+    boundary = BoundaryEvent(
+        source_event_id="event-complete-21",
+        source_sequence=21,
+        dedupe_key=f"writing:{command.id}:terminal",
+        event_type="completed",
+        payload={"taskId": task.id},
+    )
+
+    acceptance = await repository.complete_with_message_and_command(
+        task.id,
+        command.id,
+        {"finalResponse": "完成"},
+        "完成",
+        21,
+        boundary,
+    )
+
+    assert acceptance.accepted is True
+    assert acceptance.already_applied is True
+    assert acceptance.outbox_event_id == existing.id
+
+
+@pytest.mark.asyncio
+async def test_artifact_decision_persists_terminal_callback_identity() -> None:
+    task = _task(sequence=20)
+    task.phase = "active"
+    command = _command("command-current", "processing")
+    command.kind = "artifact_decision"
+    command.resultJson = json.dumps(
+        {"artifactId": "artifact-1", "accepted": True},
+        ensure_ascii=False,
+    )
+    session = CallbackSession(
+        task,
+        {command.id: command},
+        active_command_id=command.id,
+        latest_command_id=command.id,
+    )
+    repository = WritingTaskRepository(lambda: session)  # type: ignore[arg-type]
+
+    first = await repository.complete_with_message_and_command(
+        task.id,
+        command.id,
+        {"finalResponse": "完成"},
+        "完成",
+        21,
+    )
+    session.active_command_id = None
+    changed = await repository.complete_with_message_and_command(
+        task.id,
+        command.id,
+        {},
+        "",
+        22,
+    )
+
+    assert first.accepted is True
+    assert changed.accepted is False
+    assert changed.rejection_code == "WRITING_CALLBACK_RESULT_CONFLICT"
+
+
+@pytest.mark.asyncio
+async def test_legacy_completion_rejects_missing_persisted_final_content() -> None:
+    task = _task(sequence=20)
+    task.phase = "completed"
+    task.finalContent = "完成"
+    legacy_job_id = build_writing_job_id(
+        task.id,
+        resume=True,
+        graph_state_json=task.graphStateJson,
+    )
+    session = CallbackSession(
+        task,
+        {},
+        active_command_id=None,
+        latest_command_id=None,
+    )
+    repository = WritingTaskRepository(lambda: session)  # type: ignore[arg-type]
+
+    acceptance = await repository.complete_with_message_and_command(
+        task.id,
+        legacy_job_id,
+        {},
+        "",
+        21,
+    )
+
+    assert acceptance.accepted is False
+    assert acceptance.rejection_code == "WRITING_CALLBACK_RESULT_CONFLICT"
+
+
+@pytest.mark.asyncio
+async def test_legacy_completion_rejects_unverifiable_extra_result_fields() -> None:
+    task = _task(sequence=20)
+    task.phase = "completed"
+    task.finalContent = "完成"
+    legacy_job_id = build_writing_job_id(
+        task.id,
+        resume=True,
+        graph_state_json=task.graphStateJson,
+    )
+    session = CallbackSession(
+        task,
+        {},
+        active_command_id=None,
+        latest_command_id=None,
+    )
+    repository = WritingTaskRepository(lambda: session)  # type: ignore[arg-type]
+
+    acceptance = await repository.complete_with_message_and_command(
+        task.id,
+        legacy_job_id,
+        {"finalResponse": "完成", "extra": "无法从历史任务核验"},
+        "完成",
+        21,
+    )
+
+    assert acceptance.accepted is False
+    assert acceptance.rejection_code == "WRITING_CALLBACK_RESULT_CONFLICT"
 
 
 @pytest.mark.asyncio
@@ -506,10 +997,8 @@ async def test_anchored_legacy_job_finishes_after_terminal_checkpoint(
         )
 
     events = await store.replay(task.id, None)
-    assert [event.event for event in events] == [
-        "checkpoint",
-        "completed" if outcome == "complete" else "error",
-    ]
+    assert [event.event for event in events] == ["checkpoint"]
+    assert any(isinstance(value, WritingEventOutbox) for value in session.added)
     assert task.phase == terminal_phase
     if outcome == "complete":
         assert task.finalContent == "最终正文"
@@ -725,4 +1214,172 @@ async def test_rejected_old_job_callbacks_do_not_publish_events() -> None:
         )
     )
 
+    assert await store.replay("task-1", None) == []
+
+
+class BoundaryReceiptRepository:
+    def __init__(self) -> None:
+        self.saved_checkpoint = False
+        self.completed = False
+        self.failed = False
+
+    async def authorize_callback(self, *args: object) -> CallbackAcceptance:
+        del args
+        return CallbackAcceptance(True, 20)
+
+    async def mark_command_processing(
+        self, *args: object, **kwargs: object
+    ) -> CallbackAcceptance:
+        del args, kwargs
+        return CallbackAcceptance(
+            True,
+            20,
+            task_phase="active",
+            command_status="processing",
+        )
+
+    async def save_checkpoint(self, *args: object, **kwargs: object) -> CallbackAcceptance:
+        del args, kwargs
+        self.saved_checkpoint = True
+        return CallbackAcceptance(
+            True,
+            20,
+            task_phase="awaiting_user_review",
+            command_status="succeeded",
+            outbox_event_id="outbox-waiting",
+        )
+
+    async def complete_with_message_and_command(
+        self, *args: object, **kwargs: object
+    ) -> CallbackAcceptance:
+        del args, kwargs
+        self.completed = True
+        return CallbackAcceptance(
+            True,
+            20,
+            task_phase="completed",
+            command_status="succeeded",
+            outbox_event_id="outbox-completed",
+        )
+
+    async def fail_with_command(
+        self, *args: object, **kwargs: object
+    ) -> CallbackAcceptance:
+        del args, kwargs
+        self.failed = True
+        return CallbackAcceptance(
+            True,
+            20,
+            task_phase="error",
+            command_status="failed",
+            outbox_event_id="outbox-error",
+        )
+
+
+class BoundaryRedisMustNotBeRequired(InMemoryWritingEventStore):
+    async def validate_agent_event(self, *args: object, **kwargs: object) -> bool:
+        del args, kwargs
+        raise AssertionError("持久业务边界不能在事务前依赖 Redis")
+
+    async def append_agent_event(self, *args: object, **kwargs: object) -> Any:
+        del args, kwargs
+        raise AssertionError("持久业务边界必须由 Outbox 异步发布")
+
+
+@pytest.mark.asyncio
+async def test_progress_event_returns_applied_receipt_after_redis_publish() -> None:
+    repository = BoundaryReceiptRepository()
+    store = InMemoryWritingEventStore()
+    service = WritingCallbackService(
+        repository,  # type: ignore[arg-type]
+        store,
+    )
+
+    receipt = await service.accept_event(
+        AgentEvent(
+            protocolVersion="1.1",
+            eventId="event-progress",
+            jobId="command-current",
+            runId="task-1",
+            taskId="task-1",
+            sequence=21,
+            event="agent_start",
+            data={},
+            occurredAt=datetime.now(UTC),
+        )
+    )
+
+    assert receipt.disposition == "applied"
+    assert [event.event for event in await store.replay("task-1", None)] == [
+        "agent_start"
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("callback_kind", "expected_outbox"),
+    [
+        ("waiting", "outbox-waiting"),
+        ("complete", "outbox-completed"),
+        ("fail", "outbox-error"),
+    ],
+)
+async def test_persistent_boundaries_return_receipt_without_direct_redis(
+    callback_kind: str,
+    expected_outbox: str,
+) -> None:
+    repository = BoundaryReceiptRepository()
+    store = BoundaryRedisMustNotBeRequired()
+    service = WritingCallbackService(
+        repository,  # type: ignore[arg-type]
+        store,
+    )
+    occurred_at = datetime.now(UTC)
+
+    if callback_kind == "waiting":
+        receipt = await service.save_checkpoint(
+            CheckpointCallback(
+                protocolVersion="1.1",
+                eventId="event-waiting",
+                jobId="command-current",
+                runId="task-1",
+                taskId="task-1",
+                sequence=21,
+                checkpoint=_checkpoint(21),
+                occurredAt=occurred_at,
+            ),
+            user_id="user-1",
+            novel_id="novel-1",
+        )
+    elif callback_kind == "complete":
+        receipt = await service.complete(
+            RunCompletionCallback(
+                protocolVersion="1.1",
+                eventId="event-complete",
+                jobId="command-current",
+                runId="task-1",
+                taskId="task-1",
+                sequence=21,
+                result={"finalResponse": "完成"},
+                occurredAt=occurred_at,
+            )
+        )
+    else:
+        receipt = await service.fail(
+            RunFailureCallback(
+                protocolVersion="1.1",
+                eventId="event-fail",
+                jobId="command-current",
+                runId="task-1",
+                taskId="task-1",
+                sequence=21,
+                code="AGENT_RUN_FAILED",
+                message="失败",
+                recoverable=True,
+                occurredAt=occurred_at,
+            )
+        )
+
+    assert receipt.disposition == "applied"
+    assert receipt.outboxEventId == expected_outbox
     assert await store.replay("task-1", None) == []

@@ -6,6 +6,27 @@ export type ReviewArtifactWithTaskId = {
   taskId?: string | null;
 };
 
+export type TaskBoundReviewArtifact = ReviewArtifactWithTaskId & {
+  id: string;
+};
+
+export type ReviewStateEpoch = {
+  capture: () => number;
+  invalidate: () => void;
+  isCurrent: (capturedEpoch: number) => boolean;
+};
+
+export function createReviewStateEpoch(): ReviewStateEpoch {
+  let epoch = 0;
+  return {
+    capture: () => epoch,
+    invalidate: () => {
+      epoch += 1;
+    },
+    isCurrent: (capturedEpoch) => capturedEpoch === epoch,
+  };
+}
+
 export type ReviewArtifactOptimisticDecision = "approve" | "discard" | "revise";
 
 export type OptimisticReviewArtifactStatus = "applying" | "discarding" | "revising";
@@ -66,31 +87,20 @@ export function clearReviewArtifactFromMessages<
   });
 }
 
+export function isTerminalReviewArtifact(
+  artifact: TaskBoundReviewArtifact,
+  taskId: string,
+  transientArtifactIds: ReadonlySet<string>,
+): boolean {
+  return artifact.taskId === taskId || transientArtifactIds.has(artifact.id);
+}
+
 export function resolveVisibleReviewArtifact<TArtifact>(
   activeArtifact: TArtifact | null | undefined,
   messages: MessageWithReviewArtifact<TArtifact>[]
 ): TArtifact | null {
   if (activeArtifact) return activeArtifact;
   return messages.length > 0 ? messages[messages.length - 1]?.reviewArtifact ?? null : null;
-}
-
-export function shouldRefreshAwaitingReviewArtifact(input: {
-  eventType: string;
-  hasTaskId: boolean;
-  visibleArtifactStatus?: string | null;
-}): boolean {
-  if (!input.hasTaskId) return false;
-  if (input.visibleArtifactStatus === "awaiting_user") return false;
-  return input.eventType === "done" || input.eventType === "completed" || input.eventType === "resume";
-}
-
-export function resolveTerminalStreamPhase<TPhase extends string>(input: {
-  visibleArtifactStatus?: string | null;
-  completedPhase: TPhase;
-  awaitingReviewPhase: TPhase;
-}): TPhase {
-  if (input.visibleArtifactStatus === "awaiting_user") return input.awaitingReviewPhase;
-  return input.completedPhase;
 }
 
 export function resolveReviewArtifactTaskId(

@@ -1,6 +1,12 @@
 """InkForge Python 服务间的共享协议。"""
 
-from .events import AgentEvent, CheckpointCallback, RunCompletionCallback, RunFailureCallback
+from .events import (
+    AgentEvent,
+    CallbackReceipt,
+    CheckpointCallback,
+    RunCompletionCallback,
+    RunFailureCallback,
+)
 from .identity import CoreAgentId
 from .jobs import AgentJobAccepted, AgentJobCancelRequest, AgentJobRequest, AgentJobStatus
 from .jwt_claims import ServiceJwtClaims, ServiceScope
@@ -25,6 +31,7 @@ from .version import PROTOCOL_VERSION
 __all__ = [
     "PROTOCOL_VERSION",
     "AgentEvent",
+    "CallbackReceipt",
     "CheckpointCallback",
     "ConsistencyDimension",
     "ConsistencyIssue",

@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 import pytest
-from inkforge_agents.clients.core import CoreServiceClient, RunResource
+from inkforge_agents.clients.core import CoreServiceClient, CoreServiceError, RunResource
 from inkforge_contracts.jwt_claims import ServiceScope
 from inkforge_service_auth import SignedServiceRequest
 
@@ -25,6 +25,56 @@ class Signer:
                 "X-InkForge-Body-SHA256": "0" * 64,
             },
         )
+
+
+def _callback_receipt(
+    *,
+    disposition: str = "applied",
+    reason_code: str = "CALLBACK_APPLIED",
+    recoverable: bool = False,
+) -> dict[str, object]:
+    return {
+        "protocolVersion": "1.0",
+        "disposition": disposition,
+        "reasonCode": reason_code,
+        "recoverable": recoverable,
+        "taskPhase": "active",
+        "commandStatus": "processing",
+        "outboxEventId": "outbox-event-1",
+    }
+
+
+async def _invoke_writing_boundary(
+    client: CoreServiceClient,
+    resource: RunResource,
+    callback_name: str,
+) -> None:
+    if callback_name == "event":
+        await client.send_event(resource, sequence=1, event="agent_start", data={})
+        return
+    if callback_name == "checkpoint":
+        await client.save_checkpoint(
+            resource,
+            sequence=2,
+            checkpoint={"taskId": "task-1"},
+        )
+        return
+    if callback_name == "complete":
+        await client.complete(
+            resource,
+            sequence=3,
+            result={"finalContent": "完成"},
+        )
+        return
+    if callback_name == "fail":
+        await client.fail(
+            resource,
+            sequence=4,
+            code="MODEL_ERROR",
+            message="失败",
+        )
+        return
+    raise AssertionError(f"未知回调类型：{callback_name}")
 
 
 @pytest.mark.asyncio
@@ -55,6 +105,8 @@ async def test_core_client_signs_tools_events_checkpoint_and_completion() -> Non
                     "message": "检查一致性",
                 },
             )
+        if request.url.path.endswith(("/events", "/checkpoint", "/complete")):
+            return httpx.Response(200, json=_callback_receipt())
         return httpx.Response(204)
 
     signer = Signer()
@@ -188,7 +240,9 @@ async def test_core_client_uses_stable_idempotency_keys_for_retries() -> None:
     signer = Signer()
     http = httpx.AsyncClient(
         base_url="https://core.example",
-        transport=httpx.MockTransport(lambda request: httpx.Response(204)),
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json=_callback_receipt())
+        ),
     )
     client = CoreServiceClient(http, signer)  # type: ignore[arg-type]
     resource = RunResource(
@@ -214,4 +268,135 @@ async def test_core_client_uses_stable_idempotency_keys_for_retries() -> None:
     failure_payload = json.loads(signer.calls[0]["body"])
     assert failure_payload["protocolVersion"] == "1.1"
     assert failure_payload["jobId"] == "job-1"
+    await http.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("callback_name", ["event", "checkpoint", "complete", "fail"])
+async def test_writing_boundary_rejects_missing_callback_receipt(
+    callback_name: str,
+) -> None:
+    http = httpx.AsyncClient(
+        base_url="https://core.example",
+        transport=httpx.MockTransport(lambda request: httpx.Response(204)),
+    )
+    client = CoreServiceClient(http, Signer())  # type: ignore[arg-type]
+    resource = RunResource(
+        userId="user-1",
+        novelId="novel-1",
+        taskId="task-1",
+        runId="run-1",
+        jobId="job-1",
+    )
+
+    with pytest.raises(CoreServiceError) as caught:
+        await _invoke_writing_boundary(client, resource, callback_name)
+
+    assert caught.value.code == "CALLBACK_RECEIPT_MISSING"
+    assert caught.value.recoverable is True
+    await http.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(200, content=b"{"),
+        httpx.Response(200, json={"disposition": "applied"}),
+    ],
+)
+async def test_writing_boundary_rejects_invalid_callback_receipt(
+    response: httpx.Response,
+) -> None:
+    http = httpx.AsyncClient(
+        base_url="https://core.example",
+        transport=httpx.MockTransport(lambda request: response),
+    )
+    client = CoreServiceClient(http, Signer())  # type: ignore[arg-type]
+    resource = RunResource(
+        userId="user-1",
+        novelId="novel-1",
+        taskId="task-1",
+        runId="run-1",
+        jobId="job-1",
+    )
+
+    with pytest.raises(CoreServiceError) as caught:
+        await client.save_checkpoint(
+            resource,
+            sequence=2,
+            checkpoint={"taskId": "task-1"},
+        )
+
+    assert caught.value.code == "CALLBACK_RECEIPT_INVALID"
+    assert caught.value.recoverable is True
+    await http.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recoverable", [True, False])
+async def test_writing_boundary_maps_rejected_receipt_recoverability(
+    recoverable: bool,
+) -> None:
+    http = httpx.AsyncClient(
+        base_url="https://core.example",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                json=_callback_receipt(
+                    disposition="rejected",
+                    reason_code="CALLBACK_IDENTITY_REJECTED",
+                    recoverable=recoverable,
+                ),
+            )
+        ),
+    )
+    client = CoreServiceClient(http, Signer())  # type: ignore[arg-type]
+    resource = RunResource(
+        userId="user-1",
+        novelId="novel-1",
+        taskId="task-1",
+        runId="run-1",
+        jobId="job-1",
+    )
+
+    with pytest.raises(CoreServiceError) as caught:
+        await client.complete(
+            resource,
+            sequence=3,
+            result={"finalContent": "完成"},
+        )
+
+    assert caught.value.code == "CALLBACK_IDENTITY_REJECTED"
+    assert caught.value.recoverable is recoverable
+    await http.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("callback_name", ["event", "checkpoint", "complete", "fail"])
+@pytest.mark.parametrize("disposition", ["applied", "already_applied"])
+async def test_writing_boundary_accepts_applied_receipts(
+    callback_name: str,
+    disposition: str,
+) -> None:
+    http = httpx.AsyncClient(
+        base_url="https://core.example",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                json=_callback_receipt(disposition=disposition),
+            )
+        ),
+    )
+    client = CoreServiceClient(http, Signer())  # type: ignore[arg-type]
+    resource = RunResource(
+        userId="user-1",
+        novelId="novel-1",
+        taskId="task-1",
+        runId="run-1",
+        jobId="job-1",
+    )
+
+    await _invoke_writing_boundary(client, resource, callback_name)
+
     await http.aclose()

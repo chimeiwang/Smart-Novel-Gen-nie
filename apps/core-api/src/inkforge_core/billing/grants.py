@@ -54,7 +54,11 @@ class ModelGrantCodec:
                 algorithms=["EdDSA"],
                 audience="agent-service",
                 issuer="core-api",
-                options={"require": ["iss", "aud", "iat", "exp"], "verify_exp": False},
+                options={
+                    "require": ["iss", "aud", "iat", "exp"],
+                    "verify_exp": False,
+                    "verify_iat": False,
+                },
             )
             payload.pop("iss")
             payload.pop("aud")

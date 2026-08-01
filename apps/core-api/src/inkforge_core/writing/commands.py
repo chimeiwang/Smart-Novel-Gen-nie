@@ -14,6 +14,7 @@ from ..db.base import utc_now
 from ..db.models import (
     Chapter,
     Novel,
+    ReviewArtifact,
     WritingMessage,
     WritingRunCommand,
     WritingSession,
@@ -25,8 +26,14 @@ from ..short_medium.completion import (
     load_short_medium_run_source,
 )
 from .message_metadata import workflow_message_metadata
+from .outbox import supersede_waiting_for_new_command
+from .outcome import WritingRunOutcomeFacts, project_writing_run_outcome
 from .records import TaskRecord
-from .recovery import validate_resume_session_binding
+from .recovery import (
+    InvalidGraphSnapshotError,
+    deserialize_graph_snapshot,
+    validate_resume_session_binding,
+)
 from .schemas import (
     ResumeWritingRunRequest,
     ResumeWritingRunResponse,
@@ -35,7 +42,7 @@ from .schemas import (
     WritingRunStartRequest,
     WritingRunStatusResponse,
 )
-from .tasks import mark_task_failed_state
+from .tasks import TERMINAL_CALLBACK_RESULT_FIELD, mark_task_failed_state
 
 WritingCommandKind = Literal["start", "resume", "artifact_decision"]
 WritingCommandStatus = Literal["pending", "submitted", "processing", "succeeded", "failed"]
@@ -249,39 +256,70 @@ class WritingRunCommandRepository:
         self, user_id: str, task_id: str
     ) -> WritingRunStatusResponse:
         async with self._session_factory() as session:
-            task, _owner_id = await self._require_owned_task(
+            task, owner_id = await self._require_owned_task(
                 session, user_id, task_id
             )
             command = await session.scalar(
                 select(WritingRunCommand)
-                .where(
-                    WritingRunCommand.taskId == task.id,
-                    WritingRunCommand.kind.in_(("start", "resume")),
-                )
+                .where(WritingRunCommand.taskId == task.id)
                 .order_by(
                     WritingRunCommand.createdAt.desc(),
                     WritingRunCommand.id.desc(),
                 )
                 .limit(1)
             )
-        payload = (
-            _load_json_object(command.payloadJson, field="payloadJson")
-            if command is not None
-            else {}
-        )
-        result = (
-            _load_json_object(command.resultJson, field="resultJson")
-            if command is not None and command.resultJson is not None
-            else {}
-        )
-        operation = payload.get("operation")
-        if operation not in {
-            "generate_outline",
-            "generate_manuscript",
-            "replace_selection",
-            "full_check",
-        }:
-            operation = None
+            payload = (
+                _load_json_object(command.payloadJson, field="payloadJson")
+                if command is not None
+                else {}
+            )
+            result = (
+                _load_status_result(command.resultJson)
+                if command is not None and command.resultJson is not None
+                else {}
+            )
+            operation = payload.get("operation")
+            if operation not in {
+                "generate_outline",
+                "generate_manuscript",
+                "replace_selection",
+                "full_check",
+            }:
+                operation = None
+            workflow = _workflow_policy(payload, task.graphStateJson)
+            candidate_version_id = result.get("candidateVersionId")
+            active_artifact_id = (
+                _active_review_artifact_id(task, owner_id)
+                if workflow == "long_form" and task.phase == "awaiting_user_review"
+                else None
+            )
+            active_artifact = (
+                await session.scalar(
+                    select(ReviewArtifact).where(ReviewArtifact.id == active_artifact_id)
+                )
+                if (
+                    task.phase == "awaiting_user_review"
+                    and (command is None or command.status not in ACTIVE_COMMAND_STATUSES)
+                    and active_artifact_id is not None
+                )
+                else None
+            )
+            candidate_artifact = (
+                await session.scalar(
+                    select(ReviewArtifact).where(ReviewArtifact.id == candidate_version_id)
+                )
+                if (
+                    workflow == "short_medium"
+                    and operation
+                    in {
+                        "generate_outline",
+                        "generate_manuscript",
+                        "replace_selection",
+                    }
+                    and isinstance(candidate_version_id, str)
+                )
+                else None
+            )
         error: dict[str, Any] | None = None
         if command is not None and command.status == "failed":
             error = {
@@ -291,8 +329,53 @@ class WritingRunCommandRepository:
             }
             if isinstance(result.get("message"), str):
                 error["message"] = result["message"]
-        candidate_version_id = result.get("candidateVersionId")
         check_report = result.get("checkReport")
+        result_kind = "none"
+        result_id: str | None = None
+        result_ready = False
+        if workflow == "long_form" and task.phase == "awaiting_user_review":
+            result_kind = "review_artifact"
+            result_id = active_artifact_id
+            result_ready = (
+                active_artifact is not None
+                and active_artifact.id == active_artifact_id
+                and active_artifact.taskId == task.id
+                and active_artifact.novelId == task.novelId
+                and active_artifact.status == "awaiting_user"
+            )
+        elif workflow == "short_medium" and operation in {
+            "generate_outline",
+            "generate_manuscript",
+            "replace_selection",
+        }:
+            result_kind = "short_candidate"
+            result_id = candidate_version_id if isinstance(candidate_version_id, str) else None
+            result_ready = _short_medium_candidate_ready(
+                task=task,
+                command=command,
+                payload=payload,
+                candidate_id=result_id,
+                candidate=candidate_artifact,
+            )
+        elif workflow == "short_medium" and operation == "full_check":
+            result_kind = "check_report"
+            result_id = command.id if command is not None else None
+            result_ready = isinstance(check_report, dict)
+        outcome = project_writing_run_outcome(
+            WritingRunOutcomeFacts(
+                task_phase=task.phase,
+                task_updated_at=task.updatedAt,
+                workflow=workflow,
+                command_id=command.id if command is not None else None,
+                command_kind=command.kind if command is not None else None,
+                command_status=command.status if command is not None else None,
+                command_updated_at=command.updatedAt if command is not None else None,
+                operation=cast(str | None, operation),
+                result_kind=cast(Any, result_kind),
+                result_id=result_id,
+                result_ready=result_ready,
+            )
+        )
         return WritingRunStatusResponse(
             taskId=task.id,
             novelId=task.novelId,
@@ -313,6 +396,7 @@ class WritingRunCommandRepository:
             ),
             checkReport=check_report if isinstance(check_report, dict) else None,
             error=error,
+            outcome=outcome,
         )
 
     async def create_resume_with_message(
@@ -390,6 +474,10 @@ class WritingRunCommandRepository:
                     )
                     session.add(command)
                     await session.flush()
+                    await supersede_waiting_for_new_command(
+                        session,
+                        task_id=task.id,
+                    )
                     return _resume_response(command)
         except IntegrityError as exc:
             raced = await self._get_existing_response(user_id, request.clientRequestId)
@@ -438,6 +526,10 @@ class WritingRunCommandRepository:
                     if raced is not None:
                         return _command_record(*raced)
                     raise _active_command_error(task_id) from exc
+                await supersede_waiting_for_new_command(
+                    session,
+                    task_id=task.id,
+                )
                 return _command_record(command, task, owner_id)
 
     async def require_owned_task(self, user_id: str, task_id: str) -> TaskRecord:
@@ -488,6 +580,10 @@ class WritingRunCommandRepository:
                 )
                 session.add(command)
                 await session.flush()
+                await supersede_waiting_for_new_command(
+                    session,
+                    task_id=task.id,
+                )
                 return _command_record(command, task, owner_id)
 
     async def _get_existing_response(
@@ -766,6 +862,72 @@ class WritingRunCommandRepository:
             raise _active_command_error(task_id)
 
 
+def _active_review_artifact_id(task: WritingTask, owner_id: str) -> str | None:
+    if task.graphStateJson is None:
+        return None
+    try:
+        snapshot = deserialize_graph_snapshot(
+            task.graphStateJson,
+            expected_task_id=task.id,
+            expected_user_id=owner_id,
+            expected_novel_id=task.novelId,
+            expected_chapter_id=task.chapterId,
+        )
+    except InvalidGraphSnapshotError:
+        return None
+    return snapshot.active_artifact_id
+
+
+def _workflow_policy(
+    command_payload: dict[str, Any], graph_state_json: str | None
+) -> Literal["long_form", "short_medium"]:
+    if command_payload.get("workflow") == "short_medium":
+        return "short_medium"
+    if graph_state_json is not None:
+        try:
+            snapshot = json.loads(graph_state_json)
+        except (json.JSONDecodeError, TypeError):
+            snapshot = None
+        if isinstance(snapshot, dict) and snapshot.get("workflow") == "short_medium":
+            return "short_medium"
+    return "long_form"
+
+
+def _short_medium_candidate_ready(
+    *,
+    task: WritingTask,
+    command: WritingRunCommand | None,
+    payload: dict[str, Any],
+    candidate_id: str | None,
+    candidate: ReviewArtifact | None,
+) -> bool:
+    if command is None or candidate_id is None or candidate is None:
+        return False
+    if (
+        candidate.id != candidate_id
+        or command.artifactId != candidate_id
+        or candidate.taskId != task.id
+        or candidate.novelId != task.novelId
+        or candidate.status not in {"awaiting_user", "applied"}
+    ):
+        return False
+    operation = payload.get("operation")
+    document_type = payload.get("documentType")
+    if operation == "generate_outline" and document_type != "outline":
+        return False
+    if operation == "generate_manuscript" and document_type != "manuscript":
+        return False
+    if document_type == "outline":
+        return candidate.kind == "outline_draft" and candidate.chapterId is None
+    if document_type == "manuscript":
+        return (
+            payload.get("chapterId") == task.chapterId
+            and candidate.kind == "chapter_draft"
+            and candidate.chapterId == task.chapterId
+        )
+    return False
+
+
 def _active_command_error(task_id: str) -> ApiError:
     return ApiError(
         status_code=409,
@@ -890,7 +1052,7 @@ def _command_record(
 ) -> WritingCommandRecord:
     payload = _load_json_object(command.payloadJson, field="payloadJson")
     result = (
-        _load_json_object(command.resultJson, field="resultJson")
+        _load_status_result(command.resultJson)
         if command.resultJson is not None
         else None
     )
@@ -927,6 +1089,15 @@ def _load_json_object(value: str, *, field: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise RuntimeError(f"写作命令的 {field} 必须是 JSON 对象")
     return cast(dict[str, Any], parsed)
+
+
+def _load_status_result(value: str) -> dict[str, Any]:
+    try:
+        result = _load_json_object(value, field="resultJson")
+    except RuntimeError:
+        return {}
+    result.pop(TERMINAL_CALLBACK_RESULT_FIELD, None)
+    return result
 
 
 def _dump_json(value: Any) -> str:

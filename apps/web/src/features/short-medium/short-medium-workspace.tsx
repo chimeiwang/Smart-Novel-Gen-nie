@@ -10,6 +10,7 @@ import {
 import { browserApi } from "@/lib/api/browser";
 import { requireApiData } from "@/lib/api/response";
 import { countTextLength } from "@/shared/lib/word-count";
+import { parseSseEvent } from "@/shared/contracts/sse-events";
 import {
   buildSelectionIdentity,
   type SelectionIdentity,
@@ -25,6 +26,10 @@ import {
   type ConfirmedVersionAction,
   versionActionForInspection,
 } from "./short-workspace-state";
+import {
+  decideShortRunOutcome,
+  type ShortRunOutcome,
+} from "./short-run-outcome";
 
 type DocumentType = "outline" | "manuscript";
 
@@ -73,26 +78,32 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "操作失败，请稍后重试。";
 }
 
-async function waitForTerminalEvent(taskId: string): Promise<void> {
-  await new Promise<void>((resolve) => {
+async function waitForTerminalOutcome(taskId: string): Promise<ShortRunOutcome> {
+  return await new Promise<ShortRunOutcome>((resolve, reject) => {
     const source = new EventSource(
       `/api/v1/writing/runs/${encodeURIComponent(taskId)}/events`,
       { withCredentials: true },
     );
     const timeout = window.setTimeout(() => {
       source.close();
-      resolve();
+      reject(new Error("等待 Agent 任务结果超时，请刷新后重试。"));
     }, 30 * 60_000);
-    const finish = () => {
+    const finish = (outcome: ShortRunOutcome) => {
       window.clearTimeout(timeout);
       source.close();
-      resolve();
+      resolve(outcome);
     };
-    source.addEventListener("completed", finish, { once: true });
-    source.addEventListener("error", (event) => {
-      // Core 发出的 error 终态是 MessageEvent；浏览器连接错误只是普通 Event，
-      // 后者交给 EventSource 自动重连，不能误判为任务失败。
-      if (event instanceof MessageEvent) finish();
+    source.addEventListener("run_outcome", (event) => {
+      if (!(event instanceof MessageEvent)) return;
+      try {
+        const parsed = parseSseEvent(JSON.parse(event.data), "run_outcome");
+        if (!parsed || parsed.type !== "run_outcome") return;
+        if (decideShortRunOutcome(parsed).kind !== "continue") {
+          finish(parsed);
+        }
+      } catch {
+        // 非法控制帧不改变生命周期，等待下一次权威结果或自动重连。
+      }
     });
   });
 }
@@ -526,25 +537,37 @@ export function ShortMediumWorkspace({
         },
       }));
       setRunningTaskId(run.id);
-      await waitForTerminalEvent(run.id);
+      await waitForTerminalOutcome(run.id);
       const terminal = requireApiData(await browserApi.GET(
         "/api/v1/writing/runs/{task_id}",
         { params: { path: { task_id: run.id } } },
       ));
-      if (terminal.phase === "error") {
+      const outcomeDecision = decideShortRunOutcome(terminal.outcome);
+      if (outcomeDecision.kind === "failed") {
         throw new Error(
           terminal.error
             ? JSON.stringify(terminal.error, null, 2)
-            : "Agent 任务失败。",
+            : `Agent 任务失败（${outcomeDecision.code}）。`,
         );
       }
-      if (terminal.checkReport) {
+      if (outcomeDecision.kind === "inconsistent") {
+        throw new Error(
+          `任务状态对账异常（${outcomeDecision.code}），不能把本次运行显示为成功。`,
+        );
+      }
+      if (outcomeDecision.kind === "continue") {
+        throw new Error("任务流已结束，但权威状态仍未收敛，请刷新后重试。");
+      }
+      if (outcomeDecision.resultKind === "check_report" && terminal.checkReport) {
         setCheckReport(JSON.stringify(terminal.checkReport, null, 2));
       }
       await loadVersions();
-      setVersionsOpen(Boolean(terminal.candidateVersionId));
-      if (terminal.candidateVersionId) {
-        await inspectVersion(terminal.candidateVersionId);
+      const candidateVersionId = outcomeDecision.resultKind === "short_candidate"
+        ? outcomeDecision.resultId
+        : null;
+      setVersionsOpen(Boolean(candidateVersionId));
+      if (candidateVersionId) {
+        await inspectVersion(candidateVersionId);
       }
     } catch (actionError) {
       setError(errorMessage(actionError));

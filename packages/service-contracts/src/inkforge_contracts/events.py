@@ -13,6 +13,20 @@ from .identity import Identifier, NonBlankString
 from .short_medium import validate_short_medium_result
 
 
+class CallbackReceipt(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    protocolVersion: Literal["1.0"]
+    disposition: Literal["applied", "already_applied", "rejected"]
+    reasonCode: NonBlankString
+    recoverable: bool
+    taskPhase: NonBlankString
+    commandStatus: Literal[
+        "pending", "submitted", "processing", "succeeded", "failed"
+    ] | None
+    outboxEventId: Identifier | None = None
+
+
 class AgentEvent(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 

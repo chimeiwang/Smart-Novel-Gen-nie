@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import JsonValue
 
+from .schemas import WritingRunOutcome
+
 STREAM_TTL_SECONDS = 86_400
+ReplayDisposition = Literal["emit", "skip", "wait"]
 
 
 class EventSequenceGap(Exception):
@@ -18,6 +21,10 @@ class EventSequenceGap(Exception):
         self.expected_sequence = expected_sequence
         self.received_sequence = received_sequence
         self.recoverable = True
+
+
+class EventSourceConflict(Exception):
+    """同一来源事件标识对应了不同的规范化事件。"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +84,13 @@ class InMemoryWritingEventStore:
         async with self._lock:
             duplicate = self._source_ids.get((task_id, source_event_id))
             if duplicate is not None:
+                if not _same_agent_event(
+                    duplicate,
+                    sequence=sequence,
+                    event=event,
+                    data=data,
+                ):
+                    raise EventSourceConflict
                 return duplicate
             last_sequence = self._last_sequences.get(task_id)
             expected = _expected_sequence(
@@ -108,9 +122,23 @@ class InMemoryWritingEventStore:
         sequence: int,
         durable_baseline: int,
         allow_rebase: bool,
+        event: str | None = None,
+        data: dict[str, JsonValue] | None = None,
     ) -> bool:
         async with self._lock:
-            if (task_id, source_event_id) in self._source_ids:
+            duplicate = self._source_ids.get((task_id, source_event_id))
+            if duplicate is not None:
+                if (
+                    event is not None
+                    and data is not None
+                    and not _same_agent_event(
+                        duplicate,
+                        sequence=sequence,
+                        event=event,
+                        data=data,
+                    )
+                ):
+                    raise EventSourceConflict
                 return False
             last_sequence = self._last_sequences.get(task_id)
             if (
@@ -129,6 +157,29 @@ class InMemoryWritingEventStore:
                 raise EventSequenceGap(expected, sequence)
             return True
 
+    async def validate_agent_event_source(
+        self,
+        task_id: str,
+        *,
+        source_event_id: str,
+        sequence: int,
+        event: str,
+        data: dict[str, JsonValue],
+    ) -> bool:
+        """核验来源标识；未见过返回 True，完全重复返回 False。"""
+        async with self._lock:
+            duplicate = self._source_ids.get((task_id, source_event_id))
+            if duplicate is None:
+                return True
+            if not _same_agent_event(
+                duplicate,
+                sequence=sequence,
+                event=event,
+                data=data,
+            ):
+                raise EventSourceConflict
+            return False
+
     async def replay(self, task_id: str, last_event_id: str | None) -> list[WritingEvent]:
         events = list(self._events.get(task_id, []))
         if last_event_id is None:
@@ -143,10 +194,17 @@ if existing then
 end
 local received = tonumber(ARGV[1])
 local last_raw = redis.call('GET', KEYS[3])
+local durable_baseline = tonumber(ARGV[7])
+local allow_rebase = ARGV[8] == '1'
 local expected = 1
 if last_raw then
-  expected = tonumber(last_raw) + 1
-elseif ARGV[8] == '1' and received > tonumber(ARGV[7]) then
+  local last = tonumber(last_raw)
+  if allow_rebase and last <= durable_baseline and received > durable_baseline then
+    expected = received
+  else
+    expected = last + 1
+  end
+elseif allow_rebase and received > durable_baseline then
   expected = received
 end
 if received ~= expected then
@@ -222,6 +280,13 @@ class RedisWritingEventStore:
             existing = await self._read_event(task_id, value)
             if existing is None:
                 raise RuntimeError("重复事件对应的短期流已失效，需要状态对账")
+            if not _same_agent_event(
+                existing,
+                sequence=sequence,
+                event=event,
+                data=data,
+            ):
+                raise EventSourceConflict
             return existing
         return WritingEvent(
             value,
@@ -240,12 +305,25 @@ class RedisWritingEventStore:
         sequence: int,
         durable_baseline: int,
         allow_rebase: bool,
+        event: str | None = None,
+        data: dict[str, JsonValue] | None = None,
     ) -> bool:
         source_event, raw_last_sequence = await self._redis.mget(
             _source_key(task_id, source_event_id),
             _sequence_key(task_id),
         )
         if source_event is not None:
+            if event is not None and data is not None:
+                existing = await self._read_event(task_id, _text(source_event))
+                if existing is None:
+                    raise RuntimeError("重复事件对应的短期流已失效，需要状态对账")
+                if not _same_agent_event(
+                    existing,
+                    sequence=sequence,
+                    event=event,
+                    data=data,
+                ):
+                    raise EventSourceConflict
             return False
         last_sequence = (
             int(_text(raw_last_sequence)) if raw_last_sequence is not None else None
@@ -265,6 +343,32 @@ class RedisWritingEventStore:
         if sequence != expected:
             raise EventSequenceGap(expected, sequence)
         return True
+
+    async def validate_agent_event_source(
+        self,
+        task_id: str,
+        *,
+        source_event_id: str,
+        sequence: int,
+        event: str,
+        data: dict[str, JsonValue],
+    ) -> bool:
+        raw_event_id = await self._redis.get(
+            _source_key(task_id, source_event_id)
+        )
+        if raw_event_id is None:
+            return True
+        existing = await self._read_event(task_id, _text(raw_event_id))
+        if existing is None:
+            raise RuntimeError("重复事件对应的短期流已失效，需要状态对账")
+        if not _same_agent_event(
+            existing,
+            sequence=sequence,
+            event=event,
+            data=data,
+        ):
+            raise EventSourceConflict
+        return False
 
     async def replay(self, task_id: str, last_event_id: str | None) -> list[WritingEvent]:
         minimum = "-" if last_event_id is None else last_event_id
@@ -292,36 +396,110 @@ def format_heartbeat() -> str:
     return ": 心跳\n\n"
 
 
+def format_run_outcome(outcome: WritingRunOutcome) -> str:
+    payload = json.dumps(
+        outcome.model_dump(mode="json"),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return f"event: run_outcome\ndata: {payload}\n\n"
+
+
 async def stream_task_events(
     store: Any,
     task_id: str,
     *,
     last_event_id: str | None,
+    outcome_provider: Callable[[], Awaitable[WritingRunOutcome]],
+    event_visibility_provider: Callable[
+        [list[WritingEvent]],
+        Awaitable[dict[str, ReplayDisposition]],
+    ]
+    | None = None,
     poll_interval_seconds: float = 1.0,
     heartbeat_interval_seconds: float = 15.0,
 ) -> AsyncIterator[str]:
     cursor = last_event_id
     elapsed_without_event = 0.0
+    outcome = await outcome_provider()
+    outcome_fingerprint = _outcome_fingerprint(outcome)
+    yield format_run_outcome(outcome)
+    if outcome.streamShouldClose:
+        terminal_events, cursor = await _replay_visible_events(
+            store,
+            task_id,
+            cursor,
+            event_visibility_provider,
+        )
+        for event in terminal_events:
+            yield format_sse_event(event)
+        if terminal_events:
+            yield format_run_outcome(outcome)
+        return
     while True:
-        events = await store.replay(task_id, cursor)
+        events, cursor = await _replay_visible_events(
+            store,
+            task_id,
+            cursor,
+            event_visibility_provider,
+        )
         if events:
             elapsed_without_event = 0.0
             for event in events:
                 yield format_sse_event(event)
-                cursor = event.id
-                if event.event in {
-                    "done",
-                    "completed",
-                    "error",
-                    "artifact_awaiting_user_approval",
-                }:
-                    return
+        outcome = await outcome_provider()
+        current_fingerprint = _outcome_fingerprint(outcome)
+        if current_fingerprint != outcome_fingerprint:
+            yield format_run_outcome(outcome)
+            outcome_fingerprint = current_fingerprint
+        if outcome.streamShouldClose:
+            return
+        if events:
             continue
         await asyncio.sleep(poll_interval_seconds)
         elapsed_without_event += poll_interval_seconds
         if elapsed_without_event >= heartbeat_interval_seconds:
             yield format_heartbeat()
             elapsed_without_event = 0.0
+
+
+def _outcome_fingerprint(outcome: WritingRunOutcome) -> str:
+    return json.dumps(
+        outcome.model_dump(mode="json", exclude={"observedAt"}),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+async def _replay_visible_events(
+    store: Any,
+    task_id: str,
+    cursor: str | None,
+    visibility_provider: Callable[
+        [list[WritingEvent]],
+        Awaitable[dict[str, ReplayDisposition]],
+    ]
+    | None,
+) -> tuple[list[WritingEvent], str | None]:
+    replayed = await store.replay(task_id, cursor)
+    if not replayed:
+        return [], cursor
+    dispositions = (
+        await visibility_provider(replayed)
+        if visibility_provider is not None
+        else {event.id: "emit" for event in replayed}
+    )
+    visible: list[WritingEvent] = []
+    next_cursor = cursor
+    for event in replayed:
+        disposition = dispositions.get(event.id, "wait")
+        if disposition == "wait":
+            break
+        next_cursor = event.id
+        if disposition == "emit":
+            visible.append(event)
+    return visible, next_cursor
 
 
 def _stream_key(task_id: str) -> str:
@@ -343,11 +521,30 @@ def _expected_sequence(
     durable_baseline: int,
     allow_rebase: bool,
 ) -> int:
+    if (
+        allow_rebase
+        and sequence > durable_baseline
+        and (last_sequence is None or last_sequence <= durable_baseline)
+    ):
+        return sequence
     if last_sequence is not None:
         return last_sequence + 1
-    if allow_rebase and sequence > durable_baseline:
-        return sequence
     return 1
+
+
+def _same_agent_event(
+    existing: WritingEvent,
+    *,
+    sequence: int,
+    event: str,
+    data: dict[str, JsonValue],
+) -> bool:
+    return (
+        existing.source_event_id is not None
+        and existing.sequence == sequence
+        and existing.event == event
+        and existing.data == data
+    )
 
 
 def _encode_data(data: dict[str, JsonValue]) -> str:

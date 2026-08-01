@@ -1,17 +1,20 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
-from dataclasses import dataclass
-from typing import Any, Protocol, cast
+from dataclasses import dataclass, replace
+from typing import Any, Literal, Protocol, cast
 
 from inkforge_contracts.events import (
     AgentEvent,
+    CallbackReceipt,
     CheckpointCallback,
     RunCompletionCallback,
     RunFailureCallback,
 )
 from inkforge_contracts.jobs import AgentJobStatus
+from pydantic import JsonValue
 from sqlalchemy import exists, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -21,6 +24,7 @@ from ..errors import ApiError
 from ..short_medium.completion import finalize_short_medium_completion
 from .job_identity import build_writing_job_id
 from .message_metadata import workflow_message_metadata
+from .outbox import BoundaryEvent, OutboxRegistration, enqueue_boundary_event
 from .records import TaskRecord
 from .recovery import (
     InvalidGraphSnapshotError,
@@ -29,11 +33,12 @@ from .recovery import (
 from .schemas import (
     ResumeWritingRunRequest,
     ResumeWritingRunResponse,
+    WritingCommandStatus,
     WritingRunResponse,
     WritingRunStartRequest,
     WritingRunStatusResponse,
 )
-from .sse import EventSequenceGap, WritingEvent
+from .sse import EventSequenceGap, EventSourceConflict, WritingEvent
 
 TERMINAL_TASK_PHASES = frozenset({"completed", "error"})
 LEGACY_RECONCILABLE_PHASES = frozenset({"active", "waiting_call"})
@@ -44,6 +49,10 @@ SEQUENCE_STALE_CODE = "WRITING_CALLBACK_SEQUENCE_STALE"
 ALREADY_APPLIED_CODE = "WRITING_CALLBACK_ALREADY_APPLIED"
 STATE_NOOP_CODE = "WRITING_CALLBACK_STATE_NOOP"
 CHECKPOINT_CONFLICT_CODE = "WRITING_CHECKPOINT_CONFLICT"
+CALLBACK_RESULT_CONFLICT_CODE = "WRITING_CALLBACK_RESULT_CONFLICT"
+OUTBOX_BOUNDARY_CONFLICT_CODE = "WRITING_OUTBOX_BOUNDARY_CONFLICT"
+EVENT_SOURCE_CONFLICT_CODE = "WRITING_EVENT_SOURCE_CONFLICT"
+TERMINAL_CALLBACK_RESULT_FIELD = "_inkforgeTerminalCallbackResult"
 logger = logging.getLogger(__name__)
 
 
@@ -69,12 +78,24 @@ class ImmediateCommandDispatcher(Protocol):
 
 
 class EventStorePort(Protocol):
+    async def validate_agent_event_source(
+        self,
+        task_id: str,
+        *,
+        source_event_id: str,
+        sequence: int,
+        event: str,
+        data: dict[str, Any],
+    ) -> bool: ...
+
     async def validate_agent_event(
         self,
         task_id: str,
         *,
         source_event_id: str,
         sequence: int,
+        event: str,
+        data: dict[str, Any],
         durable_baseline: int,
         allow_rebase: bool,
     ) -> bool: ...
@@ -98,6 +119,9 @@ class CallbackAcceptance:
     persisted_sequence: int
     already_applied: bool = False
     rejection_code: str | None = None
+    task_phase: str | None = None
+    command_status: WritingCommandStatus | None = None
+    outbox_event_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,8 +133,10 @@ class _CallbackTarget:
 
 @dataclass(frozen=True, slots=True)
 class _CallbackPreparation:
+    should_continue: bool
     should_publish: bool
     durable_baseline: int
+    acceptance: CallbackAcceptance
 
 
 class WritingCallbackRepositoryPort(Protocol):
@@ -129,6 +155,7 @@ class WritingCallbackRepositoryPort(Protocol):
         serialized: str,
         phase: str,
         sequence: int,
+        boundary: BoundaryEvent | None = None,
     ) -> CallbackAcceptance: ...
 
     async def complete_with_message_and_command(
@@ -138,10 +165,16 @@ class WritingCallbackRepositoryPort(Protocol):
         result: dict[str, Any],
         visible_response: str,
         sequence: int,
+        boundary: BoundaryEvent | None = None,
     ) -> CallbackAcceptance: ...
 
     async def fail_with_command(
-        self, task_id: str, job_id: str, code: str, sequence: int
+        self,
+        task_id: str,
+        job_id: str,
+        code: str,
+        sequence: int,
+        boundary: BoundaryEvent | None = None,
     ) -> CallbackAcceptance: ...
 
 
@@ -318,9 +351,10 @@ class WritingTaskRepository:
                     return CallbackAcceptance(
                         False, 0, rejection_code=JOB_MISMATCH_CODE
                     )
-                return CallbackAcceptance(
-                    True,
-                    _persisted_event_sequence(target.task),
+                return _target_acceptance(
+                    target,
+                    accepted=True,
+                    persisted_sequence=_persisted_event_sequence(target.task),
                     already_applied=target.already_applied,
                 )
 
@@ -331,6 +365,7 @@ class WritingTaskRepository:
         serialized: str,
         phase: str,
         sequence: int,
+        boundary: BoundaryEvent | None = None,
     ) -> CallbackAcceptance:
         async with self._session_factory() as session:
             async with session.begin():
@@ -348,11 +383,32 @@ class WritingTaskRepository:
                     )
                 if sequence == persisted_sequence:
                     identical = target.task.graphStateJson == serialized
-                    return CallbackAcceptance(
-                        identical,
-                        persisted_sequence,
+                    registration = (
+                        await _enqueue_target_boundary(
+                            session,
+                            target,
+                            boundary,
+                            durable_baseline=None,
+                        )
+                        if identical
+                        else OutboxRegistration(outbox_id=None)
+                    )
+                    if registration.conflict:
+                        return _target_acceptance(
+                            target,
+                            accepted=False,
+                            persisted_sequence=persisted_sequence,
+                            rejection_code=OUTBOX_BOUNDARY_CONFLICT_CODE,
+                        )
+                    return _target_acceptance(
+                        target,
+                        accepted=identical,
+                        persisted_sequence=persisted_sequence,
                         already_applied=identical,
-                        rejection_code=None if identical else CHECKPOINT_CONFLICT_CODE,
+                        rejection_code=(
+                            None if identical else CHECKPOINT_CONFLICT_CODE
+                        ),
+                        outbox_event_id=registration.outbox_id,
                     )
                 if target.already_applied or target.task.phase in TERMINAL_TASK_PHASES:
                     return CallbackAcceptance(
@@ -366,6 +422,19 @@ class WritingTaskRepository:
                     serialized,
                     fallback_phase=phase,
                 )
+                registration = await _enqueue_target_boundary(
+                    session,
+                    target,
+                    boundary,
+                    durable_baseline=persisted_sequence,
+                )
+                if registration.conflict:
+                    return _target_acceptance(
+                        target,
+                        accepted=False,
+                        persisted_sequence=persisted_sequence,
+                        rejection_code=OUTBOX_BOUNDARY_CONFLICT_CODE,
+                    )
                 target.task.graphStateJson = serialized
                 target.task.phase = phase
                 target.task.updatedAt = utc_now()
@@ -373,7 +442,12 @@ class WritingTaskRepository:
                     target.command,
                     "succeeded" if phase == "awaiting_user_review" else "processing",
                 )
-                return CallbackAcceptance(True, persisted_sequence)
+                return _target_acceptance(
+                    target,
+                    accepted=True,
+                    persisted_sequence=persisted_sequence,
+                    outbox_event_id=registration.outbox_id,
+                )
 
     async def mark_command_processing(
         self, task_id: str, job_id: str, sequence: int
@@ -387,19 +461,25 @@ class WritingTaskRepository:
                     )
                 persisted_sequence = _persisted_event_sequence(target.task)
                 if sequence <= persisted_sequence:
-                    return CallbackAcceptance(
-                        False,
-                        persisted_sequence,
+                    return _target_acceptance(
+                        target,
+                        accepted=False,
+                        persisted_sequence=persisted_sequence,
                         rejection_code=SEQUENCE_STALE_CODE,
                     )
                 if target.already_applied:
-                    return CallbackAcceptance(
-                        False,
-                        persisted_sequence,
+                    return _target_acceptance(
+                        target,
+                        accepted=False,
+                        persisted_sequence=persisted_sequence,
                         rejection_code=ALREADY_APPLIED_CODE,
                     )
                 _transition_callback_command(target.command, "processing")
-                return CallbackAcceptance(True, persisted_sequence)
+                return _target_acceptance(
+                    target,
+                    accepted=True,
+                    persisted_sequence=persisted_sequence,
+                )
 
     async def complete_with_message_and_command(
         self,
@@ -408,7 +488,9 @@ class WritingTaskRepository:
         result: dict[str, Any],
         visible_response: str,
         sequence: int,
+        boundary: BoundaryEvent | None = None,
     ) -> CallbackAcceptance:
+        callback_result = dict(result)
         values: dict[str, Any] = {"phase": "completed", "updatedAt": utc_now()}
         final_content = result.get("finalContent", result.get("finalResponse"))
         if isinstance(final_content, str):
@@ -439,34 +521,95 @@ class WritingTaskRepository:
                             persisted_sequence,
                             rejection_code=STATE_NOOP_CODE,
                         )
-                    if visible_response:
-                        await _persist_workflow_message(
-                            session,
-                            task,
-                            role="agent",
-                            content=visible_response,
-                            event_type="done",
+                    if not _task_completion_result_compatible(task, result):
+                        return _target_acceptance(
+                            target,
+                            accepted=False,
+                            persisted_sequence=persisted_sequence,
+                            rejection_code=CALLBACK_RESULT_CONFLICT_CODE,
+                        )
+                    registration = await _enqueue_target_boundary(
+                        session,
+                        target,
+                        boundary,
+                        durable_baseline=persisted_sequence,
+                    )
+                    if registration.conflict:
+                        return _target_acceptance(
+                            target,
+                            accepted=False,
+                            persisted_sequence=persisted_sequence,
+                            rejection_code=OUTBOX_BOUNDARY_CONFLICT_CODE,
                         )
                     for name, value in values.items():
                         if name != "phase":
                             setattr(task, name, value)
-                    return CallbackAcceptance(True, persisted_sequence)
+                    return _target_acceptance(
+                        target,
+                        accepted=True,
+                        persisted_sequence=persisted_sequence,
+                        already_applied=True,
+                        outbox_event_id=registration.outbox_id,
+                    )
                 if target.already_applied:
                     accepted = (
                         target.command is not None
                         and target.command.status == "succeeded"
                     )
-                    return CallbackAcceptance(
-                        accepted,
-                        persisted_sequence,
+                    if accepted and not _completion_result_compatible(
+                        task,
+                        target.command,
+                        result,
+                    ):
+                        return _target_acceptance(
+                            target,
+                            accepted=False,
+                            persisted_sequence=persisted_sequence,
+                            rejection_code=CALLBACK_RESULT_CONFLICT_CODE,
+                        )
+                    registration = (
+                        await _enqueue_target_boundary(
+                            session,
+                            target,
+                            boundary,
+                            durable_baseline=persisted_sequence,
+                        )
+                        if accepted
+                        else OutboxRegistration(outbox_id=None)
+                    )
+                    if registration.conflict:
+                        return _target_acceptance(
+                            target,
+                            accepted=False,
+                            persisted_sequence=persisted_sequence,
+                            rejection_code=OUTBOX_BOUNDARY_CONFLICT_CODE,
+                        )
+                    return _target_acceptance(
+                        target,
+                        accepted=accepted,
+                        persisted_sequence=persisted_sequence,
                         already_applied=accepted,
                         rejection_code=None if accepted else STATE_NOOP_CODE,
+                        outbox_event_id=registration.outbox_id,
                     )
                 if task.phase == "error":
                     return CallbackAcceptance(
                         False,
                         persisted_sequence,
                         rejection_code=STATE_NOOP_CODE,
+                    )
+                registration = await _enqueue_target_boundary(
+                    session,
+                    target,
+                    boundary,
+                    durable_baseline=persisted_sequence,
+                )
+                if registration.conflict:
+                    return _target_acceptance(
+                        target,
+                        accepted=False,
+                        persisted_sequence=persisted_sequence,
+                        rejection_code=OUTBOX_BOUNDARY_CONFLICT_CODE,
                     )
                 if (
                     target.command is not None
@@ -489,8 +632,18 @@ class WritingTaskRepository:
                 for name, value in values.items():
                     if name != "phase" or task.phase not in TERMINAL_TASK_PHASES:
                         setattr(task, name, value)
-                _transition_callback_command(target.command, "succeeded", result=result)
-                return CallbackAcceptance(True, persisted_sequence)
+                _transition_callback_command(
+                    target.command,
+                    "succeeded",
+                    result=result,
+                    callback_result=callback_result,
+                )
+                return _target_acceptance(
+                    target,
+                    accepted=True,
+                    persisted_sequence=persisted_sequence,
+                    outbox_event_id=registration.outbox_id,
+                )
 
     async def persist_workflow_message(
         self,
@@ -519,7 +672,12 @@ class WritingTaskRepository:
                 )
 
     async def fail_with_command(
-        self, task_id: str, job_id: str, code: str, sequence: int
+        self,
+        task_id: str,
+        job_id: str,
+        code: str,
+        sequence: int,
+        boundary: BoundaryEvent | None = None,
     ) -> CallbackAcceptance:
         async with self._session_factory() as session:
             async with session.begin():
@@ -540,29 +698,107 @@ class WritingTaskRepository:
                     and target.task.phase in TERMINAL_TASK_PHASES
                 ):
                     accepted = target.task.phase == "error"
-                    return CallbackAcceptance(
-                        accepted,
-                        persisted_sequence,
+                    if accepted and not _task_failure_result_compatible(
+                        target.task,
+                        code,
+                    ):
+                        return _target_acceptance(
+                            target,
+                            accepted=False,
+                            persisted_sequence=persisted_sequence,
+                            rejection_code=CALLBACK_RESULT_CONFLICT_CODE,
+                        )
+                    registration = (
+                        await _enqueue_target_boundary(
+                            session,
+                            target,
+                            boundary,
+                            durable_baseline=persisted_sequence,
+                        )
+                        if accepted
+                        else OutboxRegistration(outbox_id=None)
+                    )
+                    if registration.conflict:
+                        return _target_acceptance(
+                            target,
+                            accepted=False,
+                            persisted_sequence=persisted_sequence,
+                            rejection_code=OUTBOX_BOUNDARY_CONFLICT_CODE,
+                        )
+                    return _target_acceptance(
+                        target,
+                        accepted=accepted,
+                        persisted_sequence=persisted_sequence,
                         already_applied=accepted,
                         rejection_code=None if accepted else STATE_NOOP_CODE,
+                        outbox_event_id=registration.outbox_id,
                     )
                 if target.already_applied:
                     accepted = (
                         target.command is not None and target.command.status == "failed"
                     )
-                    return CallbackAcceptance(
-                        accepted,
-                        persisted_sequence,
+                    if accepted and not _failure_result_compatible(
+                        target.task,
+                        target.command,
+                        code,
+                    ):
+                        return _target_acceptance(
+                            target,
+                            accepted=False,
+                            persisted_sequence=persisted_sequence,
+                            rejection_code=CALLBACK_RESULT_CONFLICT_CODE,
+                        )
+                    registration = (
+                        await _enqueue_target_boundary(
+                            session,
+                            target,
+                            boundary,
+                            durable_baseline=persisted_sequence,
+                        )
+                        if accepted
+                        else OutboxRegistration(outbox_id=None)
+                    )
+                    if registration.conflict:
+                        return _target_acceptance(
+                            target,
+                            accepted=False,
+                            persisted_sequence=persisted_sequence,
+                            rejection_code=OUTBOX_BOUNDARY_CONFLICT_CODE,
+                        )
+                    return _target_acceptance(
+                        target,
+                        accepted=accepted,
+                        persisted_sequence=persisted_sequence,
                         already_applied=accepted,
                         rejection_code=None if accepted else STATE_NOOP_CODE,
+                        outbox_event_id=registration.outbox_id,
+                    )
+                registration = await _enqueue_target_boundary(
+                    session,
+                    target,
+                    boundary,
+                    durable_baseline=persisted_sequence,
+                )
+                if registration.conflict:
+                    return _target_acceptance(
+                        target,
+                        accepted=False,
+                        persisted_sequence=persisted_sequence,
+                        rejection_code=OUTBOX_BOUNDARY_CONFLICT_CODE,
                     )
                 mark_task_failed_state(target.task, code)
                 _transition_callback_command(
                     target.command,
                     "failed",
                     result={"code": code},
+                    callback_result={"code": code},
                 )
-                return CallbackAcceptance(True, persisted_sequence)
+                return _target_acceptance(
+                    target,
+                    accepted=True,
+                    persisted_sequence=persisted_sequence,
+                    outbox_event_id=registration.outbox_id,
+                )
 
 
 class WritingTaskService:
@@ -614,16 +850,18 @@ class WritingCallbackService:
         self._repository = repository
         self._events = event_store
 
-    async def accept_event(self, body: AgentEvent) -> None:
+    async def accept_event(self, body: AgentEvent) -> CallbackReceipt:
         preparation = await self._prepare_callback(
             task_id=body.taskId,
             job_id=body.jobId,
             event_id=body.eventId,
             sequence=body.sequence,
+            callback_event=body.event,
+            callback_data=body.data,
             ignore_when_already_applied=True,
         )
-        if preparation is None:
-            return
+        if not preparation.should_continue:
+            return _callback_receipt(preparation.acceptance)
         acceptance = await self._repository.mark_command_processing(
             body.taskId, body.jobId, body.sequence
         )
@@ -634,20 +872,26 @@ class WritingCallbackService:
                 body.jobId,
                 body.eventId,
             )
-            return
+            return _callback_receipt(acceptance)
         if preparation.should_publish:
-            await self._append(
-                body.taskId,
-                body.eventId,
-                body.sequence,
-                body.event,
-                body.data,
-                durable_baseline=preparation.durable_baseline,
-            )
+            try:
+                await self._append(
+                    body.taskId,
+                    body.eventId,
+                    body.sequence,
+                    body.event,
+                    body.data,
+                    durable_baseline=preparation.durable_baseline,
+                )
+            except EventSourceConflict:
+                return _callback_receipt(
+                    _callback_rejection(acceptance, EVENT_SOURCE_CONFLICT_CODE)
+                )
+        return _callback_receipt(acceptance)
 
     async def save_checkpoint(
         self, body: CheckpointCallback, *, user_id: str, novel_id: str
-    ) -> None:
+    ) -> CallbackReceipt:
         checkpoint = dict(body.checkpoint)
         checkpoint[CALLBACK_JOB_ID_FIELD] = body.jobId
         serialized = json.dumps(checkpoint, ensure_ascii=False)
@@ -691,21 +935,64 @@ class WritingCallbackService:
             if is_short_medium
             else phase if isinstance(phase, str) else "active"
         )
+        waiting_payload: dict[str, JsonValue] = {"taskId": body.taskId}
+        artifact_id = checkpoint.get("activeArtifactId")
+        if isinstance(artifact_id, str) and artifact_id:
+            waiting_payload["artifactId"] = artifact_id
+            active_agent = checkpoint.get("activeAgent")
+            waiting_payload["agentId"] = (
+                active_agent
+                if isinstance(active_agent, str) and active_agent
+                else "系统"
+            )
+        boundary = (
+            BoundaryEvent(
+                source_event_id=body.eventId,
+                source_sequence=body.sequence,
+                dedupe_key=f"writing:{body.jobId}:waiting:{body.sequence}",
+                event_type="artifact_awaiting_user_approval",
+                payload=waiting_payload,
+            )
+            if not is_short_medium and persisted_phase == "awaiting_user_review"
+            else None
+        )
+        if boundary is not None:
+            acceptance = await self._repository.save_checkpoint(
+                body.taskId,
+                body.jobId,
+                serialized,
+                persisted_phase,
+                body.sequence,
+                boundary,
+            )
+            if not acceptance.accepted:
+                _log_callback_outcome(
+                    acceptance.rejection_code or STATE_NOOP_CODE,
+                    body.taskId,
+                    body.jobId,
+                    body.eventId,
+                )
+            return _callback_receipt(acceptance)
+
         preparation = await self._prepare_callback(
             task_id=body.taskId,
             job_id=body.jobId,
             event_id=body.eventId,
             sequence=body.sequence,
+            callback_event="checkpoint",
+            callback_data={"phase": checkpoint.get("phase")},
             allow_persisted_equal=True,
+            continue_on_duplicate=True,
         )
-        if preparation is None:
-            return
+        if not preparation.should_continue:
+            return _callback_receipt(preparation.acceptance)
         acceptance = await self._repository.save_checkpoint(
             body.taskId,
             body.jobId,
             serialized,
             persisted_phase,
             body.sequence,
+            None,
         )
         if not acceptance.accepted:
             _log_callback_outcome(
@@ -714,37 +1001,43 @@ class WritingCallbackService:
                 body.jobId,
                 body.eventId,
             )
-            return
+            return _callback_receipt(acceptance)
         if preparation.should_publish:
-            await self._append(
-                body.taskId,
-                body.eventId,
-                body.sequence,
-                "checkpoint",
-                {"phase": checkpoint.get("phase")},
-                durable_baseline=preparation.durable_baseline,
-            )
+            try:
+                await self._append(
+                    body.taskId,
+                    body.eventId,
+                    body.sequence,
+                    "checkpoint",
+                    {"phase": checkpoint.get("phase")},
+                    durable_baseline=preparation.durable_baseline,
+                )
+            except EventSourceConflict:
+                return _callback_receipt(
+                    _callback_rejection(acceptance, EVENT_SOURCE_CONFLICT_CODE)
+                )
+        return _callback_receipt(acceptance)
 
-    async def complete(self, body: RunCompletionCallback) -> None:
+    async def complete(self, body: RunCompletionCallback) -> CallbackReceipt:
         final_response = body.result.get("finalResponse")
         visible_response = final_response.strip() if isinstance(final_response, str) else ""
-        event_data: dict[str, Any] = {"taskId": body.taskId}
-        if visible_response:
-            event_data["finalContent"] = visible_response
-        preparation = await self._prepare_callback(
-            task_id=body.taskId,
-            job_id=body.jobId,
-            event_id=body.eventId,
-            sequence=body.sequence,
+        boundary = BoundaryEvent(
+            source_event_id=body.eventId,
+            source_sequence=body.sequence,
+            dedupe_key=f"writing:{body.jobId}:terminal",
+            event_type="completed",
+            payload={
+                "taskId": body.taskId,
+                "resultSha256": _callback_result_digest(body.result),
+            },
         )
-        if preparation is None:
-            return
         acceptance = await self._repository.complete_with_message_and_command(
             body.taskId,
             body.jobId,
             body.result,
             visible_response,
             body.sequence,
+            boundary,
         )
         if not acceptance.accepted:
             _log_callback_outcome(
@@ -753,28 +1046,26 @@ class WritingCallbackService:
                 body.jobId,
                 body.eventId,
             )
-            return
-        if preparation.should_publish:
-            await self._append(
-                body.taskId,
-                body.eventId,
-                body.sequence,
-                "completed",
-                event_data,
-                durable_baseline=preparation.durable_baseline,
-            )
+        return _callback_receipt(acceptance)
 
-    async def fail(self, body: RunFailureCallback) -> None:
-        preparation = await self._prepare_callback(
-            task_id=body.taskId,
-            job_id=body.jobId,
-            event_id=body.eventId,
-            sequence=body.sequence,
+    async def fail(self, body: RunFailureCallback) -> CallbackReceipt:
+        boundary = BoundaryEvent(
+            source_event_id=body.eventId,
+            source_sequence=body.sequence,
+            dedupe_key=f"writing:{body.jobId}:terminal",
+            event_type="error",
+            payload={
+                "message": "智能体运行失败",
+                "code": body.code,
+                "recoverable": body.recoverable,
+            },
         )
-        if preparation is None:
-            return
         acceptance = await self._repository.fail_with_command(
-            body.taskId, body.jobId, body.code, body.sequence
+            body.taskId,
+            body.jobId,
+            body.code,
+            body.sequence,
+            boundary,
         )
         if not acceptance.accepted:
             _log_callback_outcome(
@@ -783,20 +1074,7 @@ class WritingCallbackService:
                 body.jobId,
                 body.eventId,
             )
-            return
-        if preparation.should_publish:
-            await self._append(
-                body.taskId,
-                body.eventId,
-                body.sequence,
-                "error",
-                {
-                    "message": "智能体运行失败",
-                    "code": body.code,
-                    "recoverable": body.recoverable,
-                },
-                durable_baseline=preparation.durable_baseline,
-            )
+        return _callback_receipt(acceptance)
 
     async def _prepare_callback(
         self,
@@ -805,18 +1083,62 @@ class WritingCallbackService:
         job_id: str,
         event_id: str,
         sequence: int,
+        callback_event: str,
+        callback_data: dict[str, Any],
         allow_persisted_equal: bool = False,
         ignore_when_already_applied: bool = False,
-    ) -> _CallbackPreparation | None:
+        continue_on_duplicate: bool = False,
+    ) -> _CallbackPreparation:
         authorization = await self._repository.authorize_callback(task_id, job_id)
         if not authorization.accepted:
-            _log_callback_outcome(
+            rejection = _callback_rejection(
+                authorization,
                 authorization.rejection_code or JOB_MISMATCH_CODE,
+            )
+            _log_callback_outcome(
+                rejection.rejection_code or JOB_MISMATCH_CODE,
                 task_id,
                 job_id,
                 event_id,
             )
-            return None
+            return _CallbackPreparation(
+                should_continue=False,
+                should_publish=False,
+                durable_baseline=authorization.persisted_sequence,
+                acceptance=rejection,
+            )
+        try:
+            source_unseen = await self._events.validate_agent_event_source(
+                task_id,
+                source_event_id=event_id,
+                sequence=sequence,
+                event=callback_event,
+                data=callback_data,
+            )
+        except EventSourceConflict:
+            rejection = _callback_rejection(
+                authorization,
+                EVENT_SOURCE_CONFLICT_CODE,
+            )
+            _log_callback_outcome(
+                EVENT_SOURCE_CONFLICT_CODE,
+                task_id,
+                job_id,
+                event_id,
+            )
+            return _CallbackPreparation(
+                should_continue=False,
+                should_publish=False,
+                durable_baseline=authorization.persisted_sequence,
+                acceptance=rejection,
+            )
+        if not source_unseen and not continue_on_duplicate:
+            return _CallbackPreparation(
+                should_continue=False,
+                should_publish=False,
+                durable_baseline=authorization.persisted_sequence,
+                acceptance=replace(authorization, already_applied=True),
+            )
         if ignore_when_already_applied and authorization.already_applied:
             _log_callback_outcome(
                 ALREADY_APPLIED_CODE,
@@ -824,36 +1146,84 @@ class WritingCallbackService:
                 job_id,
                 event_id,
             )
-            return None
+            return _CallbackPreparation(
+                should_continue=False,
+                should_publish=False,
+                durable_baseline=authorization.persisted_sequence,
+                acceptance=authorization,
+            )
         if sequence < authorization.persisted_sequence:
+            rejection = _callback_rejection(authorization, SEQUENCE_STALE_CODE)
             _log_callback_outcome(
                 SEQUENCE_STALE_CODE,
                 task_id,
                 job_id,
                 event_id,
             )
-            return None
+            return _CallbackPreparation(
+                should_continue=False,
+                should_publish=False,
+                durable_baseline=authorization.persisted_sequence,
+                acceptance=rejection,
+            )
         if sequence == authorization.persisted_sequence:
             if not allow_persisted_equal:
+                rejection = _callback_rejection(
+                    authorization, SEQUENCE_STALE_CODE
+                )
                 _log_callback_outcome(
                     SEQUENCE_STALE_CODE,
                     task_id,
                     job_id,
                     event_id,
                 )
-                return None
+                return _CallbackPreparation(
+                    should_continue=False,
+                    should_publish=False,
+                    durable_baseline=authorization.persisted_sequence,
+                    acceptance=rejection,
+                )
             durable_baseline = max(0, sequence - 1)
         else:
             durable_baseline = authorization.persisted_sequence
-        should_publish = await self._validate_event_sequence(
-            task_id,
-            event_id,
-            sequence,
-            durable_baseline=durable_baseline,
-        )
+        try:
+            should_publish = await self._validate_event_sequence(
+                task_id,
+                event_id,
+                sequence,
+                event=callback_event,
+                data=callback_data,
+                durable_baseline=durable_baseline,
+            )
+        except EventSourceConflict:
+            rejection = _callback_rejection(
+                authorization,
+                EVENT_SOURCE_CONFLICT_CODE,
+            )
+            _log_callback_outcome(
+                EVENT_SOURCE_CONFLICT_CODE,
+                task_id,
+                job_id,
+                event_id,
+            )
+            return _CallbackPreparation(
+                should_continue=False,
+                should_publish=False,
+                durable_baseline=durable_baseline,
+                acceptance=rejection,
+            )
+        if not should_publish and not continue_on_duplicate:
+            return _CallbackPreparation(
+                should_continue=False,
+                should_publish=False,
+                durable_baseline=durable_baseline,
+                acceptance=replace(authorization, already_applied=True),
+            )
         return _CallbackPreparation(
+            should_continue=True,
             should_publish=should_publish,
             durable_baseline=durable_baseline,
+            acceptance=authorization,
         )
 
     async def _validate_event_sequence(
@@ -862,6 +1232,8 @@ class WritingCallbackService:
         event_id: str,
         sequence: int,
         *,
+        event: str,
+        data: dict[str, Any],
         durable_baseline: int,
     ) -> bool:
         try:
@@ -869,6 +1241,8 @@ class WritingCallbackService:
                 task_id,
                 source_event_id=event_id,
                 sequence=sequence,
+                event=event,
+                data=data,
                 durable_baseline=durable_baseline,
                 allow_rebase=True,
             )
@@ -897,6 +1271,42 @@ class WritingCallbackService:
             )
         except EventSequenceGap as exc:
             raise _event_sequence_gap_error(exc) from exc
+
+
+def _callback_rejection(
+    acceptance: CallbackAcceptance,
+    code: str,
+) -> CallbackAcceptance:
+    return CallbackAcceptance(
+        accepted=False,
+        persisted_sequence=acceptance.persisted_sequence,
+        rejection_code=code,
+        task_phase=acceptance.task_phase,
+        command_status=acceptance.command_status,
+        outbox_event_id=acceptance.outbox_event_id,
+    )
+
+
+def _callback_receipt(acceptance: CallbackAcceptance) -> CallbackReceipt:
+    disposition: Literal["applied", "already_applied", "rejected"]
+    if acceptance.accepted and acceptance.already_applied:
+        disposition = "already_applied"
+        reason_code = ALREADY_APPLIED_CODE
+    elif acceptance.accepted:
+        disposition = "applied"
+        reason_code = "WRITING_CALLBACK_APPLIED"
+    else:
+        disposition = "rejected"
+        reason_code = acceptance.rejection_code or STATE_NOOP_CODE
+    return CallbackReceipt(
+        protocolVersion="1.0",
+        disposition=disposition,
+        reasonCode=reason_code,
+        recoverable=False,
+        taskPhase=acceptance.task_phase or "unknown",
+        commandStatus=acceptance.command_status,
+        outboxEventId=acceptance.outbox_event_id,
+    )
 
 
 def _event_sequence_gap_error(exc: EventSequenceGap) -> ApiError:
@@ -948,6 +1358,48 @@ def _persisted_event_sequence(task: WritingTask) -> int:
             message="持久写作快照事件序号无效",
         )
     return cast(int, value)
+
+
+def _target_acceptance(
+    target: _CallbackTarget,
+    *,
+    accepted: bool,
+    persisted_sequence: int,
+    already_applied: bool = False,
+    rejection_code: str | None = None,
+    outbox_event_id: str | None = None,
+) -> CallbackAcceptance:
+    return CallbackAcceptance(
+        accepted=accepted,
+        persisted_sequence=persisted_sequence,
+        already_applied=already_applied,
+        rejection_code=rejection_code,
+        task_phase=target.task.phase,
+        command_status=(
+            cast(WritingCommandStatus, target.command.status)
+            if target.command is not None
+            else None
+        ),
+        outbox_event_id=outbox_event_id,
+    )
+
+
+async def _enqueue_target_boundary(
+    session: AsyncSession,
+    target: _CallbackTarget,
+    boundary: BoundaryEvent | None,
+    *,
+    durable_baseline: int | None,
+) -> OutboxRegistration:
+    if boundary is None:
+        return OutboxRegistration(outbox_id=None)
+    return await enqueue_boundary_event(
+        session,
+        task_id=target.task.id,
+        command_id=target.command.id if target.command is not None else None,
+        boundary=boundary,
+        durable_baseline=durable_baseline,
+    )
 
 
 async def _lock_callback_target(
@@ -1084,6 +1536,7 @@ def _transition_callback_command(
     target: str,
     *,
     result: dict[str, Any] | None = None,
+    callback_result: dict[str, Any] | None = None,
 ) -> None:
     if command is None:
         return
@@ -1099,13 +1552,170 @@ def _transition_callback_command(
     command.status = target
     command.completedAt = now
     command.updatedAt = now
-    if command.resultJson is None and result is not None:
+    if callback_result is not None:
+        persisted_result = _terminal_result_payload(command, result)
+        persisted_result[TERMINAL_CALLBACK_RESULT_FIELD] = callback_result
+        command.resultJson = json.dumps(
+            persisted_result,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    elif command.resultJson is None and result is not None:
         command.resultJson = json.dumps(
             result,
             ensure_ascii=False,
             sort_keys=True,
             separators=(",", ":"),
         )
+
+
+def _command_result_contains(
+    command: WritingRunCommand | None,
+    incoming: dict[str, Any],
+) -> bool:
+    if command is None or command.resultJson is None:
+        return False
+    try:
+        stored = json.loads(command.resultJson)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    if not isinstance(stored, dict):
+        return False
+    callback_result = stored.get(TERMINAL_CALLBACK_RESULT_FIELD)
+    if isinstance(callback_result, dict):
+        return callback_result == incoming
+    comparable = dict(stored)
+    if _is_short_medium_command(command):
+        try:
+            payload = json.loads(command.payloadJson)
+        except (json.JSONDecodeError, TypeError):
+            return False
+        if not isinstance(payload, dict):
+            return False
+        enrichment_key = (
+            "checkReport"
+            if payload.get("operation") == "full_check"
+            else "candidateVersionId"
+        )
+        comparable.pop(enrichment_key, None)
+    return comparable == incoming
+
+
+def _completion_result_compatible(
+    task: WritingTask,
+    command: WritingRunCommand | None,
+    incoming: dict[str, Any],
+) -> bool:
+    if command is not None and (
+        command.kind != "artifact_decision"
+        or _has_terminal_callback_result(command)
+    ):
+        return _command_result_contains(command, incoming)
+    return _task_completion_result_compatible(task, incoming)
+
+
+def _failure_result_compatible(
+    task: WritingTask,
+    command: WritingRunCommand | None,
+    code: str,
+) -> bool:
+    if command is not None and (
+        command.kind != "artifact_decision"
+        or _has_terminal_callback_result(command)
+    ):
+        return _command_result_contains(command, {"code": code})
+    return _task_failure_result_compatible(task, code)
+
+
+def _task_completion_result_compatible(
+    task: WritingTask,
+    incoming: dict[str, Any],
+) -> bool:
+    supported_fields = {"finalContent", "finalResponse", "agentOutputs"}
+    if set(incoming) - supported_fields:
+        return False
+    incoming_final_content = incoming.get("finalContent")
+    incoming_final_response = incoming.get("finalResponse")
+    if (
+        isinstance(incoming_final_content, str)
+        and isinstance(incoming_final_response, str)
+        and incoming_final_content != incoming_final_response
+    ):
+        return False
+    final_content = incoming.get("finalContent", incoming.get("finalResponse"))
+    if task.finalContent is not None and (
+        not isinstance(final_content, str) or task.finalContent != final_content
+    ):
+        return False
+    if task.finalContent is None and isinstance(final_content, str):
+        return False
+    agent_outputs = incoming.get("agentOutputs")
+    if task.agentOutputs is None:
+        return agent_outputs is None
+    if agent_outputs is None:
+        return False
+    try:
+        stored_outputs: object = json.loads(task.agentOutputs)
+        return bool(stored_outputs == agent_outputs)
+    except (json.JSONDecodeError, TypeError):
+        return False
+
+
+def _has_terminal_callback_result(command: WritingRunCommand) -> bool:
+    if command.resultJson is None:
+        return False
+    try:
+        result = json.loads(command.resultJson)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    return (
+        isinstance(result, dict)
+        and isinstance(result.get(TERMINAL_CALLBACK_RESULT_FIELD), dict)
+    )
+
+
+def _terminal_result_payload(
+    command: WritingRunCommand,
+    result: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if command.kind != "artifact_decision":
+        return dict(result or {})
+    if command.resultJson is None:
+        return dict(result or {})
+    try:
+        existing = json.loads(command.resultJson)
+    except (json.JSONDecodeError, TypeError):
+        return dict(result or {})
+    return dict(existing) if isinstance(existing, dict) else dict(result or {})
+
+
+def _callback_result_digest(result: dict[str, Any]) -> str:
+    canonical = json.dumps(
+        result,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _task_failure_result_compatible(task: WritingTask, code: str) -> bool:
+    if task.graphStateJson is None:
+        return True
+    try:
+        snapshot = json.loads(task.graphStateJson)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    if not isinstance(snapshot, dict):
+        return False
+    error_message = snapshot.get("errorMessage")
+    if not isinstance(error_message, str):
+        return True
+    if not error_message.startswith("智能体运行失败："):
+        return True
+    return error_message.endswith(code)
 
 
 def _is_short_medium_command(command: WritingRunCommand) -> bool:
@@ -1184,6 +1794,8 @@ def _checkpoint_phase_for_locked_command(
             code="WRITING_SNAPSHOT_INVALID",
             message=str(exc),
         ) from exc
+    if fallback_phase in TERMINAL_TASK_PHASES:
+        return "active"
     return fallback_phase
 
 

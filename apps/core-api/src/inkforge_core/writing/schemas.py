@@ -210,6 +210,43 @@ class ResumeWritingRunResponse(WritingSchema):
     commandStatus: WritingCommandStatus
 
 
+class WritingRunOutcomeCommand(WritingSchema):
+    id: str
+    kind: str
+    status: WritingCommandStatus
+    updatedAt: datetime
+
+
+class WritingRunOutcomeResult(WritingSchema):
+    kind: Literal[
+        "none",
+        "review_artifact",
+        "short_candidate",
+        "check_report",
+        "final_message",
+    ]
+    ready: bool
+    id: str | None = None
+
+
+class WritingRunOutcome(WritingSchema):
+    state: Literal[
+        "queued",
+        "running",
+        "waiting_user",
+        "succeeded",
+        "failed",
+        "inconsistent",
+    ]
+    code: str
+    taskTerminal: bool
+    streamShouldClose: bool
+    reconciliationRequired: bool
+    currentCommand: WritingRunOutcomeCommand | None
+    result: WritingRunOutcomeResult
+    observedAt: datetime
+
+
 class WritingRunStatusResponse(WritingSchema):
     taskId: str
     novelId: str
@@ -227,3 +264,4 @@ class WritingRunStatusResponse(WritingSchema):
     candidateVersionId: str | None
     checkReport: dict[str, JsonValue] | None
     error: dict[str, JsonValue] | None
+    outcome: WritingRunOutcome

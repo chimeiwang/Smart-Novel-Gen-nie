@@ -8,6 +8,7 @@ from typing import Any, Protocol
 import httpx
 from inkforge_contracts.events import (
     AgentEvent,
+    CallbackReceipt,
     CheckpointCallback,
     RunCompletionCallback,
     RunFailureCallback,
@@ -46,9 +47,16 @@ class RunResource(BaseModel):
 
 
 class CoreServiceError(RuntimeError):
-    def __init__(self, message: str, *, recoverable: bool) -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        recoverable: bool,
+        code: str | None = None,
+    ) -> None:
         super().__init__(message)
         self.recoverable = recoverable
+        self.code = code
 
 
 class CoreServiceClient:
@@ -111,6 +119,7 @@ class CoreServiceClient:
             scope=ServiceScope.CALLBACK_EVENT,
             resource=resource,
             idempotency_key=event_id,
+            require_callback_receipt=True,
         )
 
     async def save_checkpoint(
@@ -139,6 +148,7 @@ class CoreServiceClient:
             scope=ServiceScope.CALLBACK_CHECKPOINT,
             resource=resource,
             idempotency_key=event_id,
+            require_callback_receipt=True,
         )
 
     async def complete(
@@ -167,6 +177,7 @@ class CoreServiceClient:
             scope=ServiceScope.CALLBACK_COMPLETE,
             resource=resource,
             idempotency_key=event_id,
+            require_callback_receipt=True,
         )
 
     async def fail(
@@ -199,6 +210,7 @@ class CoreServiceClient:
             scope=ServiceScope.CALLBACK_FAIL,
             resource=resource,
             idempotency_key=event_id,
+            require_callback_receipt=True,
         )
 
     async def create_artifact(
@@ -468,6 +480,7 @@ class CoreServiceClient:
         scope: ServiceScope,
         resource: RunResource,
         idempotency_key: str,
+        require_callback_receipt: bool = False,
     ) -> dict[str, Any]:
         body = canonical_json_body(payload)
         signed = self._signer.sign_request(
@@ -489,17 +502,48 @@ class CoreServiceClient:
                 headers={**signed.headers, "Content-Type": "application/json"},
             )
             response.raise_for_status()
-            if response.status_code == 204 or not response.content:
-                return {}
-            value = response.json()
         except httpx.HTTPStatusError as exc:
             recoverable = exc.response.status_code >= 500
             raise CoreServiceError(
                 "核心服务拒绝智能体回调",
                 recoverable=recoverable,
             ) from exc
-        except (httpx.HTTPError, ValueError) as exc:
+        except httpx.HTTPError as exc:
             raise CoreServiceError("核心服务暂时不可用", recoverable=True) from exc
+
+        if response.status_code == 204 or not response.content:
+            if require_callback_receipt:
+                raise CoreServiceError(
+                    "核心服务未返回写作回调接收凭证",
+                    recoverable=True,
+                    code="CALLBACK_RECEIPT_MISSING",
+                )
+            return {}
+        try:
+            value = response.json()
+        except ValueError as exc:
+            if require_callback_receipt:
+                raise CoreServiceError(
+                    "核心服务返回的写作回调接收凭证不是有效 JSON",
+                    recoverable=True,
+                    code="CALLBACK_RECEIPT_INVALID",
+                ) from exc
+            raise CoreServiceError("核心服务暂时不可用", recoverable=True) from exc
+        if require_callback_receipt:
+            try:
+                receipt = CallbackReceipt.model_validate(value)
+            except ValueError as exc:
+                raise CoreServiceError(
+                    "核心服务返回的写作回调接收凭证不符合契约",
+                    recoverable=True,
+                    code="CALLBACK_RECEIPT_INVALID",
+                ) from exc
+            if receipt.disposition == "rejected":
+                raise CoreServiceError(
+                    f"{receipt.reasonCode}：核心服务拒绝写作回调",
+                    recoverable=receipt.recoverable,
+                    code=receipt.reasonCode,
+                )
         if not isinstance(value, dict):
             raise CoreServiceError("核心服务响应格式无效", recoverable=False)
         return value

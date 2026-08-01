@@ -2531,6 +2531,12 @@ class WritingTask(Base):
         back_populates="task",
         foreign_keys=lambda: [WritingRunCommand.taskId],
     )
+    outboxEvents: Mapped[list[WritingEventOutbox]] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
+        back_populates="task",
+        foreign_keys=lambda: [WritingEventOutbox.taskId],
+    )
     chapter: Mapped[Chapter] = relationship(
         back_populates="writingTasks",
         foreign_keys=lambda: [WritingTask.chapterId],
@@ -2606,6 +2612,11 @@ class WritingRunCommand(Base):
         back_populates="commands",
         foreign_keys=lambda: [WritingRunCommand.taskId],
     )
+    outboxEvents: Mapped[list[WritingEventOutbox]] = relationship(
+        passive_deletes=True,
+        back_populates="command",
+        foreign_keys=lambda: [WritingEventOutbox.commandId],
+    )
 
     __table_args__ = (
         PrimaryKeyConstraint("id", name="WritingRunCommand_pkey"),
@@ -2616,6 +2627,115 @@ class WritingRunCommand(Base):
             "taskId",
             unique=True,
             postgresql_where=text("\"status\" IN ('pending', 'submitted', 'processing')"),
+        ),
+        {"schema": "public"},
+    )
+
+
+class WritingEventOutbox(Base):
+    __tablename__ = "WritingEventOutbox"
+    attemptCount: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    commandId: Mapped[str | None] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.WritingRunCommand.id",
+            name="WritingEventOutbox_commandId_fkey",
+            ondelete="SET NULL",
+            onupdate="CASCADE",
+        ),
+        nullable=True,
+    )
+    createdAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    dedupeKey: Mapped[str] = mapped_column(Text, nullable=False)
+    deliveryState: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'pending'::text")
+    )
+    durableBaseline: Mapped[int] = mapped_column(Integer, nullable=False)
+    eventType: Mapped[str] = mapped_column(Text, nullable=False)
+    id: Mapped[str] = mapped_column(Text, nullable=False, default=generate_id)
+    lastErrorCode: Mapped[str | None] = mapped_column(Text, nullable=True)
+    leaseExpiresAt: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=True
+    )
+    leaseToken: Mapped[str | None] = mapped_column(Text, nullable=True)
+    nextAttemptAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    payloadJson: Mapped[str] = mapped_column(Text, nullable=False)
+    publishedAt: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=True
+    )
+    redisEventId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sourceEventId: Mapped[str] = mapped_column(Text, nullable=False)
+    sourceSequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    taskId: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.WritingTask.id",
+            name="WritingEventOutbox_taskId_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        nullable=False,
+    )
+    updatedAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+    task: Mapped[WritingTask] = relationship(
+        back_populates="outboxEvents",
+        foreign_keys=lambda: [WritingEventOutbox.taskId],
+    )
+    command: Mapped[WritingRunCommand | None] = relationship(
+        back_populates="outboxEvents",
+        foreign_keys=lambda: [WritingEventOutbox.commandId],
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="WritingEventOutbox_pkey"),
+        Index(
+            "WritingEventOutbox_sourceEventId_key",
+            "sourceEventId",
+            unique=True,
+        ),
+        Index("WritingEventOutbox_dedupeKey_key", "dedupeKey", unique=True),
+        Index(
+            "WritingEventOutbox_taskId_sourceSequence_key",
+            "taskId",
+            "sourceSequence",
+            unique=True,
+        ),
+        Index(
+            "WritingEventOutbox_due_idx",
+            "deliveryState",
+            "nextAttemptAt",
+            "createdAt",
+            postgresql_where=text(
+                '"deliveryState" IN (\'pending\', \'delivering\')'
+            ),
+        ),
+        Index(
+            "WritingEventOutbox_task_sequence_idx",
+            "taskId",
+            "sourceSequence",
+        ),
+        Index(
+            "WritingEventOutbox_publishedAt_idx",
+            "publishedAt",
+            postgresql_where=text('"publishedAt" IS NOT NULL'),
         ),
         {"schema": "public"},
     )

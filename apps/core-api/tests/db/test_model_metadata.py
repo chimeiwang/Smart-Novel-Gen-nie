@@ -44,6 +44,7 @@ EXPECTED_MODEL_TABLES = {
     "WritingStyle",
     "StyleReference",
     "StylePortraitTask",
+    "WritingEventOutbox",
     "WritingRunCommand",
     "Foreshadowing",
     "OutlineNode",
@@ -193,7 +194,7 @@ def test_timestamp_text_bigint_and_vector_types_preserve_existing_storage() -> N
     ]
     bigint_columns = [column for column in columns if isinstance(column.type, BigInteger)]
 
-    assert len(timestamp_columns) == 75
+    assert len(timestamp_columns) == 80
     assert all(column.type.precision == 3 for column in timestamp_columns)
     assert all(column.type.timezone is False for column in timestamp_columns)
     assert {(column.table.name, column.name) for column in bigint_columns} == {
@@ -273,9 +274,26 @@ def test_primary_keys_foreign_keys_and_indexes_match_the_frozen_contract() -> No
                 assert postgresql_options["where"] is None
             else:
                 predicate = str(postgresql_options["where"])
-                assert '"status"' in predicate
+                expected_predicate_tokens = {
+                    "WritingRunCommand_active_task_key": (
+                        '"status"',
+                        "pending",
+                        "submitted",
+                        "processing",
+                    ),
+                    "WritingEventOutbox_due_idx": (
+                        '"deliveryState"',
+                        "pending",
+                        "delivering",
+                    ),
+                    "WritingEventOutbox_publishedAt_idx": (
+                        '"publishedAt"',
+                        "IS NOT NULL",
+                    ),
+                }
+                assert name in expected_predicate_tokens
                 assert all(
-                    value in predicate for value in ("pending", "submitted", "processing")
+                    token in predicate for token in expected_predicate_tokens[name]
                 )
             assert expected["includeColumns"] == []
             assert expected["options"] == []
@@ -499,6 +517,7 @@ def test_configured_database_registers_connection_and_schema_readiness(
         "configuration",
         "database",
         "database_schema",
+        "writing_outbox",
     }
 
 
@@ -541,7 +560,9 @@ def test_database_readiness_failure_returns_generic_not_ready_without_secret(
             "configuration": "ok",
             "database": "failed",
             "database_schema": "failed",
+            "writing_outbox": "failed",
         },
+        "backgroundTasks": {"writing_outbox": "OUTBOX_HEALTH_UNAVAILABLE"},
     }
     assert opaque_marker not in response.text
 
@@ -562,6 +583,13 @@ def test_schema_drift_marks_only_schema_readiness_as_failed(
     async def drifted(_engine: AsyncEngine, _path: Path) -> SchemaVerificationResult:
         return SchemaVerificationResult(ready=False, fingerprint="drifted", diffs=[])
 
+    class HealthyOutboxReadiness:
+        async def check(self) -> bool:
+            return True
+
+        def error_codes(self) -> dict[str, str]:
+            return {}
+
     monkeypatch.setattr(session, "create_database_engine", lambda _url: engine)
     monkeypatch.setattr(session, "create_session_factory", lambda _engine: object())
     monkeypatch.setattr(session, "check_database_connection", connected)
@@ -570,7 +598,8 @@ def test_schema_drift_marks_only_schema_readiness_as_failed(
     app = app_module.create_app(
         settings=Settings.model_validate(
             {"environment": "dev", "database_url": "postgresql://user:secret@db/inkforge"}
-        )
+        ),
+        writing_outbox_readiness=HealthyOutboxReadiness(),
     )
     response = TestClient(app).get("/api/v1/health/ready")
 
@@ -579,6 +608,7 @@ def test_schema_drift_marks_only_schema_readiness_as_failed(
         "configuration": "ok",
         "database": "ok",
         "database_schema": "failed",
+        "writing_outbox": "ok",
     }
 
 
@@ -676,7 +706,7 @@ def test_mappers_cover_every_real_foreign_key_without_logical_id_relationships()
     mapped_models = [getattr(models, name) for name in EXPECTED_MODEL_TABLES]
     relationship_count = sum(len(inspect(model).relationships) for model in mapped_models)
 
-    assert relationship_count == 114
+    assert relationship_count == 118
     assert set(inspect(models.CharacterRelation).relationships.keys()) == {"character", "target"}
     assert inspect(models.Location).relationships["parent"].remote_side == {
         models.Location.__table__.c.id
@@ -724,7 +754,7 @@ def test_parent_relationship_delete_policy_matches_every_real_foreign_key() -> N
                 assert "delete" not in relation.cascade, (model_name, relation.key)
             assert "delete-orphan" not in relation.cascade, (model_name, relation.key)
 
-    assert parent_relationships == 56
+    assert parent_relationships == 58
 
 
 def _sqlite_uow_engine(*tables: Any) -> Any:

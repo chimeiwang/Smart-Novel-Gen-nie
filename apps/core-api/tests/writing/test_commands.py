@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 import pytest
 from inkforge_core.db.base import utc_now
-from inkforge_core.db.models import WritingRunCommand, WritingTask
+from inkforge_core.db.models import ReviewArtifact, WritingRunCommand, WritingTask
 from inkforge_core.errors import ApiError
 from inkforge_core.writing.commands import (
     WritingRunCommandRepository,
@@ -61,6 +61,8 @@ class CommandSession:
 
     async def execute(self, statement: object) -> object:
         self.statements.append(statement)
+        if 'UPDATE public."WritingEventOutbox"' in str(statement):
+            return type("UpdateResult", (), {"rowcount": 0})()
         if not self.execute_results:
             raise AssertionError("收到未预期的数据库查询")
         return self.execute_results.pop(0)
@@ -80,6 +82,22 @@ class SessionFactory:
         if not self.sessions:
             raise AssertionError("收到未预期的数据库会话")
         return self.sessions.pop(0)
+
+
+class StatusSession(CommandSession):
+    def __init__(
+        self,
+        execute_results: list[object],
+        scalar_results: list[object | None],
+    ) -> None:
+        super().__init__(execute_results)
+        self.scalar_results = list(scalar_results)
+
+    async def scalar(self, statement: object) -> object | None:
+        self.statements.append(statement)
+        if not self.scalar_results:
+            raise AssertionError("收到未预期的标量查询")
+        return self.scalar_results.pop(0)
 
 
 def task() -> WritingTask:
@@ -119,6 +137,462 @@ def command(
     )
 
 
+def review_artifact(
+    *,
+    artifact_id: str = "artifact-1",
+    task_id: str = "task-1",
+    novel_id: str = "novel-1",
+    chapter_id: str | None = "chapter-1",
+    kind: str = "chapter_draft",
+    status: str = "awaiting_user",
+) -> ReviewArtifact:
+    now = utc_now()
+    return ReviewArtifact(
+        id=artifact_id,
+        novelId=novel_id,
+        chapterId=chapter_id,
+        taskId=task_id,
+        artifactKey="draft-1",
+        kind=kind,
+        status=status,
+        title="待确认草案",
+        payloadJson=json.dumps({"kind": kind, "content": "正文"}),
+        revision=1,
+        createdAt=now,
+        updatedAt=now,
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_status_projects_latest_artifact_decision_command() -> None:
+    owned_task = task()
+    decision = command(command_id="decision-1", status="processing")
+    decision.kind = "artifact_decision"
+    decision.createdAt = owned_task.updatedAt + timedelta(seconds=1)
+    decision.updatedAt = decision.createdAt
+    session = StatusSession(
+        [RowResult((owned_task, "user-1"))],
+        [decision],
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    response = await repository.get_run_status("user-1", owned_task.id)
+
+    assert response.commandId == decision.id
+    assert response.outcome.state == "running"
+    assert response.outcome.currentCommand is not None
+    assert response.outcome.currentCommand.id == decision.id
+    assert response.outcome.currentCommand.kind == "artifact_decision"
+    rendered = str(session.statements[1].compile(dialect=postgresql.dialect()))
+    assert '"WritingRunCommand"."kind" IN' not in rendered
+
+
+@pytest.mark.asyncio
+async def test_long_form_waiting_status_requires_authoritative_review_artifact() -> None:
+    owned_task = task()
+    owned_task.phase = "awaiting_user_review"
+    owned_task.graphStateJson = json.dumps(
+        {
+            "taskId": owned_task.id,
+            "userId": "user-1",
+            "novelId": owned_task.novelId,
+            "chapterId": owned_task.chapterId,
+            "targetWordCount": owned_task.targetWordCount,
+            "conversationHistory": [],
+            "phase": "awaiting_user_review",
+            "eventSequence": 7,
+            "artifactReview": {"activeArtifactId": "artifact-1"},
+        }
+    )
+    completed_command = command(status="succeeded")
+    artifact = review_artifact()
+    session = StatusSession(
+        [RowResult((owned_task, "user-1"))],
+        [completed_command, artifact],
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    response = await repository.get_run_status("user-1", owned_task.id)
+
+    assert response.outcome.state == "waiting_user"
+    assert response.outcome.taskTerminal is False
+    assert response.outcome.result.kind == "review_artifact"
+    assert response.outcome.result.id == artifact.id
+    assert response.outcome.result.ready is True
+
+
+@pytest.mark.asyncio
+async def test_legacy_long_form_waiting_status_loads_artifact_without_command() -> None:
+    owned_task = task()
+    owned_task.phase = "awaiting_user_review"
+    owned_task.graphStateJson = json.dumps(
+        {
+            "taskId": owned_task.id,
+            "userId": "user-1",
+            "novelId": owned_task.novelId,
+            "chapterId": owned_task.chapterId,
+            "targetWordCount": owned_task.targetWordCount,
+            "conversationHistory": [],
+            "phase": "awaiting_user_review",
+            "eventSequence": 7,
+            "artifactReview": {"activeArtifactId": "artifact-1"},
+        }
+    )
+    artifact = review_artifact()
+    session = StatusSession(
+        [RowResult((owned_task, "user-1"))],
+        [None, artifact],
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    response = await repository.get_run_status("user-1", owned_task.id)
+
+    assert response.commandId is None
+    assert response.outcome.state == "waiting_user"
+    assert response.outcome.currentCommand is None
+    assert response.outcome.result.id == artifact.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "artifact",
+    [
+        review_artifact(artifact_id="artifact-other"),
+        review_artifact(task_id="task-other"),
+        review_artifact(novel_id="novel-other"),
+        review_artifact(status="applied"),
+    ],
+    ids=["wrong-id", "wrong-task", "wrong-novel", "not-awaiting-user"],
+)
+async def test_long_form_waiting_status_rejects_non_authoritative_artifact(
+    artifact: ReviewArtifact,
+) -> None:
+    owned_task = task()
+    owned_task.phase = "awaiting_user_review"
+    owned_task.graphStateJson = json.dumps(
+        {
+            "taskId": owned_task.id,
+            "userId": "user-1",
+            "novelId": owned_task.novelId,
+            "chapterId": owned_task.chapterId,
+            "targetWordCount": owned_task.targetWordCount,
+            "conversationHistory": [],
+            "phase": "awaiting_user_review",
+            "eventSequence": 7,
+            "artifactReview": {"activeArtifactId": "artifact-1"},
+        }
+    )
+    completed_command = command(status="succeeded")
+    session = StatusSession(
+        [RowResult((owned_task, "user-1"))],
+        [completed_command, artifact],
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    response = await repository.get_run_status("user-1", owned_task.id)
+
+    assert response.outcome.state == "inconsistent"
+    assert response.outcome.result.kind == "review_artifact"
+    assert response.outcome.result.ready is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("candidate_status", ["awaiting_user", "applied"])
+async def test_short_medium_completed_document_run_projects_verified_candidate(
+    candidate_status: str,
+) -> None:
+    owned_task = task()
+    owned_task.phase = "completed"
+    short_command = command(status="succeeded")
+    short_command.payloadJson = json.dumps(
+        {
+            "workflow": "short_medium",
+            "operation": "generate_manuscript",
+            "documentType": "manuscript",
+            "chapterId": owned_task.chapterId,
+        }
+    )
+    short_command.resultJson = json.dumps({"candidateVersionId": "candidate-1"})
+    short_command.artifactId = "candidate-1"
+    candidate = review_artifact(
+        artifact_id="candidate-1",
+        status=candidate_status,
+    )
+    session = StatusSession(
+        [RowResult((owned_task, "user-1"))],
+        [short_command, candidate],
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    response = await repository.get_run_status("user-1", owned_task.id)
+
+    assert response.candidateVersionId == candidate.id
+    assert response.outcome.state == "succeeded"
+    assert response.outcome.taskTerminal is True
+    assert response.outcome.result.kind == "short_candidate"
+    assert response.outcome.result.id == candidate.id
+    assert response.outcome.result.ready is True
+
+
+@pytest.mark.asyncio
+async def test_short_medium_outline_candidate_has_outline_identity() -> None:
+    owned_task = task()
+    owned_task.phase = "completed"
+    short_command = command(status="succeeded")
+    short_command.payloadJson = json.dumps(
+        {
+            "workflow": "short_medium",
+            "operation": "generate_outline",
+            "documentType": "outline",
+            "chapterId": None,
+        }
+    )
+    short_command.resultJson = json.dumps({"candidateVersionId": "candidate-1"})
+    short_command.artifactId = "candidate-1"
+    candidate = review_artifact(
+        artifact_id="candidate-1",
+        chapter_id=None,
+        kind="outline_draft",
+    )
+    session = StatusSession(
+        [RowResult((owned_task, "user-1"))],
+        [short_command, candidate],
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    response = await repository.get_run_status("user-1", owned_task.id)
+
+    assert response.outcome.state == "succeeded"
+    assert response.outcome.result.kind == "short_candidate"
+    assert response.outcome.result.ready is True
+
+
+@pytest.mark.asyncio
+async def test_short_medium_candidate_rejects_operation_document_type_conflict() -> None:
+    owned_task = task()
+    owned_task.phase = "completed"
+    short_command = command(status="succeeded")
+    short_command.payloadJson = json.dumps(
+        {
+            "workflow": "short_medium",
+            "operation": "generate_outline",
+            "documentType": "manuscript",
+            "chapterId": owned_task.chapterId,
+        }
+    )
+    short_command.resultJson = json.dumps({"candidateVersionId": "candidate-1"})
+    short_command.artifactId = "candidate-1"
+    candidate = review_artifact(artifact_id="candidate-1")
+    session = StatusSession(
+        [RowResult((owned_task, "user-1"))],
+        [short_command, candidate],
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    response = await repository.get_run_status("user-1", owned_task.id)
+
+    assert response.outcome.state == "inconsistent"
+    assert response.outcome.result.ready is False
+
+
+@pytest.mark.asyncio
+async def test_short_medium_full_check_projects_complete_report() -> None:
+    owned_task = task()
+    owned_task.phase = "completed"
+    short_command = command(status="succeeded")
+    short_command.payloadJson = json.dumps(
+        {
+            "workflow": "short_medium",
+            "operation": "full_check",
+            "documentType": "manuscript",
+            "chapterId": owned_task.chapterId,
+        }
+    )
+    report = {"summary": "检查完成", "issues": []}
+    short_command.resultJson = json.dumps({"checkReport": report})
+    session = StatusSession(
+        [RowResult((owned_task, "user-1"))],
+        [short_command],
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    response = await repository.get_run_status("user-1", owned_task.id)
+
+    assert response.checkReport == report
+    assert response.candidateVersionId is None
+    assert response.outcome.state == "succeeded"
+    assert response.outcome.result.kind == "check_report"
+    assert response.outcome.result.id == short_command.id
+    assert response.outcome.result.ready is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "result",
+    [{}, {"checkReport": "不是结构化报告"}],
+    ids=["missing", "wrong-type"],
+)
+async def test_short_medium_full_check_rejects_missing_or_invalid_report(
+    result: dict[str, object],
+) -> None:
+    owned_task = task()
+    owned_task.phase = "completed"
+    short_command = command(status="succeeded")
+    short_command.payloadJson = json.dumps(
+        {
+            "workflow": "short_medium",
+            "operation": "full_check",
+            "documentType": "manuscript",
+            "chapterId": owned_task.chapterId,
+        }
+    )
+    short_command.resultJson = json.dumps(result)
+    session = StatusSession(
+        [RowResult((owned_task, "user-1"))],
+        [short_command],
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    response = await repository.get_run_status("user-1", owned_task.id)
+
+    assert response.checkReport is None
+    assert response.outcome.state == "inconsistent"
+    assert response.outcome.result.kind == "check_report"
+    assert response.outcome.result.ready is False
+
+
+@pytest.mark.asyncio
+async def test_run_status_reports_corrupted_full_check_result_as_inconsistent() -> None:
+    owned_task = task()
+    owned_task.phase = "completed"
+    short_command = command(status="succeeded")
+    short_command.payloadJson = json.dumps(
+        {
+            "workflow": "short_medium",
+            "operation": "full_check",
+            "documentType": "manuscript",
+            "chapterId": owned_task.chapterId,
+        }
+    )
+    short_command.resultJson = "{损坏的 JSON"
+    session = StatusSession(
+        [RowResult((owned_task, "user-1"))],
+        [short_command],
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    response = await repository.get_run_status("user-1", owned_task.id)
+
+    assert response.checkReport is None
+    assert response.outcome.state == "inconsistent"
+    assert response.outcome.result.kind == "check_report"
+    assert response.outcome.result.ready is False
+
+
+@pytest.mark.asyncio
+async def test_short_medium_without_command_does_not_use_long_form_reconciliation() -> None:
+    owned_task = task()
+    owned_task.phase = "active"
+    owned_task.graphStateJson = json.dumps(
+        {
+            "workflow": "short_medium",
+            "operation": "generate_manuscript",
+            "documentType": "manuscript",
+            "chapterId": owned_task.chapterId,
+            "phase": "generating",
+            "eventSequence": 3,
+        }
+    )
+    session = StatusSession(
+        [RowResult((owned_task, "user-1"))],
+        [None],
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    response = await repository.get_run_status("user-1", owned_task.id)
+
+    assert response.commandId is None
+    assert response.outcome.state == "inconsistent"
+    assert response.outcome.reconciliationRequired is True
+    assert response.outcome.streamShouldClose is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "case",
+    [
+        "wrong-id",
+        "wrong-task",
+        "wrong-novel",
+        "wrong-chapter",
+        "wrong-kind",
+        "wrong-status",
+        "wrong-command-artifact",
+    ],
+)
+async def test_short_medium_candidate_must_match_command_and_document_identity(
+    case: str,
+) -> None:
+    owned_task = task()
+    owned_task.phase = "completed"
+    short_command = command(status="succeeded")
+    short_command.payloadJson = json.dumps(
+        {
+            "workflow": "short_medium",
+            "operation": "generate_manuscript",
+            "documentType": "manuscript",
+            "chapterId": owned_task.chapterId,
+        }
+    )
+    short_command.resultJson = json.dumps({"candidateVersionId": "candidate-1"})
+    short_command.artifactId = (
+        "candidate-other" if case == "wrong-command-artifact" else "candidate-1"
+    )
+    candidate = review_artifact(
+        artifact_id="candidate-other" if case == "wrong-id" else "candidate-1",
+        task_id="task-other" if case == "wrong-task" else owned_task.id,
+        novel_id="novel-other" if case == "wrong-novel" else owned_task.novelId,
+        chapter_id=("chapter-other" if case == "wrong-chapter" else owned_task.chapterId),
+        kind="outline_draft" if case == "wrong-kind" else "chapter_draft",
+        status="draft" if case == "wrong-status" else "awaiting_user",
+    )
+    session = StatusSession(
+        [RowResult((owned_task, "user-1"))],
+        [short_command, candidate],
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    response = await repository.get_run_status("user-1", owned_task.id)
+
+    assert response.outcome.state == "inconsistent"
+    assert response.outcome.result.kind == "short_candidate"
+    assert response.outcome.result.ready is False
+
+
 @pytest.mark.asyncio
 async def test_same_client_request_returns_existing_command() -> None:
     owned_task = task()
@@ -144,6 +618,10 @@ async def test_same_client_request_returns_existing_command() -> None:
     assert second.id == first.id
     assert second.status == "pending"
     assert len(first_session.added) == 1
+    assert any(
+        'UPDATE public."WritingEventOutbox"' in str(statement)
+        for statement in first_session.statements
+    )
 
 
 @pytest.mark.asyncio

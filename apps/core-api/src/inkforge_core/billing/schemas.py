@@ -6,6 +6,7 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
 
 ProviderName = Literal["openai_compatible", "fake"]
+MODEL_GRANT_LIFETIME_SECONDS = 1_200
 
 
 class BillingSchema(BaseModel):
@@ -40,7 +41,10 @@ class ModelGrantClaims(BillingSchema):
 
     @model_validator(mode="after")
     def validate_lifetime(self) -> Self:
-        if self.exp <= self.iat or self.exp - self.iat > 300:
+        if (
+            self.exp <= self.iat
+            or self.exp - self.iat > MODEL_GRANT_LIFETIME_SECONDS
+        ):
             raise ValueError("模型授权令牌有效期无效")
         return self
 

@@ -242,7 +242,7 @@ flowchart TD
 - 显示当前 Operation 和阶段。
 - 显示 Agent 开始、状态、工具摘要、流式正文和完成状态。
 - 不把 Agent 聊天正文当 Markdown 解析，按普通段落文本渲染。
-- 草案事件只刷新聊天流草案卡片；审核弹窗由用户主动打开。
+- 草案事件只触发 Core 权威草案刷新，不得直接把事件载荷恢复成可操作卡片；审核弹窗由用户主动打开。
 - 前端按任务保存最后一个事件 ID，重连时发送 `Last-Event-ID`，并拒绝不符合共享事件契约的载荷。
 - 断流后应能从会话和任务状态恢复待审核草案。
 
@@ -295,11 +295,11 @@ Operation 的 `contextStrategy` 只生成最小投影：`brief` 提供任务、�
 
 写作处理器在初次运行、命令恢复和当前 job 快照恢复时附加仅运行时 `runtimeContext`，其中 `RunResource.runId/jobId` 只来自当前 QueueJob。Agent 执行、工具、草案创建、评审和草案水合统一使用该身份；`runtimeContext` 在稳定快照序列化前移除，不能成为可恢复业务状态。
 
-恢复自动复审、自动返工或用户 revise 决定前，Agent Service 使用 Core `planning.activeArtifact` 水合权威草案并校验 task、novel、chapter、kind、artifactKey 与 revision；Core 已事务处理的 approve/discard 不要求草案继续存在。进程内草案记录只在等待态 checkpoint、完成回调或失败回调成功后，按同一 `runId/jobId` 释放。
+恢复自动复审、自动返工或用户 revise 决定前，Agent Service 使用 Core `planning.activeArtifact` 水合权威草案并校验 task、novel、chapter、kind、artifactKey 与 revision；Core 已事务处理的 approve/discard 不要求草案继续存在。进程内草案记录只在等待态 checkpoint、完成回调或失败回调返回合法 `applied/already_applied` 凭证后，按同一 `runId/jobId` 释放。
 
 Agent Service 使用 `MODEL_MAX_OUTPUT_TOKENS` 表达当前部署模型的单次最大输出能力，默认 `384000`，合法范围为 `1..1_000_000`；普通 Agent 与文风画像共用该值。它不是目标篇幅，不要求模型必须生成到该长度，也不承诺无限输出。
 
-计费模型调用仍先向 Core 申请有限正整数 grant；Core 可以按可用余额缩小额度，`ModelRuntime` 校验授权后把实际 `maxOutputTokens` 精确传给 Provider，任何调用都不得绕过授权上限。
+计费模型调用仍先向 Core 申请有限正整数 grant；模型授权生命周期为 1200 秒，供单次模型调用完成后上报实际用量，不改变内部服务请求令牌的短期约束。Core 可以按可用余额缩小额度，`ModelRuntime` 校验授权后把实际 `maxOutputTokens` 精确传给 Provider，任何调用都不得绕过授权上限。
 
 Provider 必须提供规范化完成原因并保留供应商原始值。`length`、`content_filter`、`stop`/`tool_calls` 与实际工具状态矛盾、以及没有合法工具调用的 `unknown` 都在接受正文或执行工具副作用前失败，当前不把 `length` 作为自动续写信号；文风画像只接受 `stop`、无工具调用且正文非空的纯文本响应，半截画像不能成功。人工模型日志记录规范化值和完整原始值。
 
@@ -320,7 +320,7 @@ Provider 必须提供规范化完成原因并保留供应商原始值。`length`
 - 写作事件使用短期 Redis Stream 保存，支持 `Last-Event-ID` 重放、来源事件去重和序号缺口对账；没有 Redis 的测试环境使用同契约内存实现。
 - 智能体事件、检查点、完成和失败只接受可信网段内的 Ed25519 签名内部回调；签名请求体和来源幂等标识都包含 `jobId`。
 - Redis 事件序号键丢失时，Core 先用 PostgreSQL 当前命令身份和持久检查点授权，再允许当前 job 从持久序号后重建基线；旧 job 或小于等于持久序号的事件不能抬高、回退或重置基线。
-- 回调按“精确身份授权、Redis 序号预检、PostgreSQL 二次锁定并持久化、Redis Lua 原子发布”执行；数据库已成功而首次发布失败时，同一来源事件能够幂等补发。
+- 普通过程事件和非边界 checkpoint 仍按“精确身份授权、Redis 序号预检、PostgreSQL 二次锁定并持久化、Redis Lua 原子发布”执行。相同来源标识只有在 sequence、事件类型和规范化数据完全一致时才视为安全重复，否则返回明确冲突；来源内容核验先于命令终态和持久序号短路。等待用户、完成和失败边界不依赖事务前 Redis：Core 在同一 PostgreSQL 事务内收敛业务事实并插入 `WritingEventOutbox`，提交后返回显式接收凭证；Publisher 再按稳定来源标识幂等写入 Redis Stream。Outbox 的 `durableBaseline` 只能取持有任务行锁后、修改本次事实前的 PostgreSQL 快照序号，不能由回调层按 `sequence - 1` 推测；相同来源、序号、终态幂等键或终态原始 result 对应不同事实时返回明确 rejected 回执。迁移前无命令的历史终态只接受可从任务字段严格核验的 completion result，无法核验的额外字段必须拒绝。
 - 同一 job 已保存 `completed/error` 快照后，Agent 重试必须从持久序号直接重放 completion/failure，不能重新执行图或重新生成正文；failure 回调自身的 5xx、超时或断线保留可重试语义。
 - Agent 图返回 `phase=error` 时，Agent Service 保存错误快照并调用失败回调，不得发送完成回调。
 - 稳定快照写入 `WritingTask.graphStateJson`，并拒绝 `runtime`、回调、聚合作品数据和控制事件等仅运行时字段。
@@ -330,6 +330,6 @@ Provider 必须提供规范化完成原因并保留供应商原始值。`length`
 - OperationDefinition 已成为工具、终止事件、产物 kind 和 artifactKey 的运行契约；reviewer 无读取工具，reviser 只基于 Core 权威草案返工，错误产物不会静默兜底。
 - OpenAI-compatible Provider 已把规范化和原始完成原因传入 Runtime 与人工日志；长度截断、内容过滤、矛盾完成原因和非法 unknown 响应不会被当成成功。
 - Core API 已把写作启动、恢复和草案决定先保存为 PostgreSQL 持久命令，再由 dispatcher 提交到 Redis 队列。文风画像以 `StylePortraitTask`、质量检查以 `WorkflowRun(kind=quality_check)`、资料索引以 `RagDocument` 的待重建状态作为持久事实；各自 dispatcher 使用稳定任务标识补投，Redis 只承载可重建的投递状态。Agent Service 消费任务并通过签名回调保存检查点、事件、草案和终态。
-- 草案进入等待用户确认时，Agent Service 先发送 `artifact_awaiting_user_approval` SSE 事件，再保存带有最新事件序号的稳定快照；前端据此刷新待确认草案。
+- 草案进入等待用户确认时，Agent Service 使用下一个连续序号直接保存稳定快照，不再先直发等待事件；Core 在保存快照的同一事务中创建 `artifact_awaiting_user_approval` Outbox。后续 resume/artifact_decision 命令会在自身事务内作废尚未发布的旧 waiting，Publisher 遇到 waiting 序号竞争时也会再次核对并转为 superseded。长篇 completed/error 稳定 checkpoint 只保存图内终态，数据库任务和命令保持非终态，直到 complete/fail 与 terminal Outbox 在同一事务收敛。SSE 只重放 published 边界事件，跳过 superseded，并在 pending/delivering/blocked 边界前保留原游标等待；同时发送不带游标的 PostgreSQL `run_outcome` 控制帧。客户端在建连或断流后重新读取 outcome，只按 `streamShouldClose` 收敛生命周期，legacy 事件只承担展示兼容且不能直接恢复可操作草案；非 waiting_user 终态按任务清理临时草案入口并使较早的在途读取失效，相同 succeeded outcome 的完成副作用按任务、命令和结果只执行一次。
 - Core 对账器可以强制修复 Redis 中缺失的 queued 索引或完全丢失的运行键，但不得重新打开 Redis 已记录为 completed、failed 或 cancelled 的运行。
 - Agent Service 不连接数据库，所有读取工具和业务写入都通过 Core 内部工具网关完成。

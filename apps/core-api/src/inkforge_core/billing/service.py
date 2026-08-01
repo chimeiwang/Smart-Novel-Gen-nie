@@ -23,6 +23,7 @@ from .repository import (
     UsageSnapshot,
 )
 from .schemas import (
+    MODEL_GRANT_LIFETIME_SECONDS,
     AuthorizeModelCallRequest,
     AuthorizeModelCallResponse,
     BillingSummaryResponse,
@@ -84,6 +85,7 @@ class BillingService:
                 )
 
         issued_at = (now or datetime.now(UTC)).astimezone(UTC).replace(microsecond=0)
+        issued_at_seconds = int(issued_at.timestamp())
         request_id = str(uuid4())
         claims = ModelGrantClaims(
             requestId=request_id,
@@ -96,8 +98,8 @@ class BillingService:
             agentId=request.agentId,
             maxOutputTokens=max_output,
             billable=billable,
-            iat=int(issued_at.timestamp()),
-            exp=int(issued_at.timestamp()) + 120,
+            iat=issued_at_seconds,
+            exp=issued_at_seconds + MODEL_GRANT_LIFETIME_SECONDS,
         )
         return AuthorizeModelCallResponse(
             requestId=request_id,

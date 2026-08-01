@@ -11,15 +11,37 @@ from inkforge_contracts.events import (
     RunFailureCallback,
 )
 from inkforge_core.errors import ApiError
+from inkforge_core.writing.outbox import BoundaryEvent
+from inkforge_core.writing.schemas import WritingRunOutcome, WritingRunOutcomeResult
 from inkforge_core.writing.sse import (
     EventSequenceGap,
+    EventSourceConflict,
     InMemoryWritingEventStore,
     RedisWritingEventStore,
+    WritingEvent,
     format_heartbeat,
     format_sse_event,
     stream_task_events,
 )
 from inkforge_core.writing.tasks import CallbackAcceptance, WritingCallbackService
+
+
+def _run_outcome(
+    state: str,
+    *,
+    code: str = "TEST_OUTCOME",
+) -> WritingRunOutcome:
+    return WritingRunOutcome(
+        state=state,
+        code=code,
+        taskTerminal=state in {"succeeded", "failed"},
+        streamShouldClose=state
+        in {"waiting_user", "succeeded", "failed", "inconsistent"},
+        reconciliationRequired=state == "inconsistent",
+        currentCommand=None,
+        result=WritingRunOutcomeResult(kind="none", ready=False),
+        observedAt=datetime.now(UTC),
+    )
 
 
 @pytest.mark.asyncio
@@ -110,10 +132,14 @@ def test_sse_format_keeps_typed_payload_and_heartbeat() -> None:
 
 
 @pytest.mark.asyncio
-async def test_stream_replays_after_last_id_and_closes_on_terminal_event() -> None:
+async def test_legacy_terminal_event_does_not_close_a_running_outcome() -> None:
     store = InMemoryWritingEventStore()
     await store.append("task-1", "agent_chunk", {"chunk": "旧内容"})
     await store.append("task-1", "completed", {"taskId": "task-1"})
+    outcomes = iter([_run_outcome("running"), _run_outcome("succeeded")])
+
+    async def outcome_provider() -> WritingRunOutcome:
+        return next(outcomes)
 
     chunks = [
         chunk
@@ -122,42 +148,117 @@ async def test_stream_replays_after_last_id_and_closes_on_terminal_event() -> No
             "task-1",
             last_event_id="1",
             poll_interval_seconds=0,
+            outcome_provider=outcome_provider,
         )
     ]
 
-    assert len(chunks) == 1
-    assert "id: 2" in chunks[0]
-    assert "event: completed" in chunks[0]
+    assert len(chunks) == 3
+    assert "event: run_outcome" in chunks[0]
+    assert '"state":"running"' in chunks[0]
+    assert "id:" not in chunks[0]
+    assert "id: 2" in chunks[1]
+    assert "event: completed" in chunks[1]
+    assert "event: run_outcome" in chunks[2]
+    assert '"state":"succeeded"' in chunks[2]
 
 
 @pytest.mark.asyncio
-async def test_stream_closes_when_artifact_awaits_user_approval() -> None:
+@pytest.mark.parametrize(
+    "state",
+    ["waiting_user", "succeeded", "failed", "inconsistent"],
+)
+async def test_stream_closes_from_postgres_outcome_without_redis_event(
+    state: str,
+) -> None:
     store = InMemoryWritingEventStore()
-    await store.append("task-1", "agent_start", {"phase": "active"})
-    await store.append(
-        "task-1",
-        "artifact_awaiting_user_approval",
-        {"agentId": "剧情", "artifactId": "artifact-1"},
-    )
+
+    async def outcome_provider() -> WritingRunOutcome:
+        return _run_outcome(state)
 
     stream = stream_task_events(
         store,
         "task-1",
         last_event_id=None,
         poll_interval_seconds=0.01,
+        outcome_provider=outcome_provider,
     )
     first = await anext(stream)
-    second = await anext(stream)
 
-    assert "event: agent_start" in first
-    assert "event: artifact_awaiting_user_approval" in second
+    assert "event: run_outcome" in first
+    assert f'"state":"{state}"' in first
+    assert "id:" not in first
     with pytest.raises(StopAsyncIteration):
         await asyncio.wait_for(anext(stream), timeout=0.05)
+
+
+@pytest.mark.asyncio
+async def test_terminal_outcome_still_replays_available_legacy_boundary() -> None:
+    store = InMemoryWritingEventStore()
+    await store.append("task-1", "completed", {"taskId": "task-1"})
+
+    async def outcome_provider() -> WritingRunOutcome:
+        return _run_outcome("succeeded")
+
+    chunks = [
+        chunk
+        async for chunk in stream_task_events(
+            store,
+            "task-1",
+            last_event_id=None,
+            outcome_provider=outcome_provider,
+            poll_interval_seconds=0,
+        )
+    ]
+
+    assert ["event: run_outcome" in chunk for chunk in chunks] == [
+        True,
+        False,
+        True,
+    ]
+    assert chunks[0] == chunks[-1]
+    assert "event: completed" in chunks[1]
+    assert "id: 1" in chunks[1]
+
+
+@pytest.mark.asyncio
+async def test_terminal_stream_hides_superseded_outbox_boundary() -> None:
+    store = InMemoryWritingEventStore()
+    await store.append_agent_event(
+        "task-1",
+        source_event_id="waiting-superseded",
+        sequence=1,
+        event="artifact_awaiting_user_approval",
+        data={"taskId": "task-1"},
+    )
+
+    async def outcome_provider() -> WritingRunOutcome:
+        return _run_outcome("succeeded")
+
+    async def visibility_provider(
+        events: list[WritingEvent],
+    ) -> dict[str, str]:
+        return {event.id: "skip" for event in events}
+
+    chunks = [
+        chunk
+        async for chunk in stream_task_events(
+            store,
+            "task-1",
+            last_event_id=None,
+            outcome_provider=outcome_provider,
+            event_visibility_provider=visibility_provider,
+        )
+    ]
+
+    assert len(chunks) == 1
+    assert "event: run_outcome" in chunks[0]
+    assert "artifact_awaiting_user_approval" not in chunks[0]
 
 
 class FailureRepository:
     def __init__(self) -> None:
         self.code: str | None = None
+        self.boundary: BoundaryEvent | None = None
 
     async def authorize_callback(
         self, task_id: str, job_id: str
@@ -167,12 +268,18 @@ class FailureRepository:
         return CallbackAcceptance(True, 0)
 
     async def fail_with_command(
-        self, task_id: str, job_id: str, code: str, sequence: int
+        self,
+        task_id: str,
+        job_id: str,
+        code: str,
+        sequence: int,
+        boundary: BoundaryEvent,
     ) -> CallbackAcceptance:
         assert task_id == "task-1"
         assert job_id == "job-1"
         assert sequence == 1
         self.code = code
+        self.boundary = boundary
         return CallbackAcceptance(True, 0)
 
     async def save_checkpoint(
@@ -210,16 +317,18 @@ async def test_failure_callback_does_not_expose_provider_message_in_browser_even
         )
     )
 
-    events = await store.replay("task-1", None)
     assert repository.code == "PROVIDER_FAILED"
-    assert events[0].data["message"] == "智能体运行失败"
-    assert "内部地址" not in str(events[0].data)
+    assert repository.boundary is not None
+    assert repository.boundary.payload["message"] == "智能体运行失败"
+    assert "内部地址" not in str(repository.boundary.payload)
+    assert await store.replay("task-1", None) == []
 
 
 class CompletionRepository:
     def __init__(self) -> None:
         self.completed: tuple[str, dict[str, object]] | None = None
         self.messages: list[tuple[str, str, str, str, str | None]] = []
+        self.boundary: BoundaryEvent | None = None
 
     async def authorize_callback(
         self, task_id: str, job_id: str
@@ -246,10 +355,12 @@ class CompletionRepository:
         result: dict[str, object],
         visible_response: str,
         sequence: int,
+        boundary: BoundaryEvent,
     ) -> CallbackAcceptance:
         assert job_id == "job-1"
         assert sequence == 1
         self.completed = (task_id, result)
+        self.boundary = boundary
         if visible_response:
             self.messages.append((task_id, "agent", visible_response, "done", None))
         return CallbackAcceptance(True, 0)
@@ -271,7 +382,7 @@ class CompletionRepository:
 
 
 @pytest.mark.asyncio
-async def test_completion_callback_persists_and_streams_visible_agent_response() -> None:
+async def test_completion_callback_persists_visible_response_and_outbox_boundary() -> None:
     repository = CompletionRepository()
     store = InMemoryWritingEventStore()
     service = WritingCallbackService(repository, store)
@@ -289,8 +400,11 @@ async def test_completion_callback_persists_and_streams_visible_agent_response()
         )
     )
 
-    events = await store.replay("task-1", None)
-    assert events[0].data["finalContent"] == "这是本轮可见回复。"
+    assert await store.replay("task-1", None) == []
+    assert repository.boundary is not None
+    assert repository.boundary.event_type == "completed"
+    assert repository.boundary.payload["taskId"] == "task-1"
+    assert len(str(repository.boundary.payload["resultSha256"])) == 64
     assert repository.messages == [
         ("task-1", "agent", "这是本轮可见回复。", "done", None)
     ]
@@ -312,9 +426,10 @@ async def test_completed_event_is_appended_after_durable_state() -> None:
             result: dict[str, object],
             visible_response: str,
             sequence: int,
+            boundary: BoundaryEvent,
         ) -> CallbackAcceptance:
-            del task_id, job_id, result, visible_response, sequence
-            order.extend(["message", "task", "command"])
+            del task_id, job_id, result, visible_response, sequence, boundary
+            order.extend(["message", "task", "command", "outbox"])
             return CallbackAcceptance(True, 0)
 
     class OrderedEventStore(InMemoryWritingEventStore):
@@ -336,7 +451,7 @@ async def test_completed_event_is_appended_after_durable_state() -> None:
         )
     )
 
-    assert order == ["message", "task", "command", "event"]
+    assert order == ["message", "task", "command", "outbox"]
 
 
 class CheckpointGapRepository:
@@ -440,6 +555,204 @@ async def test_redis_store_rebases_missing_sequence_from_durable_checkpoint() ->
     assert await redis.get("writing:event-sequence:task-1") == b"21"
 
 
+async def _seed_agent_events(
+    store: InMemoryWritingEventStore | RedisWritingEventStore,
+) -> None:
+    for sequence in range(1, 6):
+        await store.append_agent_event(
+            "task-1",
+            source_event_id=f"event-{sequence}",
+            sequence=sequence,
+            event="agent_chunk",
+            data={"chunk": str(sequence)},
+        )
+
+
+def _make_event_store(
+    backend: str,
+) -> InMemoryWritingEventStore | RedisWritingEventStore:
+    if backend == "memory":
+        return InMemoryWritingEventStore()
+    return RedisWritingEventStore(fakeredis.aioredis.FakeRedis())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["memory", "redis"])
+async def test_real_database_baseline_does_not_hide_a_redis_sequence_gap(
+    backend: str,
+) -> None:
+    accepted_store = _make_event_store(backend)
+    rejected_store = _make_event_store(backend)
+    for store in (accepted_store, rejected_store):
+        for sequence in range(1, 22):
+            await store.append_agent_event(
+                "task-1",
+                source_event_id=f"event-{sequence}",
+                sequence=sequence,
+                event="agent_chunk",
+                data={"chunk": str(sequence)},
+            )
+
+    accepted = await accepted_store.append_agent_event(
+        "task-1",
+        source_event_id="terminal-22",
+        sequence=22,
+        event="error",
+        data={"taskId": "task-1"},
+        durable_baseline=20,
+        allow_rebase=True,
+    )
+    with pytest.raises(EventSequenceGap) as captured:
+        await rejected_store.append_agent_event(
+            "task-1",
+            source_event_id="terminal-23",
+            sequence=23,
+            event="error",
+            data={"taskId": "task-1"},
+            durable_baseline=20,
+            allow_rebase=True,
+        )
+
+    assert accepted.sequence == 22
+    assert captured.value.expected_sequence == 22
+    assert captured.value.received_sequence == 23
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["memory", "redis"])
+async def test_store_rebases_lagging_sequence_from_durable_checkpoint(
+    backend: str,
+) -> None:
+    store = _make_event_store(backend)
+    await _seed_agent_events(store)
+
+    event = await store.append_agent_event(
+        "task-1",
+        source_event_id="event-21",
+        sequence=21,
+        event="completed",
+        data={"taskId": "task-1"},
+        durable_baseline=20,
+        allow_rebase=True,
+    )
+
+    assert event.sequence == 21
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["memory", "redis"])
+async def test_store_rejects_gap_when_durable_checkpoint_cannot_cover_it(
+    backend: str,
+) -> None:
+    store = _make_event_store(backend)
+    await _seed_agent_events(store)
+
+    with pytest.raises(EventSequenceGap) as captured:
+        await store.append_agent_event(
+            "task-1",
+            source_event_id="event-21",
+            sequence=21,
+            event="completed",
+            data={"taskId": "task-1"},
+            durable_baseline=4,
+            allow_rebase=True,
+        )
+
+    assert captured.value.expected_sequence == 6
+    assert captured.value.received_sequence == 21
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("backend", ["memory", "redis"])
+async def test_rebased_source_event_id_is_idempotent(backend: str) -> None:
+    store = _make_event_store(backend)
+    await _seed_agent_events(store)
+    first = await store.append_agent_event(
+        "task-1",
+        source_event_id="event-21",
+        sequence=21,
+        event="completed",
+        data={"taskId": "task-1"},
+        durable_baseline=20,
+        allow_rebase=True,
+    )
+
+    duplicate = await store.append_agent_event(
+        "task-1",
+        source_event_id="event-21",
+        sequence=21,
+        event="completed",
+        data={"taskId": "task-1"},
+        durable_baseline=20,
+        allow_rebase=True,
+    )
+
+    assert duplicate == first
+    assert len(await store.replay("task-1", None)) == 6
+
+    with pytest.raises(EventSourceConflict):
+        await store.append_agent_event(
+            "task-1",
+            source_event_id="event-21",
+            sequence=21,
+            event="error",
+            data={"code": "CHANGED"},
+            durable_baseline=20,
+            allow_rebase=True,
+        )
+
+
+class DuplicateEventRepository:
+    async def authorize_callback(
+        self, task_id: str, job_id: str
+    ) -> CallbackAcceptance:
+        del task_id, job_id
+        return CallbackAcceptance(True, 0)
+
+    async def mark_command_processing(
+        self, task_id: str, job_id: str, sequence: int
+    ) -> CallbackAcceptance:
+        del task_id, job_id, sequence
+        raise AssertionError("重复或冲突事件不能再次推进命令")
+
+
+@pytest.mark.asyncio
+async def test_process_event_duplicate_and_conflict_return_distinct_receipts() -> None:
+    store = InMemoryWritingEventStore()
+    await store.append_agent_event(
+        "task-1",
+        source_event_id="event-1",
+        sequence=1,
+        event="agent_start",
+        data={"agentId": "写作"},
+    )
+    service = WritingCallbackService(
+        DuplicateEventRepository(),  # type: ignore[arg-type]
+        store,
+    )
+    base = {
+        "protocolVersion": "1.1",
+        "eventId": "event-1",
+        "jobId": "job-1",
+        "runId": "task-1",
+        "taskId": "task-1",
+        "sequence": 1,
+        "event": "agent_start",
+        "occurredAt": datetime.now(UTC),
+    }
+
+    duplicate = await service.accept_event(
+        AgentEvent.model_validate({**base, "data": {"agentId": "写作"}})
+    )
+    conflict = await service.accept_event(
+        AgentEvent.model_validate({**base, "data": {"agentId": "编辑"}})
+    )
+
+    assert duplicate.disposition == "already_applied"
+    assert conflict.disposition == "rejected"
+    assert conflict.reasonCode == "WRITING_EVENT_SOURCE_CONFLICT"
+
+
 @pytest.mark.asyncio
 async def test_redis_store_does_not_rebase_old_sequence_at_or_below_checkpoint() -> None:
     redis = fakeredis.aioredis.FakeRedis()
@@ -479,8 +792,9 @@ class RetryingRepository:
         result: dict[str, object],
         visible_response: str,
         sequence: int,
+        boundary: BoundaryEvent,
     ) -> CallbackAcceptance:
-        del task_id, job_id, result, visible_response, sequence
+        del task_id, job_id, result, visible_response, sequence, boundary
         self.order.append("database")
         self.completions += 1
         return CallbackAcceptance(True, self.baseline, self.completions > 1)
@@ -506,7 +820,7 @@ class PublishOnceFailureStore(InMemoryWritingEventStore):
 
 
 @pytest.mark.asyncio
-async def test_database_success_and_first_redis_failure_retries_idempotently() -> None:
+async def test_terminal_database_commit_does_not_wait_for_redis() -> None:
     order: list[str] = []
     repository = RetryingRepository(order)
     store = PublishOnceFailureStore(order)
@@ -522,22 +836,12 @@ async def test_database_success_and_first_redis_failure_retries_idempotently() -
         occurredAt=datetime.now(UTC),
     )
 
-    with pytest.raises(RuntimeError, match="Redis 发布失败"):
-        await service.complete(callback)
     await service.complete(callback)
 
-    assert order == [
-        "authorize",
-        "validate",
-        "database",
-        "publish",
-        "authorize",
-        "validate",
-        "database",
-        "publish",
-    ]
-    assert repository.completions == 2
-    assert len(await store.replay("task-1", None)) == 1
+    assert order == ["database"]
+    assert repository.completions == 1
+    assert store.publish_attempts == 0
+    assert await store.replay("task-1", None) == []
 
 
 class OldSequenceRepository(RetryingRepository):
@@ -639,3 +943,53 @@ async def test_state_noop_uses_non_identity_error_code(caplog: pytest.LogCapture
 
     assert "WRITING_CALLBACK_ALREADY_APPLIED" in caplog.text
     assert "WRITING_JOB_MISMATCH" not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("already_applied", [False, True])
+async def test_process_event_checks_source_content_before_state_or_sequence_noop(
+    already_applied: bool,
+) -> None:
+    order: list[str] = []
+    store = InMemoryWritingEventStore()
+    await store.append_agent_event(
+        "task-1",
+        source_event_id="event-1",
+        sequence=1,
+        event="agent_start",
+        data={"agentId": "写作"},
+    )
+    await store.append_agent_event(
+        "task-1",
+        source_event_id="event-2",
+        sequence=2,
+        event="agent_done",
+        data={"agentId": "写作"},
+    )
+    repository = (
+        AlreadyAppliedRepository(order, baseline=2)
+        if already_applied
+        else OldSequenceRepository(order, baseline=2)
+    )
+    service = WritingCallbackService(repository, store)  # type: ignore[arg-type]
+    base = {
+        "protocolVersion": "1.1",
+        "eventId": "event-1",
+        "jobId": "job-1",
+        "runId": "task-1",
+        "taskId": "task-1",
+        "sequence": 1,
+        "event": "agent_start",
+        "occurredAt": datetime.now(UTC),
+    }
+
+    duplicate = await service.accept_event(
+        AgentEvent.model_validate({**base, "data": {"agentId": "写作"}})
+    )
+    conflict = await service.accept_event(
+        AgentEvent.model_validate({**base, "data": {"agentId": "编辑"}})
+    )
+
+    assert duplicate.disposition == "already_applied"
+    assert conflict.disposition == "rejected"
+    assert conflict.reasonCode == "WRITING_EVENT_SOURCE_CONFLICT"

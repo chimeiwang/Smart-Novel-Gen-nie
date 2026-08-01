@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import Annotated, cast
 
-from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi import APIRouter, Depends, Request
 from inkforge_contracts.events import (
     AgentEvent,
+    CallbackReceipt,
     CheckpointCallback,
     RunCompletionCallback,
     RunFailureCallback,
@@ -96,7 +97,7 @@ async def _verify(
     return novel_id, user_id
 
 
-@router.post("/{run_id}/events", status_code=status.HTTP_204_NO_CONTENT)
+@router.post("/{run_id}/events", response_model=CallbackReceipt)
 async def accept_event(
     run_id: str,
     body: AgentEvent,
@@ -104,7 +105,7 @@ async def accept_event(
     verifier: Verifier,
     service: CallbackService,
     repository: TaskRepository,
-) -> Response:
+) -> CallbackReceipt:
     await _verify(
         request,
         verifier,
@@ -114,11 +115,10 @@ async def accept_event(
         task_id=body.taskId,
         scope=ServiceScope.CALLBACK_EVENT,
     )
-    await service.accept_event(body)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return await service.accept_event(body)
 
 
-@router.put("/{run_id}/checkpoint", status_code=status.HTTP_204_NO_CONTENT)
+@router.put("/{run_id}/checkpoint", response_model=CallbackReceipt)
 async def save_checkpoint(
     run_id: str,
     body: CheckpointCallback,
@@ -126,7 +126,7 @@ async def save_checkpoint(
     verifier: Verifier,
     service: CallbackService,
     repository: TaskRepository,
-) -> Response:
+) -> CallbackReceipt:
     novel_id, user_id = await _verify(
         request,
         verifier,
@@ -136,11 +136,10 @@ async def save_checkpoint(
         task_id=body.taskId,
         scope=ServiceScope.CALLBACK_CHECKPOINT,
     )
-    await service.save_checkpoint(body, user_id=user_id, novel_id=novel_id)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return await service.save_checkpoint(body, user_id=user_id, novel_id=novel_id)
 
 
-@router.put("/{run_id}/complete", status_code=status.HTTP_204_NO_CONTENT)
+@router.put("/{run_id}/complete", response_model=CallbackReceipt)
 async def complete_run(
     run_id: str,
     body: RunCompletionCallback,
@@ -148,7 +147,7 @@ async def complete_run(
     verifier: Verifier,
     service: CallbackService,
     repository: TaskRepository,
-) -> Response:
+) -> CallbackReceipt:
     await _verify(
         request,
         verifier,
@@ -158,11 +157,10 @@ async def complete_run(
         task_id=body.taskId,
         scope=ServiceScope.CALLBACK_COMPLETE,
     )
-    await service.complete(body)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return await service.complete(body)
 
 
-@router.put("/{run_id}/fail", status_code=status.HTTP_204_NO_CONTENT)
+@router.put("/{run_id}/fail", response_model=CallbackReceipt)
 async def fail_run(
     run_id: str,
     body: RunFailureCallback,
@@ -170,7 +168,7 @@ async def fail_run(
     verifier: Verifier,
     service: CallbackService,
     repository: TaskRepository,
-) -> Response:
+) -> CallbackReceipt:
     await _verify(
         request,
         verifier,
@@ -180,5 +178,4 @@ async def fail_run(
         task_id=body.taskId,
         scope=ServiceScope.CALLBACK_FAIL,
     )
-    await service.fail(body)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    return await service.fail(body)

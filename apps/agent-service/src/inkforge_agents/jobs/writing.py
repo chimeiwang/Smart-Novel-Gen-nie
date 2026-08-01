@@ -186,21 +186,7 @@ class WritingJobHandler:
         ):
             owned_artifact_id = stable_artifact_id
         waiting_for_user = "__interrupt__" in result or stable.get("phase") == "waiting_user"
-        artifact_id = stable.get("activeArtifactId")
         next_sequence = sequence + 1
-        has_review_event = waiting_for_user and isinstance(artifact_id, str) and bool(artifact_id)
-        if has_review_event:
-            active_agent = stable.get("activeAgent")
-            await self._core.send_event(
-                resource,
-                sequence=next_sequence,
-                event="artifact_awaiting_user_approval",
-                data={
-                    "agentId": active_agent if isinstance(active_agent, str) else "系统",
-                    "artifactId": artifact_id,
-                },
-            )
-            next_sequence += 1
         stable["eventSequence"] = next_sequence
         checkpoint = to_typescript_snapshot(serialize_snapshot(stable))
         self._record_state(

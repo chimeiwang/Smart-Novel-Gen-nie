@@ -3844,6 +3844,58 @@ export interface components {
              */
             updatedAt: string;
         };
+        /** WritingRunOutcome */
+        WritingRunOutcome: {
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "queued" | "running" | "waiting_user" | "succeeded" | "failed" | "inconsistent";
+            /** Code */
+            code: string;
+            /** Taskterminal */
+            taskTerminal: boolean;
+            /** Streamshouldclose */
+            streamShouldClose: boolean;
+            /** Reconciliationrequired */
+            reconciliationRequired: boolean;
+            currentCommand: components["schemas"]["WritingRunOutcomeCommand"] | null;
+            result: components["schemas"]["WritingRunOutcomeResult"];
+            /**
+             * Observedat
+             * Format: date-time
+             */
+            observedAt: string;
+        };
+        /** WritingRunOutcomeCommand */
+        WritingRunOutcomeCommand: {
+            /** Id */
+            id: string;
+            /** Kind */
+            kind: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "submitted" | "processing" | "succeeded" | "failed";
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
+        /** WritingRunOutcomeResult */
+        WritingRunOutcomeResult: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "none" | "review_artifact" | "short_candidate" | "check_report" | "final_message";
+            /** Ready */
+            ready: boolean;
+            /** Id */
+            id?: string | null;
+        };
         /** WritingRunResponse */
         WritingRunResponse: {
             /** Id */
@@ -3909,6 +3961,7 @@ export interface components {
             error: {
                 [key: string]: components["schemas"]["JsonValue"];
             } | null;
+            outcome: components["schemas"]["WritingRunOutcome"];
         };
         /** WritingSessionDetail */
         WritingSessionDetail: {

@@ -72,6 +72,66 @@ def test_core_lifespan_starts_and_stops_command_dispatcher() -> None:
     assert dispatcher.stopped is True
 
 
+def test_core_lifespan_starts_and_stops_writing_outbox_publisher() -> None:
+    publisher = Reconciler()
+    app = create_app(testing=True, writing_outbox_publisher=publisher)
+
+    with TestClient(app) as client:
+        assert client.get("/api/v1/health/live").status_code == 200
+        assert publisher.started is True
+
+    assert publisher.stopped is True
+
+
+def test_core_readiness_fails_when_writing_outbox_publisher_crashes() -> None:
+    class CrashedPublisher:
+        async def run(self) -> None:
+            raise RuntimeError("模拟 Outbox publisher 崩溃")
+
+        def request_stop(self) -> None:
+            pass
+
+    app = create_app(testing=True, writing_outbox_publisher=CrashedPublisher())
+
+    with TestClient(app) as client:
+        import time
+
+        deadline = time.monotonic() + 1
+        registry = app.state.background_task_registry
+        while (
+            registry.error_code("writing_outbox_publisher")
+            != "BACKGROUND_TASK_BACKOFF"
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.001)
+        response = client.get("/api/v1/health/ready")
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["background_tasks"] == "failed"
+    assert response.json()["backgroundTasks"]["writing_outbox_publisher"] == (
+        "BACKGROUND_TASK_BACKOFF"
+    )
+
+
+def test_core_readiness_reports_writing_outbox_data_health() -> None:
+    class UnhealthyOutbox:
+        async def check(self) -> bool:
+            return False
+
+        def error_codes(self) -> dict[str, str]:
+            return {"writing_outbox": "OUTBOX_BLOCKED"}
+
+    app = create_app(testing=True, writing_outbox_readiness=UnhealthyOutbox())
+
+    response = TestClient(app).get("/api/v1/health/ready")
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["writing_outbox"] == "failed"
+    assert response.json()["backgroundTasks"] == {
+        "writing_outbox": "OUTBOX_BLOCKED"
+    }
+
+
 def test_core_readiness_fails_when_registered_background_task_exits() -> None:
     class CrashedWorker:
         async def run(self) -> None:

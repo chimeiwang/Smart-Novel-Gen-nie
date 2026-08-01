@@ -44,6 +44,42 @@ export const ErrorEventSchema = z.object({
   message: z.string(),
 });
 
+export const RunOutcomeEventSchema = z.object({
+  type: z.literal("run_outcome"),
+  state: z.enum([
+    "queued",
+    "running",
+    "waiting_user",
+    "succeeded",
+    "failed",
+    "inconsistent",
+  ]),
+  code: z.string().min(1),
+  taskTerminal: z.boolean(),
+  streamShouldClose: z.boolean(),
+  reconciliationRequired: z.boolean(),
+  currentCommand: z.object({
+    id: z.string(),
+    kind: z.string(),
+    status: z.enum(["pending", "submitted", "processing", "succeeded", "failed"]),
+    updatedAt: z.string(),
+  }).nullable(),
+  result: z.object({
+    kind: z.enum([
+      "none",
+      "review_artifact",
+      "short_candidate",
+      "check_report",
+      "final_message",
+    ]),
+    ready: z.boolean(),
+    id: z.string().nullable().optional(),
+  }),
+  observedAt: z.string(),
+});
+
+export type RunOutcomeData = Omit<z.infer<typeof RunOutcomeEventSchema>, "type">;
+
 export const ResumeEventSchema = z.object({
   type: z.literal("resume"),
   taskId: z.string(),
@@ -340,6 +376,7 @@ export const WritingSseEventSchema = z.discriminatedUnion("type", [
   DoneEventSchema,
   CompletedEventSchema,
   ErrorEventSchema,
+  RunOutcomeEventSchema,
   ResumeEventSchema,
   AgentStartEventSchema,
   AgentDoneEventSchema,
@@ -383,7 +420,7 @@ export type SseEventType = WritingSseEvent["type"];
 
 /** 事件类型列表 */
 export const SSE_EVENT_TYPES: SseEventType[] = [
-  "start", "done", "completed", "error", "resume",
+  "start", "done", "completed", "error", "run_outcome", "resume",
   "agent_start", "agent_done", "agent_status", "agent_chunk",
   "classifying_intent", "intent_classified", "operation_classified", "operation_stage", "command_parsed",
   "user_input_required", "updates_saved", "updates_declined",

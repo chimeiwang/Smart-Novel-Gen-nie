@@ -85,6 +85,11 @@ from .writing.callbacks import router as writing_callback_router
 from .writing.command_dispatcher import WritingRunCommandDispatcher
 from .writing.commands import WritingRunCommandRepository
 from .writing.context import WritingContextRepository, WritingContextService
+from .writing.outbox import (
+    WritingOutboxPublisher,
+    WritingOutboxReadiness,
+    WritingOutboxRepository,
+)
 from .writing.read_tool_service import WritingReadToolService
 from .writing.read_tools import ALL_AGENT_IDS, register_read_tools
 from .writing.reconciler import WritingRunReconciler
@@ -250,6 +255,17 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
         RedisWritingEventStore(redis) if redis is not None else InMemoryWritingEventStore()
     )
     app.state.writing_event_store = event_store
+    writing_outbox_repository = WritingOutboxRepository(session_factory)
+    app.state.writing_outbox_repository = writing_outbox_repository
+    if getattr(app.state, "writing_outbox_publisher", None) is None:
+        app.state.writing_outbox_publisher = WritingOutboxPublisher(
+            writing_outbox_repository,
+            event_store,
+        )
+    if getattr(app.state, "writing_outbox_readiness", None) is None:
+        app.state.writing_outbox_readiness = WritingOutboxReadiness(
+            writing_outbox_repository
+        )
     app.state.writing_task_repository = writing_task_repository
     app.state.writing_command_repository = writing_command_repository
     writing_submitter = WritingTaskAgentSubmitter(agent_client) if agent_client else None
@@ -326,6 +342,10 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
     workers = [
         (name, cast(BackgroundWorker, worker))
         for name, worker in (
+            (
+                "writing_outbox_publisher",
+                getattr(app.state, "writing_outbox_publisher", None),
+            ),
             ("writing_reconciler", getattr(app.state, "writing_reconciler", None)),
             (
                 "writing_command_dispatcher",
@@ -385,6 +405,8 @@ def create_app(
     settings: Settings | None = None,
     writing_reconciler: object | None = None,
     writing_command_dispatcher: object | None = None,
+    writing_outbox_publisher: object | None = None,
+    writing_outbox_readiness: object | None = None,
 ) -> FastAPI:
     loaded_settings = settings
     if loaded_settings is None:
@@ -403,6 +425,8 @@ def create_app(
     app.state.settings = loaded_settings
     app.state.writing_reconciler = writing_reconciler
     app.state.writing_command_dispatcher = writing_command_dispatcher
+    app.state.writing_outbox_publisher = writing_outbox_publisher
+    app.state.writing_outbox_readiness = writing_outbox_readiness
     app.state.readiness_checks = {}
     app.state.readiness_error_details = {}
     register_readiness_check(app, "configuration", lambda: True)
@@ -410,6 +434,17 @@ def create_app(
     _configure_auth(app, loaded_settings)
     _configure_agent_client(app, loaded_settings)
     _configure_business_services(app, loaded_settings)
+    configured_outbox_readiness = cast(
+        WritingOutboxReadiness | None,
+        getattr(app.state, "writing_outbox_readiness", None),
+    )
+    if configured_outbox_readiness is not None:
+        register_readiness_check(
+            app,
+            "writing_outbox",
+            configured_outbox_readiness.check,
+            error_details=configured_outbox_readiness.error_codes,
+        )
     _configure_rag_callback_auth(app, loaded_settings)
     app.add_middleware(SafeUnhandledExceptionMiddleware)
     app.add_middleware(RequestIdMiddleware)

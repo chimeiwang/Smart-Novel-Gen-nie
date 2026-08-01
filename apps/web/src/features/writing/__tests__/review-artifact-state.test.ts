@@ -5,15 +5,16 @@ import {
   attachReviewArtifactToConversation,
   attachReviewArtifactToLastMessage,
   clearReviewArtifactFromMessages,
+  createReviewStateEpoch,
+  isTerminalReviewArtifact,
   resolveReviewArtifactActionTaskId,
-  resolveTerminalStreamPhase,
   resolveReviewArtifactTaskId,
   resolveVisibleReviewArtifact,
-  shouldRefreshAwaitingReviewArtifact,
 } from "../review-artifact-state";
 
 type TestArtifact = {
   id: string;
+  taskId?: string | null;
   artifactKey?: string | null;
   revision?: number;
   status: string;
@@ -92,61 +93,6 @@ describe("review artifact state", () => {
     assert.equal(messages[0].reviewArtifact, second);
   });
 
-  it("refreshes awaiting artifacts after a stream ends when none is visible", () => {
-    assert.equal(
-      shouldRefreshAwaitingReviewArtifact({
-        eventType: "done",
-        hasTaskId: true,
-        visibleArtifactStatus: null,
-      }),
-      true
-    );
-  });
-
-  it("does not refresh awaiting artifacts without a current task id", () => {
-    assert.equal(
-      shouldRefreshAwaitingReviewArtifact({
-        eventType: "done",
-        hasTaskId: false,
-        visibleArtifactStatus: null,
-      }),
-      false
-    );
-  });
-
-  it("does not refresh when an awaiting artifact is already visible", () => {
-    assert.equal(
-      shouldRefreshAwaitingReviewArtifact({
-        eventType: "done",
-        hasTaskId: true,
-        visibleArtifactStatus: "awaiting_user",
-      }),
-      false
-    );
-  });
-
-  it("keeps the UI in review mode when a terminal stream event arrives for an awaiting artifact", () => {
-    assert.equal(
-      resolveTerminalStreamPhase({
-        visibleArtifactStatus: "awaiting_user",
-        completedPhase: "completed",
-        awaitingReviewPhase: "recording",
-      }),
-      "recording"
-    );
-  });
-
-  it("marks the UI completed when a terminal stream event has no awaiting artifact", () => {
-    assert.equal(
-      resolveTerminalStreamPhase({
-        visibleArtifactStatus: null,
-        completedPhase: "completed",
-        awaitingReviewPhase: "recording",
-      }),
-      "completed"
-    );
-  });
-
   it("uses the artifact task id when no current task id is available", () => {
     assert.equal(
       resolveReviewArtifactTaskId(null, { taskId: "task-from-artifact" }),
@@ -211,5 +157,44 @@ describe("review artifact state", () => {
         { reviewArtifact: { id: "artifact-2" } },
       ]
     );
+  });
+
+  it("只清理权威终态所属任务及其临时草案", () => {
+    const transientArtifactIds = new Set(["artifact-without-task"]);
+
+    assert.equal(
+      isTerminalReviewArtifact(
+        { id: "artifact-by-task", taskId: "task-1" },
+        "task-1",
+        transientArtifactIds,
+      ),
+      true,
+    );
+    assert.equal(
+      isTerminalReviewArtifact(
+        { id: "artifact-without-task" },
+        "task-1",
+        transientArtifactIds,
+      ),
+      true,
+    );
+    assert.equal(
+      isTerminalReviewArtifact(
+        { id: "artifact-other-task", taskId: "task-2" },
+        "task-1",
+        transientArtifactIds,
+      ),
+      false,
+    );
+  });
+
+  it("终态清理会让所有在途草案读取失效", () => {
+    const epoch = createReviewStateEpoch();
+    const staleRequest = epoch.capture();
+
+    assert.equal(epoch.isCurrent(staleRequest), true);
+    epoch.invalidate();
+    assert.equal(epoch.isCurrent(staleRequest), false);
+    assert.equal(epoch.isCurrent(epoch.capture()), true);
   });
 });

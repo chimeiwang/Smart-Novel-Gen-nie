@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from ..auth.dependencies import get_current_user
 from ..auth.repository import AuthUser
 from ..errors import ApiError
+from .outbox import WritingOutboxRepository
 from .schemas import (
     CreateMessageRequest,
     CreateWritingSessionRequest,
@@ -15,6 +16,7 @@ from .schemas import (
     ResumeWritingRunRequest,
     ResumeWritingRunResponse,
     UpdateWritingSessionRequest,
+    WritingRunOutcome,
     WritingRunResponse,
     WritingRunStartRequest,
     WritingRunStatusResponse,
@@ -50,6 +52,20 @@ def get_writing_task_service(request: Request) -> WritingTaskService:
     return service
 
 
+def get_writing_outbox_repository(request: Request) -> WritingOutboxRepository:
+    repository = cast(
+        WritingOutboxRepository | None,
+        getattr(request.app.state, "writing_outbox_repository", None),
+    )
+    if repository is None:
+        raise ApiError(
+            status_code=503,
+            code="WRITING_OUTBOX_UNAVAILABLE",
+            message="写作事件发件箱暂时不可用",
+        )
+    return repository
+
+
 def get_writing_task_repository(request: Request) -> WritingTaskRepository:
     repository = cast(
         WritingTaskRepository | None,
@@ -78,6 +94,10 @@ def get_writing_event_store(request: Request) -> object:
 Service = Annotated[WritingService, Depends(get_writing_service)]
 User = Annotated[AuthUser, Depends(get_current_user)]
 TaskService = Annotated[WritingTaskService, Depends(get_writing_task_service)]
+OutboxRepository = Annotated[
+    WritingOutboxRepository,
+    Depends(get_writing_outbox_repository),
+]
 TaskRepository = Annotated[WritingTaskRepository, Depends(get_writing_task_repository)]
 EventStore = Annotated[object, Depends(get_writing_event_store)]
 
@@ -182,11 +202,23 @@ async def stream_writing_run_events(
     user: User,
     repository: TaskRepository,
     store: EventStore,
+    service: TaskService,
+    outbox_repository: OutboxRepository,
     last_event_id: Annotated[str | None, Header(alias="Last-Event-ID")] = None,
 ) -> StreamingResponse:
     await repository.require_task(user.id, task_id)
+
+    async def load_outcome() -> WritingRunOutcome:
+        return (await service.get_status(user.id, task_id)).outcome
+
     return StreamingResponse(
-        stream_task_events(store, task_id, last_event_id=last_event_id),
+        stream_task_events(
+            store,
+            task_id,
+            last_event_id=last_event_id,
+            outcome_provider=load_outcome,
+            event_visibility_provider=outbox_repository.replay_dispositions,
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache, no-transform",

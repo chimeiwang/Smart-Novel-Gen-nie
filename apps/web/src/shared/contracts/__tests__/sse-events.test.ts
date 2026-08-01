@@ -10,6 +10,27 @@ import { readFile } from "node:fs/promises";
 import { parseSseEvent, SSE_EVENT_TYPES } from "../sse-events";
 
 describe("SSE event contract", () => {
+  it("解析无游标的权威运行结果控制帧", () => {
+    const event = parseSseEvent(
+      {
+        state: "inconsistent",
+        code: "SHORT_MEDIUM_RESULT_MISSING",
+        taskTerminal: true,
+        streamShouldClose: true,
+        reconciliationRequired: true,
+        currentCommand: null,
+        result: { kind: "short_candidate", ready: false, id: null },
+        observedAt: "2026-08-01T12:00:00Z",
+      },
+      "run_outcome",
+    );
+
+    assert.equal(event?.type, "run_outcome");
+    assert.equal(event?.state, "inconsistent");
+    assert.equal(event?.result.ready, false);
+    assert.ok(SSE_EVENT_TYPES.includes("run_outcome"));
+  });
+
   it("uses the standard SSE event field when data omits type", () => {
     const event = parseSseEvent(
       {

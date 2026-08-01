@@ -18,8 +18,10 @@ ReviewArtifact 是 Agent 产物正式落库前的持久中间层。
 过期摘要、dirty 工作稿、过期基础版本和重复采用返回冲突，不能自动变基或静默覆盖。网络结果不
 确定时依靠 `clientRequestId`、taskId 或 jobId 对账并幂等重放；版本内容和 Diff 不得截断。
 
-Agent 完成回调必须在同一 Core 事务中创建候选或保存检查报告，并收敛 WritingTask 与命令终态。
+Agent 完成回调必须在同一 Core 事务中创建候选或保存检查报告、收敛 WritingTask 与命令终态，并插入唯一 `WritingEventOutbox` 边界事件；Redis 通知失败不得否定已经提交的业务结果。
 任一步失败都整体回滚，不能出现“任务完成但候选不存在”或“候选存在但任务仍运行”的状态。
+终态稳定 checkpoint 只保存可重放的图快照，不得提前把数据库任务写成 completed/error；否则在完成回调到达前会形成任务终态、命令仍 processing 的伪冲突。
+终态重复回调只有在 Agent 原始 result 与首次应用完全一致时才可视为已应用过；Core 后续补充的候选、报告或展示字段不能反过来放宽该幂等判定。没有命令指纹的历史终态遇到无法从任务字段证明一致的额外 result 必须拒绝。SSE 中的旧边界事件只用于展示，审核动作的成功、失败和释放必须由 PostgreSQL `run_outcome` 决定；旧草案载荷不能直接恢复操作入口，非 waiting_user 终态必须清理所属任务的临时草案界面并使先前在途读取失效；同一成功 outcome 的外部完成副作用只能执行一次。
 
 ### 状态
 
@@ -301,7 +303,7 @@ WorkflowStep 记录运行步骤：
 - Agent 创建或修订草案、提交复审结论必须使用签名内部接口，并绑定同一用户、小说、任务和运行。
 - 草案执行显式区分 primary、reviewer 和 reviser：reviewer 无读取工具，只读取注入的 Core 权威草案并提交一次 evaluation；reviser 获得原 payload、revision、artifactKey 和合并后的 requiredChanges，按原 Operation 产物契约生成同类新 revision。
 - 草案完成复审并进入 `awaiting_user` 后，Agent Service 必须发送草案等待确认事件，前端再通过 Core 查询权威草案内容，不能依赖进程内状态猜测。
-- 服务重启或新命令恢复自动复审/返工前，Agent Service 必须从 Core `planning.activeArtifact` 水合权威草案；approve/discard 已由 Core 事务完成，不依赖草案继续存在。等待态只在事件与 checkpoint 成功后、完成态和错误态只在相应回调成功后，按当前 QueueJob 的 `runId/jobId` 释放进程内记录。
+- 服务重启或新命令恢复自动复审/返工前，Agent Service 必须从 Core `planning.activeArtifact` 水合权威草案；approve/discard 已由 Core 事务完成，不依赖草案继续存在。等待态、完成态和错误态都只有在对应 checkpoint/回调返回合法 `applied/already_applied` 凭证后，才能按当前 QueueJob 的 `runId/jobId` 释放进程内记录；等待态不再依赖先发 Redis 事件。
 - 首版跨服务复审不实现局部草案 patch；所有修改结论归一为完整 rewrite，同时保留原 requiredChanges 和 patch 意图。不能把完整返工描述为局部修订，也不能因此直接写正式小说数据。
 - 一致性终检由“校验”Agent 的 quality 模式执行，并通过共享严格报告契约保存完整 WorkflowRun 输出；旧商业评分列不承载一致性数据。
 - 正文、大纲、Beat Plan 和 `agent_updates` 只有在 `awaiting_user` 状态下由用户批准后才能正式写入；应用失败会恢复为等待用户确认。

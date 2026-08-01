@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
+import inkforge_contracts
 import pytest
 from inkforge_contracts import (
     AgentEvent,
@@ -13,6 +14,66 @@ from inkforge_contracts import (
 from pydantic import BaseModel, ValidationError
 
 OCCURRED_AT = datetime(2026, 7, 10, 8, 30, tzinfo=UTC)
+
+
+def test_callback_receipt_distinguishes_applied_duplicate_and_rejected() -> None:
+    assert hasattr(inkforge_contracts, "CallbackReceipt")
+    receipt_model = inkforge_contracts.CallbackReceipt
+
+    applied = receipt_model.model_validate(
+        {
+            "protocolVersion": "1.0",
+            "disposition": "applied",
+            "reasonCode": "WRITING_CALLBACK_APPLIED",
+            "recoverable": False,
+            "taskPhase": "completed",
+            "commandStatus": "succeeded",
+            "outboxEventId": "outbox-1",
+        }
+    )
+    duplicate = receipt_model.model_validate(
+        {
+            "protocolVersion": "1.0",
+            "disposition": "already_applied",
+            "reasonCode": "WRITING_CALLBACK_ALREADY_APPLIED",
+            "recoverable": False,
+            "taskPhase": "completed",
+            "commandStatus": "succeeded",
+            "outboxEventId": "outbox-1",
+        }
+    )
+    rejected = receipt_model.model_validate(
+        {
+            "protocolVersion": "1.0",
+            "disposition": "rejected",
+            "reasonCode": "WRITING_JOB_MISMATCH",
+            "recoverable": False,
+            "taskPhase": "active",
+            "commandStatus": "processing",
+            "outboxEventId": None,
+        }
+    )
+
+    assert applied.disposition == "applied"
+    assert duplicate.disposition == "already_applied"
+    assert rejected.disposition == "rejected"
+
+
+def test_callback_receipt_rejects_unknown_disposition_and_blank_reason() -> None:
+    assert hasattr(inkforge_contracts, "CallbackReceipt")
+    receipt_model = inkforge_contracts.CallbackReceipt
+    payload = {
+        "protocolVersion": "1.0",
+        "disposition": "ignored",
+        "reasonCode": " ",
+        "recoverable": False,
+        "taskPhase": "active",
+        "commandStatus": "processing",
+        "outboxEventId": None,
+    }
+
+    with pytest.raises(ValidationError):
+        receipt_model.model_validate(payload)
 
 
 def valid_event_payload() -> dict[str, object]:
