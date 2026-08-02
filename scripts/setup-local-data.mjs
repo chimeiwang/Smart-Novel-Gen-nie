@@ -44,7 +44,7 @@ function assertRequiredExecutables(paths, fileExists) {
   const postgresExecutables = [
     [paths.initdb, "initdb.exe"],
     [paths.pgCtl, "pg_ctl.exe"],
-    [paths.pgIsReady, "pg_isready.exe"],
+    [paths.psql, "psql.exe"],
     [paths.createdb, "createdb.exe"],
   ];
   for (const [file, name] of postgresExecutables) {

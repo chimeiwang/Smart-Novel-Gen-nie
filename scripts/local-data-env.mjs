@@ -95,7 +95,12 @@ export function loadLocalDataEnv({
     throw new Error(`.env.local 缺少 ${missing.join("、")}。`);
   }
 
-  const childEnv = { ...parentEnv, ...fileEnv };
+  const childEnv = {
+    ...fileEnv,
+    ...parentEnv,
+    DATABASE_URL: fileEnv.DATABASE_URL,
+    REDIS_URL: fileEnv.REDIS_URL,
+  };
   validateLocalDataEnv(childEnv);
   return childEnv;
 }
@@ -135,6 +140,7 @@ export function resolveLocalDataPaths({
     initdb: path.join(postgresBin, "initdb.exe"),
     pgCtl: path.join(postgresBin, "pg_ctl.exe"),
     pgIsReady: path.join(postgresBin, "pg_isready.exe"),
+    psql: path.join(postgresBin, "psql.exe"),
     createdb: path.join(postgresBin, "createdb.exe"),
     memuraiRoot,
     memuraiConfig: path.join(memuraiRoot, "memurai.conf"),

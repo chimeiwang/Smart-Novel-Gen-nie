@@ -14,6 +14,7 @@ const childEnv = {
 const paths = {
   pgCtl: "C:\\postgres\\pg_ctl.exe",
   pgIsReady: "C:\\postgres\\pg_isready.exe",
+  psql: "C:\\postgres\\psql.exe",
   postgresData: "C:\\runtime\\postgres\\data",
   postgresLog: "C:\\runtime\\postgres\\postgres.log",
   memuraiCli: "C:\\Program Files\\Memurai\\memurai-cli.exe",
@@ -25,10 +26,17 @@ const paths = {
 function createRuntime({
   postgresOpen = true,
   postgresHealthy = true,
+  postgresIdentityMatches = true,
   redisOpen = true,
   redisHealthy = true,
 } = {}) {
-  const state = { postgresOpen, postgresHealthy, redisOpen, redisHealthy };
+  const state = {
+    postgresOpen,
+    postgresHealthy,
+    postgresIdentityMatches,
+    redisOpen,
+    redisHealthy,
+  };
   const commands = [];
   const detachedStarts = [];
 
@@ -48,6 +56,18 @@ function createRuntime({
         }
         if (command === paths.pgIsReady) {
           return { status: state.postgresHealthy ? 0 : 1, stdout: "", stderr: "" };
+        }
+        if (command === paths.psql) {
+          return {
+            status: state.postgresHealthy ? 0 : 1,
+            stdout:
+              state.postgresHealthy && state.postgresIdentityMatches
+                ? "inkforge_local\u001finkforge_local\r\n"
+                : state.postgresHealthy
+                  ? "other_database\u001fother_user\r\n"
+                  : "",
+            stderr: "",
+          };
         }
         if (command === paths.memuraiCli) {
           return {
@@ -127,6 +147,16 @@ test("5432 已占用但 PostgreSQL 健康检查失败时拒绝接管", async () 
   assert.equal(runtime.detachedStarts.length, 0);
 });
 
+test("5432 上是其他 PostgreSQL 数据库或用户时拒绝复用", async () => {
+  const runtime = createRuntime({ postgresIdentityMatches: false });
+
+  await assert.rejects(
+    () => ensureLocalData(childEnv, runtime.options),
+    /5432.*健康检查失败.*不会停止或接管/,
+  );
+  assert.equal(runtime.commands.filter(({ command }) => command === paths.pgCtl).length, 0);
+});
+
 test("6379 已占用但 Memurai PING 失败时拒绝接管", async () => {
   const runtime = createRuntime({ redisHealthy: false });
 
@@ -143,8 +173,9 @@ test("健康检查仅通过子进程环境传递密码", async () => {
 
   await ensureLocalData(childEnv, runtime.options);
 
-  const postgresCheck = runtime.commands.find(({ command }) => command === paths.pgIsReady);
+  const postgresCheck = runtime.commands.find(({ command }) => command === paths.psql);
   const redisCheck = runtime.commands.find(({ command }) => command === paths.memuraiCli);
+  assert.ok(postgresCheck);
   assert.equal(postgresCheck.options.env.PGPASSWORD, "local-postgres-password");
   assert.equal(redisCheck.options.env.REDISCLI_AUTH, "local-redis-password");
   assert.doesNotMatch(postgresCheck.args.join(" "), /local-postgres-password/);

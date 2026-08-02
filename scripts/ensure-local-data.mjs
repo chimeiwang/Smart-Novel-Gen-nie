@@ -54,20 +54,31 @@ function postgresInstallHint(paths) {
 
 function checkPostgres(target, env, paths, runCommand) {
   const result = runCommand(
-    paths.pgIsReady,
+    paths.psql,
     [
-      "-h",
+      "--no-psqlrc",
+      "--no-password",
+      "--quiet",
+      "--tuples-only",
+      "--no-align",
+      "--host",
       target.host,
-      "-p",
+      "--port",
       String(target.port),
-      "-d",
+      "--dbname",
       target.database,
-      "-U",
+      "--username",
       target.username,
+      "--command",
+      "SELECT current_database() || chr(31) || current_user;",
     ],
     { env: { ...env, PGPASSWORD: target.password } },
   );
-  return !result.error && result.status === 0;
+  return (
+    !result.error &&
+    result.status === 0 &&
+    result.stdout.trim() === `${target.database}\u001f${target.username}`
+  );
 }
 
 function checkMemurai(target, env, paths, runCommand) {
@@ -118,7 +129,7 @@ export async function ensureLocalData(
   } = {},
 ) {
   const targets = validateLocalDataEnv(env);
-  requireFile(paths.pgIsReady, "pg_isready.exe", fileExists);
+  requireFile(paths.psql, "psql.exe", fileExists);
   requireFile(paths.memuraiCli, "memurai-cli.exe", fileExists);
 
   const [postgresOpen, redisOpen] = await Promise.all([

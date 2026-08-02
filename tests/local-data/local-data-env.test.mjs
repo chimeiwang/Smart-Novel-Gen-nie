@@ -36,13 +36,14 @@ test(".env.local 的本地数据地址覆盖父进程中的远程地址", () =>
       parentEnv: {
         DATABASE_URL: "postgresql+asyncpg://remote:secret@203.0.113.10:5432/inkforge",
         REDIS_URL: "redis://:secret@203.0.113.10:6379/0",
+        JWT_SECRET: "terminal-jwt",
         KEEP_ME: "保留",
       },
     });
 
     assert.equal(childEnv.DATABASE_URL, POSTGRES_URL);
     assert.equal(childEnv.REDIS_URL, REDIS_URL);
-    assert.equal(childEnv.JWT_SECRET, "local-jwt");
+    assert.equal(childEnv.JWT_SECRET, "terminal-jwt");
     assert.equal(childEnv.KEEP_ME, "保留");
   }));
 
