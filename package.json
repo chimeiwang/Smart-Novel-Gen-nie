@@ -4,8 +4,6 @@
   "description": "",
   "scripts": {
     "dev": "node scripts/dev.mjs",
-    "data:setup": "node scripts/setup-local-data.mjs",
-    "data:start": "node scripts/ensure-local-data.mjs",
     "build": "npm run build --workspace @inkforge/web",
     "start": "npm run start --workspace @inkforge/web",
     "lint": "npm run lint --workspace @inkforge/web",
@@ -16,8 +14,7 @@
     "test:web": "npm test --workspace @inkforge/web && npm test --workspace @inkforge/api-client",
     "test:e2e": "playwright test",
     "test:e2e:list": "playwright test --list",
-    "test:python": "uv run pytest",
-    "test:local-data": "node --test tests/local-data/*.test.mjs"
+    "test:python": "uv run pytest"
   },
   "keywords": [],
   "author": "",
