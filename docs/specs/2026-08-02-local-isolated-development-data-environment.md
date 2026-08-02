@@ -3,7 +3,7 @@
 ## 状态
 
 - 日期：2026-08-02
-- 状态：待用户复核
+- 状态：已确认，进入实施
 - 范围：Windows 原生 PostgreSQL、Redis 兼容服务、生产数据只读快照恢复与 `npm run dev` 一键启动
 - 替代关系：本规格完整替代提交 `931b9ec` 中的 WSL2/Docker 方案；实施时不保留、不叠加该旧路线
 
@@ -23,8 +23,8 @@
 - 本机 Windows 的 5432、6379 端口当前没有监听服务，本机尚未安装本地 PostgreSQL；
 - 本机已有 Memurai Developer 4.1.8 可执行文件及一个停止状态的服务注册，但日常非提升用户不能依赖
   该服务注册完成按需启动；
-- 当前 Windows 包源可以安装 Miniforge；conda-forge 可以提供 PostgreSQL 14.23 与 pgvector 0.8.0
-  的 Windows 原生包；
+- 本机已有未加入 PATH 的 Conda 25.11.1，位置为 `F:\ai\conda`，但尚无 `inkforge-data` 环境；
+  conda-forge 可以提供 PostgreSQL 14.23 与 pgvector 0.8.0 的 Windows 原生包；
 - 数据库结构契约要求 PostgreSQL 14.23，并精确要求 `vector` 扩展版本为 0.8.0；
 - 远程 Redis 中的队列、租约、事件流和防重放键不适合复制到本地；
 - 仓库不会自动创建 PostgreSQL schema；Core 的 readiness 失败也不能替代应用启动前的结构检查；
@@ -34,8 +34,8 @@
 
 - Web、Core、Agent、PostgreSQL 和 Redis 兼容服务全部直接运行在 Windows 本机。
 - 不安装或使用 WSL、虚拟机、Docker、Docker Desktop、Docker Engine 或 Compose。
-- PostgreSQL 使用 Miniforge 管理的独立 conda 环境 `inkforge-data`，固定安装 PostgreSQL 14.23 和
-  pgvector 0.8.0；它们仍是 Windows 原生进程，不要求进入 conda 交互 shell。
+- PostgreSQL 使用现有 `F:\ai\conda` 管理的独立 conda 环境 `inkforge-data`，固定从 conda-forge
+  安装 PostgreSQL 14.23 和 pgvector 0.8.0；它们仍是 Windows 原生进程，不要求进入 conda 交互 shell。
 - Redis 使用现有 Memurai Developer 可执行文件，由当前 Windows 用户以项目专用配置和独立进程运行，
   不依赖远程 Redis，也不依赖需要日常提权启动的 Windows 服务注册。
 - 本地数据库名和角色名固定为 `inkforge_local`，使用独立随机密码；Memurai 使用独立随机密码。
@@ -104,7 +104,7 @@ Windows npm run dev
 
 ### PostgreSQL 与 pgvector
 
-- 使用 Miniforge 创建独立环境 `inkforge-data`，包版本固定为 `postgresql=14.23`、
+- 使用现有 Conda 创建独立环境 `inkforge-data`，包版本固定为 `postgresql=14.23`、
   `pgvector=0.8.0`，不复用项目 Python `.venv`。
 - 启动器直接调用该环境中的 `pg_ctl.exe`、`pg_isready.exe`、`psql.exe` 和 `pg_restore.exe`；日常使用
   不要求用户激活 conda 环境。
@@ -155,7 +155,7 @@ Windows npm run dev
 1. 显式解析 `.env.local` 中的 `DATABASE_URL` 和 `REDIS_URL`，覆盖父终端的同名值，再校验最终传给
    子进程的实际生效值：两者主机均为 `127.0.0.1`，数据库名为 `inkforge_local`；不接受服务器 IP、
    主机名或非本地目标。
-2. 验证 Miniforge PostgreSQL 环境、Memurai 可执行文件、运行时清单和 `ready.json` 均存在且相互匹配。
+2. 验证独立 Conda PostgreSQL 环境、Memurai 可执行文件、运行时清单和 `ready.json` 均存在且相互匹配。
 3. 取得 `%LOCALAPPDATA%\InkForge\local-data\runtime\ensure.lock` 的互斥启动权。锁记录 PID 和时间；
    若另一个存活进程正在启动数据服务，则在有限超时内等待健康结果，不再发起第二次启动；仅当记录的
    PID 已不存在时才回收陈旧锁。取得锁后仍需再次探测，避免检查与启动之间的竞态。
@@ -215,7 +215,7 @@ Windows npm run dev
    `127.0.0.1/inkforge_local`、PostgreSQL 系统标识符和数据目录属于本地运行时清单。
 2. 首次空库恢复可直接执行；替换已有本地数据库必须使用明确的本地替换参数。任何目标校验失败都在
    破坏性操作前停止。
-3. 使用 Miniforge 环境中的 `pg_restore`，以 `--no-owner --no-acl` 恢复已有生产结构与数据。本步骤只
+3. 使用 `inkforge-data` 环境中的 `pg_restore`，以 `--no-owner --no-acl` 恢复已有生产结构与数据。本步骤只
    在本地副本重放既有结构，不引入迁移、初始化 SQL 或结构变化。
 4. 恢复后立即执行当前 `schema-contract.json` 的只读指纹校验；不得依赖 Core readiness 代替此检查。
 5. 在单一事务中执行生产执行态隔离；第二次只读审计必须报告零条可自动调度记录。
@@ -228,13 +228,20 @@ Windows npm run dev
 
 隔离入口只允许修改本地恢复副本，不执行结构变更，并且可重复执行：
 
-- `pending/submitted/processing` 的 `WritingRunCommand` 收敛为现有合法终态 `failed`，并记录本地隔离原因；
-- `active/waiting_call` 的 `WritingTask` 收敛为本地错误；
-- `pending/running` 的 `WorkflowRun` 收敛为 `cancelled`；关联 `WorkflowStep` 中，`pending` 收敛为
-  `skipped`，`running` 收敛为 `failed`；
+- 先处理任务与命令配对：存在 `pending/submitted/processing` 命令且任务仍为
+  `idle/active/waiting_call/awaiting_user_review` 时，任务收敛为 `error`、命令收敛为 `failed`；命令的
+  `payloadJson/resultJson/artifactId/decision` 原样保留，避免覆盖已经事务提交的草案决定结果；
+- 若活动命令关联的任务已经是 `completed`，命令收敛为 `succeeded`；若任务已经是 `error`，命令收敛为
+  `failed`。已经终态的任务本身不改写；
+- 没有活动命令的遗留 `active/waiting_call` 任务收敛为 `error`；其 `graphStateJson` 原样保留；
+- 没有活动命令的 `idle/awaiting_user_review` 任务不改，避免破坏正常空闲任务和待用户确认草案；
+- `pending/running` 的 `WorkflowRun` 收敛为 `cancelled`；仅其关联 `WorkflowStep` 中，`pending` 收敛为
+  `skipped`，`running` 收敛为 `failed`；`waiting_user` 运行及其待用户步骤不改；
 - 所有仍为 `running` 的 `ChapterQualityCheck` 收敛为 `failed`，并记录本地隔离原因；
-- `pending/processing` 的 `StylePortraitTask` 收敛为现有合法终态 `error`；
-- 等待重新索引的 `RagDocument` 收敛为本地失败，后续只允许用户明确重新索引；
+- `pending/processing` 的 `StylePortraitTask` 收敛为现有合法终态 `error`，并同步更新对应
+  `WritingStyle.errorMessage`，避免父记录继续显示处理中；
+- 仅 `status=disabled` 且 `errorMessage="等待重新索引"` 的 `RagDocument` 收敛为本地 `failed`；
+  因“检索索引服务未配置”而 disabled 的记录保持不变，后续只允许用户明确重新索引；
 - `pending/delivering/blocked` 的 `WritingEventOutbox` 收敛为现有合法终态 `superseded`，清除租约字段但
   保留历史证据；
 - 保留小说、章节、中短篇正式版本、用户、计费历史和已经终态的写作历史。
@@ -298,9 +305,10 @@ Windows npm run dev
 
 - 本地数据库结构指纹与 `apps/core-api/src/inkforge_core/db/schema-contract.json` 完全一致。
 - 本地数据库可以读取目标小说 `cmsab6kir4dtb9en83he6sdfj` 及其当前已应用版本。
-- 执行态隔离后的第二次审计分别报告 WritingRunCommand 活动态、WritingTask 执行态、WorkflowRun/Step
-  活动态、ChapterQualityCheck 运行态、StylePortraitTask 活动态、RagDocument 待索引态和
-  WritingEventOutbox 待投递态均为零。
+- 执行态隔离后的第二次审计分别报告 WritingRunCommand 活动态、WritingTask 可对账执行态、任务与命令
+  终态错配、WorkflowRun 活动态、已取消运行的活动 WorkflowStep、ChapterQualityCheck 运行态、
+  StylePortraitTask 活动态、RagDocument 精确待索引态、WritingEventOutbox 待投递态以及已 superseded
+  但仍持有租约的 Outbox 均为零。
 - 首次用 fake 模型执行 `npm run dev` 后，Web、Core API 和 Agent Service readiness 全部通过。
 - 用户可以登录并打开目标小说。
 - 使用唯一 canary/jobId 验证标识只进入本地 Redis；对远程 Redis 只做同一精确标识的只读查询。
