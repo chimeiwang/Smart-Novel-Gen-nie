@@ -1054,7 +1054,10 @@ short.agent.watch
 
 #### 17.6 Skill 部署
 
-重写现有同名本机 Skill `inkforge-short-story-operator`，不并存第二个相似触发 Skill。最小结构：
+本地开发继续使用现有同名 Skill `inkforge-short-story-operator`。生产环境操作按
+`2026-08-04-production-short-story-operator-skill.md` 使用独立
+`inkforge-production-short-story-operator`；两者必须通过触发描述、wrapper、profile 和状态目录
+明确隔离，不能隐式切换目标环境。本地 Skill 的最小结构：
 
 ```text
 inkforge-short-story-operator/
