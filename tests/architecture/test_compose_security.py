@@ -35,11 +35,23 @@ def test_only_nginx_publishes_ports_and_internal_routes_are_blocked() -> None:
     for service in PRODUCTION_SERVICES[1:]:
         assert "ports:" not in _service_block(source, service)
     nginx_service = _service_block(source, "nginx")
-    assert "ports:" in nginx_service
-    assert '- "127.0.0.1:${INKFORGE_PORT:-43120}:8080"' in nginx_service
+    ports = re.search(
+        r"(?ms)^    ports:\n(?P<body>.*?)(?=^    [a-z][a-z0-9_-]*:|\Z)",
+        nginx_service,
+    )
+    assert ports is not None
+    assert re.findall(r"(?m)^      -\s+(?P<binding>.+?)\s*$", ports.group("body")) == [
+        '"127.0.0.1:${INKFORGE_PORT:-43120}:8080"'
+    ]
 
     nginx = (ROOT / "infra" / "nginx" / "nginx.conf").read_text(encoding="utf-8")
-    assert re.search(r"location\s+\^~\s+/internal/", nginx)
+    internal = re.search(
+        r"location\s+\^~\s+/internal/\s*\{(?P<body>[^{}]*)\}",
+        nginx,
+    )
+    assert internal is not None
+    assert re.search(r"(?m)^\s*return\s+404;\s*$", internal.group("body"))
+    assert "proxy_pass" not in internal.group("body")
     assert re.search(r"location\s+\^~\s+/api/v1/", nginx)
     assert "proxy_buffering off;" in nginx
 
@@ -54,8 +66,10 @@ def test_compose_nginx_preserves_only_trusted_https_forwarding() -> None:
     )
 
     assert mapping is not None
-    assert re.search(r"(?m)^\s*default\s+\$scheme;\s*$", mapping.group("body"))
-    assert re.search(r"(?m)^\s*https\s+https;\s*$", mapping.group("body"))
+    mapping_entries = [line.strip() for line in mapping.group("body").splitlines() if line.strip()]
+    assert mapping_entries == ["default $scheme;", "~^https$ https;"]
+    assert "HTTPS" not in mapping.group("body")
+    assert "Https" not in mapping.group("body")
     assert nginx.count(
         "proxy_set_header X-Forwarded-Proto $inkforge_forwarded_proto;"
     ) == 2
