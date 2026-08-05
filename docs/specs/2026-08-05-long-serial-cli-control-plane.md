@@ -3,7 +3,7 @@
 ## 状态
 
 - 日期：2026-08-05
-- 状态：已确认，待编写实施计划
+- 状态：已确认，实施计划已编写，待实施
 - 范围：长篇公共控制契约、任务恢复、ReviewArtifact 来源保护、CLI 命令面与生产操作边界
 - 数据库：禁止修改 PostgreSQL schema
 
@@ -299,6 +299,22 @@ CLI 和 Web 只用 outcome 控制生命周期。`phase` 只作兼容展示；`in
 其 ID。`succeeded` 必须满足对应 Operation 的真实结果已存在。任何无法解释的任务、命令和产物组合
 投影为 `inconsistent`，不能伪造成功。
 
+显式长篇任务的真实结果按 Operation 固定：`plan_chapter` 必须存在同 task、kind=`beat_plan` 的权威
+Artifact 事实，`write_chapter` 必须存在同 task、kind=`chapter_draft` 的权威 Artifact 事实；进入
+`waiting_user` 时 Artifact 必须仍为 `awaiting_user`，approve 后的 succeeded 必须能证明该 Artifact 已
+`applied`，discard 后的 succeeded 必须有同 task、同 artifactId 且 `deleted=true` 的持久 decision command
+结果，revise 后仍须回到新的 `awaiting_user` revision。`review_chapter` 不创建可应用 Artifact，只有有效结果 command 的持久
+`resultJson` 中存在非空完整 `finalResponse` 时才可 succeeded；状态响应新增可空 `reviewReport`，只为
+该 Operation 返回这份完整文本，同时令 outcome.result 为 `kind=final_message, ready=true`。错误 kind、
+空报告、缺少对应 Artifact 或 command/result 不一致都投影为 `inconsistent`。历史没有 command 的旧任务
+继续使用既有只读兼容投影，不倒推或补写结果。
+
+有效结果 command 通常就是当前 command。若当前 command 是 `effective=false` 的终态 no-op cancel，
+projector 必须沿 `priorOutcome.currentCommand.id` 读取前一个持久 command；连续执行多个终态 no-op cancel
+时继续沿链解析，直到找到原业务 command。链缺失、循环、跨 task 或不能回到合法原 command 时投影为
+`inconsistent`。当前 cancel command 仍作为审计意义上的 currentCommand 返回，但 plan/write 的 Artifact
+事实和 review 的完整 `finalResponse` 必须从有效结果 command 验证，不能因 no-op cancel 丢失或降级。
+
 ### resume 边界
 
 `POST /api/v1/writing/runs/{taskId}/resume` 只接受普通继续输入和稳定 checkpoint 所需回答。公开
@@ -360,8 +376,9 @@ POST /api/v1/writing/runs/{taskId}/cancel
 
 终态 no-op 取消也保存一条 succeeded `cancel` command，使 clientRequestId 能绑定请求指纹；其 result
 明确包含 `effective=false`、`alreadyTerminal=true` 和取消前的完整权威 `priorOutcome`（state、code、
-result 及原 command 身份，不复制 observedAt）。outcome projector 显示本次 cancel 为当前命令，但
-必须从 priorOutcome 保留原状态和结果，不能把原成功或失败改写成取消，也不能丢失原产物 ID。
+result 及前一个 command 身份，不复制 observedAt）。outcome projector 显示本次 cancel 为当前命令，但
+必须从 priorOutcome 保留原状态和结果，并按上面的有效结果 command 规则解析原业务证据，不能把原成功
+或失败改写成取消，也不能丢失原产物 ID 或 `reviewReport`。
 
 竞态由统一锁序决定：完成事务先提交时，取消成为终态 no-op；取消事务先提交时，旧 job 立即失去
 当前命令身份。Agent 已进入一次模型调用时不承诺瞬时打断网络请求；Agent 在模型返回后、图节点切换
@@ -825,15 +842,15 @@ CLI 不从错误文本、SSE 事件名、Agent 聊天正文或本地文件猜测
 ## 生产长篇操作 Skill
 
 章节闭环稳定后新增独立个人 Skill `inkforge-production-long-novel-operator`。它调用同一个仓库 CLI，
-继续固定：
+并以已批准的生产 HTTPS 规格和实施计划完成为前置，固定：
 
 ```text
-origin  = http://124.71.85.180
+origin  = https://inkforge.cn
 profile = production
 ```
 
-用户已接受该固定地址的公网明文 HTTP 风险；新 Skill 不把链路描述为加密或安全，也不登录服务器、
-不使用 SSH、不直连数据库或内部接口。
+新 Skill 不保留公网 IP HTTP 回退、`acceptedInsecureHttp`、`-AcceptInsecureHttp` 或
+`INKFORGE_CLI_ALLOW_INSECURE_HTTP_ORIGIN`，也不登录服务器、不使用 SSH、不直连数据库或内部接口。
 
 新 Skill 复用现有 `production` CLI profile、Windows Credential Manager 凭据和已配置的预期用户名，
 不创建第二份登录凭据或长篇业务配置。
@@ -998,7 +1015,7 @@ long.quality.reset
 - SSE 首次快照、Last-Event-ID 重连、waiting_user、各终态和 300 秒不可达预算。
 - watcher 失败不返回 0；Ctrl+C 返回 130 且不调用 cancel。
 - 401、409、422、requestId、details 和网络不确定结果保持稳定输出。
-- profile、Cookie、密码和固定明文放行值不进入 stdout 或日志。
+- profile、Cookie 和密码不进入 stdout 或日志；生产 wrapper 不注入任何不安全 HTTP 放行值。
 
 ### 生成客户端与静态检查
 
@@ -1030,6 +1047,8 @@ auth.whoami
 -> 制造 Web/CLI 来源冲突并确认拒绝覆盖
 -> 重新生成并 approve 正文
 -> 章节进入 review
+-> long.agent.start(review_chapter)
+-> long.task.watch/get 返回完整 reviewReport，且不创建可应用 Artifact
 -> long.quality.run
 -> long.quality.get 到终态
 -> 章节进入 completed
