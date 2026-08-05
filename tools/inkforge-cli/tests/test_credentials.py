@@ -39,6 +39,11 @@ NullBackend.__module__ = "keyring.backends.null"
 AltFileBackend.__module__ = "keyrings.alt.file"
 
 
+@pytest.fixture(autouse=True)
+def _clear_insecure_http_origin(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("INKFORGE_CLI_ALLOW_INSECURE_HTTP_ORIGIN", raising=False)
+
+
 @pytest.mark.parametrize("backend", [NullBackend({}), AltFileBackend({}), object()])
 def test_production_store_rejects_every_non_win_vault_backend(backend: object) -> None:
     with pytest.raises(InsecureCredentialBackendError):
@@ -83,3 +88,38 @@ def test_origin_accepts_only_loopback_http_or_https(origin: str, expected: str) 
 def test_origin_rejects_insecure_or_ambiguous_values(origin: str) -> None:
     with pytest.raises(ValueError):
         validate_core_origin(origin)
+
+
+def test_origin_allows_only_the_explicit_remote_http_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "INKFORGE_CLI_ALLOW_INSECURE_HTTP_ORIGIN",
+        "http://124.71.85.180",
+    )
+
+    assert validate_core_origin("http://124.71.85.180/") == "http://124.71.85.180"
+    with pytest.raises(ValueError):
+        validate_core_origin("http://124.71.85.181")
+
+
+@pytest.mark.parametrize(
+    "allowed_origin",
+    [
+        "http://124.71.85.180/api",
+        "http://124.71.85.180?unsafe=1",
+        "http://*.71.85.180",
+        "https://124.71.85.180",
+    ],
+)
+def test_origin_rejects_invalid_insecure_http_allowlist_values(
+    monkeypatch: pytest.MonkeyPatch,
+    allowed_origin: str,
+) -> None:
+    monkeypatch.setenv(
+        "INKFORGE_CLI_ALLOW_INSECURE_HTTP_ORIGIN",
+        allowed_origin,
+    )
+
+    with pytest.raises(ValueError):
+        validate_core_origin("http://124.71.85.180")

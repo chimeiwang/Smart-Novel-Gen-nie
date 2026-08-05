@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import sys
 from typing import Any, Protocol
 from urllib.parse import urlsplit
@@ -78,7 +79,10 @@ class MemoryCredentialStore:
         self._values.pop((profile, validate_core_origin(origin)), None)
 
 
-def validate_core_origin(origin: str) -> str:
+_INSECURE_HTTP_ORIGIN_ENV = "INKFORGE_CLI_ALLOW_INSECURE_HTTP_ORIGIN"
+
+
+def _normalize_core_origin(origin: str) -> tuple[str, str, str]:
     if not origin or origin != origin.strip():
         raise ValueError("Core API 地址不能为空或包含首尾空白")
 
@@ -93,13 +97,27 @@ def validate_core_origin(origin: str) -> str:
         raise ValueError("Core API 地址只能包含 origin，不得包含路径、查询或片段")
 
     hostname = parsed.hostname.lower()
-    if parsed.scheme == "http" and hostname not in {"localhost", "127.0.0.1", "::1"}:
-        raise ValueError("HTTP 仅允许连接本机回环地址，远程地址必须使用 HTTPS")
-
     try:
         port = parsed.port
     except ValueError as exc:
         raise ValueError("Core API 端口无效") from exc
     rendered_host = f"[{hostname}]" if ":" in hostname else hostname
     rendered_port = f":{port}" if port is not None else ""
-    return f"{parsed.scheme}://{rendered_host}{rendered_port}"
+    return f"{parsed.scheme}://{rendered_host}{rendered_port}", parsed.scheme, hostname
+
+
+def validate_core_origin(origin: str) -> str:
+    normalized, scheme, hostname = _normalize_core_origin(origin)
+    if scheme == "http" and hostname not in {"localhost", "127.0.0.1", "::1"}:
+        allowed_origin = os.environ.get(_INSECURE_HTTP_ORIGIN_ENV)
+        try:
+            normalized_allowed = (
+                _normalize_core_origin(allowed_origin)[0]
+                if allowed_origin is not None
+                else None
+            )
+        except ValueError:
+            normalized_allowed = None
+        if normalized_allowed != normalized:
+            raise ValueError("HTTP 仅允许连接本机回环地址，远程地址必须使用 HTTPS")
+    return normalized

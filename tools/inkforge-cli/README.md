@@ -15,8 +15,10 @@ uv run --package inkforge-cli inkforge auth.login `
 ```
 
 `auth.login` 是唯一交互命令。密码只从真实 TTY 隐藏读取；登录会话写入 Windows Credential
-Manager，不写入仓库、普通配置、stdout 或日志。远程 Core 只允许 HTTPS，本地 HTTP 只允许回环
-地址。
+Manager，不写入仓库、普通配置、stdout 或日志。远程 Core 默认只允许 HTTPS，本地 HTTP 只允许
+回环地址。已明确接受风险的受控 wrapper 可以把
+`INKFORGE_CLI_ALLOW_INSECURE_HTTP_ORIGIN` 设置为一个完整 HTTP origin；该放行只匹配这个地址，
+不得使用通配值。
 
 除登录外，命令都从 stdin 读取一个 UTF-8 JSON 对象，stdout 返回 JSON；`short.agent.watch`
 返回 JSONL。例如：
