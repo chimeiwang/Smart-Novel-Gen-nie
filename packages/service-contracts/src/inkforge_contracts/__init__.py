@@ -10,13 +10,36 @@ from .events import (
 from .identity import CoreAgentId
 from .jobs import AgentJobAccepted, AgentJobCancelRequest, AgentJobRequest, AgentJobStatus
 from .jwt_claims import ServiceJwtClaims, ServiceScope
+from .long_serial import (
+    LONG_SERIAL_RUN_PAYLOAD_ADAPTER,
+    PUBLIC_LONG_SERIAL_OPERATIONS,
+    AbsenceSentinel,
+    ChapterRangeScope,
+    ChapterScope,
+    ChapterTarget,
+    LongSerialResumeInput,
+    LongSerialRunBase,
+    LongSerialRunPayload,
+    LongSerialScope,
+    NovelScope,
+    OutlineNodeScope,
+    ResumeLongSerialRunPayload,
+    SourceBinding,
+    StartLongSerialRunPayload,
+)
+from .operations import (
+    CreativeOperationKind,
+    ExecutableCreativeOperationKind,
+    HistoricalCreativeOperationKind,
+    PublicOperationDefinition,
+)
 from .quality import (
     ConsistencyDimension,
     ConsistencyIssue,
     ConsistencyQualityReport,
     ConsistencyScores,
 )
-from .runs import CreativeOperationKind, RunAccepted, RunRequest, RunStatusResponse
+from .runs import RunAccepted, RunRequest, RunStatusResponse
 from .short_medium import (
     ShortMediumCheckResult,
     ShortMediumDocumentResult,
@@ -42,12 +65,30 @@ __all__ = [
     "AgentJobCancelRequest",
     "AgentJobRequest",
     "AgentJobStatus",
+    "AbsenceSentinel",
+    "ChapterRangeScope",
+    "ChapterScope",
+    "ChapterTarget",
     "CreativeOperationKind",
+    "ExecutableCreativeOperationKind",
+    "HistoricalCreativeOperationKind",
+    "LONG_SERIAL_RUN_PAYLOAD_ADAPTER",
+    "LongSerialResumeInput",
+    "LongSerialRunBase",
+    "LongSerialRunPayload",
+    "LongSerialScope",
+    "NovelScope",
+    "OutlineNodeScope",
+    "PUBLIC_LONG_SERIAL_OPERATIONS",
+    "PublicOperationDefinition",
+    "ResumeLongSerialRunPayload",
     "RunAccepted",
     "RunCompletionCallback",
     "RunFailureCallback",
     "RunRequest",
     "RunStatusResponse",
+    "SourceBinding",
+    "StartLongSerialRunPayload",
     "ShortMediumCheckResult",
     "ShortMediumDocumentResult",
     "ShortMediumDocumentType",

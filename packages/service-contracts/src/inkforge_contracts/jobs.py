@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from .identity import Identifier
+from .long_serial import LONG_SERIAL_RUN_PAYLOAD_ADAPTER
 from .short_medium import ShortMediumRunPayload
 
 AgentJobKind = Literal["writing", "portrait", "rag", "quality"]
@@ -26,12 +27,16 @@ class AgentJobRequest(BaseModel):
     force: bool = False
 
     @model_validator(mode="after")
-    def validate_short_medium_payload(self) -> AgentJobRequest:
-        if (
-            self.kind == "writing"
-            and self.payload.get("workflow") == "short_medium"
-        ):
+    def validate_writing_payload(self) -> AgentJobRequest:
+        if self.kind != "writing" or "workflow" not in self.payload:
+            return self
+        workflow = self.payload["workflow"]
+        if workflow == "short_medium":
             ShortMediumRunPayload.model_validate(self.payload)
+        elif workflow == "long_serial":
+            LONG_SERIAL_RUN_PAYLOAD_ADAPTER.validate_python(self.payload)
+        else:
+            raise ValueError("写作任务 workflow 不受支持")
         return self
 
 

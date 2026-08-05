@@ -3,20 +3,7 @@ from typing import Literal, Self
 from pydantic import BaseModel, ConfigDict, NonNegativeInt, model_validator
 
 from .identity import Identifier, NonBlankString
-
-CreativeOperationKind = Literal[
-    "answer_question",
-    "create_lore",
-    "revise_lore",
-    "create_outline",
-    "revise_outline",
-    "plan_chapter",
-    "write_chapter",
-    "rewrite_scene",
-    "review_chapter",
-    "sync_lore",
-    "manage_foreshadowing",
-]
+from .operations import CreativeOperationKind
 
 
 class RunRequest(BaseModel):

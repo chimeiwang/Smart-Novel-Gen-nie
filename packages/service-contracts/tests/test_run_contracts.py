@@ -8,6 +8,8 @@ from inkforge_contracts import (
     PROTOCOL_VERSION,
     CoreAgentId,
     CreativeOperationKind,
+    ExecutableCreativeOperationKind,
+    HistoricalCreativeOperationKind,
     RunAccepted,
     RunRequest,
     RunStatusResponse,
@@ -40,6 +42,19 @@ def test_protocol_version_and_literal_sets_are_exact() -> None:
         "rewrite_scene",
         "review_chapter",
         "sync_lore",
+        "manage_foreshadowing",
+    }
+    assert CreativeOperationKind is HistoricalCreativeOperationKind
+    assert set(get_args(ExecutableCreativeOperationKind)) == {
+        "answer_question",
+        "create_lore",
+        "revise_lore",
+        "create_outline",
+        "revise_outline",
+        "plan_chapter",
+        "write_chapter",
+        "rewrite_scene",
+        "review_chapter",
         "manage_foreshadowing",
     }
 
