@@ -76,6 +76,21 @@ def test_compose_nginx_preserves_only_trusted_https_forwarding() -> None:
     assert "proxy_set_header X-Forwarded-Proto $scheme;" not in nginx
 
 
+def test_compose_nginx_preserves_trusted_real_client_ip() -> None:
+    nginx = (ROOT / "infra" / "nginx" / "nginx.conf").read_text(encoding="utf-8")
+    mapping = re.search(
+        r"map\s+\$http_x_real_ip\s+\$inkforge_real_ip\s*\{(?P<body>.*?)\}",
+        nginx,
+        re.DOTALL,
+    )
+
+    assert mapping is not None
+    mapping_entries = [line.strip() for line in mapping.group("body").splitlines() if line.strip()]
+    assert mapping_entries == ["default $http_x_real_ip;", '"" $remote_addr;']
+    assert nginx.count("proxy_set_header X-Real-IP $inkforge_real_ip;") == 2
+    assert "proxy_set_header X-Real-IP $remote_addr;" not in nginx
+
+
 def test_every_container_has_health_resource_and_filesystem_limits() -> None:
     source = COMPOSE.read_text(encoding="utf-8")
     total_cpus = 0.0
