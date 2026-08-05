@@ -14,6 +14,7 @@ from inkforge_core.agent_client import (
     QualityAgentSubmitter,
     RagAgentSubmitter,
     WritingTaskAgentSubmitter,
+    command_job_payload,
 )
 from inkforge_core.writing.commands import WritingCommandRecord
 from inkforge_core.writing.records import TaskRecord
@@ -159,6 +160,85 @@ async def test_writing_command_uses_command_id_as_job_id() -> None:
     assert captured[0].payload == command.payload
     assert captured[0].force is True
     assert status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_writing_command_envelope_only_submits_validated_job() -> None:
+    captured: list[AgentJobRequest] = []
+
+    class Client:
+        async def submit(self, request: AgentJobRequest) -> AgentJobAccepted:
+            captured.append(request)
+            return AgentJobAccepted(
+                jobId=request.jobId,
+                runId=request.runId,
+                taskId=request.taskId,
+                status="queued",
+            )
+
+    task = TaskRecord(
+        id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        writing_session_id=None,
+        phase="idle",
+        graph_state_json=None,
+    )
+    job = {
+        "resume": False,
+        "chapterId": "chapter-1",
+        "writingSessionId": None,
+        "resumeInput": None,
+    }
+    envelope = {
+        "_inkforgeCommand": {
+            "schemaVersion": 1,
+            "clientRequestId": "request-00000001",
+            "commandKind": "start",
+            "resourceIdentity": {
+                "novelId": "novel-1",
+                "chapterId": "chapter-1",
+            },
+            "normalizedBody": {"userInstruction": "继续"},
+            "requestFingerprint": "a" * 64,
+        },
+        "job": job,
+    }
+    command = WritingCommandRecord(
+        id="command-envelope",
+        task=task,
+        kind="start",
+        payload=envelope,
+        status="pending",
+        attempt_count=0,
+    )
+
+    status = await WritingTaskAgentSubmitter(  # type: ignore[arg-type]
+        Client()
+    ).submit_command(command)
+
+    assert captured[0].payload == job
+    assert captured[0].payload != envelope
+    assert status == "queued"
+    assert command_job_payload(job) == job
+
+
+def test_command_job_payload_rejects_malformed_new_envelope() -> None:
+    with pytest.raises(ValueError, match="job"):
+        command_job_payload(
+            {
+                "_inkforgeCommand": {
+                    "schemaVersion": 1,
+                    "clientRequestId": "request-00000001",
+                    "commandKind": "start",
+                    "resourceIdentity": {},
+                    "normalizedBody": {},
+                    "requestFingerprint": "a" * 64,
+                },
+                "quality": {},
+            }
+        )
 
 
 @pytest.mark.asyncio

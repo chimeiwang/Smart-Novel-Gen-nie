@@ -25,6 +25,7 @@ from ..short_medium.completion import (
     assemble_short_medium_run_payload,
     load_short_medium_run_source,
 )
+from .idempotency import command_idempotency_key
 from .message_metadata import workflow_message_metadata
 from .outbox import supersede_waiting_for_new_command
 from .outcome import WritingRunOutcomeFacts, project_writing_run_outcome
@@ -62,10 +63,6 @@ class WritingCommandRecord:
     artifact_id: str | None = None
     decision: str | None = None
     result: dict[str, Any] | None = None
-
-
-def command_idempotency_key(user_id: str, client_request_id: str) -> str:
-    return f"{user_id}:{client_request_id}"
 
 
 class WritingRunCommandRepository:

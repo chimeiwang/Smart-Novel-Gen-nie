@@ -12,6 +12,7 @@ from pydantic import JsonValue
 
 from .errors import ApiError
 from .writing.commands import WritingCommandRecord
+from .writing.idempotency import parse_command_envelope
 from .writing.job_identity import build_writing_job_id
 from .writing.records import TaskRecord
 
@@ -123,6 +124,7 @@ class WritingTaskAgentSubmitter:
         )
 
     async def submit_command(self, command: WritingCommandRecord) -> AgentJobStatus:
+        payload = command_job_payload(command.payload)
         accepted = await self._client.submit(
             AgentJobRequest(
                 protocolVersion="1.0",
@@ -133,8 +135,8 @@ class WritingTaskAgentSubmitter:
                 novelId=command.task.novel_id,
                 userId=command.task.user_id,
                 priority=10,
-                payload=cast(dict[str, JsonValue], command.payload),
-                force=command.payload.get("force") is True,
+                payload=payload,
+                force=payload.get("force") is True,
             )
         )
         return accepted.status
@@ -269,3 +271,15 @@ class RagAgentSubmitter:
             )
         )
         return accepted.status
+
+
+def command_job_payload(payload: dict[str, object]) -> dict[str, JsonValue]:
+    if "_inkforgeCommand" not in payload:
+        return cast(dict[str, JsonValue], payload)
+    parse_command_envelope(payload)
+    if set(payload) != {"_inkforgeCommand", "job"}:
+        raise ValueError("新写作命令 envelope 必须且只能包含 _inkforgeCommand 和 job")
+    job = payload.get("job")
+    if not isinstance(job, dict) or any(not isinstance(key, str) for key in job):
+        raise ValueError("新写作命令 envelope 的 job 必须是 JSON 对象")
+    return cast(dict[str, JsonValue], job)
