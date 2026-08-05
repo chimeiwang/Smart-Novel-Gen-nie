@@ -26,10 +26,18 @@ def test_outline_save_checks_safe_precondition_before_content_equality() -> None
     )
 
 
-def test_node_mutations_take_novel_level_advisory_lock() -> None:
-    for name in ("create_node", "update_node", "delete_node"):
+def test_outline_mutations_take_novel_level_row_and_advisory_lock() -> None:
+    for name in (
+        "upsert_outline",
+        "create_node",
+        "update_node",
+        "delete_node",
+        "replace_nodes",
+    ):
         assert "_lock_novel" in inspect.getsource(getattr(OutlineRepository, name))
     lock_source = inspect.getsource(OutlineRepository._lock_novel)
+    assert "select(Novel)" in lock_source
+    assert "with_for_update" in lock_source
     assert "pg_advisory_xact_lock(:key)" in lock_source
     assert "sha256" in lock_source
 

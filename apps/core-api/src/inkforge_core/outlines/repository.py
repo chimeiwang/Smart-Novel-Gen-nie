@@ -126,6 +126,7 @@ class OutlineRepository:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
+                await self._lock_novel(session, novel_id, user_id)
                 outline = await session.scalar(
                     select(Outline)
                     .where(Outline.novelId == novel_id)
@@ -165,7 +166,7 @@ class OutlineRepository:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
-                await self._lock_novel(session, novel_id)
+                await self._lock_novel(session, novel_id, user_id)
                 await self._validate_links(session, novel_id, fields)
                 snapshots = await self._snapshots(session, novel_id)
                 candidate = self._snapshot("待创建", fields)
@@ -182,7 +183,7 @@ class OutlineRepository:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
-                await self._lock_novel(session, novel_id)
+                await self._lock_novel(session, novel_id, user_id)
                 current = await session.scalar(
                     select(OutlineNode).where(
                         OutlineNode.id == node_id, OutlineNode.novelId == novel_id
@@ -214,7 +215,7 @@ class OutlineRepository:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
-                await self._lock_novel(session, novel_id)
+                await self._lock_novel(session, novel_id, user_id)
                 child = await session.scalar(
                     select(OutlineNode.id).where(OutlineNode.parentId == node_id).limit(1)
                 )
@@ -241,7 +242,7 @@ class OutlineRepository:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
-                await self._lock_novel(session, novel_id)
+                await self._lock_novel(session, novel_id, user_id)
                 if any(item.get("action") != "create" for item in adjustments):
                     raise ApiError(
                         status_code=422,
@@ -346,7 +347,18 @@ class OutlineRepository:
             raise ApiError(status_code=403, code="NOVEL_FORBIDDEN", message="无权访问该小说")
 
     @staticmethod
-    async def _lock_novel(session: AsyncSession, novel_id: str) -> None:
+    async def _lock_novel(
+        session: AsyncSession, novel_id: str, user_id: str
+    ) -> None:
+        novel = await session.scalar(
+            select(Novel).where(Novel.id == novel_id).with_for_update()
+        )
+        if novel is None or novel.userId != user_id:
+            raise ApiError(
+                status_code=403,
+                code="NOVEL_FORBIDDEN",
+                message="无权访问该小说",
+            )
         if session.bind is not None and session.bind.dialect.name == "postgresql":
             key = int.from_bytes(hashlib.sha256(novel_id.encode()).digest()[:8], "big", signed=True)
             await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})

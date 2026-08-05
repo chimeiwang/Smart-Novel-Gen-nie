@@ -125,10 +125,10 @@ class FormalWriteRepository:
             async with session.begin():
                 await _require_owner(session, artifact.novel_id, user_id)
                 chapter = await session.scalar(
-                    select(Chapter.id).where(
+                    select(Chapter).where(
                         Chapter.id == artifact.chapter_id,
                         Chapter.novelId == artifact.novel_id,
-                    )
+                    ).with_for_update()
                 )
                 if chapter is None:
                     raise ApiError(
