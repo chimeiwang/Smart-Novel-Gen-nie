@@ -9,6 +9,7 @@ import {
   type AgentId,
 } from "@/features/writing/agent-registry";
 import { browserApi } from "@/lib/api/browser";
+import { createClientRequestId } from "@/lib/api/client-request-id";
 import { requireApiData } from "@/lib/api/response";
 import type { RunOutcomeData, WritingSseEvent } from "@/shared/contracts/sse-events";
 import { parseSseEvent } from "@/shared/contracts/sse-events";
@@ -1909,7 +1910,7 @@ export function WritingConversation({
     try {
       const run = requireApiData(await browserApi.POST("/api/v1/writing/runs", {
         body: {
-          clientRequestId: crypto.randomUUID(),
+          clientRequestId: createClientRequestId(),
           novelId,
           chapterId,
           targetWordCount,
@@ -1972,7 +1973,7 @@ export function WritingConversation({
           {
             params: { path: { task_id: taskId } },
             body: {
-              clientRequestId: crypto.randomUUID(),
+              clientRequestId: createClientRequestId(),
               writingSessionId: currentSessionId ?? null,
               userMessage: message,
             },
@@ -2134,7 +2135,7 @@ export function WritingConversation({
         {
           params: { path: { task_id: currentTaskId } },
           body: {
-            clientRequestId: crypto.randomUUID(),
+            clientRequestId: createClientRequestId(),
             writingSessionId: currentSessionId ?? null,
             userMessage: decision === "current_chapter" ? "使用当前章节" : "新建下一章",
           },
@@ -2773,7 +2774,7 @@ export function WritingConversation({
           {
             params: { path: { artifact_id: artifact.id } },
             body: {
-              clientRequestId: crypto.randomUUID(),
+              clientRequestId: createClientRequestId(),
               decision,
               editedContent: decision === "approve" ? editedContent ?? null : null,
               selectedUpdateRefs: decision === "approve" ? selectedUpdateRefs ?? null : null,

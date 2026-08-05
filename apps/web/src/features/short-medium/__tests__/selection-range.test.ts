@@ -18,7 +18,10 @@ describe("中短篇 Unicode 选区", () => {
     assert.equal(identity.selectedText, "😀");
     assert.equal(identity.selectionStart, 2);
     assert.equal(identity.selectionEnd, 3);
-    assert.match(identity.selectedTextHash, /^[0-9a-f]{64}$/);
+    assert.equal(
+      identity.selectedTextHash,
+      "f0443a342c5ef54783a111b51ba56c938e474c32324d90c3a60c9c8e3a37e2d9",
+    );
   });
 
   it("拒绝空选区和拆开代理对的下标", () => {

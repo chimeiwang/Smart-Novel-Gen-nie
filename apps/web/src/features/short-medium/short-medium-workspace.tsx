@@ -8,6 +8,7 @@ import {
   type ChapterSaveState,
 } from "@/features/editor/chapter-save-coordinator";
 import { browserApi } from "@/lib/api/browser";
+import { createClientRequestId } from "@/lib/api/client-request-id";
 import { requireApiData } from "@/lib/api/response";
 import { countTextLength } from "@/shared/lib/word-count";
 import { parseSseEvent } from "@/shared/contracts/sse-events";
@@ -326,7 +327,7 @@ export function ShortMediumWorkspace({
       setPendingVersionAction({
         action: "submit",
         targetVersionId: null,
-        clientRequestId: crypto.randomUUID(),
+        clientRequestId: createClientRequestId(),
         preview: state,
       });
       setVersionsOpen(true);
@@ -378,7 +379,7 @@ export function ShortMediumWorkspace({
       setPendingVersionAction(action ? {
         action,
         targetVersionId: versionId,
-        clientRequestId: crypto.randomUUID(),
+        clientRequestId: createClientRequestId(),
       } : null);
     } catch (actionError) {
       setError(errorMessage(actionError));
@@ -514,7 +515,7 @@ export function ShortMediumWorkspace({
       }
       const run = requireApiData(await browserApi.POST("/api/v1/writing/runs", {
         body: {
-          clientRequestId: crypto.randomUUID(),
+          clientRequestId: createClientRequestId(),
           workflow: "short_medium",
           novelId,
           operation,

@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 import { browserApi } from "@/lib/api/browser";
+import { createClientRequestId } from "@/lib/api/client-request-id";
 import { requireApiData } from "@/lib/api/response";
 import {
   STORY_LENGTH_PROFILE_CONFIG,
@@ -40,7 +41,7 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
   const [sourceKind, setSourceKind] = useState<ShortMediumSourceKind>("idea");
   const [sourceText, setSourceText] = useState("");
   const [clientRequestId, setClientRequestId] = useState(
-    () => globalThis.crypto.randomUUID(),
+    () => createClientRequestId(),
   );
   const shortMedium = storyLengthProfile === "short_medium";
 
@@ -63,7 +64,7 @@ export function CreateNovelModal({ isOpen, onClose }: CreateNovelModalProps) {
           firstChapterGoal: shortMedium ? null : firstChapterGoal || null,
         },
       }));
-      setClientRequestId(globalThis.crypto.randomUUID());
+      setClientRequestId(createClientRequestId());
       onClose();
       router.push(`/workspace/${result.novelId}`);
       router.refresh();
