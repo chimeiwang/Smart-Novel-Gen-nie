@@ -4,16 +4,28 @@
 
 - 初始日期：2026-08-04
 - 直连变更确认日期：2026-08-05
-- 状态：直连 HTTP 设计已确认，待实施
-- 生产入口：`http://124.71.85.180`
+- 状态：服务器HTTPS已实现，个人Skill待迁移
+- 当前生产入口：`https://inkforge.cn`
 
-## 背景与决策
+服务器端已于 2026-08-05 启用可信 HTTPS，并恢复生产 `Secure` Cookie。个人
+`inkforge-production-short-story-operator` Skill 尚未迁移；下文保留的是此前已确认的临时公网 HTTP
+直连设计，只用于历史追溯和迁移核对，其中的 IP/HTTP origin、明文风险确认和放行变量都不再是当前
+生产操作指引。个人 Skill 完成 HTTPS 迁移前，不得沿用下文方案发起生产业务请求。
+
+## 待迁移边界
+
+- 把生产 origin 固定为 `https://inkforge.cn`，继续使用隔离的 `production` profile。
+- 删除 Skill 中的 `INKFORGE_CLI_ALLOW_INSECURE_HTTP_ORIGIN` 注入、`acceptedInsecureHttp` 配置和明文风险说明。
+- 迁移不得保留到 IP/HTTP 的静默降级路径；身份核验、命令白名单、Diff、确认哈希和恢复边界保持不变。
+- 本次仓库文档同步不修改个人 Skill；迁移完成后再更新本规格状态。
+
+## 历史背景与决策
 
 本机已有 `inkforge-short-story-operator`，它通过仓库内 `inkforge-cli` 操作本地 Core 公共接口。
 独立的 `inkforge-production-short-story-operator` 已按相同业务流程创建，初始实现使用 SSH 隧道
 保护公网 HTTP 链路。
 
-生产入口当前只有 HTTP：实测 `http://124.71.85.180/` 返回 200，HTTPS 端口连接超时。现有 CLI
+当时的生产入口只有 HTTP：实测 `http://124.71.85.180/` 返回 200，HTTPS 端口连接超时。现有 CLI
 默认拒绝远程 HTTP，只允许回环 HTTP 或远程 HTTPS，避免密码和会话 Cookie 明文经过公网。
 
 用户已明确接受固定生产入口上的明文 HTTP 风险，并批准移除 SSH 隧道。新设计不再登录服务器、

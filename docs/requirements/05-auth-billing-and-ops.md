@@ -10,14 +10,14 @@
 - 注册、登录、登出和当前用户接口由 Core API 提供。
 - 用户名输入先去除首尾空白并转为小写，再按 3 至 32 位小写字母、数字、下划线或短横线校验和存储；密码至少 6 位。
 - 密码由 Python bcrypt 哈希，禁止保存明文。
-- 会话使用 HS256 JWT，写入 httpOnly、sameSite=lax Cookie，有效期 30 天。
+- 会话使用 HS256 JWT，写入 httpOnly、sameSite=lax Cookie，有效期 30 天；生产 HTTPS 环境必须同时设置 `Secure`。
 - 登录失败不区分用户名不存在和密码错误。
 
 ## 资源授权
 
 小说、章节、写作任务、会话、消息、质量检查、参考资料、文风和 ReviewArtifact 都必须沿关系校验到当前用户。历史 `Novel.userId = null` 只允许显式兼容，不能成为新数据规则。
 
-浏览器只能访问 `/api/v1/**`。Nginx 必须阻断公网 `/internal/**`。
+浏览器只能访问 `/api/v1/**`。宿主机 Nginx 与 Compose Nginx 必须共同阻断公网 `/internal/**`。
 
 ## 服务间互信
 
@@ -81,7 +81,19 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 
 ## 生产编排
 
-`infra/compose.yaml` 包含 Nginx、Web、Core API、Agent Service 和 Redis。生产 PostgreSQL 14 继续作为宿主机服务运行，只有 Nginx 发布容器端口。
+`infra/compose.yaml` 包含 Nginx、Web、Core API、Agent Service 和 Redis。生产 PostgreSQL 14 继续作为宿主机服务运行，只有 Compose Nginx 发布容器端口，并且只能绑定 `127.0.0.1:${INKFORGE_PORT:-43120}`。
+
+生产公网入口分为宿主机 TLS 边界和 Compose 应用路由两层：
+
+```text
+公网 80/443
+  -> 宿主机 Nginx（HTTPS 终止、HTTP 与 www 规范化跳转、/internal/** 阻断）
+  -> 127.0.0.1:43120
+  -> Compose Nginx :8080
+  -> Web / Core API
+```
+
+宿主机 Nginx 是唯一可从公网直接到达的入口。公开证书由宿主机 Certbot 管理，证书及私钥只保存在 `/etc/letsencrypt`，不得进入 Git 仓库、应用镜像或 `.env`。`certbot.timer` 负责自动续期，续期成功后的 deploy hook 必须先执行 `nginx -t`，通过后才 reload 宿主机 Nginx。
 
 生产发布由 GitHub Actions 在 Runner 上构建带提交哈希标签的 Web、Core API 和 Agent Service 三张镜像，经 SSH 加载到服务器，再以 `--no-build` 启动 `infra/compose.yaml`。2 核 2 GB 服务器不得现场安装依赖或构建镜像；缺少 `.env`、四个服务密钥、宿主机 PostgreSQL 连接或可恢复备份时必须停止部署。
 
@@ -150,6 +162,8 @@ Core 与 Agent readiness 在后台任务不健康时保留 `checks` 兼容字段
 
 `DEPLOY_SSH_KNOWN_HOSTS` 属于 GitHub `production` environment Secret，不是应用容器环境变量；只用于为发布流程生成严格校验的临时 `known_hosts` 文件。
 
+`ALLOW_INSECURE_HTTP_AUTH` 只保留为已经结束的 IP/HTTP 过渡兼容项。生产 `.env` 不得设置该变量为 `true`，Core 在生产环境必须按 `false` 运行并签发 `Secure` Cookie。
+
 ## 验收标准
 
 - 用户可以注册、登录、登出并查看计费摘要。
@@ -157,7 +171,9 @@ Core 与 Agent readiness 在后台任务不健康时保留 `checks` 兼容字段
 - Agent 不能连接数据库，内部伪造、重放、跨任务或跨小说请求会被拒绝。
 - 余额不足时模型调用不会开始；重复完成回调不会重复扣费。
 - Agent 重启后任务可以从稳定检查点恢复。
-- Nginx 是唯一公网入口，公网 `/internal/**` 返回 404。
+- 宿主机 Nginx 是唯一公网入口，80 与 `www` 永久跳转到 `https://inkforge.cn`，公网 `/internal/**` 返回 404。
+- 生产 TLS 只接受 1.2 和 1.3；公开证书覆盖 `inkforge.cn` 与 `www.inkforge.cn`，并由 Certbot timer 与校验后 reload 的 deploy hook 续期。
+- Compose Nginx 只绑定宿主机 `127.0.0.1:43120`，不得允许公网绕过宿主机 HTTPS 边界。
 - 数据库结构指纹在迁移前后保持不变。
 - 生产 SSH 只信任离线核验的主机公钥，运行中的部署不会被后续提交取消。
 - 新版本失败时可恢复到经验证的上一镜像；回滚成功仍保留发布失败状态。

@@ -9,7 +9,7 @@
 - LangGraph Python、LangChain Core：Agent 编排和模型运行时。
 - PostgreSQL、pgvector：现有主数据库，结构禁止在本重构中修改。
 - Redis：运行队列、SSE 短期重放、限流和服务令牌重放保护。
-- Nginx、Docker Compose：单机生产部署。
+- 宿主机 Nginx、Certbot、Compose Nginx：单机生产 HTTPS 边界与应用路由。
 
 ## 目录
 
@@ -59,7 +59,21 @@ uv run ruff check .
 2. 运行 `uv run python scripts/generate_service_keys.py --output-dir infra/secrets` 生成服务密钥。
 3. 运行 `docker compose -f infra/compose.yaml up --build -d`。
 
-Nginx 是唯一公网入口。Agent Service 不加入数据库网络，也不会接收 `DATABASE_URL`。生产 Compose 不定义 PostgreSQL 服务或数据卷，也不包含初始化 SQL 或迁移；原数据库继续由宿主机 PostgreSQL 管理。
+生产流量链路为：
+
+```text
+公网 80/443
+  -> 宿主机 Nginx（TLS 终止与规范化跳转）
+  -> 127.0.0.1:43120
+  -> Compose Nginx :8080
+  -> Web / Core API
+```
+
+宿主机 Nginx 是唯一公网入口，Compose Nginx 只绑定宿主机回环地址。`http://inkforge.cn`、`http://www.inkforge.cn` 与 `https://www.inkforge.cn` 永久跳转到 `https://inkforge.cn`，两层 Nginx 都阻断公网 `/internal/**`。
+
+公开证书由宿主机 Certbot 管理，只保存在 `/etc/letsencrypt`，不得写入仓库、镜像或 `.env`。`certbot.timer` 自动续期，deploy hook 在续期成功后先验证配置再 reload 宿主机 Nginx。
+
+Agent Service 不加入数据库网络，也不会接收 `DATABASE_URL`。生产 Compose 不定义 PostgreSQL 服务或数据卷，也不包含初始化 SQL 或迁移；原数据库继续由宿主机 PostgreSQL 管理。
 
 `main` 分支的生产发布由 GitHub Actions 在 Runner 上预构建三张镜像并通过 SSH 部署；构建输入未变化的服务直接复用服务器已有镜像，只传输确实变化的镜像。服务器只执行 `infra/compose.yaml` 的 `--no-build` 启动，并必须提前准备可由部署用户只读访问的 `.env`、`infra/secrets` 下四个服务密钥和现有宿主机 PostgreSQL。
 
