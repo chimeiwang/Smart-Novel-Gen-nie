@@ -34,12 +34,32 @@ def test_only_nginx_publishes_ports_and_internal_routes_are_blocked() -> None:
     source = COMPOSE.read_text(encoding="utf-8")
     for service in PRODUCTION_SERVICES[1:]:
         assert "ports:" not in _service_block(source, service)
-    assert "ports:" in _service_block(source, "nginx")
+    nginx_service = _service_block(source, "nginx")
+    assert "ports:" in nginx_service
+    assert '- "127.0.0.1:${INKFORGE_PORT:-43120}:8080"' in nginx_service
 
     nginx = (ROOT / "infra" / "nginx" / "nginx.conf").read_text(encoding="utf-8")
     assert re.search(r"location\s+\^~\s+/internal/", nginx)
     assert re.search(r"location\s+\^~\s+/api/v1/", nginx)
     assert "proxy_buffering off;" in nginx
+
+
+def test_compose_nginx_preserves_only_trusted_https_forwarding() -> None:
+    nginx = (ROOT / "infra" / "nginx" / "nginx.conf").read_text(encoding="utf-8")
+    mapping = re.search(
+        r"map\s+\$http_x_forwarded_proto\s+\$inkforge_forwarded_proto\s*\{"
+        r"(?P<body>.*?)\}",
+        nginx,
+        re.DOTALL,
+    )
+
+    assert mapping is not None
+    assert re.search(r"(?m)^\s*default\s+\$scheme;\s*$", mapping.group("body"))
+    assert re.search(r"(?m)^\s*https\s+https;\s*$", mapping.group("body"))
+    assert nginx.count(
+        "proxy_set_header X-Forwarded-Proto $inkforge_forwarded_proto;"
+    ) == 2
+    assert "proxy_set_header X-Forwarded-Proto $scheme;" not in nginx
 
 
 def test_every_container_has_health_resource_and_filesystem_limits() -> None:
@@ -115,6 +135,9 @@ def test_test_compose_owns_isolated_postgres() -> None:
 def test_production_env_example_targets_host_gateway() -> None:
     source = (ROOT / ".env.example").read_text(encoding="utf-8")
 
+    assert "INKFORGE_PORT=43120" in source
+    assert "宿主机 Nginx" in source
+    assert "回环" in source
     assert "@host.docker.internal:5432/" in source
     for obsolete in (
         "POSTGRES_USER=",
@@ -133,8 +156,9 @@ def test_ip_http_auth_mode_is_explicit_and_disabled_by_default() -> None:
     assert compose_variable in _service_block(compose, "core-api")
     assert compose.count(compose_variable) == 1
     assert "ALLOW_INSECURE_HTTP_AUTH=false" in env_example
-    assert "仅短期 IP/HTTP 使用" in env_example
-    assert "恢复 HTTPS 后删除 ALLOW_INSECURE_HTTP_AUTH 并重新部署" in env_example
+    assert "ALLOW_INSECURE_HTTP_AUTH=true" not in env_example
+    assert "生产 HTTPS" in env_example
+    assert "不得开启明文 HTTP 认证" in env_example
 
 
 def test_production_deployment_forbids_dynamic_trust_and_destructive_commands() -> None:

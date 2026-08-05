@@ -9,7 +9,7 @@ services:
     security_opt:
       - no-new-privileges:true
     ports:
-      - "${INKFORGE_PORT:-80}:8080"
+      - "127.0.0.1:${INKFORGE_PORT:-43120}:8080"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     tmpfs:
