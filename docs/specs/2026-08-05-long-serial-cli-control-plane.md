@@ -222,8 +222,9 @@ Core 在创建任务的同一事务内：
 3. 从共享公开 Operation 投影推导主责 Agent、reviewers、允许的 target/scope 和 Artifact 类型。
 4. 读取并冻结来源绑定。
 5. 生成不包含 `clientRequestId` 的规范化请求 JSON 和 SHA-256 指纹。
-6. 创建 `WritingTask` 与 `WritingRunCommand`，把 operation、target、scope、来源绑定和请求指纹写入
-   现有 command payload/`graphStateJson`。
+6. 创建 `WritingTask` 与 `WritingRunCommand`，按后文 `_inkforgeCommand + job` envelope 保存
+   `payloadJson`，并把 operation、target、scope、来源绑定等运行恢复所需的稳定投影写入
+   `graphStateJson`。
 
 `packages/service-contracts` 增加严格 `LongSerialRunPayload`，替换 Agent job 中对此分支的无类型
 payload 字典；同时增加精简、权威且不依赖运行时实现的 `PublicOperationDefinition`，至少包含
@@ -283,8 +284,21 @@ updatedAt
 
 ### 单任务状态
 
-现有 `GET /api/v1/writing/runs/{taskId}` 保留兼容字段，并补充 workflow、operation、target、scope、
-当前 checkpoint、activeArtifactId、recoverable 和统一 outcome。
+现有 `GET /api/v1/writing/runs/{taskId}` 返回 `WritingRunStatusResponse`，保留兼容字段，并补充
+workflow、operation、target、scope、当前 checkpoint、activeArtifactId、recoverable、可空的
+`reviewReport` 和统一 outcome。
+
+`WritingRunStatusResponse.checkpoint` 是可空的公共投影；非空时只返回以下四个字段：
+
+```text
+eventSequence
+phase
+operationStage
+operationStep
+```
+
+其中 `operationStage` 和 `operationStep` 可空。公共响应不得直接返回 `graphStateJson`，也不得泄露
+完整 LangGraph 快照、消息、工具结果或模型中间状态。
 
 outcome 增加 `cancelled`：
 
@@ -295,19 +309,26 @@ queued | running | waiting_user | succeeded | failed | cancelled | inconsistent
 CLI 和 Web 只用 outcome 控制生命周期。`phase` 只作兼容展示；`inconsistent` 和 `cancelled` 都可以
 由现有数据库事实派生，不增加 `WritingTask.phase` 枚举。
 
-`waiting_user` 必须满足：存在归属正确、状态为 `awaiting_user` 的权威 Artifact，并在 result 中返回
-其 ID。`succeeded` 必须满足对应 Operation 的真实结果已存在。任何无法解释的任务、命令和产物组合
-投影为 `inconsistent`，不能伪造成功。
+`waiting_user` 必须满足：存在归属正确、状态为 `awaiting_user` 的权威 Artifact，并在
+`outcome.result` 中返回其 ID。`succeeded` 必须满足对应 Operation 的真实结果已经由持久数据库事实证明；
+显式任务的 `phase=completed` 本身不是成功证据，不能继续沿用旧的“completed 即 succeeded”兼容规则。
 
-显式长篇任务的真实结果按 Operation 固定：`plan_chapter` 必须存在同 task、kind=`beat_plan` 的权威
-Artifact 事实，`write_chapter` 必须存在同 task、kind=`chapter_draft` 的权威 Artifact 事实；进入
-`waiting_user` 时 Artifact 必须仍为 `awaiting_user`，approve 后的 succeeded 必须能证明该 Artifact 已
-`applied`，discard 后的 succeeded 必须有同 task、同 artifactId 且 `deleted=true` 的持久 decision command
-结果，revise 后仍须回到新的 `awaiting_user` revision。`review_chapter` 不创建可应用 Artifact，只有有效结果 command 的持久
-`resultJson` 中存在非空完整 `finalResponse` 时才可 succeeded；状态响应新增可空 `reviewReport`，只为
-该 Operation 返回这份完整文本，同时令 outcome.result 为 `kind=final_message, ready=true`。错误 kind、
-空报告、缺少对应 Artifact 或 command/result 不一致都投影为 `inconsistent`。历史没有 command 的旧任务
-继续使用既有只读兼容投影，不倒推或补写结果。
+显式长篇任务的结果事实按 Operation 固定：
+
+- `plan_chapter`：只接受同 task、kind=`beat_plan` 的权威 Artifact，`outcome.result` 返回该 Artifact ID；
+  `waiting_user` 时它必须为 `awaiting_user`，approve 后的 succeeded 必须能证明它已 `applied`，discard 后的
+  succeeded 必须有同 task、同 artifactId 且 `deleted=true` 的持久 decision command 结果，revise 后必须
+  回到新的 `awaiting_user` revision。
+- `write_chapter`：规则与 plan 相同，但 Artifact kind 必须为 `chapter_draft`；Artifact ID 和 decision 事实
+  必须来自同一 task 的持久记录，不能从任务 phase、SSE 或图快照猜测。
+- `review_chapter`：不创建可应用 Artifact；只有有效结果 command 的持久 `resultJson` 来自终态 callback，
+  且其中 `finalResponse` 是非空完整字符串时才可 succeeded。此时 `outcome.result` 固定为
+  `kind=final_message, ready=true`，`WritingRunStatusResponse.reviewReport` 原样返回完整 `finalResponse`；
+  其他 Operation 或尚未形成该成功事实时，`reviewReport` 为 `null`。
+
+显式任务缺少上述 Artifact、decision command 或结果 command，Artifact/结果 kind 与 Operation 不符，
+Artifact/task/command 身份不一致，或者 review 报告为空时，一律投影为 `inconsistent`，不能回退到任务
+phase 伪造 succeeded。历史没有 command 的旧任务继续使用既有只读兼容投影，不倒推或补写结果。
 
 有效结果 command 通常就是当前 command。若当前 command 是 `effective=false` 的终态 no-op cancel，
 projector 必须沿 `priorOutcome.currentCommand.id` 读取前一个持久 command；连续执行多个终态 no-op cancel
@@ -413,6 +434,29 @@ cancelled 命令状态。取消含义由 command kind、result 和 outcome 表�
 }
 ```
 
+不存在的资源也必须使用稳定逻辑 ID，并把 `absenceSentinel` 严格保存为仅含
+`resourceType/resourceId` 的父资源引用。例如不存在的小说级文本总纲固定为：
+
+```json
+{
+  "resourceType": "outline",
+  "resourceId": "novel:<novelId>:outline",
+  "exists": false,
+  "updatedAt": null,
+  "contentSha256": null,
+  "revision": null,
+  "absenceSentinel": {
+    "resourceType": "novel",
+    "resourceId": "<novelId>"
+  }
+}
+```
+
+`exists=false` 时 `updatedAt/contentSha256/revision` 必须全部为 `null`，`absenceSentinel` 必填；
+`exists=true` 时 `absenceSentinel` 必须为 `null`。不存在的已批准 Beat Plan 同样使用稳定逻辑 ID
+`chapter:<chapterId>:approved_beat_plan`，sentinel 指向对应 Chapter；不得用空 ID、随机 ID 或父资源 ID
+冒充目标资源 ID。
+
 首个章节闭环至少冻结：
 
 - `plan_chapter`：目标章节、文本总纲、当前已批准 Beat Plan（存在时）；
@@ -509,20 +553,43 @@ requestFingerprint = SHA-256(canonical JSON({commandKind, resourceIdentity, body
 canonical JSON 使用 UTF-8、递归 key 排序、无多余空白、非 ASCII 原字符和 Core 规范化后的 UTC
 时间。指纹只由 Core 计算，客户端不能提交自称的 hash 替代服务端规范化。
 
-command payload 保存规范化请求和 fingerprint。命中相同 clientRequestId 时：
+所有新建 `WritingRunCommand.payloadJson` 固定使用以下 `_inkforgeCommand + job` envelope：
+
+```json
+{
+  "_inkforgeCommand": {
+    "schemaVersion": 1,
+    "clientRequestId": "caller-owned-id",
+    "commandKind": "start",
+    "resourceIdentity": {
+      "novelId": "novel-id",
+      "chapterId": "chapter-id"
+    },
+    "normalizedBody": {},
+    "requestFingerprint": "64位小写SHA-256"
+  },
+  "job": {}
+}
+```
+
+`_inkforgeCommand` 保存幂等身份、规范化请求和服务端指纹；`job` 保存严格校验后的业务 job，dispatcher
+只把 `job` 投递给 Agent Service。历史不含该 envelope 的裸 payload 仅走兼容读取路径，不回填、不参与
+新幂等 resolver，即使其中出现相同 `clientRequestId` 或旧 `idempotencyKey` 也不能命中新请求。
+
+命中相同 clientRequestId 时：
 
 - fingerprint 相同：返回原受理结果；
 - fingerprint 不同：返回 `409 IDEMPOTENCY_KEY_REUSED`；
-- 旧历史命令没有新指纹时，不把它冒充为新显式命令结果。
+- 旧历史命令没有新 envelope 时，不把它冒充为新显式命令结果。
 
 所有新增幂等写入口在事务第一步获取由 `userId + clientRequestId` 派生的 PostgreSQL transaction-level
 advisory lock，然后查询已有幂等记录；取得下述关系行锁后、判断业务状态前再查询一次。相同请求返回
 首个已保存响应，不同指纹返回 409。不能只依赖事务外预查或最后的唯一约束把并发重复变成随机状态
 冲突；start 也必须在 Chapter 锁内重查幂等记录后再判断 `WRITING_TARGET_BUSY`。
 
-该查询是跨命令族的统一 resolver：同时检查 WritingRunCommand 和带新幂等 envelope 的 WorkflowRun
+该查询是跨命令族的统一 resolver：同时检查带新幂等 envelope 的 WritingRunCommand 和 WorkflowRun
 input。不能让同一 clientRequestId 因为落在不同表、不同 task 或不同 commandKind 而绕过冲突检查。
-现有不带 envelope 的历史 WorkflowRun 不参与新请求命中。
+现有不带 envelope 的历史 WritingRunCommand 和 WorkflowRun 都不参与新请求命中。
 
 网络超时、连接中断或响应丢失后，调用方必须保留同一 ID 和完全相同的请求。CLI 不自动生成一个
 新 ID 重试写操作。
