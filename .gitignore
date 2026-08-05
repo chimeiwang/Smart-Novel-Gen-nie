@@ -39,3 +39,6 @@ __pycache__/
 .coverage
 htmlcov/
 infra/secrets/
+
+# Agent 隔离工作树
+.worktrees/
