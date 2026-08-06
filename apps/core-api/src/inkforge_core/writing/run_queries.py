@@ -301,25 +301,29 @@ def project_run_status(
                 result_ready = True
     elif operation in _LONG_ARTIFACT_KINDS:
         expected_kind = _LONG_ARTIFACT_KINDS[operation]
-        artifact = next(
-            (
-                item
-                for item in artifacts
-                if item.taskId == task.id
-                and item.novelId == task.novelId
-                and item.chapterId == task.chapterId
-                and item.kind == expected_kind
-            ),
-            None,
+        decision_artifact_id = _decision_artifact_id(effective)
+        persisted_decision_artifact = _artifact_by_id(artifacts, decision_artifact_id)
+        artifact_hint = decision_artifact_id or _snapshot_active_artifact_id(
+            task.graphStateJson
+        )
+        artifact = _long_artifact(
+            task,
+            artifacts,
+            expected_kind=expected_kind,
+            artifact_id=artifact_hint,
         )
         result_kind = "review_artifact"
-        result_id = artifact.id if artifact is not None else _decision_artifact_id(effective)
-        if artifact is not None and artifact.status == "awaiting_user":
+        result_id = artifact.id if artifact is not None else decision_artifact_id
+        if artifact is not None and _awaiting_artifact_ready(task, effective, artifact):
             active_artifact_id = artifact.id
             result_ready = True
-        elif artifact is not None and artifact.status == "applied":
+        elif _applied_artifact_ready(task, effective, artifact):
             result_ready = True
-        elif _discard_decision_ready(effective, task, result_id):
+        elif (
+            task.phase == "completed"
+            and persisted_decision_artifact is None
+            and _discard_decision_ready(effective, task, result_id)
+        ):
             result_ready = True
     elif operation == "review_chapter":
         result_kind = "final_message"
@@ -369,7 +373,12 @@ def project_run_status(
         "write_chapter",
         "review_chapter",
     }
-    if explicit_long and task.phase == "completed" and not result_ready:
+    if (
+        explicit_long
+        and task.phase == "completed"
+        and outcome.state == "succeeded"
+        and not result_ready
+    ):
         outcome = outcome.model_copy(
             update={
                 "state": "inconsistent",
@@ -379,11 +388,14 @@ def project_run_status(
                 "result": outcome.result.model_copy(update={"ready": False}),
             }
         )
-    error = _command_error(current, effective_result)
+    error = _command_error(effective, effective_result)
     recoverable = bool(
-        current is not None
-        and outcome.state in _ACTIVE_OUTCOMES
-        and (checkpoint is not None or active_artifact_id is not None)
+        outcome.state in _ACTIVE_OUTCOMES
+        and (
+            _has_recoverable_command(task, current)
+            or checkpoint is not None
+            or active_artifact_id is not None
+        )
     )
     return WritingRunStatusResponse(
         taskId=task.id,
@@ -485,7 +497,17 @@ def _resolve_effective_command(
     seen = {current.id}
     candidate = current
     while candidate.kind == "cancel":
-        prior = _full_result(candidate).get("priorOutcome")
+        if candidate.status == "failed":
+            return candidate, False, True
+        if candidate.status != "succeeded":
+            return current, False, False
+        result = _full_result(candidate)
+        effective = result.get("effective")
+        if effective is True:
+            return candidate, True, True
+        if effective is not False:
+            return current, False, False
+        prior = result.get("priorOutcome")
         prior_command = prior.get("currentCommand") if isinstance(prior, dict) else None
         prior_id = prior_command.get("id") if isinstance(prior_command, dict) else None
         if not isinstance(prior_id, str) or prior_id in seen:
@@ -544,6 +566,27 @@ def _artifact_by_id(
     return next((item for item in artifacts if item.id == artifact_id), None)
 
 
+def _long_artifact(
+    task: WritingTask,
+    artifacts: list[ReviewArtifact],
+    *,
+    expected_kind: str,
+    artifact_id: str | None,
+) -> ReviewArtifact | None:
+    candidates = [
+        item
+        for item in artifacts
+        if (artifact_id is None or item.id == artifact_id)
+        and item.taskId == task.id
+        and item.novelId == task.novelId
+        and item.chapterId == task.chapterId
+        and item.kind == expected_kind
+    ]
+    if len(candidates) != 1:
+        return None
+    return candidates[0]
+
+
 def _artifact_is_authoritative(
     task: WritingTask, artifact: ReviewArtifact, status: str
 ) -> bool:
@@ -556,7 +599,75 @@ def _artifact_is_authoritative(
 
 
 def _decision_artifact_id(command: WritingRunCommand | None) -> str | None:
-    return command.artifactId if command is not None else None
+    if command is None or command.kind != "artifact_decision":
+        return None
+    return command.artifactId
+
+
+def _awaiting_artifact_ready(
+    task: WritingTask,
+    command: WritingRunCommand | None,
+    artifact: ReviewArtifact | None,
+) -> bool:
+    if (
+        task.phase != "awaiting_user_review"
+        or artifact is None
+        or not _artifact_is_authoritative(task, artifact, "awaiting_user")
+        or command is None
+        or command.taskId != task.id
+        or command.status != "succeeded"
+    ):
+        return False
+    if command.kind == "start":
+        return True
+    return bool(
+        _artifact_decision_matches(command, task, artifact.id, "revise")
+        and artifact.revision >= 2
+        and artifact.updatedAt >= command.createdAt
+    )
+
+
+def _applied_artifact_ready(
+    task: WritingTask,
+    command: WritingRunCommand | None,
+    artifact: ReviewArtifact | None,
+) -> bool:
+    return bool(
+        task.phase == "completed"
+        and artifact is not None
+        and _artifact_is_authoritative(task, artifact, "applied")
+        and _artifact_decision_matches(command, task, artifact.id, "approve")
+    )
+
+
+def _artifact_decision_matches(
+    command: WritingRunCommand | None,
+    task: WritingTask,
+    artifact_id: str,
+    decision: str,
+) -> bool:
+    if command is None:
+        return False
+    payload = _json_object(command.payloadJson)
+    resume_input = payload.get("resumeInput")
+    result = _full_result(command)
+    return bool(
+        command.taskId == task.id
+        and command.kind == "artifact_decision"
+        and command.status == "succeeded"
+        and command.decision == decision
+        and command.artifactId == artifact_id
+        and payload.get("resume") is True
+        and isinstance(resume_input, dict)
+        and resume_input.get("artifactId") == artifact_id
+        and resume_input.get("decision") == decision
+        and result.get("artifactId") == artifact_id
+        and result.get("taskId") == task.id
+        and result.get("commandId") == command.id
+        and result.get("decision") == decision
+        and result.get("status")
+        in {"pending", "submitted", "processing", "succeeded", "failed"}
+    )
 
 
 def _discard_decision_ready(
@@ -566,14 +677,29 @@ def _discard_decision_ready(
 ) -> bool:
     result = _full_result(command)
     return bool(
-        command is not None
-        and command.taskId == task.id
-        and command.kind == "artifact_decision"
-        and command.status == "succeeded"
-        and command.decision == "discard"
-        and command.artifactId == artifact_id
+        artifact_id is not None
+        and _artifact_decision_matches(command, task, artifact_id, "discard")
         and result.get("deleted") is True
     )
+
+
+def _has_recoverable_command(
+    task: WritingTask,
+    command: WritingRunCommand | None,
+) -> bool:
+    if (
+        command is None
+        or command.taskId != task.id
+        or not command.kind
+        or command.status
+        not in {"pending", "submitted", "processing", "succeeded", "failed"}
+    ):
+        return False
+    try:
+        payload = json.loads(command.payloadJson)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    return isinstance(payload, dict)
 
 
 def _short_candidate_ready(
