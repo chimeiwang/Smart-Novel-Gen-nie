@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -23,7 +22,7 @@ from inkforge_core.db.models import (
     WritingStyle,
 )
 from inkforge_core.errors import ApiError
-from inkforge_core.lore.repository import LoreRepository
+from inkforge_core.lore.repository import ExperienceMutation, LoreRepository
 from inkforge_core.lore.schemas import (
     CreateExperienceRequest,
     CreateExperienceResponse,
@@ -455,13 +454,13 @@ async def test_experience_batch_rolls_back_when_later_version_is_stale(tmp_path:
                 "novel-1",
                 "user-1",
                 [
-                    SimpleNamespace(
+                    ExperienceMutation(
                         action="create",
                         character_id="character-a",
                         fields={"content": "不会落库"},
                         client_request_id="experience-batch-new",
                     ),
-                    SimpleNamespace(
+                    ExperienceMutation(
                         action="update",
                         entity_id=target["id"],
                         fields={"content": "陈旧覆盖"},
@@ -475,6 +474,67 @@ async def test_experience_batch_rolls_back_when_later_version_is_stale(tmp_path:
             current = await session.get(CharacterExperience, target["id"])
         assert current is not None
         assert current.content == "旧经历"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_named_experience_replay_checks_bound_id_before_resolving_name(
+    tmp_path: Path,
+) -> None:
+    engine, factory = await _create_database(tmp_path / "经历名称重放.db")
+    try:
+        await _seed(factory)
+        repository = LoreRepository(factory)
+        request_id = "named-experience-create"
+        fields = {"content": "绑定经历", "order": 2}
+        created = await repository.create_experience(
+            "novel-1", "user-1", "character-a", request_id, fields
+        )
+
+        replayed = await repository.apply_experience_mutations(
+            "novel-1",
+            "user-1",
+            [
+                ExperienceMutation(
+                    action="create",
+                    character_name="甲",
+                    client_request_id=request_id,
+                    fields=fields,
+                )
+            ],
+        )
+        assert replayed == [{**created, "effective": False}]
+
+        with pytest.raises(ApiError) as conflict:
+            await repository.apply_experience_mutations(
+                "novel-1",
+                "user-1",
+                [
+                    ExperienceMutation(
+                        action="create",
+                        character_name="不存在的角色",
+                        client_request_id=request_id,
+                        fields={**fields, "content": "更换内容"},
+                    )
+                ],
+            )
+        assert conflict.value.status_code == 409
+        assert conflict.value.code == "RESOURCE_CREATE_CONFLICT"
+
+        with pytest.raises(ValueError, match="无法唯一解析角色"):
+            await repository.apply_experience_mutations(
+                "novel-1",
+                "user-1",
+                [
+                    ExperienceMutation(
+                        action="create",
+                        character_name="不存在的角色",
+                        client_request_id="first-invalid-name",
+                        fields={"content": "首次非法创建"},
+                    )
+                ],
+            )
     finally:
         await engine.dispose()
 

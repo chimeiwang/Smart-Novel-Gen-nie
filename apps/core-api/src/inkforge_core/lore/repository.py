@@ -548,18 +548,14 @@ class LoreRepository:
                     if mutation.action == "create":
                         if mutation.client_request_id is None:
                             raise ValueError("角色经历 create 缺少安全控制字段")
-                        character_id = mutation.character_id
-                        if character_id is None:
-                            character_id = await self._resolve_character_id_in_session(
-                                session, novel_id, mutation.character_name
-                            )
                         result = await self._create_experience_in_session(
                             session,
                             novel_id,
                             user_id,
-                            character_id,
+                            mutation.character_id,
                             mutation.client_request_id,
                             mutation.fields,
+                            character_name=mutation.character_name,
                         )
                     else:
                         if mutation.entity_id is None or mutation.expected_updated_at is None:
@@ -607,9 +603,11 @@ class LoreRepository:
         session: AsyncSession,
         novel_id: str,
         user_id: str,
-        character_id: str,
+        character_id: str | None,
         client_request_id: str,
         fields: dict[str, Any],
+        *,
+        character_name: str | None = None,
     ) -> dict[str, Any]:
         chapter_id = fields.get("chapterId")
         experience_id = command_resource_id(
@@ -621,9 +619,21 @@ class LoreRepository:
             .with_for_update()
         )
         if value is not None:
+            if character_id is not None:
+                character_matches = value.characterId == character_id
+            elif character_name is not None:
+                bound_name = await session.scalar(
+                    select(Character.name).where(
+                        Character.id == value.characterId,
+                        Character.novelId == novel_id,
+                    )
+                )
+                character_matches = bound_name == character_name
+            else:
+                character_matches = False
             order_matches = fields.get("order") is None or value.order == fields["order"]
             if (
-                value.characterId == character_id
+                character_matches
                 and value.chapterId == fields.get("chapterId")
                 and value.content == fields.get("content")
                 and order_matches
@@ -634,6 +644,10 @@ class LoreRepository:
                 status_code=409,
                 code="RESOURCE_CREATE_CONFLICT",
                 message="创建请求已绑定其他内容",
+            )
+        if character_id is None:
+            character_id = await self._resolve_character_id_in_session(
+                session, novel_id, character_name
             )
         await self._require_related(session, Character, character_id, novel_id, "角色")
         if chapter_id is not None:

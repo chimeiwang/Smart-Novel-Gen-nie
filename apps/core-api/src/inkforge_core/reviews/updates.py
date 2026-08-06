@@ -4,7 +4,21 @@ from copy import deepcopy
 from datetime import datetime
 from typing import Any, Protocol
 
+from pydantic import BaseModel
+
 from ..lore.repository import EntityMutation, ExperienceMutation
+from ..lore.schemas import (
+    CreateCharacterRequest,
+    CreateFactionRequest,
+    CreateGlossaryRequest,
+    CreateItemRequest,
+    CreateLocationRequest,
+    UpdateCharacterRequest,
+    UpdateFactionRequest,
+    UpdateGlossaryRequest,
+    UpdateItemRequest,
+    UpdateLocationRequest,
+)
 
 ARRAY_SECTIONS = (
     "characters",
@@ -27,49 +41,27 @@ _ENTITY_CONFIG = {
     "factions": ("factions", ("id", "factionId"), "name"),
     "glossaries": ("glossary", ("id", "glossaryId"), "term"),
 }
+_ENTITY_CREATE_REQUESTS: dict[str, type[BaseModel]] = {
+    "characters": CreateCharacterRequest,
+    "locations": CreateLocationRequest,
+    "items": CreateItemRequest,
+    "factions": CreateFactionRequest,
+    "glossaries": CreateGlossaryRequest,
+}
+_ENTITY_UPDATE_REQUESTS: dict[str, type[BaseModel]] = {
+    "characters": UpdateCharacterRequest,
+    "locations": UpdateLocationRequest,
+    "items": UpdateItemRequest,
+    "factions": UpdateFactionRequest,
+    "glossaries": UpdateGlossaryRequest,
+}
 _ENTITY_FIELDS = {
-    "characters": {
-        "name",
-        "aliases",
-        "gender",
-        "age",
-        "identity",
-        "personality",
-        "appearance",
-        "background",
-        "coreDesire",
-        "behaviorBoundaries",
-        "speechStyle",
-        "relationshipPrinciples",
-        "shortTermGoal",
-        "factionId",
-        "powerLevel",
-        "combatAbility",
-        "specialSkills",
-        "currentStatus",
-        "statusNote",
-    },
-    "locations": {
-        "name",
-        "aliases",
-        "type",
-        "parentId",
-        "description",
-        "climate",
-        "culture",
-    },
-    "items": {
-        "name",
-        "aliases",
-        "type",
-        "rarity",
-        "effect",
-        "origin",
-        "description",
-        "ownerId",
-    },
-    "factions": {"name", "aliases", "type", "baseId", "description"},
-    "glossaries": {"term", "definition", "category"},
+    section: (
+        set(create_schema.model_fields)
+        | set(_ENTITY_UPDATE_REQUESTS[section].model_fields)
+    )
+    - {"clientRequestId", "expectedUpdatedAt"}
+    for section, create_schema in _ENTITY_CREATE_REQUESTS.items()
 }
 
 
@@ -157,6 +149,8 @@ class AgentUpdatesExecutor:
         ] = []
         for section, (kind, id_fields, name_field) in _ENTITY_CONFIG.items():
             items = updates.get(section)
+            if section in updates and not isinstance(items, list):
+                raise ValueError(f"{section} 必须是数组")
             if isinstance(items, list):
                 for item in items:
                     if not isinstance(item, dict):
@@ -248,7 +242,12 @@ class AgentUpdatesExecutor:
                 error_label=section,
             )
         entity_id = next(
-            (item[field] for field in id_fields if isinstance(item.get(field), str)), None
+            (
+                item[field]
+                for field in id_fields
+                if isinstance(item.get(field), str) and item[field]
+            ),
+            None,
         )
         expected_updated_at = _require_entity_expected_updated_at(item, section)
         if action == "delete":
@@ -567,10 +566,28 @@ def _validate_entity_item(item: dict[str, Any], section: str) -> None:
         client_request_id = item.get("clientRequestId")
         if not isinstance(client_request_id, str) or not 16 <= len(client_request_id) <= 256:
             raise ValueError(f"{section} create 必须提供 16..256 字符的 clientRequestId")
+        try:
+            _ENTITY_CREATE_REQUESTS[section].model_validate(
+                {**fields, "clientRequestId": client_request_id}
+            )
+        except ValueError as error:
+            raise ValueError(f"{section} create 业务字段无效") from error
         return
-    _require_entity_expected_updated_at(item, section)
-    if action == "update" and not fields:
-        raise ValueError(f"{section} update 至少需要一个业务字段")
+    expected_updated_at = _require_entity_expected_updated_at(item, section)
+    _, id_fields, name_field = _ENTITY_CONFIG[section]
+    has_id = any(
+        isinstance(item.get(field), str) and bool(item[field]) for field in id_fields
+    )
+    has_name = isinstance(item.get(name_field), str) and bool(item[name_field])
+    if not has_id and not has_name:
+        raise ValueError(f"{section} {action} 缺少可解析目标")
+    if action == "update":
+        try:
+            _ENTITY_UPDATE_REQUESTS[section].model_validate(
+                {**fields, "expectedUpdatedAt": expected_updated_at}
+            )
+        except ValueError as error:
+            raise ValueError(f"{section} update 业务字段无效") from error
 
 
 def _resolve_named_id(

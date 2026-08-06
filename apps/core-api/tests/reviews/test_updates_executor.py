@@ -391,6 +391,130 @@ async def test_character_experiences_section_must_be_an_array() -> None:
 
 
 @pytest.mark.asyncio
+async def test_entity_section_shape_is_checked_before_valid_experience_write() -> None:
+    lore = FakeLore()
+    executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
+
+    with pytest.raises(ValueError, match="items 必须是数组"):
+        await executor.apply(
+            "novel-1",
+            "user-1",
+            {
+                "items": {"action": "create", "name": "错误结构"},
+                "characterExperiences": [
+                    {
+                        "action": "create",
+                        "characterId": "character-1",
+                        "clientRequestId": "valid-experience-create",
+                        "content": "不应写入",
+                    }
+                ],
+            },
+        )
+
+    assert lore.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("section", "item"),
+    [
+        (
+            "glossaries",
+            {
+                "action": "create",
+                "clientRequestId": "invalid-glossary-create",
+                "term": "缺少释义",
+            },
+        ),
+        (
+            "items",
+            {
+                "action": "create",
+                "clientRequestId": "invalid-item-create",
+                "name": 1,
+            },
+        ),
+        (
+            "items",
+            {
+                "action": "update",
+                "id": "item-1",
+                "expectedUpdatedAt": "2026-08-06T00:00:00Z",
+                "name": 1,
+            },
+        ),
+        (
+            "items",
+            {
+                "action": "update",
+                "id": "item-1",
+                "expectedUpdatedAt": "2026-08-06T00:00:00Z",
+            },
+        ),
+        (
+            "items",
+            {
+                "action": "delete",
+                "expectedUpdatedAt": "2026-08-06T00:00:00Z",
+            },
+        ),
+    ],
+)
+async def test_entity_business_contracts_are_checked_before_any_write(
+    section: str, item: dict
+) -> None:
+    lore = FakeLore()
+    executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
+
+    with pytest.raises(ValueError):
+        await executor.apply(
+            "novel-1",
+            "user-1",
+            {
+                section: [item],
+                "characterExperiences": [
+                    {
+                        "action": "create",
+                        "characterId": "character-1",
+                        "clientRequestId": "valid-experience-create",
+                        "content": "不应写入",
+                    }
+                ],
+            },
+        )
+
+    assert lore.calls == []
+
+
+@pytest.mark.asyncio
+async def test_empty_entity_id_falls_back_to_valid_name_resolution_hint() -> None:
+    lore = FakeLore()
+    executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
+
+    count = await executor.apply(
+        "novel-1",
+        "user-1",
+        {
+            "items": [
+                {
+                    "action": "update",
+                    "id": "",
+                    "name": "信物",
+                    "expectedUpdatedAt": "2026-08-06T00:00:00Z",
+                }
+            ]
+        },
+    )
+
+    assert count == 1
+    mutation = lore.calls[0][3][0]
+    assert mutation.entity_id is None
+    assert mutation.lookup_field == "name"
+    assert mutation.lookup_value == "信物"
+
+
+@pytest.mark.asyncio
 async def test_replace_outline_tree_uses_single_repository_operation() -> None:
     outlines = FakeOutlines()
     executor = AgentUpdatesExecutor(FakeLore(), outlines, FakeReferences())
