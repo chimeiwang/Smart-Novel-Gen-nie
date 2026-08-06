@@ -41,6 +41,11 @@ _ENTITY_CONFIG = {
     "factions": ("factions", ("id", "factionId"), "name"),
     "glossaries": ("glossary", ("id", "glossaryId"), "term"),
 }
+_ENTITY_ID_HINTS = frozenset(
+    field
+    for _, id_fields, _ in _ENTITY_CONFIG.values()
+    for field in id_fields
+)
 _ENTITY_CREATE_REQUESTS: dict[str, type[BaseModel]] = {
     "characters": CreateCharacterRequest,
     "locations": CreateLocationRequest,
@@ -254,7 +259,7 @@ class AgentUpdatesExecutor:
             return EntityMutation(
                 action="delete",
                 kind=kind,
-                fields=fields,
+                fields={},
                 entity_id=entity_id,
                 expected_updated_at=expected_updated_at,
                 lookup_field=name_field if entity_id is None else None,
@@ -575,19 +580,26 @@ def _validate_entity_item(item: dict[str, Any], section: str) -> None:
         return
     expected_updated_at = _require_entity_expected_updated_at(item, section)
     _, id_fields, name_field = _ENTITY_CONFIG[section]
+    if action == "delete":
+        for field in _ENTITY_ID_HINTS:
+            if field in item and (
+                not isinstance(item[field], str) or not item[field]
+            ):
+                raise ValueError(f"{section} {field} 标识必须是非空字符串")
     has_id = any(
-        isinstance(item.get(field), str) and bool(item[field]) for field in id_fields
+        isinstance(item.get(field), str) and bool(item[field])
+        for field in id_fields
     )
     has_name = isinstance(item.get(name_field), str) and bool(item[name_field])
     if not has_id and not has_name:
         raise ValueError(f"{section} {action} 缺少可解析目标")
-    if action == "update":
+    if action == "update" or fields:
         try:
             _ENTITY_UPDATE_REQUESTS[section].model_validate(
                 {**fields, "expectedUpdatedAt": expected_updated_at}
             )
         except ValueError as error:
-            raise ValueError(f"{section} update 业务字段无效") from error
+            raise ValueError(f"{section} {action} 业务字段无效") from error
 
 
 def _resolve_named_id(
