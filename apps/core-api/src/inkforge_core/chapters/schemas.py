@@ -38,6 +38,7 @@ class ChapterStatusRequest(StrictModel):
 
 class ChapterProgressRequest(StrictModel):
     content: str
+    expectedUpdatedAt: JsonDatetime | None
 
 
 class ChapterMutationResponse(StrictModel):

@@ -11,6 +11,7 @@ from inkforge_core.chapters.schemas import (
 )
 from inkforge_core.chapters.service import ChapterService
 from inkforge_core.errors import ApiError
+from pydantic import ValidationError
 
 
 @dataclass
@@ -31,6 +32,7 @@ class RecordingChapterRepository:
         self.created_checks = 0
         self.has_default_check = False
         self.progress_content: str | None = None
+        self.progress_expected_updated_at: datetime | None = None
 
     async def require_chapter(self, chapter_id: str, user_id: str, *, lock: bool = False):
         del chapter_id, user_id, lock
@@ -53,9 +55,16 @@ class RecordingChapterRepository:
         del chapter_id
         return self.consistency_status
 
-    async def upsert_progress(self, chapter_id: str, user_id: str, content: str):
+    async def upsert_progress(
+        self,
+        chapter_id: str,
+        user_id: str,
+        content: str,
+        expected_updated_at: datetime | None,
+    ):
         del chapter_id, user_id
         self.progress_content = content
+        self.progress_expected_updated_at = expected_updated_at
         return datetime(2026, 7, 11, tzinfo=UTC)
 
     async def set_status_with_default_check(
@@ -364,8 +373,23 @@ async def test_chapter_progress_is_saved_without_truncation() -> None:
     repository = RecordingChapterRepository()
     service = ChapterService(repository)  # type: ignore[arg-type]
     content = "进展\n" * 100_000
-    await service.update_progress("user-1", "chapter-1", ChapterProgressRequest(content=content))
+    await service.update_progress(
+        "user-1",
+        "chapter-1",
+        ChapterProgressRequest(content=content, expectedUpdatedAt=None),
+    )
     assert repository.progress_content == content
+    assert repository.progress_expected_updated_at is None
+
+
+def test_chapter_progress_requires_explicit_version_precondition() -> None:
+    with pytest.raises(ValidationError):
+        ChapterProgressRequest.model_validate({"content": "进展"})
+
+    request = ChapterProgressRequest.model_validate(
+        {"content": "进展", "expectedUpdatedAt": None}
+    )
+    assert request.expectedUpdatedAt is None
 
 
 @pytest.mark.parametrize(

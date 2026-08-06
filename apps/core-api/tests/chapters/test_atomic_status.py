@@ -6,8 +6,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from inkforge_core.chapters.repository import ChapterRepository
-from inkforge_core.db.models import Chapter, ChapterQualityCheck
+from inkforge_core.db.models import Chapter, ChapterProgress, ChapterQualityCheck
 from inkforge_core.errors import ApiError
+from inkforge_core.novels.repository import utc_datetime
 from inkforge_core.quality.repository import QualityRepository
 
 
@@ -118,6 +119,82 @@ class DraftMutationRepository(ChapterRepository):
     async def _lock_consistency_check(self, session, chapter_id: str):
         del session, chapter_id
         return self.session.check_value
+
+
+class ProgressMutationSession(RecordingSession):
+    def __init__(self, chapter_value: Chapter, progress_value: ChapterProgress | None) -> None:
+        super().__init__([])
+        self.chapter_value = chapter_value
+        self.progress_value = progress_value
+
+    async def scalar(self, statement):
+        del statement
+        return self.progress_value
+
+    def add(self, value: object) -> None:
+        super().add(value)
+        self.progress_value = value  # type: ignore[assignment]
+
+    async def flush(self) -> None:
+        if self.progress_value is not None and self.progress_value.updatedAt is None:
+            self.progress_value.updatedAt = datetime(2026, 7, 11, tzinfo=UTC)
+
+
+class ProgressMutationRepository(ChapterRepository):
+    def __init__(self, session: ProgressMutationSession) -> None:
+        super().__init__(lambda: session)  # type: ignore[arg-type]
+        self.session = session
+
+    async def _lock_chapter_owner(self, session, chapter_id: str, user_id: str):
+        del session, chapter_id, user_id
+        return self.session.chapter_value
+
+
+@pytest.mark.asyncio
+async def test_progress_uses_null_for_first_write_and_rejects_stale_versions() -> None:
+    current = chapter()
+    repository = ProgressMutationRepository(ProgressMutationSession(current, None))
+
+    created_at = await repository.upsert_progress("chapter-1", "user-1", "首次进展", None)
+
+    assert created_at == datetime(2026, 7, 11, tzinfo=UTC)
+    progress = repository.session.progress_value
+    assert progress is not None
+    assert progress.content == "首次进展"
+
+    with pytest.raises(ApiError) as caught:
+        await repository.upsert_progress("chapter-1", "user-1", "覆盖", None)
+
+    assert caught.value.status_code == 409
+    assert caught.value.code == "CHAPTER_PROGRESS_VERSION_CONFLICT"
+    assert caught.value.details == {"currentUpdatedAt": created_at.isoformat()}
+    assert progress.content == "首次进展"
+
+
+@pytest.mark.asyncio
+async def test_progress_replay_is_idempotent_and_changed_content_advances_version() -> None:
+    current = chapter()
+    previous = datetime(2026, 7, 11, tzinfo=UTC)
+    progress = ChapterProgress(
+        id="progress-1",
+        chapterId="chapter-1",
+        content="已保存",
+        createdAt=previous,
+        updatedAt=previous,
+    )
+    repository = ProgressMutationRepository(ProgressMutationSession(current, progress))
+
+    replay_at = await repository.upsert_progress(
+        "chapter-1", "user-1", "已保存", previous
+    )
+    changed_at = await repository.upsert_progress(
+        "chapter-1", "user-1", "新进展", previous
+    )
+
+    assert replay_at == previous
+    assert changed_at >= previous.replace(microsecond=1_000)
+    assert utc_datetime(progress.updatedAt) == changed_at
+    assert progress.content == "新进展"
 
 
 @pytest.mark.asyncio
@@ -448,7 +525,13 @@ async def test_quality_patch_uses_same_transaction_and_lock_order() -> None:
     session = RecordingSession(events)
     check = quality_check("pending")
     repository = RecordingQualityRepository(session, chapter(), check)
-    result = await repository.update_public_status("check-1", "user-1", "skipped", False)
+    result = await repository.update_public_status(
+        "check-1",
+        "user-1",
+        "skipped",
+        False,
+        check.updatedAt.replace(tzinfo=UTC),
+    )
     assert result.status == "skipped"
     assert events == [
         "事务开始",
@@ -539,7 +622,13 @@ async def test_quality_patch_and_completion_cannot_interleave_between_locks() ->
     chapter_repository = InterleavingChapterRepository(shared)
 
     quality_task = asyncio.create_task(
-        quality_repository.update_public_status("check-1", "user-1", "skipped", False)
+        quality_repository.update_public_status(
+            "check-1",
+            "user-1",
+            "skipped",
+            False,
+            shared.check.updatedAt.replace(tzinfo=UTC),
+        )
     )
     await shared.quality_has_chapter_lock.wait()
     completion_task = asyncio.create_task(

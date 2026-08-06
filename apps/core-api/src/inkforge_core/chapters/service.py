@@ -45,7 +45,13 @@ class ChapterRepositoryPort(Protocol):
         content: str,
         expected_updated_at: datetime,
     ) -> datetime: ...
-    async def upsert_progress(self, chapter_id: str, user_id: str, content: str) -> datetime: ...
+    async def upsert_progress(
+        self,
+        chapter_id: str,
+        user_id: str,
+        content: str,
+        expected_updated_at: datetime | None,
+    ) -> datetime: ...
     async def transition_status(
         self,
         chapter_id: str,
@@ -86,7 +92,12 @@ class ChapterService:
         self, user_id: str, chapter_id: str, request: ChapterProgressRequest
     ) -> ChapterMutationResponse:
         await self._repository.require_chapter(chapter_id, user_id)
-        updated_at = await self._repository.upsert_progress(chapter_id, user_id, request.content)
+        updated_at = await self._repository.upsert_progress(
+            chapter_id,
+            user_id,
+            request.content,
+            request.expectedUpdatedAt,
+        )
         return ChapterMutationResponse(updatedAt=updated_at)
 
     async def set_status(

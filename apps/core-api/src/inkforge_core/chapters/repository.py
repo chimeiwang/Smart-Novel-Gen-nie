@@ -146,20 +146,34 @@ class ChapterRepository:
             raise RuntimeError("章节更新时间缺失")
         return updated_at
 
-    async def upsert_progress(self, chapter_id: str, user_id: str, content: str) -> datetime:
+    async def upsert_progress(
+        self,
+        chapter_id: str,
+        user_id: str,
+        content: str,
+        expected_updated_at: datetime | None,
+    ) -> datetime:
         async with self._session_factory() as session:
             async with session.begin():
-                await self._require_chapter(session, chapter_id, user_id, lock=True)
+                await self._lock_chapter_owner(session, chapter_id, user_id)
                 progress = await session.scalar(
                     select(ChapterProgress)
                     .where(ChapterProgress.chapterId == chapter_id)
                     .with_for_update()
                 )
                 if progress is None:
+                    _require_progress_expected_updated_at(None, expected_updated_at)
                     progress = ChapterProgress(chapterId=chapter_id, content=content)
                     session.add(progress)
                 else:
+                    current_updated_at = _required_updated_at(progress.updatedAt)
+                    if progress.content == content:
+                        return current_updated_at
+                    _require_progress_expected_updated_at(
+                        current_updated_at, expected_updated_at
+                    )
                     progress.content = content
+                    progress.updatedAt = next_chapter_updated_at(current_updated_at)
                 await session.flush()
                 updated_at = utc_datetime(progress.updatedAt)
         if updated_at is None:
@@ -386,4 +400,23 @@ def _require_expected_updated_at(current: datetime, expected: datetime) -> None:
             code="CHAPTER_VERSION_CONFLICT",
             message="章节已在其他位置更新，请保留当前草稿并重新加载",
             details={"currentUpdatedAt": current.isoformat()},
+        )
+
+
+def _require_progress_expected_updated_at(
+    current: datetime | None, expected: datetime | None
+) -> None:
+    normalized_expected = (
+        expected.replace(tzinfo=UTC) if expected is not None and expected.tzinfo is None
+        else expected.astimezone(UTC) if expected is not None
+        else None
+    )
+    if normalized_expected != current:
+        raise ApiError(
+            status_code=409,
+            code="CHAPTER_PROGRESS_VERSION_CONFLICT",
+            message="章节进展已在其他位置更新，请保留当前草稿并重新加载",
+            details={
+                "currentUpdatedAt": current.isoformat() if current is not None else None
+            },
         )
