@@ -3,7 +3,16 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from inkforge_contracts.long_serial import ChapterTarget, LongSerialScope
+from inkforge_contracts.operations import ExecutableCreativeOperationKind
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    field_validator,
+    model_validator,
+)
 
 CoreAgentId = Literal["设定", "剧情", "写作", "校验", "编辑"]
 WritingCommandStatus = Literal[
@@ -178,7 +187,33 @@ class ShortMediumStartWritingRunRequest(WritingSchema):
         return self
 
 
-type WritingRunStartRequest = StartWritingRunRequest | ShortMediumStartWritingRunRequest
+class LongSerialStartWritingRunRequest(WritingSchema):
+    clientRequestId: str = Field(min_length=16, max_length=128)
+    workflow: Literal["long_serial"]
+    novelId: str = Field(min_length=1, max_length=256)
+    chapterId: str = Field(min_length=1, max_length=256)
+    writingSessionId: str | None = Field(
+        default=None, min_length=1, max_length=256
+    )
+    operation: ExecutableCreativeOperationKind
+    target: ChapterTarget
+    scope: LongSerialScope
+    targetWordCount: int = Field(default=4000, ge=1, le=10_000_000)
+    userInstruction: str = Field(min_length=1)
+
+    @field_validator("userInstruction")
+    @classmethod
+    def validate_user_instruction(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("用户要求不能为空白")
+        return value
+
+
+type WritingRunStartRequest = (
+    StartWritingRunRequest
+    | ShortMediumStartWritingRunRequest
+    | LongSerialStartWritingRunRequest
+)
 
 
 class ResumeWritingRunRequest(WritingSchema):

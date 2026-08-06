@@ -103,6 +103,12 @@ def command_idempotency_key(user_id: str, client_request_id: str) -> str:
     return f"{user_id}:{client_request_id}"
 
 
+def enveloped_command_idempotency_key(
+    user_id: str, client_request_id: str
+) -> str:
+    return f"v1:{user_id}:{client_request_id}"
+
+
 async def acquire_idempotency_lock(
     session: AsyncSession,
     *,
@@ -145,8 +151,14 @@ async def resolve_idempotency(
             .join(WritingTask, WritingTask.id == WritingRunCommand.taskId)
             .join(Novel, Novel.id == WritingTask.novelId)
             .where(
-                WritingRunCommand.idempotencyKey
-                == command_idempotency_key(user_id, client_request_id),
+                WritingRunCommand.idempotencyKey.in_(
+                    (
+                        enveloped_command_idempotency_key(
+                            user_id, client_request_id
+                        ),
+                        command_idempotency_key(user_id, client_request_id),
+                    )
+                ),
                 Novel.userId == user_id,
             )
         )

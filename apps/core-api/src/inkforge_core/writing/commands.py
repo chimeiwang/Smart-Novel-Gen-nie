@@ -6,6 +6,12 @@ from datetime import datetime, timedelta
 from typing import Any, Literal, cast
 
 from inkforge_contracts.jobs import AgentJobStatus
+from inkforge_contracts.long_serial import (
+    LONG_SERIAL_RUN_PAYLOAD_ADAPTER,
+    PUBLIC_LONG_SERIAL_OPERATIONS,
+    ChapterScope,
+)
+from inkforge_contracts.operations import PublicOperationDefinition
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -15,6 +21,7 @@ from ..db.models import (
     Chapter,
     Novel,
     ReviewArtifact,
+    WritingBible,
     WritingMessage,
     WritingRunCommand,
     WritingSession,
@@ -25,7 +32,16 @@ from ..short_medium.completion import (
     assemble_short_medium_run_payload,
     load_short_medium_run_source,
 )
-from .idempotency import command_idempotency_key
+from .idempotency import (
+    JsonValue,
+    acquire_idempotency_lock,
+    command_idempotency_key,
+    enveloped_command_idempotency_key,
+    normalize_json_value,
+    parse_command_envelope,
+    request_fingerprint,
+    resolve_idempotency,
+)
 from .message_metadata import workflow_message_metadata
 from .outbox import supersede_waiting_for_new_command
 from .outcome import WritingRunOutcomeFacts, project_writing_run_outcome
@@ -36,6 +52,7 @@ from .recovery import (
     validate_resume_session_binding,
 )
 from .schemas import (
+    LongSerialStartWritingRunRequest,
     ResumeWritingRunRequest,
     ResumeWritingRunResponse,
     ShortMediumStartWritingRunRequest,
@@ -43,7 +60,9 @@ from .schemas import (
     WritingRunStartRequest,
     WritingRunStatusResponse,
 )
+from .source_bindings import capture_chapter_source_bindings
 from .tasks import TERMINAL_CALLBACK_RESULT_FIELD, mark_task_failed_state
+from .transaction_locks import WritingLockRequest, lock_writing_rows
 
 WritingCommandKind = Literal["start", "resume", "artifact_decision"]
 WritingCommandStatus = Literal["pending", "submitted", "processing", "succeeded", "failed"]
@@ -80,6 +99,8 @@ class WritingRunCommandRepository:
     async def create_start_with_task(
         self, user_id: str, request: WritingRunStartRequest
     ) -> WritingRunResponse:
+        if isinstance(request, LongSerialStartWritingRunRequest):
+            return await self._create_long_serial_start(user_id, request)
         key = command_idempotency_key(user_id, request.clientRequestId)
         existing = await self._get_existing_response(user_id, request.clientRequestId)
         if isinstance(existing, WritingRunResponse):
@@ -157,6 +178,174 @@ class WritingRunCommandRepository:
                 code="WRITING_COMMAND_CONFLICT",
                 message="写作启动请求发生并发冲突",
             ) from exc
+
+    async def _create_long_serial_start(
+        self,
+        user_id: str,
+        request: LongSerialStartWritingRunRequest,
+    ) -> WritingRunResponse:
+        definition = _long_serial_operation_definition(request)
+        normalized = normalize_json_value(
+            request.model_dump(mode="json", exclude={"clientRequestId"})
+        )
+        if not isinstance(normalized, dict):
+            raise RuntimeError("长篇启动请求规范化后不是 JSON 对象")
+        normalized_body = normalized
+        resource_identity: dict[str, JsonValue] = {
+            "novelId": request.novelId,
+            "chapterId": request.chapterId,
+        }
+        fingerprint = request_fingerprint(
+            command_kind="start",
+            resource_identity=resource_identity,
+            body=normalized_body,
+        )
+        key = enveloped_command_idempotency_key(
+            user_id, request.clientRequestId
+        )
+
+        async with self._session_factory() as session:
+            async with session.begin():
+                await acquire_idempotency_lock(
+                    session,
+                    user_id=user_id,
+                    client_request_id=request.clientRequestId,
+                )
+                replay = await _resolve_long_serial_start_response(
+                    self,
+                    session,
+                    user_id=user_id,
+                    client_request_id=request.clientRequestId,
+                    fingerprint=fingerprint,
+                )
+                if replay is not None:
+                    return replay
+
+                await lock_writing_rows(
+                    session,
+                    user_id=user_id,
+                    request=WritingLockRequest(
+                        novel_id=request.novelId,
+                        chapter_ids=(request.chapterId,),
+                    ),
+                )
+                await _require_long_serial_profile(session, request.novelId)
+                if request.writingSessionId is not None:
+                    await _require_session_binding(
+                        session,
+                        user_id,
+                        request.writingSessionId,
+                        request.novelId,
+                        request.chapterId,
+                    )
+
+                replay = await _resolve_long_serial_start_response(
+                    self,
+                    session,
+                    user_id=user_id,
+                    client_request_id=request.clientRequestId,
+                    fingerprint=fingerprint,
+                )
+                if replay is not None:
+                    return replay
+
+                if definition.mutating:
+                    await _require_no_active_long_serial_mutation(
+                        session, request.chapterId
+                    )
+                bindings = await capture_chapter_source_bindings(
+                    session,
+                    novel_id=request.novelId,
+                    chapter_id=request.chapterId,
+                )
+                raw_job = {
+                    "version": 1,
+                    "workflow": "long_serial",
+                    "chapterId": request.chapterId,
+                    "writingSessionId": request.writingSessionId,
+                    "operation": request.operation,
+                    "target": request.target.model_dump(mode="json"),
+                    "scope": request.scope.model_dump(mode="json"),
+                    "sourceBindings": [
+                        binding.model_dump(mode="json") for binding in bindings
+                    ],
+                    "targetWordCount": request.targetWordCount,
+                    "userInstruction": request.userInstruction,
+                    "resume": False,
+                    "resumeInput": None,
+                }
+                validated_job = LONG_SERIAL_RUN_PAYLOAD_ADAPTER.validate_python(
+                    raw_job
+                )
+                job = validated_job.model_dump(mode="json")
+                conversation_history = [
+                    {
+                        "role": "user",
+                        "content": request.userInstruction,
+                    }
+                ]
+                task = WritingTask(
+                    novelId=request.novelId,
+                    chapterId=request.chapterId,
+                    writingSessionId=request.writingSessionId,
+                    phase="idle",
+                    targetWordCount=request.targetWordCount,
+                    selectedAgents=",".join(
+                        (definition.principalAgent, *definition.reviewers)
+                    ),
+                    conversationHistory=_dump_json(conversation_history),
+                )
+                session.add(task)
+                await session.flush()
+                task.graphStateJson = _dump_json(
+                    {
+                        **job,
+                        "taskId": task.id,
+                        "userId": user_id,
+                        "novelId": request.novelId,
+                        "chapterId": request.chapterId,
+                        "targetWordCount": request.targetWordCount,
+                        "conversationHistory": conversation_history,
+                        "eventSequence": 0,
+                        "phase": "active",
+                    }
+                )
+                if request.writingSessionId is not None:
+                    session.add(
+                        WritingMessage(
+                            sessionId=request.writingSessionId,
+                            role="user",
+                            content=request.userInstruction,
+                            metadata_=workflow_message_metadata(
+                                task.id,
+                                event_type="user",
+                                content=request.userInstruction,
+                            ),
+                        )
+                    )
+                    await _touch_writing_session(
+                        session, request.writingSessionId
+                    )
+                envelope = {
+                    "_inkforgeCommand": {
+                        "schemaVersion": 1,
+                        "clientRequestId": request.clientRequestId,
+                        "commandKind": "start",
+                        "resourceIdentity": resource_identity,
+                        "normalizedBody": normalized_body,
+                        "requestFingerprint": fingerprint,
+                    },
+                    "job": job,
+                }
+                command = _new_command(
+                    task,
+                    kind="start",
+                    key=key,
+                    payload=envelope,
+                )
+                session.add(command)
+                await session.flush()
+                return _run_response(task, command)
 
     async def _create_short_medium_start(
         self,
@@ -857,6 +1046,148 @@ class WritingRunCommandRepository:
         ).one_or_none()
         if row is not None:
             raise _active_command_error(task_id)
+
+
+def _long_serial_operation_definition(
+    request: LongSerialStartWritingRunRequest,
+) -> PublicOperationDefinition:
+    definition = PUBLIC_LONG_SERIAL_OPERATIONS.get(request.operation)
+    if definition is None or not isinstance(request.scope, ChapterScope):
+        raise ApiError(
+            status_code=409,
+            code="LONG_SCOPE_NOT_SUPPORTED",
+            message="当前长篇操作、目标或范围尚不受支持",
+        )
+    if (
+        request.target.type != definition.targetKind
+        or request.target.id != request.chapterId
+        or request.scope.kind not in definition.allowedScopeKinds
+        or request.scope.chapterId != request.chapterId
+    ):
+        raise ApiError(
+            status_code=409,
+            code="LONG_SCOPE_NOT_SUPPORTED",
+            message="当前长篇操作、目标或范围尚不受支持",
+        )
+    return definition
+
+
+async def _require_long_serial_profile(
+    session: AsyncSession,
+    novel_id: str,
+) -> None:
+    profile = await session.scalar(
+        select(WritingBible.storyLengthProfile)
+        .where(WritingBible.novelId == novel_id)
+        .with_for_update()
+    )
+    if profile != "long_serial":
+        raise ApiError(
+            status_code=409,
+            code="LONG_WORKFLOW_MISMATCH",
+            message="目标小说不是长篇作品",
+            details={"novelId": novel_id},
+        )
+
+
+async def _require_no_active_long_serial_mutation(
+    session: AsyncSession,
+    chapter_id: str,
+) -> None:
+    rows = (
+        await session.execute(
+            select(WritingTask, WritingRunCommand.payloadJson)
+            .outerjoin(
+                WritingRunCommand,
+                and_(
+                    WritingRunCommand.taskId == WritingTask.id,
+                    WritingRunCommand.kind == "start",
+                ),
+            )
+            .where(
+                WritingTask.chapterId == chapter_id,
+                WritingTask.phase.not_in(("completed", "error")),
+            )
+            .order_by(WritingTask.createdAt.asc(), WritingTask.id.asc())
+            .with_for_update(of=WritingTask)
+        )
+    ).all()
+    seen: set[str] = set()
+    for task, payload_json in rows:
+        if task.id in seen:
+            continue
+        seen.add(task.id)
+        if _start_payload_is_mutating(payload_json):
+            raise ApiError(
+                status_code=409,
+                code="WRITING_TARGET_BUSY",
+                message="该章节已有正在进行的写入任务",
+                details={"taskId": task.id},
+            )
+
+
+def _start_payload_is_mutating(payload_json: object) -> bool:
+    if not isinstance(payload_json, str):
+        return True
+    try:
+        payload = _load_json_object(payload_json, field="payloadJson")
+        metadata = parse_command_envelope(payload)
+    except (RuntimeError, ValueError):
+        return True
+    if metadata is None:
+        return True
+    job = payload.get("job")
+    if not isinstance(job, dict) or job.get("workflow") != "long_serial":
+        return True
+    operation = job.get("operation")
+    if not isinstance(operation, str):
+        return True
+    definition = PUBLIC_LONG_SERIAL_OPERATIONS.get(operation)
+    return definition is None or definition.mutating
+
+
+async def _resolve_long_serial_start_response(
+    repository: WritingRunCommandRepository,
+    session: AsyncSession,
+    *,
+    user_id: str,
+    client_request_id: str,
+    fingerprint: str,
+) -> WritingRunResponse | None:
+    resolution = await resolve_idempotency(
+        session,
+        user_id=user_id,
+        client_request_id=client_request_id,
+        request_fingerprint=fingerprint,
+    )
+    if resolution is None:
+        return None
+    if resolution.record_kind != "writing_command":
+        raise _idempotency_reused_error(client_request_id)
+    row = await repository._get_by_id(
+        session,
+        resolution.record_id,
+        for_update=False,
+    )
+    if row is None:
+        raise _idempotency_reused_error(client_request_id)
+    command, task, owner_id = row
+    if owner_id != user_id or command.kind != "start":
+        raise _idempotency_reused_error(client_request_id)
+    payload = _load_json_object(command.payloadJson, field="payloadJson")
+    job = payload.get("job")
+    if not isinstance(job, dict) or job.get("workflow") != "long_serial":
+        raise _idempotency_reused_error(client_request_id)
+    return _run_response(task, command)
+
+
+def _idempotency_reused_error(client_request_id: str) -> ApiError:
+    return ApiError(
+        status_code=409,
+        code="IDEMPOTENCY_KEY_REUSED",
+        message="同一幂等标识已绑定其他请求",
+        details={"clientRequestId": client_request_id},
+    )
 
 
 def _active_review_artifact_id(task: WritingTask, owner_id: str) -> str | None:

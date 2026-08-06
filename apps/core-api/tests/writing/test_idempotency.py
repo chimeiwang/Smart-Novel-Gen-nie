@@ -10,6 +10,7 @@ from inkforge_core.writing.idempotency import (
     acquire_idempotency_lock,
     canonical_json_bytes,
     command_idempotency_key,
+    enveloped_command_idempotency_key,
     normalize_json_value,
     parse_command_envelope,
     request_fingerprint,
@@ -188,6 +189,12 @@ async def test_resolver_replays_same_writing_command_fingerprint() -> None:
     assert command_idempotency_key("user-1", "request-00000001") == (
         "user-1:request-00000001"
     )
+    assert enveloped_command_idempotency_key(
+        "user-1", "request-00000001"
+    ) == "v1:user-1:request-00000001"
+    assert enveloped_command_idempotency_key(
+        "user-1", "request-00000001"
+    ) != command_idempotency_key("user-1", "request-00000001")
 
 
 @pytest.mark.asyncio
