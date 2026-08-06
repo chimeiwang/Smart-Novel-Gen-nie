@@ -5,17 +5,24 @@ import json
 from collections.abc import Generator
 
 import pytest
+from inkforge_cli.api import CoreApiError, CoreTransportError
 from inkforge_cli.registry import CommandSpec, FileOutputSpec
-from inkforge_cli.runtime import RuntimeContractError, emit_command_result
+from inkforge_cli.runtime import (
+    CliInputError,
+    LocalFileError,
+    RuntimeContractError,
+    command_exit_code,
+    emit_command_result,
+)
 
 
 def _unused_handler(runtime: object, payload: dict[str, object]) -> dict[str, object]:
     return payload
 
 
-def _spec(*, output_mode: str) -> CommandSpec:
+def _spec(*, output_mode: str, name: str = "test.command") -> CommandSpec:
     return CommandSpec(
-        name="test.command",
+        name=name,
         handler=_unused_handler,
         inputMode="json",
         outputMode=output_mode,  # type: ignore[arg-type]
@@ -103,3 +110,36 @@ def test_jsonl_command_rejects_a_non_object_frame_after_preserving_prior_frames(
         emit_command_result(_spec(output_mode="jsonl"), stream(), stdout)
 
     assert json.loads(stdout.getvalue())["type"] == "event"
+
+
+@pytest.mark.parametrize(
+    ("error", "exit_code"),
+    [
+        (CliInputError("FIELD_REQUIRED", "字段缺失"), 2),
+        (CliInputError("AUTH_REQUIRED", "缺少凭据", exit_code=3), 3),
+        (CliInputError("IDENTITY_MISMATCH", "身份不匹配", exit_code=3), 3),
+        (CoreApiError(422, code="INVALID", message="参数无效"), 2),
+        (CoreApiError(401, code="UNAUTHORIZED", message="未登录"), 3),
+        (CoreApiError(409, code="STALE_VERSION", message="版本冲突"), 4),
+        (CoreApiError(403, code="FORBIDDEN", message="禁止访问"), 5),
+        (CoreApiError(500, code="INTERNAL_ERROR", message="服务异常"), 5),
+        (CoreTransportError(), 5),
+        (LocalFileError("写入失败"), 6),
+        (RuntimeError("未预期错误"), 1),
+    ],
+)
+def test_long_command_uses_the_complete_exit_code_contract(
+    error: Exception,
+    exit_code: int,
+) -> None:
+    assert command_exit_code(
+        _spec(output_mode="json", name="long.test"),
+        error,
+    ) == exit_code
+
+
+def test_short_transport_error_keeps_the_legacy_exit_code() -> None:
+    assert command_exit_code(
+        _spec(output_mode="json", name="short.list"),
+        CoreTransportError(),
+    ) == 1

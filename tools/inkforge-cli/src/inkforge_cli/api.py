@@ -14,6 +14,16 @@ class SseConnectionError(RuntimeError):
     pass
 
 
+class CoreTransportError(RuntimeError):
+    code = "CORE_TRANSPORT_ERROR"
+    message = "Core API 连接失败"
+    details: None = None
+    request_id: None = None
+
+    def __init__(self) -> None:
+        super().__init__(self.message)
+
+
 class CoreApiError(RuntimeError):
     def __init__(
         self,
@@ -107,22 +117,28 @@ class CoreApiClient:
     ) -> Any:
         self._validate_path(path)
         supplied_headers = kwargs.pop("headers", None)
-        response = self._client.request(
-            method,
-            path,
-            headers=self._headers(supplied_headers),
-            **kwargs,
-        )
+        try:
+            response = self._client.request(
+                method,
+                path,
+                headers=self._headers(supplied_headers),
+                **kwargs,
+            )
+        except httpx.TransportError as exc:
+            raise CoreTransportError() from exc
         self._raise_for_status(response)
         if response.status_code == 204 or not response.content:
             return {}
         return response.json()
 
     def login(self, username: str, password: str) -> tuple[dict[str, Any], str]:
-        response = self._client.post(
-            "/api/v1/auth/login",
-            json={"username": username, "password": password},
-        )
+        try:
+            response = self._client.post(
+                "/api/v1/auth/login",
+                json={"username": username, "password": password},
+            )
+        except httpx.TransportError as exc:
+            raise CoreTransportError() from exc
         self._raise_for_status(response)
         token = response.cookies.get("inkforge-token")
         if not token:

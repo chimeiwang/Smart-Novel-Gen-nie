@@ -6,9 +6,10 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, TextIO, cast
 
-from .api import CoreApiClient
+from .api import CoreApiClient, CoreApiError, CoreTransportError
 from .config import ConfigStore, JsonConfigStore
 from .credentials import CredentialStore, KeyringCredentialStore
+from .io import write_bytes
 from .json_types import JsonObject, JsonValue
 
 if TYPE_CHECKING:
@@ -45,6 +46,19 @@ class CliInputError(RuntimeError):
 
 
 class RuntimeContractError(RuntimeError):
+    pass
+
+
+class CoreResponseContractError(CoreApiError):
+    def __init__(self, message: str) -> None:
+        super().__init__(
+            502,
+            code="CORE_RESPONSE_CONTRACT_ERROR",
+            message=message,
+        )
+
+
+class LocalFileError(OSError):
     pass
 
 
@@ -177,6 +191,37 @@ def require_client_request_id(payload: JsonObject) -> str:
     return value
 
 
+def command_exit_code(spec: CommandSpec | None, error: Exception) -> int:
+    if not _is_long_command(spec):
+        if isinstance(error, CliInputError | CoreApiError):
+            return error.exit_code
+        if isinstance(
+            error,
+            LocalFileError | OSError | UnicodeError | json.JSONDecodeError,
+        ):
+            return 6
+        return 1
+
+    if isinstance(error, CliInputError):
+        return 3 if error.exit_code == 3 else 2
+    if isinstance(error, CoreApiError):
+        if error.status_code == 422:
+            return 2
+        if error.status_code == 401:
+            return 3
+        if error.status_code == 409:
+            return 4
+        return 5
+    if isinstance(error, CoreTransportError):
+        return 5
+    if isinstance(
+        error,
+        LocalFileError | OSError | UnicodeError | json.JSONDecodeError,
+    ):
+        return 6
+    return 1
+
+
 def ensure_command_json_result(value: object) -> JsonObject:
     if isinstance(value, dict):
         if not _is_json_object(value):
@@ -196,6 +241,8 @@ def emit_command_result(
     spec: CommandSpec,
     result: CommandResult,
     stdout: TextIO,
+    *,
+    payload: JsonObject | None = None,
 ) -> int:
     if spec.outputMode == "json":
         if not isinstance(result, dict) or not _is_json_object(result):
@@ -203,6 +250,9 @@ def emit_command_result(
                 f"命令 {spec.name} 声明 JSON 输出，但处理器未返回 JSON 对象"
             )
         data: JsonValue = result.data if isinstance(result, _RawJsonResult) else result
+        output_file = _output_file(spec, payload)
+        if output_file is not None:
+            data = _apply_file_output(spec, data, output_file)
         write_json_line(
             stdout,
             {
@@ -230,6 +280,61 @@ def emit_command_result(
         if not isinstance(frame, dict) or not _is_json_object(frame):
             raise RuntimeContractError(f"命令 {spec.name} 输出了非 JSON 对象帧")
         write_json_line(stdout, frame)
+
+
+def _is_long_command(spec: CommandSpec | None) -> bool:
+    return spec is not None and spec.name.startswith("long.")
+
+
+def _output_file(spec: CommandSpec, payload: JsonObject | None) -> str | None:
+    if (
+        not _is_long_command(spec)
+        or spec.fileOutput.kind == "none"
+        or payload is None
+    ):
+        return None
+    value = payload.get("outputFile")
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise CliInputError("INVALID_OUTPUT_FILE", "outputFile 必须是非空字符串")
+    return value
+
+
+def _apply_file_output(
+    spec: CommandSpec,
+    data: JsonValue,
+    output_file: str,
+) -> JsonValue:
+    if spec.fileOutput.kind == "data_json":
+        try:
+            payload = (
+                json.dumps(data, ensure_ascii=False, indent=2) + "\n"
+            ).encode("utf-8")
+            descriptor = write_bytes(
+                output_file,
+                payload,
+                "application/json; charset=utf-8",
+            )
+        except (OSError, UnicodeError) as exc:
+            raise LocalFileError("输出文件写入失败") from exc
+        return {"resultFile": cast(JsonObject, dict(descriptor))}
+
+    field = spec.fileOutput.field
+    media_type = spec.fileOutput.media_type
+    if not isinstance(data, dict) or field is None or media_type is None:
+        raise CoreResponseContractError("远端响应不是可提取主文本的 JSON 对象")
+    value = data.get(field)
+    if not isinstance(value, str):
+        raise CoreResponseContractError(f"响应缺少文本字段：{field}")
+    try:
+        descriptor = write_bytes(output_file, value.encode("utf-8"), media_type)
+    except (OSError, UnicodeError) as exc:
+        raise LocalFileError("输出文件写入失败") from exc
+    transformed = dict(data)
+    del transformed[field]
+    transformed[f"{field}File"] = cast(JsonObject, dict(descriptor))
+    return transformed
 
 
 def _is_json_object(value: object) -> bool:

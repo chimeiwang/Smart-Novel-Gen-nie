@@ -5,7 +5,12 @@ from collections.abc import Callable
 
 import httpx
 import pytest
-from inkforge_cli.api import CoreApiClient, CoreApiError, SseConnectionError
+from inkforge_cli.api import (
+    CoreApiClient,
+    CoreApiError,
+    CoreTransportError,
+    SseConnectionError,
+)
 
 
 def make_client(handler: Callable[[httpx.Request], httpx.Response]) -> CoreApiClient:
@@ -126,3 +131,17 @@ def test_sse_transport_failure_uses_a_specific_retryable_error() -> None:
 
     with pytest.raises(SseConnectionError):
         list(client.iter_sse("task-1"))
+
+
+def test_regular_transport_failure_is_wrapped_without_credentials() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadError("包含敏感信息 session-cookie", request=request)
+
+    client = make_client(handler)
+
+    with pytest.raises(CoreTransportError) as caught:
+        client.request("GET", "/api/v1/novels")
+
+    assert caught.value.code == "CORE_TRANSPORT_ERROR"
+    assert "session-cookie" not in str(caught.value)
+    assert "session-cookie" not in repr(caught.value)

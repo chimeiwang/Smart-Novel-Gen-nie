@@ -4,13 +4,14 @@ import json
 import sys
 from typing import Any, TextIO, cast
 
-from .api import CoreApiError
+from .api import CoreApiError, CoreTransportError
 from .commands.short.snapshots import DirtySnapshotError
 from .credentials import InsecureCredentialBackendError
 from .json_types import JsonObject, JsonValue
 from .runtime import (
     CliDependencies,
     CliInputError,
+    command_exit_code,
     default_dependencies,
     emit_command_result,
     prepare_runtime,
@@ -52,6 +53,7 @@ def run(
     output_stream = stdout or sys.stdout
     error_stream = stderr or sys.stderr
     command = arguments[0] if arguments else ""
+    spec = None
     try:
         if not command:
             raise CliInputError("COMMAND_REQUIRED", "必须提供命令")
@@ -68,10 +70,15 @@ def run(
             dependencies=deps,
         )
         result = spec.handler(runtime, payload)
-        return emit_command_result(spec, result, output_stream)
+        return emit_command_result(
+            spec,
+            result,
+            output_stream,
+            payload=payload,
+        )
     except CliInputError as exc:
         write_json_line(output_stream, _error_payload(command, exc.code, exc.message))
-        return exc.exit_code
+        return command_exit_code(spec, exc)
     except CoreApiError as exc:
         write_json_line(
             output_stream,
@@ -83,7 +90,21 @@ def run(
                 request_id=exc.request_id,
             ),
         )
-        return exc.exit_code
+        return command_exit_code(spec, exc)
+    except CoreTransportError as exc:
+        exit_code = command_exit_code(spec, exc)
+        if exit_code == 5:
+            write_json_line(
+                output_stream,
+                _error_payload(command, exc.code, exc.message),
+            )
+        else:
+            error_stream.write("InkForge CLI 遇到未预期错误。\n")
+            write_json_line(
+                output_stream,
+                _error_payload(command, "UNEXPECTED_ERROR", "CLI 遇到未预期错误"),
+            )
+        return exit_code
     except (DirtySnapshotError, OSError, UnicodeError, json.JSONDecodeError) as exc:
         write_json_line(
             output_stream,
