@@ -85,6 +85,9 @@ def _default_specs() -> list[CommandSpec]:
         list_foreshadowings,
         list_outline_nodes,
     )
+    from .commands.long.lore_entities import LORE_ENTITY_COMMAND_SPECS
+    from .commands.long.lore_relationships import LORE_RELATIONSHIP_COMMAND_SPECS
+    from .commands.long.planning_mutations import PLANNING_COMMAND_SPECS
     from .commands.long.quality import QUALITY_COMMAND_SPECS
     from .commands.long.read import (
         get_chapter,
@@ -96,6 +99,8 @@ def _default_specs() -> list[CommandSpec]:
     from .commands.long.read import (
         list_novels as list_long_novels,
     )
+    from .commands.long.references import REFERENCE_COMMAND_SPECS
+    from .commands.long.styles import STYLE_COMMAND_SPECS
     from .commands.long.task_mutations import TASK_MUTATION_COMMAND_SPECS
     from .commands.long.tasks import get_task, list_tasks
     from .commands.long.tasks import watch as watch_task
@@ -338,6 +343,11 @@ def _default_specs() -> list[CommandSpec]:
         *TASK_MUTATION_COMMAND_SPECS,
         *ARTIFACT_COMMAND_SPECS,
         *QUALITY_COMMAND_SPECS,
+        *PLANNING_COMMAND_SPECS,
+        *LORE_ENTITY_COMMAND_SPECS,
+        *LORE_RELATIONSHIP_COMMAND_SPECS,
+        *REFERENCE_COMMAND_SPECS,
+        *STYLE_COMMAND_SPECS,
     ]
 
 

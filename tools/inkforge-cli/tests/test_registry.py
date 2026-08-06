@@ -61,6 +61,38 @@ EXPECTED_COMMANDS = {
     "long.quality.run",
     "long.quality.skip",
     "long.quality.reset",
+    "long.lore.story-background.save",
+    "long.lore.world-setting.save",
+    "long.lore.writing-bible.save",
+    "long.lore.story-progress.save",
+    "long.plot-progress.save",
+    "long.lore.character.create",
+    "long.lore.character.update",
+    "long.lore.character.delete",
+    "long.lore.location.create",
+    "long.lore.location.update",
+    "long.lore.location.delete",
+    "long.lore.faction.create",
+    "long.lore.faction.update",
+    "long.lore.faction.delete",
+    "long.lore.item.create",
+    "long.lore.item.update",
+    "long.lore.item.delete",
+    "long.lore.glossary.create",
+    "long.lore.glossary.update",
+    "long.lore.glossary.delete",
+    "long.lore.relation.create",
+    "long.lore.relation.update",
+    "long.lore.relation.delete",
+    "long.lore.experience.create",
+    "long.lore.experience.update",
+    "long.lore.experience.delete",
+    "long.reference.create",
+    "long.reference.update",
+    "long.reference.delete",
+    "long.reference.reindex",
+    "long.style.apply",
+    "long.style.clear",
 }
 
 EXPECTED_LONG_MUTATIONS = {
@@ -76,24 +108,64 @@ EXPECTED_LONG_MUTATIONS = {
     "long.quality.run",
     "long.quality.skip",
     "long.quality.reset",
+    "long.lore.story-background.save",
+    "long.lore.world-setting.save",
+    "long.lore.writing-bible.save",
+    "long.lore.story-progress.save",
+    "long.plot-progress.save",
+    "long.lore.character.create",
+    "long.lore.character.update",
+    "long.lore.character.delete",
+    "long.lore.location.create",
+    "long.lore.location.update",
+    "long.lore.location.delete",
+    "long.lore.faction.create",
+    "long.lore.faction.update",
+    "long.lore.faction.delete",
+    "long.lore.item.create",
+    "long.lore.item.update",
+    "long.lore.item.delete",
+    "long.lore.glossary.create",
+    "long.lore.glossary.update",
+    "long.lore.glossary.delete",
+    "long.lore.relation.create",
+    "long.lore.relation.update",
+    "long.lore.relation.delete",
+    "long.lore.experience.create",
+    "long.lore.experience.update",
+    "long.lore.experience.delete",
+    "long.reference.create",
+    "long.reference.update",
+    "long.reference.delete",
+    "long.reference.reindex",
+    "long.style.apply",
+    "long.style.clear",
 }
 
-STAGE_C_FAMILIES = {
-    "outline",
-    "outline-node",
-    "foreshadowing",
-    "lore",
-    "reference",
-    "style",
+EXPECTED_STRUCTURED_WRITES = EXPECTED_LONG_MUTATIONS - {
+    "long.chapter.save",
+    "long.chapter.status",
+    "long.chapter.progress.save",
+    "long.agent.start",
+    "long.task.resume",
+    "long.task.cancel",
+    "long.artifact.approve",
+    "long.artifact.revise",
+    "long.artifact.discard",
+    "long.quality.run",
+    "long.quality.skip",
+    "long.quality.reset",
 }
-STAGE_C_ACTIONS = {
-    "save",
-    "create",
-    "update",
-    "delete",
-    "reindex",
-    "apply",
-    "clear",
+
+EXPECTED_STRUCTURED_CREATES = {
+    "long.lore.character.create",
+    "long.lore.location.create",
+    "long.lore.faction.create",
+    "long.lore.item.create",
+    "long.lore.glossary.create",
+    "long.lore.relation.create",
+    "long.lore.experience.create",
+    "long.reference.create",
 }
 
 
@@ -149,17 +221,40 @@ def test_long_mutation_and_watcher_capabilities_are_exact() -> None:
     assert registry["long.task.watch"].requiresClientRequestId is False
 
 
-def test_stage_c_structured_mutations_are_not_registered() -> None:
-    command_names = get_command_registry()
+def test_structured_mutation_capabilities_are_exact() -> None:
+    registry = get_command_registry()
+
+    assert len(registry) == 77
+    assert sum(
+        name.startswith("long.") and spec.mutation
+        for name, spec in registry.items()
+    ) == 44
+    assert {
+        name for name in EXPECTED_STRUCTURED_WRITES if name in registry
+    } == EXPECTED_STRUCTURED_WRITES
+    assert {
+        name
+        for name, spec in registry.items()
+        if name in EXPECTED_STRUCTURED_WRITES and spec.requiresClientRequestId
+    } == EXPECTED_STRUCTURED_CREATES
+    assert registry["long.reference.reindex"].requiresClientRequestId is False
+
+
+def test_excluded_stage_c_families_remain_unregistered() -> None:
+    command_names = set(get_command_registry())
 
     assert not {
-        name
-        for name in command_names
-        if len(segments := name.split(".")) >= 3
-        and segments[0] == "long"
-        and segments[1] in STAGE_C_FAMILIES
-        and segments[-1] in STAGE_C_ACTIONS
-    }
+        "long.outline.save",
+        "long.outline-node.create",
+        "long.outline-node.update",
+        "long.outline-node.delete",
+        "long.foreshadowing.create",
+        "long.foreshadowing.update",
+        "long.foreshadowing.delete",
+        "long.style.create",
+        "long.style.update",
+        "long.style.delete",
+    } & command_names
 
 
 def test_readme_command_list_matches_registry_without_wildcards() -> None:

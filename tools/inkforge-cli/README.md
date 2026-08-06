@@ -58,12 +58,20 @@ Codex 的完整操作规程位于用户 Skill：
   approve、revise 或 discard 流程处理，不能直接写入正式内容。
 - `long.task.watch` 只观察权威 `outcome`，停止 watcher 不会取消服务端任务；真正取消必须显式执行
   `long.task.cancel`。
-- 大纲节点、伏笔、设定、参考资料和文风的结构化写命令仍未开放，不能用现有读接口或批量请求绕过
-  幂等、CAS 和来源绑定门槛。
+- 本规格列出的设定、参考资料和小说文风应用命令已经开放；大纲节点、伏笔和用户级文风资产写入仍未开放。
+  任何调用都不能用读接口或批量请求绕过幂等、CAS、Diff 确认和来源绑定门槛。
 
 ## 命令清单
 
 以下标记区由注册表测试精确校验。每行都是已注册的具体命令，不接受前缀通配。
+
+长篇创作资料写命令遵循以下统一规则：
+
+- 单例、实体、关系、经历和参考资料更新都必须携带读取结果中的 `expectedUpdatedAt`；冲突后停止，重新读取并重新展示 Diff，不自动换版本重试。
+- 实体、关系、经历和参考资料创建使用稳定 `clientRequestId`。网络结果不确定时，只能用完全相同的请求重放，不能换 ID 盲目再建一份。
+- 删除命令返回 Core 的完整影响报告。调用方必须先展示引用或影响，再由用户确认是否执行；CLI 不提供隐式级联清理。
+- 参考资料保存成功只代表正式资料已提交。`ragStatus=disabled` 表示等待索引，`failed` 表示索引失败；只有回拉到 `ready` 才能表述为索引完成。
+- 结构化写命令不接受 `outputFile`，不维护本地镜像，也不开放大纲节点、伏笔或用户级文风资产写入。
 
 <!-- command-list:start -->
 ```text
@@ -112,5 +120,37 @@ long.artifact.discard
 long.quality.run
 long.quality.skip
 long.quality.reset
+long.lore.story-background.save
+long.lore.world-setting.save
+long.lore.writing-bible.save
+long.lore.story-progress.save
+long.plot-progress.save
+long.lore.character.create
+long.lore.character.update
+long.lore.character.delete
+long.lore.location.create
+long.lore.location.update
+long.lore.location.delete
+long.lore.faction.create
+long.lore.faction.update
+long.lore.faction.delete
+long.lore.item.create
+long.lore.item.update
+long.lore.item.delete
+long.lore.glossary.create
+long.lore.glossary.update
+long.lore.glossary.delete
+long.lore.relation.create
+long.lore.relation.update
+long.lore.relation.delete
+long.lore.experience.create
+long.lore.experience.update
+long.lore.experience.delete
+long.reference.create
+long.reference.update
+long.reference.delete
+long.reference.reindex
+long.style.apply
+long.style.clear
 ```
 <!-- command-list:end -->

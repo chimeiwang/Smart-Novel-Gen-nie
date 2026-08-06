@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from inkforge_cli.json_types import JsonObject
-from inkforge_cli.registry import CommandSpec, FileOutputSpec
+from inkforge_cli.registry import CommandSpec, FileOutputSpec, get_command_registry
 from inkforge_cli.runtime import (
     CoreResponseContractError,
     LocalFileError,
@@ -131,3 +131,17 @@ def test_output_write_error_is_wrapped_as_a_local_file_error(
             io.StringIO(),
             payload={"outputFile": str(tmp_path / "result.json")},
         )
+
+
+def test_long_structured_write_commands_never_offer_file_output() -> None:
+    structured = {
+        name: spec
+        for name, spec in get_command_registry().items()
+        if spec.mutation
+        and name.startswith(
+            ("long.lore.", "long.plot-progress.", "long.reference.", "long.style.")
+        )
+    }
+
+    assert len(structured) == 32
+    assert all(spec.fileOutput.kind == "none" for spec in structured.values())
