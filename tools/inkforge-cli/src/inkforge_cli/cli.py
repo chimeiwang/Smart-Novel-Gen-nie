@@ -1,22 +1,18 @@
 from __future__ import annotations
 
 import argparse
-import getpass
 import json
 import re
 import sys
-from collections.abc import Callable
-from dataclasses import dataclass
+from collections.abc import Generator
 from pathlib import Path
-from typing import Any, Never, Protocol, TextIO
+from typing import Any, Never, TextIO, cast
 from urllib.parse import quote
 
-from .api import CoreApiClient, CoreApiError, SseConnectionError
-from .config import ConfigStore, JsonConfigStore, ProfileConfig
+from .api import CoreApiError, SseConnectionError
+from .config import ProfileConfig
 from .credentials import (
-    CredentialStore,
     InsecureCredentialBackendError,
-    KeyringCredentialStore,
     validate_core_origin,
 )
 from .files import (
@@ -27,6 +23,19 @@ from .files import (
     load_snapshot_manifest,
     sha256_text,
     write_large_result,
+)
+from .json_types import JsonObject, JsonValue
+from .runtime import (
+    ApiClient,
+    CliDependencies,
+    CliInputError,
+    CliRuntime,
+    default_dependencies,
+    emit_command_result,
+    ensure_command_json_result,
+    prepare_runtime,
+    require_client_request_id,
+    write_json_line,
 )
 
 _SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
@@ -45,69 +54,9 @@ _SHORT_AGENT_START_FIELDS = (
 )
 
 
-class ApiClient(Protocol):
-    def request(self, method: str, path: str, **kwargs: Any) -> Any: ...
-
-    def login(self, username: str, password: str) -> tuple[dict[str, Any], str]: ...
-
-    def iter_sse(
-        self,
-        task_id: str,
-        last_event_id: str | None = None,
-    ) -> Any: ...
-
-
-@dataclass(frozen=True, slots=True)
-class CliDependencies:
-    api_factory: Callable[[str, str | None], ApiClient]
-    config_store: ConfigStore
-    credential_store: CredentialStore
-    getpass_fn: Callable[[str], str]
-    stdin_isatty: Callable[[], bool]
-
-
-class CliInputError(RuntimeError):
-    def __init__(self, code: str, message: str, *, exit_code: int = 2) -> None:
-        self.code = code
-        self.message = message
-        self.exit_code = exit_code
-        super().__init__(message)
-
-
 class SilentArgumentParser(argparse.ArgumentParser):
     def error(self, message: str) -> Never:
         raise CliInputError("INVALID_ARGUMENTS", "auth.login 参数无效")
-
-
-def _default_dependencies(stdin: TextIO) -> CliDependencies:
-    def api_factory(origin: str, token: str | None = None) -> ApiClient:
-        return CoreApiClient(origin, token)
-
-    return CliDependencies(
-        api_factory=api_factory,
-        config_store=JsonConfigStore(),
-        credential_store=KeyringCredentialStore(),
-        getpass_fn=getpass.getpass,
-        stdin_isatty=stdin.isatty,
-    )
-
-
-def _write_json(stream: TextIO, value: object) -> None:
-    stream.write(json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n")
-    stream.flush()
-
-
-def _read_payload(stdin: TextIO) -> dict[str, Any]:
-    raw = stdin.read().removeprefix("\ufeff")
-    if not raw.strip():
-        raise CliInputError("JSON_REQUIRED", "stdin 必须包含一个 UTF-8 JSON 对象")
-    try:
-        payload = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise CliInputError("INVALID_JSON", "stdin 不是有效的单个 JSON 对象") from exc
-    if not isinstance(payload, dict):
-        raise CliInputError("JSON_OBJECT_REQUIRED", "stdin 顶层必须是 JSON 对象")
-    return payload
 
 
 def _require_string(
@@ -122,14 +71,7 @@ def _require_string(
     return value
 
 
-def _require_client_request_id(payload: dict[str, Any]) -> str:
-    value = payload.get("clientRequestId")
-    if not isinstance(value, str) or len(value) < 16:
-        raise CliInputError(
-            "CLIENT_REQUEST_ID_REQUIRED",
-            "写请求必须由调用方提供长度至少 16 的稳定 clientRequestId",
-        )
-    return value
+_require_client_request_id = require_client_request_id
 
 
 def _require_confirmation_hash(payload: dict[str, Any]) -> str:
@@ -154,13 +96,6 @@ def _ensure_clean_snapshot(
             "写操作必须提供 short.pull 生成的 manifestPath",
         )
     ensure_snapshot_clean(manifest_path, novel_id=novel_id)
-
-
-def _profile_from(payload: dict[str, Any]) -> str:
-    value = payload.get("profile", "default")
-    if not isinstance(value, str) or not value:
-        raise CliInputError("INVALID_PROFILE", "profile 必须是非空字符串")
-    return value
 
 
 def _public_id(value: str) -> str:
@@ -204,18 +139,15 @@ def _write_response_file(
     return result
 
 
-def _login(
-    argv: list[str],
-    *,
-    stdout: TextIO,
-    dependencies: CliDependencies,
-) -> int:
+def _handle_login(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
+    del payload
     parser = SilentArgumentParser(prog="inkforge auth.login", add_help=False)
     parser.add_argument("--origin", required=True)
     parser.add_argument("--username", required=True)
     parser.add_argument("--profile", default="default")
-    arguments = parser.parse_args(argv)
+    arguments = parser.parse_args(runtime.argv)
 
+    dependencies = runtime.dependencies
     if not dependencies.stdin_isatty():
         raise CliInputError(
             "TTY_REQUIRED",
@@ -230,14 +162,10 @@ def _login(
         arguments.profile,
         ProfileConfig(origin=origin, username=arguments.username),
     )
-    _write_json(
-        stdout,
-        {"ok": True, "command": "auth.login", "data": user},
-    )
-    return 0
+    return ensure_command_json_result(user)
 
 
-def _pull(api: ApiClient, payload: dict[str, Any]) -> dict[str, object]:
+def _pull(api: ApiClient, payload: dict[str, Any]) -> JsonObject:
     novel_id = _require_string(payload, "novelId")
     target = Path(_require_string(payload, "outputDirectory"))
     encoded_novel_id = _public_id(novel_id)
@@ -308,7 +236,7 @@ def _pull(api: ApiClient, payload: dict[str, Any]) -> dict[str, object]:
         f"/api/v1/novels/{encoded_novel_id}/versions",
         params={"documentType": "manuscript", "chapterId": chapter_id},
     )
-    metadata = {
+    metadata: JsonObject = {
         "chapterId": chapter_id,
         "outlineUpdatedAt": (
             outline_record.get("updatedAt") if isinstance(outline_record, dict) else None
@@ -338,7 +266,14 @@ def _draft_save(api: ApiClient, payload: dict[str, Any]) -> Any:
     manifest_path = Path(_require_string(payload, "manifestPath")).resolve()
     manifest = load_snapshot_manifest(manifest_path, novel_id=novel_id)
     documents = manifest["documents"]
-    descriptor = documents[document_type]
+    if not isinstance(documents, dict):
+        raise CliInputError("INVALID_MANIFEST", "manifest 缺少 documents 对象")
+    descriptor = documents.get(document_type)
+    if not isinstance(descriptor, dict):
+        raise CliInputError(
+            "INVALID_MANIFEST",
+            f"manifest 缺少 {document_type} 文档描述符",
+        )
     if descriptor["path"] != str(file_path):
         raise CliInputError(
             "INVALID_MANIFEST",
@@ -555,12 +490,33 @@ def _dispatch(api: ApiClient, command: str, payload: dict[str, Any]) -> Any:
     raise CliInputError("UNKNOWN_COMMAND", f"未知命令 {command}")
 
 
+def _handle_logout(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
+    del payload
+    api = runtime.require_api()
+    profile, origin = runtime.require_identity()
+    try:
+        result = api.request("POST", "/api/v1/auth/logout")
+    finally:
+        runtime.dependencies.credential_store.delete(profile, origin)
+    return ensure_command_json_result(result)
+
+
+def _handle_json_command(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
+    result = _dispatch(runtime.require_api(), runtime.spec.name, payload)
+    return ensure_command_json_result(result)
+
+
+def _handle_watch(
+    runtime: CliRuntime,
+    payload: JsonObject,
+) -> Generator[JsonObject, None, int]:
+    return _watch(runtime.require_api(), payload)
+
+
 def _watch(
     api: ApiClient,
     payload: dict[str, Any],
-    *,
-    stdout: TextIO,
-) -> int:
+) -> Generator[JsonObject, None, int]:
     task_id = _require_string(payload, "taskId")
     last_event_id = payload.get("lastEventId")
     if last_event_id is not None and not isinstance(last_event_id, str):
@@ -573,7 +529,7 @@ def _watch(
                 event_id = event.get("id") if isinstance(event, dict) else None
                 if isinstance(event_id, str) and event_id:
                     last_event_id = event_id
-                _write_json(stdout, {"type": "event", **event})
+                yield ensure_command_json_result({"type": "event", **event})
         except SseConnectionError:
             disconnected = True
 
@@ -584,12 +540,11 @@ def _watch(
                 f"/api/v1/writing/runs/{_public_id(task_id)}",
             )
             if _is_terminal_run_state(state):
-                _write_json(stdout, {"type": "terminal", "data": state})
+                yield ensure_command_json_result({"type": "terminal", "data": state})
                 return 0
         if reconnects >= _MAX_SSE_RECONNECTS:
-            _write_json(stdout, {"type": "state", "data": state})
-            _write_json(
-                stdout,
+            yield ensure_command_json_result({"type": "state", "data": state})
+            yield ensure_command_json_result(
                 {
                     "type": "error",
                     "error": {
@@ -620,17 +575,18 @@ def _error_payload(
     *,
     details: Any | None = None,
     request_id: str | None = None,
-) -> dict[str, object]:
-    error: dict[str, object] = {"code": code, "message": message}
+) -> JsonObject:
+    error: JsonObject = {"code": code, "message": message}
     if details is not None:
-        error["details"] = details
+        error["details"] = cast(JsonValue, details)
     if request_id is not None:
         error["requestId"] = request_id
-    return {
+    result: JsonObject = {
         "ok": False,
         "command": command,
         "error": error,
     }
+    return result
 
 
 def run(
@@ -649,54 +605,25 @@ def run(
     try:
         if not command:
             raise CliInputError("COMMAND_REQUIRED", "必须提供命令")
-        deps = dependencies or _default_dependencies(input_stream)
-        if command == "auth.login":
-            return _login(arguments[1:], stdout=output_stream, dependencies=deps)
-        if len(arguments) != 1:
-            raise CliInputError("INVALID_ARGUMENTS", "非登录命令不接受命令行参数")
+        from .registry import get_command_registry
 
-        payload = _read_payload(input_stream)
-        profile = _profile_from(payload)
-        config = deps.config_store.get(profile)
-        if config is None:
-            raise CliInputError(
-                "AUTH_REQUIRED",
-                "尚未登录，请在真实终端执行 auth.login",
-                exit_code=3,
-            )
-        token = deps.credential_store.get(profile, config.origin)
-        if token is None:
-            raise CliInputError(
-                "AUTH_REQUIRED",
-                "安全凭据中没有有效会话，请在真实终端重新登录",
-                exit_code=3,
-            )
-        api = deps.api_factory(config.origin, token)
-
-        if command == "auth.logout":
-            try:
-                result = api.request("POST", "/api/v1/auth/logout")
-            finally:
-                deps.credential_store.delete(profile, config.origin)
-            _write_json(
-                output_stream,
-                {"ok": True, "command": command, "data": result},
-            )
-            return 0
-        if command == "short.agent.watch":
-            return _watch(api, payload, stdout=output_stream)
-
-        result = _dispatch(api, command, payload)
-        _write_json(
-            output_stream,
-            {"ok": True, "command": command, "data": result},
+        spec = get_command_registry().get(command)
+        if spec is None:
+            raise CliInputError("UNKNOWN_COMMAND", f"未知命令 {command}")
+        deps = dependencies or default_dependencies(input_stream)
+        runtime, payload = prepare_runtime(
+            spec,
+            arguments[1:],
+            stdin=input_stream,
+            dependencies=deps,
         )
-        return 0
+        result = spec.handler(runtime, payload)
+        return emit_command_result(spec, result, output_stream)
     except CliInputError as exc:
-        _write_json(output_stream, _error_payload(command, exc.code, exc.message))
+        write_json_line(output_stream, _error_payload(command, exc.code, exc.message))
         return exc.exit_code
     except CoreApiError as exc:
-        _write_json(
+        write_json_line(
             output_stream,
             _error_payload(
                 command,
@@ -708,13 +635,13 @@ def run(
         )
         return exc.exit_code
     except (DirtySnapshotError, OSError, UnicodeError, json.JSONDecodeError) as exc:
-        _write_json(
+        write_json_line(
             output_stream,
             _error_payload(command, "LOCAL_FILE_ERROR", str(exc)),
         )
         return 6
     except InsecureCredentialBackendError as exc:
-        _write_json(
+        write_json_line(
             output_stream,
             _error_payload(command, "SECURE_CREDENTIAL_BACKEND_REQUIRED", str(exc)),
         )
@@ -722,7 +649,7 @@ def run(
     except Exception:
         # 不把异常对象写入输出，避免第三方库把请求头或凭据带入错误文本。
         error_stream.write("InkForge CLI 遇到未预期错误。\n")
-        _write_json(
+        write_json_line(
             output_stream,
             _error_payload(command, "UNEXPECTED_ERROR", "CLI 遇到未预期错误"),
         )

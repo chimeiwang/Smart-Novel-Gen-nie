@@ -187,6 +187,24 @@ def test_plain_command_consumes_one_json_and_emits_one_json() -> None:
     assert api.calls[0][2]["params"] == {"storyLengthProfile": "short_medium"}
 
 
+def test_unknown_command_is_rejected_before_reading_stdin_or_credentials() -> None:
+    stdout = io.StringIO()
+    deps = dependencies(RecordingApi())
+    deps.config_store.delete("default")
+
+    code = run(
+        ["short.does-not-exist"],
+        stdin=io.StringIO("this is deliberately not json"),
+        stdout=stdout,
+        stderr=io.StringIO(),
+        dependencies=deps,
+    )
+
+    result = json.loads(stdout.getvalue())
+    assert code == 2
+    assert result["error"]["code"] == "UNKNOWN_COMMAND"
+
+
 def test_windows_powershell_utf8_bom_is_accepted() -> None:
     api = RecordingApi(responses=[[]])
     stdout = io.StringIO()
