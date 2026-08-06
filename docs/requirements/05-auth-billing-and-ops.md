@@ -64,7 +64,7 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 - 文风画像、质量检查和 RAG 索引分别从 `StylePortraitTask`、`WorkflowRun(kind=quality_check)` 和 `RagDocument` 恢复投递；进程内任务或 Redis 状态都不是这些工作的唯一事实来源。
 - Agent 对重复稳定 job ID 返回 Redis 中的实际任务状态。Core dispatcher 遇到 `completed/failed/cancelled` 时必须幂等结束仍处于 PostgreSQL 活动态的画像、质量检查或 RAG 记录，不能把终态 job 当作已重新排队；已经完成的业务记录和 RAG 的新内容版本不得被旧 job 覆盖。
 - Core 的命令、旧任务对账、画像、质量检查和 RAG dispatcher，以及 Agent 的队列消费者，都由生命周期任务监督器管理；后台协程异常退出后按 1、2、4、8 秒、最高 30 秒退避重启，稳定运行窗口结束后清零连续失败计数。就绪检查必须检查实际运行的内部 `Task`，启动、退避、连续失败和监督器退出时不能只因对象存在而报告健康。
-- 后台循环只在明确的数据库、网络或 Redis 暂态异常上原地退避；TypeError、Pydantic 契约错误和其他未知程序错误必须退出循环交给监督器。Redis OOM、MISCONF 和 READONLY 等写入拒绝立即使消费者退出并让 readiness 失败。
+- 后台循环只在明确的数据库、网络或 Redis 暂态异常上原地退避；TypeError、Pydantic 契约错误和其他未知程序错误必须退出循环交给监督器。Agent 多槽消费者在其他已领取 job 排空期间先停止新领取，并以 `BACKGROUND_TASK_FAILURE_DRAINING` 立即使 readiness 失败；Redis OOM、MISCONF 和 READONLY 等写入拒绝也必须进入该失败路径。
 - `WritingMessage` 只保存用户可见聊天记录，不能反推图状态。
 
 ## 版本化数据迁移
@@ -132,7 +132,8 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 2 核 2 GB 默认限制：
 
 - 每个 Python 服务一个 worker；
-- 同时只执行一个模型任务；
+- Agent 单进程内最多同时处理三个不同项目的独立队列 job，同一 `novelId` 同时只执行一个 job，并全局最多执行三个模型调用；`AGENT_MAX_CONCURRENCY` 只允许 1、2 或 3，配置 1 用于资源压力下的串行回退；
+- Agent 与 Core 的 Redis 客户端连接池各为 8；Agent 到 Core HTTP 仍最多 4 个连接、Embedding HTTP 最多 2 个连接，数据库池不因 Agent 并行而扩大；
 - Redis `maxmemory` 为 64 MB，关闭 AOF，并使用 `maxmemory-policy noeviction`；内存耗尽时必须明确拒绝新写入，不能淘汰队列、事件或防重放键；
 - Agent 队列完成、失败或取消的 job 只在 Redis 保留默认 7 天、最少 24 小时的终态 tombstone；终态时间 ZSET 驱动有界清理，过期后删除 status 和索引，PostgreSQL 继续作为长期幂等事实来源。
 - 升级前缺少终态 ZSET 的旧 status 使用 HSCAN 游标分批回填 tombstone，并清除 ready、processing、payload、lease、attempt 和 score 残留；过期租约缺少 payload 或 score 时原子收敛为 failed，不能留下 running 孤儿。
@@ -149,6 +150,7 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 | `JWT_SECRET` | Core、Web | 浏览器会话签名 |
 | `REDIS_URL` | Core、Agent | 队列、事件和防重放 |
 | `QUEUE_TERMINAL_RETENTION_DAYS` | Agent | Redis 队列终态 tombstone 保留天数，默认 7、最少 1；Compose 显式透传 |
+| `AGENT_MAX_CONCURRENCY` | Agent | 单进程不同项目队列 job 与全局模型调用上限，只允许 1、2 或 3，2 核 2 GB 默认 3；同一 `novelId` 始终串行 |
 | `RAG_INDEX_ENABLED` | Core、Agent | 同时启用资料索引投递和 embedding 就绪校验；两端必须使用相同值 |
 | `OPENAI_API_KEY` | Agent | 模型服务密钥 |
 | `OPENAI_BASE_URL` | Agent | 模型服务地址 |
@@ -159,7 +161,7 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 | `CORE_SERVICE_PUBLIC_KEY_PATH` | Agent | Core 验签公钥 |
 | `WORKFLOW_HUMAN_LOG_DIR` | Agent | 人工日志目录 |
 
-Core 与 Agent readiness 在后台任务不健康时保留 `checks` 兼容字段，并在 `backgroundTasks` 中返回具体任务名及稳定错误码，便于区分未启动、退避、连续失败和监督器停止。
+Core 与 Agent readiness 在后台任务不健康时保留 `checks` 兼容字段，并在 `backgroundTasks` 中返回具体任务名及稳定错误码，便于区分未启动、失败后排空、退避、连续失败和监督器停止。Agent 多槽消费者使用 `BACKGROUND_TASK_FAILURE_DRAINING` 表示已停止领取新任务、正在等待其他已领取任务稳定收敛。
 
 `DEPLOY_SSH_KNOWN_HOSTS` 属于 GitHub `production` environment Secret，不是应用容器环境变量；只用于为发布流程生成严格校验的临时 `known_hosts` 文件。
 

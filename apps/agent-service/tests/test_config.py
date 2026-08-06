@@ -41,6 +41,21 @@ def test_queue_terminal_retention_days_reads_environment(
     assert Settings().queue_terminal_retention_days == 3
 
 
+def test_agent_parallel_limit_defaults_to_three_and_accepts_lower_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert Settings.model_validate({}).agent_max_concurrency == 3
+
+    monkeypatch.setenv("AGENT_MAX_CONCURRENCY", "1")
+    assert Settings().agent_max_concurrency == 1
+    monkeypatch.setenv("AGENT_MAX_CONCURRENCY", "2")
+    assert Settings().agent_max_concurrency == 2
+
+    for invalid_value in (0, 4):
+        with pytest.raises(ValidationError):
+            Settings.model_validate({"agent_max_concurrency": invalid_value})
+
+
 def test_模型最大输出预算默认值与边界() -> None:
     assert Settings.model_validate({}).model_max_output_tokens == 384_000
     assert (

@@ -265,6 +265,8 @@ Agent Runtime 是唯一多轮 tool-call loop。
 - reviewer 不暴露读取工具，只能接收 Core 权威草案并调用一次 `submit_evaluation`；reviser 使用原 Operation 工具契约，接收原草案、revision、artifactKey 和合并后的修改要求后生成同类新 revision。
 - consistency 质量任务由“校验”Agent 的 `quality` 模式执行，只暴露 `submit_quality_report`。
 
+队列 job 与单次 Operation 内并行使用同一个有界预算。2 核 2 GB 生产环境保持一个 Agent Uvicorn worker，默认最多同时处理三个不同 `novelId` 的独立 job，同一 `novelId` 同时只执行一个 job；同项目冲突的 claim 通过租约校验原子回队，成功回队时撤销本次 claim 增加的 attempts，且不等待项目锁占住执行槽。共享 `ModelRuntime` 把所有模型调用的全局峰值限制为三个。Reviewer `Send` 仍可并行，但与其他 job 重叠时也必须等待全局模型槽；`AGENT_MAX_CONCURRENCY=1` 可恢复严格串行。该并行不改变同一任务的命令身份、事件序号、检查点和 ReviewArtifact 顺序。
+
 控制工具示例：
 
 - propose_updates：提交短小更新草案。
@@ -332,4 +334,5 @@ Provider 必须提供规范化完成原因并保留供应商原始值。`length`
 - Core API 已把写作启动、恢复和草案决定先保存为 PostgreSQL 持久命令，再由 dispatcher 提交到 Redis 队列。文风画像以 `StylePortraitTask`、质量检查以 `WorkflowRun(kind=quality_check)`、资料索引以 `RagDocument` 的待重建状态作为持久事实；各自 dispatcher 使用稳定任务标识补投，Redis 只承载可重建的投递状态。Agent Service 消费任务并通过签名回调保存检查点、事件、草案和终态。
 - 草案进入等待用户确认时，Agent Service 使用下一个连续序号直接保存稳定快照，不再先直发等待事件；Core 在保存快照的同一事务中创建 `artifact_awaiting_user_approval` Outbox。后续 resume/artifact_decision 命令会在自身事务内作废尚未发布的旧 waiting，Publisher 遇到 waiting 序号竞争时也会再次核对并转为 superseded。长篇 completed/error 稳定 checkpoint 只保存图内终态，数据库任务和命令保持非终态，直到 complete/fail 与 terminal Outbox 在同一事务收敛。SSE 只重放 published 边界事件，跳过 superseded，并在 pending/delivering/blocked 边界前保留原游标等待；同时发送不带游标的 PostgreSQL `run_outcome` 控制帧。客户端在建连或断流后重新读取 outcome，只按 `streamShouldClose` 收敛生命周期，legacy 事件只承担展示兼容且不能直接恢复可操作草案；非 waiting_user 终态按任务清理临时草案入口并使较早的在途读取失效，相同 succeeded outcome 的完成副作用按任务、命令和结果只执行一次。
 - Core 对账器可以强制修复 Redis 中缺失的 queued 索引或完全丢失的运行键，但不得重新打开 Redis 已记录为 completed、failed 或 cancelled 的运行。
+- Agent 队列消费者已在单进程内提供默认三个执行槽，不同 `novelId` 可并行、同一 `novelId` 只执行一个 job，每个 claim 独立续租；共享 `ModelRuntime` 同时把普通 Agent、Reviewer、中短篇、质量和画像的模型调用总数限制为三个。消费槽致命错误会立即停止新领取并使 readiness 失败，其他已领取任务排空后由监督器重启；配置 1 保留串行回退路径。
 - Agent Service 不连接数据库，所有读取工具和业务写入都通过 Core 内部工具网关完成。

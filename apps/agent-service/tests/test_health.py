@@ -115,6 +115,40 @@ def test_readiness_fails_when_queue_consumer_task_exits_unexpectedly() -> None:
     }
 
 
+def test_readiness_fails_while_parallel_consumer_drains_after_failure() -> None:
+    class DrainingConsumer(Consumer):
+        def is_healthy(self) -> bool:
+            return False
+
+        @property
+        def health_error_code(self) -> str:
+            return "BACKGROUND_TASK_FAILURE_DRAINING"
+
+    settings = Settings.model_validate(
+        {
+            "environment": "production",
+            "model_provider": "fake",
+        }
+    )
+    app = create_app(
+        testing=True,
+        settings=settings,
+        run_queue=object(),  # type: ignore[arg-type]
+        core_request_verifier=object(),  # type: ignore[arg-type]
+        queue_consumer=DrainingConsumer(),
+    )
+    app.state.core_client = object()
+
+    with TestClient(app) as client:
+        response = client.get("/internal/v1/health/ready")
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["queue_consumer"] == "failed"
+    assert response.json()["backgroundTasks"] == {
+        "queue_consumer": "BACKGROUND_TASK_FAILURE_DRAINING"
+    }
+
+
 def test_readiness_fails_after_queue_redis_oom() -> None:
     class OomQueue:
         terminal_retention = timedelta(days=7)
@@ -365,6 +399,34 @@ async def test_rag_handler_requires_agent_side_feature_flag(
     finally:
         await app.state.core_http.aclose()
         await app.state.embedding_http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_runtime_uses_one_shared_agent_parallel_limit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        app_module,
+        "create_agent_callback_signer",
+        lambda **_kwargs: object(),
+    )
+    settings = Settings.model_validate(
+        {
+            "environment": "test",
+            "model_provider": "fake",
+            "agent_service_private_key_path": "unused.pem",
+            "workflow_human_log_dir": str(tmp_path),
+            "agent_max_concurrency": 1,
+        }
+    )
+    app = create_app(settings=settings, run_queue=object())  # type: ignore[arg-type]
+
+    try:
+        assert app.state.queue_consumer.max_concurrency == 1
+        assert app.state.model_runtime.max_concurrency == 1
+    finally:
+        await app.state.core_http.aclose()
 
 
 @pytest.mark.asyncio

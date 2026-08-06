@@ -85,6 +85,8 @@ flowchart TD
     M --> N
 ~~~
 
+全部 Reviewer 继续通过 LangGraph `Send` 并行扇出，但并发请求必须经过 Agent Service 共享 `ModelRuntime` 的全局模型门。2 核 2 GB 默认最多同时执行三个模型调用；当其他队列 job 也在运行时，额外 Reviewer 等待模型槽，不能绕过全局预算。同一 `novelId` 的独立队列 job 仍保持串行。
+
 ## 用户决策
 
 用户可对 awaiting_user 草案执行：

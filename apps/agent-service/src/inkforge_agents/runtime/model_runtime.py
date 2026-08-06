@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from typing import Any, Protocol
 
@@ -52,12 +53,30 @@ class ModelRuntime:
         *,
         billing: BillingPort | None = None,
         observer: ModelCallObserver | None = None,
+        max_concurrency: int = 1,
     ) -> None:
+        if max_concurrency < 1:
+            raise ValueError("模型调用并发数必须为正整数")
         self._provider = provider
         self._billing = billing
         self._observer = observer
+        self._max_concurrency = max_concurrency
+        self._semaphore = asyncio.Semaphore(max_concurrency)
+
+    @property
+    def max_concurrency(self) -> int:
+        return self._max_concurrency
 
     async def run_turn(
+        self,
+        request: ModelTurnRequest,
+        *,
+        context: ModelCallContext | None = None,
+    ) -> ModelTurnResult:
+        async with self._semaphore:
+            return await self._run_turn_limited(request, context=context)
+
+    async def _run_turn_limited(
         self,
         request: ModelTurnRequest,
         *,
