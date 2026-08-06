@@ -72,12 +72,29 @@ def _validate_spec(spec: CommandSpec) -> None:
 
 
 def _default_specs() -> list[CommandSpec]:
-    # 延迟导入避免启动层与注册表在模块加载阶段形成循环依赖。
-    from .cli import (
-        _handle_json_command,
-        _handle_login,
-        _handle_logout,
-        _handle_watch,
+    from .commands.auth import login, logout, whoami
+    from .commands.short.agents import (
+        start as agent_start,
+    )
+    from .commands.short.agents import (
+        watch as agent_watch,
+    )
+    from .commands.short.documents import (
+        create as short_create,
+    )
+    from .commands.short.documents import (
+        draft_save,
+        list_novels,
+        pull,
+    )
+    from .commands.short.versions import (
+        adopt,
+        diff,
+        get,
+        list_versions,
+        preview,
+        restore,
+        submit,
     )
 
     no_file = FileOutputSpec(kind="none")
@@ -90,7 +107,7 @@ def _default_specs() -> list[CommandSpec]:
     return [
         CommandSpec(
             name="auth.login",
-            handler=_handle_login,
+            handler=login,
             inputMode="argv_tty",
             outputMode="json",
             fileOutput=no_file,
@@ -100,7 +117,7 @@ def _default_specs() -> list[CommandSpec]:
         ),
         CommandSpec(
             name="auth.logout",
-            handler=_handle_logout,
+            handler=logout,
             inputMode="json",
             outputMode="json",
             fileOutput=no_file,
@@ -110,7 +127,7 @@ def _default_specs() -> list[CommandSpec]:
         ),
         CommandSpec(
             name="auth.whoami",
-            handler=_handle_json_command,
+            handler=whoami,
             inputMode="json",
             outputMode="json",
             fileOutput=no_file,
@@ -120,7 +137,7 @@ def _default_specs() -> list[CommandSpec]:
         ),
         CommandSpec(
             name="short.list",
-            handler=_handle_json_command,
+            handler=list_novels,
             inputMode="json",
             outputMode="json",
             fileOutput=no_file,
@@ -130,7 +147,7 @@ def _default_specs() -> list[CommandSpec]:
         ),
         CommandSpec(
             name="short.create",
-            handler=_handle_json_command,
+            handler=short_create,
             inputMode="json",
             outputMode="json",
             fileOutput=no_file,
@@ -140,7 +157,7 @@ def _default_specs() -> list[CommandSpec]:
         ),
         CommandSpec(
             name="short.pull",
-            handler=_handle_json_command,
+            handler=pull,
             inputMode="json",
             outputMode="json",
             fileOutput=no_file,
@@ -150,7 +167,7 @@ def _default_specs() -> list[CommandSpec]:
         ),
         CommandSpec(
             name="short.draft.save",
-            handler=_handle_json_command,
+            handler=draft_save,
             inputMode="json",
             outputMode="json",
             fileOutput=no_file,
@@ -160,7 +177,7 @@ def _default_specs() -> list[CommandSpec]:
         ),
         CommandSpec(
             name="short.version.preview",
-            handler=_handle_json_command,
+            handler=preview,
             inputMode="json",
             outputMode="json",
             fileOutput=data_json,
@@ -170,7 +187,7 @@ def _default_specs() -> list[CommandSpec]:
         ),
         CommandSpec(
             name="short.version.submit",
-            handler=_handle_json_command,
+            handler=submit,
             inputMode="json",
             outputMode="json",
             fileOutput=no_file,
@@ -180,7 +197,7 @@ def _default_specs() -> list[CommandSpec]:
         ),
         CommandSpec(
             name="short.version.list",
-            handler=_handle_json_command,
+            handler=list_versions,
             inputMode="json",
             outputMode="json",
             fileOutput=no_file,
@@ -190,7 +207,7 @@ def _default_specs() -> list[CommandSpec]:
         ),
         CommandSpec(
             name="short.version.diff",
-            handler=_handle_json_command,
+            handler=diff,
             inputMode="json",
             outputMode="json",
             fileOutput=data_json,
@@ -200,7 +217,7 @@ def _default_specs() -> list[CommandSpec]:
         ),
         CommandSpec(
             name="short.version.get",
-            handler=_handle_json_command,
+            handler=get,
             inputMode="json",
             outputMode="json",
             fileOutput=primary_content,
@@ -210,7 +227,7 @@ def _default_specs() -> list[CommandSpec]:
         ),
         CommandSpec(
             name="short.version.adopt",
-            handler=_handle_json_command,
+            handler=adopt,
             inputMode="json",
             outputMode="json",
             fileOutput=no_file,
@@ -220,7 +237,7 @@ def _default_specs() -> list[CommandSpec]:
         ),
         CommandSpec(
             name="short.version.restore",
-            handler=_handle_json_command,
+            handler=restore,
             inputMode="json",
             outputMode="json",
             fileOutput=no_file,
@@ -230,7 +247,7 @@ def _default_specs() -> list[CommandSpec]:
         ),
         CommandSpec(
             name="short.agent.start",
-            handler=_handle_json_command,
+            handler=agent_start,
             inputMode="json",
             outputMode="json",
             fileOutput=no_file,
@@ -240,7 +257,7 @@ def _default_specs() -> list[CommandSpec]:
         ),
         CommandSpec(
             name="short.agent.watch",
-            handler=_handle_watch,
+            handler=agent_watch,
             inputMode="json",
             outputMode="jsonl",
             fileOutput=no_file,
