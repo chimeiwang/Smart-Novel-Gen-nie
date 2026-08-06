@@ -195,7 +195,7 @@ export function WorkspaceShell({
                   completedAt: currentChapter.completedAt,
                   updatedAt: currentChapter.updatedAt,
                 }}
-                chapterProgress={currentChapter.progress?.content ?? null}
+                chapterProgress={currentChapter.progress ?? null}
                 qualityChecks={currentChapter.qualityChecks.filter(
                   (check) => check.type === "consistency",
                 )}

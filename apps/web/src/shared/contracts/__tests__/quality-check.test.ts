@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import type { QualityCheckDto } from "../quality-check";
+import {
+  RunQualityCheckSchema,
+  UpdateQualityCheckStatusSchema,
+  type QualityCheckDto,
+} from "../quality-check";
 
 const generatedExample = {
   id: "check-1",
@@ -37,4 +41,33 @@ test("质量检查 DTO 直接派生自生成客户端", async () => {
   );
   assert.doesNotMatch(source, /QualityCheckDtoSchema/);
   assert.doesNotMatch(source, /toQualityCheckDto/);
+});
+
+test("质量运行请求必须携带调用方生成的幂等请求号", () => {
+  assert.equal(RunQualityCheckSchema.safeParse({ checkId: "check-1" }).success, false);
+  assert.equal(
+    RunQualityCheckSchema.safeParse({
+      checkId: "check-1",
+      clientRequestId: "quality-run-1",
+    }).success,
+    true,
+  );
+});
+
+test("质量状态更新必须携带当前服务端版本", () => {
+  assert.equal(
+    UpdateQualityCheckStatusSchema.safeParse({
+      id: "check-1",
+      status: "skipped",
+    }).success,
+    false,
+  );
+  assert.equal(
+    UpdateQualityCheckStatusSchema.safeParse({
+      id: "check-1",
+      status: "skipped",
+      expectedUpdatedAt: "2026-08-06T00:00:00Z",
+    }).success,
+    true,
+  );
 });

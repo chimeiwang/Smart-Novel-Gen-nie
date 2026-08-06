@@ -101,12 +101,14 @@ export const UpdateQualityCheckStatusSchema = z.object({
   id: z.string(),
   status: z.enum(["pending", "skipped"]),
   resetResult: z.boolean().optional(),
+  expectedUpdatedAt: z.string().min(1),
 });
 export type UpdateQualityCheckStatusInput = z.infer<typeof UpdateQualityCheckStatusSchema>;
 
 /** 质量检查运行请求 */
 export const RunQualityCheckSchema = z.object({
   checkId: z.string(),
+  clientRequestId: z.string().min(1),
   taskId: z.string().optional(),
   message: z.string().optional(),
 });

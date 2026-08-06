@@ -2775,6 +2775,7 @@ export function WritingConversation({
             params: { path: { artifact_id: artifact.id } },
             body: {
               clientRequestId: createClientRequestId(),
+              expectedRevision: artifact.revision,
               decision,
               editedContent: decision === "approve" ? editedContent ?? null : null,
               selectedUpdateRefs: decision === "approve" ? selectedUpdateRefs ?? null : null,

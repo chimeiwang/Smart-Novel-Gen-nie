@@ -12,6 +12,7 @@ import {
 
 import type { WorkspaceView } from "@/features/workspace/workspace-view";
 import { browserApi } from "@/lib/api/browser";
+import { createClientRequestId } from "@/lib/api/client-request-id";
 import { requireApiData } from "@/lib/api/response";
 import type { QualityCheckDto } from "@/shared/contracts/quality-check";
 import { countTextLength } from "@/shared/lib/word-count";
@@ -46,7 +47,10 @@ type ChapterEditorProps = {
     completedAt: string | null;
     updatedAt: string;
   };
-  chapterProgress: string | null;
+  chapterProgress: {
+    content: string;
+    updatedAt: string;
+  } | null;
   qualityChecks?: QualityCheckDto[];
   styleName?: string | null;
 };
@@ -78,10 +82,14 @@ export function ChapterEditor({
   const saveCoordinatorRef = useRef<ChapterSaveCoordinator | null>(null);
   const qualityPollingGenerationRef = useRef(0);
   const qualityPollingCheckIdRef = useRef<string | null>(null);
+  const qualityRunClientRequestIdsRef = useRef<Record<string, string>>({});
   const resumedRunningCheckIdRef = useRef<string | null>(null);
 
   // 章节进展状态
-  const [progressContent, setProgressContent] = useState(chapterProgress ?? "");
+  const [progressContent, setProgressContent] = useState(chapterProgress?.content ?? "");
+  const [progressUpdatedAt, setProgressUpdatedAt] = useState(
+    chapterProgress?.updatedAt ?? null,
+  );
   const [showProgress, setShowProgress] = useState(false);
   const [pendingProgress, startProgressTransition] = useTransition();
 
@@ -174,10 +182,11 @@ export function ChapterEditor({
 
   const handleSaveProgress = () => {
     startProgressTransition(async () => {
-      requireApiData(await browserApi.PUT("/api/v1/chapters/{chapter_id}/progress", {
+      const response = requireApiData(await browserApi.PUT("/api/v1/chapters/{chapter_id}/progress", {
         params: { path: { chapter_id: chapter.id } },
-        body: { content: progressContent },
+        body: { content: progressContent, expectedUpdatedAt: progressUpdatedAt },
       }));
+      setProgressUpdatedAt(response.updatedAt);
     });
   };
 
@@ -277,11 +286,15 @@ export function ChapterEditor({
     if (qualityPollingCheckIdRef.current !== null) return;
     setRunningCheckId(check.id);
     setQualityError(null);
+    const clientRequestId = qualityRunClientRequestIdsRef.current[check.id]
+      ?? createClientRequestId();
+    qualityRunClientRequestIdsRef.current[check.id] = clientRequestId;
     try {
       requireApiData(await browserApi.POST("/api/v1/quality-checks/{check_id}/run", {
         params: { path: { check_id: check.id } },
-        body: {},
+        body: { clientRequestId },
       }));
+      delete qualityRunClientRequestIdsRef.current[check.id];
       const runningCheck: QualityCheckDto = { ...check, status: "running" };
       setLocalChecks((current) => replaceQualityCheck(current, runningCheck));
       await pollRunningQualityCheck(runningCheck);
@@ -297,8 +310,9 @@ export function ChapterEditor({
     try {
       const updatedCheck = requireApiData(await browserApi.PATCH("/api/v1/quality-checks/{check_id}", {
         params: { path: { check_id: check.id } },
-        body: { status, resetResult: status === "pending" },
+        body: { status, resetResult: status === "pending", expectedUpdatedAt: check.updatedAt },
       }));
+      delete qualityRunClientRequestIdsRef.current[check.id];
       setLocalChecks((current) => replaceQualityCheck(current, updatedCheck));
       router.refresh();
     } catch (error) {

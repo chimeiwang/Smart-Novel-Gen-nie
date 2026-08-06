@@ -32,6 +32,14 @@ test("中短篇作品进入简化双文档工作台而不是长篇三栏流程",
   assert.match(source, /targetTotalWordCount/);
 });
 
+test("长篇章节编辑器接收完整的章节进展版本来源", async () => {
+  const shellUrl = new URL("../workspace-shell.tsx", import.meta.url);
+  const source = await readFile(shellUrl, "utf8");
+
+  assert.match(source, /chapterProgress=\{currentChapter\.progress\s*\?\?\s*null\}/);
+  assert.doesNotMatch(source, /chapterProgress=\{currentChapter\.progress\?\.content/);
+});
+
 test("审核内容与审核弹窗使用独立 portal host", async () => {
   const conversationUrl = new URL("../../writing/writing-conversation.tsx", import.meta.url);
   const source = await readFile(conversationUrl, "utf8");

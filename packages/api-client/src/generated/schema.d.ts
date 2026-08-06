@@ -1099,6 +1099,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/writing/runs/{task_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Writing Run */
+        post: operations["cancel_writing_run_api_v1_writing_runs__task_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/writing/runs/{task_id}/events": {
         parameters: {
             query?: never;
@@ -1108,6 +1125,23 @@ export interface paths {
         };
         /** Stream Writing Run Events */
         get: operations["stream_writing_run_events_api_v1_writing_runs__task_id__events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/review-artifacts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Review Artifacts */
+        get: operations["list_review_artifacts_api_v1_review_artifacts_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1342,6 +1376,13 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AbsenceSentinel */
+        AbsenceSentinel: {
+            /** Resourcetype */
+            resourceType: string;
+            /** Resourceid */
+            resourceId: string;
+        };
         /** AppliedStyleSummary */
         AppliedStyleSummary: {
             /** Id */
@@ -1477,6 +1518,31 @@ export interface components {
             /** File */
             file: string;
         };
+        /** CancelWritingRunRequest */
+        CancelWritingRunRequest: {
+            /** Clientrequestid */
+            clientRequestId: string;
+        };
+        /** CancelWritingRunResponse */
+        CancelWritingRunResponse: {
+            /** Taskid */
+            taskId: string;
+            /** Commandid */
+            commandId: string;
+            /**
+             * Commandstatus
+             * @enum {string}
+             */
+            commandStatus: "pending" | "submitted" | "processing" | "succeeded" | "failed";
+            /** Effective */
+            effective: boolean;
+            /** Alreadyterminal */
+            alreadyTerminal: boolean;
+            /** Cancelledcommandid */
+            cancelledCommandId: string | null;
+            /** Cancelledjobid */
+            cancelledJobId: string | null;
+        };
         /** ChapterIdSummary */
         ChapterIdSummary: {
             /** Id */
@@ -1518,6 +1584,8 @@ export interface components {
         ChapterProgressRequest: {
             /** Content */
             content: string;
+            /** Expectedupdatedat */
+            expectedUpdatedAt: string | null;
         };
         /** ChapterRangeScope */
         ChapterRangeScope: {
@@ -3044,6 +3112,8 @@ export interface components {
         ReviewArtifactDecisionRequest: {
             /** Clientrequestid */
             clientRequestId: string;
+            /** Expectedrevision */
+            expectedRevision: number;
             /**
              * Decision
              * @enum {string}
@@ -3055,6 +3125,13 @@ export interface components {
             selectedUpdateRefs?: components["schemas"]["ArtifactSelectionRef"][] | null;
             /** Usermessage */
             userMessage?: string | null;
+        };
+        /** ReviewArtifactListResponse */
+        ReviewArtifactListResponse: {
+            /** Items */
+            items: components["schemas"]["ReviewArtifactResponse"][];
+            /** Nextcursor */
+            nextCursor: string | null;
         };
         /** ReviewArtifactResponse */
         ReviewArtifactResponse: {
@@ -3099,6 +3176,13 @@ export interface components {
             revision: number;
             /** Evaluations */
             evaluations?: components["schemas"]["ArtifactEvaluationResponse"][];
+            /** Sourcebindings */
+            sourceBindings: components["schemas"]["SourceBinding"][] | null;
+            /**
+             * Sourcebindingstatus
+             * @enum {string}
+             */
+            sourceBindingStatus: "verified" | "legacy_missing" | "not_yet_supported";
             /**
              * Createdat
              * Format: date-time
@@ -3112,6 +3196,8 @@ export interface components {
         };
         /** RunQualityCheckRequest */
         RunQualityCheckRequest: {
+            /** Clientrequestid */
+            clientRequestId: string;
             /** Taskid */
             taskId?: string | null;
             /** Message */
@@ -3182,6 +3268,22 @@ export interface components {
             selectedTextHash?: string | null;
             /** Userinstruction */
             userInstruction?: string | null;
+        };
+        /** SourceBinding */
+        SourceBinding: {
+            /** Resourcetype */
+            resourceType: string;
+            /** Resourceid */
+            resourceId: string;
+            /** Exists */
+            exists: boolean;
+            /** Updatedat */
+            updatedAt: string | null;
+            /** Contentsha256 */
+            contentSha256: string | null;
+            /** Revision */
+            revision: number | null;
+            absenceSentinel: components["schemas"]["AbsenceSentinel"] | null;
         };
         /** StartWritingRunRequest */
         StartWritingRunRequest: {
@@ -3465,6 +3567,11 @@ export interface components {
              * @default false
              */
             resetResult: boolean;
+            /**
+             * Expectedupdatedat
+             * Format: date-time
+             */
+            expectedUpdatedAt: string;
         };
         /** UpdateReferenceRequest */
         UpdateReferenceRequest: {
@@ -14878,6 +14985,124 @@ export interface operations {
             };
         };
     };
+    cancel_writing_run_api_v1_writing_runs__task_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CancelWritingRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CancelWritingRunResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     stream_writing_run_events_api_v1_writing_runs__task_id__events_get: {
         parameters: {
             query?: never;
@@ -14899,6 +15124,126 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_review_artifacts_api_v1_review_artifacts_get: {
+        parameters: {
+            query: {
+                novelId: string;
+                chapterId?: string | null;
+                taskId?: string | null;
+                status?: string | null;
+                kind?: string | null;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewArtifactListResponse"];
+                };
             };
             /** @description 统一错误响应 */
             400: {
