@@ -42,6 +42,14 @@ if [ "$agent_required_successes" -gt "$agent_max_attempts" ]; then
 fi
 
 compose ps
+compose exec -T agent-service sh -c '
+set -eu
+log_dir="${WORKFLOW_HUMAN_LOG_DIR:?缺少 WORKFLOW_HUMAN_LOG_DIR}"
+test -d "$log_dir"
+probe_dir="$log_dir/.inkforge-write-probe-$$"
+mkdir "$probe_dir"
+rmdir "$probe_dir"
+'
 binding="$(compose port nginx 8080 | head -n 1)"
 port="${binding##*:}"
 case "$port" in

@@ -39,6 +39,7 @@ def _run_compose_smoke(
     max_attempts: int,
     ready_sequence: str = "",
     nginx_binding: str = "0.0.0.0:43120",
+    log_write_status: int = 0,
 ) -> tuple[subprocess.CompletedProcess[str], int, list[str]]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -70,6 +71,7 @@ def _run_compose_smoke(
         "FAKE_AGENT_READY_COUNTER": _posix_path(agent_counter),
         "FAKE_AGENT_READY_AFTER": str(ready_after),
         "FAKE_AGENT_READY_SEQUENCE": ready_sequence,
+        "FAKE_AGENT_LOG_WRITE_STATUS": str(log_write_status),
         "SMOKE_AGENT_REQUIRED_SUCCESSES": str(required_successes),
         "SMOKE_AGENT_MAX_ATTEMPTS": str(max_attempts),
         "SMOKE_AGENT_POLL_SECONDS": "0",
@@ -118,6 +120,30 @@ def test_compose_smoke_executes_standalone_agent_readiness_probe() -> None:
     assert "< scripts/agent_readiness_probe.py" in smoke_source
     assert "DIAGNOSTIC_FIELDS" in probe_source
     assert "with error:" in probe_source
+
+
+def test_compose_smoke_checks_agent_log_directory_with_real_write_probe() -> None:
+    smoke_source = SMOKE_SH.read_text(encoding="utf-8")
+
+    assert "WORKFLOW_HUMAN_LOG_DIR" in smoke_source
+    assert 'mkdir "$probe_dir"' in smoke_source
+    assert 'rmdir "$probe_dir"' in smoke_source
+
+
+def test_compose_smoke_fails_when_agent_log_directory_is_not_writable(
+    tmp_path: Path,
+) -> None:
+    result, call_count, urls = _run_compose_smoke(
+        tmp_path,
+        ready_after=1,
+        required_successes=1,
+        max_attempts=1,
+        log_write_status=19,
+    )
+
+    assert result.returncode != 0
+    assert call_count == 0
+    assert urls == []
 
 
 def test_rollback_requires_distinct_current_and_previous_python_tags() -> None:

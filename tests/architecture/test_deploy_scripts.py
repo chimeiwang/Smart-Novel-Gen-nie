@@ -212,6 +212,7 @@ def _run_deploy(
     rollback_status: int = 0,
     schema_verify_status: int = 0,
     agent_ready_sequence: str = "",
+    agent_log_init_status: int = 0,
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     app_dir = tmp_path / "app"
     bin_dir = tmp_path / "bin"
@@ -274,6 +275,7 @@ def _run_deploy(
         "FAKE_SCHEMA_VERIFY_STATUS": str(schema_verify_status),
         "FAKE_AGENT_READY_COUNTER": _posix_path(agent_counter_path),
         "FAKE_AGENT_READY_SEQUENCE": agent_ready_sequence,
+        "FAKE_AGENT_LOG_INIT_STATUS": str(agent_log_init_status),
         "SMOKE_AGENT_MAX_ATTEMPTS": "1",
         "SMOKE_AGENT_REQUIRED_SUCCESSES": "1",
         "SMOKE_AGENT_POLL_SECONDS": "0",
@@ -361,6 +363,48 @@ def test_successful_deployment_refreshes_nginx_with_new_tag(tmp_path: Path) -> N
         ("tag=new-tag", "全栈"),
         ("tag=new-tag", "Nginx"),
     ]
+
+
+def test_deployment_initializes_agent_log_volume_before_version_switch(
+    tmp_path: Path,
+) -> None:
+    result, log = _run_deploy(tmp_path, previous_state="valid")
+
+    assert result.returncode == 0, result.stderr
+    lines = log.splitlines()
+    create_index = next(
+        index
+        for index, line in enumerate(lines)
+        if "docker volume create inkforge_agent_logs" in line
+    )
+    init_index = next(
+        index
+        for index, line in enumerate(lines)
+        if "docker run --rm --network none --read-only --cap-drop ALL --cap-add CHOWN"
+        in line
+    )
+    up_index = next(
+        index
+        for index, line in enumerate(lines)
+        if line.endswith(" up --no-build -d --wait")
+    )
+    assert create_index < init_index < up_index
+    assert "--user 0:0" in lines[init_index]
+    assert "source=inkforge_agent_logs,target=/data/agent-logs" in lines[init_index]
+    assert "inkforge-agent-service:new-tag chown 10001:10001 /data/agent-logs" in lines[init_index]
+
+
+def test_agent_log_volume_initialization_failure_stops_before_version_switch(
+    tmp_path: Path,
+) -> None:
+    result, log = _run_deploy(
+        tmp_path,
+        previous_state="valid",
+        agent_log_init_status=19,
+    )
+
+    assert result.returncode == 19
+    assert _full_stack_up_lines(log) == []
 
 
 def test_failed_new_version_restores_previous_version_and_keeps_failure(

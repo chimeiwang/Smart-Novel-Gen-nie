@@ -12,6 +12,20 @@ compose() {
   docker compose --env-file .env -f "$compose_file" "$@"
 }
 
+initialize_agent_log_volume() {
+  docker volume create inkforge_agent_logs >/dev/null
+  docker run \
+    --rm \
+    --network none \
+    --read-only \
+    --cap-drop ALL \
+    --cap-add CHOWN \
+    --user 0:0 \
+    --mount type=volume,source=inkforge_agent_logs,target=/data/agent-logs \
+    "inkforge-agent-service:$INKFORGE_IMAGE_TAG" \
+    chown 10001:10001 /data/agent-logs
+}
+
 refresh_nginx() {
   compose up --no-build -d --wait --no-deps --force-recreate nginx
 }
@@ -158,6 +172,7 @@ fi
 docker compose version >/dev/null 2>&1 || { echo "缺少 docker compose" >&2; exit 1; }
 export INKFORGE_IMAGE_TAG
 compose config >/dev/null
+initialize_agent_log_volume
 
 rollback() {
   original_status="$1"

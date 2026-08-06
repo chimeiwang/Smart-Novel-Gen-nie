@@ -30,6 +30,15 @@ def test_compose_keeps_database_out_of_agent_trust_boundary() -> None:
     assert "agent_net" in agent
 
 
+def test_agent_log_volume_initializer_is_not_a_compose_runtime_service() -> None:
+    source = COMPOSE.read_text(encoding="utf-8")
+    agent = _service_block(source, "agent-service")
+
+    assert "agent-logs-init:" not in source
+    assert 'user: "10001:10001"' in agent
+    assert "agent_logs:/data/agent-logs" in agent
+
+
 def test_cancel_uses_postgres_outcome_instead_of_outbox_boundary() -> None:
     cancellation = (
         ROOT

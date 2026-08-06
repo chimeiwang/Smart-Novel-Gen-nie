@@ -74,6 +74,7 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 ## 人工日志
 
 - Agent 日志写入 `/data/agent-logs` 命名卷。
+- 生产部署在版本切换前通过无网络、只挂载日志卷且仅保留 `CHOWN` capability 的一次性初始化容器，把卷根目录所有权设为 `10001:10001`；初始化失败时不得执行 `compose up`。
 - 同一任务恢复运行追加到同一文件。
 - 保存完整模型 messages、模型正文和中文状态切换。
 - 不记录 tools schema、tool_calls、工具参数或工具结果。
@@ -111,7 +112,7 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 - 只存在部分服务、镜像仓库不符合约定、三服务标签不一致或旧镜像任一缺失时，在启动新容器前停止部署并要求人工检查；
 - 三服务标签一致且旧镜像均存在时，才把该标签作为自动回滚目标。
 
-新版本 `compose up --no-build -d --wait`、只读 schema 指纹检查或生产 smoke 任一失败时，脚本自动用上一标签恢复三个服务，并再次执行 Compose 状态、schema 指纹和 smoke 检查。日志出现“新版本部署失败，旧版本已恢复”表示服务已恢复但本次发布仍失败，CI 必须保持非零；出现“自动回滚也失败”表示新旧版本均未通过验收，必须立即人工处理。回滚不得执行 `down -v`、删除卷或镜像、重写 `.env`、现场构建或数据库迁移。
+新版本 `compose up --no-build -d --wait`、只读 schema 指纹检查或生产 smoke 任一失败时，脚本自动用上一标签恢复三个服务，并再次执行 Compose 状态、schema 指纹和 smoke 检查。生产 smoke 必须以正式 Agent 身份在人工日志目录实际创建并删除探针目录；只检查 HTTP readiness 不足以证明写作任务可运行。日志出现“新版本部署失败，旧版本已恢复”表示服务已恢复但本次发布仍失败，CI 必须保持非零；出现“自动回滚也失败”表示新旧版本均未通过验收，必须立即人工处理。回滚不得执行 `down -v`、删除卷或镜像、重写 `.env`、现场构建或数据库迁移。
 
 网络边界：
 
@@ -136,7 +137,7 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 - Agent 队列完成、失败或取消的 job 只在 Redis 保留默认 7 天、最少 24 小时的终态 tombstone；终态时间 ZSET 驱动有界清理，过期后删除 status 和索引，PostgreSQL 继续作为长期幂等事实来源。
 - 升级前缺少终态 ZSET 的旧 status 使用 HSCAN 游标分批回填 tombstone，并清除 ready、processing、payload、lease、attempt 和 score 残留；过期租约缺少 payload 或 score 时原子收敛为 failed，不能留下 running 孤儿。
 - ready ZSET 按优先级分别查询已经到期的成员，未来才可重试的高优先级 job 不得阻塞当前已到期的低优先级 job；同优先级仍按 readyAt 排序。
-- 所有容器使用非 root 用户、只读根文件系统、健康检查和资源上限。
+- 所有常驻容器使用非 root 用户、只读根文件系统、健康检查和资源上限。唯一 root 例外是部署期间的日志卷一次性初始化容器；它不得加入网络、不得接收密钥或业务环境变量，只挂载 `agent_logs`，删除全部 capability 后仅加回 `CHOWN`，成功退出后才能切换版本。
 
 运维必须监控 Redis `used_memory`、`evicted_keys` 和写入被拒绝数量。`evicted_keys` 应持续为 0；内存接近上限或出现写入拒绝时先停止接收新的模型任务并扩容或清理可确认过期的数据，不能临时切回淘汰策略。
 

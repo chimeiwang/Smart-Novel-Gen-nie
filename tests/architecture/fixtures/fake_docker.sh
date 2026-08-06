@@ -16,6 +16,7 @@ if [ "${1:-}" = "compose" ]; then
     *" ps "*) exit 0 ;;
     *" port nginx 8080 "*) printf '%s\n' "${FAKE_NGINX_BINDING:-0.0.0.0:80}"; exit 0 ;;
     *" exec -T core-api python -c "*) exit "${FAKE_SCHEMA_VERIFY_STATUS:-0}" ;;
+    *" exec -T agent-service sh -c "*) exit "${FAKE_AGENT_LOG_WRITE_STATUS:-0}" ;;
     *" exec -T agent-service "*)
       if [ -n "${FAKE_AGENT_READY_COUNTER:-}" ]; then
         count=0
@@ -95,6 +96,12 @@ if [ "${1:-}" = "image" ] && [ "${2:-}" = "inspect" ]; then
     esac
   fi
   exit 0
+fi
+
+if [ "${1:-}" = "run" ]; then
+  case " $* " in
+    *" --cap-add CHOWN "*) exit "${FAKE_AGENT_LOG_INIT_STATUS:-0}" ;;
+  esac
 fi
 
 exit 0
