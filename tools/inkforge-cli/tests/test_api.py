@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 from collections.abc import Callable
 
@@ -11,6 +12,10 @@ from inkforge_cli.api import (
     CoreTransportError,
     SseConnectionError,
 )
+from inkforge_cli.cli import run
+from inkforge_cli.config import MemoryConfigStore, ProfileConfig
+from inkforge_cli.credentials import MemoryCredentialStore
+from inkforge_cli.runtime import CliDependencies
 
 
 def make_client(handler: Callable[[httpx.Request], httpx.Response]) -> CoreApiClient:
@@ -145,3 +150,49 @@ def test_regular_transport_failure_is_wrapped_without_credentials() -> None:
     assert caught.value.code == "CORE_TRANSPORT_ERROR"
     assert "session-cookie" not in str(caught.value)
     assert "session-cookie" not in repr(caught.value)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [b'{"broken":', b"\xff"],
+)
+def test_long_command_maps_invalid_success_json_to_remote_contract_error(
+    body: bytes,
+) -> None:
+    client = make_client(
+        lambda request: httpx.Response(
+            200,
+            content=body,
+            headers={"content-type": "application/json"},
+            request=request,
+        )
+    )
+    config = MemoryConfigStore()
+    config.save(
+        "default",
+        ProfileConfig(origin="http://127.0.0.1:8000", username="tester"),
+    )
+    credentials = MemoryCredentialStore()
+    credentials.set("default", "http://127.0.0.1:8000", "session-cookie")
+    stdout = io.StringIO()
+
+    exit_code = run(
+        ["long.novel.list"],
+        stdin=io.StringIO("{}"),
+        stdout=stdout,
+        stderr=io.StringIO(),
+        dependencies=CliDependencies(
+            api_factory=lambda origin, token=None: client,
+            config_store=config,
+            credential_store=credentials,
+            getpass_fn=lambda prompt: "unused",
+            stdin_isatty=lambda: False,
+        ),
+    )
+
+    output = json.loads(stdout.getvalue())
+    assert exit_code == 5
+    assert output["error"] == {
+        "code": "CORE_RESPONSE_CONTRACT_ERROR",
+        "message": "Core API 成功响应不是有效 JSON",
+    }

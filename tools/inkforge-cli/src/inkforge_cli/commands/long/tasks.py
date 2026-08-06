@@ -2,9 +2,14 @@ from __future__ import annotations
 
 from collections.abc import Generator
 
-from ...api import CoreTransportError, SseConnectionError
+from ...api import (
+    CoreApiError,
+    CoreResponseContractError,
+    CoreTransportError,
+    SseConnectionError,
+)
 from ...json_types import JsonObject
-from ...runtime import CliRuntime, CoreResponseContractError
+from ...runtime import CliRuntime
 from .read import (
     public_id,
     query_fields,
@@ -76,13 +81,16 @@ def watch(
     try:
         while True:
             if needs_status:
+                attempt_started = runtime.dependencies.monotonic_fn()
                 try:
                     snapshot = request_json(runtime, task_path)
-                except CoreTransportError:
+                except (CoreApiError, CoreTransportError) as error:
+                    if not _is_retryable_unavailable(error):
+                        raise
                     now = runtime.dependencies.monotonic_fn()
                     if unreachable_since is None:
-                        unreachable_since = now
-                    elif now - unreachable_since > _UNREACHABLE_TIMEOUT_SECONDS:
+                        unreachable_since = attempt_started
+                    if now - unreachable_since > _UNREACHABLE_TIMEOUT_SECONDS:
                         yield _unreachable_frame(
                             task_id,
                             last_event_id,
@@ -112,6 +120,7 @@ def watch(
                     backoff_after_status = False
 
             received_event = False
+            sse_attempt_started = runtime.dependencies.monotonic_fn()
             try:
                 for raw_event in api.iter_sse(task_id, last_event_id):
                     frame, event_id = _event_frame(raw_event)
@@ -121,6 +130,26 @@ def watch(
                     yield frame
             except SseConnectionError:
                 pass
+            except CoreApiError as error:
+                if not _is_retryable_unavailable(error):
+                    raise
+                unavailable_started = (
+                    runtime.dependencies.monotonic_fn()
+                    if received_event
+                    else sse_attempt_started
+                )
+                if unreachable_since is None:
+                    unreachable_since = unavailable_started
+                if (
+                    runtime.dependencies.monotonic_fn() - unreachable_since
+                    > _UNREACHABLE_TIMEOUT_SECONDS
+                ):
+                    yield _unreachable_frame(
+                        task_id,
+                        last_event_id,
+                        last_snapshot,
+                    )
+                    return 5
 
             if received_event:
                 backoff_index = 0
@@ -143,6 +172,12 @@ def _sleep_with_backoff(runtime: CliRuntime, index: int) -> int:
     delay = _BACKOFF_SECONDS[min(index, len(_BACKOFF_SECONDS) - 1)]
     runtime.dependencies.sleep_fn(delay)
     return min(index + 1, len(_BACKOFF_SECONDS) - 1)
+
+
+def _is_retryable_unavailable(
+    error: CoreApiError | CoreTransportError,
+) -> bool:
+    return isinstance(error, CoreTransportError) or error.status_code >= 500
 
 
 def _outcome_state(snapshot: JsonObject) -> str:

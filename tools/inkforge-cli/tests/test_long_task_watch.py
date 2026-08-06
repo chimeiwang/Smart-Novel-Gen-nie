@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import pytest
-from inkforge_cli.api import CoreTransportError, SseConnectionError
+from inkforge_cli.api import CoreApiError, CoreTransportError, SseConnectionError
 from inkforge_cli.cli import run
 from inkforge_cli.config import MemoryConfigStore, ProfileConfig
 from inkforge_cli.credentials import MemoryCredentialStore
@@ -35,6 +35,9 @@ class WatchApi:
     snapshots: list[object]
     streams: list[list[object]] = field(default_factory=list)
     unreachable_after_snapshots: bool = False
+    transport_failure_delay: float = 0.0
+    sse_failure_delay: float = 0.0
+    clock: FakeClock | None = None
     calls: list[tuple[str, str, dict[str, Any]]] = field(default_factory=list)
 
     def request(self, method: str, path: str, **kwargs: Any) -> Any:
@@ -42,6 +45,9 @@ class WatchApi:
         if self.snapshots:
             result = self.snapshots.pop(0)
         elif self.unreachable_after_snapshots:
+            if self.transport_failure_delay:
+                assert self.clock is not None
+                self.clock.now += self.transport_failure_delay
             result = CoreTransportError()
         else:
             raise AssertionError("测试没有配置下一次 Core 状态响应")
@@ -56,6 +62,9 @@ class WatchApi:
         stream = self.streams.pop(0)
         for item in stream:
             if isinstance(item, BaseException):
+                if self.sse_failure_delay:
+                    assert self.clock is not None
+                    self.clock.now += self.sse_failure_delay
                 raise item
             yield item
 
@@ -297,6 +306,190 @@ def test_watch_exits_after_core_is_continuously_unreachable_for_over_300_seconds
     assert set(call[0] for call in api.calls) == {"GET", "SSE"}
 
 
+def test_watch_counts_a_blocking_failed_status_attempt_toward_timeout() -> None:
+    clock = FakeClock()
+    running = _status("running")
+    api = WatchApi(
+        snapshots=[running],
+        streams=[
+            [
+                {"id": "event-10", "event": "progress", "data": {"step": 10}},
+                SseConnectionError("断线"),
+            ]
+        ],
+        unreachable_after_snapshots=True,
+        transport_failure_delay=301.0,
+        clock=clock,
+    )
+
+    exit_code, frames, _stderr = _invoke(api, clock)
+
+    assert exit_code == 5
+    assert frames[-1]["error"]["code"] == "WATCH_CORE_UNREACHABLE"
+    assert frames[-1]["error"]["lastEventId"] == "event-10"
+    assert clock.sleeps == []
+    assert [call[0] for call in api.calls] == ["GET", "SSE", "GET"]
+
+
+@pytest.mark.parametrize("status_code", [502, 503, 504])
+def test_watch_retries_continuous_status_server_errors_until_budget_expires(
+    status_code: int,
+) -> None:
+    api = WatchApi(
+        snapshots=[
+            CoreApiError(
+                status_code,
+                code=f"HTTP_{status_code}",
+                message="Core 暂时不可用",
+            )
+            for _ in range(50)
+        ]
+    )
+    clock = FakeClock()
+
+    exit_code, frames, _stderr = _invoke(api, clock)
+
+    assert exit_code == 5
+    assert frames == [
+        {
+            "type": "error",
+            "error": {
+                "code": "WATCH_CORE_UNREACHABLE",
+                "message": "Core API 连续不可达超过 300 秒；仅停止观察，服务端任务未取消",
+                "taskId": TASK_ID,
+                "lastEventId": None,
+                "state": None,
+            },
+        }
+    ]
+    assert clock.now > 300.0
+    assert max(clock.sleeps) == 10.0
+
+
+def test_watch_server_error_timeout_preserves_last_cursor_and_state() -> None:
+    running = _status("running")
+    api = WatchApi(
+        snapshots=[
+            running,
+            *[
+                CoreApiError(503, code="HTTP_503", message="Core 暂时不可用")
+                for _ in range(50)
+            ],
+        ],
+        streams=[
+            [
+                {"id": "event-12", "event": "progress", "data": {"step": 12}},
+                SseConnectionError("断线"),
+            ]
+        ],
+    )
+    clock = FakeClock()
+
+    exit_code, frames, _stderr = _invoke(api, clock)
+
+    assert exit_code == 5
+    assert frames[-1]["error"] == {
+        "code": "WATCH_CORE_UNREACHABLE",
+        "message": "Core API 连续不可达超过 300 秒；仅停止观察，服务端任务未取消",
+        "taskId": TASK_ID,
+        "lastEventId": "event-12",
+        "state": "running",
+    }
+
+
+def test_watch_reconciles_and_backs_off_after_sse_handshake_server_error() -> None:
+    initial = _status("running")
+    after_handshake_error = _status("running")
+    terminal = _status("succeeded")
+    api = WatchApi(
+        snapshots=[initial, after_handshake_error, terminal],
+        streams=[
+            [CoreApiError(503, code="HTTP_503", message="SSE 暂时不可用")],
+            [],
+        ],
+    )
+    clock = FakeClock()
+
+    exit_code, frames, _stderr = _invoke(api, clock)
+
+    assert exit_code == 0
+    assert frames == [
+        {"type": "snapshot", "data": initial},
+        {"type": "terminal", "data": terminal},
+    ]
+    assert api.calls == [
+        ("GET", TASK_PATH, {}),
+        ("SSE", TASK_ID, {"lastEventId": None}),
+        ("GET", TASK_PATH, {}),
+        ("SSE", TASK_ID, {"lastEventId": None}),
+        ("GET", TASK_PATH, {}),
+    ]
+    assert clock.sleeps == [0.5]
+
+
+def test_watch_counts_a_blocking_sse_server_error_toward_timeout() -> None:
+    clock = FakeClock()
+    initial = _status("running")
+    api = WatchApi(
+        snapshots=[initial],
+        streams=[
+            [CoreApiError(503, code="HTTP_503", message="SSE 暂时不可用")],
+        ],
+        sse_failure_delay=301.0,
+        clock=clock,
+    )
+
+    exit_code, frames, _stderr = _invoke(api, clock)
+
+    assert exit_code == 5
+    assert frames == [
+        {"type": "snapshot", "data": initial},
+        {
+            "type": "error",
+            "error": {
+                "code": "WATCH_CORE_UNREACHABLE",
+                "message": "Core API 连续不可达超过 300 秒；仅停止观察，服务端任务未取消",
+                "taskId": TASK_ID,
+                "lastEventId": None,
+                "state": "running",
+            },
+        },
+    ]
+    assert clock.sleeps == []
+    assert api.calls == [
+        ("GET", TASK_PATH, {}),
+        ("SSE", TASK_ID, {"lastEventId": None}),
+    ]
+
+
+def test_watch_does_not_retry_non_server_core_errors() -> None:
+    initial = _status("running")
+    api = WatchApi(
+        snapshots=[initial],
+        streams=[
+            [CoreApiError(409, code="TASK_CONFLICT", message="任务冲突")],
+        ],
+    )
+    clock = FakeClock()
+
+    exit_code, frames, _stderr = _invoke(api, clock)
+
+    assert exit_code == 4
+    assert frames == [
+        {"type": "snapshot", "data": initial},
+        {
+            "ok": False,
+            "command": "long.task.watch",
+            "error": {"code": "TASK_CONFLICT", "message": "任务冲突"},
+        },
+    ]
+    assert api.calls == [
+        ("GET", TASK_PATH, {}),
+        ("SSE", TASK_ID, {"lastEventId": None}),
+    ]
+    assert clock.sleeps == []
+
+
 def test_watch_ctrl_c_returns_130_without_cancelling_server_task() -> None:
     running = _status("running")
     api = WatchApi(
@@ -321,6 +514,68 @@ def test_watch_ctrl_c_returns_130_without_cancelling_server_task() -> None:
             "taskId": TASK_ID,
             "lastEventId": "event-7",
         },
+    }
+    assert api.calls == [
+        ("GET", TASK_PATH, {}),
+        ("SSE", TASK_ID, {"lastEventId": None}),
+    ]
+
+
+class InterruptingStdout(io.StringIO):
+    def __init__(self, operation: str) -> None:
+        super().__init__()
+        self.operation = operation
+        self.write_calls = 0
+        self.flush_calls = 0
+
+    def write(self, value: str) -> int:
+        self.write_calls += 1
+        if self.operation == "write" and self.write_calls == 2:
+            raise KeyboardInterrupt
+        return super().write(value)
+
+    def flush(self) -> None:
+        self.flush_calls += 1
+        if self.operation == "flush" and self.flush_calls == 2:
+            raise KeyboardInterrupt
+        super().flush()
+
+
+@pytest.mark.parametrize(
+    ("operation", "expected_frame_types"),
+    [
+        ("write", ["snapshot", "error"]),
+        ("flush", ["snapshot", "event", "error"]),
+    ],
+)
+def test_watch_routes_stdout_interrupt_back_into_generator(
+    operation: str,
+    expected_frame_types: list[str],
+) -> None:
+    api = WatchApi(
+        snapshots=[_status("running")],
+        streams=[
+            [{"id": "event-11", "event": "progress", "data": {"step": 11}}]
+        ],
+    )
+    stdout = InterruptingStdout(operation)
+
+    exit_code = run(
+        ["long.task.watch"],
+        stdin=io.StringIO(json.dumps({"taskId": TASK_ID}, ensure_ascii=False)),
+        stdout=stdout,
+        stderr=io.StringIO(),
+        dependencies=_dependencies(api, FakeClock()),
+    )
+
+    frames = [json.loads(line) for line in stdout.getvalue().splitlines()]
+    assert exit_code == 130
+    assert [frame["type"] for frame in frames] == expected_frame_types
+    assert frames[-1]["error"] == {
+        "code": "WATCH_INTERRUPTED",
+        "message": "仅停止观察，服务端任务未取消",
+        "taskId": TASK_ID,
+        "lastEventId": "event-11",
     }
     assert api.calls == [
         ("GET", TASK_PATH, {}),

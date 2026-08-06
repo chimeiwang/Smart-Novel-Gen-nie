@@ -3,11 +3,18 @@ from __future__ import annotations
 import getpass
 import json
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, TextIO, cast
 
-from .api import CoreApiClient, CoreApiError, CoreTransportError
+from .api import (
+    CoreApiClient,
+    CoreApiError,
+    CoreTransportError,
+)
+from .api import (
+    CoreResponseContractError as CoreResponseContractError,
+)
 from .config import ConfigStore, JsonConfigStore
 from .credentials import CredentialStore, KeyringCredentialStore
 from .io import write_bytes
@@ -50,15 +57,6 @@ class CliInputError(RuntimeError):
 
 class RuntimeContractError(RuntimeError):
     pass
-
-
-class CoreResponseContractError(CoreApiError):
-    def __init__(self, message: str) -> None:
-        super().__init__(
-            502,
-            code="CORE_RESPONSE_CONTRACT_ERROR",
-            message=message,
-        )
 
 
 class LocalFileError(OSError):
@@ -282,7 +280,27 @@ def emit_command_result(
             return exit_code
         if not isinstance(frame, dict) or not _is_json_object(frame):
             raise RuntimeContractError(f"命令 {spec.name} 输出了非 JSON 对象帧")
-        write_json_line(stdout, frame)
+        try:
+            write_json_line(stdout, frame)
+        except KeyboardInterrupt as interrupt:
+            if spec.name != "long.task.watch" or not isinstance(result, Generator):
+                raise
+            try:
+                interrupted_frame = result.throw(interrupt)
+            except StopIteration as terminal:
+                exit_code = terminal.value
+                if type(exit_code) is not int:
+                    raise RuntimeContractError(
+                        f"命令 {spec.name} 的 JSONL 生成器必须显式返回整数退出码"
+                    ) from terminal
+                return exit_code
+            if not isinstance(interrupted_frame, dict) or not _is_json_object(
+                interrupted_frame
+            ):
+                raise RuntimeContractError(
+                    f"命令 {spec.name} 输出了非 JSON 对象帧"
+                ) from interrupt
+            write_json_line(stdout, interrupted_frame)
 
 
 def _is_long_command(spec: CommandSpec | None) -> bool:

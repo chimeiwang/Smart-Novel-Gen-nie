@@ -43,6 +43,15 @@ class CoreApiError(RuntimeError):
         super().__init__(message)
 
 
+class CoreResponseContractError(CoreApiError):
+    def __init__(self, message: str) -> None:
+        super().__init__(
+            502,
+            code="CORE_RESPONSE_CONTRACT_ERROR",
+            message=message,
+        )
+
+
 class CoreApiClient:
     def __init__(
         self,
@@ -109,6 +118,15 @@ class CoreApiClient:
             request_id=request_id,
         )
 
+    @staticmethod
+    def _parse_success_json(response: httpx.Response) -> Any:
+        try:
+            return response.json()
+        except (UnicodeError, ValueError) as exc:
+            raise CoreResponseContractError(
+                "Core API 成功响应不是有效 JSON"
+            ) from exc
+
     def request(
         self,
         method: str,
@@ -129,7 +147,7 @@ class CoreApiClient:
         self._raise_for_status(response)
         if response.status_code == 204 or not response.content:
             return {}
-        return response.json()
+        return self._parse_success_json(response)
 
     def login(self, username: str, password: str) -> tuple[dict[str, Any], str]:
         try:
@@ -147,7 +165,7 @@ class CoreApiClient:
                 code="LOGIN_COOKIE_MISSING",
                 message="登录成功响应缺少 inkforge-token Cookie",
             )
-        payload = response.json()
+        payload = self._parse_success_json(response)
         if not isinstance(payload, dict):
             raise CoreApiError(
                 500,
