@@ -733,6 +733,173 @@ async def test_old_generation_failure_is_rejected_without_changing_new_pending(
 
 
 @pytest.mark.asyncio
+async def test_success_callback_preserves_generation_and_replays_without_replacing_chunks(
+    tmp_path: Path,
+) -> None:
+    engine, factory = await _create_database(tmp_path / "success-terminal-generation.db")
+    try:
+        await _seed_novels(factory)
+        repository = ReferenceRepository(factory)
+        created = await repository.create_reference(
+            "novel-1",
+            "user-1",
+            "reference-success-terminal",
+            _fields(),
+            index_enabled=True,
+        )
+        task_id, run_id = await _rag_identity(
+            created["id"], created["contentHash"], created["indexGeneration"]
+        )
+
+        completed = await repository.replace_index(
+            "novel-1",
+            created["id"],
+            task_id,
+            run_id,
+            created["contentHash"],
+            [[1.0]],
+        )
+        assert completed["ragStatus"] == "ready"
+        async with factory() as session:
+            generation = await session.scalar(
+                select(RagDocument.updatedAt).where(
+                    RagDocument.sourceId == created["id"]
+                )
+            )
+            first_chunk_ids = list(
+                await session.scalars(select(RagChunk.id))
+            )
+        assert generation == created["indexGeneration"].replace(tzinfo=None)
+        assert len(first_chunk_ids) == 1
+
+        replayed = await repository.replace_index(
+            "novel-1",
+            created["id"],
+            task_id,
+            run_id,
+            created["contentHash"],
+            [[1.0]],
+        )
+        assert replayed["ragStatus"] == "ready"
+        async with factory() as session:
+            replay_generation = await session.scalar(
+                select(RagDocument.updatedAt).where(
+                    RagDocument.sourceId == created["id"]
+                )
+            )
+            replay_chunk_ids = list(
+                await session.scalars(select(RagChunk.id))
+            )
+        assert replay_generation == generation
+        assert replay_chunk_ids == first_chunk_ids
+
+        with pytest.raises(ApiError) as conflicting_failure:
+            await repository.mark_index_failed(
+                "novel-1",
+                created["id"],
+                task_id,
+                run_id,
+                created["contentHash"],
+                "索引生成失败",
+            )
+        assert conflicting_failure.value.code == "RAG_INDEX_TERMINAL_CONFLICT"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_failure_callback_preserves_generation_and_replays_without_mutation(
+    tmp_path: Path,
+) -> None:
+    engine, factory = await _create_database(tmp_path / "failure-terminal-generation.db")
+    try:
+        await _seed_novels(factory)
+        repository = ReferenceRepository(factory)
+        created = await repository.create_reference(
+            "novel-1",
+            "user-1",
+            "reference-failure-terminal",
+            _fields(),
+            index_enabled=True,
+        )
+        task_id, run_id = await _rag_identity(
+            created["id"], created["contentHash"], created["indexGeneration"]
+        )
+
+        await repository.mark_index_failed(
+            "novel-1",
+            created["id"],
+            task_id,
+            run_id,
+            created["contentHash"],
+            "索引生成失败",
+        )
+        await repository.mark_index_failed(
+            "novel-1",
+            created["id"],
+            task_id,
+            run_id,
+            created["contentHash"],
+            "索引生成失败",
+        )
+        async with factory() as session:
+            document = await session.scalar(
+                select(RagDocument).where(RagDocument.sourceId == created["id"])
+            )
+            chunk_count = await session.scalar(select(func.count()).select_from(RagChunk))
+        assert document is not None
+        assert document.status == "failed"
+        assert document.updatedAt == created["indexGeneration"].replace(tzinfo=None)
+        assert chunk_count == 0
+
+        with pytest.raises(ApiError) as conflicting_success:
+            await repository.replace_index(
+                "novel-1",
+                created["id"],
+                task_id,
+                run_id,
+                created["contentHash"],
+                [[1.0]],
+            )
+        assert conflicting_success.value.code == "RAG_INDEX_TERMINAL_CONFLICT"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_terminal_preserves_generation_on_replay(tmp_path: Path) -> None:
+    engine, factory = await _create_database(tmp_path / "dispatcher-terminal-generation.db")
+    try:
+        await _seed_novels(factory)
+        repository = ReferenceRepository(factory)
+        created = await repository.create_reference(
+            "novel-1",
+            "user-1",
+            "reference-dispatcher-terminal",
+            _fields(),
+            index_enabled=True,
+        )
+
+        for _ in range(2):
+            await repository.mark_rag_dispatch_terminal(
+                "novel-1",
+                created["id"],
+                created["contentHash"],
+                created["indexGeneration"],
+                "cancelled",
+            )
+        async with factory() as session:
+            document = await session.scalar(
+                select(RagDocument).where(RagDocument.sourceId == created["id"])
+            )
+        assert document is not None
+        assert document.status == "failed"
+        assert document.updatedAt == created["indexGeneration"].replace(tzinfo=None)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_reference_batch_rolls_back_all_reference_items_on_later_conflict(
     tmp_path: Path,
 ) -> None:

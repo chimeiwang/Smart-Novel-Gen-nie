@@ -55,11 +55,24 @@ def test_any_stale_hash_combination_is_rejected_before_mutation(
     assert caught.value.code == "RAG_INDEX_STALE"
 
 
-@pytest.mark.parametrize("status", ["ready", "failed"])
-def test_old_failure_callback_cannot_overwrite_terminal_index_state(status: str) -> None:
+def test_failure_callback_cannot_overwrite_ready_index_state() -> None:
     with pytest.raises(ApiError) as caught:
-        ReferenceRepository._require_failure_target(document(content_sha256("正文"), status))
-    assert caught.value.code == "RAG_INDEX_STALE"
+        ReferenceRepository._require_failure_target(
+            document(content_sha256("正文"), "ready")
+        )
+    assert caught.value.code == "RAG_INDEX_TERMINAL_CONFLICT"
+
+
+def test_failure_callback_replay_accepts_failed_index_state() -> None:
+    assert not ReferenceRepository._require_failure_target(
+        document(content_sha256("正文"), "failed")
+    )
+
+
+def test_failure_callback_accepts_pending_index_state() -> None:
+    assert ReferenceRepository._require_failure_target(
+        document(content_sha256("正文"), "disabled")
+    )
 
 
 def test_dispatch_terminal_only_matches_current_waiting_content() -> None:

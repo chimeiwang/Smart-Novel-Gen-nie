@@ -453,6 +453,10 @@ class ReferenceRepository:
                     task_id,
                     run_id,
                 )
+                if document.status == "ready":
+                    return self._dto(reference, document.status, document)
+                if document.status == "failed":
+                    raise self._terminal_conflict()
                 chunks = validate_chunk_capacity(chunk_text_losslessly(reference.content))
                 if chunks:
                     normalized = normalize_embeddings(embeddings)
@@ -488,6 +492,7 @@ class ReferenceRepository:
                 document.status = "ready"
                 document.errorMessage = None
                 document.contentHash = content_sha256(reference.content)
+                flag_modified(document, "updatedAt")
                 result = self._dto(reference, document.status, document)
         return result
 
@@ -545,9 +550,11 @@ class ReferenceRepository:
                     task_id,
                     run_id,
                 )
-                self._require_failure_target(document)
+                if not self._require_failure_target(document):
+                    return
                 document.status = "failed"
                 document.errorMessage = message
+                flag_modified(document, "updatedAt")
 
     async def mark_rag_dispatch_terminal(
         self,
@@ -570,6 +577,7 @@ class ReferenceRepository:
                     return
                 document.status = "failed"
                 document.errorMessage = f"智能体索引任务已终止：{agent_status}"
+                flag_modified(document, "updatedAt")
 
     async def search(
         self, novel_id: str, user_id: str, embedding: list[float], top_k: int
@@ -704,9 +712,12 @@ class ReferenceRepository:
             raise cls._stale_index()
 
     @classmethod
-    def _require_failure_target(cls, document: RagDocument) -> None:
-        if document.status != "disabled":
-            raise cls._stale_index()
+    def _require_failure_target(cls, document: RagDocument) -> bool:
+        if document.status == "failed":
+            return False
+        if document.status == "ready":
+            raise cls._terminal_conflict()
+        return True
 
     @staticmethod
     def _matches_pending_dispatch(
@@ -766,4 +777,12 @@ class ReferenceRepository:
             status_code=409,
             code="RAG_INDEX_STALE",
             message="参考资料内容已变化，拒绝写入过期索引结果",
+        )
+
+    @staticmethod
+    def _terminal_conflict() -> ApiError:
+        return ApiError(
+            status_code=409,
+            code="RAG_INDEX_TERMINAL_CONFLICT",
+            message="索引任务已进入其他终态",
         )
