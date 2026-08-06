@@ -166,6 +166,18 @@ def test_relationship_command_specs_have_exact_identity_contracts() -> None:
             f"/api/v1/novels/novel-1/experiences/{quote('experience/一', safe='')}",
             {"expectedUpdatedAt": "2026-08-07T00:00:00Z"},
         ),
+        (
+            "long.lore.experience.update",
+            {
+                "novelId": "novel-1",
+                "experienceId": "experience-1",
+                "expectedUpdatedAt": "2026-08-07T00:00:00Z",
+                "data": {"chapterId": None},
+            },
+            "PATCH",
+            "/api/v1/novels/novel-1/experiences/experience-1",
+            {"chapterId": None, "expectedUpdatedAt": "2026-08-07T00:00:00Z"},
+        ),
     ],
 )
 def test_relationship_commands_send_exact_public_requests(
@@ -339,6 +351,148 @@ def test_unknown_fields_are_rejected_without_requests(
     module = _module()
     spec = _spec(module, command)
     api = RecordingApi()
+
+    with pytest.raises(CliInputError):
+        spec.handler(_runtime(spec, api), payload)
+
+    assert api.calls == []
+
+
+@pytest.mark.parametrize(
+    ("command", "payload"),
+    [
+        (
+            "long.lore.relation.create",
+            {
+                "novelId": "novel-1",
+                "clientRequestId": "stable-relation-create-0001",
+                "data": {
+                    "characterId": "character-1",
+                    "targetId": "target-1",
+                    "relationType": "not-a-relation",
+                },
+            },
+        ),
+        (
+            "long.lore.relation.create",
+            {
+                "novelId": "novel-1",
+                "clientRequestId": "stable-relation-create-0001",
+                "data": {
+                    "characterId": "character-1",
+                    "targetId": "target-1",
+                    "relationType": "friend",
+                    "intimacy": True,
+                },
+            },
+        ),
+        (
+            "long.lore.relation.update",
+            {
+                "novelId": "novel-1",
+                "relationId": "relation-1",
+                "expectedUpdatedAt": "2026-08-07T00:00:00Z",
+                "data": {"intimacy": 101},
+            },
+        ),
+        (
+            "long.lore.relation.update",
+            {
+                "novelId": "novel-1",
+                "relationId": "relation-1",
+                "expectedUpdatedAt": "2026-08-07T00:00:00Z",
+                "data": {"description": 7},
+            },
+        ),
+        (
+            "long.lore.relation.create",
+            {
+                "novelId": "novel-1",
+                "clientRequestId": "x" * 257,
+                "data": {
+                    "characterId": "character-1",
+                    "targetId": "target-1",
+                    "relationType": "friend",
+                },
+            },
+        ),
+        (
+            "long.lore.experience.create",
+            {
+                "novelId": "novel-1",
+                "characterId": "character-1",
+                "clientRequestId": "stable-experience-create-01",
+                "data": {"content": None},
+            },
+        ),
+        (
+            "long.lore.experience.create",
+            {
+                "novelId": "novel-1",
+                "characterId": "character-1",
+                "clientRequestId": "stable-experience-create-01",
+                "data": {"content": "valid", "order": "first"},
+            },
+        ),
+        (
+            "long.lore.experience.update",
+            {
+                "novelId": "novel-1",
+                "experienceId": "experience-1",
+                "expectedUpdatedAt": "2026-08-07T00:00:00Z",
+                "data": {"order": False},
+            },
+        ),
+        (
+            "long.lore.experience.update",
+            {
+                "novelId": "novel-1",
+                "experienceId": "experience-1",
+                "expectedUpdatedAt": "2026-08-07T00:00:00Z",
+                "data": {"chapterId": 7},
+            },
+        ),
+    ],
+)
+def test_business_field_types_and_ranges_are_rejected_before_http(
+    command: str,
+    payload: dict[str, Any],
+) -> None:
+    module = _module()
+    spec = _spec(module, command)
+    api = RecordingApi()
+
+    with pytest.raises(CliInputError):
+        spec.handler(_runtime(spec, api), payload)
+
+    assert api.calls == []
+
+
+@pytest.mark.parametrize(
+    ("command", "data"),
+    [
+        ("long.lore.relation.update", {"relationType": None}),
+        ("long.lore.relation.update", {"intimacy": None}),
+        ("long.lore.experience.update", {"content": None}),
+        ("long.lore.experience.update", {"order": None}),
+    ],
+)
+def test_required_update_fields_reject_null_before_http(
+    command: str,
+    data: dict[str, Any],
+) -> None:
+    module = _module()
+    spec = _spec(module, command)
+    api = RecordingApi()
+    resource_id_field = (
+        "relationId" if command == "long.lore.relation.update" else "experienceId"
+    )
+    payload = {
+        "novelId": "novel-1",
+        resource_id_field: "resource-1",
+        "expectedUpdatedAt": "2026-08-07T00:00:00Z",
+        "data": data,
+    }
 
     with pytest.raises(CliInputError):
         spec.handler(_runtime(spec, api), payload)

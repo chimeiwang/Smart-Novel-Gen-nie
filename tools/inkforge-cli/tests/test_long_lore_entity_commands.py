@@ -365,6 +365,43 @@ def test_business_field_type_and_create_requirements_fail_before_request(
     assert api.calls == []
 
 
+@pytest.mark.parametrize(
+    ("command", "id_field", "business_field"),
+    [
+        ("long.lore.character.update", "characterId", "name"),
+        ("long.lore.character.update", "characterId", "currentStatus"),
+        ("long.lore.location.update", "locationId", "name"),
+        ("long.lore.faction.update", "factionId", "name"),
+        ("long.lore.item.update", "itemId", "name"),
+        ("long.lore.glossary.update", "glossaryId", "term"),
+        ("long.lore.glossary.update", "glossaryId", "definition"),
+    ],
+)
+def test_update_rejects_required_business_field_null_without_request(
+    command: str,
+    id_field: str,
+    business_field: str,
+) -> None:
+    module = _module()
+    spec = _spec(module, command)
+    api = RecordingApi()
+
+    with pytest.raises(CliInputError) as caught:
+        spec.handler(
+            _runtime(spec, api),
+            {
+                "novelId": "novel-1",
+                id_field: "entity-1",
+                "expectedUpdatedAt": "v1",
+                "data": {business_field: None},
+            },
+        )
+
+    assert caught.value.code == "INVALID_DATA_FIELD"
+    assert command_exit_code(spec, caught.value) == 2
+    assert api.calls == []
+
+
 def test_glossary_definition_preserves_core_empty_string_semantics() -> None:
     module = _module()
     spec = _spec(module, "long.lore.glossary.create")

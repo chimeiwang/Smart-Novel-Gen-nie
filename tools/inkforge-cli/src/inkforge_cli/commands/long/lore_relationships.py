@@ -3,6 +3,7 @@ from __future__ import annotations
 from ...json_types import JsonObject
 from ...registry import CommandSpec, FileOutputSpec
 from ...runtime import (
+    CliInputError,
     CliRuntime,
     ensure_command_json_result,
     require_client_request_id,
@@ -32,6 +33,106 @@ _RELATION_UPDATE_FIELDS = frozenset({
     "endDate",
 })
 _EXPERIENCE_FIELDS = frozenset({"chapterId", "content", "order"})
+_RELATION_TYPES = frozenset({
+    "family",
+    "master_student",
+    "friend",
+    "enemy",
+    "ally",
+    "lover",
+    "rival",
+    "subordinate",
+    "acquaintance",
+    "other",
+})
+_RELATION_NULLABLE_STRING_FIELDS = frozenset({
+    "description",
+    "startDate",
+    "endDate",
+})
+
+
+def _require_create_request_id(payload: JsonObject) -> str:
+    value = require_client_request_id(payload)
+    if len(value) > 256:
+        raise CliInputError(
+            "CLIENT_REQUEST_ID_REQUIRED",
+            "clientRequestId 长度必须在 16 到 256 个字符之间",
+        )
+    return value
+
+
+def _require_nullable_string(data: JsonObject, field: str) -> None:
+    value = data[field]
+    if value is not None and not isinstance(value, str):
+        raise CliInputError(
+            "INVALID_DATA_FIELD",
+            f"data.{field} 必须是字符串或 null",
+        )
+
+
+def _require_nullable_integer(data: JsonObject, field: str) -> int | None:
+    value = data[field]
+    if value is not None and (isinstance(value, bool) or not isinstance(value, int)):
+        raise CliInputError(
+            "INVALID_DATA_FIELD",
+            f"data.{field} 必须是整数或 null",
+        )
+    return value
+
+
+def _validate_relation_data(data: JsonObject, *, creating: bool) -> None:
+    if creating:
+        require_string(data, "characterId")
+        require_string(data, "targetId")
+
+    if "relationType" in data:
+        relation_type = data["relationType"]
+        if not isinstance(relation_type, str) or relation_type not in _RELATION_TYPES:
+            raise CliInputError(
+                "INVALID_DATA_FIELD",
+                "data.relationType 不是受支持的关系类型",
+            )
+    elif creating:
+        raise CliInputError("FIELD_REQUIRED", "data 缺少字段 relationType")
+
+    if "intimacy" in data:
+        intimacy = _require_nullable_integer(data, "intimacy")
+        if intimacy is None:
+            raise CliInputError(
+                "INVALID_DATA_FIELD",
+                "data.intimacy 不能为 null",
+            )
+        if intimacy is not None and not 0 <= intimacy <= 100:
+            raise CliInputError(
+                "INVALID_DATA_FIELD",
+                "data.intimacy 必须在 0 到 100 之间",
+            )
+
+    for field in _RELATION_NULLABLE_STRING_FIELDS & data.keys():
+        _require_nullable_string(data, field)
+
+
+def _validate_experience_data(data: JsonObject, *, creating: bool) -> None:
+    if creating:
+        require_string(data, "content", allow_empty=True)
+    elif "content" in data:
+        _require_nullable_string(data, "content")
+        if data["content"] is None:
+            raise CliInputError(
+                "INVALID_DATA_FIELD",
+                "data.content 不能为 null",
+            )
+
+    if "chapterId" in data:
+        _require_nullable_string(data, "chapterId")
+    if "order" in data:
+        order = _require_nullable_integer(data, "order")
+        if order is None and not creating:
+            raise CliInputError(
+                "INVALID_DATA_FIELD",
+                "data.order 不能为 null",
+            )
 
 
 def _novel_path(payload: JsonObject) -> str:
@@ -44,13 +145,11 @@ def create_relation(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
         required=frozenset({"novelId", "clientRequestId", "data"}),
     )
     data = require_data_fields(payload, allowed=_RELATION_CREATE_FIELDS)
-    require_string(data, "characterId")
-    require_string(data, "targetId")
-    require_string(data, "relationType")
+    _validate_relation_data(data, creating=True)
     response = runtime.require_api().request(
         "POST",
         f"{_novel_path(payload)}/relations",
-        json={**data, "clientRequestId": require_client_request_id(payload)},
+        json={**data, "clientRequestId": _require_create_request_id(payload)},
     )
     return ensure_command_json_result(response)
 
@@ -66,6 +165,7 @@ def update_relation(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
         }),
     )
     data = require_data_fields(payload, allowed=_RELATION_UPDATE_FIELDS)
+    _validate_relation_data(data, creating=False)
     relation_id = encode_path_id(require_string(payload, "relationId"))
     response = runtime.require_api().request(
         "PATCH",
@@ -111,12 +211,12 @@ def create_experience(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
         }),
     )
     data = require_data_fields(payload, allowed=_EXPERIENCE_FIELDS)
-    require_string(data, "content", allow_empty=True)
+    _validate_experience_data(data, creating=True)
     character_id = encode_path_id(require_string(payload, "characterId"))
     response = runtime.require_api().request(
         "POST",
         f"{_novel_path(payload)}/characters/{character_id}/experiences",
-        json={**data, "clientRequestId": require_client_request_id(payload)},
+        json={**data, "clientRequestId": _require_create_request_id(payload)},
     )
     return ensure_command_json_result(response)
 
@@ -132,6 +232,7 @@ def update_experience(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
         }),
     )
     data = require_data_fields(payload, allowed=_EXPERIENCE_FIELDS)
+    _validate_experience_data(data, creating=False)
     experience_id = encode_path_id(require_string(payload, "experienceId"))
     response = runtime.require_api().request(
         "PATCH",

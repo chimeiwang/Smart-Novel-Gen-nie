@@ -66,6 +66,7 @@ class ResourceSpec:
     id_field: str
     business_fields: frozenset[str]
     create_required_fields: frozenset[str]
+    non_nullable_fields: frozenset[str]
 
 
 ENTITY_RESOURCES: dict[str, ResourceSpec] = {
@@ -74,11 +75,13 @@ ENTITY_RESOURCES: dict[str, ResourceSpec] = {
         "characterId",
         CHARACTER_FIELDS,
         frozenset({"name"}),
+        frozenset({"name", "currentStatus"}),
     ),
     "location": ResourceSpec(
         "locations",
         "locationId",
         LOCATION_FIELDS,
+        frozenset({"name"}),
         frozenset({"name"}),
     ),
     "faction": ResourceSpec(
@@ -86,17 +89,20 @@ ENTITY_RESOURCES: dict[str, ResourceSpec] = {
         "factionId",
         FACTION_FIELDS,
         frozenset({"name"}),
+        frozenset({"name"}),
     ),
     "item": ResourceSpec(
         "items",
         "itemId",
         ITEM_FIELDS,
         frozenset({"name"}),
+        frozenset({"name"}),
     ),
     "glossary": ResourceSpec(
         "glossary",
         "glossaryId",
         GLOSSARY_FIELDS,
+        frozenset({"term", "definition"}),
         frozenset({"term", "definition"}),
     ),
 }
@@ -135,15 +141,10 @@ def _validate_business_data(
 
     for field, value in data.items():
         if value is None:
-            if creating and field in resource.create_required_fields:
+            if field in resource.non_nullable_fields:
                 raise CliInputError(
                     "INVALID_DATA_FIELD",
                     f"data.{field} 不能为 null",
-                )
-            if creating and field == "currentStatus":
-                raise CliInputError(
-                    "INVALID_DATA_FIELD",
-                    "data.currentStatus 不能为 null",
                 )
             continue
         if not isinstance(value, str):
