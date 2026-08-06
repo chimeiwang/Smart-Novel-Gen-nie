@@ -13,8 +13,6 @@ from inkforge_core.outlines.service import OutlineService
 def test_every_outline_mutation_uses_transaction_and_owner_recheck() -> None:
     for name in ("upsert_outline", "upsert_plot", "create_node", "update_node", "delete_node"):
         source = inspect.getsource(getattr(OutlineRepository, name))
-        if name == "upsert_plot":
-            source = inspect.getsource(OutlineRepository._upsert_singleton)
         assert "session.begin()" in source
         assert "_require_owner" in source
 
@@ -29,6 +27,7 @@ def test_outline_save_checks_safe_precondition_before_content_equality() -> None
 def test_outline_mutations_take_novel_level_row_and_advisory_lock() -> None:
     for name in (
         "upsert_outline",
+        "upsert_plot",
         "create_node",
         "update_node",
         "delete_node",
@@ -40,6 +39,21 @@ def test_outline_mutations_take_novel_level_row_and_advisory_lock() -> None:
     assert "with_for_update" in lock_source
     assert "pg_advisory_xact_lock(:key)" in lock_source
     assert "sha256" in lock_source
+
+
+def test_plot_progress_uses_locked_explicit_cas_before_idempotency_check() -> None:
+    source = inspect.getsource(OutlineRepository.upsert_plot)
+
+    assert "select(PlotProgress)" in source
+    assert "with_for_update()" in source
+    assert "require_expected_updated_at(" in source
+    assert 'code="PLOT_PROGRESS_VERSION_CONFLICT"' in source
+    assert "next_utc_timestamp(" in source
+    assert source.index("require_expected_updated_at(") < source.index(
+        "if any("
+    )
+    assert "_upsert_singleton" not in source
+    assert "pg_insert" not in source
 
 
 def test_node_update_and_delete_are_scoped_by_id_and_novel() -> None:

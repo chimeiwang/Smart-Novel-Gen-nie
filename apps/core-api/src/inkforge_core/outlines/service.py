@@ -24,7 +24,11 @@ class OutlineRepositoryPort(Protocol):
         expected_updated_at: datetime,
     ) -> dict[str, Any]: ...
     async def upsert_plot(
-        self, novel_id: str, user_id: str, fields: dict[str, Any]
+        self,
+        novel_id: str,
+        user_id: str,
+        fields: dict[str, Any],
+        expected_updated_at: datetime | None,
     ) -> dict[str, Any]: ...
     async def create_node(
         self, novel_id: str, user_id: str, fields: dict[str, Any]
@@ -66,7 +70,12 @@ class OutlineService:
     async def save_plot(
         self, user_id: str, novel_id: str, body: PlotProgressRequest
     ) -> dict[str, Any]:
-        return await self._repository.upsert_plot(novel_id, user_id, body.model_dump())
+        return await self._repository.upsert_plot(
+            novel_id,
+            user_id,
+            body.model_dump(exclude={"expectedUpdatedAt"}),
+            body.expectedUpdatedAt,
+        )
 
     async def list_nodes(self, user_id: str, novel_id: str) -> list[dict[str, Any]]:
         return await self._repository.list_nodes(novel_id, user_id)

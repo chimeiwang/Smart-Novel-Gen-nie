@@ -5,10 +5,10 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from sqlalchemy import delete, select, text, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ..concurrency import next_utc_timestamp, require_expected_updated_at
 from ..db.base import utc_now
 from ..db.models import Chapter, Foreshadowing, Novel, Outline, OutlineNode, PlotProgress
 from ..errors import ApiError
@@ -156,9 +156,47 @@ class OutlineRepository:
         return result
 
     async def upsert_plot(
-        self, novel_id: str, user_id: str, fields: dict[str, Any]
+        self,
+        novel_id: str,
+        user_id: str,
+        fields: dict[str, Any],
+        expected_updated_at: datetime | None,
     ) -> dict[str, Any]:
-        return await self._upsert_singleton(novel_id, user_id, PlotProgress, fields)
+        async with self._session_factory() as session:
+            async with session.begin():
+                await self._require_owner(session, novel_id, user_id)
+                await self._lock_novel(session, novel_id, user_id)
+                value = await session.scalar(
+                    select(PlotProgress)
+                    .where(PlotProgress.novelId == novel_id)
+                    .with_for_update()
+                )
+                current_updated_at = value.updatedAt if value is not None else None
+                require_expected_updated_at(
+                    current_updated_at,
+                    expected_updated_at,
+                    code="PLOT_PROGRESS_VERSION_CONFLICT",
+                )
+                if value is None:
+                    created_at = _database_utc(next_utc_timestamp(None))
+                    value = PlotProgress(
+                        novelId=novel_id,
+                        **fields,
+                        updatedAt=created_at,
+                    )
+                    session.add(value)
+                    await session.flush()
+                elif any(
+                    getattr(value, name) != requested
+                    for name, requested in fields.items()
+                ):
+                    for name, requested in fields.items():
+                        setattr(value, name, requested)
+                    value.updatedAt = _database_utc(
+                        next_utc_timestamp(current_updated_at)
+                    )
+                    await session.flush()
+                return _dict(value)
 
     async def create_node(
         self, novel_id: str, user_id: str, fields: dict[str, Any]
@@ -321,25 +359,6 @@ class OutlineRepository:
                             )
                         client_ids[client_key] = value.id
 
-    async def _upsert_singleton(
-        self,
-        novel_id: str,
-        user_id: str,
-        model: type[Any],
-        fields: dict[str, Any],
-    ) -> dict[str, Any]:
-        async with self._session_factory() as session:
-            async with session.begin():
-                await self._require_owner(session, novel_id, user_id)
-                statement = (
-                    pg_insert(model)
-                    .values(novelId=novel_id, **fields)
-                    .on_conflict_do_update(index_elements=[model.novelId], set_=fields)
-                    .returning(model)
-                )
-                value = (await session.scalars(statement)).one()
-                return _dict(value)
-
     @staticmethod
     async def _require_owner(session: AsyncSession, novel_id: str, user_id: str) -> None:
         owner = await session.scalar(select(Novel.userId).where(Novel.id == novel_id))
@@ -416,6 +435,10 @@ def _required_updated_at(value: datetime | None) -> datetime:
     if value is None:
         raise RuntimeError("大纲更新时间缺失")
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _database_utc(value: datetime) -> datetime:
+    return value.astimezone(UTC).replace(tzinfo=None)
 
 
 def _next_updated_at(current: datetime) -> datetime:

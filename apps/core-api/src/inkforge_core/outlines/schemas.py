@@ -55,11 +55,15 @@ class UpdateOutlineNodeRequest(StrictModel):
     chapterEndOrder: int | None = None
 
 
-class PlotProgressRequest(StrictModel):
+class PlotProgressFields(StrictModel):
     currentStage: str
     currentGoal: str | None = None
     currentConflict: str | None = None
     nextMilestone: str | None = None
+
+
+class PlotProgressRequest(PlotProgressFields):
+    expectedUpdatedAt: JsonDatetime | None
 
 
 class CreateForeshadowingRequest(StrictModel):
@@ -94,7 +98,7 @@ class OutlineNodeResponse(CreateOutlineNodeRequest):
     updatedAt: datetime
 
 
-class PlotProgressResponse(PlotProgressRequest):
+class PlotProgressResponse(PlotProgressFields):
     id: str
     updatedAt: datetime
 
