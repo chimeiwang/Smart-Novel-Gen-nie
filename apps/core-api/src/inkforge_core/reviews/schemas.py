@@ -86,6 +86,7 @@ class ArtifactSelectionRef(ReviewSchema):
 
 class ReviewArtifactDecisionRequest(ReviewSchema):
     clientRequestId: str = Field(min_length=16, max_length=128)
+    expectedRevision: int = Field(ge=1)
     decision: Literal["approve", "discard", "revise"]
     editedContent: str | None = None
     selectedUpdateRefs: list[ArtifactSelectionRef] | None = None

@@ -31,6 +31,15 @@ class ArtifactPort(Protocol):
 class ReviewRepositoryPort(Protocol):
     async def require_artifact(self, user_id: str, artifact_id: str) -> ArtifactPort: ...
 
+    async def prepare_decision(
+        self,
+        user_id: str,
+        artifact_id: str,
+        *,
+        expected_revision: int,
+        decision: str,
+    ) -> ArtifactPort: ...
+
     async def transition(self, artifact_id: str, current: str, target: str) -> None: ...
 
     async def discard(self, user_id: str, artifact_id: str) -> None: ...
@@ -58,10 +67,16 @@ class ReviewService:
         artifact_id: str,
         decision: Literal["approve", "discard", "revise"],
         *,
+        expected_revision: int,
         edited_content: str | None = None,
         selected_update_refs: list[dict[str, object]] | None = None,
     ) -> ArtifactDecisionResponse:
-        artifact = await self._repository.require_artifact(user_id, artifact_id)
+        artifact = await self._repository.prepare_decision(
+            user_id,
+            artifact_id,
+            expected_revision=expected_revision,
+            decision=decision,
+        )
         if is_short_medium_artifact_key(artifact.artifact_key):
             raise ApiError(
                 status_code=409,
@@ -99,6 +114,9 @@ class ReviewService:
                 edited_content=edited_content,
                 selected_update_refs=selected_update_refs,
             )
+        except ApiError:
+            await self._transition(artifact_id, "applying", "awaiting_user")
+            raise
         except Exception:
             await self._transition(artifact_id, "applying", "awaiting_user")
             raise ApiError(

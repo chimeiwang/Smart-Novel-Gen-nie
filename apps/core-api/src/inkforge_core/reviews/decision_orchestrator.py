@@ -17,6 +17,11 @@ from ..lore.repository import LoreRepository
 from ..outlines.repository import OutlineRepository
 from ..references.repository import ReferenceRepository
 from ..writing.commands import WritingCommandRecord, WritingRunCommandRepository
+from ..writing.idempotency import (
+    normalize_json_value,
+    parse_command_envelope,
+    request_fingerprint,
+)
 from ..writing.records import TaskRecord
 from .apply import FormalArtifactApplier
 from .formal_writes import FormalWriteRepository
@@ -45,6 +50,7 @@ class ReviewDecisionServicePort(Protocol):
         artifact_id: str,
         decision: Literal["approve", "discard", "revise"],
         *,
+        expected_revision: int,
         edited_content: str | None = None,
         selected_update_refs: list[dict[str, object]] | None = None,
     ) -> ArtifactDecisionResponse: ...
@@ -108,11 +114,21 @@ class ReviewDecisionOrchestrator:
         artifact_id: str,
         request: ReviewArtifactDecisionRequest,
     ) -> ArtifactDecisionAcceptedResponse:
+        normalized_body = normalize_json_value(
+            request.model_dump(mode="json", exclude={"clientRequestId"})
+        )
+        if not isinstance(normalized_body, dict):
+            raise RuntimeError("草案决定请求无法规范化")
+        fingerprint = request_fingerprint(
+            command_kind="artifact_decision",
+            resource_identity={"artifactId": artifact_id},
+            body=normalized_body,
+        )
         existing = await self._command_lookup.get_by_idempotency_key(
             user_id, request.clientRequestId
         )
         if existing is not None:
-            return _accepted_response_from_command(existing)
+            return _accepted_response_from_command(existing, fingerprint)
 
         accepted: ArtifactDecisionAcceptedResponse
         async with self._session_factory() as outer:
@@ -141,6 +157,7 @@ class ReviewDecisionOrchestrator:
                     user_id,
                     artifact_id,
                     request.decision,
+                    expected_revision=request.expectedRevision,
                     edited_content=request.editedContent,
                     selected_update_refs=refs,
                 )
@@ -160,12 +177,23 @@ class ReviewDecisionOrchestrator:
                 }
                 if request.userMessage is not None:
                     resume_input["userMessage"] = request.userMessage
-                payload: dict[str, Any] = {
+                job: dict[str, Any] = {
                     "version": 1,
                     "resume": True,
                     "chapterId": task.chapter_id,
                     "writingSessionId": task.writing_session_id,
                     "resumeInput": resume_input,
+                }
+                payload: dict[str, Any] = {
+                    "_inkforgeCommand": {
+                        "schemaVersion": 1,
+                        "clientRequestId": request.clientRequestId,
+                        "commandKind": "artifact_decision",
+                        "resourceIdentity": {"artifactId": artifact_id},
+                        "normalizedBody": normalized_body,
+                        "requestFingerprint": fingerprint,
+                    },
+                    "job": job,
                 }
                 await dependencies.commands.create_artifact_decision(
                     command_id=command_id,
@@ -191,12 +219,24 @@ class ReviewDecisionOrchestrator:
 
 def _accepted_response_from_command(
     command: WritingCommandRecord,
+    fingerprint: str,
 ) -> ArtifactDecisionAcceptedResponse:
     if command.kind != "artifact_decision" or command.result is None:
         raise ApiError(
             status_code=409,
             code="IDEMPOTENCY_KEY_REUSED",
             message="客户端请求标识已用于其他操作",
+        )
+    metadata = parse_command_envelope(command.payload)
+    if (
+        metadata is None
+        or metadata.commandKind != "artifact_decision"
+        or metadata.requestFingerprint != fingerprint
+    ):
+        raise ApiError(
+            status_code=409,
+            code="IDEMPOTENCY_KEY_REUSED",
+            message="同一幂等标识已绑定其他请求",
         )
     try:
         return ArtifactDecisionAcceptedResponse.model_validate(command.result)

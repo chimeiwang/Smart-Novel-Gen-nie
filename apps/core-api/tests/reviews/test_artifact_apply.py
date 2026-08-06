@@ -36,6 +36,12 @@ class FakeReviewRepository:
         assert artifact_id == "artifact-1"
         return self.artifact
 
+    async def prepare_decision(
+        self, user_id: str, artifact_id: str, *, expected_revision: int, decision: str
+    ) -> Artifact:
+        del expected_revision, decision
+        return await self.require_artifact(user_id, artifact_id)
+
     async def transition(self, artifact_id: str, current: str, target: str) -> None:
         assert self.artifact.status == current
         self.transitions.append((current, target))
@@ -72,7 +78,7 @@ async def test_approve_transitions_through_applying_to_applied() -> None:
     applier = FakeApplier()
     service = ReviewService(repository, applier)
 
-    result = await service.decide("user-1", "artifact-1", "approve")
+    result = await service.decide("user-1", "artifact-1", "approve", expected_revision=1)
 
     assert repository.transitions == [
         ("awaiting_user", "applying"),
@@ -87,7 +93,7 @@ async def test_apply_failure_returns_artifact_to_awaiting_user() -> None:
     service = ReviewService(repository, FakeApplier(fail=True))
 
     with pytest.raises(ApiError) as error:
-        await service.decide("user-1", "artifact-1", "approve")
+        await service.decide("user-1", "artifact-1", "approve", expected_revision=1)
 
     assert error.value.status_code == 409
     assert repository.transitions[-1] == ("applying", "awaiting_user")
@@ -97,7 +103,7 @@ async def test_apply_failure_returns_artifact_to_awaiting_user() -> None:
 async def test_discard_hard_deletes_artifact() -> None:
     repository = FakeReviewRepository()
     result = await ReviewService(repository, FakeApplier()).decide(
-        "user-1", "artifact-1", "discard"
+        "user-1", "artifact-1", "discard", expected_revision=1
     )
 
     assert repository.deleted is True
@@ -109,7 +115,9 @@ async def test_revision_brief_cannot_be_approved() -> None:
     repository = FakeReviewRepository(Artifact(kind="revision_brief"))
 
     with pytest.raises(ApiError) as error:
-        await ReviewService(repository, FakeApplier()).decide("user-1", "artifact-1", "approve")
+        await ReviewService(repository, FakeApplier()).decide(
+            "user-1", "artifact-1", "approve", expected_revision=1
+        )
 
     assert error.value.status_code == 400
     assert repository.transitions == []
@@ -124,7 +132,7 @@ async def test_generic_decision_rejects_short_medium_versions(decision: str) -> 
 
     with pytest.raises(ApiError) as error:
         await ReviewService(repository, FakeApplier()).decide(
-            "user-1", "artifact-1", decision  # type: ignore[arg-type]
+            "user-1", "artifact-1", decision, expected_revision=1  # type: ignore[arg-type]
         )
 
     assert error.value.code == "SHORT_MEDIUM_VERSION_ROUTE_REQUIRED"

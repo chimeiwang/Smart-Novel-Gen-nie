@@ -15,6 +15,7 @@ from inkforge_core.reviews.schemas import (
     ReviewArtifactDecisionRequest,
 )
 from inkforge_core.writing.commands import WritingCommandRecord
+from inkforge_core.writing.idempotency import request_fingerprint
 from inkforge_core.writing.records import TaskRecord
 
 
@@ -98,11 +99,32 @@ def artifact() -> ArtifactRecord:
 
 
 def command(*, result: dict[str, Any] | None = None) -> WritingCommandRecord:
+    body = {
+        "expectedRevision": 1,
+        "decision": "discard",
+        "editedContent": None,
+        "selectedUpdateRefs": None,
+        "userMessage": None,
+    }
     return WritingCommandRecord(
         id="command-1",
         task=task(),
         kind="artifact_decision",
-        payload={"resume": True},
+        payload={
+            "_inkforgeCommand": {
+                "schemaVersion": 1,
+                "clientRequestId": "request-00000001",
+                "commandKind": "artifact_decision",
+                "resourceIdentity": {"artifactId": "artifact-1"},
+                "normalizedBody": body,
+                "requestFingerprint": request_fingerprint(
+                    command_kind="artifact_decision",
+                    resource_identity={"artifactId": "artifact-1"},
+                    body=body,
+                ),
+            },
+            "job": {"resume": True},
+        },
         status="pending",
         attempt_count=0,
         artifact_id="artifact-1",
@@ -207,8 +229,9 @@ async def test_all_decisions_create_one_durable_resume_command(decision: str) ->
         "user-1",
         "artifact-1",
         ReviewArtifactDecisionRequest(
-            clientRequestId="request-00000001",
-            decision=decision,
+                clientRequestId="request-00000001",
+                expectedRevision=1,
+                decision=decision,
             userMessage="按此决定继续",
         ),
     )
@@ -217,7 +240,7 @@ async def test_all_decisions_create_one_durable_resume_command(decision: str) ->
     assert response.status == "pending"
     assert response.decision == decision
     assert subject.commands.created is not None
-    assert subject.commands.created["payload"]["resumeInput"] == {
+    assert subject.commands.created["payload"]["job"]["resumeInput"] == {
         "artifactId": "artifact-1",
         "decision": decision,
         "userMessage": "按此决定继续",
@@ -235,6 +258,7 @@ async def test_apply_failure_rolls_back_before_command_creation() -> None:
             "artifact-1",
             ReviewArtifactDecisionRequest(
                 clientRequestId="request-00000001",
+                expectedRevision=1,
                 decision="approve",
             ),
         )
@@ -269,9 +293,42 @@ async def test_discard_retry_returns_original_command_before_artifact_lookup() -
         "artifact-1",
         ReviewArtifactDecisionRequest(
             clientRequestId="request-00000001",
+            expectedRevision=1,
             decision="discard",
         ),
     )
 
     assert response.commandId == "command-1"
     assert response.deleted is True
+
+
+@pytest.mark.asyncio
+async def test_reused_client_request_id_with_different_revision_is_rejected() -> None:
+    saved = {
+        "artifactId": "artifact-1",
+        "taskId": "task-1",
+        "commandId": "command-1",
+        "decision": "discard",
+        "status": "pending",
+        "savedCount": 0,
+        "deleted": True,
+    }
+    orchestrator = ReviewDecisionOrchestrator(
+        OuterFactory(OuterSession()),  # type: ignore[arg-type]
+        command_lookup=Lookup(command(result=saved)),
+        dependencies_builder=lambda _factory: pytest.fail("不应执行新的草案决定"),
+        transactional_factory_builder=lambda _connection: object(),
+    )
+
+    with pytest.raises(ApiError) as captured:
+        await orchestrator.decide(
+            "user-1",
+            "artifact-1",
+            ReviewArtifactDecisionRequest(
+                clientRequestId="request-00000001",
+                expectedRevision=2,
+                decision="discard",
+            ),
+        )
+
+    assert captured.value.code == "IDEMPOTENCY_KEY_REUSED"

@@ -22,6 +22,7 @@ from ..db.models import (
 )
 from ..errors import ApiError
 from ..short_medium.repository import is_short_medium_artifact_key
+from ..writing.source_bindings import verify_source_bindings
 from .schemas import (
     ArtifactEvaluationResponse,
     ArtifactKind,
@@ -73,6 +74,52 @@ class ReviewRepository:
                     message="无权访问该待审核草案",
                 )
             return _record(artifact)
+
+    async def prepare_decision(
+        self,
+        user_id: str,
+        artifact_id: str,
+        *,
+        expected_revision: int,
+        decision: str,
+    ) -> ArtifactRecord:
+        async with self._session_factory() as session:
+            async with session.begin():
+                artifact = await session.scalar(
+                    select(ReviewArtifact)
+                    .join(Novel, Novel.id == ReviewArtifact.novelId)
+                    .where(ReviewArtifact.id == artifact_id, Novel.userId == user_id)
+                    .with_for_update()
+                )
+                if artifact is None:
+                    raise ApiError(
+                        status_code=403,
+                        code="REVIEW_ARTIFACT_FORBIDDEN",
+                        message="无权访问该待审核草案",
+                    )
+                if artifact.revision != expected_revision:
+                    raise ApiError(
+                        status_code=409,
+                        code="ARTIFACT_REVISION_CONFLICT",
+                        message="待审核草案修订号已变化",
+                        details={
+                            "expectedRevision": expected_revision,
+                            "currentRevision": artifact.revision,
+                        },
+                    )
+                if artifact.status != "awaiting_user":
+                    raise ApiError(
+                        status_code=409,
+                        code="ARTIFACT_NOT_AWAITING_USER",
+                        message="当前草案状态不能接受用户决定",
+                    )
+                if decision != "discard" and artifact.kind in _SOURCE_BOUND_KINDS:
+                    bindings = await _decision_source_bindings(session, artifact)
+                    await verify_source_bindings(
+                        session,
+                        tuple(SourceBinding.model_validate(item) for item in bindings),
+                    )
+                return _record(artifact)
 
     async def get_response(self, user_id: str, artifact_id: str) -> ReviewArtifactResponse:
         async with self._session_factory() as session:
@@ -565,6 +612,37 @@ async def _source_bindings_for_task(
             message="待审核草案缺少权威来源绑定",
         )
     return command.id, bindings
+
+
+async def _decision_source_bindings(
+    session: AsyncSession, artifact: ReviewArtifact
+) -> list[dict[str, Any]]:
+    payload = _parse_json(artifact.payloadJson, {})
+    control = payload.get("_inkforgeControl") if isinstance(payload, dict) else None
+    source_command_id = control.get("sourceCommandId") if isinstance(control, dict) else None
+    if not isinstance(source_command_id, str) or not source_command_id or artifact.taskId is None:
+        raise ApiError(
+            status_code=409,
+            code="ARTIFACT_SOURCE_BINDINGS_MISSING",
+            message="待审核草案缺少权威来源绑定",
+        )
+    command = await session.scalar(
+        select(WritingRunCommand)
+        .where(
+            WritingRunCommand.id == source_command_id,
+            WritingRunCommand.taskId == artifact.taskId,
+            WritingRunCommand.kind == "start",
+        )
+        .with_for_update()
+    )
+    bindings = _source_bindings_from_command(command) if command is not None else None
+    if bindings is None:
+        raise ApiError(
+            status_code=409,
+            code="ARTIFACT_SOURCE_BINDINGS_MISSING",
+            message="待审核草案缺少权威来源绑定",
+        )
+    return bindings
 
 
 def _source_bindings_from_command(

@@ -90,9 +90,14 @@ class WritingRunCommandRepository:
     async def get_by_idempotency_key(
         self, user_id: str, client_request_id: str
     ) -> WritingCommandRecord | None:
-        key = command_idempotency_key(user_id, client_request_id)
         async with self._session_factory() as session:
-            row = await self._get_by_idempotency_key(session, key)
+            row = await self._get_by_idempotency_key(
+                session, enveloped_command_idempotency_key(user_id, client_request_id)
+            )
+            if row is None:
+                row = await self._get_by_idempotency_key(
+                    session, command_idempotency_key(user_id, client_request_id)
+                )
         return _command_record(*row) if row is not None else None
 
     async def create_start_with_task(
@@ -784,7 +789,7 @@ class WritingRunCommandRepository:
         payload: dict[str, Any],
         result: dict[str, Any],
     ) -> WritingCommandRecord:
-        key = command_idempotency_key(user_id, client_request_id)
+        key = enveloped_command_idempotency_key(user_id, client_request_id)
         async with self._session_factory() as session:
             async with session.begin():
                 existing = await self._get_by_idempotency_key(session, key)
