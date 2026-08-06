@@ -513,7 +513,7 @@ def test_noop_cancel_after_effective_cancel_keeps_cancelled_outcome() -> None:
     ("command_status", "expected_outcome"),
     [("pending", "queued"), ("processing", "running")],
 )
-def test_fresh_active_command_is_recoverable_without_checkpoint_or_artifact(
+def test_fresh_active_command_is_not_recoverable_without_checkpoint(
     command_status: str,
     expected_outcome: str,
 ) -> None:
@@ -524,7 +524,7 @@ def test_fresh_active_command_is_recoverable_without_checkpoint_or_artifact(
     )
 
     assert status.outcome.state == expected_outcome
-    assert status.recoverable is True
+    assert status.recoverable is False
 
 
 def test_noop_cancel_preserves_prior_failure_error() -> None:

@@ -13,6 +13,7 @@ from ..db.models import Novel, ReviewArtifact, WritingRunCommand, WritingTask
 from ..errors import ApiError
 from ..http.cursor import InvalidCursorError, decode_run_cursor, encode_run_cursor
 from .outcome import WritingRunOutcomeFacts, project_writing_run_outcome
+from .recoverability import resolve_recoverable_checkpoint
 from .schemas import (
     WritingCommandStatus,
     WritingRunCheckpointResponse,
@@ -391,11 +392,7 @@ def project_run_status(
     error = _command_error(effective, effective_result)
     recoverable = bool(
         outcome.state in _ACTIVE_OUTCOMES
-        and (
-            _has_recoverable_command(task, current)
-            or checkpoint is not None
-            or active_artifact_id is not None
-        )
+        and resolve_recoverable_checkpoint(task, commands) is not None
     )
     return WritingRunStatusResponse(
         taskId=task.id,

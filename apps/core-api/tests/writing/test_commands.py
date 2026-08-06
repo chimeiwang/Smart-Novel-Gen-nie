@@ -21,7 +21,8 @@ from inkforge_core.writing.commands import (
     WritingRunCommandRepository,
     command_idempotency_key,
 )
-from inkforge_core.writing.schemas import StartWritingRunRequest
+from inkforge_core.writing.recoverability import resolve_recoverable_checkpoint
+from inkforge_core.writing.schemas import ResumeWritingRunRequest, StartWritingRunRequest
 from inkforge_core.writing.transaction_locks import LockedWritingRows
 from sqlalchemy.dialects import postgresql
 
@@ -76,6 +77,10 @@ class CommandSession:
         if not self.execute_results:
             raise AssertionError("收到未预期的数据库查询")
         return self.execute_results.pop(0)
+
+    async def scalar(self, statement: object) -> object | None:
+        self.statements.append(statement)
+        return None
 
     def add(self, value: object) -> None:
         self.added.append(value)
@@ -632,6 +637,144 @@ async def test_same_client_request_returns_existing_command() -> None:
         'UPDATE public."WritingEventOutbox"' in str(statement)
         for statement in first_session.statements
     )
+
+
+def test_recovery_checkpoint_requires_a_bound_snapshot_and_terminal_command() -> None:
+    owned_task = task()
+    source = command(status="succeeded")
+    source.payloadJson = '{"job":{"operation":"write_chapter"}}'
+    assert resolve_recoverable_checkpoint(owned_task, [source]) is None
+
+    owned_task.graphStateJson = json.dumps(
+        {
+            "taskId": owned_task.id,
+            "userId": "user-1",
+            "novelId": owned_task.novelId,
+            "chapterId": owned_task.chapterId,
+            "targetWordCount": owned_task.targetWordCount,
+            "conversationHistory": [],
+            "phase": owned_task.phase,
+            "eventSequence": 1,
+            "currentOperation": {"kind": "write_chapter"},
+            "operationStage": "执行创作操作",
+            "callbackJobId": source.id,
+        }
+    )
+    assert resolve_recoverable_checkpoint(owned_task, [source]) is not None
+    assert resolve_recoverable_checkpoint(owned_task, [command(status="processing")]) is None
+    source.payloadJson = '{"job":{"operation":"review_chapter"}}'
+    assert resolve_recoverable_checkpoint(owned_task, [source]) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_message", ["  ", None])
+async def test_blank_resume_without_checkpoint_is_rejected_before_side_effects(
+    monkeypatch: pytest.MonkeyPatch,
+    user_message: str | None,
+) -> None:
+    owned_task = task()
+    session = CommandSession()
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    async def no_replay(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        return None
+
+    async def identity(*args: object, **kwargs: object) -> tuple[str, str]:
+        del args, kwargs
+        return owned_task.novelId, owned_task.chapterId
+
+    async def locked(*args: object, **kwargs: object) -> LockedWritingRows:
+        del args, kwargs
+        return LockedWritingRows(
+            novel=Novel(id=owned_task.novelId, userId="user-1"),
+            chapters=(Chapter(id=owned_task.chapterId, novelId=owned_task.novelId),),
+            task=owned_task,
+            artifact=None,
+            command=None,
+        )
+
+    async def no_active(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+
+    monkeypatch.setattr(commands_module, "acquire_idempotency_lock", no_active)
+    monkeypatch.setattr(commands_module, "_resolve_long_serial_resume_response", no_replay)
+    monkeypatch.setattr(repository, "_require_owned_task_identity", identity)
+    monkeypatch.setattr(repository, "_find_current_command_id", no_replay)
+    monkeypatch.setattr(commands_module, "lock_writing_rows", locked)
+    monkeypatch.setattr(repository, "_require_no_active_command", no_active)
+
+    with pytest.raises(ApiError, match="没有可恢复") as error:
+        await repository.create_resume_with_message(
+            "user-1",
+            owned_task.id,
+            ResumeWritingRunRequest(
+                clientRequestId="resume-empty-0001", userMessage=user_message
+            ),
+        )
+
+    assert error.value.code == "WRITING_RUN_NOT_RECOVERABLE"
+    assert session.added == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("user_message", [None, "继续"])
+async def test_authoritative_awaiting_artifact_blocks_resume_without_side_effects(
+    monkeypatch: pytest.MonkeyPatch,
+    user_message: str | None,
+) -> None:
+    owned_task = task()
+    session = CommandSession()
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+
+    async def no_replay(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        return None
+
+    async def identity(*args: object, **kwargs: object) -> tuple[str, str]:
+        del args, kwargs
+        return owned_task.novelId, owned_task.chapterId
+
+    async def locked(*args: object, **kwargs: object) -> LockedWritingRows:
+        del args, kwargs
+        return LockedWritingRows(
+            novel=Novel(id=owned_task.novelId, userId="user-1"),
+            chapters=(Chapter(id=owned_task.chapterId, novelId=owned_task.novelId),),
+            task=owned_task,
+            artifact=None,
+            command=None,
+        )
+
+    async def no_active(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+
+    async def artifact(*args: object, **kwargs: object) -> str:
+        del args, kwargs
+        return "artifact-1"
+
+    monkeypatch.setattr(commands_module, "acquire_idempotency_lock", no_active)
+    monkeypatch.setattr(commands_module, "_resolve_long_serial_resume_response", no_replay)
+    monkeypatch.setattr(repository, "_require_owned_task_identity", identity)
+    monkeypatch.setattr(repository, "_find_current_command_id", no_replay)
+    monkeypatch.setattr(commands_module, "lock_writing_rows", locked)
+    monkeypatch.setattr(repository, "_require_no_active_command", no_active)
+    monkeypatch.setattr(session, "scalar", artifact)
+
+    with pytest.raises(ApiError) as error:
+        await repository.create_resume_with_message(
+            "user-1",
+            owned_task.id,
+            ResumeWritingRunRequest(
+                clientRequestId="resume-artifact-01", userMessage=user_message
+            ),
+        )
+
+    assert error.value.code == "ARTIFACT_DECISION_REQUIRED"
+    assert session.added == []
 
 
 @pytest.mark.asyncio

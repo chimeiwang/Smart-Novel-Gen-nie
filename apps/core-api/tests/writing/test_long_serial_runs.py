@@ -394,7 +394,34 @@ async def test_long_serial_resume_reuses_authoritative_start_job(
         createdAt=NOW.replace(tzinfo=None),
         updatedAt=NOW.replace(tzinfo=None),
     )
-    session = TransactionSession([_long_serial_start_envelope()])
+    owned_task.graphStateJson = json.dumps(
+        {
+            "taskId": owned_task.id,
+            "userId": "user-1",
+            "novelId": owned_task.novelId,
+            "chapterId": owned_task.chapterId,
+            "targetWordCount": owned_task.targetWordCount,
+            "conversationHistory": [],
+            "phase": "active",
+            "eventSequence": 1,
+            "currentOperation": {"kind": "write_chapter"},
+            "operationStage": "执行创作操作",
+            "callbackJobId": "command-current",
+        }
+    )
+    source_command = WritingRunCommand(
+        id="command-current",
+        taskId=owned_task.id,
+        kind="start",
+        payloadJson=_long_serial_start_envelope(),
+        idempotencyKey="key-command-current",
+        status="succeeded",
+        attemptCount=0,
+        nextAttemptAt=NOW.replace(tzinfo=None),
+        createdAt=NOW.replace(tzinfo=None),
+        updatedAt=NOW.replace(tzinfo=None),
+    )
+    session = TransactionSession([None, _long_serial_start_envelope()])
     repository = WritingRunCommandRepository(  # type: ignore[arg-type]
         SessionFactory(session)
     )
@@ -427,7 +454,7 @@ async def test_long_serial_resume_reuses_authoritative_start_job(
             chapters=(Chapter(id="chapter-1", novelId="novel-1"),),
             task=owned_task,
             artifact=None,
-            command=None,
+            command=source_command,
         )
 
     async def unexpected_owned_task(*args: object, **kwargs: object) -> None:
@@ -437,6 +464,11 @@ async def test_long_serial_resume_reuses_authoritative_start_job(
     async def no_active_command(*args: object, **kwargs: object) -> None:
         del args, kwargs
         order.append("busy")
+
+    async def current_command_id(*args: object, **kwargs: object) -> str:
+        del args, kwargs
+        order.append("current")
+        return source_command.id
 
     async def supersede(*args: object, **kwargs: object) -> None:
         del args, kwargs
@@ -450,6 +482,7 @@ async def test_long_serial_resume_reuses_authoritative_start_job(
         raising=False,
     )
     monkeypatch.setattr(repository, "_require_owned_task_identity", identity)
+    monkeypatch.setattr(repository, "_find_current_command_id", current_command_id)
     monkeypatch.setattr(repository, "_require_owned_task", unexpected_owned_task)
     monkeypatch.setattr(commands_module, "lock_writing_rows", locked)
     monkeypatch.setattr(repository, "_require_no_active_command", no_active_command)
@@ -497,12 +530,14 @@ async def test_long_serial_resume_reuses_authoritative_start_job(
             novel_id="novel-1",
             chapter_ids=("chapter-1",),
             task_id="task-1",
+            command_id="command-current",
         )
     ]
     assert order == [
         "advisory",
         "replay",
         "identity",
+        "current",
         "lock",
         "replay",
         "busy",

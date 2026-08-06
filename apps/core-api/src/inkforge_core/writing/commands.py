@@ -21,6 +21,7 @@ from ..db.base import utc_now
 from ..db.models import (
     Chapter,
     Novel,
+    ReviewArtifact,
     WritingBible,
     WritingMessage,
     WritingRunCommand,
@@ -45,6 +46,7 @@ from .idempotency import (
 from .message_metadata import workflow_message_metadata
 from .outbox import supersede_waiting_for_new_command
 from .records import TaskRecord
+from .recoverability import resolve_recoverable_checkpoint
 from .recovery import validate_resume_session_binding
 from .schemas import (
     LongSerialStartWritingRunRequest,
@@ -579,6 +581,9 @@ class WritingRunCommandRepository:
                     novel_id, chapter_id = await self._require_owned_task_identity(
                         session, user_id, task_id
                     )
+                    current_command_id = await self._find_current_command_id(
+                        session, task_id
+                    )
                     locked_rows = await lock_writing_rows(
                         session,
                         user_id=user_id,
@@ -586,6 +591,7 @@ class WritingRunCommandRepository:
                             novel_id=novel_id,
                             chapter_ids=(chapter_id,) if chapter_id is not None else (),
                             task_id=task_id,
+                            command_id=current_command_id,
                         ),
                     )
                     task = locked_rows.task
@@ -618,7 +624,29 @@ class WritingRunCommandRepository:
                             message=str(exc),
                         ) from exc
                     await self._require_no_active_command(session, task_id)
+                    awaiting_artifact = await session.scalar(
+                        select(ReviewArtifact.id).where(
+                            ReviewArtifact.taskId == task.id,
+                            ReviewArtifact.novelId == task.novelId,
+                            ReviewArtifact.chapterId == task.chapterId,
+                            ReviewArtifact.status == "awaiting_user",
+                        )
+                    )
+                    if awaiting_artifact is not None:
+                        raise ApiError(
+                            status_code=409,
+                            code="ARTIFACT_DECISION_REQUIRED",
+                            message="存在等待用户决策的审核产物，必须先提交审核决定",
+                        )
                     visible_message = (request.userMessage or "").strip()
+                    if not visible_message and resolve_recoverable_checkpoint(
+                        task, [locked_rows.command] if locked_rows.command else []
+                    ) is None:
+                        raise ApiError(
+                            status_code=409,
+                            code="WRITING_RUN_NOT_RECOVERABLE",
+                            message="当前写作任务没有可恢复的持久检查点",
+                        )
                     if visible_message and task.writingSessionId is not None:
                         session.add(
                             WritingMessage(
@@ -1077,6 +1105,22 @@ class WritingRunCommandRepository:
             )
         novel_id, chapter_id = row
         return cast(str, novel_id), cast(str | None, chapter_id)
+
+    async def _find_current_command_id(
+        self, session: AsyncSession, task_id: str
+    ) -> str | None:
+        return cast(
+            str | None,
+            await session.scalar(
+                select(WritingRunCommand.id)
+                .where(WritingRunCommand.taskId == task_id)
+                .order_by(
+                    WritingRunCommand.createdAt.desc(),
+                    WritingRunCommand.id.desc(),
+                )
+                .limit(1)
+            ),
+        )
 
     async def _require_no_active_command(self, session: AsyncSession, task_id: str) -> None:
         row = (
