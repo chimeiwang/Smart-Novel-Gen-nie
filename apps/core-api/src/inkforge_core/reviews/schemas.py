@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
+from inkforge_contracts.long_serial import SourceBinding
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 ArtifactStatus = Literal["draft", "under_review", "awaiting_user", "applying", "applied"]
@@ -18,6 +19,7 @@ ArtifactKind = Literal[
     "freeform_markdown",
 ]
 EvaluationVerdict = Literal["pass", "revise", "block"]
+SourceBindingStatus = Literal["verified", "legacy_missing", "not_yet_supported"]
 
 STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
     "draft": frozenset({"draft", "under_review", "awaiting_user"}),
@@ -66,8 +68,15 @@ class ReviewArtifactResponse(ReviewSchema):
     reviewerAgent: str | None
     revision: int
     evaluations: list[ArtifactEvaluationResponse] = Field(default_factory=list)
+    sourceBindings: list[SourceBinding] | None
+    sourceBindingStatus: SourceBindingStatus
     createdAt: datetime
     updatedAt: datetime
+
+
+class ReviewArtifactListResponse(ReviewSchema):
+    items: list[ReviewArtifactResponse]
+    nextCursor: str | None
 
 
 class ArtifactSelectionRef(ReviewSchema):
@@ -121,6 +130,8 @@ class CreateArtifactRequest(ReviewSchema):
     def validate_payload_kind(self) -> CreateArtifactRequest:
         if self.payload.get("kind") != self.kind:
             raise ValueError("草案 kind 必须与 payload.kind 一致")
+        if "_inkforgeControl" in self.payload:
+            raise ValueError("草案 payload 不得包含保留控制字段")
         return self
 
 

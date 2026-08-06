@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, cast
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 
 from ..auth.dependencies import get_current_user
 from ..auth.repository import AuthUser
@@ -12,6 +12,7 @@ from .repository import ReviewRepository
 from .schemas import (
     ArtifactDecisionAcceptedResponse,
     ReviewArtifactDecisionRequest,
+    ReviewArtifactListResponse,
     ReviewArtifactResponse,
 )
 
@@ -51,6 +52,31 @@ DecisionOrchestrator = Annotated[
     ReviewDecisionOrchestrator, Depends(get_review_decision_orchestrator)
 ]
 Repository = Annotated[ReviewRepository, Depends(get_review_repository)]
+
+
+@router.get("/review-artifacts", response_model=ReviewArtifactListResponse)
+async def list_review_artifacts(
+    user: User,
+    repository: Repository,
+    novelId: str = Query(min_length=1, max_length=256),
+    chapterId: str | None = Query(default=None, min_length=1, max_length=256),
+    taskId: str | None = Query(default=None, min_length=1, max_length=256),
+    status: str | None = Query(default=None),
+    kind: str | None = Query(default=None),
+    cursor: str | None = Query(default=None, min_length=1, max_length=512),
+    limit: int = Query(default=50, ge=1, le=100),
+) -> ReviewArtifactListResponse:
+    items, next_cursor = await repository.list_artifacts(
+        user.id,
+        novel_id=novelId,
+        chapter_id=chapterId,
+        task_id=taskId,
+        status=status,
+        kind=kind,
+        cursor=cursor,
+        limit=limit,
+    )
+    return ReviewArtifactListResponse(items=items, nextCursor=next_cursor)
 
 
 @router.get("/review-artifacts/{artifact_id}", response_model=ReviewArtifactResponse)

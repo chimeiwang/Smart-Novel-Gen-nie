@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import base64
 import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, cast
 
-from sqlalchemy import delete, select, update
+from inkforge_contracts.long_serial import SourceBinding
+from sqlalchemy import and_, delete, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -27,9 +29,12 @@ from .schemas import (
     CreateArtifactRequest,
     EvaluationVerdict,
     ReviewArtifactResponse,
+    SourceBindingStatus,
     SubmitArtifactEvaluationRequest,
     assert_status_transition,
 )
+
+_SOURCE_BOUND_KINDS = frozenset({"beat_plan", "chapter_draft"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,7 +90,13 @@ class ReviewRepository:
                     .order_by(ReviewArtifactEvaluation.createdAt.desc())
                 )
             ).scalars()
-            return _response(artifact, list(evaluations))
+            source_bindings, source_binding_status = await _source_binding_view(session, artifact)
+            return _response(
+                artifact,
+                list(evaluations),
+                source_bindings=source_bindings,
+                source_binding_status=source_binding_status,
+            )
 
     async def get_task_artifact(self, user_id: str, task_id: str) -> ReviewArtifactResponse | None:
         async with self._session_factory() as session:
@@ -127,7 +138,13 @@ class ReviewRepository:
                     .order_by(ReviewArtifactEvaluation.createdAt.desc())
                 )
             ).scalars()
-            return _response(artifact, list(evaluations))
+            source_bindings, source_binding_status = await _source_binding_view(session, artifact)
+            return _response(
+                artifact,
+                list(evaluations),
+                source_bindings=source_bindings,
+                source_binding_status=source_binding_status,
+            )
 
     async def list_task_artifacts(
         self,
@@ -175,6 +192,62 @@ class ReviewRepository:
             }
             for artifact in artifacts
         ]
+
+    async def list_artifacts(
+        self,
+        user_id: str,
+        *,
+        novel_id: str,
+        chapter_id: str | None,
+        task_id: str | None,
+        status: str | None,
+        kind: str | None,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[ReviewArtifactResponse], str | None]:
+        conditions = [ReviewArtifact.novelId == novel_id, Novel.userId == user_id]
+        if chapter_id is not None:
+            conditions.append(ReviewArtifact.chapterId == chapter_id)
+        if task_id is not None:
+            conditions.append(ReviewArtifact.taskId == task_id)
+        if status is not None:
+            conditions.append(ReviewArtifact.status == status)
+        if kind is not None:
+            conditions.append(ReviewArtifact.kind == kind)
+        if cursor is not None:
+            created_at, artifact_id = _decode_cursor(cursor)
+            conditions.append(
+                or_(
+                    ReviewArtifact.createdAt < created_at,
+                    and_(ReviewArtifact.createdAt == created_at, ReviewArtifact.id < artifact_id),
+                )
+            )
+        async with self._session_factory() as session:
+            artifacts = list(
+                (
+                    await session.scalars(
+                        select(ReviewArtifact)
+                        .join(Novel, Novel.id == ReviewArtifact.novelId)
+                        .where(*conditions)
+                        .order_by(ReviewArtifact.createdAt.desc(), ReviewArtifact.id.desc())
+                        .limit(limit + 1)
+                    )
+                ).all()
+            )
+            has_more = len(artifacts) > limit
+            artifacts = artifacts[:limit]
+            source_views = await _source_binding_views(session, artifacts)
+            responses = [
+                _response(
+                    artifact,
+                    [],
+                    source_bindings=source_views[artifact.id][0],
+                    source_binding_status=source_views[artifact.id][1],
+                )
+                for artifact in artifacts
+            ]
+        next_cursor = _encode_cursor(artifacts[-1]) if has_more and artifacts else None
+        return responses, next_cursor
 
     async def transition(self, artifact_id: str, current: str, target: str) -> None:
         values: dict[str, object] = {"status": target, "updatedAt": utc_now()}
@@ -258,7 +331,39 @@ class ReviewRepository:
                         )
                         .with_for_update()
                     )
-                payload_json = json.dumps(request.payload, ensure_ascii=False)
+                payload = dict(request.payload)
+                if request.kind in _SOURCE_BOUND_KINDS:
+                    source_command_id: str
+                    if existing is None:
+                        source_command_id, _bindings = await _source_bindings_for_task(
+                            session, task.id
+                        )
+                    else:
+                        existing_payload = _parse_json(existing.payloadJson, {})
+                        control = (
+                            existing_payload.get("_inkforgeControl")
+                            if isinstance(existing_payload, dict)
+                            else None
+                        )
+                        inherited_source_command_id = (
+                            control.get("sourceCommandId")
+                            if isinstance(control, dict)
+                            else None
+                        )
+                        if (
+                            not isinstance(inherited_source_command_id, str)
+                            or not inherited_source_command_id
+                        ):
+                            raise ApiError(
+                                status_code=409,
+                                code="ARTIFACT_SOURCE_BINDINGS_MISSING",
+                                message="待审核草案缺少可继承的来源命令",
+                            )
+                        source_command_id = inherited_source_command_id
+                    payload["_inkforgeControl"] = {
+                        "sourceCommandId": source_command_id
+                    }
+                payload_json = json.dumps(payload, ensure_ascii=False)
                 diff_json = (
                     json.dumps(request.diff, ensure_ascii=False)
                     if request.diff is not None
@@ -434,6 +539,156 @@ async def _require_current_writing_job(
         )
 
 
+async def _source_bindings_for_task(
+    session: AsyncSession, task_id: str
+) -> tuple[str, list[dict[str, Any]]]:
+    command = await session.scalar(
+        select(WritingRunCommand)
+        .where(
+            WritingRunCommand.taskId == task_id,
+            WritingRunCommand.kind == "start",
+        )
+        .order_by(WritingRunCommand.createdAt.asc(), WritingRunCommand.id.asc())
+        .limit(1)
+    )
+    if command is None:
+        raise ApiError(
+            status_code=409,
+            code="ARTIFACT_SOURCE_BINDINGS_MISSING",
+            message="待审核草案缺少权威来源命令",
+        )
+    bindings = _source_bindings_from_command(command)
+    if bindings is None:
+        raise ApiError(
+            status_code=409,
+            code="ARTIFACT_SOURCE_BINDINGS_MISSING",
+            message="待审核草案缺少权威来源绑定",
+        )
+    return command.id, bindings
+
+
+def _source_bindings_from_command(
+    command: WritingRunCommand,
+) -> list[dict[str, Any]] | None:
+    try:
+        payload = json.loads(command.payloadJson)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    job = payload.get("job")
+    source = job if isinstance(job, dict) else payload
+    raw_bindings = source.get("sourceBindings")
+    if not isinstance(raw_bindings, list) or not raw_bindings:
+        return None
+    try:
+        return [
+            SourceBinding.model_validate(binding).model_dump(mode="json")
+            for binding in raw_bindings
+        ]
+    except (TypeError, ValueError):
+        return None
+
+
+async def _source_binding_view(
+    session: AsyncSession, artifact: ReviewArtifact
+) -> tuple[list[dict[str, Any]] | None, SourceBindingStatus]:
+    if artifact.kind not in _SOURCE_BOUND_KINDS:
+        return None, "not_yet_supported"
+    payload = _parse_json(artifact.payloadJson, {})
+    control = payload.get("_inkforgeControl") if isinstance(payload, dict) else None
+    source_command_id = control.get("sourceCommandId") if isinstance(control, dict) else None
+    if not isinstance(source_command_id, str) or not source_command_id or artifact.taskId is None:
+        return None, "legacy_missing"
+    command = await session.scalar(
+        select(WritingRunCommand).where(
+            WritingRunCommand.id == source_command_id,
+            WritingRunCommand.taskId == artifact.taskId,
+            WritingRunCommand.kind == "start",
+        )
+    )
+    if command is None:
+        return None, "legacy_missing"
+    bindings = _source_bindings_from_command(command)
+    return (bindings, "verified") if bindings is not None else (None, "legacy_missing")
+
+
+async def _source_binding_views(
+    session: AsyncSession, artifacts: list[ReviewArtifact]
+) -> dict[str, tuple[list[dict[str, Any]] | None, SourceBindingStatus]]:
+    source_ids: dict[str, str] = {}
+    views: dict[str, tuple[list[dict[str, Any]] | None, SourceBindingStatus]] = {}
+    for artifact in artifacts:
+        if artifact.kind not in _SOURCE_BOUND_KINDS:
+            views[artifact.id] = (None, "not_yet_supported")
+            continue
+        payload = _parse_json(artifact.payloadJson, {})
+        control = payload.get("_inkforgeControl") if isinstance(payload, dict) else None
+        source_command_id = (
+            control.get("sourceCommandId") if isinstance(control, dict) else None
+        )
+        if (
+            not isinstance(source_command_id, str)
+            or not source_command_id
+            or artifact.taskId is None
+        ):
+            views[artifact.id] = (None, "legacy_missing")
+            continue
+        source_ids[artifact.id] = source_command_id
+    if not source_ids:
+        return views
+    commands = list(
+        (
+            await session.scalars(
+                select(WritingRunCommand).where(WritingRunCommand.id.in_(set(source_ids.values())))
+            )
+        ).all()
+    )
+    commands_by_id = {command.id: command for command in commands}
+    for artifact in artifacts:
+        source_command_id = source_ids.get(artifact.id)
+        if source_command_id is None:
+            continue
+        command = commands_by_id.get(source_command_id)
+        if command is None or command.taskId != artifact.taskId or command.kind != "start":
+            views[artifact.id] = (None, "legacy_missing")
+            continue
+        bindings = _source_bindings_from_command(command)
+        views[artifact.id] = (
+            (bindings, "verified") if bindings is not None else (None, "legacy_missing")
+        )
+    return views
+
+
+def _encode_cursor(artifact: ReviewArtifact) -> str:
+    payload = json.dumps(
+        {"createdAt": artifact.createdAt.isoformat(), "id": artifact.id},
+        separators=(",", ":"),
+    ).encode()
+    return base64.urlsafe_b64encode(payload).decode().rstrip("=")
+
+
+def _decode_cursor(cursor: str) -> tuple[datetime, str]:
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        value = json.loads(base64.urlsafe_b64decode(padded))
+        created_at = datetime.fromisoformat(value["createdAt"])
+        artifact_id = value["id"]
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ApiError(
+            status_code=422,
+            code="REVIEW_ARTIFACT_CURSOR_INVALID",
+            message="待审核草案分页游标无效",
+        ) from exc
+    if not isinstance(artifact_id, str) or not artifact_id:
+        raise ApiError(
+            status_code=422,
+            code="REVIEW_ARTIFACT_CURSOR_INVALID",
+            message="待审核草案分页游标无效",
+        )
+    return created_at, artifact_id
+
+
 def _parse_json(value: str | None, fallback: Any) -> Any:
     if value is None:
         return fallback
@@ -478,9 +733,21 @@ def _record(artifact: ReviewArtifact) -> ArtifactRecord:
 
 
 def _response(
-    artifact: ReviewArtifact, evaluations: list[ReviewArtifactEvaluation]
+    artifact: ReviewArtifact,
+    evaluations: list[ReviewArtifactEvaluation],
+    *,
+    source_bindings: list[dict[str, Any]] | None = None,
+    source_binding_status: SourceBindingStatus | None = None,
 ) -> ReviewArtifactResponse:
     record = _record(artifact)
+    payload = dict(record.payload)
+    payload.pop("_inkforgeControl", None)
+    if source_binding_status is None:
+        source_binding_status = (
+            "legacy_missing"
+            if record.kind in _SOURCE_BOUND_KINDS
+            else "not_yet_supported"
+        )
     return ReviewArtifactResponse(
         id=record.id,
         novelId=record.novel_id,
@@ -492,7 +759,7 @@ def _response(
         status=cast(ArtifactStatus, record.status),
         title=record.title,
         summary=record.summary,
-        payload=record.payload,
+        payload=payload,
         diff=record.diff,
         createdByAgent=record.created_by_agent,
         updatedByAgent=record.updated_by_agent,
@@ -511,6 +778,12 @@ def _response(
             )
             for item in evaluations
         ],
+        sourceBindings=(
+            [SourceBinding.model_validate(item) for item in source_bindings]
+            if source_bindings is not None
+            else None
+        ),
+        sourceBindingStatus=source_binding_status,
         createdAt=record.created_at,
         updatedAt=record.updated_at,
     )
