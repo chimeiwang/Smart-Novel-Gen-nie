@@ -307,6 +307,7 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
         session_factory,
         command_lookup=writing_command_repository,
         dispatcher=command_dispatcher,
+        reference_index_enabled=rag_submitter is not None,
     )
     app.state.writing_callback_service = WritingCallbackService(
         writing_task_repository, event_store

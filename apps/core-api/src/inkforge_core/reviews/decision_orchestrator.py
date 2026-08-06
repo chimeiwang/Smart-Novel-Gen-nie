@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from functools import partial
 from typing import Any, Literal, Protocol
 
 from sqlalchemy.ext.asyncio import (
@@ -113,11 +114,15 @@ class ReviewDecisionOrchestrator:
         dependencies_builder: Callable[[Any], ReviewDecisionDependencies] | None = None,
         transactional_factory_builder: Callable[[Any], Any] | None = None,
         dispatcher: ImmediateDispatcherPort | None = None,
+        reference_index_enabled: bool = False,
     ) -> None:
         self._session_factory = session_factory
         self._command_lookup = command_lookup or WritingRunCommandRepository(session_factory)
         self._idempotency_resolver = idempotency_resolver
-        self._dependencies_builder = dependencies_builder or _build_dependencies
+        self._dependencies_builder = dependencies_builder or partial(
+            _build_dependencies,
+            reference_index_enabled=reference_index_enabled,
+        )
         self._transactional_factory_builder = (
             transactional_factory_builder or _build_transactional_factory
         )
@@ -339,12 +344,15 @@ def _build_transactional_factory(
 
 def _build_dependencies(
     session_factory: async_sessionmaker[AsyncSession],
+    *,
+    reference_index_enabled: bool = False,
 ) -> ReviewDecisionDependencies:
     repository = ReviewRepository(session_factory)
     updates = AgentUpdatesExecutor(
         LoreRepository(session_factory),
         OutlineRepository(session_factory),
         ReferenceRepository(session_factory),
+        reference_index_enabled=reference_index_enabled,
     )
     service = ReviewService(
         repository,
