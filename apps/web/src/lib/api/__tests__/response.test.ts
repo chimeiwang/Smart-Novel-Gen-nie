@@ -1,7 +1,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { CoreApiPageError, requireApiData } from "../response";
+import { ApiResponseError, CoreApiPageError, apiError, requireApiData } from "../response";
+
+test("API 错误保留服务端诊断字段", () => {
+  const error = apiError({
+    status: 409,
+    error: {
+      code: "version_conflict",
+      message: "资料已被更新",
+      details: { currentUpdatedAt: "2026-08-07T08:00:00Z" },
+      requestId: "request-123",
+    },
+  });
+
+  assert.ok(error instanceof ApiResponseError);
+  assert.equal(error.status, 409);
+  assert.equal(error.code, "version_conflict");
+  assert.equal(error.message, "资料已被更新");
+  assert.deepEqual(error.details, { currentUpdatedAt: "2026-08-07T08:00:00Z" });
+  assert.equal(error.requestId, "request-123");
+});
 
 test("成功响应返回类型化数据", () => {
   const data = requireApiData({

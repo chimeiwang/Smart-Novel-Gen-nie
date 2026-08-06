@@ -186,3 +186,89 @@ def test_openapi_writing_run_paths_use_unified_error_response() -> None:
                 "$ref": "#/components/schemas/ErrorResponse"
             }
         assert "HTTPValidationError" not in str(operation["responses"]["422"])
+
+
+def test_openapi_exposes_creative_material_write_versions() -> None:
+    document = create_app(testing=True).openapi()
+    schemas = document["components"]["schemas"]
+
+    expected_contracts = {
+        "ContentRequest": (
+            {"content", "expectedUpdatedAt"},
+            {"content", "expectedUpdatedAt"},
+        ),
+        "WritingBibleRequest": ({
+            "storyLengthProfile",
+            "targetTotalWordCount",
+            "genre",
+            "targetReaders",
+            "coreSellingPoint",
+            "readerPromise",
+            "appealModel",
+            "taboo",
+            "comparableTitles",
+            "notes",
+            "expectedUpdatedAt",
+        }, {"expectedUpdatedAt"}),
+        "PlotProgressRequest": ({
+            "currentStage",
+            "currentGoal",
+            "currentConflict",
+            "nextMilestone",
+            "expectedUpdatedAt",
+        }, {"currentStage", "expectedUpdatedAt"}),
+        "ApplyStyleRequest": (
+            {"styleId", "expectedStyleId"},
+            {"styleId", "expectedStyleId"},
+        ),
+    }
+    for schema_name, (fields, required) in expected_contracts.items():
+        schema = schemas[schema_name]
+        assert schema["additionalProperties"] is False
+        assert set(schema["properties"]) == fields
+        assert set(schema["required"]) == required
+
+    assert "storyProgressUpdatedAt" in schemas["WorkspacePlanningResponse"][
+        "properties"
+    ]
+    assert "storyProgressUpdatedAt" in schemas["WorkspacePlanningResponse"]["required"]
+
+    for schema_name in (
+        "CreateCharacterRequest",
+        "CreateItemRequest",
+        "CreateLocationRequest",
+        "CreateFactionRequest",
+        "CreateGlossaryRequest",
+        "CreateExperienceRequest",
+        "CreateRelationRequest",
+        "CreateReferenceRequest",
+    ):
+        assert "clientRequestId" in schemas[schema_name]["required"]
+
+    for schema_name in (
+        "UpdateCharacterRequest",
+        "UpdateItemRequest",
+        "UpdateLocationRequest",
+        "UpdateFactionRequest",
+        "UpdateGlossaryRequest",
+        "UpdateExperienceRequest",
+        "UpdateRelationRequest",
+        "UpdateReferenceRequest",
+        "DeleteEntityRequest",
+        "DeleteReferenceRequest",
+    ):
+        assert "expectedUpdatedAt" in schemas[schema_name]["required"]
+
+
+def test_public_openapi_does_not_leak_internal_reference_index_contracts() -> None:
+    document = create_app(testing=True).openapi()
+    serialized = str(document)
+
+    assert "/internal/v1/" not in serialized
+    for internal_schema in (
+        "CompleteReferenceIndexRequest",
+        "FailReferenceIndexRequest",
+        "ReferenceIndexContextRequest",
+        "ReferenceIndexContextResponse",
+    ):
+        assert internal_schema not in document["components"]["schemas"]

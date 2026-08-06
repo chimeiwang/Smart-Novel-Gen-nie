@@ -1,32 +1,35 @@
 "use client";
 
+import type { components } from "@inkforge/api-client";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { browserApi } from "@/lib/api/browser";
-import { requireApiData } from "@/lib/api/response";
+import { ApiResponseError, requireApiData } from "@/lib/api/response";
+
+type PlotProgressDto = components["schemas"]["PlotProgressDto"];
+type PlotProgressDraft = Pick<
+  PlotProgressDto,
+  "currentStage" | "currentGoal" | "currentConflict" | "nextMilestone"
+>;
 
 type ProgressPanelProps = {
   novelId: string;
-  progress: {
-    currentStage: string;
-    currentGoal: string | null;
-    currentConflict: string | null;
-    nextMilestone: string | null;
-  } | null;
+  progress: PlotProgressDto | null;
   onChanged?: () => void;
 };
 
 export function ProgressPanel({ novelId, progress, onChanged }: ProgressPanelProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [draft, setDraft] = useState<ProgressPanelProps["progress"] | null>(null);
+  const [draft, setDraft] = useState<PlotProgressDraft | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const currentStage = draft?.currentStage ?? progress?.currentStage ?? "开篇";
   const currentGoal = draft?.currentGoal ?? progress?.currentGoal ?? "";
   const currentConflict = draft?.currentConflict ?? progress?.currentConflict ?? "";
   const nextMilestone = draft?.nextMilestone ?? progress?.nextMilestone ?? "";
 
-  const setField = (field: keyof NonNullable<ProgressPanelProps["progress"]>, value: string) => {
+  const setField = (field: keyof PlotProgressDraft, value: string) => {
     setDraft((current) => ({
       currentStage,
       currentGoal,
@@ -39,14 +42,29 @@ export function ProgressPanel({ novelId, progress, onChanged }: ProgressPanelPro
 
   const handleSave = () => {
     startTransition(async () => {
-      requireApiData(await browserApi.PUT("/api/v1/novels/{novel_id}/plot-progress", {
-        params: { path: { novel_id: novelId } },
-        body: { currentStage, currentGoal, currentConflict, nextMilestone },
-      }));
+      setSaveError(null);
+      try {
+        requireApiData(await browserApi.PUT("/api/v1/novels/{novel_id}/plot-progress", {
+          params: { path: { novel_id: novelId } },
+          body: {
+            currentStage,
+            currentGoal,
+            currentConflict,
+            nextMilestone,
+            expectedUpdatedAt: progress?.updatedAt ?? null,
+          },
+        }));
 
-      setDraft(null);
-      onChanged?.();
-      router.refresh();
+        setDraft(null);
+        onChanged?.();
+        router.refresh();
+      } catch (error) {
+        if (error instanceof ApiResponseError && error.status === 409) {
+          setSaveError("资料已在其他位置更新，当前草稿已保留，请刷新资料后再保存。");
+        } else {
+          setSaveError(error instanceof Error ? error.message : "保存失败，请稍后重试。");
+        }
+      }
     });
   };
 
@@ -83,9 +101,10 @@ export function ProgressPanel({ novelId, progress, onChanged }: ProgressPanelPro
           onChange={(event) => setField("nextMilestone", event.target.value)}
           placeholder="下一里程碑"
         />
-        <button className="button secondary" type="button" onClick={handleSave}>
+        <button className="button secondary" type="button" disabled={pending} onClick={handleSave}>
           {pending ? "保存中..." : "保存剧情进度"}
         </button>
+        {saveError ? <p className="form-error" role="alert">{saveError}</p> : null}
       </div>
     </div>
   );

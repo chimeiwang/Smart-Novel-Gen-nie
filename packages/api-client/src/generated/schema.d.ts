@@ -1394,6 +1394,15 @@ export interface components {
         ApplyStyleRequest: {
             /** Styleid */
             styleId: string | null;
+            /** Expectedstyleid */
+            expectedStyleId: string | null;
+        };
+        /** ApplyStyleResponse */
+        ApplyStyleResponse: {
+            /** Styleid */
+            styleId: string | null;
+            /** Effective */
+            effective: boolean;
         };
         /** ApprovedBeatPlanSummary */
         ApprovedBeatPlanSummary: {
@@ -1833,6 +1842,8 @@ export interface components {
         ContentRequest: {
             /** Content */
             content: string | null;
+            /** Expectedupdatedat */
+            expectedUpdatedAt: string | null;
         };
         /** ContentResponse */
         ContentResponse: {
@@ -1893,6 +1904,103 @@ export interface components {
             currentStatus: "active" | "missing" | "dead" | "imprisoned" | "unknown";
             /** Statusnote */
             statusNote?: string | null;
+            /** Clientrequestid */
+            clientRequestId: string;
+        };
+        /** CreateCharacterResponse */
+        CreateCharacterResponse: {
+            /** Name */
+            name: string;
+            /** Aliases */
+            aliases?: string | null;
+            /** Gender */
+            gender?: string | null;
+            /** Age */
+            age?: string | null;
+            /** Appearance */
+            appearance?: string | null;
+            /** Personality */
+            personality?: string | null;
+            /** Identity */
+            identity?: string | null;
+            /** Background */
+            background?: string | null;
+            /** Coredesire */
+            coreDesire?: string | null;
+            /** Behaviorboundaries */
+            behaviorBoundaries?: string | null;
+            /** Speechstyle */
+            speechStyle?: string | null;
+            /** Relationshipprinciples */
+            relationshipPrinciples?: string | null;
+            /** Shorttermgoal */
+            shortTermGoal?: string | null;
+            /** Factionid */
+            factionId?: string | null;
+            /** Powerlevel */
+            powerLevel?: string | null;
+            /** Combatability */
+            combatAbility?: string | null;
+            /** Specialskills */
+            specialSkills?: string | null;
+            /**
+             * Currentstatus
+             * @default active
+             * @enum {string}
+             */
+            currentStatus: "active" | "missing" | "dead" | "imprisoned" | "unknown";
+            /** Statusnote */
+            statusNote?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+            /** Effective */
+            effective: boolean;
+        };
+        /** CreateExperienceRequest */
+        CreateExperienceRequest: {
+            /** Chapterid */
+            chapterId?: string | null;
+            /** Content */
+            content: string;
+            /** Order */
+            order?: number | null;
+            /** Clientrequestid */
+            clientRequestId: string;
+        };
+        /** CreateExperienceResponse */
+        CreateExperienceResponse: {
+            /** Id */
+            id: string;
+            /** Characterid */
+            characterId: string;
+            /** Chapterid */
+            chapterId: string | null;
+            /** Content */
+            content: string;
+            /** Order */
+            order: number;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+            /** Effective */
+            effective: boolean;
         };
         /** CreateFactionRequest */
         CreateFactionRequest: {
@@ -1906,6 +2014,35 @@ export interface components {
             baseId?: string | null;
             /** Description */
             description?: string | null;
+            /** Clientrequestid */
+            clientRequestId: string;
+        };
+        /** CreateFactionResponse */
+        CreateFactionResponse: {
+            /** Name */
+            name: string;
+            /** Aliases */
+            aliases?: string | null;
+            /** Type */
+            type?: string | null;
+            /** Baseid */
+            baseId?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+            /** Effective */
+            effective: boolean;
         };
         /** CreateForeshadowingRequest */
         CreateForeshadowingRequest: {
@@ -1934,6 +2071,31 @@ export interface components {
             definition: string;
             /** Category */
             category?: string | null;
+            /** Clientrequestid */
+            clientRequestId: string;
+        };
+        /** CreateGlossaryResponse */
+        CreateGlossaryResponse: {
+            /** Term */
+            term: string;
+            /** Definition */
+            definition: string;
+            /** Category */
+            category?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+            /** Effective */
+            effective: boolean;
         };
         /** CreateItemRequest */
         CreateItemRequest: {
@@ -1953,6 +2115,41 @@ export interface components {
             description?: string | null;
             /** Ownerid */
             ownerId?: string | null;
+            /** Clientrequestid */
+            clientRequestId: string;
+        };
+        /** CreateItemResponse */
+        CreateItemResponse: {
+            /** Name */
+            name: string;
+            /** Aliases */
+            aliases?: string | null;
+            /** Type */
+            type?: string | null;
+            /** Rarity */
+            rarity?: string | null;
+            /** Effect */
+            effect?: string | null;
+            /** Origin */
+            origin?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Ownerid */
+            ownerId?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+            /** Effective */
+            effective: boolean;
         };
         /** CreateLocationRequest */
         CreateLocationRequest: {
@@ -1970,6 +2167,39 @@ export interface components {
             culture?: string | null;
             /** Description */
             description?: string | null;
+            /** Clientrequestid */
+            clientRequestId: string;
+        };
+        /** CreateLocationResponse */
+        CreateLocationResponse: {
+            /** Name */
+            name: string;
+            /** Aliases */
+            aliases?: string | null;
+            /** Type */
+            type?: string | null;
+            /** Parentid */
+            parentId?: string | null;
+            /** Climate */
+            climate?: string | null;
+            /** Culture */
+            culture?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+            /** Effective */
+            effective: boolean;
         };
         /** CreateMessageRequest */
         CreateMessageRequest: {
@@ -2068,6 +2298,101 @@ export interface components {
             content: string;
             /** Sourceurl */
             sourceUrl?: string | null;
+            /** Clientrequestid */
+            clientRequestId: string;
+        };
+        /** CreateReferenceResponse */
+        CreateReferenceResponse: {
+            /** Title */
+            title: string;
+            /**
+             * Type
+             * @enum {string}
+             */
+            type: "note" | "web" | "book" | "image" | "custom";
+            /** Content */
+            content: string;
+            /** Sourceurl */
+            sourceUrl?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Ragstatus
+             * @enum {string}
+             */
+            ragStatus: "disabled" | "ready" | "failed";
+            /** Contenthash */
+            contentHash: string;
+            /** Errormessage */
+            errorMessage: string | null;
+            /** Createdat */
+            createdAt?: string | null;
+            /** Updatedat */
+            updatedAt?: string | null;
+            /** Effective */
+            effective: boolean;
+        };
+        /** CreateRelationRequest */
+        CreateRelationRequest: {
+            /** Characterid */
+            characterId: string;
+            /** Targetid */
+            targetId: string;
+            /**
+             * Relationtype
+             * @enum {string}
+             */
+            relationType: "family" | "master_student" | "friend" | "enemy" | "ally" | "lover" | "rival" | "subordinate" | "acquaintance" | "other";
+            /**
+             * Intimacy
+             * @default 0
+             */
+            intimacy: number;
+            /** Description */
+            description?: string | null;
+            /** Startdate */
+            startDate?: string | null;
+            /** Enddate */
+            endDate?: string | null;
+            /** Clientrequestid */
+            clientRequestId: string;
+        };
+        /** CreateRelationResponse */
+        CreateRelationResponse: {
+            /** Characterid */
+            characterId: string;
+            /** Targetid */
+            targetId: string;
+            /**
+             * Relationtype
+             * @enum {string}
+             */
+            relationType: "family" | "master_student" | "friend" | "enemy" | "ally" | "lover" | "rival" | "subordinate" | "acquaintance" | "other";
+            /**
+             * Intimacy
+             * @default 0
+             */
+            intimacy: number;
+            /** Description */
+            description?: string | null;
+            /** Startdate */
+            startDate?: string | null;
+            /** Enddate */
+            endDate?: string | null;
+            /** Id */
+            id: string;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+            /** Effective */
+            effective: boolean;
         };
         /** CreateStyleRequest */
         CreateStyleRequest: {
@@ -2104,6 +2429,62 @@ export interface components {
         DashboardResponse: {
             /** Novels */
             novels: components["schemas"]["DashboardNovel"][];
+        };
+        /** DeleteEntityRequest */
+        DeleteEntityRequest: {
+            /**
+             * Expectedupdatedat
+             * Format: date-time
+             */
+            expectedUpdatedAt: string;
+        };
+        /** DeleteImpactResponse */
+        DeleteImpactResponse: {
+            /**
+             * Deletedtype
+             * @enum {string}
+             */
+            deletedType: "characters" | "items" | "locations" | "factions" | "glossary" | "experience" | "relation";
+            /** Deletedid */
+            deletedId: string;
+            /** Affected */
+            affected: {
+                [key: string]: number;
+            };
+        };
+        /** DeleteReferenceAffected */
+        DeleteReferenceAffected: {
+            /**
+             * Reference
+             * @constant
+             */
+            reference: 1;
+            /**
+             * Ragdocuments
+             * @enum {integer}
+             */
+            ragDocuments: 0 | 1;
+            /** Ragchunks */
+            ragChunks: number;
+        };
+        /** DeleteReferenceImpactResponse */
+        DeleteReferenceImpactResponse: {
+            /**
+             * Deletedtype
+             * @constant
+             */
+            deletedType: "reference";
+            /** Deletedid */
+            deletedId: string;
+            affected: components["schemas"]["DeleteReferenceAffected"];
+        };
+        /** DeleteReferenceRequest */
+        DeleteReferenceRequest: {
+            /**
+             * Expectedupdatedat
+             * Format: date-time
+             */
+            expectedUpdatedAt: string;
         };
         /** DiffBlock */
         DiffBlock: {
@@ -2181,15 +2562,6 @@ export interface components {
             details: components["schemas"]["JsonValue"] | null;
             /** Requestid */
             requestId: string;
-        };
-        /** ExperienceRequest */
-        ExperienceRequest: {
-            /** Chapterid */
-            chapterId?: string | null;
-            /** Content */
-            content: string;
-            /** Order */
-            order?: number | null;
         };
         /** ExperienceResponse */
         ExperienceResponse: {
@@ -2785,6 +3157,8 @@ export interface components {
             currentConflict?: string | null;
             /** Nextmilestone */
             nextMilestone?: string | null;
+            /** Expectedupdatedat */
+            expectedUpdatedAt: string | null;
         };
         /** PlotProgressResponse */
         PlotProgressResponse: {
@@ -2963,8 +3337,6 @@ export interface components {
         };
         /** ReferenceMaterialResponse */
         ReferenceMaterialResponse: {
-            /** Id */
-            id: string;
             /** Title */
             title: string;
             /**
@@ -2975,7 +3347,9 @@ export interface components {
             /** Content */
             content: string;
             /** Sourceurl */
-            sourceUrl: string | null;
+            sourceUrl?: string | null;
+            /** Id */
+            id: string;
             /**
              * Ragstatus
              * @enum {string}
@@ -3015,35 +3389,17 @@ export interface components {
              */
             accepted: true;
         };
+        /** ReindexReferenceRequest */
+        ReindexReferenceRequest: {
+            /** Expectedcontenthash */
+            expectedContentHash: string;
+        };
         /** RelationPeer */
         RelationPeer: {
             /** Id */
             id: string;
             /** Name */
             name: string;
-        };
-        /** RelationRequest */
-        RelationRequest: {
-            /** Characterid */
-            characterId: string;
-            /** Targetid */
-            targetId: string;
-            /**
-             * Relationtype
-             * @enum {string}
-             */
-            relationType: "family" | "master_student" | "friend" | "enemy" | "ally" | "lover" | "rival" | "subordinate" | "acquaintance" | "other";
-            /**
-             * Intimacy
-             * @default 0
-             */
-            intimacy: number;
-            /** Description */
-            description?: string | null;
-            /** Startdate */
-            startDate?: string | null;
-            /** Enddate */
-            endDate?: string | null;
         };
         /** RelationResponse */
         RelationResponse: {
@@ -3451,6 +3807,25 @@ export interface components {
             currentStatus?: ("active" | "missing" | "dead" | "imprisoned" | "unknown") | null;
             /** Statusnote */
             statusNote?: string | null;
+            /**
+             * Expectedupdatedat
+             * Format: date-time
+             */
+            expectedUpdatedAt: string;
+        };
+        /** UpdateExperienceRequest */
+        UpdateExperienceRequest: {
+            /** Chapterid */
+            chapterId?: string | null;
+            /** Content */
+            content?: string | null;
+            /** Order */
+            order?: number | null;
+            /**
+             * Expectedupdatedat
+             * Format: date-time
+             */
+            expectedUpdatedAt: string;
         };
         /** UpdateFactionRequest */
         UpdateFactionRequest: {
@@ -3464,6 +3839,11 @@ export interface components {
             baseId?: string | null;
             /** Description */
             description?: string | null;
+            /**
+             * Expectedupdatedat
+             * Format: date-time
+             */
+            expectedUpdatedAt: string;
         };
         /** UpdateForeshadowingRequest */
         UpdateForeshadowingRequest: {
@@ -3488,6 +3868,11 @@ export interface components {
             definition?: string | null;
             /** Category */
             category?: string | null;
+            /**
+             * Expectedupdatedat
+             * Format: date-time
+             */
+            expectedUpdatedAt: string;
         };
         /** UpdateItemRequest */
         UpdateItemRequest: {
@@ -3507,6 +3892,11 @@ export interface components {
             description?: string | null;
             /** Ownerid */
             ownerId?: string | null;
+            /**
+             * Expectedupdatedat
+             * Format: date-time
+             */
+            expectedUpdatedAt: string;
         };
         /** UpdateLocationRequest */
         UpdateLocationRequest: {
@@ -3524,6 +3914,11 @@ export interface components {
             culture?: string | null;
             /** Description */
             description?: string | null;
+            /**
+             * Expectedupdatedat
+             * Format: date-time
+             */
+            expectedUpdatedAt: string;
         };
         /** UpdateOutlineNodeRequest */
         UpdateOutlineNodeRequest: {
@@ -3583,6 +3978,11 @@ export interface components {
             content?: string | null;
             /** Sourceurl */
             sourceUrl?: string | null;
+            /**
+             * Expectedupdatedat
+             * Format: date-time
+             */
+            expectedUpdatedAt: string;
         };
         /** UpdateRelationRequest */
         UpdateRelationRequest: {
@@ -3596,6 +3996,11 @@ export interface components {
             startDate?: string | null;
             /** Enddate */
             endDate?: string | null;
+            /**
+             * Expectedupdatedat
+             * Format: date-time
+             */
+            expectedUpdatedAt: string;
         };
         /** UpdateWritingSessionRequest */
         UpdateWritingSessionRequest: {
@@ -3889,6 +4294,11 @@ export interface components {
         WorkspacePlanningResponse: {
             /** Storyprogress */
             storyProgress: string | null;
+            /**
+             * Storyprogressupdatedat
+             * Format: date-time
+             */
+            storyProgressUpdatedAt: string;
             storyBackground: components["schemas"]["ContentDto"] | null;
             worldSetting: components["schemas"]["ContentDto"] | null;
             writingBible: components["schemas"]["WritingBibleDto"] | null;
@@ -3990,6 +4400,8 @@ export interface components {
             comparableTitles?: string | null;
             /** Notes */
             notes?: string | null;
+            /** Expectedupdatedat */
+            expectedUpdatedAt: string | null;
         };
         /** WritingBibleResponse */
         WritingBibleResponse: {
@@ -7005,7 +7417,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CharacterResponse"];
+                    "application/json": components["schemas"]["CreateCharacterResponse"];
                 };
             };
             /** @description 统一错误响应 */
@@ -7112,14 +7524,20 @@ export interface operations {
                 "inkforge-token"?: string | null;
             };
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteEntityRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
-            204: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["DeleteImpactResponse"];
+                };
             };
             /** @description 统一错误响应 */
             400: {
@@ -7469,7 +7887,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ItemResponse"];
+                    "application/json": components["schemas"]["CreateItemResponse"];
                 };
             };
             /** @description 统一错误响应 */
@@ -7576,14 +7994,20 @@ export interface operations {
                 "inkforge-token"?: string | null;
             };
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteEntityRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
-            204: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["DeleteImpactResponse"];
+                };
             };
             /** @description 统一错误响应 */
             400: {
@@ -7933,7 +8357,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LocationResponse"];
+                    "application/json": components["schemas"]["CreateLocationResponse"];
                 };
             };
             /** @description 统一错误响应 */
@@ -8040,14 +8464,20 @@ export interface operations {
                 "inkforge-token"?: string | null;
             };
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteEntityRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
-            204: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["DeleteImpactResponse"];
+                };
             };
             /** @description 统一错误响应 */
             400: {
@@ -8397,7 +8827,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["FactionResponse"];
+                    "application/json": components["schemas"]["CreateFactionResponse"];
                 };
             };
             /** @description 统一错误响应 */
@@ -8504,14 +8934,20 @@ export interface operations {
                 "inkforge-token"?: string | null;
             };
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteEntityRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
-            204: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["DeleteImpactResponse"];
+                };
             };
             /** @description 统一错误响应 */
             400: {
@@ -8861,7 +9297,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["GlossaryResponse"];
+                    "application/json": components["schemas"]["CreateGlossaryResponse"];
                 };
             };
             /** @description 统一错误响应 */
@@ -8968,14 +9404,20 @@ export interface operations {
                 "inkforge-token"?: string | null;
             };
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteEntityRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
-            204: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["DeleteImpactResponse"];
+                };
             };
             /** @description 统一错误响应 */
             400: {
@@ -9317,7 +9759,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ExperienceRequest"];
+                "application/json": components["schemas"]["CreateExperienceRequest"];
             };
         };
         responses: {
@@ -9327,7 +9769,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ExperienceResponse"];
+                    "application/json": components["schemas"]["CreateExperienceResponse"];
                 };
             };
             /** @description 统一错误响应 */
@@ -9434,14 +9876,20 @@ export interface operations {
                 "inkforge-token"?: string | null;
             };
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteEntityRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
-            204: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["DeleteImpactResponse"];
+                };
             };
             /** @description 统一错误响应 */
             400: {
@@ -9549,7 +9997,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ExperienceRequest"];
+                "application/json": components["schemas"]["UpdateExperienceRequest"];
             };
         };
         responses: {
@@ -9781,7 +10229,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RelationRequest"];
+                "application/json": components["schemas"]["CreateRelationRequest"];
             };
         };
         responses: {
@@ -9791,7 +10239,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RelationResponse"];
+                    "application/json": components["schemas"]["CreateRelationResponse"];
                 };
             };
             /** @description 统一错误响应 */
@@ -9898,14 +10346,20 @@ export interface operations {
                 "inkforge-token"?: string | null;
             };
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteEntityRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
-            204: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["DeleteImpactResponse"];
+                };
             };
             /** @description 统一错误响应 */
             400: {
@@ -11891,7 +12345,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ReferenceMaterialResponse"];
+                    "application/json": components["schemas"]["CreateReferenceResponse"];
                 };
             };
             /** @description 统一错误响应 */
@@ -11998,14 +12452,20 @@ export interface operations {
                 "inkforge-token"?: string | null;
             };
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteReferenceRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
-            204: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["DeleteReferenceImpactResponse"];
+                };
             };
             /** @description 统一错误响应 */
             400: {
@@ -12230,7 +12690,11 @@ export interface operations {
                 "inkforge-token"?: string | null;
             };
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReindexReferenceRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             202: {
@@ -13502,11 +13966,13 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            204: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ApplyStyleResponse"];
+                };
             };
             /** @description 统一错误响应 */
             400: {

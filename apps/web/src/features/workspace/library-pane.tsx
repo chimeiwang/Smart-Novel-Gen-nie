@@ -10,7 +10,7 @@ import { ProgressPanel } from "@/features/progress/progress-panel";
 import { ReferencePanel } from "@/features/references/reference-panel";
 import { StylePanel } from "@/features/styles/style-panel";
 import { browserApi } from "@/lib/api/browser";
-import { requireApiData } from "@/lib/api/response";
+import { ApiResponseError, requireApiData } from "@/lib/api/response";
 import {
   STORY_LENGTH_PROFILE_CONFIG,
   normalizeStoryLengthProfile,
@@ -42,6 +42,13 @@ type LibraryPaneProps = {
   appliedStyleId: string | null;
   active: boolean;
 };
+
+function creativeMaterialSaveError(error: unknown): string {
+  if (error instanceof ApiResponseError && error.status === 409) {
+    return "资料已在其他位置更新，当前草稿已保留，请刷新资料后再保存。";
+  }
+  return error instanceof Error ? error.message : "保存失败，请稍后重试。";
+}
 
 const LIBRARY_GROUPS: Array<{
   label: string;
@@ -109,7 +116,17 @@ function PlanningTextEditor({
   onSave: (value: string) => Promise<void>;
 }) {
   const [value, setValue] = useState(initialValue);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+
+  const save = () => startTransition(async () => {
+    setSaveError(null);
+    try {
+      await onSave(value);
+    } catch (error) {
+      setSaveError(creativeMaterialSaveError(error));
+    }
+  });
 
   return (
     <section className="library-form-section stack">
@@ -129,11 +146,12 @@ function PlanningTextEditor({
           className="button"
           type="button"
           disabled={pending}
-          onClick={() => startTransition(() => onSave(value))}
+          onClick={save}
         >
           {pending ? "保存中..." : "保存"}
         </button>
       </div>
+      {saveError ? <p className="form-error" role="alert">{saveError}</p> : null}
     </section>
   );
 }
@@ -165,6 +183,7 @@ function WritingBibleEditor({
   onChanged: () => void;
 }) {
   const [form, setForm] = useState(() => toWritingBibleForm(writingBible));
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
   const update = (field: keyof typeof form, value: string) => {
@@ -179,15 +198,21 @@ function WritingBibleEditor({
     }));
   };
   const save = () => startTransition(async () => {
-    requireApiData(await browserApi.PUT("/api/v1/novels/{novel_id}/writing-bible", {
-      params: { path: { novel_id: novelId } },
-      body: {
-        ...form,
-        targetTotalWordCount: Number(form.targetTotalWordCount) || null,
-      },
-    }));
-    onChanged();
-    router.refresh();
+    setSaveError(null);
+    try {
+      requireApiData(await browserApi.PUT("/api/v1/novels/{novel_id}/writing-bible", {
+        params: { path: { novel_id: novelId } },
+        body: {
+          ...form,
+          targetTotalWordCount: Number(form.targetTotalWordCount) || null,
+          expectedUpdatedAt: writingBible?.updatedAt ?? null,
+        },
+      }));
+      onChanged();
+      router.refresh();
+    } catch (error) {
+      setSaveError(creativeMaterialSaveError(error));
+    }
   });
 
   return (
@@ -245,6 +270,7 @@ function WritingBibleEditor({
           {pending ? "保存中..." : "保存"}
         </button>
       </div>
+      {saveError ? <p className="form-error" role="alert">{saveError}</p> : null}
     </section>
   );
 }
@@ -296,10 +322,11 @@ export function LibraryPane({ novelId, appliedStyleId, active }: LibraryPaneProp
       | "/api/v1/novels/{novel_id}/story-background"
       | "/api/v1/novels/{novel_id}/world-setting",
     content: string,
+    expectedUpdatedAt: string | null,
   ) => {
     requireApiData(await browserApi.PUT(path, {
       params: { path: { novel_id: novelId } },
-      body: { content },
+      body: { content, expectedUpdatedAt },
     }));
     refresh("planning");
     router.refresh();
@@ -363,13 +390,13 @@ export function LibraryPane({ novelId, appliedStyleId, active }: LibraryPaneProp
       return <ProgressPanel novelId={novelId} progress={planning.plotProgress} onChanged={() => refresh("planning")} />;
     }
     if (activeItem === "storyProgress") {
-      return <PlanningTextEditor key="storyProgress" title="故事进展" description="记录故事整体进展、关键转折和伏笔。" initialValue={planning.storyProgress ?? ""} placeholder="记录故事的整体进展..." onSave={(value) => savePlanningText("/api/v1/novels/{novel_id}/story-progress", value)} />;
+      return <PlanningTextEditor key="storyProgress" title="故事进展" description="记录故事整体进展、关键转折和伏笔。" initialValue={planning.storyProgress ?? ""} placeholder="记录故事的整体进展..." onSave={(value) => savePlanningText("/api/v1/novels/{novel_id}/story-progress", value, planning.storyProgressUpdatedAt)} />;
     }
     if (activeItem === "storyBackground") {
-      return <PlanningTextEditor key="storyBackground" title="故事背景" description="描述故事的基础背景和核心冲突。" initialValue={planning.storyBackground?.content ?? ""} placeholder="描述故事的时代背景、起始事件和核心冲突..." onSave={(value) => savePlanningText("/api/v1/novels/{novel_id}/story-background", value)} />;
+      return <PlanningTextEditor key="storyBackground" title="故事背景" description="描述故事的基础背景和核心冲突。" initialValue={planning.storyBackground?.content ?? ""} placeholder="描述故事的时代背景、起始事件和核心冲突..." onSave={(value) => savePlanningText("/api/v1/novels/{novel_id}/story-background", value, planning.storyBackground?.updatedAt ?? null)} />;
     }
     if (activeItem === "worldSetting") {
-      return <PlanningTextEditor key="worldSetting" title="世界设定" description="描述世界类型、力量体系、规则和历史。" initialValue={planning.worldSetting?.content ?? ""} placeholder="描述世界的设定..." onSave={(value) => savePlanningText("/api/v1/novels/{novel_id}/world-setting", value)} />;
+      return <PlanningTextEditor key="worldSetting" title="世界设定" description="描述世界类型、力量体系、规则和历史。" initialValue={planning.worldSetting?.content ?? ""} placeholder="描述世界的设定..." onSave={(value) => savePlanningText("/api/v1/novels/{novel_id}/world-setting", value, planning.worldSetting?.updatedAt ?? null)} />;
     }
     return <WritingBibleEditor novelId={novelId} writingBible={planning.writingBible} onChanged={() => refresh("planning")} />;
   };
