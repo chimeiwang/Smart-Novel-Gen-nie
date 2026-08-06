@@ -1004,6 +1004,9 @@ long.quality.reset
 按 planning、outline node、foreshadowing、lore、reference、style 的垂直切片逐类补齐原子写入、
 幂等、CAS、删除影响和 sourceBindings，再注册对应 CLI 命令。不得为了凑齐命令表先暴露不安全接口。
 
+`2026-08-06-long-serial-creative-material-cli-writes.md` 规格定义的 32 条长篇创作资料写命令已经实现，
+但尚未部署到生产环境。大纲正文、大纲节点、伏笔和用户级文风库的写命令仍未开放。
+
 ### D. 生产操作
 
 - 创建并验证生产长篇 Skill 和 policy；

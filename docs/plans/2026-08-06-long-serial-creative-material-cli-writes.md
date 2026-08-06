@@ -1026,7 +1026,7 @@ Run:
 & 'C:\Users\niebo\.codex\skills\inkforge-production-short-story-operator\tests\structured-writes.Tests.ps1'
 & 'C:\Users\niebo\.codex\skills\inkforge-production-short-story-operator\tests\https-migration.Tests.ps1'
 & 'C:\Users\niebo\.codex\skills\inkforge-production-short-story-operator\tests\unicode-runtime.Tests.ps1'
-uv run python 'C:\Users\niebo\.codex\skills\.system\skill-creator\scripts\quick_validate.py' 'C:\Users\niebo\.codex\skills\inkforge-production-short-story-operator'
+uv run python -X utf8 'C:\Users\niebo\.codex\skills\.system\skill-creator\scripts\quick_validate.py' 'C:\Users\niebo\.codex\skills\inkforge-production-short-story-operator'
 ```
 
 Expected: 所有 PowerShell 脚本退出 0，quick_validate 输出 `Skill is valid!`。
