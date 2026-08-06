@@ -47,23 +47,54 @@ class LoreRepositoryPort(Protocol):
         expected_updated_at: datetime,
     ) -> dict[str, Any]: ...
     async def create_experience(
-        self, novel_id: str, user_id: str, character_id: str, fields: dict[str, Any]
+        self,
+        novel_id: str,
+        user_id: str,
+        character_id: str,
+        client_request_id: str,
+        fields: dict[str, Any],
     ) -> dict[str, Any]: ...
     async def list_experiences(
         self, novel_id: str, user_id: str, character_id: str
     ) -> list[dict[str, Any]]: ...
     async def update_experience(
-        self, novel_id: str, user_id: str, experience_id: str, fields: dict[str, Any]
+        self,
+        novel_id: str,
+        user_id: str,
+        experience_id: str,
+        fields: dict[str, Any],
+        expected_updated_at: datetime,
     ) -> dict[str, Any]: ...
-    async def delete_experience(self, novel_id: str, user_id: str, experience_id: str) -> None: ...
+    async def delete_experience(
+        self,
+        novel_id: str,
+        user_id: str,
+        experience_id: str,
+        expected_updated_at: datetime,
+    ) -> dict[str, Any]: ...
     async def create_relation(
-        self, novel_id: str, user_id: str, fields: dict[str, Any]
+        self,
+        novel_id: str,
+        user_id: str,
+        client_request_id: str,
+        fields: dict[str, Any],
     ) -> dict[str, Any]: ...
     async def list_relations(self, novel_id: str, user_id: str) -> list[dict[str, Any]]: ...
     async def update_relation(
-        self, novel_id: str, user_id: str, relation_id: str, fields: dict[str, Any]
+        self,
+        novel_id: str,
+        user_id: str,
+        relation_id: str,
+        fields: dict[str, Any],
+        expected_updated_at: datetime,
     ) -> dict[str, Any]: ...
-    async def delete_relation(self, novel_id: str, user_id: str, relation_id: str) -> None: ...
+    async def delete_relation(
+        self,
+        novel_id: str,
+        user_id: str,
+        relation_id: str,
+        expected_updated_at: datetime,
+    ) -> dict[str, Any]: ...
 
 
 class LoreService:
@@ -122,8 +153,15 @@ class LoreService:
     async def create_experience(
         self, user_id: str, novel_id: str, character_id: str, request: BaseModel
     ) -> dict[str, Any]:
+        client_request_id = getattr(request, "clientRequestId", None)
+        if not isinstance(client_request_id, str):
+            raise TypeError("角色经历创建请求缺少 clientRequestId")
         return await self._repository.create_experience(
-            novel_id, user_id, character_id, request.model_dump()
+            novel_id,
+            user_id,
+            character_id,
+            client_request_id,
+            request.model_dump(exclude={"clientRequestId"}),
         )
 
     async def list_experiences(
@@ -134,17 +172,48 @@ class LoreService:
     async def update_experience(
         self, user_id: str, novel_id: str, experience_id: str, request: BaseModel
     ) -> dict[str, Any]:
+        expected_updated_at = getattr(request, "expectedUpdatedAt", None)
+        if not isinstance(expected_updated_at, datetime):
+            raise TypeError("角色经历更新请求缺少 expectedUpdatedAt")
+        fields = request.model_dump(exclude={"expectedUpdatedAt"}, exclude_unset=True)
+        self._require_update_fields(fields)
+        if any(fields.get(field) is None for field in ("content", "order") if field in fields):
+            raise ApiError(
+                status_code=422,
+                code="LORE_FIELD_REQUIRED",
+                message="经历内容和顺序不能为 null",
+            )
         return await self._repository.update_experience(
-            novel_id, user_id, experience_id, request.model_dump(exclude_unset=True)
+            novel_id,
+            user_id,
+            experience_id,
+            fields,
+            expected_updated_at,
         )
 
-    async def delete_experience(self, user_id: str, novel_id: str, experience_id: str) -> None:
-        await self._repository.delete_experience(novel_id, user_id, experience_id)
+    async def delete_experience(
+        self,
+        user_id: str,
+        novel_id: str,
+        experience_id: str,
+        request: DeleteEntityRequest,
+    ) -> dict[str, Any]:
+        return await self._repository.delete_experience(
+            novel_id, user_id, experience_id, request.expectedUpdatedAt
+        )
 
     async def create_relation(
         self, user_id: str, novel_id: str, request: BaseModel
     ) -> dict[str, Any]:
-        return await self._repository.create_relation(novel_id, user_id, request.model_dump())
+        client_request_id = getattr(request, "clientRequestId", None)
+        if not isinstance(client_request_id, str):
+            raise TypeError("人物关系创建请求缺少 clientRequestId")
+        return await self._repository.create_relation(
+            novel_id,
+            user_id,
+            client_request_id,
+            request.model_dump(exclude={"clientRequestId"}),
+        )
 
     async def list_relations(self, user_id: str, novel_id: str) -> list[dict[str, Any]]:
         return await self._repository.list_relations(novel_id, user_id)
@@ -152,7 +221,10 @@ class LoreService:
     async def update_relation(
         self, user_id: str, novel_id: str, relation_id: str, request: BaseModel
     ) -> dict[str, Any]:
-        fields = request.model_dump(exclude_unset=True)
+        expected_updated_at = getattr(request, "expectedUpdatedAt", None)
+        if not isinstance(expected_updated_at, datetime):
+            raise TypeError("人物关系更新请求缺少 expectedUpdatedAt")
+        fields = request.model_dump(exclude={"expectedUpdatedAt"}, exclude_unset=True)
         self._require_update_fields(fields)
         if any(
             fields.get(field) is None for field in ("relationType", "intimacy") if field in fields
@@ -162,10 +234,20 @@ class LoreService:
                 code="LORE_FIELD_REQUIRED",
                 message="关系类型和亲密度不能为 null",
             )
-        return await self._repository.update_relation(novel_id, user_id, relation_id, fields)
+        return await self._repository.update_relation(
+            novel_id, user_id, relation_id, fields, expected_updated_at
+        )
 
-    async def delete_relation(self, user_id: str, novel_id: str, relation_id: str) -> None:
-        await self._repository.delete_relation(novel_id, user_id, relation_id)
+    async def delete_relation(
+        self,
+        user_id: str,
+        novel_id: str,
+        relation_id: str,
+        request: DeleteEntityRequest,
+    ) -> dict[str, Any]:
+        return await self._repository.delete_relation(
+            novel_id, user_id, relation_id, request.expectedUpdatedAt
+        )
 
     async def upsert_content(
         self,

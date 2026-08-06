@@ -16,7 +16,7 @@ from inkforge_core.lore.schemas import (
     CreateGlossaryRequest,
     CreateItemRequest,
     CreateLocationRequest,
-    RelationRequest,
+    CreateRelationRequest,
     WritingBibleRequest,
     WritingBibleResponse,
 )
@@ -54,8 +54,14 @@ from pydantic import ValidationError
             },
         ),
         (
-            RelationRequest,
-            {"characterId": "a", "targetId": "b", "relationType": "friend", "unknown": "x"},
+            CreateRelationRequest,
+            {
+                "characterId": "a",
+                "targetId": "b",
+                "relationType": "friend",
+                "clientRequestId": "contract-relation",
+                "unknown": "x",
+            },
         ),
     ],
 )
@@ -85,8 +91,13 @@ def test_character_status_is_exact_literal(status: object) -> None:
 )
 def test_relation_type_is_exact_literal(relation_type: object) -> None:
     with pytest.raises(ValidationError):
-        RelationRequest.model_validate(
-            {"characterId": "a", "targetId": "b", "relationType": relation_type}
+        CreateRelationRequest.model_validate(
+            {
+                "characterId": "a",
+                "targetId": "b",
+                "relationType": relation_type,
+                "clientRequestId": "contract-relation",
+            }
         )
 
 

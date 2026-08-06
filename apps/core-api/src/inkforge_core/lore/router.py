@@ -3,7 +3,7 @@ from __future__ import annotations
 # mypy: disable-error-code="no-untyped-def"
 from typing import Annotated, Any, cast
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Request
 
 from ..auth.dependencies import get_current_user
 from ..auth.repository import AuthUser
@@ -14,6 +14,8 @@ from .schemas import (
     ContentResponse,
     CreateCharacterRequest,
     CreateCharacterResponse,
+    CreateExperienceRequest,
+    CreateExperienceResponse,
     CreateFactionRequest,
     CreateFactionResponse,
     CreateGlossaryRequest,
@@ -22,17 +24,18 @@ from .schemas import (
     CreateItemResponse,
     CreateLocationRequest,
     CreateLocationResponse,
+    CreateRelationRequest,
+    CreateRelationResponse,
     DeleteEntityRequest,
     DeleteImpactResponse,
-    ExperienceRequest,
     ExperienceResponse,
     FactionResponse,
     GlossaryResponse,
     ItemResponse,
     LocationResponse,
-    RelationRequest,
     RelationResponse,
     UpdateCharacterRequest,
+    UpdateExperienceRequest,
     UpdateFactionRequest,
     UpdateGlossaryRequest,
     UpdateItemRequest,
@@ -244,11 +247,15 @@ async def delete_glossary(
 
 @router.post(
     "/novels/{novel_id}/characters/{character_id}/experiences",
-    response_model=ExperienceResponse,
+    response_model=CreateExperienceResponse,
     status_code=201,
 )
 async def create_experience(
-    novel_id: str, character_id: str, body: ExperienceRequest, user: User, service: Service
+    novel_id: str,
+    character_id: str,
+    body: CreateExperienceRequest,
+    user: User,
+    service: Service,
 ):
     return await service.create_experience(user.id, novel_id, character_id, body)
 
@@ -263,19 +270,37 @@ async def list_experiences(novel_id: str, character_id: str, user: User, service
 
 @router.patch("/novels/{novel_id}/experiences/{experience_id}", response_model=ExperienceResponse)
 async def update_experience(
-    novel_id: str, experience_id: str, body: ExperienceRequest, user: User, service: Service
+    novel_id: str,
+    experience_id: str,
+    body: UpdateExperienceRequest,
+    user: User,
+    service: Service,
 ):
     return await service.update_experience(user.id, novel_id, experience_id, body)
 
 
-@router.delete("/novels/{novel_id}/experiences/{experience_id}", status_code=204)
-async def delete_experience(novel_id: str, experience_id: str, user: User, service: Service):
-    await service.delete_experience(user.id, novel_id, experience_id)
-    return Response(status_code=204)
+@router.delete(
+    "/novels/{novel_id}/experiences/{experience_id}",
+    response_model=DeleteImpactResponse,
+)
+async def delete_experience(
+    novel_id: str,
+    experience_id: str,
+    body: DeleteEntityRequest,
+    user: User,
+    service: Service,
+):
+    return await service.delete_experience(user.id, novel_id, experience_id, body)
 
 
-@router.post("/novels/{novel_id}/relations", response_model=RelationResponse, status_code=201)
-async def create_relation(novel_id: str, body: RelationRequest, user: User, service: Service):
+@router.post(
+    "/novels/{novel_id}/relations",
+    response_model=CreateRelationResponse,
+    status_code=201,
+)
+async def create_relation(
+    novel_id: str, body: CreateRelationRequest, user: User, service: Service
+):
     return await service.create_relation(user.id, novel_id, body)
 
 
@@ -291,10 +316,18 @@ async def update_relation(
     return await service.update_relation(user.id, novel_id, relation_id, body)
 
 
-@router.delete("/novels/{novel_id}/relations/{relation_id}", status_code=204)
-async def delete_relation(novel_id: str, relation_id: str, user: User, service: Service):
-    await service.delete_relation(user.id, novel_id, relation_id)
-    return Response(status_code=204)
+@router.delete(
+    "/novels/{novel_id}/relations/{relation_id}",
+    response_model=DeleteImpactResponse,
+)
+async def delete_relation(
+    novel_id: str,
+    relation_id: str,
+    body: DeleteEntityRequest,
+    user: User,
+    service: Service,
+):
+    return await service.delete_relation(user.id, novel_id, relation_id, body)
 
 
 @router.put("/novels/{novel_id}/story-background", response_model=ContentResponse)

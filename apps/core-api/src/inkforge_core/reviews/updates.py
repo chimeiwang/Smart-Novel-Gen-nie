@@ -4,7 +4,7 @@ from copy import deepcopy
 from datetime import datetime
 from typing import Any, Protocol
 
-from ..lore.repository import EntityMutation
+from ..lore.repository import EntityMutation, ExperienceMutation
 
 ARRAY_SECTIONS = (
     "characters",
@@ -80,13 +80,9 @@ class LoreUpdatesPort(Protocol):
     async def apply_entity_mutations(
         self, novel_id: str, user_id: str, mutations: list[EntityMutation]
     ) -> list[dict[str, Any]]: ...
-    async def create_experience(
-        self, novel_id: str, user_id: str, character_id: str, fields: dict[str, Any]
-    ) -> dict[str, Any]: ...
-    async def update_experience(
-        self, novel_id: str, user_id: str, experience_id: str, fields: dict[str, Any]
-    ) -> dict[str, Any]: ...
-    async def delete_experience(self, novel_id: str, user_id: str, experience_id: str) -> None: ...
+    async def apply_experience_mutations(
+        self, novel_id: str, user_id: str, mutations: list[ExperienceMutation]
+    ) -> list[dict[str, Any]]: ...
     async def upsert_content(
         self,
         novel_id: str,
@@ -171,18 +167,25 @@ class AgentUpdatesExecutor:
             self._build_entity_mutation(section, kind, id_fields, name_field, item)
             for section, kind, id_fields, name_field, item in entity_items
         ]
+        experience_mutations: list[ExperienceMutation] = []
+        experiences = updates.get("characterExperiences")
+        if "characterExperiences" in updates and not isinstance(experiences, list):
+            raise ValueError("characterExperiences 必须是数组")
+        if isinstance(experiences, list):
+            for item in experiences:
+                if not isinstance(item, dict):
+                    raise ValueError("characterExperiences 更新项结构无效")
+                experience_mutations.append(self._build_experience_mutation(item))
         if entity_mutations:
             await self._lore.apply_entity_mutations(
                 novel_id, user_id, entity_mutations
             )
             count += len(entity_mutations)
-        experiences = updates.get("characterExperiences")
-        if isinstance(experiences, list):
-            for item in experiences:
-                if not isinstance(item, dict):
-                    raise ValueError("characterExperiences 更新项结构无效")
-                await self._apply_experience(novel_id, user_id, item)
-                count += 1
+        if experience_mutations:
+            await self._lore.apply_experience_mutations(
+                novel_id, user_id, experience_mutations
+            )
+            count += len(experience_mutations)
         count += await self._apply_outline_updates(novel_id, user_id, updates)
         count += await self._apply_foreshadowing(novel_id, user_id, updates)
         count += await self._apply_references(novel_id, user_id, updates)
@@ -270,27 +273,72 @@ class AgentUpdatesExecutor:
             error_label=section,
         )
 
-    async def _apply_experience(self, novel_id: str, user_id: str, item: dict[str, Any]) -> None:
+    @staticmethod
+    def _build_experience_mutation(item: dict[str, Any]) -> ExperienceMutation:
         action = item.get("action")
+        if action not in {"create", "update", "delete"}:
+            raise ValueError("characterExperiences action 无效")
         experience_id = item.get("id")
-        fields = _strict_fields(item, {"chapterId", "content", "order"}, "characterExperiences")
+        fields = _strict_fields(
+            item,
+            {"chapterId", "content", "order"},
+            "characterExperiences",
+            extra_control={"clientRequestId", "expectedUpdatedAt"},
+        )
+        if "content" in fields and not isinstance(fields["content"], str):
+            raise ValueError("characterExperiences content 字段类型无效，不能为 null")
+        if "chapterId" in fields and fields["chapterId"] is not None and not isinstance(
+            fields["chapterId"], str
+        ):
+            raise ValueError("characterExperiences chapterId 字段类型无效")
+        order = fields.get("order")
+        if order is not None and (not isinstance(order, int) or isinstance(order, bool)):
+            raise ValueError("characterExperiences order 字段类型无效")
         if action == "create":
             character_id = item.get("characterId")
-            if not isinstance(character_id, str):
-                characters = await self._lore.list_entities(novel_id, user_id, "characters")
-                matches = [
-                    value for value in characters if value.get("name") == item.get("characterName")
-                ]
-                if len(matches) != 1 or not isinstance(matches[0].get("id"), str):
-                    raise ValueError("角色经历无法唯一解析角色")
-                character_id = matches[0]["id"]
-            await self._lore.create_experience(novel_id, user_id, character_id, fields)
-        elif action == "update" and isinstance(experience_id, str):
-            await self._lore.update_experience(novel_id, user_id, experience_id, fields)
-        elif action == "delete" and isinstance(experience_id, str):
-            await self._lore.delete_experience(novel_id, user_id, experience_id)
-        else:
+            character_name = item.get("characterName")
+            if not isinstance(character_id, str) and not isinstance(character_name, str):
+                raise ValueError("角色经历无法唯一解析角色")
+            client_request_id = item.get("clientRequestId")
+            if not isinstance(client_request_id, str) or not 16 <= len(client_request_id) <= 256:
+                raise ValueError(
+                    "characterExperiences create 必须提供 16..256 字符的 clientRequestId"
+                )
+            if "content" not in fields:
+                raise ValueError("characterExperiences create 必须提供 content")
+            return ExperienceMutation(
+                action="create",
+                fields=fields,
+                character_id=character_id if isinstance(character_id, str) else None,
+                character_name=character_name if isinstance(character_name, str) else None,
+                client_request_id=client_request_id,
+            )
+        if not isinstance(experience_id, str):
             raise ValueError("角色经历更新缺少有效标识")
+        expected_updated_at = _require_entity_expected_updated_at(
+            item, "characterExperiences"
+        )
+        if action == "update":
+            if not fields:
+                raise ValueError("characterExperiences update 至少需要一个业务字段")
+            if any(
+                fields.get(field) is None
+                for field in ("content", "order")
+                if field in fields
+            ):
+                raise ValueError("characterExperiences content/order 不能为 null")
+            return ExperienceMutation(
+                action="update",
+                fields=fields,
+                entity_id=experience_id,
+                expected_updated_at=expected_updated_at,
+            )
+        return ExperienceMutation(
+            action="delete",
+            fields=fields,
+            entity_id=experience_id,
+            expected_updated_at=expected_updated_at,
+        )
 
     async def _apply_outline_updates(
         self, novel_id: str, user_id: str, updates: dict[str, object]

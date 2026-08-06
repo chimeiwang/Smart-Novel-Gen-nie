@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
 from pydantic import JsonValue
-from sqlalchemy import delete, func, or_, select, text, update
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -96,6 +96,17 @@ class EntityMutation:
     lookup_field: str | None = None
     lookup_value: str | None = None
     error_label: str = "设定实体"
+
+
+@dataclass(frozen=True, slots=True)
+class ExperienceMutation:
+    action: Literal["create", "update", "delete"]
+    fields: dict[str, Any]
+    entity_id: str | None = None
+    character_id: str | None = None
+    character_name: str | None = None
+    client_request_id: str | None = None
+    expected_updated_at: datetime | None = None
 
 
 def _utc(value: datetime | None) -> datetime | None:
@@ -445,27 +456,25 @@ class LoreRepository:
         return {name: count for name, count in counts.items() if count > 0}
 
     async def create_experience(
-        self, novel_id: str, user_id: str, character_id: str, fields: dict[str, Any]
+        self,
+        novel_id: str,
+        user_id: str,
+        character_id: str,
+        client_request_id: str,
+        fields: dict[str, Any],
     ) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
-                await self._require_related(session, Character, character_id, novel_id, "角色")
-                chapter_id = fields.get("chapterId")
-                if chapter_id is not None:
-                    await self._require_related(session, Chapter, chapter_id, novel_id, "章节")
-                if fields.get("order") is None:
-                    maximum = await session.scalar(
-                        select(func.max(CharacterExperience.order)).where(
-                            CharacterExperience.characterId == character_id
-                        )
-                    )
-                    fields["order"] = (maximum if maximum is not None else -1) + 1
-                value = CharacterExperience(characterId=character_id, **fields)
-                session.add(value)
-                await session.flush()
-                result = _model_dict(value)
-        return result
+                await self._lock_novel(session, novel_id)
+                return await self._create_experience_in_session(
+                    session,
+                    novel_id,
+                    user_id,
+                    character_id,
+                    client_request_id,
+                    fields,
+                )
 
     async def list_experiences(
         self, novel_id: str, user_id: str, character_id: str
@@ -487,68 +496,250 @@ class LoreRepository:
         return [_model_dict(value) for value in values]
 
     async def update_experience(
-        self, novel_id: str, user_id: str, experience_id: str, fields: dict[str, Any]
+        self,
+        novel_id: str,
+        user_id: str,
+        experience_id: str,
+        fields: dict[str, Any],
+        expected_updated_at: datetime,
     ) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
-                chapter_id = fields.get("chapterId")
-                if chapter_id is not None:
-                    await self._require_related(session, Chapter, chapter_id, novel_id, "章节")
-                subquery = select(Character.id).where(Character.novelId == novel_id)
-                outcome = cast(
-                    CursorResult[Any],
-                    await session.execute(
-                        update(CharacterExperience)
-                        .where(
-                            CharacterExperience.id == experience_id,
-                            CharacterExperience.characterId.in_(subquery),
-                        )
-                        .values(**fields)
-                    ),
+                await self._lock_novel(session, novel_id)
+                return await self._update_experience_in_session(
+                    session,
+                    novel_id,
+                    experience_id,
+                    fields,
+                    expected_updated_at,
                 )
-                if outcome.rowcount != 1:
-                    raise ApiError(
-                        status_code=404, code="EXPERIENCE_NOT_FOUND", message="角色经历不存在"
-                    )
-                value = await session.scalar(
-                    select(CharacterExperience).where(CharacterExperience.id == experience_id)
-                )
-                result = _model_dict(value)
-        return result
 
-    async def delete_experience(self, novel_id: str, user_id: str, experience_id: str) -> None:
+    async def delete_experience(
+        self,
+        novel_id: str,
+        user_id: str,
+        experience_id: str,
+        expected_updated_at: datetime,
+    ) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
-                subquery = select(Character.id).where(Character.novelId == novel_id)
-                outcome = cast(
-                    CursorResult[Any],
-                    await session.execute(
-                        delete(CharacterExperience).where(
-                            CharacterExperience.id == experience_id,
-                            CharacterExperience.characterId.in_(subquery),
-                        )
-                    ),
+                await self._lock_novel(session, novel_id)
+                return await self._delete_experience_in_session(
+                    session,
+                    novel_id,
+                    experience_id,
+                    expected_updated_at,
                 )
-                if outcome.rowcount != 1:
-                    raise ApiError(
-                        status_code=404, code="EXPERIENCE_NOT_FOUND", message="角色经历不存在"
-                    )
+
+    async def apply_experience_mutations(
+        self,
+        novel_id: str,
+        user_id: str,
+        mutations: list[ExperienceMutation],
+    ) -> list[dict[str, Any]]:
+        async with self._session_factory() as session:
+            async with session.begin():
+                await self._require_owner(session, novel_id, user_id)
+                await self._lock_novel(session, novel_id)
+                results: list[dict[str, Any]] = []
+                for mutation in mutations:
+                    if mutation.action == "create":
+                        if mutation.client_request_id is None:
+                            raise ValueError("角色经历 create 缺少安全控制字段")
+                        character_id = mutation.character_id
+                        if character_id is None:
+                            character_id = await self._resolve_character_id_in_session(
+                                session, novel_id, mutation.character_name
+                            )
+                        result = await self._create_experience_in_session(
+                            session,
+                            novel_id,
+                            user_id,
+                            character_id,
+                            mutation.client_request_id,
+                            mutation.fields,
+                        )
+                    else:
+                        if mutation.entity_id is None or mutation.expected_updated_at is None:
+                            raise ValueError(
+                                f"角色经历 {mutation.action} 缺少安全控制字段"
+                            )
+                        if mutation.action == "update":
+                            result = await self._update_experience_in_session(
+                                session,
+                                novel_id,
+                                mutation.entity_id,
+                                mutation.fields,
+                                mutation.expected_updated_at,
+                            )
+                        else:
+                            result = await self._delete_experience_in_session(
+                                session,
+                                novel_id,
+                                mutation.entity_id,
+                                mutation.expected_updated_at,
+                            )
+                    results.append(result)
+                return results
+
+    @staticmethod
+    async def _resolve_character_id_in_session(
+        session: AsyncSession, novel_id: str, character_name: str | None
+    ) -> str:
+        if character_name is None:
+            raise ValueError("角色经历无法唯一解析角色")
+        ids = (
+            await session.scalars(
+                select(Character.id)
+                .where(Character.novelId == novel_id, Character.name == character_name)
+                .limit(2)
+                .with_for_update()
+            )
+        ).all()
+        if len(ids) != 1:
+            raise ValueError("角色经历无法唯一解析角色")
+        return ids[0]
+
+    async def _create_experience_in_session(
+        self,
+        session: AsyncSession,
+        novel_id: str,
+        user_id: str,
+        character_id: str,
+        client_request_id: str,
+        fields: dict[str, Any],
+    ) -> dict[str, Any]:
+        chapter_id = fields.get("chapterId")
+        experience_id = command_resource_id(
+            "experiences", user_id, novel_id, client_request_id
+        )
+        value = await session.scalar(
+            select(CharacterExperience)
+            .where(CharacterExperience.id == experience_id)
+            .with_for_update()
+        )
+        if value is not None:
+            order_matches = fields.get("order") is None or value.order == fields["order"]
+            if (
+                value.characterId == character_id
+                and value.chapterId == fields.get("chapterId")
+                and value.content == fields.get("content")
+                and order_matches
+                and _utc(value.createdAt) == _utc(value.updatedAt)
+            ):
+                return {**_model_dict(value), "effective": False}
+            raise ApiError(
+                status_code=409,
+                code="RESOURCE_CREATE_CONFLICT",
+                message="创建请求已绑定其他内容",
+            )
+        await self._require_related(session, Character, character_id, novel_id, "角色")
+        if chapter_id is not None:
+            await self._require_related(session, Chapter, chapter_id, novel_id, "章节")
+        order = fields.get("order")
+        if order is None:
+            maximum = await session.scalar(
+                select(func.max(CharacterExperience.order)).where(
+                    CharacterExperience.characterId == character_id
+                )
+            )
+            order = (maximum if maximum is not None else -1) + 1
+        created_at = _database_utc(next_utc_timestamp(None))
+        value = CharacterExperience(
+            id=experience_id,
+            characterId=character_id,
+            chapterId=chapter_id,
+            content=fields["content"],
+            order=order,
+            createdAt=created_at,
+            updatedAt=created_at,
+        )
+        session.add(value)
+        await session.flush()
+        return {**_model_dict(value), "effective": True}
+
+    async def _update_experience_in_session(
+        self,
+        session: AsyncSession,
+        novel_id: str,
+        experience_id: str,
+        fields: dict[str, Any],
+        expected_updated_at: datetime,
+    ) -> dict[str, Any]:
+        characters = select(Character.id).where(Character.novelId == novel_id)
+        value = await session.scalar(
+            select(CharacterExperience)
+            .where(
+                CharacterExperience.id == experience_id,
+                CharacterExperience.characterId.in_(characters),
+            )
+            .with_for_update()
+        )
+        if value is None:
+            raise ApiError(
+                status_code=404, code="EXPERIENCE_NOT_FOUND", message="角色经历不存在"
+            )
+        current_updated_at = _utc(value.updatedAt)
+        require_expected_updated_at(
+            current_updated_at,
+            expected_updated_at,
+            code="LORE_EXPERIENCE_VERSION_CONFLICT",
+        )
+        chapter_id = fields.get("chapterId")
+        if chapter_id is not None:
+            await self._require_related(session, Chapter, chapter_id, novel_id, "章节")
+        if any(getattr(value, name) != requested for name, requested in fields.items()):
+            for name, requested in fields.items():
+                setattr(value, name, requested)
+            value.updatedAt = _database_utc(next_utc_timestamp(current_updated_at))
+            await session.flush()
+        return _model_dict(value)
+
+    async def _delete_experience_in_session(
+        self,
+        session: AsyncSession,
+        novel_id: str,
+        experience_id: str,
+        expected_updated_at: datetime,
+    ) -> dict[str, Any]:
+        characters = select(Character.id).where(Character.novelId == novel_id)
+        value = await session.scalar(
+            select(CharacterExperience)
+            .where(
+                CharacterExperience.id == experience_id,
+                CharacterExperience.characterId.in_(characters),
+            )
+            .with_for_update()
+        )
+        if value is None:
+            raise ApiError(
+                status_code=404, code="EXPERIENCE_NOT_FOUND", message="角色经历不存在"
+            )
+        require_expected_updated_at(
+            _utc(value.updatedAt),
+            expected_updated_at,
+            code="LORE_EXPERIENCE_VERSION_CONFLICT",
+        )
+        await session.delete(value)
+        await session.flush()
+        return {"deletedType": "experience", "deletedId": experience_id, "affected": {}}
 
     async def create_relation(
-        self, novel_id: str, user_id: str, fields: dict[str, Any]
+        self,
+        novel_id: str,
+        user_id: str,
+        client_request_id: str,
+        fields: dict[str, Any],
     ) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
-                for field in ("characterId", "targetId"):
-                    await self._require_related(session, Character, fields[field], novel_id, "角色")
-                value = CharacterRelation(**fields)
-                session.add(value)
-                await session.flush()
-                result = _model_dict(value)
-        return result
+                await self._lock_novel(session, novel_id)
+                return await self._create_relation_in_session(
+                    session, novel_id, user_id, client_request_id, fields
+                )
 
     async def list_relations(self, novel_id: str, user_id: str) -> list[dict[str, Any]]:
         async with self._session_factory() as session:
@@ -567,52 +758,147 @@ class LoreRepository:
         return [_model_dict(value) for value in values]
 
     async def update_relation(
-        self, novel_id: str, user_id: str, relation_id: str, fields: dict[str, Any]
+        self,
+        novel_id: str,
+        user_id: str,
+        relation_id: str,
+        fields: dict[str, Any],
+        expected_updated_at: datetime,
     ) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
-                characters = select(Character.id).where(Character.novelId == novel_id)
-                outcome = cast(
-                    CursorResult[Any],
-                    await session.execute(
-                        update(CharacterRelation)
-                        .where(
-                            CharacterRelation.id == relation_id,
-                            CharacterRelation.characterId.in_(characters),
-                            CharacterRelation.targetId.in_(characters),
-                        )
-                        .values(**fields)
-                    ),
+                await self._lock_novel(session, novel_id)
+                return await self._update_relation_in_session(
+                    session, novel_id, relation_id, fields, expected_updated_at
                 )
-                if outcome.rowcount != 1:
-                    raise ApiError(
-                        status_code=404, code="RELATION_NOT_FOUND", message="人物关系不存在"
-                    )
-                value = await session.scalar(
-                    select(CharacterRelation).where(CharacterRelation.id == relation_id)
-                )
-                result = _model_dict(value)
-        return result
 
-    async def delete_relation(self, novel_id: str, user_id: str, relation_id: str) -> None:
+    async def delete_relation(
+        self,
+        novel_id: str,
+        user_id: str,
+        relation_id: str,
+        expected_updated_at: datetime,
+    ) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
-                characters = select(Character.id).where(Character.novelId == novel_id)
-                outcome = cast(
-                    CursorResult[Any],
-                    await session.execute(
-                        delete(CharacterRelation).where(
-                            CharacterRelation.id == relation_id,
-                            CharacterRelation.characterId.in_(characters),
-                        )
-                    ),
+                await self._lock_novel(session, novel_id)
+                return await self._delete_relation_in_session(
+                    session, novel_id, relation_id, expected_updated_at
                 )
-                if outcome.rowcount != 1:
-                    raise ApiError(
-                        status_code=404, code="RELATION_NOT_FOUND", message="人物关系不存在"
-                    )
+
+    async def _create_relation_in_session(
+        self,
+        session: AsyncSession,
+        novel_id: str,
+        user_id: str,
+        client_request_id: str,
+        fields: dict[str, Any],
+    ) -> dict[str, Any]:
+        relation_id = command_resource_id("relations", user_id, novel_id, client_request_id)
+        create_fields = {
+            "characterId": fields["characterId"],
+            "targetId": fields["targetId"],
+            "relationType": fields["relationType"],
+            "intimacy": fields.get("intimacy", 0),
+            "description": fields.get("description"),
+            "startDate": fields.get("startDate"),
+            "endDate": fields.get("endDate"),
+        }
+        value = await session.scalar(
+            select(CharacterRelation)
+            .where(CharacterRelation.id == relation_id)
+            .with_for_update()
+        )
+        if value is not None:
+            if (
+                all(getattr(value, name) == requested for name, requested in create_fields.items())
+                and _utc(value.createdAt) == _utc(value.updatedAt)
+            ):
+                return {**_model_dict(value), "effective": False}
+            raise ApiError(
+                status_code=409,
+                code="RESOURCE_CREATE_CONFLICT",
+                message="创建请求已绑定其他内容",
+            )
+        for field in ("characterId", "targetId"):
+            await self._require_related(session, Character, fields[field], novel_id, "角色")
+        created_at = _database_utc(next_utc_timestamp(None))
+        value = CharacterRelation(
+            id=relation_id,
+            **create_fields,
+            createdAt=created_at,
+            updatedAt=created_at,
+        )
+        session.add(value)
+        await session.flush()
+        return {**_model_dict(value), "effective": True}
+
+    async def _update_relation_in_session(
+        self,
+        session: AsyncSession,
+        novel_id: str,
+        relation_id: str,
+        fields: dict[str, Any],
+        expected_updated_at: datetime,
+    ) -> dict[str, Any]:
+        value = await self._relation_for_update(session, novel_id, relation_id)
+        if value is None:
+            raise ApiError(
+                status_code=404, code="RELATION_NOT_FOUND", message="人物关系不存在"
+            )
+        current_updated_at = _utc(value.updatedAt)
+        require_expected_updated_at(
+            current_updated_at,
+            expected_updated_at,
+            code="LORE_RELATION_VERSION_CONFLICT",
+        )
+        if any(getattr(value, name) != requested for name, requested in fields.items()):
+            for name, requested in fields.items():
+                setattr(value, name, requested)
+            value.updatedAt = _database_utc(next_utc_timestamp(current_updated_at))
+            await session.flush()
+        return _model_dict(value)
+
+    async def _delete_relation_in_session(
+        self,
+        session: AsyncSession,
+        novel_id: str,
+        relation_id: str,
+        expected_updated_at: datetime,
+    ) -> dict[str, Any]:
+        value = await self._relation_for_update(session, novel_id, relation_id)
+        if value is None:
+            raise ApiError(
+                status_code=404, code="RELATION_NOT_FOUND", message="人物关系不存在"
+            )
+        require_expected_updated_at(
+            _utc(value.updatedAt),
+            expected_updated_at,
+            code="LORE_RELATION_VERSION_CONFLICT",
+        )
+        await session.delete(value)
+        await session.flush()
+        return {"deletedType": "relation", "deletedId": relation_id, "affected": {}}
+
+    @staticmethod
+    async def _relation_for_update(
+        session: AsyncSession, novel_id: str, relation_id: str
+    ) -> CharacterRelation | None:
+        characters = select(Character.id).where(Character.novelId == novel_id)
+        return cast(
+            CharacterRelation | None,
+            await session.scalar(
+                select(CharacterRelation)
+                .where(
+                    CharacterRelation.id == relation_id,
+                    CharacterRelation.characterId.in_(characters),
+                    CharacterRelation.targetId.in_(characters),
+                )
+                .with_for_update()
+            )
+        )
 
     async def upsert_content(
         self,

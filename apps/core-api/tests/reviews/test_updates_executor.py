@@ -21,6 +21,10 @@ class FakeLore:
         self.calls.append(("entity_batch", novel_id, user_id, mutations))
         return []
 
+    async def apply_experience_mutations(self, novel_id, user_id, mutations):
+        self.calls.append(("experience_batch", novel_id, user_id, mutations))
+        return []
+
     async def upsert_content(
         self,
         novel_id: str,
@@ -212,6 +216,175 @@ async def test_all_entity_controls_are_validated_before_any_write() -> None:
                     {"action": "update", "id": "item-1", "name": "新信物"},
                 ]
             },
+        )
+
+    assert lore.calls == []
+
+
+@pytest.mark.asyncio
+async def test_all_experience_controls_are_validated_before_any_write() -> None:
+    lore = FakeLore()
+    executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
+
+    with pytest.raises(ValueError, match="expectedUpdatedAt"):
+        await executor.apply(
+            "novel-1",
+            "user-1",
+            {
+                "characterExperiences": [
+                    {
+                        "action": "create",
+                        "characterId": "character-1",
+                        "clientRequestId": "artifact-experience-create",
+                        "content": "新增经历",
+                    },
+                    {
+                        "action": "update",
+                        "id": "experience-1",
+                        "content": "陈旧更新",
+                    },
+                ]
+            },
+        )
+
+    assert lore.calls == []
+
+
+@pytest.mark.asyncio
+async def test_experience_controls_are_checked_before_other_section_writes() -> None:
+    lore = FakeLore()
+    executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
+
+    with pytest.raises(ValueError, match="expectedUpdatedAt"):
+        await executor.apply(
+            "novel-1",
+            "user-1",
+            {
+                "items": [
+                    {
+                        "action": "create",
+                        "clientRequestId": "artifact-item-create",
+                        "name": "信物",
+                    }
+                ],
+                "characterExperiences": [
+                    {
+                        "action": "update",
+                        "id": "experience-1",
+                        "content": "缺少版本",
+                    }
+                ],
+            },
+        )
+
+    assert lore.calls == []
+
+
+@pytest.mark.asyncio
+async def test_experiences_use_one_batch_and_forward_controls_separately() -> None:
+    lore = FakeLore()
+    executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
+
+    count = await executor.apply(
+        "novel-1",
+        "user-1",
+        {
+            "characterExperiences": [
+                {
+                    "action": "create",
+                    "characterId": "character-1",
+                    "clientRequestId": "artifact-experience-create",
+                    "content": "新增经历",
+                },
+                {
+                    "action": "update",
+                    "id": "experience-1",
+                    "expectedUpdatedAt": "2026-08-06T00:00:00Z",
+                    "content": "更新经历",
+                },
+                {
+                    "action": "delete",
+                    "id": "experience-2",
+                    "expectedUpdatedAt": "2026-08-06T00:00:01Z",
+                },
+            ]
+        },
+    )
+
+    assert count == 3
+    assert len(lore.calls) == 1
+    call = lore.calls[0]
+    assert call[:3] == ("experience_batch", "novel-1", "user-1")
+    mutations = call[3]
+    assert [mutation.action for mutation in mutations] == ["create", "update", "delete"]
+    assert mutations[0].character_id == "character-1"
+    assert mutations[0].client_request_id == "artifact-experience-create"
+    assert mutations[0].fields == {"content": "新增经历"}
+    assert mutations[1].entity_id == "experience-1"
+    assert mutations[1].expected_updated_at == datetime(2026, 8, 6, tzinfo=UTC)
+    assert mutations[1].fields == {"content": "更新经历"}
+    assert mutations[2].entity_id == "experience-2"
+    assert mutations[2].expected_updated_at == datetime(2026, 8, 6, 0, 0, 1, tzinfo=UTC)
+    for mutation in mutations:
+        assert "clientRequestId" not in mutation.fields
+        assert "expectedUpdatedAt" not in mutation.fields
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("field", ["content", "order"])
+async def test_experience_update_rejects_null_required_fields(field: str) -> None:
+    lore = FakeLore()
+    executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
+
+    with pytest.raises(ValueError, match="不能为 null"):
+        await executor.apply(
+            "novel-1",
+            "user-1",
+            {
+                "characterExperiences": [
+                    {
+                        "action": "update",
+                        "id": "experience-1",
+                        "expectedUpdatedAt": "2026-08-06T00:00:00Z",
+                        field: None,
+                    }
+                ]
+            },
+        )
+
+    assert lore.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "item",
+    [
+        {"action": "update", "id": "experience-1", "content": 1},
+        {"action": "update", "id": "experience-1", "order": "1"},
+        {"action": "update", "id": "experience-1", "chapterId": 1},
+    ],
+)
+async def test_experience_update_rejects_wrong_business_field_types(item: dict) -> None:
+    lore = FakeLore()
+    executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
+    item["expectedUpdatedAt"] = "2026-08-06T00:00:00Z"
+
+    with pytest.raises(ValueError, match="字段类型无效"):
+        await executor.apply(
+            "novel-1", "user-1", {"characterExperiences": [item]}
+        )
+
+    assert lore.calls == []
+
+
+@pytest.mark.asyncio
+async def test_character_experiences_section_must_be_an_array() -> None:
+    lore = FakeLore()
+    executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
+
+    with pytest.raises(ValueError, match="必须是数组"):
+        await executor.apply(
+            "novel-1", "user-1", {"characterExperiences": {"action": "delete"}}
         )
 
     assert lore.calls == []

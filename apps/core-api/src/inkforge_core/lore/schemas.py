@@ -19,7 +19,15 @@ RelationType = Literal[
     "other",
 ]
 StoryLengthProfile = Literal["short_medium", "long_serial"]
-LoreKind = Literal["characters", "items", "locations", "factions", "glossary"]
+LoreKind = Literal[
+    "characters",
+    "items",
+    "locations",
+    "factions",
+    "glossary",
+    "experience",
+    "relation",
+]
 ContentKind = Literal["story-background", "world-setting", "writing-bible", "story-progress"]
 
 
@@ -230,13 +238,32 @@ class DeleteImpactResponse(StrictModel):
     affected: dict[str, int]
 
 
-class ExperienceRequest(StrictModel):
+class ExperienceFields(StrictModel):
     chapterId: str | None = None
     content: str
     order: int | None = None
 
 
-class RelationRequest(StrictModel):
+class ExperiencePatch(StrictModel):
+    chapterId: str | None = None
+    content: str | None = None
+    order: int | None = None
+
+
+class CreateExperienceRequest(ExperienceFields):
+    clientRequestId: str = Field(min_length=16, max_length=256)
+
+
+class UpdateExperienceRequest(ExperiencePatch):
+    expectedUpdatedAt: JsonDatetime
+
+    @model_validator(mode="after")
+    def require_business_field(self) -> UpdateExperienceRequest:
+        _require_patch_field(self)
+        return self
+
+
+class RelationFields(StrictModel):
     characterId: str
     targetId: str
     relationType: RelationType
@@ -246,12 +273,25 @@ class RelationRequest(StrictModel):
     endDate: str | None = None
 
 
-class UpdateRelationRequest(StrictModel):
+class RelationPatch(StrictModel):
     relationType: RelationType | None = None
     intimacy: int | None = Field(default=None, ge=0, le=100)
     description: str | None = None
     startDate: str | None = None
     endDate: str | None = None
+
+
+class CreateRelationRequest(RelationFields):
+    clientRequestId: str = Field(min_length=16, max_length=256)
+
+
+class UpdateRelationRequest(RelationPatch):
+    expectedUpdatedAt: JsonDatetime
+
+    @model_validator(mode="after")
+    def require_business_field(self) -> UpdateRelationRequest:
+        _require_patch_field(self)
+        return self
 
 
 class ContentRequest(StrictModel):
@@ -336,10 +376,18 @@ class ExperienceResponse(StrictModel):
     updatedAt: datetime
 
 
-class RelationResponse(RelationRequest):
+class CreateExperienceResponse(ExperienceResponse):
+    effective: bool
+
+
+class RelationResponse(RelationFields):
     id: str
     createdAt: datetime
     updatedAt: datetime
+
+
+class CreateRelationResponse(RelationResponse):
+    effective: bool
 
 
 class ContentResponse(StrictModel):
