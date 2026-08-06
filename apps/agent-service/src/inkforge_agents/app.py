@@ -25,6 +25,7 @@ from .jobs.short_medium import (
 from .jobs.writing import WritingJobHandler
 from .observability import HumanWorkflowLog, WorkflowModelObserver
 from .observability.router import router as debug_router
+from .operations.definitions import validate_public_operation_definitions
 from .operations.graph import OperationDependencies, build_operation_graph
 from .providers.base import ModelProvider
 from .providers.selector import create_model_provider
@@ -59,6 +60,7 @@ def create_app(
     queue_consumer: ConsumerPort | None = None,
     workflow_log: HumanWorkflowLog | None = None,
 ) -> FastAPI:
+    validate_public_operation_definitions()
     loaded_settings = settings or (create_testing_settings() if testing else Settings())
     provider: ModelProvider | None = None
     provider_error: str | None = None

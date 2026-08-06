@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
+
+from inkforge_contracts.long_serial import PUBLIC_LONG_SERIAL_OPERATIONS
+from inkforge_contracts.operations import LongSerialScopeKind, PublicOperationDefinition
 
 from ..definitions.agents import AgentId
 from .contracts import CreativeOperationKind, OutputKind, TargetType
@@ -82,6 +85,8 @@ class OperationDefinition:
     requiresArtifact: bool
     requiresUserApproval: bool
     executionBrief: str
+    allowedScopeKinds: tuple[LongSerialScopeKind, ...] = ()
+    mutating: bool = False
     textArtifactKind: str | None = None
     allowedToolNames: frozenset[str] = frozenset()
     terminalControlTools: frozenset[str] = frozenset()
@@ -89,6 +94,7 @@ class OperationDefinition:
     artifactKeyPolicy: ArtifactKeyPolicy = "none"
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "allowedScopeKinds", tuple(self.allowedScopeKinds))
         for field_name in (
             "allowedToolNames",
             "terminalControlTools",
@@ -113,6 +119,22 @@ class OperationDefinition:
         ):
             raise ValueError("无产物 Operation 不得声明产物执行契约")
 
+    def to_public_definition(self) -> PublicOperationDefinition:
+        if self.kind not in PUBLIC_LONG_SERIAL_OPERATIONS:
+            raise ValueError(f"Operation {self.kind} 不是公开长篇操作")
+        return PublicOperationDefinition.model_validate(
+            {
+                "operation": self.kind,
+                "workflow": "long_serial",
+                "targetKind": self.targetType,
+                "allowedScopeKinds": self.allowedScopeKinds,
+                "mutating": self.mutating,
+                "principalAgent": self.primaryAgent,
+                "reviewers": self.reviewers,
+                "artifactKind": self.textArtifactKind,
+            }
+        )
+
 
 def _definition(
     kind: CreativeOperationKind,
@@ -130,6 +152,8 @@ def _definition(
     terminal_tools: frozenset[str] = frozenset(),
     artifact_events: frozenset[str] = frozenset(),
     artifact_key_policy: ArtifactKeyPolicy = "none",
+    allowed_scope_kinds: tuple[LongSerialScopeKind, ...] = (),
+    mutating: bool = False,
 ) -> OperationDefinition:
     requires_artifact = policy != "none"
     return OperationDefinition(
@@ -144,6 +168,8 @@ def _definition(
         requiresArtifact=requires_artifact,
         requiresUserApproval=requires_artifact,
         executionBrief=brief,
+        allowedScopeKinds=allowed_scope_kinds,
+        mutating=mutating,
         textArtifactKind=text_kind,
         allowedToolNames=allowed_tools,
         terminalControlTools=terminal_tools,
@@ -240,6 +266,8 @@ OPERATION_DEFINITIONS: dict[CreativeOperationKind, OperationDefinition] = {
         terminal_tools=frozenset({"submit_beat_plan"}),
         artifact_events=frozenset({"submit_beat_plan"}),
         artifact_key_policy="generated_stable",
+        allowed_scope_kinds=("chapter",),
+        mutating=True,
     ),
     "write_chapter": _definition(
         "write_chapter",
@@ -256,6 +284,8 @@ OPERATION_DEFINITIONS: dict[CreativeOperationKind, OperationDefinition] = {
         terminal_tools=frozenset({"begin_artifact_output"}),
         artifact_events=frozenset({"begin_artifact_output"}),
         artifact_key_policy="generated_stable",
+        allowed_scope_kinds=("chapter",),
+        mutating=True,
     ),
     "rewrite_scene": _definition(
         "rewrite_scene",
@@ -284,6 +314,7 @@ OPERATION_DEFINITIONS: dict[CreativeOperationKind, OperationDefinition] = {
         "none",
         "生成章节审核报告。",
         allowed_tools=_EDITOR_READ,
+        allowed_scope_kinds=("chapter",),
     ),
     "manage_foreshadowing": _definition(
         "manage_foreshadowing",
@@ -301,3 +332,17 @@ OPERATION_DEFINITIONS: dict[CreativeOperationKind, OperationDefinition] = {
         artifact_key_policy="builder_or_generated",
     ),
 }
+
+
+def validate_public_operation_definitions() -> None:
+    for operation, expected in PUBLIC_LONG_SERIAL_OPERATIONS.items():
+        definition = OPERATION_DEFINITIONS.get(cast(CreativeOperationKind, operation))
+        if definition is None:
+            raise ValueError(f"公开 Operation 定义缺失：{operation}")
+        actual = definition.to_public_definition()
+        if actual != expected:
+            raise ValueError(
+                f"公开 Operation 定义漂移：{operation}；"
+                f"期望 {expected.model_dump(mode='json')}，"
+                f"实际 {actual.model_dump(mode='json')}"
+            )

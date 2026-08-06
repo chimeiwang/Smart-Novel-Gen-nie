@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 import pytest
+from inkforge_agents.app import create_app
 from inkforge_agents.definitions.agents import AGENT_DEFINITIONS
 from inkforge_agents.operations.definitions import (
     OPERATION_DEFINITIONS,
     OperationDefinition,
 )
 from inkforge_agents.tools.registry import build_default_registry
+from inkforge_contracts.long_serial import PUBLIC_LONG_SERIAL_OPERATIONS
 
 NOVEL_READ = frozenset({"get_novel_info", "list_available_data"})
 CHARACTER_READ = frozenset(
@@ -169,6 +172,32 @@ def test_all_creative_operations_have_exact_execution_contracts() -> None:
         assert definition.artifactEventTypes == expected["events"], kind
         assert definition.textArtifactKind == expected["text_kind"], kind
         assert definition.artifactKeyPolicy == expected["key_policy"], kind
+
+
+@pytest.mark.parametrize("operation", tuple(PUBLIC_LONG_SERIAL_OPERATIONS))
+def test_public_long_serial_definition_matches_shared_contract(operation: str) -> None:
+    expected = PUBLIC_LONG_SERIAL_OPERATIONS[operation]
+
+    actual = OPERATION_DEFINITIONS[operation].to_public_definition()  # type: ignore[index]
+
+    assert actual.operation == expected.operation
+    assert actual.workflow == expected.workflow
+    assert actual.targetKind == expected.targetKind
+    assert actual.allowedScopeKinds == expected.allowedScopeKinds
+    assert actual.mutating == expected.mutating
+    assert actual.principalAgent == expected.principalAgent
+    assert actual.reviewers == expected.reviewers
+    assert actual.artifactKind == expected.artifactKind
+
+
+def test_create_app_fails_fast_when_public_operation_definition_drifts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    drifted = replace(OPERATION_DEFINITIONS["write_chapter"], reviewers=())
+    monkeypatch.setitem(OPERATION_DEFINITIONS, "write_chapter", drifted)
+
+    with pytest.raises(ValueError, match="write_chapter"):
+        create_app(testing=True)
 
 
 def test_every_operation_declares_valid_execution_contract() -> None:
