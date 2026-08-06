@@ -115,7 +115,14 @@ def create_app(
     app.state.settings = loaded_settings
     app.state.workflow_log = workflow_log
     app.state.model_provider = provider
-    app.state.model_runtime = ModelRuntime(provider) if provider is not None else None
+    app.state.model_runtime = (
+        ModelRuntime(
+            provider,
+            max_concurrency=loaded_settings.agent_max_concurrency,
+        )
+        if provider is not None
+        else None
+    )
     app.state.model_provider_error = provider_error
     app.state.run_queue = run_queue
     app.state.core_request_verifier = core_request_verifier
@@ -151,6 +158,7 @@ def create_app(
                         if app.state.queue_consumer is not None
                         and getattr(app.state, "consumer_supervisor", None) is not None
                         and app.state.consumer_supervisor.is_ready()
+                        and _consumer_is_healthy(app.state.queue_consumer)
                         else "failed"
                     ),
                 }
@@ -175,6 +183,7 @@ def create_app(
                     if supervisor is not None
                     else "BACKGROUND_TASK_NOT_REGISTERED"
                 )
+                or _consumer_health_error_code(app.state.queue_consumer)
                 or "BACKGROUND_TASK_NOT_RUNNING"
             }
         return JSONResponse(
@@ -201,7 +210,7 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
             redis = Redis.from_url(
                 settings.redis_url.get_secret_value(),
                 decode_responses=False,
-                max_connections=4,
+                max_connections=8,
                 socket_connect_timeout=2.0,
                 socket_timeout=5.0,
             )
@@ -266,6 +275,7 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                     provider,
                     billing=CoreBillingGateway(core),
                     observer=WorkflowModelObserver(workflow_log),
+                    max_concurrency=settings.agent_max_concurrency,
                 )
                 gateway = CoreToolGateway(core, embedding_provider)
                 registry = build_default_registry(gateway)
@@ -320,6 +330,20 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                 )
                 if settings.rag_index_enabled and embedding_provider is not None:
                     handlers["rag"] = RagJobHandler(core, embedding_provider)
-                app.state.queue_consumer = QueueConsumer(queue, handlers)
+                app.state.queue_consumer = QueueConsumer(
+                    queue,
+                    handlers,
+                    max_concurrency=settings.agent_max_concurrency,
+                )
     except (OSError, ValueError) as exc:
         app.state.runtime_error = str(exc)
+
+
+def _consumer_is_healthy(consumer: object) -> bool:
+    check = getattr(consumer, "is_healthy", None)
+    return bool(check()) if callable(check) else True
+
+
+def _consumer_health_error_code(consumer: object) -> str | None:
+    error_code = getattr(consumer, "health_error_code", None)
+    return error_code if isinstance(error_code, str) and error_code else None

@@ -225,6 +225,32 @@ class RedisRunQueue:
         )
         return bool(result)
 
+    async def defer(
+        self,
+        claim: QueueClaim,
+        *,
+        delay: timedelta,
+        now: datetime | None = None,
+    ) -> bool:
+        if delay <= timedelta(0):
+            raise ValueError("项目互斥延迟必须大于零")
+        ready_ms = int((_utc(now) + delay).timestamp() * 1000)
+        score = claim.job.priority * _PRIORITY_FACTOR + ready_ms
+        result = await self._redis.eval(
+            _DEFER_SCRIPT,
+            6,
+            self._ready,
+            self._processing,
+            self._statuses,
+            self._leases,
+            self._attempts,
+            self._scores,
+            claim.job.jobId,
+            claim.leaseToken,
+            score,
+        )
+        return bool(result)
+
     async def recover_expired(self, *, now: datetime | None = None) -> int:
         result = await self._redis.eval(
             _RECOVER_SCRIPT,
@@ -411,6 +437,23 @@ redis.call('HSET', KEYS[3], ARGV[1], 'queued')
 redis.call('HDEL', KEYS[4], ARGV[1])
 redis.call('ZADD', KEYS[1], ARGV[3], ARGV[1])
 redis.call('HSET', KEYS[5], ARGV[1], ARGV[3])
+return 1
+"""
+
+_DEFER_SCRIPT = """
+if redis.call('HGET', KEYS[3], ARGV[1]) ~= 'running' then return 0 end
+if redis.call('HGET', KEYS[4], ARGV[1]) ~= ARGV[2] then return 0 end
+redis.call('ZREM', KEYS[2], ARGV[1])
+redis.call('HSET', KEYS[3], ARGV[1], 'queued')
+redis.call('HDEL', KEYS[4], ARGV[1])
+local attempts = tonumber(redis.call('HGET', KEYS[5], ARGV[1]) or '0')
+if attempts <= 1 then
+  redis.call('HDEL', KEYS[5], ARGV[1])
+else
+  redis.call('HINCRBY', KEYS[5], ARGV[1], -1)
+end
+redis.call('ZADD', KEYS[1], ARGV[3], ARGV[1])
+redis.call('HSET', KEYS[6], ARGV[1], ARGV[3])
 return 1
 """
 

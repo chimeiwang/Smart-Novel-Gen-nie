@@ -555,7 +555,7 @@ async def test_application_configures_small_bounded_redis_pool(
         assert captured == {
             "url": "redis://redis:6379/0",
             "decode_responses": False,
-            "max_connections": 4,
+            "max_connections": 8,
             "socket_connect_timeout": 1.0,
             "socket_timeout": 1.0,
         }

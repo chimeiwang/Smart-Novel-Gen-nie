@@ -118,7 +118,7 @@ def _configure_auth(app: FastAPI, settings: Settings) -> None:
     redis = Redis.from_url(
         settings.redis_url.get_secret_value(),
         decode_responses=False,
-        max_connections=4,
+        max_connections=8,
         socket_connect_timeout=1.0,
         socket_timeout=1.0,
     )

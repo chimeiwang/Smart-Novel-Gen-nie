@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     openai_base_url: str = "https://api.deepseek.com/v1"
     openai_model: str = "deepseek-v4-flash"
     model_max_output_tokens: int = Field(default=384_000, ge=1, le=1_000_000)
+    agent_max_concurrency: int = Field(default=3, ge=1, le=3)
     redis_url: SecretStr | None = None
     queue_terminal_retention_days: int = Field(default=7, ge=1)
     trusted_core_cidrs: Annotated[tuple[str, ...], NoDecode] = ()

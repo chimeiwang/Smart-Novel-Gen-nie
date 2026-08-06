@@ -133,6 +133,30 @@ def test_agent_queue_terminal_retention_is_configurable() -> None:
     )
 
 
+def test_agent_parallel_limit_is_explicit_and_keeps_one_process() -> None:
+    compose = COMPOSE.read_text(encoding="utf-8")
+    agent = _service_block(compose, "agent-service")
+    production_env = (ROOT / ".env.example").read_text(encoding="utf-8")
+    local_env = (ROOT / ".env.local.example").read_text(encoding="utf-8")
+    dockerfile = (ROOT / "infra" / "docker" / "agent-service.Dockerfile").read_text(
+        encoding="utf-8"
+    )
+
+    assert "AGENT_MAX_CONCURRENCY: ${AGENT_MAX_CONCURRENCY:-3}" in agent
+    assert "AGENT_MAX_CONCURRENCY=3" in production_env
+    assert "AGENT_MAX_CONCURRENCY=3" in local_env
+    assert '"--workers", "1"' in dockerfile
+
+
+def test_python_redis_pools_allow_bounded_agent_parallelism() -> None:
+    for path in (
+        ROOT / "apps" / "agent-service" / "src" / "inkforge_agents" / "app.py",
+        ROOT / "apps" / "core-api" / "src" / "inkforge_core" / "app.py",
+    ):
+        source = path.read_text(encoding="utf-8")
+        assert re.search(r"max_connections\s*=\s*8", source)
+
+
 def test_web_and_core_require_the_same_production_jwt_secret() -> None:
     source = COMPOSE.read_text(encoding="utf-8")
     expected = "JWT_SECRET: ${JWT_SECRET:?必须配置会话签名密钥}"

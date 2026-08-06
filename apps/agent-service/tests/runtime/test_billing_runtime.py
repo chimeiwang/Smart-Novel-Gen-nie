@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -82,6 +83,121 @@ class ModelObserver:
         self.calls.append(
             (context, messages, output, finish_reason, raw_finish_reason)
         )
+
+
+@pytest.mark.asyncio
+async def test_model_runtime_limits_process_wide_parallel_calls() -> None:
+    class BlockingProvider(Provider):
+        billable = False
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.active = 0
+            self.maximum = 0
+            self.started = 0
+            self.capacity_reached = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+            self.active += 1
+            self.started += 1
+            self.maximum = max(self.maximum, self.active)
+            if self.started == 3:
+                self.capacity_reached.set()
+            try:
+                await self.release.wait()
+                return await super().complete_turn(request)
+            finally:
+                self.active -= 1
+
+    provider = BlockingProvider()
+    runtime = ModelRuntime(
+        provider,  # type: ignore[arg-type]
+        max_concurrency=3,
+    )
+    request = ModelTurnRequest(
+        messages=[{"role": "user", "content": "并发测试"}],
+        tools=[],
+        maxOutputTokens=128,
+    )
+    tasks = [asyncio.create_task(runtime.run_turn(request)) for _ in range(4)]
+    try:
+        await asyncio.wait_for(provider.capacity_reached.wait(), timeout=1)
+        await asyncio.sleep(0.01)
+        assert provider.started == 3
+        assert provider.maximum == 3
+    finally:
+        provider.release.set()
+        await asyncio.gather(*tasks)
+
+    assert provider.started == 4
+    assert provider.maximum == 3
+
+
+def test_model_runtime_rejects_non_positive_parallel_limit() -> None:
+    with pytest.raises(ValueError, match="模型调用并发数必须为正整数"):
+        ModelRuntime(Provider(), max_concurrency=0)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_model_runtime_limits_billable_authorizations() -> None:
+    class BlockingBilling(Billing):
+        def __init__(self) -> None:
+            super().__init__()
+            self.active = 0
+            self.maximum = 0
+            self.capacity_reached = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def authorize(
+            self,
+            context: ModelCallContext,
+            payload: dict[str, Any],
+            request_id: str,
+        ) -> dict[str, Any]:
+            self.active += 1
+            self.maximum = max(self.maximum, self.active)
+            if self.active == 3:
+                self.capacity_reached.set()
+            try:
+                await self.release.wait()
+                return await super().authorize(context, payload, request_id)
+            finally:
+                self.active -= 1
+
+    billing = BlockingBilling()
+    runtime = ModelRuntime(
+        Provider(),  # type: ignore[arg-type]
+        billing=billing,
+        max_concurrency=3,
+    )
+    request = ModelTurnRequest(
+        messages=[{"role": "user", "content": "计费并发测试"}],
+        tools=[],
+        maxOutputTokens=128,
+    )
+    context = ModelCallContext(
+        userId="user-1",
+        novelId="novel-1",
+        taskId="task-1",
+        runId="run-1",
+        agentId="写作",
+    )
+    tasks = [
+        asyncio.create_task(runtime.run_turn(request, context=context))
+        for _ in range(4)
+    ]
+    try:
+        await asyncio.wait_for(billing.capacity_reached.wait(), timeout=1)
+        await asyncio.sleep(0.01)
+        assert len(billing.authorizations) == 0
+        assert billing.maximum == 3
+    finally:
+        billing.release.set()
+        await asyncio.gather(*tasks)
+
+    assert len(billing.authorizations) == 4
+    assert billing.maximum == 3
 
 
 @pytest.mark.asyncio

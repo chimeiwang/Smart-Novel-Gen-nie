@@ -272,6 +272,114 @@ async def test_future_high_priority_retry_does_not_block_due_lower_priority() ->
 
 
 @pytest.mark.asyncio
+async def test_project_deferral_returns_job_without_consuming_attempt() -> None:
+    redis = fakeredis.aioredis.FakeRedis()
+    queue = RedisRunQueue(redis, prefix="test:queue")
+    now = datetime.now(UTC)
+    await queue.enqueue(job("project-deferred", created_at=now))
+    old_claim = await queue.claim(
+        visibility_timeout=timedelta(seconds=30),
+        now=now,
+    )
+    assert old_claim is not None
+    assert old_claim.attempts == 1
+
+    assert await queue.defer(
+        old_claim,
+        delay=timedelta(seconds=2),
+        now=now,
+    ) is True
+
+    assert await queue.status("project-deferred") == "queued"
+    assert await redis.zscore("test:queue:processing", "project-deferred") is None
+    assert await redis.hget("test:queue:leases", "project-deferred") is None
+    assert await redis.hget("test:queue:attempts", "project-deferred") is None
+    assert await queue.acknowledge(old_claim, status="completed") is False
+    assert await queue.claim(
+        visibility_timeout=timedelta(seconds=30),
+        now=now + timedelta(seconds=1),
+    ) is None
+
+    new_claim = await queue.claim(
+        visibility_timeout=timedelta(seconds=30),
+        now=now + timedelta(seconds=2),
+    )
+    assert new_claim is not None
+    assert new_claim.job.jobId == "project-deferred"
+    assert new_claim.attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_project_deferral_rejects_stale_lease() -> None:
+    queue = RedisRunQueue(fakeredis.aioredis.FakeRedis(), prefix="test:queue")
+    now = datetime.now(UTC)
+    await queue.enqueue(job("stale-project-defer", created_at=now))
+    stale = await queue.claim(
+        visibility_timeout=timedelta(milliseconds=1),
+        now=now,
+    )
+    assert stale is not None
+    assert await queue.recover_expired(now=now + timedelta(seconds=1)) == 1
+    current = await queue.claim(
+        visibility_timeout=timedelta(seconds=30),
+        now=now + timedelta(seconds=1),
+    )
+    assert current is not None
+
+    assert await queue.defer(
+        stale,
+        delay=timedelta(seconds=2),
+        now=now + timedelta(seconds=1),
+    ) is False
+    assert await queue.status("stale-project-defer") == "running"
+    assert await queue.acknowledge(current, status="completed") is True
+
+
+@pytest.mark.asyncio
+async def test_project_deferral_preserves_existing_attempt_count() -> None:
+    queue = RedisRunQueue(fakeredis.aioredis.FakeRedis(), prefix="test:queue")
+    now = datetime.now(UTC)
+    await queue.enqueue(job("deferred-after-failure", created_at=now))
+    first = await queue.claim(
+        visibility_timeout=timedelta(seconds=30),
+        now=now,
+    )
+    assert first is not None
+    assert await queue.retry(first, delay=timedelta(0), now=now) is True
+    second = await queue.claim(
+        visibility_timeout=timedelta(seconds=30),
+        now=now,
+    )
+    assert second is not None
+    assert second.attempts == 2
+
+    assert await queue.defer(
+        second,
+        delay=timedelta(seconds=2),
+        now=now,
+    ) is True
+    third = await queue.claim(
+        visibility_timeout=timedelta(seconds=30),
+        now=now + timedelta(seconds=2),
+    )
+    assert third is not None
+    assert third.attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_project_deferral_rejects_non_positive_delay() -> None:
+    queue = RedisRunQueue(fakeredis.aioredis.FakeRedis(), prefix="test:queue")
+    await queue.enqueue(job("invalid-project-delay"))
+    claim = await queue.claim(visibility_timeout=timedelta(seconds=30))
+    assert claim is not None
+
+    with pytest.raises(ValueError, match="项目互斥延迟必须大于零"):
+        await queue.defer(claim, delay=timedelta(0))
+
+    assert await queue.status("invalid-project-delay") == "running"
+
+
+@pytest.mark.asyncio
 async def test_same_priority_claims_earliest_ready_time_first() -> None:
     queue = RedisRunQueue(fakeredis.aioredis.FakeRedis(), prefix="test:queue")
     now = datetime.now(UTC)
