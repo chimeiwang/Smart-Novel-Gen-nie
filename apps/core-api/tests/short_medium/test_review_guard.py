@@ -17,6 +17,7 @@ async def test_generic_create_rejects_short_medium_version_key() -> None:
     request = CreateArtifactRequest(
         runId="run-1",
         taskId="task-1",
+        jobId="command-1",
         novelId="novel-1",
         artifactKey="short-medium:outline:novel-1",
         kind="outline_draft",
