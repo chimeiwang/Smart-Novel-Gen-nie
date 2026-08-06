@@ -61,6 +61,22 @@ def test_registry_has_unique_existing_command_names_and_declares_special_modes()
         "short.version.restore",
         "short.agent.start",
         "short.agent.watch",
+        "long.novel.list",
+        "long.novel.get",
+        "long.chapter.list",
+        "long.chapter.get",
+        "long.session.list",
+        "long.session.get",
+        "long.planning.get",
+        "long.lore.get",
+        "long.resources.get",
+        "long.outline-node.list",
+        "long.foreshadowing.list",
+        "long.task.list",
+        "long.task.get",
+        "long.artifact.list",
+        "long.artifact.get",
+        "long.quality.get",
     } == set(registry)
 
 

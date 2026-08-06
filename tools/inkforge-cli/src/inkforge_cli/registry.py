@@ -73,6 +73,27 @@ def _validate_spec(spec: CommandSpec) -> None:
 
 def _default_specs() -> list[CommandSpec]:
     from .commands.auth import login, logout, whoami
+    from .commands.long.knowledge import (
+        get_artifact,
+        get_lore,
+        get_planning,
+        get_quality_check,
+        get_resources,
+        list_artifacts,
+        list_foreshadowings,
+        list_outline_nodes,
+    )
+    from .commands.long.read import (
+        get_chapter,
+        get_novel,
+        get_session,
+        list_chapters,
+        list_sessions,
+    )
+    from .commands.long.read import (
+        list_novels as list_long_novels,
+    )
+    from .commands.long.tasks import get_task, list_tasks
     from .commands.short.agents import (
         start as agent_start,
     )
@@ -104,6 +125,23 @@ def _default_specs() -> list[CommandSpec]:
         field="content",
         media_type="text/plain; charset=utf-8",
     )
+
+    def long_read_spec(
+        name: str,
+        handler: CommandHandler,
+        file_output: FileOutputSpec = data_json,
+    ) -> CommandSpec:
+        return CommandSpec(
+            name=name,
+            handler=handler,
+            inputMode="json",
+            outputMode="json",
+            fileOutput=file_output,
+            mutation=False,
+            requiresIdentity=True,
+            requiresClientRequestId=False,
+        )
+
     return [
         CommandSpec(
             name="auth.login",
@@ -265,6 +303,22 @@ def _default_specs() -> list[CommandSpec]:
             requiresIdentity=True,
             requiresClientRequestId=False,
         ),
+        long_read_spec("long.novel.list", list_long_novels),
+        long_read_spec("long.novel.get", get_novel),
+        long_read_spec("long.chapter.list", list_chapters),
+        long_read_spec("long.chapter.get", get_chapter, primary_content),
+        long_read_spec("long.session.list", list_sessions),
+        long_read_spec("long.session.get", get_session),
+        long_read_spec("long.planning.get", get_planning),
+        long_read_spec("long.lore.get", get_lore),
+        long_read_spec("long.resources.get", get_resources),
+        long_read_spec("long.outline-node.list", list_outline_nodes),
+        long_read_spec("long.foreshadowing.list", list_foreshadowings),
+        long_read_spec("long.task.list", list_tasks),
+        long_read_spec("long.task.get", get_task),
+        long_read_spec("long.artifact.list", list_artifacts),
+        long_read_spec("long.artifact.get", get_artifact),
+        long_read_spec("long.quality.get", get_quality_check),
     ]
 
 
