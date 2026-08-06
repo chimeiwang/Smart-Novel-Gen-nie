@@ -23,7 +23,7 @@ from inkforge_core.references import schemas
 from inkforge_core.references.rag import content_sha256
 from inkforge_core.references.repository import ReferenceMutation, ReferenceRepository
 from pydantic import ValidationError
-from sqlalchemy import DefaultClause, MetaData, func, select, text
+from sqlalchemy import DefaultClause, MetaData, delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
 
@@ -141,6 +141,7 @@ async def test_create_replay_conflict_history_delete_rebuild_and_novel_namespace
         )
         assert created["id"] == expected_id
         assert created["effective"] is True
+        first_generation = created["indexGeneration"]
         assert created["createdAt"] == created["updatedAt"]
         assert created["updatedAt"].microsecond % 1000 == 0
 
@@ -181,6 +182,23 @@ async def test_create_replay_conflict_history_delete_rebuild_and_novel_namespace
             changed["updatedAt"],
             index_enabled=True,
         )
+        assert changed["indexGeneration"] != first_generation
+        assert restored["indexGeneration"] != first_generation
+        assert restored["indexGeneration"] != changed["indexGeneration"]
+        await repository.mark_rag_dispatch_terminal(
+            "novel-1",
+            expected_id,
+            content_sha256("初始正文"),
+            first_generation,
+            "cancelled",
+        )
+        async with factory() as session:
+            current_document = await session.scalar(
+                select(RagDocument).where(RagDocument.sourceId == expected_id)
+            )
+        assert current_document is not None
+        assert current_document.status == "disabled"
+        assert current_document.errorMessage == "等待重新索引"
         with pytest.raises(ApiError) as history_conflict:
             await repository.create_reference(
                 "novel-1", "user-1", request_id, _fields(), index_enabled=True
@@ -211,6 +229,32 @@ async def test_create_replay_conflict_history_delete_rebuild_and_novel_namespace
         )
         assert recreated["id"] == expected_id
         assert recreated["effective"] is True
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_create_replay_rejects_missing_rag_document(tmp_path: Path) -> None:
+    engine, factory = await _create_database(tmp_path / "create-replay-missing-document.db")
+    try:
+        await _seed_novels(factory)
+        repository = ReferenceRepository(factory)
+        request_id = "reference-create-missing-document"
+        created = await repository.create_reference(
+            "novel-1", "user-1", request_id, _fields(), index_enabled=True
+        )
+        async with factory() as session, session.begin():
+            await session.execute(
+                delete(RagDocument).where(RagDocument.sourceId == created["id"])
+            )
+
+        with pytest.raises(ApiError) as caught:
+            await repository.create_reference(
+                "novel-1", "user-1", request_id, _fields(), index_enabled=True
+            )
+
+        assert caught.value.status_code == 409
+        assert caught.value.code == "RAG_DOCUMENT_MISSING"
     finally:
         await engine.dispose()
 
@@ -247,7 +291,6 @@ async def test_update_cas_noop_and_index_input_boundaries(tmp_path: Path) -> Non
                     embedding=[1.0],
                 )
             )
-
         unchanged = await repository.update_reference(
             "novel-1",
             "user-1",
@@ -271,7 +314,13 @@ async def test_update_cas_noop_and_index_input_boundaries(tmp_path: Path) -> Non
         assert metadata_only["ragStatus"] == "ready"
         async with factory() as session:
             chunk_count = await session.scalar(select(func.count()).select_from(RagChunk))
+            generation_before_title = await session.scalar(
+                select(RagDocument.updatedAt).where(
+                    RagDocument.sourceId == reference_id
+                )
+            )
         assert chunk_count == 1
+        assert generation_before_title is not None
 
         with pytest.raises(ApiError) as stale:
             await repository.update_reference(
@@ -293,15 +342,36 @@ async def test_update_cas_noop_and_index_input_boundaries(tmp_path: Path) -> Non
         assert document is not None and document.status == "ready"
         assert chunk_count == 1
 
+        title_changed = await repository.update_reference(
+            "novel-1",
+            "user-1",
+            reference_id,
+            {"title": "新标题"},
+            metadata_only["updatedAt"],
+            index_enabled=True,
+        )
+        assert title_changed["updatedAt"] > metadata_only["updatedAt"]
+        assert title_changed["ragStatus"] == "ready"
+        assert title_changed["indexRefreshRequired"] is False
+        async with factory() as session:
+            document = await session.scalar(
+                select(RagDocument).where(RagDocument.sourceId == reference_id)
+            )
+            chunk_count = await session.scalar(select(func.count()).select_from(RagChunk))
+        assert document is not None and document.title == "新标题"
+        assert document.status == "ready"
+        assert document.updatedAt == generation_before_title
+        assert chunk_count == 1
+
         changed = await repository.update_reference(
             "novel-1",
             "user-1",
             reference_id,
-            {"title": "新标题", "content": "新正文"},
-            metadata_only["updatedAt"],
+            {"content": "新正文"},
+            title_changed["updatedAt"],
             index_enabled=True,
         )
-        assert changed["updatedAt"] > metadata_only["updatedAt"]
+        assert changed["updatedAt"] > title_changed["updatedAt"]
         assert changed["ragStatus"] == "disabled"
         assert changed["contentHash"] == content_sha256("新正文")
         assert changed["errorMessage"] == "等待重新索引"
@@ -413,6 +483,14 @@ async def test_reindex_requires_matching_formal_and_document_hash_before_mutatio
                 )
             )
 
+        async with factory() as session:
+            before_ready_reindex = await session.scalar(
+                select(RagDocument.updatedAt).where(
+                    RagDocument.sourceId == created["id"]
+                )
+            )
+        assert before_ready_reindex is not None
+
         with pytest.raises(ApiError) as stale:
             await repository.prepare_reindex(
                 "novel-1", "user-1", created["id"], "0" * 64
@@ -432,7 +510,9 @@ async def test_reindex_requires_matching_formal_and_document_hash_before_mutatio
         second = await repository.prepare_reindex(
             "novel-1", "user-1", created["id"], expected_hash
         )
-        assert first == second == expected_hash
+        assert first["contentHash"] == second["contentHash"] == expected_hash
+        assert first["indexGeneration"] == second["indexGeneration"]
+        assert first["indexGeneration"] != before_ready_reindex
         async with factory() as session:
             document = await session.scalar(
                 select(RagDocument).where(RagDocument.sourceId == created["id"])
@@ -443,6 +523,19 @@ async def test_reindex_requires_matching_formal_and_document_hash_before_mutatio
         assert document.status == "disabled"
         assert document.errorMessage == "等待重新索引"
         assert chunk_count == 0
+
+        async with factory() as session, session.begin():
+            document = await session.scalar(
+                select(RagDocument).where(RagDocument.sourceId == created["id"])
+            )
+            assert document is not None
+            document.status = "failed"
+            document.errorMessage = "failed"
+        third = await repository.prepare_reindex(
+            "novel-1", "user-1", created["id"], expected_hash
+        )
+        assert third["contentHash"] == expected_hash
+        assert third["indexGeneration"] != second["indexGeneration"]
     finally:
         await engine.dispose()
 

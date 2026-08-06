@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
 from inkforge_contracts.jobs import AgentJobStatus
@@ -18,6 +19,7 @@ class RagDispatchRecord:
     novel_id: str
     reference_id: str
     content_hash: str
+    generation: datetime
 
 
 class RagDispatchRepository(Protocol):
@@ -31,6 +33,7 @@ class RagDispatchRepository(Protocol):
         novel_id: str,
         reference_id: str,
         content_hash: str,
+        generation: datetime,
         agent_status: AgentJobStatus,
     ) -> None: ...
 
@@ -42,6 +45,7 @@ class RagDispatchSubmitter(Protocol):
         novel_id: str,
         reference_id: str,
         content_hash: str,
+        generation: datetime,
     ) -> AgentJobStatus: ...
 
 
@@ -75,12 +79,14 @@ class RagIndexDispatcher:
                     record.novel_id,
                     record.reference_id,
                     record.content_hash,
+                    record.generation,
                 )
                 if agent_status not in {"queued", "running"}:
                     await self._repository.mark_rag_dispatch_terminal(
                         record.novel_id,
                         record.reference_id,
                         record.content_hash,
+                        record.generation,
                         agent_status,
                     )
                 completed += 1

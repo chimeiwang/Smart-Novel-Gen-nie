@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import replace
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -348,13 +349,19 @@ async def test_portrait_and_rag_submitters_propagate_agent_job_status() -> None:
         == "cancelled"
     )
     assert (
-        await rag.submit("user-1", "novel-1", "reference-1", "a" * 64)
+        await rag.submit(
+            "user-1",
+            "novel-1",
+            "reference-1",
+            "a" * 64,
+            datetime(2026, 8, 7, tzinfo=UTC),
+        )
         == "cancelled"
     )
 
 
 @pytest.mark.asyncio
-async def test_rag_submitter_reuses_deterministic_job_identity_for_same_reference_hash() -> None:
+async def test_rag_submitter_separates_stable_task_from_generation_job_identity() -> None:
     captured: list[AgentJobRequest] = []
 
     class Client:
@@ -369,18 +376,32 @@ async def test_rag_submitter_reuses_deterministic_job_identity_for_same_referenc
 
     submitter = RagAgentSubmitter(Client())  # type: ignore[arg-type]
     content_hash = "a" * 64
-    expected_digest = hashlib.sha256(
+    expected_task_digest = hashlib.sha256(
         f"rag:reference-1:{content_hash}".encode()
     ).hexdigest()[:32]
+    first_generation = datetime(2026, 8, 7, 1, 2, 3, 456000, tzinfo=UTC)
+    second_generation = first_generation + timedelta(milliseconds=1)
 
-    await submitter.submit("user-1", "novel-1", "reference-1", content_hash)
-    await submitter.submit("user-1", "novel-1", "reference-1", content_hash)
+    await submitter.submit(
+        "user-1", "novel-1", "reference-1", content_hash, first_generation
+    )
+    await submitter.submit(
+        "user-1", "novel-1", "reference-1", content_hash, first_generation
+    )
+    await submitter.submit(
+        "user-1", "novel-1", "reference-1", content_hash, second_generation
+    )
 
-    assert len(captured) == 2
-    assert {
-        (request.jobId, request.runId, request.taskId) for request in captured
-    } == {(f"rag-{expected_digest}",) * 3}
+    assert len(captured) == 3
     assert captured[0].model_dump() == captured[1].model_dump()
+    assert captured[0].taskId == captured[2].taskId == f"rag-{expected_task_digest}"
+    expected_first_run_digest = hashlib.sha256(
+        f"rag:reference-1:{content_hash}:2026-08-07T01:02:03.456Z".encode()
+    ).hexdigest()[:32]
+    assert captured[0].runId == f"rag-{expected_first_run_digest}"
+    assert captured[0].jobId == captured[0].runId
+    assert captured[2].jobId == captured[2].runId
+    assert captured[0].jobId != captured[2].jobId
 
 
 @pytest.mark.asyncio

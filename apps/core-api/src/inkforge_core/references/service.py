@@ -28,6 +28,7 @@ class IndexSubmitter(Protocol):
         novel_id: str,
         reference_id: str,
         content_hash: str,
+        generation: datetime,
     ) -> AgentJobStatus: ...
 
 
@@ -75,7 +76,7 @@ class ReferenceRepositoryPort(Protocol):
         user_id: str,
         reference_id: str,
         expected_content_hash: str,
-    ) -> str: ...
+    ) -> dict[str, Any]: ...
     async def mark_index_failed(
         self,
         novel_id: str,
@@ -111,6 +112,7 @@ class ReferenceService:
             request.model_dump(exclude={"clientRequestId"}),
             index_enabled=self._submitter is not None,
         )
+        generation = value.pop("indexGeneration")
         if self._submitter is not None and value.get("effective") is True:
             try:
                 await self._submitter.submit(
@@ -118,6 +120,7 @@ class ReferenceService:
                     novel_id,
                     str(value["id"]),
                     str(value["contentHash"]),
+                    generation,
                 )
             except Exception:
                 logger.warning("参考资料索引任务提交失败", extra={"referenceId": value["id"]})
@@ -146,6 +149,7 @@ class ReferenceService:
             index_enabled=self._submitter is not None,
         )
         index_refresh_required = value.pop("indexRefreshRequired", False)
+        generation = value.pop("indexGeneration")
         if self._submitter is not None and index_refresh_required:
             try:
                 await self._submitter.submit(
@@ -153,6 +157,7 @@ class ReferenceService:
                     novel_id,
                     reference_id,
                     str(value["contentHash"]),
+                    generation,
                 )
             except Exception:
                 logger.warning("参考资料索引任务提交失败", extra={"referenceId": reference_id})
@@ -183,14 +188,20 @@ class ReferenceService:
                 code="RAG_INDEX_UNAVAILABLE",
                 message="检索索引服务暂时不可用",
             )
-        content_hash = await self._repository.prepare_reindex(
+        intent = await self._repository.prepare_reindex(
             novel_id,
             user_id,
             reference_id,
             request.expectedContentHash,
         )
         try:
-            await self._submitter.submit(user_id, novel_id, reference_id, content_hash)
+            await self._submitter.submit(
+                user_id,
+                novel_id,
+                reference_id,
+                str(intent["contentHash"]),
+                intent["indexGeneration"],
+            )
         except Exception:
             raise ApiError(
                 status_code=503,

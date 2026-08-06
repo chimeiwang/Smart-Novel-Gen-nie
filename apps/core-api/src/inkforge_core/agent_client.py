@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import UTC, datetime
 from typing import Protocol, cast
 from urllib.parse import urlencode
 
@@ -306,16 +307,31 @@ class RagAgentSubmitter:
         novel_id: str,
         reference_id: str,
         content_hash: str,
+        generation: datetime,
     ) -> AgentJobStatus:
-        digest = hashlib.sha256(f"rag:{reference_id}:{content_hash}".encode()).hexdigest()[:32]
-        run_id = f"rag-{digest}"
+        task_digest = hashlib.sha256(
+            f"rag:{reference_id}:{content_hash}".encode()
+        ).hexdigest()[:32]
+        task_id = f"rag-{task_digest}"
+        generation_utc = (
+            generation.replace(tzinfo=UTC)
+            if generation.tzinfo is None
+            else generation.astimezone(UTC)
+        )
+        generation_text = generation_utc.isoformat(timespec="milliseconds").replace(
+            "+00:00", "Z"
+        )
+        run_digest = hashlib.sha256(
+            f"rag:{reference_id}:{content_hash}:{generation_text}".encode()
+        ).hexdigest()[:32]
+        run_id = f"rag-{run_digest}"
         accepted = await self._client.submit(
             AgentJobRequest(
                 protocolVersion="1.0",
                 jobId=run_id,
                 kind="rag",
                 runId=run_id,
-                taskId=run_id,
+                taskId=task_id,
                 novelId=novel_id,
                 userId=user_id,
                 priority=30,

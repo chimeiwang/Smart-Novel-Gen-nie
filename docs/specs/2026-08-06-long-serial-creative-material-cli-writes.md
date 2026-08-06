@@ -67,7 +67,7 @@
 
 所有命令均为 `inputMode=json`、`outputMode=json`、`mutation=true`、`requiresIdentity=true`，不接受
 `outputFile`。八条创建命令要求调用方提供稳定 `clientRequestId`；CLI 不临时生成该值。重新索引使用
-`referenceId + expectedContentHash` 作为现有确定性任务身份。
+`referenceId + expectedContentHash` 作为稳定逻辑任务身份，并使用持久索引代次区分每次物理运行。
 
 ### 单例资料命令
 
@@ -187,8 +187,14 @@ CLI 删除不是级联清理入口。Core 在事务中检查引用，并按以�
 - `create` 和 `update` 支持 `content`/`contentFile` 二选一，按完整 UTF-8 读取。
 - 更新和删除使用 `expectedUpdatedAt`。
 - `reindex` 要求 `expectedContentHash`；内容 hash 不匹配时拒绝启动。
-- Core 复用现有 `referenceId + expectedContentHash` 确定性索引任务身份；完全相同的请求返回同一任务，
-  不重复入队。资料内容变化后必须先取得新的 `contentHash`，不能用旧 hash 启动索引。
+- Core 使用 `referenceId + expectedContentHash` 生成稳定 `taskId`，并使用 `RagDocument.updatedAt`
+  作为持久索引代次；`jobId/runId` 同时绑定资料 ID、内容 hash 和该代次。同一 pending 意图的网络重试
+  复用完整任务请求；`ready` 或 `failed` 终态后显式重索引，即使 hash 相同也推进代次并创建新的
+  `jobId/runId`。内容从 A 变为 B 再恢复 A 时同样不能复用旧 A 的物理运行。
+- 只有正文实际变化才清理分块、进入等待重索引并提交任务。只改标题时同步 RAG 文档标题，但保留
+  当前分块、内容 hash、索引状态和代次；只改类型或来源链接不修改 RAG 文档。
+- 创建请求命中合法幂等重放时，若对应 `RagDocument` 已缺失，返回
+  `409 RAG_DOCUMENT_MISSING`，不得伪装成 `effective=false` 成功。
 - 资料事务提交成功只表示正式资料已保存，不代表 RAG 已 ready。CLI 返回 `ragStatus`，生产流程继续通过
   `long.resources.get` 观察到 `ready` 或 `failed`；pending 状态不得表述为索引成功。
 

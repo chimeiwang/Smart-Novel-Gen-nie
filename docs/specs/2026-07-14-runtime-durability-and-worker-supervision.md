@@ -81,7 +81,8 @@ Core 的写作对账器采用与现有命令 dispatcher 一致的循环级异常
 `RagDocument` 保存当前内容哈希和索引状态，作为每个内容版本的持久事实：
 
 - 参考资料创建或影响索引的更新在配置了 embedding 服务时标记为“等待重新索引”；
-- job ID 继续由 `referenceId + contentHash` 生成，同一内容版本幂等；
+- `taskId` 继续由 `referenceId + contentHash` 生成；`jobId/runId` 还必须绑定持久索引代次，避免终态
+  Redis job 阻止同一 hash 的后续显式重索引；同一 pending 意图的补投继续复用相同代次和物理身份；
 - 对账器只补投当前哈希仍匹配、状态为 `disabled` 且明确标记等待索引的文档；
 - 内容已变化的旧任务由现有哈希校验拒绝，不能覆盖新索引；
 - 重复提交命中 Redis 终态 job 时，仅当资料与文档的当前内容哈希仍等于该 job 的哈希、且文档仍在“等待重新索引”状态，才把文档幂等收敛为 `failed`；旧内容版本不得覆盖新版本状态；

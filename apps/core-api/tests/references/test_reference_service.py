@@ -42,6 +42,7 @@ class RecordingRepository:
             "errorMessage": "等待重新索引" if index_enabled else "检索索引服务未配置",
             "createdAt": NOW,
             "updatedAt": NOW,
+            "indexGeneration": NOW,
         }
 
     async def update_reference(
@@ -68,11 +69,12 @@ class RecordingRepository:
             "createdAt": NOW,
             "updatedAt": NOW,
             "indexRefreshRequired": self.update_refresh_required,
+            "indexGeneration": NOW,
         }
 
     async def prepare_reindex(self, novel_id, user_id, reference_id, expected_content_hash):
         self.prepared.append((novel_id, user_id, reference_id, expected_content_hash))
-        return HASH
+        return {"contentHash": HASH, "indexGeneration": NOW}
 
     async def mark_index_failed(self, novel_id, reference_id, expected_content_hash, message):
         self.failed = (novel_id, reference_id, expected_content_hash, message)
@@ -84,19 +86,29 @@ class RecordingRepository:
 
 class RecordingSubmitter:
     def __init__(self) -> None:
-        self.jobs: list[tuple[str, str, str, str]] = []
+        self.jobs: list[tuple[str, str, str, str, datetime]] = []
 
     async def submit(
-        self, user_id: str, novel_id: str, reference_id: str, content_hash: str
+        self,
+        user_id: str,
+        novel_id: str,
+        reference_id: str,
+        content_hash: str,
+        generation: datetime,
     ) -> None:
-        self.jobs.append((user_id, novel_id, reference_id, content_hash))
+        self.jobs.append((user_id, novel_id, reference_id, content_hash, generation))
 
 
 class FailingSubmitter:
     async def submit(
-        self, user_id: str, novel_id: str, reference_id: str, content_hash: str
+        self,
+        user_id: str,
+        novel_id: str,
+        reference_id: str,
+        content_hash: str,
+        generation: datetime,
     ) -> None:
-        del user_id, novel_id, reference_id, content_hash
+        del user_id, novel_id, reference_id, content_hash, generation
         raise RuntimeError("队列不可用")
 
 
@@ -141,7 +153,9 @@ async def test_configured_indexer_receives_saved_reference_id() -> None:
             clientRequestId="reference-create-0001",
         ),
     )
-    assert submitter.jobs == [("user-1", "novel-1", "reference-1", result.contentHash)]
+    assert submitter.jobs == [
+        ("user-1", "novel-1", "reference-1", result.contentHash, NOW)
+    ]
     assert repository.created_index_enabled is True
 
 
@@ -219,6 +233,22 @@ async def test_explicit_reindex_submission_failure_keeps_persisted_retry_intent(
 
 
 @pytest.mark.asyncio
+async def test_repeated_explicit_reindex_reuses_persisted_generation() -> None:
+    repository = RecordingRepository()
+    submitter = RecordingSubmitter()
+    service = ReferenceService(repository, submitter)  # type: ignore[arg-type]
+    body = schemas.ReindexReferenceRequest(expectedContentHash=HASH)
+
+    await service.reindex("user-1", "novel-1", "reference-1", body)
+    await service.reindex("user-1", "novel-1", "reference-1", body)
+
+    assert submitter.jobs == [
+        ("user-1", "novel-1", "reference-1", HASH, NOW),
+        ("user-1", "novel-1", "reference-1", HASH, NOW),
+    ]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "fields",
     [
@@ -260,11 +290,11 @@ async def test_create_replay_submits_only_when_creation_is_effective() -> None:
 
     assert first.effective is True
     assert replayed.effective is False
-    assert submitter.jobs == [("user-1", "novel-1", "reference-1", HASH)]
+    assert submitter.jobs == [("user-1", "novel-1", "reference-1", HASH, NOW)]
 
 
 @pytest.mark.asyncio
-async def test_noop_update_does_not_submit_index_job() -> None:
+async def test_title_only_update_does_not_submit_index_job() -> None:
     repository = RecordingRepository()
     repository.update_refresh_required = False
     submitter = RecordingSubmitter()

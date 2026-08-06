@@ -9,7 +9,8 @@ def test_reference_content_change_explicitly_deletes_old_chunks_and_disables_doc
     source = inspect.getsource(ReferenceRepository._update_reference_in_session)
     assert "delete(RagChunk)" in source
     assert 'document.status = "disabled"' in source
-    assert '"title", "content"' in source
+    assert '"content" in changed_fields' in source
+    assert 'if "title" in changed_fields' in source
 
 
 def test_reference_delete_explicitly_deletes_rag_document_before_source() -> None:

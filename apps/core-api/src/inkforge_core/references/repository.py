@@ -8,6 +8,7 @@ from inkforge_contracts.jobs import AgentJobStatus
 from sqlalchemy import and_, delete, func, insert, select
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm.attributes import flag_modified
 
 from ..concurrency import command_resource_id, next_utc_timestamp, require_expected_updated_at
 from ..db.models import Novel, RagChunk, RagDocument, ReferenceMaterial
@@ -212,13 +213,12 @@ class ReferenceRepository:
                 and current_fields == create_fields
             ):
                 document = await self._document(session, reference_id)
+                if document is None:
+                    raise self._missing_document()
                 return {
-                    **self._dto(
-                        reference,
-                        document.status if document is not None else None,
-                        document,
-                    ),
+                    **self._dto(reference, document.status, document),
                     "effective": False,
+                    "indexGeneration": _utc(document.updatedAt),
                 }
             raise ApiError(
                 status_code=409,
@@ -249,6 +249,7 @@ class ReferenceRepository:
         return {
             **self._dto(reference, document.status, document),
             "effective": True,
+            "indexGeneration": _utc(document.updatedAt),
         }
 
     async def _update_reference_in_session(
@@ -279,23 +280,30 @@ class ReferenceRepository:
             return {
                 **self._dto(reference, document.status, document),
                 "indexRefreshRequired": False,
+                "indexGeneration": _utc(document.updatedAt),
             }
         for name, requested in changed_fields.items():
             setattr(reference, name, requested)
         reference.updatedAt = _database_utc(next_utc_timestamp(current_updated_at))
-        index_refresh_required = bool({"title", "content"} & changed_fields.keys())
+        index_refresh_required = "content" in changed_fields
+        if "title" in changed_fields:
+            document.title = reference.title
         if index_refresh_required:
             await session.execute(delete(RagChunk).where(RagChunk.documentId == document.id))
-            document.title = reference.title
             document.contentHash = content_sha256(reference.content)
             document.status = "disabled"
             document.errorMessage = (
                 "等待重新索引" if index_enabled else "检索索引服务未配置"
             )
+            self._advance_document_generation(document)
+        elif "title" in changed_fields:
+            # 标题不属于索引输入，显式保留当前索引代次，避免 ORM 的 onupdate 误推进任务身份。
+            flag_modified(document, "updatedAt")
         await session.flush()
         return {
             **self._dto(reference, document.status, document),
             "indexRefreshRequired": index_refresh_required,
+            "indexGeneration": _utc(document.updatedAt),
         }
 
     async def _delete_reference_in_session(
@@ -379,6 +387,7 @@ class ReferenceRepository:
                     novel_id=reference.novelId,
                     reference_id=reference.id,
                     content_hash=current_hash,
+                    generation=cast(datetime, _utc(document.updatedAt)),
                 )
             )
         return records
@@ -455,7 +464,7 @@ class ReferenceRepository:
         user_id: str,
         reference_id: str,
         expected_content_hash: str,
-    ) -> str:
+    ) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
@@ -464,12 +473,23 @@ class ReferenceRepository:
                     session, novel_id, reference_id
                 )
                 self._require_current_hash(reference, document, expected_content_hash)
+                if self._matches_pending_dispatch(
+                    reference, document, expected_content_hash
+                ):
+                    return {
+                        "contentHash": expected_content_hash,
+                        "indexGeneration": _utc(document.updatedAt),
+                    }
                 await session.execute(delete(RagChunk).where(RagChunk.documentId == document.id))
                 document.title = reference.title
                 document.contentHash = expected_content_hash
                 document.status = "disabled"
                 document.errorMessage = "等待重新索引"
-                return expected_content_hash
+                generation = self._advance_document_generation(document)
+                return {
+                    "contentHash": expected_content_hash,
+                    "indexGeneration": generation,
+                }
 
     async def mark_index_failed(
         self,
@@ -493,6 +513,7 @@ class ReferenceRepository:
         novel_id: str,
         reference_id: str,
         content_hash: str,
+        generation: datetime,
         agent_status: AgentJobStatus,
     ) -> None:
         if agent_status in {"queued", "running"}:
@@ -504,7 +525,7 @@ class ReferenceRepository:
                 )
                 if not self._matches_pending_dispatch(
                     reference, document, content_hash
-                ):
+                ) or _utc(document.updatedAt) != _utc(generation):
                     return
                 document.status = "failed"
                 document.errorMessage = f"智能体索引任务已终止：{agent_status}"
@@ -604,11 +625,7 @@ class ReferenceRepository:
             ),
         )
         if document is None:
-            raise ApiError(
-                status_code=409,
-                code="RAG_DOCUMENT_MISSING",
-                message="检索文档不存在",
-            )
+            raise cls._missing_document()
         return reference, document
 
     @classmethod
@@ -643,6 +660,12 @@ class ReferenceRepository:
         )
 
     @staticmethod
+    def _advance_document_generation(document: RagDocument) -> datetime:
+        generation = next_utc_timestamp(_utc(document.updatedAt))
+        document.updatedAt = _database_utc(generation)
+        return generation
+
+    @staticmethod
     def _dto(
         reference: ReferenceMaterial,
         status: str | None,
@@ -666,6 +689,14 @@ class ReferenceRepository:
     @staticmethod
     def _not_found() -> ApiError:
         return ApiError(status_code=404, code="REFERENCE_NOT_FOUND", message="参考资料不存在")
+
+    @staticmethod
+    def _missing_document() -> ApiError:
+        return ApiError(
+            status_code=409,
+            code="RAG_DOCUMENT_MISSING",
+            message="检索文档不存在",
+        )
 
     @staticmethod
     def _stale_index() -> ApiError:
