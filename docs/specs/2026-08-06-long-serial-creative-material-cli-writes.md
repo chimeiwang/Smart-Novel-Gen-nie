@@ -66,7 +66,8 @@
 ## 命令面
 
 所有命令均为 `inputMode=json`、`outputMode=json`、`mutation=true`、`requiresIdentity=true`，不接受
-`outputFile`。创建和重新索引命令要求调用方提供稳定 `clientRequestId`；CLI 不临时生成该值。
+`outputFile`。八条创建命令要求调用方提供稳定 `clientRequestId`；CLI 不临时生成该值。重新索引使用
+`referenceId + expectedContentHash` 作为现有确定性任务身份。
 
 ### 单例资料命令
 
@@ -142,7 +143,6 @@ PLOT_PROGRESS_VERSION_CONFLICT
 REFERENCE_VERSION_CONFLICT
 APPLIED_STYLE_VERSION_CONFLICT
 RESOURCE_CREATE_CONFLICT
-IDEMPOTENCY_KEY_REUSED
 ```
 
 ### 创建幂等
@@ -186,10 +186,9 @@ CLI 删除不是级联清理入口。Core 在事务中检查引用，并按以�
 
 - `create` 和 `update` 支持 `content`/`contentFile` 二选一，按完整 UTF-8 读取。
 - 更新和删除使用 `expectedUpdatedAt`。
-- `reindex` 要求 `clientRequestId` 与 `expectedContentHash`；内容 hash 不匹配时拒绝启动。
-- Core 把 `clientRequestId + referenceId + expectedContentHash` 绑定为稳定索引任务身份；完全相同的请求
-  返回同一任务，不重复入队，同一 `clientRequestId` 更换资料或内容 hash 时返回
-  `409 IDEMPOTENCY_KEY_REUSED`。
+- `reindex` 要求 `expectedContentHash`；内容 hash 不匹配时拒绝启动。
+- Core 复用现有 `referenceId + expectedContentHash` 确定性索引任务身份；完全相同的请求返回同一任务，
+  不重复入队。资料内容变化后必须先取得新的 `contentHash`，不能用旧 hash 启动索引。
 - 资料事务提交成功只表示正式资料已保存，不代表 RAG 已 ready。CLI 返回 `ragStatus`，生产流程继续通过
   `long.resources.get` 观察到 `ready` 或 `failed`；pending 状态不得表述为索引成功。
 
@@ -235,7 +234,8 @@ npm run api:check
 2. 写前执行对应完整 GET，确认小说 ID、名称、资源 ID、当前版本和当前完整内容。
 3. 展示完整旧值、新值、删除影响与 Diff；用户确认只授权本次具体变化。
 4. 使用读取到的版本执行一次写命令。409 时停止并重新展示新 Diff，不自动换 `expectedUpdatedAt`。
-5. 网络结果不确定时先回拉；创建和重新索引只允许使用原 `clientRequestId` 与完全相同的请求重放。
+5. 网络结果不确定时先回拉；创建只允许使用原 `clientRequestId` 与完全相同的请求重放，重新索引只
+   允许使用原 `referenceId + expectedContentHash` 重放。
 6. 写后通过 `long.planning.get`、`long.lore.get` 或 `long.resources.get` 完整回拉并逐字段核对。
 7. Skill 不使用 SSH、数据库、内部接口、自制 HTTP 或浏览器 UI 绕过公共 CLI。
 
