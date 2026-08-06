@@ -11,7 +11,13 @@ class FakeAuthorizer:
         self.called = True
         assert (user_id, novel_id, task_id) == ("user-1", "novel-1", "task-1")
 
-    async def require_writing_job(self, user_id: str, novel_id: str, task_id: str, job_id: str) -> None:
+    async def require_writing_job(
+        self,
+        user_id: str,
+        novel_id: str,
+        task_id: str,
+        job_id: str,
+    ) -> None:
         assert (user_id, novel_id, task_id, job_id) == ("user-1", "novel-1", "task-1", "command-1")
 
 
