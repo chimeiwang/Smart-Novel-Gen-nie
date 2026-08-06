@@ -16,6 +16,7 @@ from ..db.models import (
     Character,
     CharacterExperience,
     CharacterRelation,
+    CharacterStateChange,
     Faction,
     Glossary,
     Item,
@@ -24,6 +25,7 @@ from ..db.models import (
     StoryBackground,
     WorldSetting,
     WritingBible,
+    faction_territories,
 )
 from ..errors import ApiError
 
@@ -431,6 +433,9 @@ class LoreRepository:
                     CharacterExperience.characterId == entity_id
                 ),
                 "ownedItems": select(func.count(Item.id)).where(Item.ownerId == entity_id),
+                "stateChanges": select(func.count(CharacterStateChange.id)).where(
+                    CharacterStateChange.characterId == entity_id
+                ),
             }
         elif kind == "locations":
             statements = {
@@ -440,12 +445,18 @@ class LoreRepository:
                 "basedFactions": select(func.count(Faction.id)).where(
                     Faction.baseId == entity_id
                 ),
+                "territoryFactions": select(func.count())
+                .select_from(faction_territories)
+                .where(faction_territories.c.B == entity_id),
             }
         elif kind == "factions":
             statements = {
                 "characters": select(func.count(Character.id)).where(
                     Character.factionId == entity_id
-                )
+                ),
+                "territories": select(func.count())
+                .select_from(faction_territories)
+                .where(faction_territories.c.A == entity_id),
             }
         else:
             return {}

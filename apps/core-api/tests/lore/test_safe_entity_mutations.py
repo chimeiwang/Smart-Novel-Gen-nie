@@ -14,6 +14,7 @@ from inkforge_core.db.models import (
     Character,
     CharacterExperience,
     CharacterRelation,
+    CharacterStateChange,
     Faction,
     Glossary,
     Item,
@@ -21,6 +22,7 @@ from inkforge_core.db.models import (
     Novel,
     User,
     WritingStyle,
+    faction_territories,
 )
 from inkforge_core.errors import ApiError
 from inkforge_core.lore.repository import EntityMutation, LoreRepository
@@ -39,7 +41,7 @@ from inkforge_core.lore.schemas import (
     UpdateLocationRequest,
 )
 from pydantic import ValidationError
-from sqlalchemy import DefaultClause, MetaData, text
+from sqlalchemy import DefaultClause, MetaData, func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
 ENTITY_CASES = [
@@ -69,6 +71,8 @@ async def _create_database(path: Path) -> tuple[AsyncEngine, async_sessionmaker]
             Glossary.__table__,
             CharacterExperience.__table__,
             CharacterRelation.__table__,
+            CharacterStateChange.__table__,
+            faction_territories,
         ):
             table.to_metadata(metadata)
         metadata.tables["public.WritingStyle"].c.sourceType.server_default = DefaultClause(
@@ -472,6 +476,52 @@ async def test_character_delete_reports_all_reference_counts(tmp_path: Path) -> 
 
 
 @pytest.mark.asyncio
+async def test_character_delete_rejects_state_change_cascade_and_preserves_data(
+    tmp_path: Path,
+) -> None:
+    engine, factory = await _create_database(tmp_path / "character-state-change-reference.db")
+    try:
+        await _seed_novels(factory)
+        repository = LoreRepository(factory)
+        character = await repository.create_entity(
+            "novel-1",
+            "user-1",
+            "characters",
+            "character-with-state-change",
+            {"name": "有历史的角色", "currentStatus": "active"},
+        )
+        async with factory() as session, session.begin():
+            session.add(
+                CharacterStateChange(
+                    id="state-change-1",
+                    characterId=character["id"],
+                    changeType="status",
+                    beforeState="受伤",
+                    afterState="康复",
+                    description="角色完成康复",
+                )
+            )
+
+        with pytest.raises(ApiError) as caught:
+            await repository.delete_entity(
+                "novel-1",
+                "user-1",
+                "characters",
+                character["id"],
+                character["updatedAt"],
+            )
+
+        assert caught.value.status_code == 409
+        assert caught.value.code == "LORE_ENTITY_REFERENCED"
+        assert caught.value.details == {"stateChanges": 1}
+        async with factory() as session:
+            assert await session.get(Character, character["id"]) is not None
+            assert await session.get(CharacterStateChange, "state-change-1") is not None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_location_and_faction_delete_report_reference_counts(tmp_path: Path) -> None:
     engine, factory = await _create_database(tmp_path / "地点势力引用.db")
     try:
@@ -518,6 +568,60 @@ async def test_location_and_faction_delete_report_reference_counts(tmp_path: Pat
 
         async with factory() as session:
             assert await session.get(Character, character["id"]) is not None
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("kind", "expected_details"),
+    [
+        ("locations", {"territoryFactions": 1}),
+        ("factions", {"territories": 1}),
+    ],
+)
+@pytest.mark.asyncio
+async def test_location_or_faction_delete_rejects_territory_cascade_and_preserves_data(
+    tmp_path: Path,
+    kind: str,
+    expected_details: dict[str, int],
+) -> None:
+    engine, factory = await _create_database(tmp_path / f"{kind}-territory-reference.db")
+    try:
+        await _seed_novels(factory)
+        repository = LoreRepository(factory)
+        location = await repository.create_entity(
+            "novel-1", "user-1", "locations", "territory-location-1", {"name": "领地"}
+        )
+        faction = await repository.create_entity(
+            "novel-1", "user-1", "factions", "territory-faction-01", {"name": "势力"}
+        )
+        async with factory() as session, session.begin():
+            await session.execute(
+                faction_territories.insert().values(A=faction["id"], B=location["id"])
+            )
+
+        target = location if kind == "locations" else faction
+        with pytest.raises(ApiError) as caught:
+            await repository.delete_entity(
+                "novel-1", "user-1", kind, target["id"], target["updatedAt"]
+            )
+
+        assert caught.value.status_code == 409
+        assert caught.value.code == "LORE_ENTITY_REFERENCED"
+        assert caught.value.details == expected_details
+        async with factory() as session:
+            assert await session.get(Location, location["id"]) is not None
+            assert await session.get(Faction, faction["id"]) is not None
+            assert (
+                await session.scalar(
+                    select(func.count())
+                    .select_from(faction_territories)
+                    .where(
+                        faction_territories.c.A == faction["id"],
+                        faction_territories.c.B == location["id"],
+                    )
+                )
+            ) == 1
     finally:
         await engine.dispose()
 

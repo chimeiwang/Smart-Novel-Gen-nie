@@ -218,6 +218,9 @@ async def test_executor_sanitizes_controls_and_defers_name_resolution_to_batch()
             ],
             "worldSetting": "完整世界设定",
         },
+        expected_lore_updated_at={
+            "worldSetting": datetime(2026, 8, 5, tzinfo=UTC),
+        },
     )
 
     assert count == 2
@@ -244,9 +247,74 @@ async def test_executor_sanitizes_controls_and_defers_name_resolution_to_batch()
             "user-1",
             "world-setting",
             "完整世界设定",
-            None,
+            datetime(2026, 8, 5, tzinfo=UTC),
         ),
     ]
+
+
+@pytest.mark.asyncio
+async def test_lore_text_update_requires_and_forwards_artifact_baseline() -> None:
+    lore = FakeLore()
+    executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
+    expected = datetime(2026, 8, 6, tzinfo=UTC)
+
+    count = await executor.apply(
+        "novel-1",
+        "user-1",
+        {"storyBackground": "候选故事背景"},
+        expected_lore_updated_at={"storyBackground": expected},
+    )
+
+    assert count == 1
+    assert lore.calls == [
+        (
+            "content",
+            "novel-1",
+            "user-1",
+            "story-background",
+            "候选故事背景",
+            expected,
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_lore_text_update_rejects_missing_artifact_baseline() -> None:
+    lore = FakeLore()
+    executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
+
+    with pytest.raises(ValueError, match="storyBackground.*版本基线"):
+        await executor.apply(
+            "novel-1",
+            "user-1",
+            {"storyBackground": "候选故事背景"},
+        )
+
+    assert lore.calls == []
+
+
+@pytest.mark.asyncio
+async def test_missing_lore_text_baseline_rejects_before_other_mutations() -> None:
+    lore = FakeLore()
+    executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
+
+    with pytest.raises(ValueError, match="worldSetting.*版本基线"):
+        await executor.apply(
+            "novel-1",
+            "user-1",
+            {
+                "characters": [
+                    {
+                        "action": "create",
+                        "clientRequestId": "artifact-character-create",
+                        "name": "不会被部分写入的角色",
+                    }
+                ],
+                "worldSetting": "缺少版本基线的世界设定",
+            },
+        )
+
+    assert lore.calls == []
 
 
 @pytest.mark.asyncio

@@ -181,6 +181,7 @@ class AgentUpdatesExecutor:
         updates: dict[str, object],
         *,
         expected_outline_updated_at: datetime | None = None,
+        expected_lore_updated_at: dict[str, datetime | None] | None = None,
     ) -> int:
         count = 0
         entity_items: list[
@@ -213,6 +214,16 @@ class AgentUpdatesExecutor:
                 if not isinstance(item, dict):
                     raise ValueError("characterExperiences 更新项结构无效")
                 experience_mutations.append(self._build_experience_mutation(item))
+        for section in ("worldSetting", "storyBackground"):
+            if section not in updates:
+                continue
+            if not isinstance(updates[section], str):
+                raise ValueError(f"{section} 必须是完整文本")
+            if (
+                expected_lore_updated_at is None
+                or section not in expected_lore_updated_at
+            ):
+                raise ValueError(f"{section} 缺少审核草案版本基线")
         if entity_mutations:
             await self._lore.apply_entity_mutations(
                 novel_id, user_id, entity_mutations
@@ -244,12 +255,14 @@ class AgentUpdatesExecutor:
                     expected_outline_updated_at,
                 )
             else:
+                if expected_lore_updated_at is None:
+                    raise ValueError(f"{section} 缺少审核草案版本基线")
                 await self._lore.upsert_content(
                     novel_id,
                     user_id,
                     kind,
                     content,
-                    None,
+                    expected_lore_updated_at[section],
                 )
             count += 1
         if count == 0:

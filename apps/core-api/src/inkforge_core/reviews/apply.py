@@ -57,6 +57,7 @@ class AgentUpdatesApplyPort(Protocol):
         updates: dict[str, object],
         *,
         expected_outline_updated_at: datetime | None = None,
+        expected_lore_updated_at: dict[str, datetime | None] | None = None,
     ) -> int: ...
 
 
@@ -93,11 +94,16 @@ class FormalArtifactApplier:
                 payload.get("baseOutlineUpdatedAt"),
                 field="baseOutlineUpdatedAt",
             )
+            expected_lore_updated_at = _optional_datetime_map(
+                payload.get("baseLoreUpdatedAt"),
+                field="baseLoreUpdatedAt",
+            )
             return await self._updates_executor.apply(
                 artifact.novel_id,
                 user_id,
                 updates,
                 expected_outline_updated_at=expected_outline_updated_at,
+                expected_lore_updated_at=expected_lore_updated_at,
             )
 
         content = edited_content if edited_content is not None else payload.get("content")
@@ -145,3 +151,22 @@ def _optional_datetime(value: object, *, field: str) -> datetime | None:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError as exc:
         raise ValueError(f"{field} 必须是 ISO 8601 时间") from exc
+
+
+def _optional_datetime_map(
+    value: object,
+    *,
+    field: str,
+) -> dict[str, datetime | None] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError(f"{field} 必须是对象")
+    allowed = {"worldSetting", "storyBackground"}
+    unknown = set(value) - allowed
+    if unknown:
+        raise ValueError(f"{field} 包含未知字段：{'、'.join(sorted(unknown))}")
+    return {
+        key: _optional_datetime(item, field=f"{field}.{key}")
+        for key, item in value.items()
+    }

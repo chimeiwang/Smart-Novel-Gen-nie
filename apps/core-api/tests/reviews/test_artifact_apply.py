@@ -173,10 +173,12 @@ class FakeUpdatesExecutor:
         updates: dict[str, object],
         *,
         expected_outline_updated_at: datetime | None = None,
+        expected_lore_updated_at: dict[str, datetime | None] | None = None,
     ) -> int:
         del novel_id, user_id
         self.updates = updates
         self.expected_outline_updated_at = expected_outline_updated_at
+        self.expected_lore_updated_at = expected_lore_updated_at
         return 1
 
 
@@ -253,6 +255,40 @@ async def test_formal_applier_forwards_outline_cas_from_artifact() -> None:
     assert executor.expected_outline_updated_at == datetime(
         2026, 7, 30, tzinfo=UTC
     )
+
+
+@pytest.mark.asyncio
+async def test_formal_applier_forwards_lore_text_cas_from_artifact() -> None:
+    executor = FakeUpdatesExecutor()
+    applier = FormalArtifactApplier(FakeFormalWrites(), executor)
+    artifact = Artifact(
+        kind="agent_updates",
+        payload={
+            "kind": "agent_updates",
+            "baseLoreUpdatedAt": {
+                "worldSetting": "2026-07-30T00:00:00Z",
+                "storyBackground": None,
+            },
+            "updates": {
+                "worldSetting": "候选世界设定",
+                "storyBackground": "候选故事背景",
+            },
+        },
+    )
+    artifact.novel_id = "novel-1"
+    artifact.chapter_id = None
+
+    await applier.apply(
+        artifact,
+        user_id="user-1",
+        edited_content=None,
+        selected_update_refs=None,
+    )
+
+    assert executor.expected_lore_updated_at == {
+        "worldSetting": datetime(2026, 7, 30, tzinfo=UTC),
+        "storyBackground": None,
+    }
 
 
 class FormalWriteSession:
