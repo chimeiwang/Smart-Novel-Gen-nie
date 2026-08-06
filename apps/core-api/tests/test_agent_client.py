@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 import pytest
-from inkforge_contracts.jobs import AgentJobAccepted, AgentJobRequest
+from inkforge_contracts.jobs import AgentJobAccepted, AgentJobCancelRequest, AgentJobRequest
 from inkforge_contracts.jwt_claims import ServiceScope
 from inkforge_core.agent_client import (
     AgentClient,
@@ -85,6 +85,43 @@ async def test_agent_client_signs_exact_body_and_resource_binding() -> None:
             "POST", "https://agent.example/internal/v1/runs", content=signer.calls[0]["body"]
         ).content
     )
+    await http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_agent_client_cancels_the_original_job_with_delete() -> None:
+    signer = Signer()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "DELETE"
+        assert request.url.path == "/internal/v1/runs/job-1"
+        assert json.loads(request.content) == {
+            "protocolVersion": "1.0",
+            "runId": "task-1",
+            "taskId": "task-1",
+            "novelId": "novel-1",
+        }
+        return httpx.Response(204)
+
+    http = httpx.AsyncClient(
+        base_url="https://agent.example",
+        transport=httpx.MockTransport(handler),
+    )
+    client = AgentClient(http, signer)
+
+    await client.cancel(
+        "job-1",
+        AgentJobCancelRequest(
+            protocolVersion="1.0",
+            runId="task-1",
+            taskId="task-1",
+            novelId="novel-1",
+        ),
+    )
+
+    assert signer.calls[0]["scope"] == (ServiceScope.AGENT_CANCEL,)
+    assert signer.calls[0]["idempotency_key"] == "job-1"
+    assert signer.calls[0]["task_id"] == "task-1"
     await http.aclose()
 
 

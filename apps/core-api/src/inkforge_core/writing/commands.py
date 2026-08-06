@@ -63,7 +63,7 @@ from .source_bindings import capture_chapter_source_bindings
 from .tasks import TERMINAL_CALLBACK_RESULT_FIELD, mark_task_failed_state
 from .transaction_locks import WritingLockRequest, lock_writing_rows
 
-WritingCommandKind = Literal["start", "resume", "artifact_decision"]
+WritingCommandKind = Literal["start", "resume", "artifact_decision", "cancel"]
 WritingCommandStatus = Literal["pending", "submitted", "processing", "succeeded", "failed"]
 
 ACTIVE_COMMAND_STATUSES = frozenset({"pending", "submitted", "processing"})
@@ -948,6 +948,48 @@ class WritingRunCommandRepository:
                     )
                 if task.phase not in {"completed", "error"}:
                     mark_task_failed_state(task, code)
+                await session.flush()
+                return _command_record(command, task, owner_id)
+
+    async def settle_cancel_dispatch(self, command_id: str) -> WritingCommandRecord:
+        async with self._session_factory() as session:
+            async with session.begin():
+                task_locked_row = await self._get_by_id(
+                    session,
+                    command_id,
+                    for_update=True,
+                    lock_task=True,
+                )
+                if task_locked_row is None:
+                    raise ApiError(
+                        status_code=404,
+                        code="WRITING_COMMAND_NOT_FOUND",
+                        message="写作命令不存在",
+                    )
+                row = await self._get_by_id(session, command_id, for_update=True)
+                if row is None:
+                    raise ApiError(
+                        status_code=404,
+                        code="WRITING_COMMAND_NOT_FOUND",
+                        message="写作命令不存在",
+                    )
+                command, task, owner_id = row
+                if command.kind != "cancel":
+                    raise ApiError(
+                        status_code=409,
+                        code="WRITING_COMMAND_STATE_CONFLICT",
+                        message="只有取消命令可以按取消投递收敛",
+                    )
+                if command.status in TERMINAL_COMMAND_STATUSES:
+                    return _command_record(command, task, owner_id)
+                now = utc_now()
+                command.status = "succeeded"
+                command.completedAt = now
+                command.updatedAt = now
+                command.lastError = None
+                command.resultJson = _dump_json({"effective": True})
+                if task.phase not in {"completed", "error"}:
+                    mark_task_failed_state(task, "WRITING_RUN_CANCELLED_BY_USER")
                 await session.flush()
                 return _command_record(command, task, owner_id)
 

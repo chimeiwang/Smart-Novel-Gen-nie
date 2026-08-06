@@ -243,6 +243,20 @@ class ResumeWritingRunResponse(WritingSchema):
     commandStatus: WritingCommandStatus
 
 
+class CancelWritingRunRequest(WritingSchema):
+    clientRequestId: str = Field(min_length=16, max_length=128)
+
+
+class CancelWritingRunResponse(WritingSchema):
+    taskId: str
+    commandId: str
+    commandStatus: WritingCommandStatus
+    effective: bool
+    alreadyTerminal: bool
+    cancelledCommandId: str | None
+    cancelledJobId: str | None
+
+
 class WritingRunOutcomeCommand(WritingSchema):
     id: str
     kind: str

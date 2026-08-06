@@ -82,6 +82,7 @@ from .styles.router import router as styles_router
 from .styles.service import StyleService
 from .styles.storage import StyleStorage
 from .writing.callbacks import router as writing_callback_router
+from .writing.cancellation import WritingRunCancellationRepository, WritingRunCancellationService
 from .writing.command_dispatcher import WritingRunCommandDispatcher
 from .writing.commands import WritingRunCommandRepository
 from .writing.context import WritingContextRepository, WritingContextService
@@ -282,6 +283,10 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
     command_dispatcher = cast(
         WritingRunCommandDispatcher | None,
         getattr(app.state, "writing_command_dispatcher", None),
+    )
+    app.state.writing_cancellation_service = WritingRunCancellationService(
+        WritingRunCancellationRepository(session_factory),
+        command_dispatcher,
     )
     if (
         command_dispatcher is not None

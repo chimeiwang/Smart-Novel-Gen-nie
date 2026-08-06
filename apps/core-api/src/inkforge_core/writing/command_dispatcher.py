@@ -28,6 +28,8 @@ class CommandDispatchRepository(Protocol):
         agent_status: AgentJobStatus,
     ) -> WritingCommandRecord: ...
 
+    async def settle_cancel_dispatch(self, command_id: str) -> WritingCommandRecord: ...
+
     async def record_dispatch_failure(
         self, command_id: str, error_code: str
     ) -> WritingCommandRecord: ...
@@ -37,6 +39,8 @@ class CommandSubmitter(Protocol):
     async def submit_command(
         self, command: WritingCommandRecord
     ) -> AgentJobStatus: ...
+
+    async def cancel_command(self, command: WritingCommandRecord) -> None: ...
 
 
 class WritingRunCommandDispatcher:
@@ -76,6 +80,11 @@ class WritingRunCommandDispatcher:
         )
         for command in commands:
             try:
+                if command.kind == "cancel":
+                    await self._submitter.cancel_command(command)
+                    await self._repository.settle_cancel_dispatch(command.id)
+                    completed += 1
+                    continue
                 agent_status = await self._submitter.submit_command(command)
                 if agent_status in {"queued", "running"}:
                     await self._repository.mark_agent_active(command.id)

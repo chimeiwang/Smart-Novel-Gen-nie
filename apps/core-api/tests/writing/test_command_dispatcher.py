@@ -56,6 +56,12 @@ class Repository:
         self.terminal_ids.append((command_id, agent_status))
         return replace(self.commands[0], status="failed")
 
+    async def settle_cancel_dispatch(
+        self, command_id: str
+    ) -> WritingCommandRecord:
+        self.terminal_ids.append((command_id, "cancelled"))
+        return replace(self.commands[0], status="succeeded")
+
     async def record_dispatch_failure(
         self, command_id: str, error_code: str
     ) -> WritingCommandRecord:
@@ -74,6 +80,30 @@ class RecordingSubmitter:
     async def submit_command(self, value: WritingCommandRecord) -> AgentJobStatus:
         self.job_ids.append(value.id)
         return self.statuses.get(value.id, "queued")
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_routes_cancel_command_to_delete_submitter() -> None:
+    repository = Repository([
+        replace(command("cancel-1"), kind="cancel", payload={"job": {"cancelledJobId": "job-1"}})
+    ])
+
+    class CancelSubmitter:
+        def __init__(self) -> None:
+            self.cancelled: list[str] = []
+
+        async def submit_command(self, value: WritingCommandRecord) -> AgentJobStatus:
+            raise AssertionError(f"取消命令不应走普通提交：{value.id}")
+
+        async def cancel_command(self, value: WritingCommandRecord) -> None:
+            self.cancelled.append(value.id)
+
+    submitter = CancelSubmitter()
+    completed = await WritingRunCommandDispatcher(repository, submitter).run_once()
+
+    assert completed == 1
+    assert submitter.cancelled == ["cancel-1"]
+    assert repository.terminal_ids == [("cancel-1", "cancelled")]
 
 
 @pytest.mark.asyncio

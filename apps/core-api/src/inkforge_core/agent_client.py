@@ -5,7 +5,12 @@ from typing import Protocol, cast
 from urllib.parse import urlencode
 
 import httpx
-from inkforge_contracts.jobs import AgentJobAccepted, AgentJobRequest, AgentJobStatus
+from inkforge_contracts.jobs import (
+    AgentJobAccepted,
+    AgentJobCancelRequest,
+    AgentJobRequest,
+    AgentJobStatus,
+)
 from inkforge_contracts.jwt_claims import ServiceScope
 from inkforge_service_auth import ServiceTokenSigner, canonical_json_body
 from pydantic import JsonValue
@@ -19,6 +24,8 @@ from .writing.records import TaskRecord
 
 class AgentJobClient(Protocol):
     async def submit(self, request: AgentJobRequest) -> AgentJobAccepted: ...
+
+    async def cancel(self, job_id: str, request: AgentJobCancelRequest) -> None: ...
 
 
 class AgentClient:
@@ -53,6 +60,37 @@ class AgentClient:
                 status_code=503,
                 code="AGENT_RUN_SUBMIT_FAILED",
                 message="智能体运行提交失败",
+            ) from exc
+
+    async def cancel(self, job_id: str, request: AgentJobCancelRequest) -> None:
+        path = f"/internal/v1/runs/{job_id}"
+        body = canonical_json_body(request.model_dump(mode="json"))
+        signed = self._signer.sign_request(
+            body=body,
+            http_method="DELETE",
+            http_path=path,
+            query_string=b"",
+            idempotency_key=job_id,
+            scope=(ServiceScope.AGENT_CANCEL,),
+            task_id=request.taskId,
+            run_id=request.runId,
+            novel_id=request.novelId,
+        )
+        try:
+            response = await self._http.request(
+                "DELETE",
+                path,
+                content=body,
+                headers={**signed.headers, "Content-Type": "application/json"},
+            )
+            if response.status_code != 204:
+                response.raise_for_status()
+                raise ValueError("智能体取消接口未返回 204")
+        except (httpx.HTTPError, ValueError) as exc:
+            raise ApiError(
+                status_code=503,
+                code="AGENT_RUN_CANCEL_FAILED",
+                message="智能体运行取消投递失败",
             ) from exc
 
     async def get_workflow_runs(
@@ -140,6 +178,23 @@ class WritingTaskAgentSubmitter:
             )
         )
         return accepted.status
+
+    async def cancel_command(self, command: WritingCommandRecord) -> None:
+        if command.kind != "cancel":
+            raise ValueError("只有取消命令可以调用取消投递")
+        payload = command_job_payload(command.payload)
+        cancelled_job_id = payload.get("cancelledJobId")
+        if not isinstance(cancelled_job_id, str):
+            raise ValueError("取消命令缺少被取消的 job 标识")
+        await self._client.cancel(
+            cancelled_job_id,
+            AgentJobCancelRequest(
+                protocolVersion="1.0",
+                runId=command.task.id,
+                taskId=command.task.id,
+                novelId=command.task.novel_id,
+            ),
+        )
 
     async def _submit(
         self,

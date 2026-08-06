@@ -8,9 +8,12 @@ from fastapi.responses import StreamingResponse
 from ..auth.dependencies import get_current_user
 from ..auth.repository import AuthUser
 from ..errors import ApiError
+from .cancellation import WritingRunCancellationService
 from .commands import WritingRunCommandRepository
 from .outbox import WritingOutboxRepository
 from .schemas import (
+    CancelWritingRunRequest,
+    CancelWritingRunResponse,
     CreateMessageRequest,
     CreateWritingSessionRequest,
     MessageResponse,
@@ -44,6 +47,20 @@ def get_writing_task_service(request: Request) -> WritingTaskService:
     service = cast(
         WritingTaskService | None,
         getattr(request.app.state, "writing_task_service", None),
+    )
+    if service is None:
+        raise ApiError(
+            status_code=503,
+            code="WRITING_TASK_UNAVAILABLE",
+            message="写作任务服务暂时不可用",
+        )
+    return service
+
+
+def get_writing_cancellation_service(request: Request) -> WritingRunCancellationService:
+    service = cast(
+        WritingRunCancellationService | None,
+        getattr(request.app.state, "writing_cancellation_service", None),
     )
     if service is None:
         raise ApiError(
@@ -110,6 +127,9 @@ def get_writing_event_store(request: Request) -> object:
 Service = Annotated[WritingService, Depends(get_writing_service)]
 User = Annotated[AuthUser, Depends(get_current_user)]
 TaskService = Annotated[WritingTaskService, Depends(get_writing_task_service)]
+CancellationService = Annotated[
+    WritingRunCancellationService, Depends(get_writing_cancellation_service)
+]
 OutboxRepository = Annotated[
     WritingOutboxRepository,
     Depends(get_writing_outbox_repository),
@@ -252,6 +272,20 @@ async def resume_writing_run(
     service: TaskService,
 ) -> ResumeWritingRunResponse:
     return await service.resume(user.id, task_id, body)
+
+
+@router.post(
+    "/runs/{task_id}/cancel",
+    response_model=CancelWritingRunResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def cancel_writing_run(
+    task_id: str,
+    body: CancelWritingRunRequest,
+    user: User,
+    service: CancellationService,
+) -> CancelWritingRunResponse:
+    return await service.cancel(user.id, task_id, body)
 
 
 @router.get("/runs/{task_id}/events", response_class=StreamingResponse)
