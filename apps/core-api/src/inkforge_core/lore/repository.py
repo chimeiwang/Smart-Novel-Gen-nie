@@ -380,10 +380,12 @@ class LoreRepository:
                     code="LORE_CONTENT_VERSION_CONFLICT",
                 )
                 if value is None:
+                    created_at = _database_utc(next_utc_timestamp(None))
                     value = model(
                         novelId=novel_id,
                         **fields,
-                        updatedAt=_database_utc(next_utc_timestamp(None)),
+                        createdAt=created_at,
+                        updatedAt=created_at,
                     )
                     session.add(value)
                     await session.flush()

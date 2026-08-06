@@ -4,7 +4,9 @@ import hashlib
 from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
+import inkforge_core.concurrency as concurrency_module
 import pytest
+from inkforge_core.db import base as db_base
 from inkforge_core.db.models import (
     Novel,
     StoryBackground,
@@ -163,6 +165,37 @@ async def test_world_setting_create_idempotency_monotonic_update_and_stale_rejec
             )
         assert current is not None
         assert current.content == "权威新设定"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_singleton_create_uses_one_timestamp_for_created_and_updated(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class RepositoryClock(datetime):
+        @classmethod
+        def now(cls, tz):
+            return datetime(2026, 8, 6, 1, 2, 3, 123_456, tzinfo=tz)
+
+    class ModelDefaultClock(datetime):
+        @classmethod
+        def now(cls, tz):
+            return datetime(2026, 8, 6, 1, 2, 3, 124_456, tzinfo=tz)
+
+    engine, factory = await _create_database(tmp_path / "首次创建时间戳.db")
+    try:
+        await _seed_novel(factory)
+        monkeypatch.setattr(concurrency_module, "datetime", RepositoryClock)
+        monkeypatch.setattr(db_base, "datetime", ModelDefaultClock)
+
+        created = await LoreRepository(factory).upsert_content(
+            "novel-1", "user-1", "story-background", "故事背景", None
+        )
+
+        assert created["createdAt"] == created["updatedAt"]
+        assert created["createdAt"].microsecond % 1000 == 0
     finally:
         await engine.dispose()
 
