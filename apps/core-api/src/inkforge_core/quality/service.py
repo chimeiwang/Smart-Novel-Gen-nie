@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Protocol
 
 from ..errors import ApiError
 from ..novels.schemas import QualityCheckDto
-from .dispatcher import QualityDispatchRecord
+from .dispatcher import QualityDispatchRecord, QualityRunCreation
 from .schemas import RunQualityCheckRequest, RunQualityCheckResponse, UpdateQualityCheckRequest
 
 
@@ -29,18 +30,21 @@ class QualityRepositoryPort(Protocol):
     async def require_check(self, check_id: str, user_id: str) -> QualityRecordPort: ...
     async def get_check(self, check_id: str, user_id: str) -> QualityCheckDto: ...
     async def update_public_status(
-        self, check_id: str, user_id: str, status: str, reset_result: bool
+        self,
+        check_id: str,
+        user_id: str,
+        status: str,
+        reset_result: bool,
+        expected_updated_at: datetime,
     ) -> QualityCheckDto: ...
-    async def authorize_run(
-        self, check_id: str, user_id: str, task_id: str | None
-    ) -> QualityRecordPort: ...
     async def create_run(
         self,
         check_id: str,
         user_id: str,
         task_id: str | None,
         message: str | None,
-    ) -> QualityDispatchRecord: ...
+        client_request_id: str,
+    ) -> QualityRunCreation: ...
     async def get_run_context(
         self,
         check_id: str,
@@ -90,33 +94,36 @@ class QualityService:
         self, user_id: str, check_id: str, request: UpdateQualityCheckRequest
     ) -> QualityCheckDto:
         return await self._repository.update_public_status(
-            check_id, user_id, request.status, request.resetResult
+            check_id,
+            user_id,
+            request.status,
+            request.resetResult,
+            request.expectedUpdatedAt,
         )
 
     async def run(
         self, user_id: str, check_id: str, request: RunQualityCheckRequest
     ) -> RunQualityCheckResponse:
-        check = await self._repository.authorize_run(check_id, user_id, request.taskId)
-        if check.type != "consistency":
-            raise ApiError(
-                status_code=400,
-                code="UNSUPPORTED_QUALITY_CHECK",
-                message="当前只支持一致性终检",
-            )
         if self._dispatcher is None:
             raise ApiError(
                 status_code=503,
                 code="QUALITY_RUN_UNAVAILABLE",
                 message="质量检查运行服务暂时不可用",
             )
-        run = await self._repository.create_run(
+        creation = await self._repository.create_run(
             check_id,
             user_id,
             request.taskId,
             request.message,
+            request.clientRequestId,
         )
-        await self._dispatcher.dispatch(run)
-        return RunQualityCheckResponse(accepted=True, checkId=check_id, taskId=run.run_id)
+        if creation.created:
+            await self._dispatcher.dispatch(creation.record)
+        return RunQualityCheckResponse(
+            accepted=True,
+            checkId=check_id,
+            taskId=creation.record.run_id,
+        )
 
     async def get_run_context(
         self,

@@ -23,6 +23,12 @@ class QualityDispatchRecord:
     message: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class QualityRunCreation:
+    record: QualityDispatchRecord
+    created: bool
+
+
 class QualityDispatchRepository(Protocol):
     async def list_dispatchable_quality_runs(
         self,

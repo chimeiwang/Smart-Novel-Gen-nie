@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from typing import Literal
+from datetime import datetime
+from typing import Annotated, Literal
 
 from inkforge_contracts import ConsistencyQualityReport
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 from ..novels.schemas import QualityCheckDto
 
@@ -12,12 +13,23 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
 
+def _parse_json_datetime(value: object) -> object:
+    if isinstance(value, str):
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return value
+
+
+JsonDatetime = Annotated[datetime, BeforeValidator(_parse_json_datetime)]
+
+
 class UpdateQualityCheckRequest(StrictModel):
     status: Literal["pending", "skipped"]
     resetResult: bool = False
+    expectedUpdatedAt: JsonDatetime
 
 
 class RunQualityCheckRequest(StrictModel):
+    clientRequestId: str = Field(min_length=16, max_length=128)
     taskId: str | None = None
     message: str | None = None
 

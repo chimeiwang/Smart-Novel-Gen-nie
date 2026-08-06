@@ -15,7 +15,7 @@ from inkforge_core.auth.dependencies import get_current_user
 from inkforge_core.auth.repository import AuthUser
 from inkforge_core.errors import ApiError
 from inkforge_core.novels.schemas import QualityCheckDto
-from inkforge_core.quality.dispatcher import QualityDispatchRecord
+from inkforge_core.quality.dispatcher import QualityDispatchRecord, QualityRunCreation
 from inkforge_core.quality.schemas import (
     QualityRunSuccessRequest,
     RunQualityCheckRequest,
@@ -74,9 +74,14 @@ class RecordingQualityRepository:
         return self.record
 
     async def update_public_status(
-        self, check_id: str, user_id: str, status: str, reset_result: bool
+        self,
+        check_id: str,
+        user_id: str,
+        status: str,
+        reset_result: bool,
+        expected_updated_at: datetime,
     ):
-        del check_id, user_id, reset_result
+        del check_id, user_id, reset_result, expected_updated_at
         self.updated = True
         self.record.status = status
         return self.record
@@ -124,8 +129,16 @@ class RecordingQualityRepository:
         user_id: str,
         task_id: str | None,
         message: str | None,
-    ) -> QualityDispatchRecord:
+        client_request_id: str,
+    ) -> QualityRunCreation:
+        del client_request_id
         await self.authorize_run(check_id, user_id, task_id)
+        if self.record.type != "consistency":
+            raise ApiError(
+                status_code=400,
+                code="UNSUPPORTED_QUALITY_CHECK",
+                message="当前只支持一致性终检",
+            )
         if self.active_run_id is not None:
             raise ApiError(
                 status_code=409,
@@ -154,7 +167,7 @@ class RecordingQualityRepository:
             ensure_ascii=False,
             separators=(",", ":"),
         )
-        return run
+        return QualityRunCreation(record=run, created=True)
 
     async def get_run_context(self, check_id, user_id, task_id, message):
         self.authorized_task_ids.append(task_id)
@@ -179,13 +192,40 @@ def test_public_quality_status_only_accepts_pending_or_skipped() -> None:
             UpdateQualityCheckRequest.model_validate({"status": status})
 
 
+def test_quality_mutations_require_stable_request_and_check_versions() -> None:
+    with pytest.raises(ValidationError):
+        RunQualityCheckRequest.model_validate({})
+    with pytest.raises(ValidationError):
+        UpdateQualityCheckRequest.model_validate({"status": "skipped"})
+
+    run = RunQualityCheckRequest.model_validate(
+        {"clientRequestId": "quality-run-000001"}
+    )
+    update = UpdateQualityCheckRequest.model_validate(
+        {
+            "status": "skipped",
+            "resetResult": False,
+            "expectedUpdatedAt": "2026-07-11T00:00:00Z",
+        }
+    )
+
+    assert run.clientRequestId == "quality-run-000001"
+    assert update.expectedUpdatedAt == datetime(2026, 7, 11, tzinfo=UTC)
+
+
 @pytest.mark.asyncio
 async def test_run_without_submitter_returns_503_without_changing_status() -> None:
     repository = RecordingQualityRepository()
     service = QualityService(repository, submitter=None)  # type: ignore[arg-type]
 
     with pytest.raises(ApiError, match="暂时不可用") as caught:
-        await service.run("user-1", "check-1", RunQualityCheckRequest(message="完整检查"))
+        await service.run(
+            "user-1",
+            "check-1",
+            RunQualityCheckRequest(
+                clientRequestId="quality-run-000001", message="完整检查"
+            ),
+        )
 
     assert caught.value.status_code == 503
     assert repository.updated is False
@@ -196,17 +236,21 @@ async def test_run_without_submitter_returns_503_without_changing_status() -> No
 async def test_run_rejects_non_consistency_check() -> None:
     repository = RecordingQualityRepository()
     repository.record.type = "editorial"
-    service = QualityService(repository, submitter=None)  # type: ignore[arg-type]
+    service = QualityService(repository, dispatcher=RecordingDispatcher())  # type: ignore[arg-type]
 
     with pytest.raises(ApiError, match="只支持一致性终检") as caught:
-        await service.run("user-1", "check-1", RunQualityCheckRequest())
+        await service.run(
+            "user-1", "check-1", RunQualityCheckRequest(clientRequestId="quality-run-000001")
+        )
 
     assert caught.value.status_code == 400
 
 
 @pytest.mark.parametrize("status", ["pending", "skipped"])
 def test_public_quality_status_accepts_only_public_values(status: str) -> None:
-    value = UpdateQualityCheckRequest.model_validate({"status": status})
+    value = UpdateQualityCheckRequest.model_validate(
+        {"status": status, "expectedUpdatedAt": "2026-07-11T00:00:00Z"}
+    )
     assert value.status == status
 
 
@@ -250,7 +294,11 @@ async def test_public_status_update_forwards_reset_and_returns_fresh_check() -> 
     response = await service.update_status(
         "user-1",
         "check-1",
-        UpdateQualityCheckRequest(status="skipped", resetResult=True),
+        UpdateQualityCheckRequest(
+            status="skipped",
+            resetResult=True,
+            expectedUpdatedAt=datetime(2026, 7, 11, tzinfo=UTC),
+        ),
     )
     assert repository.updated is True
     assert response.status == "skipped"
@@ -265,6 +313,29 @@ class RecordingDispatcher:
         return True
 
 
+class ReplayingQualityRepository(RecordingQualityRepository):
+    def __init__(self) -> None:
+        super().__init__()
+        self._records_by_request_id: dict[str, QualityDispatchRecord] = {}
+
+    async def create_run(
+        self,
+        check_id: str,
+        user_id: str,
+        task_id: str | None,
+        message: str | None,
+        client_request_id: str,
+    ) -> QualityRunCreation:
+        replay = self._records_by_request_id.get(client_request_id)
+        if replay is not None:
+            return QualityRunCreation(record=replay, created=False)
+        created = await super().create_run(
+            check_id, user_id, task_id, message, client_request_id
+        )
+        self._records_by_request_id[client_request_id] = created.record
+        return created
+
+
 @pytest.mark.asyncio
 async def test_run_submitter_receives_only_authorized_context() -> None:
     repository = RecordingQualityRepository()
@@ -273,7 +344,11 @@ async def test_run_submitter_receives_only_authorized_context() -> None:
     response = await service.run(
         "cookie-user",
         "check-1",
-        RunQualityCheckRequest(taskId="task-existing", message="完整检查"),
+        RunQualityCheckRequest(
+            clientRequestId="quality-run-000001",
+            taskId="task-existing",
+            message="完整检查",
+        ),
     )
     assert response.model_dump() == {
         "accepted": True,
@@ -286,7 +361,21 @@ async def test_run_submitter_receives_only_authorized_context() -> None:
     assert repository.last_input_json == (
         '{"checkId":"check-1","sourceTaskId":"task-existing","message":"完整检查"}'
     )
-    assert repository.authorized_task_ids == ["task-existing", "task-existing"]
+    assert repository.authorized_task_ids == ["task-existing"]
+
+
+@pytest.mark.asyncio
+async def test_quality_run_replay_returns_original_run_without_second_dispatch() -> None:
+    repository = ReplayingQualityRepository()
+    dispatcher = RecordingDispatcher()
+    service = QualityService(repository, dispatcher=dispatcher)  # type: ignore[arg-type]
+    request = RunQualityCheckRequest(clientRequestId="quality-run-000001")
+
+    first = await service.run("user-1", "check-1", request)
+    replay = await service.run("user-1", "check-1", request)
+
+    assert replay == first
+    assert len(dispatcher.records) == 1
 
 
 @pytest.mark.asyncio
@@ -295,14 +384,20 @@ async def test_repeated_quality_runs_create_distinct_persisted_run_ids() -> None
     dispatcher = RecordingDispatcher()
     service = QualityService(repository, dispatcher=dispatcher)  # type: ignore[arg-type]
 
-    first = await service.run("user-1", "check-1", RunQualityCheckRequest())
+    first = await service.run(
+        "user-1", "check-1", RunQualityCheckRequest(clientRequestId="quality-run-000001")
+    )
     with pytest.raises(ApiError) as caught:
-        await service.run("user-1", "check-1", RunQualityCheckRequest())
+        await service.run(
+            "user-1", "check-1", RunQualityCheckRequest(clientRequestId="quality-run-000002")
+        )
     assert caught.value.status_code == 409
     assert caught.value.code == "QUALITY_RUN_ACTIVE"
 
     repository.active_run_id = None
-    second = await service.run("user-1", "check-1", RunQualityCheckRequest())
+    second = await service.run(
+        "user-1", "check-1", RunQualityCheckRequest(clientRequestId="quality-run-000003")
+    )
 
     assert first.taskId == "quality-run-1"
     assert second.taskId == "quality-run-2"
@@ -320,7 +415,7 @@ async def test_run_rejects_task_that_does_not_match_check() -> None:
         await service.run(
             "cookie-user",
             "check-1",
-            RunQualityCheckRequest(taskId="mismatch"),
+            RunQualityCheckRequest(clientRequestId="quality-run-000001", taskId="mismatch"),
         )
     assert caught.value.status_code == 403
     assert caught.value.code == "QUALITY_TASK_MISMATCH"
@@ -362,7 +457,10 @@ async def test_run_api_returns_503_and_keeps_pending_when_submitter_missing() ->
     repository = RecordingQualityRepository()
     service = QualityService(repository, submitter=None)  # type: ignore[arg-type]
     async with quality_api_client(service) as client:
-        response = await client.post("/api/v1/quality-checks/check-1/run", json={})
+        response = await client.post(
+            "/api/v1/quality-checks/check-1/run",
+            json={"clientRequestId": "quality-run-000001"},
+        )
     assert response.status_code == 503
     assert response.json()["code"] == "QUALITY_RUN_UNAVAILABLE"
     assert repository.record.status == "pending"
@@ -374,7 +472,10 @@ async def test_run_api_returns_202_after_submitter_is_connected() -> None:
     repository = RecordingQualityRepository()
     service = QualityService(repository, dispatcher=RecordingDispatcher())  # type: ignore[arg-type]
     async with quality_api_client(service) as client:
-        response = await client.post("/api/v1/quality-checks/check-1/run", json={})
+        response = await client.post(
+            "/api/v1/quality-checks/check-1/run",
+            json={"clientRequestId": "quality-run-000001"},
+        )
     assert response.status_code == 202
     assert response.json()["accepted"] is True
 
@@ -444,15 +545,15 @@ def writing_task(*, novel_id: str = "novel-1", chapter_id: str = "chapter-1"):
 async def test_repository_rejects_unmatched_quality_task(row) -> None:
     from inkforge_core.quality.repository import QualityRepository
 
-    repository = QualityRepository(lambda: TaskAuthSession(row))  # type: ignore[arg-type]
-
-    async def require_check(session, check_id: str, user_id: str):
-        del session, check_id, user_id
-        return quality_check_model(), "novel-1"
-
-    repository._require_check = require_check  # type: ignore[method-assign]
+    session = TaskAuthSession(row)
+    repository = QualityRepository(lambda: session)  # type: ignore[arg-type]
     with pytest.raises(ApiError) as caught:
-        await repository.authorize_run("check-1", "user-1", "task-1")
+        await repository._validate_task_binding(
+            session,
+            repository._record(quality_check_model(), "novel-1"),
+            "user-1",
+            "task-1",
+        )
     assert caught.value.status_code == 403
     assert caught.value.code == "QUALITY_TASK_MISMATCH"
 
@@ -461,17 +562,11 @@ async def test_repository_rejects_unmatched_quality_task(row) -> None:
 async def test_repository_accepts_task_with_same_owner_novel_and_chapter() -> None:
     from inkforge_core.quality.repository import QualityRepository
 
-    repository = QualityRepository(  # type: ignore[arg-type]
-        lambda: TaskAuthSession((writing_task(), "user-1"))
-    )
-
-    async def require_check(session, check_id: str, user_id: str):
-        del session, check_id, user_id
-        return quality_check_model(), "novel-1"
-
-    repository._require_check = require_check  # type: ignore[method-assign]
-    result = await repository.authorize_run("check-1", "user-1", "task-1")
-    assert result.id == "check-1"
+    session = TaskAuthSession((writing_task(), "user-1"))
+    repository = QualityRepository(lambda: session)  # type: ignore[arg-type]
+    record = repository._record(quality_check_model(), "novel-1")
+    await repository._validate_task_binding(session, record, "user-1", "task-1")
+    assert record.id == "check-1"
 
 
 def quality_check_model():
@@ -506,6 +601,10 @@ class QualityRunSession:
     async def scalar(self, statement):
         del statement
         return self.scalar_result
+
+    async def execute(self, statement, params=None):
+        del statement, params
+        return OneRowResult(None)
 
     def add(self, value: object) -> None:
         self.added.append(value)
@@ -579,6 +678,12 @@ def quality_repository_with_locked_records(session: QualityRunSession):
         del current_session, check_id, user_id
         return chapter
 
+    async def lock_novel(current_session, check_id: str, user_id: str):
+        from inkforge_core.db.models import Novel
+
+        del current_session, check_id, user_id
+        return Novel(id=chapter.novelId, userId="user-1", name="测试小说")
+
     async def lock_check(current_session, check_id: str):
         del current_session, check_id
         return check
@@ -586,10 +691,16 @@ def quality_repository_with_locked_records(session: QualityRunSession):
     async def validate_task(current_session, record, user_id: str, task_id: str | None):
         del current_session, record, user_id, task_id
 
+    async def resolve_replay(*args, **kwargs):
+        del args, kwargs
+        return None
+
     repository._require_check = require_check  # type: ignore[method-assign]
     repository._lock_chapter_owner_for_check = lock_chapter  # type: ignore[method-assign]
+    repository._lock_novel_owner_for_check = lock_novel  # type: ignore[method-assign]
     repository._lock_check = lock_check  # type: ignore[method-assign]
     repository._validate_task_binding = validate_task  # type: ignore[method-assign]
+    repository._resolve_run_replay = resolve_replay  # type: ignore[method-assign]
     return repository, chapter, check
 
 
@@ -639,7 +750,7 @@ async def test_repository_rejects_second_active_quality_run_atomically() -> None
     repository, _, _ = quality_repository_with_locked_records(session)
 
     with pytest.raises(ApiError) as caught:
-        await repository.create_run("check-1", "user-1", None, None)
+        await repository.create_run("check-1", "user-1", None, None, "quality-run-000001")
 
     assert caught.value.status_code == 409
     assert caught.value.code == "QUALITY_RUN_ACTIVE"
@@ -651,9 +762,9 @@ async def test_repository_allows_new_quality_run_after_terminal_state() -> None:
     session = QualityRunSession(None)
     repository, _, _ = quality_repository_with_locked_records(session)
 
-    created = await repository.create_run("check-1", "user-1", None, None)
+    created = await repository.create_run("check-1", "user-1", None, None, "quality-run-000001")
 
-    assert created.run_id
+    assert created.record.run_id
     assert len(session.added) == 1
 
 
@@ -662,7 +773,7 @@ async def test_repository_marks_public_check_running_when_run_is_accepted() -> N
     session = QualityRunSession(None)
     repository, _, check = quality_repository_with_locked_records(session)
 
-    await repository.create_run("check-1", "user-1", None, None)
+    await repository.create_run("check-1", "user-1", None, None, "quality-run-000001")
 
     assert check.status == "running"
 
@@ -677,7 +788,7 @@ async def test_repository_only_allows_quality_run_for_review_chapter(
     chapter.status = chapter_status
 
     with pytest.raises(ApiError) as caught:
-        await repository.create_run("check-1", "user-1", None, None)
+        await repository.create_run("check-1", "user-1", None, None, "quality-run-000001")
 
     assert caught.value.status_code == 409
     assert caught.value.code == "QUALITY_CHECK_CHAPTER_NOT_IN_REVIEW"
@@ -697,6 +808,7 @@ async def test_public_status_update_rejects_active_quality_run() -> None:
             "user-1",
             "skipped",
             False,
+            check.updatedAt,
         )
 
     assert caught.value.status_code == 409
@@ -717,6 +829,7 @@ async def test_completed_chapter_rejects_quality_check_reset() -> None:
             "user-1",
             "pending",
             True,
+            check.updatedAt,
         )
 
     assert caught.value.status_code == 409
@@ -725,14 +838,51 @@ async def test_completed_chapter_rejects_quality_check_reset() -> None:
 
 
 @pytest.mark.asyncio
+async def test_public_quality_status_rejects_stale_check_version() -> None:
+    session = QualityRunSession(None)
+    repository, _, check = quality_repository_with_locked_records(session)
+    current = datetime(2026, 7, 11, 0, 0, 1, tzinfo=UTC)
+    check.updatedAt = current
+
+    with pytest.raises(ApiError) as caught:
+        await repository.update_public_status(
+            "check-1",
+            "user-1",
+            "skipped",
+            False,
+            datetime(2026, 7, 11, tzinfo=UTC),
+        )
+
+    assert caught.value.status_code == 409
+    assert caught.value.code == "QUALITY_CHECK_VERSION_CONFLICT"
+    assert caught.value.details == {"currentUpdatedAt": current.isoformat()}
+    assert check.status == "pending"
+
+
+@pytest.mark.asyncio
 async def test_quality_run_persists_complete_chapter_snapshot_and_hash() -> None:
     session = QualityRunSession(None)
     repository, chapter, _ = quality_repository_with_locked_records(session)
 
-    await repository.create_run("check-1", "user-1", None, "检查当前正文")
+    await repository.create_run(
+        "check-1", "user-1", None, "检查当前正文", "quality-run-000001"
+    )
 
     run = session.added[0]
-    payload = json.loads(run.input)
+    envelope = json.loads(run.input)
+    assert envelope["_inkforgeCommand"] == {
+        "schemaVersion": 1,
+        "clientRequestId": "quality-run-000001",
+        "commandKind": "quality_run",
+        "resourceIdentity": {
+            "novelId": "novel-1",
+            "chapterId": "chapter-1",
+            "checkItemId": "check-1",
+        },
+        "normalizedBody": {"taskId": None, "message": "检查当前正文"},
+        "requestFingerprint": envelope["_inkforgeCommand"]["requestFingerprint"],
+    }
+    payload = envelope["job"]
     assert payload["chapterContent"] == chapter.content
     assert payload["chapterContentSha256"] == hashlib.sha256(
         chapter.content.encode("utf-8")

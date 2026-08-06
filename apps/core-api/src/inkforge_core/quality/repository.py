@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from inkforge_contracts import ConsistencyQualityReport
@@ -12,13 +12,21 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ..chapters.content_state import (
     QUALITY_SOURCE_CHANGED,
     content_sha256,
+    next_chapter_updated_at,
     reset_quality_check,
 )
 from ..db.models import Chapter, ChapterQualityCheck, Novel, WorkflowRun, WritingTask
 from ..errors import ApiError
 from ..novels.repository import quality_check_dict, utc_datetime
 from ..novels.schemas import QualityCheckDto
-from .dispatcher import QualityDispatchRecord
+from ..writing.idempotency import (
+    JsonValue,
+    acquire_idempotency_lock,
+    normalize_json_value,
+    request_fingerprint,
+    resolve_idempotency,
+)
+from .dispatcher import QualityDispatchRecord, QualityRunCreation
 from .service import QualityRecordPort
 
 
@@ -56,7 +64,12 @@ class QualityRepository:
         return QualityCheckDto.model_validate(quality_check_dict(check))
 
     async def update_public_status(
-        self, check_id: str, user_id: str, status: str, reset_result: bool
+        self,
+        check_id: str,
+        user_id: str,
+        status: str,
+        reset_result: bool,
+        expected_updated_at: datetime,
     ) -> QualityCheckDto:
         async with self._session_factory() as session:
             async with session.begin():
@@ -66,6 +79,12 @@ class QualityRepository:
                     raise ApiError(
                         status_code=404, code="QUALITY_CHECK_NOT_FOUND", message="检查项不存在"
                     )
+                current_updated_at = _required_updated_at(check.updatedAt)
+                if _is_public_status_idempotent(check, status, reset_result):
+                    return QualityCheckDto.model_validate(quality_check_dict(check))
+                _require_quality_expected_updated_at(
+                    current_updated_at, expected_updated_at
+                )
                 if chapter.status == "completed":
                     raise ApiError(
                         status_code=409,
@@ -90,18 +109,10 @@ class QualityRepository:
                     check.scoreOverall = None
                     check.qualityGate = None
                     check.rewriteBrief = None
+                check.updatedAt = next_chapter_updated_at(current_updated_at)
                 await session.flush()
                 result = QualityCheckDto.model_validate(quality_check_dict(check))
         return result
-
-    async def authorize_run(
-        self, check_id: str, user_id: str, task_id: str | None
-    ) -> QualityRecordPort:
-        async with self._session_factory() as session:
-            check, novel_id = await self._require_check(session, check_id, user_id)
-            record = self._record(check, novel_id)
-            await self._validate_task_binding(session, record, user_id, task_id)
-        return record
 
     async def create_run(
         self,
@@ -109,9 +120,27 @@ class QualityRepository:
         user_id: str,
         task_id: str | None,
         message: str | None,
-    ) -> QualityDispatchRecord:
+        client_request_id: str,
+    ) -> QualityRunCreation:
+        normalized_body = normalize_json_value(
+            {"taskId": task_id, "message": message}
+        )
+        if not isinstance(normalized_body, dict):
+            raise RuntimeError("质量检查请求规范化后不是 JSON 对象")
         async with self._session_factory() as session:
             async with session.begin():
+                await acquire_idempotency_lock(
+                    session,
+                    user_id=user_id,
+                    client_request_id=client_request_id,
+                )
+                await self._resolve_run_replay(
+                    session,
+                    user_id=user_id,
+                    client_request_id=client_request_id,
+                    fingerprint=None,
+                )
+                novel = await self._lock_novel_owner_for_check(session, check_id, user_id)
                 chapter = await self._lock_chapter_owner_for_check(
                     session, check_id, user_id
                 )
@@ -128,8 +157,32 @@ class QualityRepository:
                         code="QUALITY_CHECK_CHAPTER_NOT_IN_REVIEW",
                         message="只有待审章节可以运行一致性终检",
                     )
-                record = self._record(check, chapter.novelId)
+                if check.type != "consistency":
+                    raise ApiError(
+                        status_code=400,
+                        code="UNSUPPORTED_QUALITY_CHECK",
+                        message="当前只支持一致性终检",
+                    )
+                record = self._record(check, novel.id)
                 await self._validate_task_binding(session, record, user_id, task_id)
+                resource_identity: dict[str, JsonValue] = {
+                    "novelId": novel.id,
+                    "chapterId": chapter.id,
+                    "checkItemId": check.id,
+                }
+                fingerprint = request_fingerprint(
+                    command_kind="quality_run",
+                    resource_identity=resource_identity,
+                    body=normalized_body,
+                )
+                replay = await self._resolve_run_replay(
+                    session,
+                    user_id=user_id,
+                    client_request_id=client_request_id,
+                    fingerprint=fingerprint,
+                )
+                if replay is not None:
+                    return replay
                 active_run = await self._find_active_quality_run(session, check_id)
                 if active_run is not None:
                     raise ApiError(
@@ -148,12 +201,22 @@ class QualityRepository:
                     sourceId=check_id,
                     input=json.dumps(
                         {
-                            "checkId": check_id,
-                            "sourceTaskId": task_id,
-                            "message": message,
-                            "chapterContent": chapter.content,
-                            "chapterContentSha256": content_sha256(chapter.content),
-                            "sourceUpdatedAt": _source_updated_at(chapter.updatedAt),
+                            "_inkforgeCommand": {
+                                "schemaVersion": 1,
+                                "clientRequestId": client_request_id,
+                                "commandKind": "quality_run",
+                                "resourceIdentity": resource_identity,
+                                "normalizedBody": normalized_body,
+                                "requestFingerprint": fingerprint,
+                            },
+                            "job": {
+                                "checkId": check_id,
+                                "sourceTaskId": task_id,
+                                "message": message,
+                                "chapterContent": chapter.content,
+                                "chapterContentSha256": content_sha256(chapter.content),
+                                "sourceUpdatedAt": _source_updated_at(chapter.updatedAt),
+                            },
                         },
                         ensure_ascii=False,
                         separators=(",", ":"),
@@ -162,7 +225,7 @@ class QualityRepository:
                 session.add(run)
                 await session.flush()
                 result = self._dispatch_record(run)
-        return result
+        return QualityRunCreation(record=result, created=True)
 
     async def list_dispatchable_quality_runs(
         self,
@@ -275,7 +338,6 @@ class QualityRepository:
                 "chapterContent": content,
                 "message": durable.message or "检查本章一致性",
             }
-        authorized_record = await self.authorize_run(check_id, user_id, task_id)
         async with self._session_factory() as session:
             async with session.begin():
                 chapter = await self._lock_chapter_owner_for_check(
@@ -288,12 +350,14 @@ class QualityRepository:
                         code="QUALITY_CHECK_NOT_FOUND",
                         message="检查项不存在",
                     )
+                record = self._record(check, chapter.novelId)
+                await self._validate_task_binding(session, record, user_id, task_id)
                 check.status = "running"
                 content = chapter.content
         return {
             "checkId": check_id,
-            "novelId": authorized_record.novel_id,
-            "chapterId": authorized_record.chapter_id,
+            "novelId": record.novel_id,
+            "chapterId": record.chapter_id,
             "chapterContent": content,
             "message": message or "检查本章一致性",
         }
@@ -493,6 +557,31 @@ class QualityRepository:
             )
         return run
 
+    async def _resolve_run_replay(
+        self,
+        session: AsyncSession,
+        *,
+        user_id: str,
+        client_request_id: str,
+        fingerprint: str | None,
+    ) -> QualityRunCreation | None:
+        if fingerprint is None:
+            return None
+        resolution = await resolve_idempotency(
+            session,
+            user_id=user_id,
+            client_request_id=client_request_id,
+            request_fingerprint=fingerprint,
+        )
+        if resolution is None:
+            return None
+        if resolution.record_kind != "workflow_run":
+            raise _idempotency_reused(client_request_id)
+        run = await self._lock_quality_run(session, resolution.record_id)
+        if run.kind != "quality_check" or run.sourceType != "quality_check":
+            raise _idempotency_reused(client_request_id)
+        return QualityRunCreation(record=self._dispatch_record(run), created=False)
+
     async def _find_active_quality_run(
         self,
         session: AsyncSession,
@@ -572,6 +661,11 @@ class QualityRepository:
             payload = json.loads(run.input or "")
         except json.JSONDecodeError as exc:
             raise ValueError("质量检查运行输入无效") from exc
+        if isinstance(payload, dict) and "_inkforgeCommand" in payload:
+            job = payload.get("job")
+            if not isinstance(job, dict) or any(not isinstance(key, str) for key in job):
+                raise ValueError("质量检查运行输入无效")
+            payload = job
         if (
             run.sourceId is None
             or not isinstance(payload, dict)
@@ -632,6 +726,33 @@ class QualityRepository:
                 message="无权访问该检查项",
             )
         return chapter
+
+    async def _lock_novel_owner_for_check(
+        self, session: AsyncSession, check_id: str, user_id: str
+    ) -> Novel:
+        novel = cast(
+            Novel | None,
+            await session.scalar(
+                select(Novel)
+                .join(Chapter, Chapter.novelId == Novel.id)
+                .join(ChapterQualityCheck, ChapterQualityCheck.chapterId == Chapter.id)
+                .where(ChapterQualityCheck.id == check_id)
+                .with_for_update(of=Novel)
+            ),
+        )
+        if novel is None:
+            raise ApiError(
+                status_code=404,
+                code="QUALITY_CHECK_NOT_FOUND",
+                message="检查项不存在",
+            )
+        if novel.userId is None or novel.userId != user_id:
+            raise ApiError(
+                status_code=403,
+                code="QUALITY_CHECK_FORBIDDEN",
+                message="无权访问该检查项",
+            )
+        return novel
 
     async def _lock_check(self, session: AsyncSession, check_id: str) -> ChapterQualityCheck | None:
         return cast(
@@ -697,3 +818,56 @@ def _source_updated_at(value: object) -> str:
     if normalized is None:
         raise RuntimeError("章节更新时间缺失")
     return normalized.isoformat()
+
+
+def _required_updated_at(value: datetime | None) -> datetime:
+    updated_at = utc_datetime(value)
+    if updated_at is None:
+        raise RuntimeError("质量检查更新时间缺失")
+    return updated_at
+
+
+def _require_quality_expected_updated_at(current: datetime, expected: datetime) -> None:
+    normalized_expected = (
+        expected.replace(tzinfo=UTC) if expected.tzinfo is None else expected.astimezone(UTC)
+    )
+    if normalized_expected != current:
+        raise ApiError(
+            status_code=409,
+            code="QUALITY_CHECK_VERSION_CONFLICT",
+            message="质量检查已在其他位置更新，请重新加载后再操作",
+            details={"currentUpdatedAt": current.isoformat()},
+        )
+
+
+def _is_public_status_idempotent(
+    check: ChapterQualityCheck, status: str, reset_result: bool
+) -> bool:
+    if check.status != status:
+        return False
+    if not reset_result:
+        return True
+    return all(
+        value is None
+        for value in (
+            check.result,
+            check.scoreHook,
+            check.scoreTension,
+            check.scorePayoff,
+            check.scorePacing,
+            check.scoreEndingHook,
+            check.scoreReaderPromise,
+            check.scoreOverall,
+            check.qualityGate,
+            check.rewriteBrief,
+        )
+    )
+
+
+def _idempotency_reused(client_request_id: str) -> ApiError:
+    return ApiError(
+        status_code=409,
+        code="IDEMPOTENCY_KEY_REUSED",
+        message="同一幂等标识已绑定其他请求",
+        details={"clientRequestId": client_request_id},
+    )
