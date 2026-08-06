@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .permissions import proposal_permission
 from .registry import ToolContext, ToolDefinition
+from .safe_writes import SAFE_STRUCTURED_WRITE_INSTRUCTION
 
 
 class StrictArgs(BaseModel):
@@ -49,7 +50,10 @@ async def _proposal_result(arguments: dict[str, Any], context: ToolContext) -> d
     return {
         "type": "PROPOSAL_TEMPLATE",
         "arguments": arguments,
-        "instruction": "请基于模板调用 propose_updates；长文本必须使用更新构建器。",
+        "instruction": (
+            "请基于模板调用 propose_updates；长文本必须使用更新构建器。"
+            f"{SAFE_STRUCTURED_WRITE_INSTRUCTION}"
+        ),
     }
 
 

@@ -7,6 +7,7 @@ from typing import Literal
 from ..definitions.agents import AgentId
 from ..operations.contracts import CreativeOperationKind
 from ..operations.definitions import OPERATION_DEFINITIONS, OperationDefinition
+from ..tools.safe_writes import SAFE_STRUCTURED_WRITE_INSTRUCTION
 
 AgentExecutionMode = Literal["primary", "reviewer", "reviser", "quality"]
 QUALITY_AGENT_ID: AgentId = "校验"
@@ -144,6 +145,7 @@ def _operation_protocol(
             }
         )
         middle = " / ".join(middle_tools)
+        lines.append(SAFE_STRUCTURED_WRITE_INSTRUCTION)
         lines.append(
             "短小更新可直接调用 propose_updates；复杂更新按 "
             f"start_update_builder → {middle} → finish_update_builder 构建。"

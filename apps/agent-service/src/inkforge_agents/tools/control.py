@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from .permissions import control_permission
 from .registry import ToolDefinition
+from .safe_writes import SAFE_STRUCTURED_WRITE_INSTRUCTION
 
 AgentId = Literal["设定", "剧情", "写作", "校验", "编辑"]
 
@@ -23,7 +24,9 @@ class QualityReportArgs(ConsistencyQualityReport):
 
 class ProposalUpdatesArgs(StrictArgs):
     summary: str = Field(min_length=1, max_length=1000)
-    updates: dict[str, JsonValue]
+    updates: dict[str, JsonValue] = Field(
+        description=SAFE_STRUCTURED_WRITE_INSTRUCTION
+    )
     artifactKey: str | None = Field(default=None, min_length=1, max_length=200)
     reviewerAgent: AgentId | None = None
     submitForReview: bool | None = None
@@ -38,7 +41,9 @@ class StartBuilderArgs(StrictArgs):
 
 class AppendBatchArgs(StrictArgs):
     artifactKey: str = Field(min_length=1, max_length=200)
-    updates: dict[str, JsonValue]
+    updates: dict[str, JsonValue] = Field(
+        description=SAFE_STRUCTURED_WRITE_INSTRUCTION
+    )
     summary: str | None = Field(default=None, min_length=1, max_length=1000)
 
 

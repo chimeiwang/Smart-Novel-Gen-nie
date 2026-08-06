@@ -139,6 +139,23 @@ def test_structured_update_brief_is_scoped_to_operation_builder_tools() -> None:
     assert "append_outline_tree" in outline
 
 
+def test_structured_update_brief_declares_safe_write_identity_contract() -> None:
+    brief = build_execution_brief("primary", "create_lore")
+
+    for expected in (
+        "clientRequestId",
+        "16..256",
+        "expectedUpdatedAt",
+        "权威上下文",
+        "详情",
+        "原样携带",
+        "不得臆造或刷新",
+        "重试或返工时保持不变",
+        "停止并说明",
+    ):
+        assert expected in brief
+
+
 def test_reviewer_brief_is_authoritative_and_single_submission() -> None:
     brief = build_execution_brief("reviewer", "write_chapter")
 

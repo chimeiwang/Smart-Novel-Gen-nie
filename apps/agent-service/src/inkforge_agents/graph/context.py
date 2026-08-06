@@ -9,11 +9,27 @@ from ..operations.definitions import OperationDefinition
 
 _NOVEL_FIELDS = ("id", "name", "summary", "storyProgress")
 _CHAPTER_SUMMARY_FIELDS = ("id", "title", "order", "status", "wordCount", "updatedAt")
-_CHARACTER_FIELDS = ("id", "name", "identity", "currentStatus", "statusNote")
-_ITEM_FIELDS = ("id", "name", "type", "rarity")
-_LOCATION_FIELDS = ("id", "name", "type", "parentId")
-_FACTION_FIELDS = ("id", "name", "type", "baseId")
-_GLOSSARY_FIELDS = ("id", "term", "category")
+_CHARACTER_FIELDS = (
+    "id",
+    "updatedAt",
+    "name",
+    "identity",
+    "currentStatus",
+    "statusNote",
+)
+_ITEM_FIELDS = ("id", "updatedAt", "name", "type", "rarity")
+_LOCATION_FIELDS = ("id", "updatedAt", "name", "type", "parentId")
+_FACTION_FIELDS = ("id", "updatedAt", "name", "type", "baseId")
+_GLOSSARY_FIELDS = ("id", "updatedAt", "term", "category")
+_EXPERIENCE_FIELDS = ("id", "chapterId", "order", "updatedAt")
+_REFERENCE_FIELDS = (
+    "id",
+    "title",
+    "type",
+    "updatedAt",
+    "contentHash",
+    "ragStatus",
+)
 _FORESHADOWING_FIELDS = (
     "id",
     "name",
@@ -58,6 +74,10 @@ def build_operation_context(
     if definition.contextStrategy == "lore":
         projection["loreIndex"] = _lore_index(workspace)
         projection["settingIndex"] = _setting_index(workspace)
+        projection["referenceIndex"] = [
+            _select(item, _REFERENCE_FIELDS)
+            for item in _items(workspace, "references")
+        ]
         return projection
     if definition.contextStrategy == "outline":
         projection["outline"] = _outline_index(workspace, planning)
@@ -123,7 +143,10 @@ def _chapter_scope(
 
 def _lore_index(workspace: Mapping[str, Any]) -> dict[str, list[dict[str, Any]]]:
     return {
-        "characters": [_character_summary(item) for item in _items(workspace, "characters")],
+        "characters": [
+            _lore_character_summary(item)
+            for item in _items(workspace, "characters")
+        ],
         "items": [_item_summary(item) for item in _items(workspace, "items")],
         "locations": [
             _select(item, _LOCATION_FIELDS) for item in _items(workspace, "locations")
@@ -149,6 +172,18 @@ def _character_summary(item: Mapping[str, Any]) -> dict[str, Any]:
     faction = item.get("faction")
     if isinstance(faction, Mapping):
         result["faction"] = _select(faction, ("id", "name"))
+    return result
+
+
+def _lore_character_summary(item: Mapping[str, Any]) -> dict[str, Any]:
+    result = _character_summary(item)
+    experiences = item.get("experiences")
+    if isinstance(experiences, list):
+        result["experiences"] = [
+            _select(experience, _EXPERIENCE_FIELDS)
+            for experience in experiences
+            if isinstance(experience, Mapping)
+        ]
     return result
 
 

@@ -247,7 +247,19 @@ class CoreArtifactPort:
     ) -> str:
         resource = _resource(state)
         agent_id = _agent_id(state)
-        kind, payload = _artifact_payload(event, content, state)
+        previous_payload = None
+        if expected_artifact_id is not None:
+            previous_payload = self._require_record(expected_artifact_id).request.get(
+                "payload"
+            )
+        kind, payload = _artifact_payload(
+            event,
+            content,
+            state,
+            previous_payload=(
+                previous_payload if isinstance(previous_payload, Mapping) else None
+            ),
+        )
         artifact_key = event.get("artifactKey")
         if not isinstance(artifact_key, str) or not artifact_key:
             raise ValueError("ARTIFACT_CONTRACT_MISMATCH：待审核草案缺少 artifactKey")
@@ -420,13 +432,55 @@ def _artifact_payload(
     event: dict[str, Any],
     content: str,
     state: Mapping[str, Any],
+    *,
+    previous_payload: Mapping[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     event_type = event.get("type")
     if event_type == "propose_updates":
-        payload = {"kind": "agent_updates", "updates": event.get("updates", {})}
-        base_outline_updated_at = _base_outline_updated_at(state)
+        updates = event.get("updates", {})
+        if not isinstance(updates, dict):
+            raise ValueError("agent_updates 草案 updates 必须是对象")
+        payload = {"kind": "agent_updates", "updates": updates}
+        previous_outline_updated_at = (
+            previous_payload.get("baseOutlineUpdatedAt")
+            if previous_payload is not None
+            else None
+        )
+        base_outline_updated_at = (
+            previous_outline_updated_at
+            if isinstance(previous_outline_updated_at, str)
+            else _base_outline_updated_at(state)
+        )
         if base_outline_updated_at is not None:
             payload["baseOutlineUpdatedAt"] = base_outline_updated_at
+        previous_lore_updated_at = (
+            previous_payload.get("baseLoreUpdatedAt")
+            if previous_payload is not None
+            else None
+        )
+        previous_lore_baseline: dict[str, str | None] | None = None
+        if isinstance(previous_lore_updated_at, Mapping) and all(
+            isinstance(key, str) and (value is None or isinstance(value, str))
+            for key, value in previous_lore_updated_at.items()
+        ):
+            previous_lore_baseline = dict(previous_lore_updated_at)
+        lore_sections = {
+            section
+            for section in ("worldSetting", "storyBackground")
+            if section in updates
+        }
+        base_lore_updated_at: dict[str, str | None] | None
+        if (
+            previous_lore_baseline is not None
+            and lore_sections.issubset(previous_lore_baseline)
+        ):
+            base_lore_updated_at = previous_lore_baseline
+        else:
+            base_lore_updated_at = _base_lore_updated_at(state, updates)
+            if base_lore_updated_at is not None and previous_lore_baseline is not None:
+                base_lore_updated_at.update(previous_lore_baseline)
+        if base_lore_updated_at is not None:
+            payload["baseLoreUpdatedAt"] = base_lore_updated_at
         return "agent_updates", payload
     if event_type == "submit_beat_plan":
         beat_plan = {key: value for key, value in event.items() if key not in {"type"}}
@@ -460,6 +514,73 @@ def _base_outline_updated_at(state: Mapping[str, Any]) -> str | None:
         if isinstance(value, str) and value:
             return value
     return None
+
+
+def _base_lore_updated_at(
+    state: Mapping[str, Any],
+    updates: Mapping[str, Any],
+) -> dict[str, str | None] | None:
+    sections = [
+        section
+        for section in ("worldSetting", "storyBackground")
+        if section in updates
+    ]
+    if not sections:
+        return None
+
+    runtime_context = state.get("runtimeContext")
+    core_context = (
+        runtime_context.get("coreContext")
+        if isinstance(runtime_context, Mapping)
+        else None
+    )
+    workspace = (
+        core_context.get("workspace")
+        if isinstance(core_context, Mapping)
+        else None
+    )
+    if isinstance(workspace, Mapping):
+        return {
+            section: _workspace_updated_at(workspace, section)
+            for section in sections
+        }
+
+    messages = state.get("contextMessages")
+    if isinstance(messages, list):
+        for raw_message in messages:
+            if not isinstance(raw_message, str):
+                continue
+            try:
+                context = json.loads(raw_message)
+            except json.JSONDecodeError:
+                continue
+            setting_index = (
+                context.get("settingIndex")
+                if isinstance(context, dict)
+                else None
+            )
+            if not isinstance(setting_index, dict):
+                continue
+            return {
+                section: _workspace_updated_at(setting_index, section)
+                for section in sections
+            }
+    raise ValueError("agent_updates 草案缺少设定版本上下文")
+
+
+def _workspace_updated_at(
+    source: Mapping[str, Any],
+    section: str,
+) -> str | None:
+    item = source.get(section)
+    if item is None:
+        return None
+    if not isinstance(item, Mapping):
+        raise ValueError(f"{section} 版本上下文无效")
+    updated_at = item.get("updatedAt")
+    if not isinstance(updated_at, str) or not updated_at:
+        raise ValueError(f"{section} 版本上下文缺少 updatedAt")
+    return updated_at
 
 
 def _resource(state: dict[str, Any]) -> RunResource:

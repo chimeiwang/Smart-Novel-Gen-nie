@@ -23,26 +23,39 @@ def _core_context() -> dict[str, Any]:
             "characters": [
                 {
                     "id": "character-1",
+                    "updatedAt": "2026-08-01T00:00:00Z",
                     "name": "林舟",
                     "identity": "逃亡者",
                     "currentStatus": "active",
                     "statusNote": "负伤",
+                    "experiences": [
+                        {
+                            "id": "experience-1",
+                            "chapterId": "chapter-1",
+                            "content": "经历正文",
+                            "order": 1,
+                            "updatedAt": "2026-08-01T01:00:00Z",
+                        }
+                    ],
                     "faction": {"id": "faction-1", "name": "巡夜司"},
                     "background": "角色背景详情",
                     "appearance": "角色外貌详情",
                 },
                 {
                     "id": "character-2",
+                    "updatedAt": "2026-08-02T00:00:00Z",
                     "name": "无关角色",
                     "identity": "商人",
                     "currentStatus": "active",
                     "statusNote": None,
+                    "experiences": [],
                     "background": "无关详情",
                 },
             ],
             "items": [
                 {
                     "id": "item-1",
+                    "updatedAt": "2026-08-03T00:00:00Z",
                     "name": "墨印",
                     "type": "信物",
                     "rarity": "稀有",
@@ -54,6 +67,7 @@ def _core_context() -> dict[str, Any]:
             "locations": [
                 {
                     "id": "location-1",
+                    "updatedAt": "2026-08-04T00:00:00Z",
                     "name": "边城",
                     "type": "关隘",
                     "parentId": None,
@@ -63,6 +77,7 @@ def _core_context() -> dict[str, Any]:
             "factions": [
                 {
                     "id": "faction-1",
+                    "updatedAt": "2026-08-05T00:00:00Z",
                     "name": "巡夜司",
                     "type": "官署",
                     "baseId": "location-1",
@@ -72,6 +87,7 @@ def _core_context() -> dict[str, Any]:
             "glossaries": [
                 {
                     "id": "term-1",
+                    "updatedAt": "2026-08-06T00:00:00Z",
                     "term": "夜潮",
                     "category": "灾变",
                     "definition": "术语定义详情",
@@ -89,7 +105,17 @@ def _core_context() -> dict[str, Any]:
                 }
             ],
             "plotProgress": {"id": "plot-1", "summary": "进入边境"},
-            "references": [{"id": "reference-1", "title": "资料", "content": "完整资料"}],
+            "references": [
+                {
+                    "id": "reference-1",
+                    "title": "资料",
+                    "type": "note",
+                    "content": "完整资料",
+                    "contentHash": "a" * 64,
+                    "ragStatus": "ready",
+                    "updatedAt": "2026-08-07T00:00:00Z",
+                }
+            ],
         },
         "planning": {
             "taskId": "task-1",
@@ -127,7 +153,11 @@ def _core_context() -> dict[str, Any]:
     ("operation_kind", "expected", "unexpected"),
     [
         ("answer_question", {"task", "novel", "chapter"}, {"loreIndex", "outline"}),
-        ("create_lore", {"task", "novel", "loreIndex"}, {"outline", "beatPlan"}),
+        (
+            "create_lore",
+            {"task", "novel", "loreIndex", "referenceIndex"},
+            {"outline", "beatPlan"},
+        ),
         ("create_outline", {"task", "novel", "outline"}, {"currentChapter", "beatPlan"}),
         (
             "write_chapter",
@@ -171,23 +201,35 @@ def test_lore_context_uses_real_workspace_overview_fields() -> None:
     assert index["characters"] == [
         {
             "id": "character-1",
+            "updatedAt": "2026-08-01T00:00:00Z",
             "name": "林舟",
             "identity": "逃亡者",
             "currentStatus": "active",
             "statusNote": "负伤",
+            "experiences": [
+                {
+                    "id": "experience-1",
+                    "chapterId": "chapter-1",
+                    "order": 1,
+                    "updatedAt": "2026-08-01T01:00:00Z",
+                }
+            ],
             "faction": {"id": "faction-1", "name": "巡夜司"},
         },
         {
             "id": "character-2",
+            "updatedAt": "2026-08-02T00:00:00Z",
             "name": "无关角色",
             "identity": "商人",
             "currentStatus": "active",
             "statusNote": None,
+            "experiences": [],
         },
     ]
     assert index["items"] == [
         {
             "id": "item-1",
+            "updatedAt": "2026-08-03T00:00:00Z",
             "name": "墨印",
             "type": "信物",
             "rarity": "稀有",
@@ -195,19 +237,48 @@ def test_lore_context_uses_real_workspace_overview_fields() -> None:
         }
     ]
     assert index["locations"] == [
-        {"id": "location-1", "name": "边城", "type": "关隘", "parentId": None}
+        {
+            "id": "location-1",
+            "updatedAt": "2026-08-04T00:00:00Z",
+            "name": "边城",
+            "type": "关隘",
+            "parentId": None,
+        }
     ]
     assert index["factions"] == [
         {
             "id": "faction-1",
+            "updatedAt": "2026-08-05T00:00:00Z",
             "name": "巡夜司",
             "type": "官署",
             "baseId": "location-1",
         }
     ]
     assert index["glossaries"] == [
-        {"id": "term-1", "term": "夜潮", "category": "灾变"}
+        {
+            "id": "term-1",
+            "updatedAt": "2026-08-06T00:00:00Z",
+            "term": "夜潮",
+            "category": "灾变",
+        }
     ]
+    assert "经历正文" not in repr(index)
+
+
+def test_lore_context_exposes_reference_versions_without_full_content() -> None:
+    context = build_operation_context(OPERATION_DEFINITIONS["create_lore"], _core_context())
+
+    assert context["referenceIndex"] == [
+        {
+            "id": "reference-1",
+            "title": "资料",
+            "type": "note",
+            "updatedAt": "2026-08-07T00:00:00Z",
+            "contentHash": "a" * 64,
+            "ragStatus": "ready",
+        }
+    ]
+    assert "完整资料" not in repr(context)
 
 
 def test_outline_context_contains_complete_high_level_summaries_without_details() -> None:
@@ -239,6 +310,7 @@ def test_chapter_context_only_includes_characters_named_by_approved_beat_plan() 
     assert context["relatedCharacters"] == [
         {
             "id": "character-1",
+            "updatedAt": "2026-08-01T00:00:00Z",
             "name": "林舟",
             "identity": "逃亡者",
             "currentStatus": "active",

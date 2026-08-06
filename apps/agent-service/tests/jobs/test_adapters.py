@@ -398,6 +398,127 @@ async def test_agent_updates_artifact_carries_outline_cas_identity() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_updates_artifact_carries_lore_text_cas_identity() -> None:
+    core = CoreClient()
+    port = CoreArtifactPort(core)
+    state = {
+        "userId": "user-1",
+        "novelId": "novel-1",
+        "taskId": "task-1",
+        "chapterId": "chapter-1",
+        "activeAgent": "设定",
+        "contextMessages": [],
+        "runtimeContext": {
+            **_runtime_context(),
+            "coreContext": {
+                "workspace": {
+                    "worldSetting": {
+                        "id": "world-1",
+                        "updatedAt": "2026-07-30T00:00:00Z",
+                    }
+                },
+                "planning": {},
+            },
+        },
+    }
+
+    await port.submit(
+        state,
+        {
+            "type": "propose_updates",
+            "artifactKey": "task-1:lore",
+            "updates": {
+                "worldSetting": "候选世界设定",
+                "storyBackground": "候选故事背景",
+            },
+        },
+        "",
+    )
+
+    assert core.artifacts[0]["payload"]["baseLoreUpdatedAt"] == {
+        "worldSetting": "2026-07-30T00:00:00Z",
+        "storyBackground": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_agent_updates_artifact_rejects_missing_lore_version_context() -> None:
+    core = CoreClient()
+    port = CoreArtifactPort(core)
+    state = {
+        "userId": "user-1",
+        "novelId": "novel-1",
+        "taskId": "task-1",
+        "chapterId": "chapter-1",
+        "activeAgent": "设定",
+        "contextMessages": [],
+        "runtimeContext": {"runResource": _runtime_context()["runResource"]},
+    }
+
+    with pytest.raises(ValueError, match="设定版本上下文"):
+        await port.submit(
+            state,
+            {
+                "type": "propose_updates",
+                "artifactKey": "task-1:lore",
+                "updates": {"worldSetting": "候选世界设定"},
+            },
+            "",
+        )
+
+    assert core.artifacts == []
+
+
+@pytest.mark.asyncio
+async def test_agent_updates_revision_preserves_original_lore_cas_identity() -> None:
+    core = CoreClient()
+    port = CoreArtifactPort(core)
+    state = {
+        "userId": "user-1",
+        "novelId": "novel-1",
+        "taskId": "task-1",
+        "chapterId": "chapter-1",
+        "activeAgent": "设定",
+        "contextMessages": [],
+        "runtimeContext": {
+            **_runtime_context(),
+            "coreContext": {
+                "workspace": {
+                    "worldSetting": {
+                        "id": "world-1",
+                        "updatedAt": "2026-07-30T00:00:00Z",
+                    }
+                },
+                "planning": {},
+            },
+        },
+    }
+    event = {
+        "type": "propose_updates",
+        "artifactKey": "task-1:lore",
+        "updates": {"worldSetting": "第一版候选世界设定"},
+    }
+    artifact_id = await port.submit(state, event, "")
+    state["activeArtifactId"] = artifact_id
+    state["runtimeContext"] = {
+        "runResource": state["runtimeContext"]["runResource"],
+    }
+
+    await port.revise(
+        state,
+        {
+            **event,
+            "updates": {"worldSetting": "返工后的候选世界设定"},
+        },
+        "",
+    )
+
+    assert core.artifacts[-1]["payload"]["baseLoreUpdatedAt"] == {
+        "worldSetting": "2026-07-30T00:00:00Z",
+    }
+
+
+@pytest.mark.asyncio
 async def test_executor_marks_primary_and_reviser_modes_explicitly() -> None:
     runner = RecordingRunner()
     executor = CoreGraphAgentExecutor(runner, CoreArtifactPort(CoreClient()))  # type: ignore[arg-type]
