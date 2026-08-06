@@ -281,6 +281,190 @@ async def test_experience_controls_are_checked_before_other_section_writes() -> 
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "item",
+    [
+        {
+            "action": "create",
+            "characterId": "character-1",
+            "clientRequestId": "valid-experience-create",
+            "expectedUpdatedAt": "2026-08-06T00:00:00Z",
+            "content": "不应写入",
+        },
+        {
+            "action": "update",
+            "id": "experience-1",
+            "clientRequestId": "valid-experience-update",
+            "expectedUpdatedAt": "2026-08-06T00:00:00Z",
+            "content": "不应写入",
+        },
+        {
+            "action": "delete",
+            "id": "experience-1",
+            "expectedUpdatedAt": "2026-08-06T00:00:00Z",
+            "fieldChanges": [{"field": "content"}],
+        },
+    ],
+)
+async def test_experience_rejects_control_from_another_action_before_any_batch(
+    item: dict[str, object],
+) -> None:
+    lore = FakeLore()
+    executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
+
+    with pytest.raises(ValueError, match="无法持久化字段"):
+        await executor.apply(
+            "novel-1",
+            "user-1",
+            {
+                "items": [
+                    {
+                        "action": "create",
+                        "clientRequestId": "valid-item-create",
+                        "name": "不应写入",
+                    }
+                ],
+                "characterExperiences": [item],
+            },
+        )
+
+    assert lore.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "foreign_control",
+    [
+        "locationId",
+        "itemId",
+        "factionId",
+        "glossaryId",
+        "referenceId",
+        "nodeId",
+        "nodeTitle",
+        "chapterTitle",
+    ],
+)
+async def test_experience_create_rejects_cross_section_control_before_any_batch(
+    foreign_control: str,
+) -> None:
+    lore = FakeLore()
+    executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
+
+    with pytest.raises(ValueError, match="无法持久化字段"):
+        await executor.apply(
+            "novel-1",
+            "user-1",
+            {
+                "items": [
+                    {
+                        "action": "create",
+                        "clientRequestId": "valid-item-create",
+                        "name": "不应写入",
+                    }
+                ],
+                "characterExperiences": [
+                    {
+                        "action": "create",
+                        "characterId": "character-1",
+                        "clientRequestId": "valid-experience-create",
+                        "content": "不应写入",
+                        foreign_control: "foreign-1",
+                    }
+                ],
+            },
+        )
+
+    assert lore.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("business_field", "value"),
+    [
+        ("content", "不应写入"),
+        ("order", 1),
+        ("chapterId", "chapter-1"),
+    ],
+)
+async def test_experience_delete_rejects_business_field_before_any_batch(
+    business_field: str, value: object
+) -> None:
+    lore = FakeLore()
+    executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
+
+    with pytest.raises(ValueError, match="无法持久化字段"):
+        await executor.apply(
+            "novel-1",
+            "user-1",
+            {
+                "items": [
+                    {
+                        "action": "create",
+                        "clientRequestId": "valid-item-create",
+                        "name": "不应写入",
+                    }
+                ],
+                "characterExperiences": [
+                    {
+                        "action": "delete",
+                        "id": "experience-1",
+                        "expectedUpdatedAt": "2026-08-06T00:00:00Z",
+                        business_field: value,
+                    }
+                ],
+            },
+        )
+
+    assert lore.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "item",
+    [
+        {
+            "action": "create",
+            "characterId": "",
+            "characterName": "合法名称",
+            "clientRequestId": "valid-experience-create",
+            "content": "不应写入",
+        },
+        {
+            "action": "create",
+            "characterId": "character-1",
+            "characterName": "",
+            "clientRequestId": "valid-experience-create",
+            "content": "不应写入",
+        },
+        {
+            "action": "update",
+            "id": "",
+            "expectedUpdatedAt": "2026-08-06T00:00:00Z",
+            "content": "不应写入",
+        },
+        {
+            "action": "delete",
+            "id": "",
+            "expectedUpdatedAt": "2026-08-06T00:00:00Z",
+        },
+    ],
+)
+async def test_experience_rejects_bad_own_hint_before_any_batch(
+    item: dict[str, object],
+) -> None:
+    lore = FakeLore()
+    executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
+
+    with pytest.raises(ValueError):
+        await executor.apply(
+            "novel-1", "user-1", {"characterExperiences": [item]}
+        )
+
+    assert lore.calls == []
+
+
+@pytest.mark.asyncio
 async def test_experiences_use_one_batch_and_forward_controls_separately() -> None:
     lore = FakeLore()
     executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
@@ -295,12 +479,14 @@ async def test_experiences_use_one_batch_and_forward_controls_separately() -> No
                     "characterId": "character-1",
                     "clientRequestId": "artifact-experience-create",
                     "content": "新增经历",
+                    "fieldChanges": [{"field": "content"}],
                 },
                 {
                     "action": "update",
                     "id": "experience-1",
                     "expectedUpdatedAt": "2026-08-06T00:00:00Z",
                     "content": "更新经历",
+                    "fieldChanges": [{"field": "content"}],
                 },
                 {
                     "action": "delete",

@@ -9,11 +9,13 @@ from pydantic import BaseModel
 from ..lore.repository import EntityMutation, ExperienceMutation
 from ..lore.schemas import (
     CreateCharacterRequest,
+    CreateExperienceRequest,
     CreateFactionRequest,
     CreateGlossaryRequest,
     CreateItemRequest,
     CreateLocationRequest,
     UpdateCharacterRequest,
+    UpdateExperienceRequest,
     UpdateFactionRequest,
     UpdateGlossaryRequest,
     UpdateItemRequest,
@@ -67,6 +69,22 @@ _ENTITY_ACTION_CONTROLS = {
     "create": {"action", "fieldChanges", "clientRequestId"},
     "update": {"action", "fieldChanges", "expectedUpdatedAt"},
     "delete": {"action", "fieldChanges", "expectedUpdatedAt"},
+}
+_EXPERIENCE_CREATE_FIELDS = set(CreateExperienceRequest.model_fields) - {
+    "clientRequestId"
+}
+_EXPERIENCE_UPDATE_FIELDS = set(UpdateExperienceRequest.model_fields) - {
+    "expectedUpdatedAt"
+}
+_EXPERIENCE_ACTION_CONTROLS = {
+    "create": {"action", "fieldChanges", "clientRequestId"},
+    "update": {"action", "fieldChanges", "id", "expectedUpdatedAt"},
+    "delete": {"action", "id", "expectedUpdatedAt"},
+}
+_EXPERIENCE_ACTION_TARGETS = {
+    "create": {"characterId", "characterName"},
+    "update": set(),
+    "delete": set(),
 }
 
 
@@ -281,34 +299,52 @@ class AgentUpdatesExecutor:
         action = item.get("action")
         if action not in {"create", "update", "delete"}:
             raise ValueError("characterExperiences action 无效")
-        experience_id = item.get("id")
-        fields = _strict_fields(
-            item,
-            {"chapterId", "content", "order"},
-            "characterExperiences",
-            extra_control={"clientRequestId", "expectedUpdatedAt"},
+        business_fields = (
+            _EXPERIENCE_CREATE_FIELDS
+            if action == "create"
+            else _EXPERIENCE_UPDATE_FIELDS if action == "update" else set()
         )
-        if "content" in fields and not isinstance(fields["content"], str):
-            raise ValueError("characterExperiences content 字段类型无效，不能为 null")
-        if "chapterId" in fields and fields["chapterId"] is not None and not isinstance(
-            fields["chapterId"], str
-        ):
-            raise ValueError("characterExperiences chapterId 字段类型无效")
-        order = fields.get("order")
-        if order is not None and (not isinstance(order, int) or isinstance(order, bool)):
-            raise ValueError("characterExperiences order 字段类型无效")
+        allowed = (
+            business_fields
+            | _EXPERIENCE_ACTION_CONTROLS[action]
+            | _EXPERIENCE_ACTION_TARGETS[action]
+        )
+        unknown = set(item) - allowed
+        if unknown:
+            names = "、".join(sorted(unknown))
+            raise ValueError(
+                f"characterExperiences 包含无法持久化字段：{names}"
+            )
+        fields = {
+            key: deepcopy(value)
+            for key, value in item.items()
+            if key in business_fields
+        }
         if action == "create":
             character_id = item.get("characterId")
             character_name = item.get("characterName")
-            if not isinstance(character_id, str) and not isinstance(character_name, str):
+            for field in ("characterId", "characterName"):
+                if field in item and (
+                    not isinstance(item[field], str) or not item[field]
+                ):
+                    raise ValueError(
+                        f"characterExperiences {field} 标识必须是非空字符串"
+                    )
+            if not character_id and not character_name:
                 raise ValueError("角色经历无法唯一解析角色")
             client_request_id = item.get("clientRequestId")
             if not isinstance(client_request_id, str) or not 16 <= len(client_request_id) <= 256:
                 raise ValueError(
                     "characterExperiences create 必须提供 16..256 字符的 clientRequestId"
                 )
-            if "content" not in fields:
-                raise ValueError("characterExperiences create 必须提供 content")
+            try:
+                CreateExperienceRequest.model_validate(
+                    {**fields, "clientRequestId": client_request_id}
+                )
+            except ValueError as error:
+                raise ValueError(
+                    "characterExperiences create 业务字段无效"
+                ) from error
             return ExperienceMutation(
                 action="create",
                 fields=fields,
@@ -316,14 +352,21 @@ class AgentUpdatesExecutor:
                 character_name=character_name if isinstance(character_name, str) else None,
                 client_request_id=client_request_id,
             )
-        if not isinstance(experience_id, str):
+        experience_id = item.get("id")
+        if not isinstance(experience_id, str) or not experience_id:
             raise ValueError("角色经历更新缺少有效标识")
         expected_updated_at = _require_entity_expected_updated_at(
             item, "characterExperiences"
         )
         if action == "update":
-            if not fields:
-                raise ValueError("characterExperiences update 至少需要一个业务字段")
+            try:
+                UpdateExperienceRequest.model_validate(
+                    {**fields, "expectedUpdatedAt": expected_updated_at}
+                )
+            except ValueError as error:
+                raise ValueError(
+                    "characterExperiences update 业务字段类型无效"
+                ) from error
             if any(
                 fields.get(field) is None
                 for field in ("content", "order")
@@ -338,7 +381,7 @@ class AgentUpdatesExecutor:
             )
         return ExperienceMutation(
             action="delete",
-            fields=fields,
+            fields={},
             entity_id=experience_id,
             expected_updated_at=expected_updated_at,
         )
