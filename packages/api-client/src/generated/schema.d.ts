@@ -1054,7 +1054,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** List Writing Runs */
+        get: operations["list_writing_runs_api_v1_writing_runs_get"];
         put?: never;
         /** Start Writing Run */
         post: operations["start_writing_run_api_v1_writing_runs_post"];
@@ -1518,6 +1519,28 @@ export interface components {
             /** Content */
             content: string;
         };
+        /** ChapterRangeScope */
+        ChapterRangeScope: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "chapter_range";
+            /** Chapterstartorder */
+            chapterStartOrder: number;
+            /** Chapterendorder */
+            chapterEndOrder: number;
+        };
+        /** ChapterScope */
+        ChapterScope: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "chapter";
+            /** Chapterid */
+            chapterId: string;
+        };
         /** @enum {string} */
         ChapterStatus: "drafting" | "review" | "completed";
         /** ChapterStatusRequest */
@@ -1541,6 +1564,16 @@ export interface components {
              * Format: date-time
              */
             updatedAt: string;
+        };
+        /** ChapterTarget */
+        ChapterTarget: {
+            /**
+             * Type
+             * @constant
+             */
+            type: "chapter";
+            /** Id */
+            id: string;
         };
         /** CharacterDto */
         CharacterDto: {
@@ -2415,6 +2448,37 @@ export interface components {
              */
             password: string;
         };
+        /** LongSerialStartWritingRunRequest */
+        LongSerialStartWritingRunRequest: {
+            /** Clientrequestid */
+            clientRequestId: string;
+            /**
+             * Workflow
+             * @constant
+             */
+            workflow: "long_serial";
+            /** Novelid */
+            novelId: string;
+            /** Chapterid */
+            chapterId: string;
+            /** Writingsessionid */
+            writingSessionId?: string | null;
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "answer_question" | "create_lore" | "revise_lore" | "create_outline" | "revise_outline" | "plan_chapter" | "write_chapter" | "rewrite_scene" | "review_chapter" | "manage_foreshadowing";
+            target: components["schemas"]["ChapterTarget"];
+            /** Scope */
+            scope: components["schemas"]["ChapterScope"] | components["schemas"]["ChapterRangeScope"] | components["schemas"]["OutlineNodeScope"] | components["schemas"]["NovelScope"];
+            /**
+             * Targetwordcount
+             * @default 4000
+             */
+            targetWordCount: number;
+            /** Userinstruction */
+            userInstruction: string;
+        };
         /** ManualVersionRequest */
         ManualVersionRequest: {
             documentType: components["schemas"]["DocumentType"];
@@ -2484,6 +2548,14 @@ export interface components {
              * Format: date-time
              */
             updatedAt: string;
+        };
+        /** NovelScope */
+        NovelScope: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "novel";
         };
         /** OutlineContentRequest */
         OutlineContentRequest: {
@@ -2597,6 +2669,16 @@ export interface components {
              * Format: date-time
              */
             updatedAt: string;
+        };
+        /** OutlineNodeScope */
+        OutlineNodeScope: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "outline_node";
+            /** Outlinenodeid */
+            outlineNodeId: string;
         };
         /** @enum {string} */
         OutlineNodeStatus: "planned" | "in_progress" | "completed" | "skipped";
@@ -2940,10 +3022,6 @@ export interface components {
             writingSessionId?: string | null;
             /** Usermessage */
             userMessage?: string | null;
-            /** Artifactid */
-            artifactId?: string | null;
-            /** Decision */
-            decision?: ("approve" | "discard" | "revise") | null;
         };
         /** ResumeWritingRunResponse */
         ResumeWritingRunResponse: {
@@ -3844,13 +3922,74 @@ export interface components {
              */
             updatedAt: string;
         };
+        /** WritingRunCheckpointResponse */
+        WritingRunCheckpointResponse: {
+            /** Eventsequence */
+            eventSequence: number;
+            /** Phase */
+            phase: string;
+            /** Operationstage */
+            operationStage: string | null;
+            /** Operationstep */
+            operationStep: string | null;
+        };
+        /** WritingRunListItem */
+        WritingRunListItem: {
+            /** Taskid */
+            taskId: string;
+            /** Novelid */
+            novelId: string;
+            /** Chapterid */
+            chapterId: string;
+            /** Writingsessionid */
+            writingSessionId: string | null;
+            /**
+             * Workflow
+             * @enum {string}
+             */
+            workflow: "long_serial" | "short_medium";
+            /** Operation */
+            operation: string | null;
+            /** Target */
+            target: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Scope */
+            scope: {
+                [key: string]: components["schemas"]["JsonValue"];
+            };
+            /** Phase */
+            phase: string;
+            outcome: components["schemas"]["WritingRunOutcome"];
+            /** Activeartifactid */
+            activeArtifactId: string | null;
+            /** Recoverable */
+            recoverable: boolean;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
+        /** WritingRunListResponse */
+        WritingRunListResponse: {
+            /** Items */
+            items: components["schemas"]["WritingRunListItem"][];
+            /** Nextcursor */
+            nextCursor: string | null;
+        };
         /** WritingRunOutcome */
         WritingRunOutcome: {
             /**
              * State
              * @enum {string}
              */
-            state: "queued" | "running" | "waiting_user" | "succeeded" | "failed" | "inconsistent";
+            state: "queued" | "running" | "waiting_user" | "succeeded" | "failed" | "cancelled" | "inconsistent";
             /** Code */
             code: string;
             /** Taskterminal */
@@ -3938,8 +4077,36 @@ export interface components {
             novelId: string;
             /** Chapterid */
             chapterId: string;
+            /** Writingsessionid */
+            writingSessionId?: string | null;
+            /**
+             * Workflow
+             * @default long_serial
+             * @enum {string}
+             */
+            workflow: "long_serial" | "short_medium";
+            /** Target */
+            target?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            } | null;
+            /** Scope */
+            scope?: {
+                [key: string]: components["schemas"]["JsonValue"];
+            } | null;
             /** Phase */
             phase: string;
+            checkpoint?: components["schemas"]["WritingRunCheckpointResponse"] | null;
+            /** Activeartifactid */
+            activeArtifactId?: string | null;
+            /**
+             * Recoverable
+             * @default false
+             */
+            recoverable: boolean;
+            /** Reviewreport */
+            reviewReport?: string | null;
+            /** Createdat */
+            createdAt?: string | null;
             /**
              * Updatedat
              * Format: date-time
@@ -3950,7 +4117,7 @@ export interface components {
             /** Commandstatus */
             commandStatus: ("pending" | "submitted" | "processing" | "succeeded" | "failed") | null;
             /** Operation */
-            operation: ("generate_outline" | "generate_manuscript" | "replace_selection" | "full_check") | null;
+            operation: ("generate_outline" | "generate_manuscript" | "replace_selection" | "full_check" | "plan_chapter" | "write_chapter" | "review_chapter") | null;
             /** Candidateversionid */
             candidateVersionId: string | null;
             /** Checkreport */
@@ -14243,6 +14410,126 @@ export interface operations {
             };
         };
     };
+    list_writing_runs_api_v1_writing_runs_get: {
+        parameters: {
+            query: {
+                novelId: string;
+                chapterId?: string | null;
+                writingSessionId?: string | null;
+                operation?: string | null;
+                outcome?: ("queued" | "running" | "waiting_user" | "succeeded" | "failed" | "cancelled" | "inconsistent") | null;
+                cursor?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WritingRunListResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     start_writing_run_api_v1_writing_runs_post: {
         parameters: {
             query?: never;
@@ -14254,7 +14541,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["StartWritingRunRequest"] | components["schemas"]["ShortMediumStartWritingRunRequest"];
+                "application/json": components["schemas"]["StartWritingRunRequest"] | components["schemas"]["ShortMediumStartWritingRunRequest"] | components["schemas"]["LongSerialStartWritingRunRequest"];
             };
         };
         responses: {

@@ -31,7 +31,10 @@ from inkforge_core.writing.schemas import (
     LongSerialStartWritingRunRequest,
     ResumeWritingRunRequest,
 )
-from inkforge_core.writing.transaction_locks import LockedWritingRows
+from inkforge_core.writing.transaction_locks import (
+    LockedWritingRows,
+    WritingLockRequest,
+)
 from pydantic import ValidationError
 
 NOW = datetime(2026, 8, 5, 10, 0, tzinfo=UTC)
@@ -395,24 +398,62 @@ async def test_long_serial_resume_reuses_authoritative_start_job(
     repository = WritingRunCommandRepository(  # type: ignore[arg-type]
         SessionFactory(session)
     )
+    order: list[str] = []
+    lock_requests: list[WritingLockRequest] = []
 
-    async def no_existing(*args: object, **kwargs: object) -> None:
+    async def advisory(*args: object, **kwargs: object) -> None:
         del args, kwargs
+        order.append("advisory")
 
-    async def owned(*args: object, **kwargs: object) -> tuple[WritingTask, str]:
+    async def no_replay(*args: object, **kwargs: object) -> None:
         del args, kwargs
-        return owned_task, "user-1"
+        order.append("replay")
 
-    monkeypatch.setattr(commands_module, "acquire_idempotency_lock", no_existing)
+    async def identity(*args: object, **kwargs: object) -> tuple[str, str]:
+        del args, kwargs
+        order.append("identity")
+        return "novel-1", "chapter-1"
+
+    async def locked(
+        *args: object, **kwargs: object
+    ) -> LockedWritingRows:
+        del args
+        request = kwargs["request"]
+        assert isinstance(request, WritingLockRequest)
+        order.append("lock")
+        lock_requests.append(request)
+        return LockedWritingRows(
+            novel=Novel(id="novel-1", userId="user-1"),
+            chapters=(Chapter(id="chapter-1", novelId="novel-1"),),
+            task=owned_task,
+            artifact=None,
+            command=None,
+        )
+
+    async def unexpected_owned_task(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise AssertionError("resume 不得先锁 WritingTask")
+
+    async def no_active_command(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        order.append("busy")
+
+    async def supersede(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        order.append("supersede")
+
+    monkeypatch.setattr(commands_module, "acquire_idempotency_lock", advisory)
     monkeypatch.setattr(
         commands_module,
         "_resolve_long_serial_resume_response",
-        no_existing,
+        no_replay,
         raising=False,
     )
-    monkeypatch.setattr(repository, "_require_owned_task", owned)
-    monkeypatch.setattr(repository, "_require_no_active_command", no_existing)
-    monkeypatch.setattr(commands_module, "supersede_waiting_for_new_command", no_existing)
+    monkeypatch.setattr(repository, "_require_owned_task_identity", identity)
+    monkeypatch.setattr(repository, "_require_owned_task", unexpected_owned_task)
+    monkeypatch.setattr(commands_module, "lock_writing_rows", locked)
+    monkeypatch.setattr(repository, "_require_no_active_command", no_active_command)
+    monkeypatch.setattr(commands_module, "supersede_waiting_for_new_command", supersede)
 
     await repository.create_resume_with_message(
         "user-1",
@@ -451,6 +492,22 @@ async def test_long_serial_resume_reuses_authoritative_start_job(
     assert job["userInstruction"] == "写出雨夜的不可逆选择"
     assert job["resume"] is True
     assert job["resumeInput"] == {"userMessage": "保留当前视角，继续"}
+    assert lock_requests == [
+        WritingLockRequest(
+            novel_id="novel-1",
+            chapter_ids=("chapter-1",),
+            task_id="task-1",
+        )
+    ]
+    assert order == [
+        "advisory",
+        "replay",
+        "identity",
+        "lock",
+        "replay",
+        "busy",
+        "supersede",
+    ]
 
 
 @pytest.mark.asyncio

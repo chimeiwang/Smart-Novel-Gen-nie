@@ -18,7 +18,7 @@ export function decideShortRunOutcome(
   if (outcome.state === "queued" || outcome.state === "running") {
     return { kind: "continue" };
   }
-  if (outcome.state === "failed") {
+  if (outcome.state === "failed" || outcome.state === "cancelled") {
     return { kind: "failed", code: outcome.code };
   }
   if (

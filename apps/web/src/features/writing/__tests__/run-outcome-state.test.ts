@@ -73,6 +73,19 @@ describe("长篇运行结果", () => {
     );
   });
 
+  it("取消任务按失败型终态收敛并保留错误码", () => {
+    assert.deepEqual(
+      mapLongRunOutcome({
+        ...base,
+        state: "cancelled",
+        code: "WRITING_RUN_CANCELLED",
+        taskTerminal: true,
+        streamShouldClose: true,
+      }),
+      { kind: "failed", code: "WRITING_RUN_CANCELLED" },
+    );
+  });
+
   it("脱离当前会话的草案操作也只按权威 outcome 收敛", () => {
     assert.equal(
       resolvePendingReviewAction(

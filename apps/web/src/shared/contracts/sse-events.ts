@@ -52,6 +52,7 @@ export const RunOutcomeEventSchema = z.object({
     "waiting_user",
     "succeeded",
     "failed",
+    "cancelled",
     "inconsistent",
   ]),
   code: z.string().min(1),

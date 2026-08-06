@@ -576,9 +576,21 @@ class WritingRunCommandRepository:
                     )
                     if replay is not None:
                         return replay
-                    task, _owner_id = await self._require_owned_task(
+                    novel_id, chapter_id = await self._require_owned_task_identity(
                         session, user_id, task_id
                     )
+                    locked_rows = await lock_writing_rows(
+                        session,
+                        user_id=user_id,
+                        request=WritingLockRequest(
+                            novel_id=novel_id,
+                            chapter_ids=(chapter_id,) if chapter_id is not None else (),
+                            task_id=task_id,
+                        ),
+                    )
+                    task = locked_rows.task
+                    if task is None:
+                        raise RuntimeError("统一写作锁未返回请求的任务")
                     replay = await _resolve_long_serial_resume_response(
                         self,
                         session,
@@ -1043,6 +1055,28 @@ class WritingRunCommandRepository:
                 message="写作任务不存在",
             )
         return cast(tuple[WritingTask, str], row)
+
+    async def _require_owned_task_identity(
+        self,
+        session: AsyncSession,
+        user_id: str,
+        task_id: str,
+    ) -> tuple[str, str | None]:
+        row = (
+            await session.execute(
+                select(WritingTask.novelId, WritingTask.chapterId)
+                .join(Novel, Novel.id == WritingTask.novelId)
+                .where(WritingTask.id == task_id, Novel.userId == user_id)
+            )
+        ).one_or_none()
+        if row is None:
+            raise ApiError(
+                status_code=404,
+                code="WRITING_TASK_NOT_FOUND",
+                message="写作任务不存在",
+            )
+        novel_id, chapter_id = row
+        return cast(str, novel_id), cast(str | None, chapter_id)
 
     async def _require_no_active_command(self, session: AsyncSession, task_id: str) -> None:
         row = (

@@ -80,4 +80,17 @@ describe("中短篇运行结果", () => {
       "inconsistent",
     );
   });
+
+  it("取消任务按失败型终态收敛并保留错误码", () => {
+    assert.deepEqual(
+      decideShortRunOutcome({
+        ...base,
+        state: "cancelled",
+        code: "WRITING_RUN_CANCELLED",
+        taskTerminal: true,
+        streamShouldClose: true,
+      }),
+      { kind: "failed", code: "WRITING_RUN_CANCELLED" },
+    );
+  });
 });

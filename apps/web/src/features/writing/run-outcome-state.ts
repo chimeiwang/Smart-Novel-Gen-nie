@@ -28,7 +28,7 @@ export function mapLongRunOutcome(
   if (outcome.state === "succeeded") {
     return { kind: "succeeded" };
   }
-  if (outcome.state === "failed") {
+  if (outcome.state === "failed" || outcome.state === "cancelled") {
     return { kind: "failed", code: outcome.code };
   }
   return { kind: "inconsistent", code: outcome.code };
