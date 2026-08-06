@@ -20,6 +20,7 @@ from ..errors import ApiError
 from ..novels.repository import quality_check_dict, utc_datetime
 from ..novels.schemas import QualityCheckDto
 from ..writing.idempotency import (
+    IdempotencyResolution,
     JsonValue,
     acquire_idempotency_lock,
     normalize_json_value,
@@ -138,6 +139,8 @@ class QualityRepository:
                     session,
                     user_id=user_id,
                     client_request_id=client_request_id,
+                    check_id=check_id,
+                    normalized_body=normalized_body,
                     fingerprint=None,
                 )
                 novel = await self._lock_novel_owner_for_check(session, check_id, user_id)
@@ -151,20 +154,6 @@ class QualityRepository:
                         code="QUALITY_CHECK_NOT_FOUND",
                         message="检查项不存在",
                     )
-                if chapter.status != "review":
-                    raise ApiError(
-                        status_code=409,
-                        code="QUALITY_CHECK_CHAPTER_NOT_IN_REVIEW",
-                        message="只有待审章节可以运行一致性终检",
-                    )
-                if check.type != "consistency":
-                    raise ApiError(
-                        status_code=400,
-                        code="UNSUPPORTED_QUALITY_CHECK",
-                        message="当前只支持一致性终检",
-                    )
-                record = self._record(check, novel.id)
-                await self._validate_task_binding(session, record, user_id, task_id)
                 resource_identity: dict[str, JsonValue] = {
                     "novelId": novel.id,
                     "chapterId": chapter.id,
@@ -179,10 +168,26 @@ class QualityRepository:
                     session,
                     user_id=user_id,
                     client_request_id=client_request_id,
+                    check_id=check_id,
+                    normalized_body=normalized_body,
                     fingerprint=fingerprint,
                 )
                 if replay is not None:
                     return replay
+                if chapter.status != "review":
+                    raise ApiError(
+                        status_code=409,
+                        code="QUALITY_CHECK_CHAPTER_NOT_IN_REVIEW",
+                        message="只有待审章节可以运行一致性终检",
+                    )
+                if check.type != "consistency":
+                    raise ApiError(
+                        status_code=400,
+                        code="UNSUPPORTED_QUALITY_CHECK",
+                        message="当前只支持一致性终检",
+                    )
+                record = self._record(check, novel.id)
+                await self._validate_task_binding(session, record, user_id, task_id)
                 active_run = await self._find_active_quality_run(session, check_id)
                 if active_run is not None:
                     raise ApiError(
@@ -563,10 +568,10 @@ class QualityRepository:
         *,
         user_id: str,
         client_request_id: str,
+        check_id: str,
+        normalized_body: dict[str, JsonValue],
         fingerprint: str | None,
     ) -> QualityRunCreation | None:
-        if fingerprint is None:
-            return None
         resolution = await resolve_idempotency(
             session,
             user_id=user_id,
@@ -575,12 +580,40 @@ class QualityRepository:
         )
         if resolution is None:
             return None
-        if resolution.record_kind != "workflow_run":
-            raise _idempotency_reused(client_request_id)
+        self._validate_run_resolution(
+            resolution,
+            check_id=check_id,
+            normalized_body=normalized_body,
+            client_request_id=client_request_id,
+        )
+        if fingerprint is None:
+            return None
         run = await self._lock_quality_run(session, resolution.record_id)
-        if run.kind != "quality_check" or run.sourceType != "quality_check":
+        if (
+            run.kind != "quality_check"
+            or run.sourceType != "quality_check"
+            or run.userId != user_id
+            or run.sourceId != check_id
+        ):
             raise _idempotency_reused(client_request_id)
         return QualityRunCreation(record=self._dispatch_record(run), created=False)
+
+    @staticmethod
+    def _validate_run_resolution(
+        resolution: IdempotencyResolution,
+        *,
+        check_id: str,
+        normalized_body: dict[str, JsonValue],
+        client_request_id: str,
+    ) -> None:
+        metadata = resolution.metadata
+        if (
+            resolution.record_kind != "workflow_run"
+            or metadata.commandKind != "quality_run"
+            or metadata.resourceIdentity.get("checkItemId") != check_id
+            or metadata.normalizedBody != normalized_body
+        ):
+            raise _idempotency_reused(client_request_id)
 
     async def _find_active_quality_run(
         self,

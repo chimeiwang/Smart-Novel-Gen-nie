@@ -500,6 +500,9 @@ class OneRowResult:
     def one_or_none(self) -> tuple[object, ...] | None:
         return self.row
 
+    def all(self) -> list[tuple[object, ...]]:
+        return [] if self.row is None else [self.row]
+
 
 class TaskAuthSession:
     def __init__(self, row: tuple[object, ...] | None) -> None:
@@ -793,6 +796,111 @@ async def test_repository_only_allows_quality_run_for_review_chapter(
     assert caught.value.status_code == 409
     assert caught.value.code == "QUALITY_CHECK_CHAPTER_NOT_IN_REVIEW"
     assert check.status == "pending"
+    assert session.added == []
+
+
+@pytest.mark.asyncio
+async def test_quality_run_replays_after_chapter_status_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from inkforge_core.writing.idempotency import (
+        IdempotencyResolution,
+        parse_command_envelope,
+    )
+
+    session = QualityRunSession(None)
+    repository, chapter, _ = quality_repository_with_locked_records(session)
+    del repository._resolve_run_replay
+
+    async def resolve_idempotency(*args, request_fingerprint, **kwargs):
+        del args, kwargs
+        if not session.added:
+            return None
+        run = session.added[0]
+        metadata = parse_command_envelope(run.input)
+        assert metadata is not None
+        if (
+            request_fingerprint is not None
+            and metadata.requestFingerprint != request_fingerprint
+        ):
+            raise AssertionError("最终指纹必须与首次请求一致")
+        return IdempotencyResolution(
+            record_kind="workflow_run",
+            record_id=run.id,
+            metadata=metadata,
+        )
+
+    async def lock_quality_run(current_session, run_id: str):
+        del current_session
+        run = session.added[0]
+        assert run.id == run_id
+        return run
+
+    monkeypatch.setattr(
+        "inkforge_core.quality.repository.resolve_idempotency", resolve_idempotency
+    )
+    repository._lock_quality_run = lock_quality_run  # type: ignore[method-assign]
+
+    first = await repository.create_run(
+        "check-1", "user-1", None, "检查当前正文", "quality-run-000001"
+    )
+    chapter.status = "completed"
+    replay = await repository.create_run(
+        "check-1", "user-1", None, "检查当前正文", "quality-run-000001"
+    )
+
+    assert first.created is True
+    assert replay.created is False
+    assert replay.record.run_id == first.record.run_id
+    assert len(session.added) == 1
+
+
+@pytest.mark.asyncio
+async def test_quality_run_rejects_cross_command_id_before_resource_locks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from inkforge_core.writing.idempotency import (
+        IdempotencyResolution,
+        InkForgeCommandMetadata,
+    )
+
+    session = QualityRunSession(None)
+    repository, _, _ = quality_repository_with_locked_records(session)
+    del repository._resolve_run_replay
+    resource_locks: list[str] = []
+    original_lock_novel = repository._lock_novel_owner_for_check
+
+    async def resolve_idempotency(*args, **kwargs):
+        del args, kwargs
+        return IdempotencyResolution(
+            record_kind="writing_command",
+            record_id="command-1",
+            metadata=InkForgeCommandMetadata(
+                schemaVersion=1,
+                clientRequestId="quality-run-000001",
+                commandKind="start",
+                resourceIdentity={"taskId": "task-1"},
+                normalizedBody={},
+                requestFingerprint="a" * 64,
+            ),
+        )
+
+    async def lock_novel(*args, **kwargs):
+        resource_locks.append("novel")
+        return await original_lock_novel(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "inkforge_core.quality.repository.resolve_idempotency", resolve_idempotency
+    )
+    repository._lock_novel_owner_for_check = lock_novel  # type: ignore[method-assign]
+
+    with pytest.raises(ApiError) as caught:
+        await repository.create_run(
+            "check-1", "user-1", None, None, "quality-run-000001"
+        )
+
+    assert caught.value.code == "IDEMPOTENCY_KEY_REUSED"
+    assert resource_locks == []
     assert session.added == []
 
 

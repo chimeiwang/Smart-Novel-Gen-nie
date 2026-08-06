@@ -143,7 +143,7 @@ async def resolve_idempotency(
     *,
     user_id: str,
     client_request_id: str,
-    request_fingerprint: str,
+    request_fingerprint: str | None,
 ) -> IdempotencyResolution | None:
     writing_rows = (
         await session.execute(
@@ -203,7 +203,10 @@ async def resolve_idempotency(
     if len(matches) != 1:
         raise _idempotency_reused(client_request_id)
     match = matches[0]
-    if match.metadata.requestFingerprint != request_fingerprint:
+    if (
+        request_fingerprint is not None
+        and match.metadata.requestFingerprint != request_fingerprint
+    ):
         raise _idempotency_reused(client_request_id)
     return match
 

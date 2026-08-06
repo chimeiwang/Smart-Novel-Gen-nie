@@ -198,6 +198,40 @@ async def test_resolver_replays_same_writing_command_fingerprint() -> None:
 
 
 @pytest.mark.asyncio
+async def test_resolver_pre_resolves_unique_envelope_without_fingerprint() -> None:
+    fingerprint = "c" * 64
+    session = RecordingSession(
+        [
+            RowsResult([]),
+            RowsResult(
+                [
+                    (
+                        "workflow-run-1",
+                        command_envelope(
+                            "request-00000001",
+                            fingerprint,
+                            command_kind="quality_run",
+                        ),
+                    )
+                ]
+            ),
+        ]
+    )
+
+    resolved = await resolve_idempotency(  # type: ignore[arg-type]
+        session,
+        user_id="user-1",
+        client_request_id="request-00000001",
+        request_fingerprint=None,
+    )
+
+    assert resolved is not None
+    assert resolved.record_kind == "workflow_run"
+    assert resolved.record_id == "workflow-run-1"
+    assert resolved.metadata.requestFingerprint == fingerprint
+
+
+@pytest.mark.asyncio
 async def test_resolver_reads_current_user_workflow_envelopes_linearly() -> None:
     fingerprint = "c" * 64
     session = RecordingSession(
