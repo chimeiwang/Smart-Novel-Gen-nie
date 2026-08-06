@@ -497,7 +497,6 @@ async def test_entity_business_contracts_are_checked_before_any_write(
         ("factions", "factionId", "name"),
         ("glossaries", "glossaryId", "term"),
         ("items", "id", "name"),
-        ("items", "characterId", "name"),
     ],
 )
 @pytest.mark.parametrize("invalid_id", [123, ""])
@@ -523,6 +522,140 @@ async def test_delete_rejects_every_invalid_id_hint_before_any_batch(
                         "expectedUpdatedAt": "2026-08-06T00:00:00Z",
                     }
                 ],
+                "characterExperiences": [
+                    {
+                        "action": "create",
+                        "characterId": "character-1",
+                        "clientRequestId": "valid-experience-create",
+                        "content": "不应写入",
+                    }
+                ],
+            },
+        )
+
+    assert lore.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("extra_field", "value"),
+    [
+        ("name", ""),
+        ("characterName", 123),
+        ("referenceId", 123),
+        ("nodeId", "node-1"),
+        ("nodeTitle", "节点"),
+        ("chapterTitle", "章节"),
+    ],
+)
+async def test_item_delete_rejects_bad_or_foreign_hint_before_any_batch(
+    extra_field: str, value: object
+) -> None:
+    lore = FakeLore()
+    executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
+
+    with pytest.raises(ValueError):
+        await executor.apply(
+            "novel-1",
+            "user-1",
+            {
+                "items": [
+                    {
+                        "action": "delete",
+                        "id": "item-1",
+                        extra_field: value,
+                        "expectedUpdatedAt": "2026-08-06T00:00:00Z",
+                    }
+                ],
+                "characterExperiences": [
+                    {
+                        "action": "create",
+                        "characterId": "character-1",
+                        "clientRequestId": "valid-experience-create",
+                        "content": "不应写入",
+                    }
+                ],
+            },
+        )
+
+    assert lore.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("section", "own_id", "foreign_hint"),
+    [
+        ("characters", "characterId", "itemId"),
+        ("locations", "locationId", "characterId"),
+        ("items", "itemId", "locationId"),
+        ("factions", "factionId", "glossaryId"),
+        ("glossaries", "glossaryId", "factionId"),
+    ],
+)
+async def test_delete_rejects_correctly_typed_cross_section_hint_before_any_batch(
+    section: str, own_id: str, foreign_hint: str
+) -> None:
+    lore = FakeLore()
+    executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
+
+    with pytest.raises(ValueError, match="无法持久化字段"):
+        await executor.apply(
+            "novel-1",
+            "user-1",
+            {
+                section: [
+                    {
+                        "action": "delete",
+                        own_id: "entity-1",
+                        foreign_hint: "foreign-entity-1",
+                        "expectedUpdatedAt": "2026-08-06T00:00:00Z",
+                    }
+                ],
+                "characterExperiences": [
+                    {
+                        "action": "create",
+                        "characterId": "character-1",
+                        "clientRequestId": "valid-experience-create",
+                        "content": "不应写入",
+                    }
+                ],
+            },
+        )
+
+    assert lore.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "item",
+    [
+        {
+            "action": "create",
+            "clientRequestId": "valid-item-create",
+            "expectedUpdatedAt": "2026-08-06T00:00:00Z",
+            "name": "信物",
+        },
+        {
+            "action": "update",
+            "clientRequestId": "valid-item-update",
+            "expectedUpdatedAt": "2026-08-06T00:00:00Z",
+            "id": "item-1",
+            "description": "不应写入",
+        },
+    ],
+)
+async def test_entity_action_rejects_control_from_another_action_before_any_batch(
+    item: dict[str, object],
+) -> None:
+    lore = FakeLore()
+    executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
+
+    with pytest.raises(ValueError, match="无法持久化字段"):
+        await executor.apply(
+            "novel-1",
+            "user-1",
+            {
+                "items": [item],
                 "characterExperiences": [
                     {
                         "action": "create",
@@ -574,30 +707,27 @@ async def test_update_rejects_invalid_id_without_valid_name_before_any_batch(
 
 
 @pytest.mark.asyncio
-async def test_empty_entity_id_falls_back_to_valid_name_resolution_hint() -> None:
+async def test_update_rejects_empty_id_even_with_valid_name_before_any_batch() -> None:
     lore = FakeLore()
     executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
 
-    count = await executor.apply(
-        "novel-1",
-        "user-1",
-        {
-            "items": [
-                {
-                    "action": "update",
-                    "id": "",
-                    "name": "信物",
-                    "expectedUpdatedAt": "2026-08-06T00:00:00Z",
-                }
-            ]
-        },
-    )
+    with pytest.raises(ValueError, match="标识必须是非空字符串"):
+        await executor.apply(
+            "novel-1",
+            "user-1",
+            {
+                "items": [
+                    {
+                        "action": "update",
+                        "id": "",
+                        "name": "信物",
+                        "expectedUpdatedAt": "2026-08-06T00:00:00Z",
+                    }
+                ]
+            },
+        )
 
-    assert count == 1
-    mutation = lore.calls[0][3][0]
-    assert mutation.entity_id is None
-    assert mutation.lookup_field == "name"
-    assert mutation.lookup_value == "信物"
+    assert lore.calls == []
 
 
 @pytest.mark.asyncio
@@ -617,7 +747,7 @@ async def test_delete_rejects_invalid_business_fields_before_any_batch(
     lore = FakeLore()
     executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
 
-    with pytest.raises(ValueError, match="delete 业务字段无效"):
+    with pytest.raises(ValueError):
         await executor.apply(
             "novel-1",
             "user-1",
@@ -642,6 +772,31 @@ async def test_delete_rejects_invalid_business_fields_before_any_batch(
         )
 
     assert lore.calls == []
+
+
+@pytest.mark.asyncio
+async def test_entity_create_keeps_field_changes_as_compatible_control() -> None:
+    lore = FakeLore()
+    executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
+
+    count = await executor.apply(
+        "novel-1",
+        "user-1",
+        {
+            "items": [
+                {
+                    "action": "create",
+                    "clientRequestId": "valid-item-create",
+                    "name": "信物",
+                    "fieldChanges": [{"field": "name"}],
+                }
+            ]
+        },
+    )
+
+    assert count == 1
+    mutation = lore.calls[0][3][0]
+    assert mutation.fields == {"name": "信物"}
 
 
 @pytest.mark.asyncio

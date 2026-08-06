@@ -41,11 +41,6 @@ _ENTITY_CONFIG = {
     "factions": ("factions", ("id", "factionId"), "name"),
     "glossaries": ("glossary", ("id", "glossaryId"), "term"),
 }
-_ENTITY_ID_HINTS = frozenset(
-    field
-    for _, id_fields, _ in _ENTITY_CONFIG.values()
-    for field in id_fields
-)
 _ENTITY_CREATE_REQUESTS: dict[str, type[BaseModel]] = {
     "characters": CreateCharacterRequest,
     "locations": CreateLocationRequest,
@@ -60,13 +55,18 @@ _ENTITY_UPDATE_REQUESTS: dict[str, type[BaseModel]] = {
     "factions": UpdateFactionRequest,
     "glossaries": UpdateGlossaryRequest,
 }
-_ENTITY_FIELDS = {
-    section: (
-        set(create_schema.model_fields)
-        | set(_ENTITY_UPDATE_REQUESTS[section].model_fields)
-    )
-    - {"clientRequestId", "expectedUpdatedAt"}
-    for section, create_schema in _ENTITY_CREATE_REQUESTS.items()
+_ENTITY_CREATE_FIELDS = {
+    section: set(schema.model_fields) - {"clientRequestId"}
+    for section, schema in _ENTITY_CREATE_REQUESTS.items()
+}
+_ENTITY_UPDATE_FIELDS = {
+    section: set(schema.model_fields) - {"expectedUpdatedAt"}
+    for section, schema in _ENTITY_UPDATE_REQUESTS.items()
+}
+_ENTITY_ACTION_CONTROLS = {
+    "create": {"action", "fieldChanges", "clientRequestId"},
+    "update": {"action", "fieldChanges", "expectedUpdatedAt"},
+    "delete": {"action", "fieldChanges", "expectedUpdatedAt"},
 }
 
 
@@ -150,7 +150,7 @@ class AgentUpdatesExecutor:
     ) -> int:
         count = 0
         entity_items: list[
-            tuple[str, str, tuple[str, ...], str, dict[str, Any]]
+            tuple[str, str, tuple[str, ...], str, dict[str, Any], dict[str, Any]]
         ] = []
         for section, (kind, id_fields, name_field) in _ENTITY_CONFIG.items():
             items = updates.get(section)
@@ -160,11 +160,15 @@ class AgentUpdatesExecutor:
                 for item in items:
                     if not isinstance(item, dict):
                         raise ValueError(f"{section} 更新项结构无效")
-                    _validate_entity_item(item, section)
-                    entity_items.append((section, kind, id_fields, name_field, item))
+                    fields = _validate_entity_item(item, section)
+                    entity_items.append(
+                        (section, kind, id_fields, name_field, item, fields)
+                    )
         entity_mutations = [
-            self._build_entity_mutation(section, kind, id_fields, name_field, item)
-            for section, kind, id_fields, name_field, item in entity_items
+            self._build_entity_mutation(
+                section, kind, id_fields, name_field, item, fields
+            )
+            for section, kind, id_fields, name_field, item, fields in entity_items
         ]
         experience_mutations: list[ExperienceMutation] = []
         experiences = updates.get("characterExperiences")
@@ -225,16 +229,11 @@ class AgentUpdatesExecutor:
         id_fields: tuple[str, ...],
         name_field: str,
         item: dict[str, Any],
+        fields: dict[str, Any],
     ) -> EntityMutation:
         action = item.get("action")
         if action not in {"create", "update", "delete"}:
             raise ValueError(f"{section} action 无效")
-        fields = _strict_fields(
-            item,
-            _ENTITY_FIELDS[section],
-            section,
-            extra_control={"clientRequestId", "expectedUpdatedAt"},
-        )
         if action == "create":
             client_request_id = item.get("clientRequestId")
             if not isinstance(client_request_id, str) or not 16 <= len(client_request_id) <= 256:
@@ -557,16 +556,40 @@ def _require_entity_expected_updated_at(item: dict[str, Any], section: str) -> d
         raise ValueError(f"{section} expectedUpdatedAt 格式无效") from error
 
 
-def _validate_entity_item(item: dict[str, Any], section: str) -> None:
+def _validate_entity_item(item: dict[str, Any], section: str) -> dict[str, Any]:
     action = item.get("action")
     if action not in {"create", "update", "delete"}:
         raise ValueError(f"{section} action 无效")
-    fields = _strict_fields(
-        item,
-        _ENTITY_FIELDS[section],
-        section,
-        extra_control={"clientRequestId", "expectedUpdatedAt"},
+    business_fields = (
+        _ENTITY_CREATE_FIELDS[section]
+        if action == "create"
+        else _ENTITY_UPDATE_FIELDS[section]
     )
+    _, id_fields, name_field = _ENTITY_CONFIG[section]
+    allowed = (
+        business_fields
+        | _ENTITY_ACTION_CONTROLS[action]
+        | set(id_fields)
+        | {name_field}
+    )
+    unknown = set(item) - allowed
+    if unknown:
+        names = "、".join(sorted(unknown))
+        raise ValueError(f"{section} 包含无法持久化字段：{names}")
+    fields = {
+        key: deepcopy(value)
+        for key, value in item.items()
+        if key in business_fields
+    }
+    for field in id_fields:
+        if field in item and (
+            not isinstance(item[field], str) or not item[field]
+        ):
+            raise ValueError(f"{section} {field} 标识必须是非空字符串")
+    if name_field in item and (
+        not isinstance(item[name_field], str) or not item[name_field]
+    ):
+        raise ValueError(f"{section} {name_field} 标识必须是非空字符串")
     if action == "create":
         client_request_id = item.get("clientRequestId")
         if not isinstance(client_request_id, str) or not 16 <= len(client_request_id) <= 256:
@@ -577,15 +600,8 @@ def _validate_entity_item(item: dict[str, Any], section: str) -> None:
             )
         except ValueError as error:
             raise ValueError(f"{section} create 业务字段无效") from error
-        return
+        return fields
     expected_updated_at = _require_entity_expected_updated_at(item, section)
-    _, id_fields, name_field = _ENTITY_CONFIG[section]
-    if action == "delete":
-        for field in _ENTITY_ID_HINTS:
-            if field in item and (
-                not isinstance(item[field], str) or not item[field]
-            ):
-                raise ValueError(f"{section} {field} 标识必须是非空字符串")
     has_id = any(
         isinstance(item.get(field), str) and bool(item[field])
         for field in id_fields
@@ -600,6 +616,7 @@ def _validate_entity_item(item: dict[str, Any], section: str) -> None:
             )
         except ValueError as error:
             raise ValueError(f"{section} {action} 业务字段无效") from error
+    return fields
 
 
 def _resolve_named_id(
