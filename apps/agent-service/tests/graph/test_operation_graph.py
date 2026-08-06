@@ -10,6 +10,7 @@ from inkforge_agents.operations.contracts import (
     create_default_operation_for_agent,
 )
 from inkforge_agents.operations.graph import OperationDependencies, build_operation_graph
+from inkforge_agents.queue.cancellation import JobCancelledError
 from inkforge_agents.runtime.execution import AgentExecutionMode
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
@@ -172,6 +173,41 @@ class ArtifactPort:
     async def discard(self, artifact_id: str) -> None:
         del artifact_id
         self.actions.append("discard")
+
+
+class Cancellation:
+    def __init__(self, cancel_on_check: int) -> None:
+        self.cancel_on_check = cancel_on_check
+        self.checks = 0
+
+    async def ensure_active(self, job_id: str | None) -> None:
+        assert job_id == "job-1"
+        self.checks += 1
+        if self.checks >= self.cancel_on_check:
+            raise JobCancelledError()
+
+
+@pytest.mark.asyncio
+async def test_operation_graph_stops_before_next_node_when_job_is_cancelled() -> None:
+    executor = AgentExecutor()
+    graph = build_operation_graph(
+        OperationDependencies(
+            agentExecutor=executor,
+            artifacts=ArtifactPort(),
+            cancellation=Cancellation(cancel_on_check=2),
+        )
+    )
+    state = _state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="写作",
+    )
+    state["currentOperation"] = create_default_operation_for_agent("写作", "写作")
+
+    with pytest.raises(JobCancelledError):
+        await graph.ainvoke(state)
 
 
 @pytest.mark.asyncio

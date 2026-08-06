@@ -8,6 +8,7 @@ from inkforge_agents.clients.core import CoreServiceError
 from inkforge_agents.graph.snapshots import serialize_snapshot, to_typescript_snapshot
 from inkforge_agents.graph.state import create_initial_state
 from inkforge_agents.jobs.writing import WritingJobHandler
+from inkforge_agents.queue.cancellation import JobCancelledError
 from inkforge_agents.queue.consumer import NonRetryableJobError
 from inkforge_agents.queue.repository import QueueJob
 from langgraph.types import Interrupt
@@ -119,6 +120,18 @@ class WorkflowLog:
 
     def finish_run(self, run_id: str, status: str) -> None:
         self.entries.append(("结束", (run_id, status)))
+
+
+class Cancellation:
+    def __init__(self, cancel_on_check: int) -> None:
+        self.cancel_on_check = cancel_on_check
+        self.checks = 0
+
+    async def ensure_active(self, job_id: str | None) -> None:
+        assert job_id == "job-1"
+        self.checks += 1
+        if self.checks >= self.cancel_on_check:
+            raise JobCancelledError()
 
 
 def _job(*, resume: bool = False, resume_input: dict[str, Any] | None = None) -> QueueJob:
@@ -267,6 +280,36 @@ async def test_explicit_long_serial_job_bypasses_parent_with_trusted_operation()
         "confidence": 1.0,
         "reasoning": "显式长篇任务按服务端 Operation 定义执行。",
     }
+
+
+@pytest.mark.asyncio
+async def test_writing_handler_cancellation_before_start_event_has_no_core_side_effects() -> None:
+    context = {
+        "workspace": {},
+        "planning": {
+            "chapterId": "chapter-1",
+            "targetWordCount": 100,
+            "conversationHistory": [],
+            "userMessage": "写作",
+            "graphState": None,
+        },
+    }
+    core = CoreClient(context)
+    handler = WritingJobHandler(
+        core,
+        parent_graph=Graph({"phase": "completed", "finalResponse": "不应提交"}),
+        operation_graph=Graph({}),
+        artifacts=ArtifactHydration(),
+        cancellation=Cancellation(cancel_on_check=3),
+    )
+
+    with pytest.raises(JobCancelledError):
+        await handler(_job())
+
+    assert core.events == []
+    assert core.checkpoints == []
+    assert core.completions == []
+    assert core.failures == []
 
 
 @pytest.mark.asyncio

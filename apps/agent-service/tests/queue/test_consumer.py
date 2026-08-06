@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 import fakeredis.aioredis
 import pytest
 from inkforge_agents.clients.core import CoreServiceError
+from inkforge_agents.queue.cancellation import JobCancelledError
 from inkforge_agents.queue.consumer import QueueConsumer
 from inkforge_agents.queue.repository import QueueJob, RedisRunQueue
 from redis.exceptions import ResponseError
@@ -96,6 +97,21 @@ async def test_consumer_does_not_retry_non_retryable_failure() -> None:
     assert await consumer.run_once() is True
     assert attempts == 1
     assert await queue.status("no-retry") == "failed"
+
+
+@pytest.mark.asyncio
+async def test_consumer_preserves_cancelled_terminal_status() -> None:
+    queue = RedisRunQueue(fakeredis.aioredis.FakeRedis(), prefix="test:queue")
+    await queue.enqueue(job("cancelled"))
+
+    async def handler(current: QueueJob) -> None:
+        del current
+        raise JobCancelledError()
+
+    consumer = QueueConsumer(queue, {"writing": handler})
+
+    assert await consumer.run_once() is True
+    assert await queue.status("cancelled") == "cancelled"
 
 
 @pytest.mark.asyncio

@@ -16,6 +16,7 @@ from redis.exceptions import (
     TimeoutError as RedisTimeoutError,
 )
 
+from .cancellation import JobCancelledError
 from .repository import JobKind, QueueClaim, QueueJob, RedisRunQueue
 
 JobHandler = Callable[[QueueJob], Awaitable[None]]
@@ -133,6 +134,8 @@ class QueueConsumer:
             return True
         try:
             await self._run_with_heartbeat(claim, handler)
+        except JobCancelledError:
+            await self._queue.acknowledge(claim, status="cancelled")
         except _QueueHeartbeatInfrastructureError as exc:
             await self._queue.retry(claim, delay=self._retry_delay)
             cause = exc.__cause__

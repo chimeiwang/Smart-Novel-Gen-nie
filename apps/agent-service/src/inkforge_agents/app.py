@@ -29,6 +29,7 @@ from .operations.definitions import validate_public_operation_definitions
 from .operations.graph import OperationDependencies, build_operation_graph
 from .providers.base import ModelProvider
 from .providers.selector import create_model_provider
+from .queue.cancellation import RedisRunCancellation
 from .queue.consumer import JobHandler, QueueConsumer
 from .queue.repository import JobKind, RedisRunQueue
 from .runs.router import CoreRequestVerifier
@@ -271,11 +272,13 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                 )
                 gateway = CoreToolGateway(core, embedding_provider)
                 registry = build_default_registry(gateway)
+                cancellation = RedisRunCancellation(queue)
                 runner = AgentRunner(
                     AgentRuntime(
                         model_runtime,
                         registry,
                         max_output_tokens=settings.model_max_output_tokens,
+                        cancellation=cancellation,
                     ),
                     registry,
                 )
@@ -283,6 +286,7 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                 dependencies = OperationDependencies(
                     agentExecutor=CoreGraphAgentExecutor(runner, artifacts),
                     artifacts=artifacts,
+                    cancellation=cancellation,
                 )
                 long_serial_writing = WritingJobHandler(
                     core,
@@ -292,6 +296,7 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                     operation_graph=build_operation_graph(dependencies),
                     artifacts=artifacts,
                     workflow_log=workflow_log,
+                    cancellation=cancellation,
                 )
                 short_medium_writing = ShortMediumWritingJobHandler(
                     core,

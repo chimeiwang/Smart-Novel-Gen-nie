@@ -9,6 +9,7 @@ from inkforge_agents.providers.base import (
     ModelTurnResult,
     ModelUsage,
 )
+from inkforge_agents.queue.cancellation import JobCancelledError
 from inkforge_agents.runtime.agent_runtime import AgentRuntime
 from inkforge_agents.runtime.model_runtime import ModelRuntime
 from inkforge_agents.tools.registry import (
@@ -90,12 +91,26 @@ def context(agent_id: str = "设定") -> ToolContext:
 def make_agent_runtime(
     model_runtime: ModelRuntime,
     registry: object,
+    **kwargs: object,
 ) -> AgentRuntime:
     return AgentRuntime(  # type: ignore[arg-type]
         model_runtime,
         registry,
         max_output_tokens=16_384,
+        **kwargs,
     )
+
+
+class Cancellation:
+    def __init__(self, cancel_on_check: int) -> None:
+        self.cancel_on_check = cancel_on_check
+        self.checks = 0
+
+    async def ensure_active(self, job_id: str | None) -> None:
+        assert job_id == "job-1"
+        self.checks += 1
+        if self.checks >= self.cancel_on_check:
+            raise JobCancelledError()
 
 
 @pytest.mark.asyncio
@@ -128,6 +143,38 @@ async def test_runtime_accumulates_full_text_and_parallelizes_safe_reads() -> No
     assert gateway.max_active == 2
     assert len(provider.requests) == 2
     assert result.usage.totalTokens == 30
+
+
+@pytest.mark.asyncio
+async def test_runtime_stops_after_model_cancellation_without_recording_content_or_tools() -> None:
+    provider = ScriptedProvider(
+        [turn("不应保留的正文", ("call-1", "get_novel_info", {}))]
+    )
+    gateway = RecordingGateway()
+    registry = build_default_registry(gateway)
+    cancellation = Cancellation(cancel_on_check=2)
+    runtime = make_agent_runtime(
+        ModelRuntime(provider), registry, cancellation=cancellation
+    )
+
+    with pytest.raises(JobCancelledError):
+        await runtime.run(
+            messages=[{"role": "user", "content": "分析设定"}],
+            exposed_tools=registry.for_agent(
+                agent_id="设定", capabilities={"novel.read"}
+            ),
+            context=ToolContext(
+                userId="user-1",
+                novelId="novel-1",
+                taskId="task-1",
+                runId="run-1",
+                jobId="job-1",
+                agentId="设定",
+            ),
+        )
+
+    assert len(provider.requests) == 1
+    assert gateway.calls == []
 
 
 @pytest.mark.asyncio

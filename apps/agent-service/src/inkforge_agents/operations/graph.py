@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 from ..definitions.agents import AgentId
 from ..graph.context import build_operation_context
 from ..graph.state import GraphState
+from ..queue.cancellation import JobCancelledError, RunCancellationPort
 from ..runtime.execution import AgentExecutionMode
 from .artifact_contract import (
     has_artifact_terminal_event,
@@ -65,6 +66,7 @@ class ArtifactPort(Protocol):
 class OperationDependencies:
     agentExecutor: AgentExecutorPort
     artifacts: ArtifactPort
+    cancellation: RunCancellationPort | None = None
 
 
 class ReviewResult(BaseModel):
@@ -123,7 +125,22 @@ def build_operation_graph(
     *,
     checkpointer: Any | None = None,
 ) -> Any:
+    async def ensure_active(state: GraphState) -> None:
+        if dependencies.cancellation is None:
+            return
+        runtime_context = state.get("runtimeContext")
+        resource = (
+            runtime_context.get("runResource")
+            if isinstance(runtime_context, dict)
+            else None
+        )
+        job_id = resource.get("jobId") if isinstance(resource, dict) else None
+        await dependencies.cancellation.ensure_active(
+            job_id if isinstance(job_id, str) else None
+        )
+
     async def prepare(state: GraphState) -> dict[str, Any]:
+        await ensure_active(state)
         operation = _operation(state)
         definition = _operation_definition(operation)
         runtime_context = state.get("runtimeContext")
@@ -151,6 +168,7 @@ def build_operation_graph(
         )
 
     async def execute(state: GraphState) -> dict[str, Any]:
+        await ensure_active(state)
         operation = _operation(state)
         result = await dependencies.agentExecutor.run(
             operation.primaryAgent,
@@ -168,6 +186,7 @@ def build_operation_graph(
         }
 
     async def submit_or_respond(state: GraphState) -> dict[str, Any]:
+        await ensure_active(state)
         operation = _operation(state)
         definition = _operation_definition(operation)
         output = state.get("agentOutputs", {}).get(operation.primaryAgent, {})
@@ -250,6 +269,7 @@ def build_operation_graph(
         return "reviewArtifact" if operation.reviewers else "markArtifactAwaitingUser"
 
     async def review_artifact(state: GraphState) -> dict[str, Any]:
+        await ensure_active(state)
         return {
             "artifactStatus": "reviewing",
             "operationStep": "review_artifact",
@@ -269,6 +289,7 @@ def build_operation_graph(
         ]
 
     async def review_worker(state: GraphState) -> dict[str, Any]:
+        await ensure_active(state)
         reviewer = state.get("reviewWorkerAgent")
         if reviewer not in {"设定", "剧情", "写作", "校验", "编辑"}:
             raise ValueError("复审智能体无效")
@@ -280,6 +301,8 @@ def build_operation_graph(
                 execution_mode="reviewer",
                 operation_kind=_operation(state).kind,
             )
+        except JobCancelledError:
+            raise
         except Exception:
             review = ReviewResult(
                 reviewer=reviewer_id,
@@ -311,6 +334,7 @@ def build_operation_graph(
         return {"reviewResults": [review.model_dump()]}
 
     async def merge_reviews(state: GraphState) -> dict[str, Any]:
+        await ensure_active(state)
         iteration = state.get("artifactIteration", 0)
         current = [
             ReviewResult.model_validate(result)
@@ -333,6 +357,7 @@ def build_operation_graph(
         return "markArtifactAwaitingUser"
 
     async def revise(state: GraphState) -> dict[str, Any]:
+        await ensure_active(state)
         operation = _operation(state)
         iteration = state.get("artifactIteration", 0) + 1
         revision_state = {
@@ -360,6 +385,7 @@ def build_operation_graph(
         }
 
     async def mark_awaiting_user(state: GraphState) -> dict[str, Any]:
+        await ensure_active(state)
         artifact_id = state.get("activeArtifactId")
         if artifact_id:
             await dependencies.artifacts.mark_awaiting_user(artifact_id)
@@ -373,6 +399,7 @@ def build_operation_graph(
     async def await_user(
         state: GraphState,
     ) -> Command[Literal["reviseArtifact", "suggestNextAction"]]:
+        await ensure_active(state)
         artifact_id = state.get("activeArtifactId")
         if not artifact_id:
             return Command(goto="suggestNextAction")
@@ -419,6 +446,7 @@ def build_operation_graph(
     async def resume_user_decision(
         state: GraphState,
     ) -> Command[Literal["reviseArtifact", "suggestNextAction"]]:
+        await ensure_active(state)
         artifact_id = state.get("activeArtifactId")
         decision = state.get("resumeDecision")
         if not artifact_id or not isinstance(decision, dict):
@@ -458,6 +486,7 @@ def build_operation_graph(
         raise ValueError("稳定恢复的用户草案决策无效")
 
     async def suggest(state: GraphState) -> dict[str, Any]:
+        await ensure_active(state)
         phase = "error" if state.get("errorMessage") else "completed"
         return {
             "phase": phase,

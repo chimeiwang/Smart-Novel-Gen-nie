@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from ..providers.base import ModelMessage, ModelToolCall, ModelTurnRequest, ModelTurnResult
+from ..queue.cancellation import JobCancelledError, RunCancellationPort
 from ..tools.registry import ToolContext, ToolDefinition, ToolRegistry
 from .model_runtime import ModelCallContext, ModelRuntime
 from .turn_result import (
@@ -36,10 +37,12 @@ class AgentRuntime:
         registry: ToolRegistry,
         *,
         max_output_tokens: int,
+        cancellation: RunCancellationPort | None = None,
     ) -> None:
         self._model_runtime = model_runtime
         self._registry = registry
         self._max_output_tokens = max_output_tokens
+        self._cancellation = cancellation
 
     async def run(
         self,
@@ -63,6 +66,7 @@ class AgentRuntime:
         active_builder_key: str | None = None
 
         for _ in range(max_iterations):
+            await self._ensure_active(context)
             available_tools = [
                 tool
                 for tool in exposed_tools
@@ -76,6 +80,7 @@ class AgentRuntime:
                 ),
                 context=model_context,
             )
+            await self._ensure_active(context)
             usage = add_usage(usage, response.usage)
             validated_calls = self._preflight_response(
                 response,
@@ -120,6 +125,7 @@ class AgentRuntime:
                     )
                     index += 1
                 if safe_batch:
+                    await self._ensure_active(context)
                     tasks: list[Coroutine[Any, Any, dict[str, Any]]] = [
                         self._registry.execute_validated(
                             tool_item, validated_arguments, context
@@ -127,6 +133,7 @@ class AgentRuntime:
                         for _, tool_item, validated_arguments in safe_batch
                     ]
                     results = await asyncio.gather(*tasks, return_exceptions=True)
+                    await self._ensure_active(context)
                     for (call_item, tool_item, arguments), result in zip(
                         safe_batch, results, strict=True
                     ):
@@ -142,6 +149,7 @@ class AgentRuntime:
                         )
                     continue
 
+                await self._ensure_active(context)
                 if tool.toolKind == "control":
                     artifact_key = arguments.get("artifactKey")
                     if tool.name == "start_update_builder":
@@ -206,8 +214,11 @@ class AgentRuntime:
                         normalized = await self._registry.execute_validated(
                             tool, arguments, context
                         )
+                    except JobCancelledError:
+                        raise
                     except Exception as exc:
                         normalized = {"error": str(exc)}
+                    await self._ensure_active(context)
                 self._record_tool(
                     call.id,
                     tool,
@@ -239,6 +250,10 @@ class AgentRuntime:
             usage,
             "max_iterations",
         )
+
+    async def _ensure_active(self, context: ToolContext) -> None:
+        if self._cancellation is not None:
+            await self._cancellation.ensure_active(context.jobId)
 
     def _preflight_response(
         self,

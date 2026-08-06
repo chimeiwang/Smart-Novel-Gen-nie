@@ -16,6 +16,7 @@ from ..graph.snapshots import deserialize_snapshot, serialize_snapshot, to_types
 from ..graph.state import GraphState, create_initial_state
 from ..operations.contracts import CreativeOperation, CreativeOperationKind
 from ..operations.definitions import OPERATION_DEFINITIONS, OperationDefinition
+from ..queue.cancellation import JobCancelledError, RunCancellationPort
 from ..queue.consumer import NonRetryableJobError
 from ..queue.repository import QueueJob
 from .workflow_log import WorkflowLogPort
@@ -90,17 +91,20 @@ class WritingJobHandler:
         operation_graph: GraphPort,
         artifacts: ArtifactHydrationPort,
         workflow_log: WorkflowLogPort | None = None,
+        cancellation: RunCancellationPort | None = None,
     ) -> None:
         self._core = core
         self._parent_graph = parent_graph
         self._operation_graph = operation_graph
         self._artifacts = artifacts
         self._workflow_log = workflow_log
+        self._cancellation = cancellation
 
     async def __call__(self, job: QueueJob) -> None:
         if job.kind != "writing":
             raise ValueError("写作处理器收到非写作任务")
         resource = _resource(job)
+        await self._ensure_active(resource)
         if self._workflow_log is not None:
             self._workflow_log.start_run(
                 run_id=job.runId,
@@ -114,7 +118,9 @@ class WritingJobHandler:
                     else None
                 ),
             )
+        await self._ensure_active(resource)
         context = await self._core.call_tool(resource, "写作", "get_writing_context", {})
+        await self._ensure_active(resource)
         current_job_state = _current_job_snapshot(job, context)
         owned_artifact_id: str | None = None
         if current_job_state is not None:
@@ -149,6 +155,7 @@ class WritingJobHandler:
             {"阶段": state.get("phase"), "操作阶段": state.get("operationStage")},
         )
         sequence = int(state.get("eventSequence", 0)) + 1
+        await self._ensure_active(resource)
         await self._core.send_event(
             resource,
             sequence=sequence,
@@ -156,10 +163,17 @@ class WritingJobHandler:
             data={"agentId": "写作", "agentName": "作家"},
         )
         try:
+            await self._ensure_active(resource)
             result = await graph.ainvoke(state)
+            await self._ensure_active(resource)
+        except JobCancelledError:
+            self._release(owned_artifact_id, resource)
+            self._finish_log(job.runId, "已取消")
+            raise
         except Exception as exc:
             self._record_state(job.runId, "运行异常", {"错误": str(exc) or "智能体运行失败"})
             self._finish_log(job.runId, "错误")
+            await self._ensure_active(resource)
             await self._core.fail(
                 resource,
                 sequence=sequence + 1,
@@ -202,6 +216,7 @@ class WritingJobHandler:
             "保存稳定快照",
             {"阶段": checkpoint.get("phase"), "操作阶段": checkpoint.get("operationStage")},
         )
+        await self._ensure_active(resource)
         await self._core.save_checkpoint(
             resource,
             sequence=next_sequence,
@@ -210,6 +225,7 @@ class WritingJobHandler:
         if stable.get("phase") == "error":
             message = str(stable.get("errorMessage") or "智能体运行失败")
             self._finish_log(job.runId, "错误")
+            await self._ensure_active(resource)
             await self._core.fail(
                 resource,
                 sequence=next_sequence + 1,
@@ -223,6 +239,7 @@ class WritingJobHandler:
             self._finish_log(job.runId, "等待用户确认")
             self._release(owned_artifact_id, resource)
             return
+        await self._ensure_active(resource)
         await self._core.complete(
             resource,
             sequence=next_sequence + 1,
@@ -246,10 +263,12 @@ class WritingJobHandler:
         state: GraphState,
         owned_artifact_id: str | None = None,
     ) -> bool:
+        await self._ensure_active(resource)
         phase = state.get("phase")
         sequence = int(state.get("eventSequence", 0)) + 1
         if phase == "completed":
             self._record_state(run_id, "重放完成回调", {"阶段": phase})
+            await self._ensure_active(resource)
             await self._core.complete(
                 resource,
                 sequence=sequence,
@@ -261,6 +280,7 @@ class WritingJobHandler:
         if phase == "error":
             message = str(state.get("errorMessage") or "智能体运行失败")
             self._record_state(run_id, "重放失败回调", {"阶段": phase})
+            await self._ensure_active(resource)
             await self._core.fail(
                 resource,
                 sequence=sequence,
@@ -308,6 +328,10 @@ class WritingJobHandler:
     def _release(self, artifact_id: str | None, resource: RunResource) -> None:
         if artifact_id is not None:
             self._artifacts.release(artifact_id, resource)
+
+    async def _ensure_active(self, resource: RunResource) -> None:
+        if self._cancellation is not None:
+            await self._cancellation.ensure_active(resource.jobId)
 
     def _prepare_state(
         self,
