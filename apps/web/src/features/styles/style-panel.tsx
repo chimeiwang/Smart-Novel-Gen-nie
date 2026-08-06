@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useTransition } from "react";
+import { useState, useTransition } from "react";
 
 import { browserApi } from "@/lib/api/browser";
-import { requireApiData } from "@/lib/api/response";
+import { ApiResponseError, requireApiData } from "@/lib/api/response";
+import { buildApplyStyleBody } from "./style-mutation";
 
 type StylePanelProps = {
   novelId: string;
@@ -22,16 +23,25 @@ type StylePanelProps = {
 export function StylePanel({ novelId, appliedStyleId, styles, onChanged }: StylePanelProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [saveError, setSaveError] = useState<string | null>(null);
 
-  const handleApply = (styleId: string) => {
+  const handleApply = (styleId: string | null) => {
     startTransition(async () => {
-      requireApiData(await browserApi.PATCH("/api/v1/novels/{novel_id}/applied-style", {
-        params: { path: { novel_id: novelId } },
-        body: { styleId },
-      }));
-
-      onChanged?.();
-      router.refresh();
+      setSaveError(null);
+      try {
+        requireApiData(await browserApi.PATCH("/api/v1/novels/{novel_id}/applied-style", {
+          params: { path: { novel_id: novelId } },
+          body: buildApplyStyleBody(styleId, appliedStyleId),
+        }));
+        onChanged?.();
+        router.refresh();
+      } catch (error) {
+        setSaveError(
+          error instanceof ApiResponseError && error.status === 409
+            ? "文风已在其他位置更新，当前操作已保留，请刷新后重试。"
+            : error instanceof Error ? error.message : "文风操作失败，请稍后重试。",
+        );
+      }
     });
   };
 
@@ -78,9 +88,17 @@ export function StylePanel({ novelId, appliedStyleId, styles, onChanged }: Style
                       </div>
                     </div>
                     {isApplied ? (
-                      <span className="badge badge-info">
-                        当前使用
-                      </span>
+                      <div className="row">
+                        <span className="badge badge-info">当前使用</span>
+                        <button
+                          className="button secondary sm"
+                          type="button"
+                          onClick={() => handleApply(null)}
+                          disabled={pending}
+                        >
+                          {pending ? "处理中..." : "清除"}
+                        </button>
+                      </div>
                     ) : (
                       <button
                         className="button sm"
@@ -99,6 +117,7 @@ export function StylePanel({ novelId, appliedStyleId, styles, onChanged }: Style
             <div className="empty">还没有文风，请先去文风库创建。</div>
           )}
         </div>
+        {saveError ? <p className="form-error" role="alert">{saveError}</p> : null}
       </div>
     </div>
   );

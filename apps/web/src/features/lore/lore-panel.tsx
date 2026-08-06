@@ -6,8 +6,10 @@ import { useState, useTransition } from "react";
 import { Form, Input, Select, InputNumber, Button, Space, Divider, Popconfirm, Card, Empty, Row, Col } from "antd";
 
 import { browserApi } from "@/lib/api/browser";
-import { requireApiData } from "@/lib/api/response";
+import { createClientRequestId } from "@/lib/api/client-request-id";
+import { ApiResponseError, requireApiData } from "@/lib/api/response";
 import { buildLoreListItems, type LoreListKind } from "./lore-list-presenter";
+import { buildChildMutationPlan, executeChildMutationPlan } from "./lore-mutation-plan";
 
 type LoreTabKey = LoreListKind;
 
@@ -16,6 +18,27 @@ type CharacterStatus = "active" | "missing" | "dead" | "imprisoned" | "unknown";
 
 // 关系类型枚举
 type RelationType = "family" | "master_student" | "friend" | "enemy" | "ally" | "lover" | "rival" | "subordinate" | "acquaintance" | "other";
+
+type ExperienceDraft = {
+  id?: string;
+  updatedAt?: string;
+  clientRequestId?: string;
+  chapterId: string;
+  content: string;
+  order: number;
+};
+
+type RelationDraft = {
+  id?: string;
+  updatedAt?: string;
+  clientRequestId?: string;
+  targetId: string;
+  relationType: RelationType;
+  intimacy: number;
+  description: string;
+  startDate: string;
+  endDate: string;
+};
 
 const LORE_TAB_LABELS: Record<LoreTabKey, string> = {
   characters: "角色",
@@ -68,6 +91,8 @@ export function LorePanel({
   const activeTab = selectedTab ?? internalActiveTab;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [entityClientRequestId, setEntityClientRequestId] = useState(createClientRequestId);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [form] = Form.useForm();
 
   // 角色表单状态
@@ -93,17 +118,9 @@ export function LorePanel({
     // 新增：当前状态
     currentStatus: "active" as CharacterStatus,
     statusNote: "",
-    experiences: [] as Array<{ id?: string; chapterId: string; content: string; order: number }>,
+    experiences: [] as ExperienceDraft[],
     // 角色关系
-    relations: [] as Array<{
-      id?: string;
-      targetId: string;
-      relationType: RelationType;
-      intimacy: number;
-      description: string;
-      startDate: string;
-      endDate: string;
-    }>,
+    relations: [] as RelationDraft[],
   });
 
   // 物品表单状态
@@ -147,6 +164,8 @@ export function LorePanel({
 
   const openCreateModal = () => {
     setEditingId(null);
+    setEntityClientRequestId(createClientRequestId());
+    setSaveError(null);
     // 重置当前 tab 的表单
     if (activeTab === "characters") {
       setCharacterForm({
@@ -215,6 +234,7 @@ export function LorePanel({
 
   const openEditModal = (id: string) => {
     setEditingId(id);
+    setSaveError(null);
     // 根据当前 tab 和 id 加载数据
     if (activeTab === "characters") {
       const character = characters.find((c) => c.id === id);
@@ -243,6 +263,7 @@ export function LorePanel({
           statusNote: character.statusNote || "",
           experiences: character.experiences.map((e) => ({
             id: e.id,
+            updatedAt: e.updatedAt,
             chapterId: e.chapterId || "",
             content: e.content,
             order: e.order,
@@ -250,6 +271,7 @@ export function LorePanel({
           // 角色关系
           relations: character.outgoingRelations.map((r) => ({
             id: r.id,
+            updatedAt: r.updatedAt,
             targetId: r.targetId,
             relationType: r.relationType,
             intimacy: r.intimacy,
@@ -316,39 +338,192 @@ export function LorePanel({
     setEditingId(null);
   };
 
+  const currentEntity = () => {
+    if (!editingId) return undefined;
+    if (activeTab === "characters") return characters.find((item) => item.id === editingId);
+    if (activeTab === "items") return items.find((item) => item.id === editingId);
+    if (activeTab === "locations") return locations.find((item) => item.id === editingId);
+    if (activeTab === "factions") return factions.find((item) => item.id === editingId);
+    return glossaries.find((item) => item.id === editingId);
+  };
+
+  const finishMutation = () => {
+    setIsModalOpen(false);
+    setEditingId(null);
+    setSaveError(null);
+    onChanged?.();
+    router.refresh();
+  };
+
+  const showMutationError = (error: unknown) => {
+    setSaveError(
+      error instanceof ApiResponseError && error.status === 409
+        ? "资料已在其他位置更新，当前表单已保留，请刷新后重试。"
+        : error instanceof Error ? error.message : "保存失败，请稍后重试。",
+    );
+  };
+
+  const saveCharacterChildren = async (
+    characterId: string,
+    character: components["schemas"]["CharacterDto"] | undefined,
+  ) => {
+    const originalExperiences: ExperienceDraft[] = (character?.experiences ?? []).map((item) => ({
+      id: item.id,
+      updatedAt: item.updatedAt,
+      chapterId: item.chapterId ?? "",
+      content: item.content,
+      order: item.order,
+    }));
+    const experienceDraft = characterForm.experiences
+      .filter((item) => item.content.trim())
+      .map((item, order) => ({ ...item, order }));
+    await executeChildMutationPlan(
+      buildChildMutationPlan(originalExperiences, experienceDraft),
+      {
+        delete: async (item) => {
+          if (!item.id || !item.updatedAt) throw new Error("经历版本信息缺失");
+          requireApiData(await browserApi.DELETE(
+            "/api/v1/novels/{novel_id}/experiences/{experience_id}",
+            {
+              params: { path: { novel_id: novelId, experience_id: item.id } },
+              body: { expectedUpdatedAt: item.updatedAt },
+            },
+          ));
+        },
+        update: async (item) => {
+          if (!item.id || !item.updatedAt) throw new Error("经历版本信息缺失");
+          requireApiData(await browserApi.PATCH(
+            "/api/v1/novels/{novel_id}/experiences/{experience_id}",
+            {
+              params: { path: { novel_id: novelId, experience_id: item.id } },
+              body: {
+                chapterId: item.chapterId || null,
+                content: item.content,
+                order: item.order,
+                expectedUpdatedAt: item.updatedAt,
+              },
+            },
+          ));
+        },
+        create: async (item) => {
+          if (!item.clientRequestId) throw new Error("经历创建身份缺失");
+          requireApiData(await browserApi.POST(
+            "/api/v1/novels/{novel_id}/characters/{character_id}/experiences",
+            {
+              params: { path: { novel_id: novelId, character_id: characterId } },
+              body: {
+                chapterId: item.chapterId || null,
+                content: item.content,
+                order: item.order,
+                clientRequestId: item.clientRequestId,
+              },
+            },
+          ));
+        },
+      },
+    );
+
+    const originalRelations: RelationDraft[] = (character?.outgoingRelations ?? []).map((item) => ({
+      id: item.id,
+      updatedAt: item.updatedAt,
+      targetId: item.targetId,
+      relationType: item.relationType,
+      intimacy: item.intimacy,
+      description: item.description ?? "",
+      startDate: item.startDate ?? "",
+      endDate: item.endDate ?? "",
+    }));
+    const relationDraft = characterForm.relations.filter((item) => item.targetId);
+    await executeChildMutationPlan(
+      buildChildMutationPlan(originalRelations, relationDraft),
+      {
+        delete: async (item) => {
+          if (!item.id || !item.updatedAt) throw new Error("关系版本信息缺失");
+          requireApiData(await browserApi.DELETE(
+            "/api/v1/novels/{novel_id}/relations/{relation_id}",
+            {
+              params: { path: { novel_id: novelId, relation_id: item.id } },
+              body: { expectedUpdatedAt: item.updatedAt },
+            },
+          ));
+        },
+        update: async (item) => {
+          if (!item.id || !item.updatedAt) throw new Error("关系版本信息缺失");
+          requireApiData(await browserApi.PATCH(
+            "/api/v1/novels/{novel_id}/relations/{relation_id}",
+            {
+              params: { path: { novel_id: novelId, relation_id: item.id } },
+              body: {
+                relationType: item.relationType,
+                intimacy: item.intimacy,
+                description: item.description,
+                startDate: item.startDate,
+                endDate: item.endDate,
+                expectedUpdatedAt: item.updatedAt,
+              },
+            },
+          ));
+        },
+        create: async (item) => {
+          if (!item.clientRequestId) throw new Error("关系创建身份缺失");
+          requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/relations", {
+            params: { path: { novel_id: novelId } },
+            body: {
+              characterId,
+              targetId: item.targetId,
+              relationType: item.relationType,
+              intimacy: item.intimacy,
+              description: item.description,
+              startDate: item.startDate,
+              endDate: item.endDate,
+              clientRequestId: item.clientRequestId,
+            },
+          }));
+        },
+      },
+    );
+  };
+
   const handleDelete = () => {
-    if (!editingId) return;
+    const entity = currentEntity();
+    if (!editingId || !entity) return;
     startTransition(async () => {
-      if (activeTab === "characters") {
-        requireApiData(await browserApi.DELETE("/api/v1/novels/{novel_id}/characters/{entity_id}", {
-          params: { path: { novel_id: novelId, entity_id: editingId } },
-        }));
-      } else if (activeTab === "items") {
-        requireApiData(await browserApi.DELETE("/api/v1/novels/{novel_id}/items/{entity_id}", {
-          params: { path: { novel_id: novelId, entity_id: editingId } },
-        }));
-      } else if (activeTab === "locations") {
-        requireApiData(await browserApi.DELETE("/api/v1/novels/{novel_id}/locations/{entity_id}", {
-          params: { path: { novel_id: novelId, entity_id: editingId } },
-        }));
-      } else if (activeTab === "factions") {
-        requireApiData(await browserApi.DELETE("/api/v1/novels/{novel_id}/factions/{entity_id}", {
-          params: { path: { novel_id: novelId, entity_id: editingId } },
-        }));
-      } else if (activeTab === "glossaries") {
-        requireApiData(await browserApi.DELETE("/api/v1/novels/{novel_id}/glossary/{entity_id}", {
-          params: { path: { novel_id: novelId, entity_id: editingId } },
-        }));
+      setSaveError(null);
+      const request = { expectedUpdatedAt: entity.updatedAt };
+      try {
+        if (activeTab === "characters") {
+          requireApiData(await browserApi.DELETE("/api/v1/novels/{novel_id}/characters/{entity_id}", {
+            params: { path: { novel_id: novelId, entity_id: editingId } }, body: request,
+          }));
+        } else if (activeTab === "items") {
+          requireApiData(await browserApi.DELETE("/api/v1/novels/{novel_id}/items/{entity_id}", {
+            params: { path: { novel_id: novelId, entity_id: editingId } }, body: request,
+          }));
+        } else if (activeTab === "locations") {
+          requireApiData(await browserApi.DELETE("/api/v1/novels/{novel_id}/locations/{entity_id}", {
+            params: { path: { novel_id: novelId, entity_id: editingId } }, body: request,
+          }));
+        } else if (activeTab === "factions") {
+          requireApiData(await browserApi.DELETE("/api/v1/novels/{novel_id}/factions/{entity_id}", {
+            params: { path: { novel_id: novelId, entity_id: editingId } }, body: request,
+          }));
+        } else {
+          requireApiData(await browserApi.DELETE("/api/v1/novels/{novel_id}/glossary/{entity_id}", {
+            params: { path: { novel_id: novelId, entity_id: editingId } }, body: request,
+          }));
+        }
+        finishMutation();
+      } catch (error) {
+        showMutationError(error);
       }
-      closeModal();
-      onChanged?.();
-      router.refresh();
     });
   };
 
   const handleSubmit = () => {
     startTransition(async () => {
-      if (activeTab === "characters") {
+      setSaveError(null);
+      try {
+        if (activeTab === "characters") {
         const characterPayload = {
           name: characterForm.name,
           aliases: characterForm.aliases,
@@ -370,131 +545,81 @@ export function LorePanel({
           currentStatus: characterForm.currentStatus,
           statusNote: characterForm.statusNote,
         };
-        if (editingId) {
+        const character = editingId
+          ? characters.find((item) => item.id === editingId)
+          : undefined;
+        if (editingId && character) {
           requireApiData(await browserApi.PATCH(
             "/api/v1/novels/{novel_id}/characters/{entity_id}",
             {
               params: { path: { novel_id: novelId, entity_id: editingId } },
-              body: characterPayload,
+              body: { ...characterPayload, expectedUpdatedAt: character.updatedAt },
             },
           ));
-
-          // 处理经历：先删除旧的，再创建新的
-          const character = characters.find((c) => c.id === editingId);
-          if (character) {
-            for (const exp of character.experiences) {
-              requireApiData(await browserApi.DELETE(
-                "/api/v1/novels/{novel_id}/experiences/{experience_id}",
-                { params: { path: { novel_id: novelId, experience_id: exp.id } } },
-              ));
-            }
-          }
-          for (let i = 0; i < characterForm.experiences.length; i++) {
-            const exp = characterForm.experiences[i];
-            if (exp.content.trim()) {
-              requireApiData(await browserApi.POST(
-                "/api/v1/novels/{novel_id}/characters/{character_id}/experiences",
-                {
-                  params: { path: { novel_id: novelId, character_id: editingId } },
-                  body: { chapterId: exp.chapterId || null, content: exp.content, order: i },
-                },
-              ));
-            }
-          }
-
-          // 处理关系：先删除旧的，再创建新的
-          if (character) {
-            for (const rel of character.outgoingRelations) {
-              requireApiData(await browserApi.DELETE(
-                "/api/v1/novels/{novel_id}/relations/{relation_id}",
-                { params: { path: { novel_id: novelId, relation_id: rel.id } } },
-              ));
-            }
-          }
-          for (const rel of characterForm.relations) {
-            if (rel.targetId && rel.relationType) {
-              requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/relations", {
-                params: { path: { novel_id: novelId } },
-                body: { characterId: editingId, ...rel },
-              }));
-            }
-          }
+          await saveCharacterChildren(editingId, character);
         } else {
           const characterId = requireApiData(await browserApi.POST(
             "/api/v1/novels/{novel_id}/characters",
-            { params: { path: { novel_id: novelId } }, body: characterPayload },
+            {
+              params: { path: { novel_id: novelId } },
+              body: { ...characterPayload, clientRequestId: entityClientRequestId },
+            },
           )).id;
-
-          // 创建经历
-          if (characterId) {
-            for (let i = 0; i < characterForm.experiences.length; i++) {
-              const exp = characterForm.experiences[i];
-              if (exp.content.trim()) {
-                requireApiData(await browserApi.POST(
-                  "/api/v1/novels/{novel_id}/characters/{character_id}/experiences",
-                  {
-                    params: { path: { novel_id: novelId, character_id: characterId } },
-                    body: { chapterId: exp.chapterId || null, content: exp.content, order: i },
-                  },
-                ));
-              }
-            }
-
-            // 创建关系
-            for (const rel of characterForm.relations) {
-              if (rel.targetId && rel.relationType) {
-                requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/relations", {
-                  params: { path: { novel_id: novelId } },
-                  body: { characterId, ...rel },
-                }));
-              }
-            }
-          }
+          await saveCharacterChildren(characterId, undefined);
         }
       } else if (activeTab === "items") {
         if (editingId) {
+          const item = items.find((value) => value.id === editingId);
+          if (!item) throw new Error("物品不存在");
           requireApiData(await browserApi.PATCH("/api/v1/novels/{novel_id}/items/{entity_id}", {
-            params: { path: { novel_id: novelId, entity_id: editingId } }, body: itemForm,
+            params: { path: { novel_id: novelId, entity_id: editingId } }, body: { ...itemForm, expectedUpdatedAt: item.updatedAt },
           }));
         } else {
           requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/items", {
-            params: { path: { novel_id: novelId } }, body: itemForm,
+            params: { path: { novel_id: novelId } }, body: { ...itemForm, clientRequestId: entityClientRequestId },
           }));
         }
       } else if (activeTab === "locations") {
         if (editingId) {
+          const location = locations.find((value) => value.id === editingId);
+          if (!location) throw new Error("地点不存在");
           requireApiData(await browserApi.PATCH("/api/v1/novels/{novel_id}/locations/{entity_id}", {
-            params: { path: { novel_id: novelId, entity_id: editingId } }, body: locationForm,
+            params: { path: { novel_id: novelId, entity_id: editingId } }, body: { ...locationForm, expectedUpdatedAt: location.updatedAt },
           }));
         } else {
           requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/locations", {
-            params: { path: { novel_id: novelId } }, body: locationForm,
+            params: { path: { novel_id: novelId } }, body: { ...locationForm, clientRequestId: entityClientRequestId },
           }));
         }
       } else if (activeTab === "factions") {
         if (editingId) {
+          const faction = factions.find((value) => value.id === editingId);
+          if (!faction) throw new Error("势力不存在");
           requireApiData(await browserApi.PATCH("/api/v1/novels/{novel_id}/factions/{entity_id}", {
-            params: { path: { novel_id: novelId, entity_id: editingId } }, body: factionForm,
+            params: { path: { novel_id: novelId, entity_id: editingId } }, body: { ...factionForm, expectedUpdatedAt: faction.updatedAt },
           }));
         } else {
           requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/factions", {
-            params: { path: { novel_id: novelId } }, body: factionForm,
+            params: { path: { novel_id: novelId } }, body: { ...factionForm, clientRequestId: entityClientRequestId },
           }));
         }
       } else if (activeTab === "glossaries") {
         if (editingId) {
+          const glossary = glossaries.find((value) => value.id === editingId);
+          if (!glossary) throw new Error("术语不存在");
           requireApiData(await browserApi.PATCH("/api/v1/novels/{novel_id}/glossary/{entity_id}", {
-            params: { path: { novel_id: novelId, entity_id: editingId } }, body: glossaryForm,
+            params: { path: { novel_id: novelId, entity_id: editingId } }, body: { ...glossaryForm, expectedUpdatedAt: glossary.updatedAt },
           }));
         } else {
           requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/glossary", {
-            params: { path: { novel_id: novelId } }, body: glossaryForm,
+            params: { path: { novel_id: novelId } }, body: { ...glossaryForm, clientRequestId: entityClientRequestId },
           }));
         }
       }
-      closeModal();
-      onChanged?.();
-      router.refresh();
+        finishMutation();
+      } catch (error) {
+        showMutationError(error);
+      }
     });
   };
 
@@ -810,7 +935,15 @@ export function LorePanel({
                   ...characterForm,
                   relations: [
                     ...characterForm.relations,
-                    { targetId: "", relationType: "friend", intimacy: 50, description: "", startDate: "", endDate: "" },
+                    {
+                      clientRequestId: createClientRequestId(),
+                      targetId: "",
+                      relationType: "friend",
+                      intimacy: 50,
+                      description: "",
+                      startDate: "",
+                      endDate: "",
+                    },
                   ],
                 });
               }}>
@@ -836,6 +969,7 @@ export function LorePanel({
                       placeholder="目标角色"
                       size="small"
                       value={rel.targetId || undefined}
+                      disabled={Boolean(rel.id)}
                       onChange={(value) => {
                         const newRelations = [...characterForm.relations];
                         newRelations[index] = { ...newRelations[index], targetId: value };
@@ -944,7 +1078,12 @@ export function LorePanel({
                   ...characterForm,
                   experiences: [
                     ...characterForm.experiences,
-                    { chapterId: "", content: "", order: characterForm.experiences.length },
+                    {
+                      clientRequestId: createClientRequestId(),
+                      chapterId: "",
+                      content: "",
+                      order: characterForm.experiences.length,
+                    },
                   ],
                 });
               }}>
@@ -1379,6 +1518,7 @@ export function LorePanel({
             </div>
           </div>
           <div className="lore-fullscreen-footer">
+            {saveError ? <span className="form-error" role="alert">{saveError}</span> : null}
             <Space>
               {editingId && (
                 <Popconfirm

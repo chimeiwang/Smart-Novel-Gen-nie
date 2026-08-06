@@ -275,7 +275,7 @@ function WritingBibleEditor({
   );
 }
 
-export function LibraryPane({ novelId, appliedStyleId, active }: LibraryPaneProps) {
+export function LibraryPane({ novelId, active }: LibraryPaneProps) {
   const [activeItem, setActiveItem] = useState<LibraryItem>("characters");
   const router = useRouter();
   const [loader] = useState(() => new DeferredWorkspaceLoader({
@@ -365,7 +365,7 @@ export function LibraryPane({ novelId, appliedStyleId, active }: LibraryPaneProp
       return resources ? (
         <StylePanel
           novelId={novelId}
-          appliedStyleId={resources.appliedStyle?.id ?? appliedStyleId}
+          appliedStyleId={resources.appliedStyle?.id ?? null}
           styles={resources.styles}
           onChanged={() => refresh("resources")}
         />
