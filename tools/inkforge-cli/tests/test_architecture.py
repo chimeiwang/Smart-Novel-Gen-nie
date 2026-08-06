@@ -23,7 +23,9 @@ def _imported_modules(path: Path) -> set[str]:
 def test_long_commands_do_not_import_short_snapshot_business() -> None:
     long_root = CLI_PACKAGE / "commands" / "long"
     forbidden_names = {
+        "DATABASE_URL",
         "DirtySnapshotError",
+        "/internal/",
         "ensure_snapshot_clean",
         "export_snapshot",
         "load_snapshot_manifest",
