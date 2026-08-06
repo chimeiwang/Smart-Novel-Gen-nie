@@ -4,14 +4,23 @@ import type { components } from "@inkforge/api-client";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
+import {
+  advanceSingletonEditBaseline,
+  createSingletonEditBaseline,
+  markSingletonEditDirty,
+  observeSingletonEditVersion,
+  resolveSingletonEditValue,
+} from "@/features/workspace/singleton-edit-baseline";
 import { browserApi } from "@/lib/api/browser";
 import { ApiResponseError, requireApiData } from "@/lib/api/response";
 
 type PlotProgressDto = components["schemas"]["PlotProgressDto"];
-type PlotProgressDraft = Pick<
-  PlotProgressDto,
-  "currentStage" | "currentGoal" | "currentConflict" | "nextMilestone"
->;
+type PlotProgressDraft = {
+  currentStage: PlotProgressDto["currentStage"];
+  currentGoal: NonNullable<PlotProgressDto["currentGoal"]>;
+  currentConflict: NonNullable<PlotProgressDto["currentConflict"]>;
+  nextMilestone: NonNullable<PlotProgressDto["nextMilestone"]>;
+};
 
 type ProgressPanelProps = {
   novelId: string;
@@ -23,39 +32,54 @@ export function ProgressPanel({ novelId, progress, onChanged }: ProgressPanelPro
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [draft, setDraft] = useState<PlotProgressDraft | null>(null);
+  const [editBaseline, setEditBaseline] = useState(() => (
+    createSingletonEditBaseline(progress?.updatedAt ?? null)
+  ));
   const [saveError, setSaveError] = useState<string | null>(null);
-  const currentStage = draft?.currentStage ?? progress?.currentStage ?? "开篇";
-  const currentGoal = draft?.currentGoal ?? progress?.currentGoal ?? "";
-  const currentConflict = draft?.currentConflict ?? progress?.currentConflict ?? "";
-  const nextMilestone = draft?.nextMilestone ?? progress?.nextMilestone ?? "";
+  const currentEditBaseline = observeSingletonEditVersion(
+    editBaseline,
+    progress?.updatedAt ?? null,
+  );
+  const remoteDraft: PlotProgressDraft = {
+    currentStage: progress?.currentStage ?? "开篇",
+    currentGoal: progress?.currentGoal ?? "",
+    currentConflict: progress?.currentConflict ?? "",
+    nextMilestone: progress?.nextMilestone ?? "",
+  };
+  const currentDraft = resolveSingletonEditValue(
+    currentEditBaseline,
+    draft ?? remoteDraft,
+    remoteDraft,
+  );
+  const { currentStage, currentGoal, currentConflict, nextMilestone } = currentDraft;
 
   const setField = (field: keyof PlotProgressDraft, value: string) => {
-    setDraft((current) => ({
-      currentStage,
-      currentGoal,
-      currentConflict,
-      nextMilestone,
-      ...current,
+    setDraft({
+      ...currentDraft,
       [field]: value,
-    }));
+    });
+    setEditBaseline(markSingletonEditDirty(currentEditBaseline));
   };
 
   const handleSave = () => {
     startTransition(async () => {
       setSaveError(null);
       try {
-        requireApiData(await browserApi.PUT("/api/v1/novels/{novel_id}/plot-progress", {
+        const saved = requireApiData(await browserApi.PUT("/api/v1/novels/{novel_id}/plot-progress", {
           params: { path: { novel_id: novelId } },
           body: {
             currentStage,
             currentGoal,
             currentConflict,
             nextMilestone,
-            expectedUpdatedAt: progress?.updatedAt ?? null,
+            expectedUpdatedAt: currentEditBaseline.expectedUpdatedAt,
           },
         }));
 
-        setDraft(null);
+        setEditBaseline((current) => advanceSingletonEditBaseline(
+          observeSingletonEditVersion(current, progress?.updatedAt ?? null),
+          saved.updatedAt,
+        ));
         onChanged?.();
         router.refresh();
       } catch (error) {
@@ -80,24 +104,28 @@ export function ProgressPanel({ novelId, progress, onChanged }: ProgressPanelPro
         <input
           className="input"
           value={currentStage}
+          disabled={pending}
           onChange={(event) => setField("currentStage", event.target.value)}
           placeholder="当前阶段"
         />
         <input
           className="input"
           value={currentGoal}
+          disabled={pending}
           onChange={(event) => setField("currentGoal", event.target.value)}
           placeholder="当前目标"
         />
         <textarea
           className="textarea"
           value={currentConflict}
+          disabled={pending}
           onChange={(event) => setField("currentConflict", event.target.value)}
           placeholder="当前冲突"
         />
         <input
           className="input"
           value={nextMilestone}
+          disabled={pending}
           onChange={(event) => setField("nextMilestone", event.target.value)}
           placeholder="下一里程碑"
         />

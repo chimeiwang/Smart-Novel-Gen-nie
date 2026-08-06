@@ -23,6 +23,13 @@ import {
   type DeferredGroupState,
   type WorkspaceGroup,
 } from "./deferred-workspace";
+import {
+  advanceSingletonEditBaseline,
+  createSingletonEditBaseline,
+  markSingletonEditDirty,
+  observeSingletonEditVersion,
+  resolveSingletonEditValue,
+} from "./singleton-edit-baseline";
 import { subscribeWorkspaceInvalidation } from "./workspace-invalidation";
 
 type LoreItem = "characters" | "locations" | "factions" | "items" | "glossaries";
@@ -106,23 +113,32 @@ function PlanningTextEditor({
   title,
   description,
   initialValue,
+  updatedAt,
   placeholder,
   onSave,
 }: {
   title: string;
   description: string;
   initialValue: string;
+  updatedAt: string | null;
   placeholder: string;
-  onSave: (value: string) => Promise<void>;
+  onSave: (value: string, expectedUpdatedAt: string | null) => Promise<string>;
 }) {
   const [value, setValue] = useState(initialValue);
+  const [editBaseline, setEditBaseline] = useState(() => createSingletonEditBaseline(updatedAt));
   const [saveError, setSaveError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const currentEditBaseline = observeSingletonEditVersion(editBaseline, updatedAt);
+  const currentValue = resolveSingletonEditValue(currentEditBaseline, value, initialValue);
 
   const save = () => startTransition(async () => {
     setSaveError(null);
     try {
-      await onSave(value);
+      const savedUpdatedAt = await onSave(currentValue, currentEditBaseline.expectedUpdatedAt);
+      setEditBaseline((current) => advanceSingletonEditBaseline(
+        observeSingletonEditVersion(current, updatedAt),
+        savedUpdatedAt,
+      ));
     } catch (error) {
       setSaveError(creativeMaterialSaveError(error));
     }
@@ -136,12 +152,16 @@ function PlanningTextEditor({
       </div>
       <textarea
         className="textarea library-long-textarea"
-        value={value}
-        onChange={(event) => setValue(event.target.value)}
+        value={currentValue}
+        disabled={pending}
+        onChange={(event) => {
+          setValue(event.target.value);
+          setEditBaseline(markSingletonEditDirty(currentEditBaseline));
+        }}
         placeholder={placeholder}
       />
       <div className="row row-between">
-        <span className="muted">{countTextLength(value)} 字</span>
+        <span className="muted">{countTextLength(currentValue)} 字</span>
         <button
           className="button"
           type="button"
@@ -183,31 +203,50 @@ function WritingBibleEditor({
   onChanged: () => void;
 }) {
   const [form, setForm] = useState(() => toWritingBibleForm(writingBible));
+  const [editBaseline, setEditBaseline] = useState(() => (
+    createSingletonEditBaseline(writingBible?.updatedAt ?? null)
+  ));
   const [saveError, setSaveError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
+  const currentEditBaseline = observeSingletonEditVersion(
+    editBaseline,
+    writingBible?.updatedAt ?? null,
+  );
+  const currentForm = resolveSingletonEditValue(
+    currentEditBaseline,
+    form,
+    toWritingBibleForm(writingBible),
+  );
+
   const update = (field: keyof typeof form, value: string) => {
-    setForm((current) => ({ ...current, [field]: value }));
+    setForm({ ...currentForm, [field]: value });
+    setEditBaseline(markSingletonEditDirty(currentEditBaseline));
   };
   const selectProfile = (profile: StoryLengthProfile) => {
-    setForm((current) => ({
-      ...current,
+    setForm({
+      ...currentForm,
       storyLengthProfile: profile,
-      targetTotalWordCount: current.targetTotalWordCount
+      targetTotalWordCount: currentForm.targetTotalWordCount
         || (profile === "short_medium" ? "80000" : "1000000"),
-    }));
+    });
+    setEditBaseline(markSingletonEditDirty(currentEditBaseline));
   };
   const save = () => startTransition(async () => {
     setSaveError(null);
     try {
-      requireApiData(await browserApi.PUT("/api/v1/novels/{novel_id}/writing-bible", {
+      const saved = requireApiData(await browserApi.PUT("/api/v1/novels/{novel_id}/writing-bible", {
         params: { path: { novel_id: novelId } },
         body: {
-          ...form,
-          targetTotalWordCount: Number(form.targetTotalWordCount) || null,
-          expectedUpdatedAt: writingBible?.updatedAt ?? null,
+          ...currentForm,
+          targetTotalWordCount: Number(currentForm.targetTotalWordCount) || null,
+          expectedUpdatedAt: currentEditBaseline.expectedUpdatedAt,
         },
       }));
+      setEditBaseline((current) => advanceSingletonEditBaseline(
+        observeSingletonEditVersion(current, writingBible?.updatedAt ?? null),
+        saved.updatedAt,
+      ));
       onChanged();
       router.refresh();
     } catch (error) {
@@ -227,9 +266,10 @@ function WritingBibleEditor({
           return (
             <button
               key={profile}
-              className={`story-profile-option ${form.storyLengthProfile === profile ? "active" : ""}`}
+              className={`story-profile-option ${currentForm.storyLengthProfile === profile ? "active" : ""}`}
               type="button"
-              aria-pressed={form.storyLengthProfile === profile}
+              aria-pressed={currentForm.storyLengthProfile === profile}
+              disabled={pending}
               onClick={() => selectProfile(profile)}
             >
               <span>{config.label}</span>
@@ -241,15 +281,15 @@ function WritingBibleEditor({
       <div className="library-form-grid">
         <label className="stack">
           <span className="label">目标总字数</span>
-          <input className="input" inputMode="numeric" value={form.targetTotalWordCount} onChange={(event) => update("targetTotalWordCount", event.target.value)} />
+          <input className="input" inputMode="numeric" value={currentForm.targetTotalWordCount} disabled={pending} onChange={(event) => update("targetTotalWordCount", event.target.value)} />
         </label>
         <label className="stack">
           <span className="label">题材/频道</span>
-          <input className="input" value={form.genre} onChange={(event) => update("genre", event.target.value)} />
+          <input className="input" value={currentForm.genre} disabled={pending} onChange={(event) => update("genre", event.target.value)} />
         </label>
         <label className="stack">
           <span className="label">目标读者</span>
-          <input className="input" value={form.targetReaders} onChange={(event) => update("targetReaders", event.target.value)} />
+          <input className="input" value={currentForm.targetReaders} disabled={pending} onChange={(event) => update("targetReaders", event.target.value)} />
         </label>
       </div>
       {([
@@ -262,7 +302,7 @@ function WritingBibleEditor({
       ] as const).map(([field, label]) => (
         <label className="stack" key={field}>
           <span className="label">{label}</span>
-          <textarea className="textarea textarea-resize" value={form[field]} onChange={(event) => update(field, event.target.value)} />
+          <textarea className="textarea textarea-resize" value={currentForm[field]} disabled={pending} onChange={(event) => update(field, event.target.value)} />
         </label>
       ))}
       <div className="row row-end">
@@ -323,13 +363,15 @@ export function LibraryPane({ novelId, active }: LibraryPaneProps) {
       | "/api/v1/novels/{novel_id}/world-setting",
     content: string,
     expectedUpdatedAt: string | null,
-  ) => {
-    requireApiData(await browserApi.PUT(path, {
+  ): Promise<string> => {
+    const saved = requireApiData(await browserApi.PUT(path, {
       params: { path: { novel_id: novelId } },
       body: { content, expectedUpdatedAt },
     }));
     refresh("planning");
     router.refresh();
+    if (!saved.updatedAt) throw new Error("保存响应缺少资料版本，请刷新后重试。");
+    return saved.updatedAt;
   };
 
   const group = groupForTab(activeItem);
@@ -390,13 +432,13 @@ export function LibraryPane({ novelId, active }: LibraryPaneProps) {
       return <ProgressPanel novelId={novelId} progress={planning.plotProgress} onChanged={() => refresh("planning")} />;
     }
     if (activeItem === "storyProgress") {
-      return <PlanningTextEditor key="storyProgress" title="故事进展" description="记录故事整体进展、关键转折和伏笔。" initialValue={planning.storyProgress ?? ""} placeholder="记录故事的整体进展..." onSave={(value) => savePlanningText("/api/v1/novels/{novel_id}/story-progress", value, planning.storyProgressUpdatedAt)} />;
+      return <PlanningTextEditor key="storyProgress" title="故事进展" description="记录故事整体进展、关键转折和伏笔。" initialValue={planning.storyProgress ?? ""} updatedAt={planning.storyProgressUpdatedAt} placeholder="记录故事的整体进展..." onSave={(value, expectedUpdatedAt) => savePlanningText("/api/v1/novels/{novel_id}/story-progress", value, expectedUpdatedAt)} />;
     }
     if (activeItem === "storyBackground") {
-      return <PlanningTextEditor key="storyBackground" title="故事背景" description="描述故事的基础背景和核心冲突。" initialValue={planning.storyBackground?.content ?? ""} placeholder="描述故事的时代背景、起始事件和核心冲突..." onSave={(value) => savePlanningText("/api/v1/novels/{novel_id}/story-background", value, planning.storyBackground?.updatedAt ?? null)} />;
+      return <PlanningTextEditor key="storyBackground" title="故事背景" description="描述故事的基础背景和核心冲突。" initialValue={planning.storyBackground?.content ?? ""} updatedAt={planning.storyBackground?.updatedAt ?? null} placeholder="描述故事的时代背景、起始事件和核心冲突..." onSave={(value, expectedUpdatedAt) => savePlanningText("/api/v1/novels/{novel_id}/story-background", value, expectedUpdatedAt)} />;
     }
     if (activeItem === "worldSetting") {
-      return <PlanningTextEditor key="worldSetting" title="世界设定" description="描述世界类型、力量体系、规则和历史。" initialValue={planning.worldSetting?.content ?? ""} placeholder="描述世界的设定..." onSave={(value) => savePlanningText("/api/v1/novels/{novel_id}/world-setting", value, planning.worldSetting?.updatedAt ?? null)} />;
+      return <PlanningTextEditor key="worldSetting" title="世界设定" description="描述世界类型、力量体系、规则和历史。" initialValue={planning.worldSetting?.content ?? ""} updatedAt={planning.worldSetting?.updatedAt ?? null} placeholder="描述世界的设定..." onSave={(value, expectedUpdatedAt) => savePlanningText("/api/v1/novels/{novel_id}/world-setting", value, expectedUpdatedAt)} />;
     }
     return <WritingBibleEditor novelId={novelId} writingBible={planning.writingBible} onChanged={() => refresh("planning")} />;
   };
