@@ -15,6 +15,7 @@ from ..db.models import (
     ReviewArtifact,
     ReviewArtifactEvaluation,
     ReviewArtifactRevision,
+    WritingRunCommand,
     WritingTask,
 )
 from ..errors import ApiError
@@ -234,6 +235,7 @@ class ReviewRepository:
                         WritingTask.novelId == request.novelId,
                         Novel.userId == user_id,
                     )
+                    .with_for_update()
                 )
                 if task is None or (
                     request.chapterId is not None and task.chapterId != request.chapterId
@@ -243,6 +245,7 @@ class ReviewRepository:
                         code="ARTIFACT_TASK_MISMATCH",
                         message="待审核草案与写作任务资源不匹配",
                     )
+                await _require_current_writing_job(session, task.id, request.jobId)
                 existing: ReviewArtifact | None = None
                 if request.artifactKey is not None:
                     existing = await session.scalar(
@@ -326,6 +329,22 @@ class ReviewRepository:
     ) -> ReviewArtifactResponse:
         async with self._session_factory() as session:
             async with session.begin():
+                task = await session.scalar(
+                    select(WritingTask)
+                    .join(Novel, Novel.id == WritingTask.novelId)
+                    .where(
+                        WritingTask.id == request.taskId,
+                        WritingTask.novelId == request.novelId,
+                        Novel.userId == user_id,
+                    )
+                    .with_for_update()
+                )
+                if task is None:
+                    raise ApiError(
+                        status_code=403,
+                        code="ARTIFACT_TASK_MISMATCH",
+                        message="复审结论与待审核草案资源不匹配",
+                    )
                 artifact = await session.scalar(
                     select(ReviewArtifact)
                     .join(Novel, Novel.id == ReviewArtifact.novelId)
@@ -343,6 +362,7 @@ class ReviewRepository:
                         code="ARTIFACT_TASK_MISMATCH",
                         message="复审结论与待审核草案资源不匹配",
                     )
+                await _require_current_writing_job(session, task.id, request.jobId)
                 if artifact.revision != request.revision:
                     raise ApiError(
                         status_code=409,
@@ -392,6 +412,26 @@ async def _owned_artifact(
             .where(ReviewArtifact.id == artifact_id, Novel.userId == user_id)
         )
     ).scalar_one_or_none()
+
+
+async def _require_current_writing_job(
+    session: AsyncSession, task_id: str, job_id: str
+) -> None:
+    command = await session.scalar(
+        select(WritingRunCommand.id)
+        .where(
+            WritingRunCommand.id == job_id,
+            WritingRunCommand.taskId == task_id,
+            WritingRunCommand.status.in_(("pending", "submitted", "processing")),
+        )
+        .with_for_update()
+    )
+    if command is None:
+        raise ApiError(
+            status_code=409,
+            code="WRITING_JOB_MISMATCH",
+            message="待审核草案写入作业不是当前活动命令",
+        )
 
 
 def _parse_json(value: str | None, fallback: Any) -> Any:

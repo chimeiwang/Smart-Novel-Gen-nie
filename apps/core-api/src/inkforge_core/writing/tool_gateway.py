@@ -23,6 +23,7 @@ class ToolRequest:
     agent_id: str
     tool_name: str
     arguments: dict[str, Any]
+    job_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +35,10 @@ class ToolRegistration:
 
 class TaskBindingPort(Protocol):
     async def require_binding(self, user_id: str, novel_id: str, task_id: str) -> None: ...
+
+    async def require_writing_job(
+        self, user_id: str, novel_id: str, task_id: str, job_id: str
+    ) -> None: ...
 
 
 class ToolGateway:
@@ -67,6 +72,19 @@ class ToolGateway:
                 message="当前智能体无权调用该工具",
             )
         await self._authorizer.require_binding(request.user_id, request.novel_id, request.task_id)
+        if not registration.read_only:
+            if request.job_id is None:
+                raise ApiError(
+                    status_code=409,
+                    code="WRITING_JOB_MISMATCH",
+                    message="写入工具缺少当前作业标识",
+                )
+            await self._authorizer.require_writing_job(
+                request.user_id,
+                request.novel_id,
+                request.task_id,
+                request.job_id,
+            )
         result = await registration.handler(request)
         if not isinstance(result, dict):
             raise TypeError("工具处理器必须返回对象")
@@ -94,6 +112,7 @@ class ToolCallBody(BaseModel):
     novelId: str = Field(min_length=1, max_length=256)
     taskId: str = Field(min_length=1, max_length=256)
     runId: str = Field(min_length=1, max_length=256)
+    jobId: str | None = Field(default=None, min_length=1, max_length=256)
     agentId: str = Field(min_length=1, max_length=64)
     arguments: dict[str, JsonValue]
 
@@ -165,6 +184,7 @@ async def execute_internal_tool(
             agent_id=body.agentId,
             tool_name=tool_name,
             arguments=body.arguments,
+            job_id=body.jobId,
         )
     )
     return ToolCallResponse.model_validate({"result": result})

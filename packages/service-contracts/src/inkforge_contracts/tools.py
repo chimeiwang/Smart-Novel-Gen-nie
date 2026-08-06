@@ -13,6 +13,7 @@ class ToolCallRequest(BaseModel):
     runId: Identifier
     taskId: Identifier
     novelId: Identifier
+    jobId: Identifier | None = None
     agentId: CoreAgentId
     toolName: NonBlankString
     arguments: dict[str, JsonValue]

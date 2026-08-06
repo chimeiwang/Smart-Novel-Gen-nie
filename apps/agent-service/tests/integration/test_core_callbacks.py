@@ -272,6 +272,49 @@ async def test_core_client_uses_stable_idempotency_keys_for_retries() -> None:
 
 
 @pytest.mark.asyncio
+async def test_artifact_writes_bind_job_to_signed_body_and_idempotency_key() -> None:
+    signer = Signer()
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": "artifact-1", "revision": 1})
+
+    http = httpx.AsyncClient(
+        base_url="https://core.example",
+        transport=httpx.MockTransport(handler),
+    )
+    client = CoreServiceClient(http, signer)  # type: ignore[arg-type]
+    resource = RunResource(
+        userId="user-1",
+        novelId="novel-1",
+        taskId="task-1",
+        runId="run-1",
+        jobId="job-1",
+    )
+    payload = {
+        "runId": "run-1",
+        "taskId": "task-1",
+        "novelId": "novel-1",
+        "jobId": "untrusted-job",
+        "kind": "chapter_draft",
+    }
+
+    await client.create_artifact(resource, payload, idempotency_key="artifact-job-1")
+    await client.create_artifact(
+        resource.model_copy(update={"jobId": "job-2"}),
+        payload,
+        idempotency_key="artifact-job-2",
+    )
+
+    first_body = json.loads(requests[0].content)
+    assert first_body["jobId"] == "job-1"
+    assert signer.calls[0]["body"] == requests[0].content
+    assert signer.calls[0]["idempotency_key"] != signer.calls[1]["idempotency_key"]
+    await http.aclose()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("callback_name", ["event", "checkpoint", "complete", "fail"])
 async def test_writing_boundary_rejects_missing_callback_receipt(
     callback_name: str,

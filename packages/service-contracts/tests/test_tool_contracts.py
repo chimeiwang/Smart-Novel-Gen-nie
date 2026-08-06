@@ -21,7 +21,17 @@ def valid_tool_call_request() -> dict[str, object]:
 def test_valid_tool_call_request_preserves_camel_case() -> None:
     request = ToolCallRequest.model_validate(valid_tool_call_request())
 
-    assert request.model_dump(mode="json") == valid_tool_call_request()
+    assert request.model_dump(mode="json") == {
+        **valid_tool_call_request(),
+        "jobId": None,
+    }
+
+
+def test_tool_call_request_allows_optional_job_id() -> None:
+    payload = valid_tool_call_request()
+    payload["jobId"] = "command-1"
+
+    assert ToolCallRequest.model_validate(payload).jobId == "command-1"
 
 
 @pytest.mark.parametrize(

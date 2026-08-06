@@ -103,6 +103,29 @@ class WritingContextRepository:
                 message="写作任务资源绑定不匹配",
             )
 
+    async def require_writing_job(
+        self, user_id: str, novel_id: str, task_id: str, job_id: str
+    ) -> None:
+        async with self._session_factory() as session:
+            found = await session.scalar(
+                select(WritingRunCommand.id)
+                .join(WritingTask, WritingTask.id == WritingRunCommand.taskId)
+                .join(Novel, Novel.id == WritingTask.novelId)
+                .where(
+                    WritingRunCommand.id == job_id,
+                    WritingRunCommand.taskId == task_id,
+                    WritingTask.novelId == novel_id,
+                    Novel.userId == user_id,
+                    WritingRunCommand.status.in_(("pending", "submitted", "processing")),
+                )
+            )
+        if found is None:
+            raise ApiError(
+                status_code=409,
+                code="WRITING_JOB_MISMATCH",
+                message="写入工具作业不是当前活动命令",
+            )
+
     async def get_planning_context(self, user_id: str, task_id: str) -> dict[str, Any]:
         async with self._session_factory() as session:
             row = (

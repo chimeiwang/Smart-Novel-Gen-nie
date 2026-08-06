@@ -11,6 +11,9 @@ class FakeAuthorizer:
         self.called = True
         assert (user_id, novel_id, task_id) == ("user-1", "novel-1", "task-1")
 
+    async def require_writing_job(self, user_id: str, novel_id: str, task_id: str, job_id: str) -> None:
+        assert (user_id, novel_id, task_id, job_id) == ("user-1", "novel-1", "task-1", "command-1")
+
 
 @pytest.mark.asyncio
 async def test_gateway_rejects_unauthorized_agent_before_handler() -> None:
@@ -69,3 +72,30 @@ async def test_gateway_returns_complete_handler_result_after_binding_check() -> 
 
     assert authorizer.called is True
     assert result["content"] == complete
+
+
+@pytest.mark.asyncio
+async def test_gateway_requires_current_job_for_write_tools() -> None:
+    gateway = ToolGateway(FakeAuthorizer())
+    gateway.register("submit_artifact", {"写作"}, False, lambda _request: _result())
+
+    with pytest.raises(ApiError) as caught:
+        await gateway.execute(
+            ToolRequest(
+                user_id="user-1",
+                novel_id="novel-1",
+                task_id="task-1",
+                run_id="run-1",
+                job_id=None,
+                agent_id="写作",
+                tool_name="submit_artifact",
+                arguments={},
+            )
+        )
+
+    assert caught.value.status_code == 409
+    assert caught.value.code == "WRITING_JOB_MISMATCH"
+
+
+async def _result() -> dict[str, object]:
+    return {}

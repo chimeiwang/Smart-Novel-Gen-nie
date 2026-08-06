@@ -104,6 +104,7 @@ class CreateArtifactRequest(ReviewSchema):
     runId: str = Field(min_length=1, max_length=256)
     taskId: str = Field(min_length=1, max_length=256)
     novelId: str = Field(min_length=1, max_length=256)
+    jobId: str = Field(min_length=1, max_length=256)
     chapterId: str | None = Field(default=None, min_length=1, max_length=256)
     workflowRunId: str | None = Field(default=None, min_length=1, max_length=256)
     artifactKey: str | None = Field(default=None, min_length=1, max_length=500)
@@ -127,6 +128,7 @@ class SubmitArtifactEvaluationRequest(ReviewSchema):
     runId: str = Field(min_length=1, max_length=256)
     taskId: str = Field(min_length=1, max_length=256)
     novelId: str = Field(min_length=1, max_length=256)
+    jobId: str = Field(min_length=1, max_length=256)
     revision: int = Field(ge=1)
     evaluatorAgent: Literal["设定", "剧情", "写作", "校验", "编辑"]
     verdict: EvaluationVerdict

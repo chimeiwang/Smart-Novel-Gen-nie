@@ -79,6 +79,7 @@ class CoreServiceClient:
                 "novelId": resource.novelId,
                 "taskId": resource.taskId,
                 "runId": resource.runId,
+                "jobId": resource.jobId,
                 "agentId": agent_id,
                 "arguments": arguments,
             },
@@ -223,7 +224,7 @@ class CoreServiceClient:
         return await self._request(
             "POST",
             "/internal/v1/review-artifacts",
-            payload,
+            _with_writing_job(payload, resource),
             scope=ServiceScope.TOOL_WRITE,
             resource=resource,
             idempotency_key=idempotency_key,
@@ -240,7 +241,7 @@ class CoreServiceClient:
         return await self._request(
             "POST",
             f"/internal/v1/review-artifacts/{artifact_id}/evaluations",
-            payload,
+            _with_writing_job(payload, resource),
             scope=ServiceScope.TOOL_WRITE,
             resource=resource,
             idempotency_key=idempotency_key,
@@ -593,6 +594,10 @@ def _writing_job_id(resource: RunResource) -> str:
     if job_id is None or not job_id.strip():
         raise CoreServiceError("写作回调缺少作业标识", recoverable=False)
     return job_id
+
+
+def _with_writing_job(payload: dict[str, JsonValue], resource: RunResource) -> dict[str, JsonValue]:
+    return {**payload, "jobId": _writing_job_id(resource)}
 
 
 def _event_id(run_id: str, job_id: str, sequence: int, event: str) -> str:
