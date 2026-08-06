@@ -23,7 +23,7 @@
 - Create: `apps/web/src/features/lore/lore-list-presenter.ts`
 - Test: `apps/web/src/features/workspace/__tests__/lore-panel-list.test.ts`
 
-- [ ] **Step 1：先写五类字段映射的失败测试**
+- [x] **Step 1：先写五类字段映射的失败测试**
 
 测试使用完整 DTO 固定数据，明确断言：
 
@@ -46,13 +46,13 @@ assert.deepEqual(buildLoreListItems("characters", fixtures), [{
 
 地点断言父地点名称和气候；势力断言总部地点；物品断言稀有度、持有者以及“效果优先、描述回退”；术语断言分类和定义。另写一个缺失可选字段测试，确保不生成空标签和推测值。
 
-- [ ] **Step 2：运行测试并确认因展示模块不存在而失败**
+- [x] **Step 2：运行测试并确认因展示模块不存在而失败**
 
 Run: `npx tsx --test apps/web/src/features/workspace/__tests__/lore-panel-list.test.ts`
 
 Expected: FAIL，错误指向无法解析 `lore-list-presenter`，而不是测试语法错误。
 
-- [ ] **Step 3：实现最小纯函数展示模型**
+- [x] **Step 3：实现最小纯函数展示模型**
 
 实现以下公开契约：
 
@@ -78,7 +78,7 @@ export function buildLoreListItems(
 
 使用 `Map` 解析 `parentId` 和 `baseId`；只过滤空字符串和 `null`；人物摘要使用 `personality || statusNote`，物品摘要使用 `effect || description`。不裁剪任何文本。
 
-- [ ] **Step 4：运行展示模型测试并确认通过**
+- [x] **Step 4：运行展示模型测试并确认通过**
 
 Run: `npx tsx --test apps/web/src/features/workspace/__tests__/lore-panel-list.test.ts`
 
@@ -90,7 +90,7 @@ Expected: PASS，字段映射与缺失字段测试全部通过。
 - Modify: `apps/web/src/features/lore/lore-panel.tsx`
 - Test: `apps/web/src/features/workspace/__tests__/lore-panel-list.test.ts`
 
-- [ ] **Step 1：先写组件结构失败测试**
+- [x] **Step 1：先写组件结构失败测试**
 
 读取 `lore-panel.tsx` 源码并断言：
 
@@ -102,13 +102,13 @@ assert.match(source, /lore-summary-description/);
 assert.doesNotMatch(source, /className="list-item list-item-button"/);
 ```
 
-- [ ] **Step 2：运行测试并确认旧结构导致失败**
+- [x] **Step 2：运行测试并确认旧结构导致失败**
 
 Run: `npx tsx --test apps/web/src/features/workspace/__tests__/lore-panel-list.test.ts`
 
 Expected: FAIL，缺少 `lore-summary-item`，并仍匹配旧的 `list-item list-item-button`。
 
-- [ ] **Step 3：用统一摘要行重写 `renderList()`**
+- [x] **Step 3：用统一摘要行重写 `renderList()`**
 
 在空状态判断之后调用 `buildLoreListItems(activeTab, data)`，统一渲染：
 
@@ -129,7 +129,7 @@ Expected: FAIL，缺少 `lore-summary-item`，并仍匹配旧的 `list-item list
 
 保留原 `openEditModal(item.id)`，不修改新增、编辑、删除和表单代码。
 
-- [ ] **Step 4：运行组件结构和展示模型测试并确认通过**
+- [x] **Step 4：运行组件结构和展示模型测试并确认通过**
 
 Run: `npx tsx --test apps/web/src/features/workspace/__tests__/lore-panel-list.test.ts`
 
@@ -141,7 +141,7 @@ Expected: PASS。
 - Modify: `apps/web/src/app/globals.css`
 - Test: `apps/web/src/features/workspace/__tests__/lore-panel-list.test.ts`
 
-- [ ] **Step 1：先写 CSS 行为失败测试**
+- [x] **Step 1：先写 CSS 行为失败测试**
 
 读取 `globals.css` 并断言存在：
 
@@ -149,27 +149,27 @@ Expected: PASS。
 assert.match(css, /\.lore-summary-item\s*\{/);
 assert.match(css, /\.lore-summary-description\s*\{[\s\S]*?-webkit-line-clamp:\s*2/);
 assert.match(css, /\.lore-summary-item:focus-visible/);
-assert.match(css, /@media \(max-width:\s*900px\)[\s\S]*?\.lore-summary-item/);
+assert.match(css, /@container lore-panel \(max-width:\s*640px\)[\s\S]*?\.lore-summary-item/);
 assert.match(css, /@media \(prefers-reduced-motion:\s*reduce\)/);
 ```
 
-- [ ] **Step 2：运行测试并确认专用样式不存在而失败**
+- [x] **Step 2：运行测试并确认专用样式不存在而失败**
 
 Run: `npx tsx --test apps/web/src/features/workspace/__tests__/lore-panel-list.test.ts`
 
 Expected: FAIL，缺少 `.lore-summary-item` 和两行截断规则。
 
-- [ ] **Step 3：实现摘要列表样式**
+- [x] **Step 3：实现摘要列表样式**
 
-使用现有 `--panel`、`--panel-soft`、`--line`、`--text`、`--muted`、`--accent` 等变量实现：桌面四列网格、清晰边界与内边距、弱悬停态、可见焦点、状态标签、两行截断；`900px` 以下把摘要区换到名称下方；减少动态偏好下取消位移。
+使用现有 `--panel`、`--panel-soft`、`--border`、`--text`、`--muted`、`--accent` 等变量实现：桌面四列网格、清晰边界与内边距、弱悬停态、可见焦点、状态标签、两行截断；设定面板容器宽度低于 `640px` 时把摘要区换到名称下方；减少动态偏好下取消位移。
 
-- [ ] **Step 4：运行定向测试并确认通过**
+- [x] **Step 4：运行定向测试并确认通过**
 
 Run: `npx tsx --test apps/web/src/features/workspace/__tests__/lore-panel-list.test.ts`
 
 Expected: PASS。
 
-- [ ] **Step 5：运行完整前端验证**
+- [x] **Step 5：运行完整前端验证**
 
 Run: `npm run test:web`
 
@@ -183,7 +183,7 @@ Run: `npm run lint`
 
 Expected: ESLint 通过且没有新增错误。
 
-- [ ] **Step 6：核对最终差异并提交实现**
+- [x] **Step 6：核对最终差异并提交实现**
 
 Run: `git diff --check`
 

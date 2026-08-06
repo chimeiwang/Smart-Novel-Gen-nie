@@ -1313,6 +1313,183 @@ body:has(.marketing-page) .user-info-bar {
   background: transparent;
 }
 
+/* 设定库摘要列表 */
+.lore-panel-root {
+  min-width: 0;
+  container-type: inline-size;
+  container-name: lore-panel;
+}
+
+.lore-list-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.lore-list-heading strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.lore-list-heading span {
+  color: var(--subtle);
+  font-size: 12px;
+}
+
+.lore-summary-item {
+  appearance: none;
+  display: grid;
+  grid-template-columns: 38px minmax(120px, 0.72fr) minmax(0, 1.55fr) 18px;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  min-height: 76px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+  box-shadow: var(--shadow);
+}
+
+.lore-summary-item:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-subtle);
+  transform: translateY(-1px);
+}
+
+.lore-summary-item:focus-visible {
+  border-color: var(--accent);
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+.lore-summary-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-soft);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.lore-summary-heading,
+.lore-summary-content {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.lore-summary-heading {
+  gap: 3px;
+}
+
+.lore-summary-content {
+  gap: 6px;
+}
+
+.lore-summary-name,
+.lore-summary-secondary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lore-summary-name {
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 20px;
+}
+
+.lore-summary-secondary {
+  color: var(--subtle);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.lore-summary-tags {
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.lore-summary-tag {
+  max-width: 160px;
+  padding: 2px 6px;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lore-summary-tag-status {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.lore-summary-tag-warning {
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+.lore-summary-description {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.lore-summary-arrow {
+  color: var(--subtle);
+  font-size: 18px;
+  line-height: 1;
+  text-align: right;
+}
+
+@container lore-panel (max-width: 640px) {
+  .lore-summary-item {
+    grid-template-columns: 36px minmax(0, 1fr) 18px;
+    align-items: start;
+  }
+
+  .lore-summary-content {
+    grid-column: 2 / 3;
+  }
+
+  .lore-summary-arrow {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+    align-self: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lore-summary-item,
+  .lore-summary-item:hover {
+    transition: none;
+    transform: none;
+  }
+}
+
 /* 标签页 */
 .tabs {
   display: flex;

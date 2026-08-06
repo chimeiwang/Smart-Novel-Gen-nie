@@ -7,8 +7,9 @@ import { Form, Input, Select, InputNumber, Button, Space, Divider, Popconfirm, C
 
 import { browserApi } from "@/lib/api/browser";
 import { requireApiData } from "@/lib/api/response";
+import { buildLoreListItems, type LoreListKind } from "./lore-list-presenter";
 
-type LoreTabKey = "characters" | "items" | "locations" | "factions" | "glossaries";
+type LoreTabKey = LoreListKind;
 
 // 角色状态枚举
 type CharacterStatus = "active" | "missing" | "dead" | "imprisoned" | "unknown";
@@ -16,13 +17,12 @@ type CharacterStatus = "active" | "missing" | "dead" | "imprisoned" | "unknown";
 // 关系类型枚举
 type RelationType = "family" | "master_student" | "friend" | "enemy" | "ally" | "lover" | "rival" | "subordinate" | "acquaintance" | "other";
 
-// 状态显示名称
-const STATUS_LABELS: Record<CharacterStatus, string> = {
-  active: "活跃",
-  missing: "失踪",
-  dead: "死亡",
-  imprisoned: "被囚禁",
-  unknown: "未知",
+const LORE_TAB_LABELS: Record<LoreTabKey, string> = {
+  characters: "角色",
+  items: "物品",
+  locations: "地点",
+  factions: "势力",
+  glossaries: "术语",
 };
 
 // 关系类型显示名称
@@ -508,120 +508,49 @@ export function LorePanel({
   };
 
   const renderList = () => {
-    if (activeTab === "characters") {
-      if (characters.length === 0) {
-        return <div className="empty">当前还没有角色设定，可以新增一个。</div>;
-      }
-      return characters.map((character) => (
-        <button
-          key={character.id}
-          className="list-item list-item-button"
-          type="button"
-          onClick={() => openEditModal(character.id)}
-        >
-          <div className="meta">
-            <span className={`badge ${character.currentStatus !== "active" ? "badge-warning" : ""}`}>
-              {STATUS_LABELS[character.currentStatus]}
+    const listItems = buildLoreListItems(activeTab, {
+      characters,
+      items,
+      locations,
+      factions,
+      glossaries,
+    });
+
+    if (listItems.length === 0) {
+      return <div className="empty">当前还没有{LORE_TAB_LABELS[activeTab]}设定，可以新增一个。</div>;
+    }
+
+    return listItems.map((item) => (
+      <button
+        key={item.id}
+        className="lore-summary-item"
+        type="button"
+        aria-label={item.ariaLabel}
+        onClick={() => openEditModal(item.id)}
+      >
+        <span className="lore-summary-mark" aria-hidden="true">{item.initial}</span>
+        <span className="lore-summary-heading">
+          <strong className="lore-summary-name">{item.name}</strong>
+          {item.secondary ? <span className="lore-summary-secondary">{item.secondary}</span> : null}
+        </span>
+        <span className="lore-summary-content">
+          {item.tags.length > 0 ? (
+            <span className="lore-summary-tags">
+              {item.tags.map((tag, index) => (
+                <span
+                  className={`lore-summary-tag lore-summary-tag-${tag.tone}`}
+                  key={`${tag.tone}:${tag.label}:${index}`}
+                >
+                  {tag.label}
+                </span>
+              ))}
             </span>
-            <strong>{character.name}</strong>
-            {character.powerLevel && <span className="muted">{character.powerLevel}</span>}
-            {character.identity && <span className="muted">{character.identity}</span>}
-            {character.faction && <span className="muted">所属：{character.faction.name}</span>}
-          </div>
-          <div className="meta">
-            {character.personality && <span className="muted">{character.personality}</span>}
-            {character.statusNote && <span className="muted-warning">{character.statusNote}</span>}
-          </div>
-        </button>
-      ));
-    }
-
-    if (activeTab === "items") {
-      if (items.length === 0) {
-        return <div className="empty">当前还没有物品设定，可以新增一个。</div>;
-      }
-      return items.map((item) => (
-        <button
-          key={item.id}
-          className="list-item list-item-button"
-          type="button"
-          onClick={() => openEditModal(item.id)}
-        >
-          <div className="meta">
-            <span className="badge">物品</span>
-            <strong>{item.name}</strong>
-            {item.type && <span className="muted">{item.type}</span>}
-            {item.rarity && <span className="muted">{item.rarity}</span>}
-          </div>
-          {item.effect && <div className="muted">{item.effect}</div>}
-        </button>
-      ));
-    }
-
-    if (activeTab === "locations") {
-      if (locations.length === 0) {
-        return <div className="empty">当前还没有地点设定，可以新增一个。</div>;
-      }
-      return locations.map((location) => (
-        <button
-          key={location.id}
-          className="list-item list-item-button"
-          type="button"
-          onClick={() => openEditModal(location.id)}
-        >
-          <div className="meta">
-            <span className="badge">地点</span>
-            <strong>{location.name}</strong>
-            {location.type && <span className="muted">{location.type}</span>}
-          </div>
-          {location.description && <div className="muted">{location.description}</div>}
-        </button>
-      ));
-    }
-
-    if (activeTab === "factions") {
-      if (factions.length === 0) {
-        return <div className="empty">当前还没有势力设定，可以新增一个。</div>;
-      }
-      return factions.map((faction) => (
-        <button
-          key={faction.id}
-          className="list-item list-item-button"
-          type="button"
-          onClick={() => openEditModal(faction.id)}
-        >
-          <div className="meta">
-            <span className="badge">势力</span>
-            <strong>{faction.name}</strong>
-            {faction.type && <span className="muted">{faction.type}</span>}
-          </div>
-        </button>
-      ));
-    }
-
-    if (activeTab === "glossaries") {
-      if (glossaries.length === 0) {
-        return <div className="empty">当前还没有术语设定，可以新增一个。</div>;
-      }
-      return glossaries.map((glossary) => (
-        <button
-          key={glossary.id}
-          className="list-item list-item-button"
-          type="button"
-          onClick={() => openEditModal(glossary.id)}
-        >
-          <div className="meta">
-            <span className="badge">术语</span>
-            <strong>{glossary.term}</strong>
-            {glossary.category && <span className="muted">{glossary.category}</span>}
-          </div>
-          <div className="muted">{glossary.definition}</div>
-        </button>
-      ));
-    }
-
-    // 故事背景和世界设定直接编辑，不需要列表
-    return null;
+          ) : null}
+          {item.summary ? <span className="lore-summary-description">{item.summary}</span> : null}
+        </span>
+        <span className="lore-summary-arrow" aria-hidden="true">›</span>
+      </button>
+    ));
   };
 
   const renderForm = () => {
@@ -1382,9 +1311,12 @@ export function LorePanel({
         <p className="muted">管理角色、物品、地点、势力、术语等设定</p>
       </div>
       <div className="row row-between">
-        <div className="muted">当前分类 {getListCount()} 条</div>
+        <div className="lore-list-heading">
+          <strong>{LORE_TAB_LABELS[activeTab]}设定</strong>
+          <span>共 {getListCount()} 条</span>
+        </div>
         <button className="button secondary" type="button" onClick={openCreateModal}>
-          + 新增设定
+          + 新增{LORE_TAB_LABELS[activeTab]}
         </button>
       </div>
       {showTabs ? <div className="tabs">
