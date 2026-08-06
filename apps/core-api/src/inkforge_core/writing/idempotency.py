@@ -138,6 +138,13 @@ def parse_command_envelope(
     return metadata
 
 
+def logical_command_kind(persisted_kind: str, payload: str | object) -> str:
+    parsed = _json_object(payload)
+    metadata = parsed.get("_inkforgeCommand") if parsed is not None else None
+    logical_kind = metadata.get("commandKind") if isinstance(metadata, dict) else None
+    return logical_kind if isinstance(logical_kind, str) and logical_kind else persisted_kind
+
+
 async def resolve_idempotency(
     session: AsyncSession,
     *,

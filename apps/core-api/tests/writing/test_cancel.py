@@ -6,6 +6,7 @@ import pytest
 from inkforge_core.db.models import WritingRunCommand
 from inkforge_core.writing.cancellation import (
     WritingRunCancellationService,
+    _retire_active_command_for_cancel,
     build_cancel_command_payload,
     build_cancelled_command_result,
 )
@@ -133,3 +134,39 @@ async def test_cancel_service_only_kicks_pending_commands() -> None:
 
     assert response.commandId == "cancel-1"
     assert dispatcher.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_cancel_flushes_retired_active_command_before_inserting_cancel() -> None:
+    current = WritingRunCommand(
+        id="command-1",
+        taskId="task-1",
+        kind="start",
+        status="processing",
+    )
+
+    class Session:
+        def __init__(self) -> None:
+            self.flush_count = 0
+
+        async def flush(self) -> None:
+            assert current.status == "failed"
+            assert current.completedAt is not None
+            assert current.resultJson is not None
+            self.flush_count += 1
+
+    session = Session()
+
+    await _retire_active_command_for_cancel(  # type: ignore[arg-type]
+        session,
+        current,
+        cancel_command_id="cancel-1",
+    )
+
+    assert session.flush_count == 1
+    assert current.lastError == "WRITING_RUN_CANCELLED_BY_USER"
+    assert json.loads(current.resultJson or "{}") == {
+        "code": "WRITING_RUN_CANCELLED_BY_USER",
+        "cancelCommandId": "cancel-1",
+        "cancelledJobId": "command-1",
+    }

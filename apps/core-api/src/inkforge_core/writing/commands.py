@@ -38,6 +38,7 @@ from .idempotency import (
     acquire_idempotency_lock,
     command_idempotency_key,
     enveloped_command_idempotency_key,
+    logical_command_kind,
     normalize_json_value,
     parse_command_envelope,
     request_fingerprint,
@@ -996,7 +997,7 @@ class WritingRunCommandRepository:
                         message="写作命令不存在",
                     )
                 command, task, owner_id = row
-                if command.kind != "cancel":
+                if logical_command_kind(command.kind, command.payloadJson) != "cancel":
                     raise ApiError(
                         status_code=409,
                         code="WRITING_COMMAND_STATE_CONFLICT",
@@ -1591,7 +1592,10 @@ def _command_record(
     return WritingCommandRecord(
         id=command.id,
         task=_task_record(task, user_id),
-        kind=cast(WritingCommandKind, command.kind),
+        kind=cast(
+            WritingCommandKind,
+            logical_command_kind(command.kind, command.payloadJson),
+        ),
         payload=payload,
         status=cast(WritingCommandStatus, command.status),
         attempt_count=command.attemptCount,

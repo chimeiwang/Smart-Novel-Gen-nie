@@ -16,6 +16,7 @@ from .idempotency import (
     JsonValue,
     acquire_idempotency_lock,
     enveloped_command_idempotency_key,
+    logical_command_kind,
     request_fingerprint,
     resolve_idempotency,
 )
@@ -168,17 +169,10 @@ class WritingRunCancellationRepository:
                     if not terminal and current is not None:
                         cancelled_command_id = current.id
                         cancelled_job_id = current.id
-                        now = utc_now()
-                        current.status = "failed"
-                        current.completedAt = now
-                        current.updatedAt = now
-                        current.lastError = "WRITING_RUN_CANCELLED_BY_USER"
-                        current.resultJson = _dump_json(
-                            build_cancelled_command_result(
-                                current,
-                                cancel_command_id=cancel_id,
-                                cancelled_job_id=cancelled_job_id,
-                            )
+                        await _retire_active_command_for_cancel(
+                            session,
+                            current,
+                            cancel_command_id=cancel_id,
                         )
                     else:
                         terminal = True
@@ -192,7 +186,7 @@ class WritingRunCancellationRepository:
                     command = WritingRunCommand(
                         id=cancel_id,
                         taskId=task.id,
-                        kind="cancel",
+                        kind="resume",
                         payloadJson=_dump_json(payload),
                         resultJson=(
                             _dump_json(
@@ -268,7 +262,11 @@ class WritingRunCancellationRepository:
         if row is None:
             raise _idempotency_reused(client_request_id)
         command, task, owner_id = cast(tuple[WritingRunCommand, WritingTask, str], row)
-        if owner_id != user_id or task.id != task_id or command.kind != "cancel":
+        if (
+            owner_id != user_id
+            or task.id != task_id
+            or logical_command_kind(command.kind, command.payloadJson) != "cancel"
+        ):
             raise _idempotency_reused(client_request_id)
         payload = _json_object(command.payloadJson)
         job = payload.get("job")
@@ -377,6 +375,27 @@ def build_cancel_command_payload(
             "cancelledJobId": cancelled_job_id,
         },
     }
+
+
+async def _retire_active_command_for_cancel(
+    session: AsyncSession,
+    command: WritingRunCommand,
+    *,
+    cancel_command_id: str,
+) -> None:
+    now = utc_now()
+    command.status = "failed"
+    command.completedAt = now
+    command.updatedAt = now
+    command.lastError = "WRITING_RUN_CANCELLED_BY_USER"
+    command.resultJson = _dump_json(
+        build_cancelled_command_result(
+            command,
+            cancel_command_id=cancel_command_id,
+            cancelled_job_id=command.id,
+        )
+    )
+    await session.flush()
 
 
 def build_cancelled_command_result(

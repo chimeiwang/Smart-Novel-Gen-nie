@@ -384,7 +384,9 @@ POST /api/v1/writing/runs/{taskId}/cancel
    `409 ARTIFACT_DECISION_REQUIRED`；取消不能暗中删除草案，用户必须显式执行 discard。
 4. 对其他非终态任务，Core 在同一事务中把旧活动命令置为 `failed`，result 记录
    `code=WRITING_RUN_CANCELLED_BY_USER`、旧 jobId 和新 cancel commandId；随后创建 pending
-   `cancel` WritingRunCommand，payload 保存被取消的 command/job ID。任务 phase 暂不进入终态。
+   `cancel` WritingRunCommand，payload 保存被取消的 command/job ID。插入取消命令前必须先把旧命令
+   的终态更新 flush 到 PostgreSQL，避免活动命令部分唯一索引把同一事务误判为两条活动命令。任务
+   phase 暂不进入终态。
 5. cancel dispatcher 调用 Agent Service 的签名 DELETE。Redis 暂时不可用时 cancel command 保持
    pending 并重试；这期间旧 job 的 Core 写型副作用已经因“当前命令身份”变化而被拒绝。
 6. Agent 队列对尚未 enqueue 的 job 也必须写入 `cancelled` tombstone，并按现有终态保留期回收；同一
@@ -412,7 +414,11 @@ result 及前一个 command 身份，不复制 observedAt）。outcome projector
 事务中按 `taskId + jobId` 复核当前命令。这样即使 Agent 尚未观察到取消，正式副作用也由 Core 硬拒绝。
 
 `WritingRunCommand.status` 继续使用 pending、submitted、processing、succeeded、failed；不增加
-cancelled 命令状态。取消含义由 command kind、result 和 outcome 表达。
+cancelled 命令状态。现有 PostgreSQL `WritingRunCommand_kind_check` 只允许 `start`、`resume` 和
+`artifact_decision`，且本项目禁止修改正式结构，因此取消命令以 `resume` 作为物理兼容值持久化，
+`_inkforgeCommand.commandKind=cancel` 才是权威逻辑命令类型。所有投递、重放和 outcome 投影必须通过
+统一解析函数读取逻辑类型，不能直接用物理 `kind` 判断取消语义。取消含义由逻辑 command kind、result
+和 outcome 表达。
 
 ## ReviewArtifact 来源版本保护
 

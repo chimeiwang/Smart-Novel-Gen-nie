@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ..db.models import Novel, ReviewArtifact, WritingRunCommand, WritingTask
 from ..errors import ApiError
 from ..http.cursor import InvalidCursorError, decode_run_cursor, encode_run_cursor
+from .idempotency import logical_command_kind
 from .outcome import WritingRunOutcomeFacts, project_writing_run_outcome
 from .recoverability import resolve_recoverable_checkpoint
 from .schemas import (
@@ -357,7 +358,11 @@ def project_run_status(
             task_updated_at=task.updatedAt,
             workflow="short_medium" if workflow == "short_medium" else "long_form",
             command_id=current.id if current is not None else None,
-            command_kind=current.kind if current is not None else None,
+            command_kind=(
+                logical_command_kind(current.kind, current.payloadJson)
+                if current is not None
+                else None
+            ),
             command_status=current.status if current is not None else None,
             command_updated_at=current.updatedAt if current is not None else None,
             operation=operation,
@@ -482,7 +487,11 @@ def _resolve_effective_command(
     current: WritingRunCommand | None,
     commands: list[WritingRunCommand],
 ) -> tuple[WritingRunCommand | None, bool | None, bool]:
-    if current is None or current.kind != "cancel" or current.status != "succeeded":
+    if (
+        current is None
+        or logical_command_kind(current.kind, current.payloadJson) != "cancel"
+        or current.status != "succeeded"
+    ):
         return current, None, True
     result = _full_result(current)
     effective = result.get("effective")
@@ -493,7 +502,7 @@ def _resolve_effective_command(
     by_id = {command.id: command for command in commands}
     seen = {current.id}
     candidate = current
-    while candidate.kind == "cancel":
+    while logical_command_kind(candidate.kind, candidate.payloadJson) == "cancel":
         if candidate.status == "failed":
             return candidate, False, True
         if candidate.status != "succeeded":

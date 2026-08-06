@@ -11,6 +11,7 @@ from inkforge_core.writing.idempotency import (
     canonical_json_bytes,
     command_idempotency_key,
     enveloped_command_idempotency_key,
+    logical_command_kind,
     normalize_json_value,
     parse_command_envelope,
     request_fingerprint,
@@ -157,6 +158,20 @@ def test_command_envelope_parser_is_strict_and_ignores_legacy_payload() -> None:
     malformed["_inkforgeCommand"]["unknown"] = True
     with pytest.raises(ValueError, match="_inkforgeCommand"):
         parse_command_envelope(malformed)
+
+
+def test_logical_command_kind_prefers_enveloped_cancel_over_physical_resume() -> None:
+    payload = command_envelope(
+        "cancel-request-0001",
+        "a" * 64,
+        command_kind="cancel",
+    )
+
+    assert logical_command_kind("resume", payload) == "cancel"
+
+
+def test_logical_command_kind_keeps_legacy_physical_kind_without_envelope() -> None:
+    assert logical_command_kind("start", '{"job":{}}') == "start"
 
 
 @pytest.mark.asyncio
