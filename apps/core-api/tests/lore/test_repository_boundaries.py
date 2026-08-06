@@ -77,13 +77,17 @@ async def test_null_owner_is_always_rejected() -> None:
 @pytest.mark.parametrize("method_name", ["create_entity", "update_entity"])
 def test_entity_mutation_locks_novel_before_validating_links(method_name: str) -> None:
     source = inspect.getsource(getattr(LoreRepository, method_name))
-    assert source.index("_lock_novel") < source.index("_validate_entity_links")
+    helper_name = f"_{method_name}_in_session"
+    assert source.index("_lock_novel") < source.index(helper_name)
+    assert "_validate_entity_links" in inspect.getsource(
+        getattr(LoreRepository, helper_name)
+    )
     assert "pg_advisory_xact_lock(:key)" in inspect.getsource(LoreRepository._lock_novel)
 
 
 def test_entity_update_and_delete_lock_target_row_for_cas() -> None:
-    update_source = inspect.getsource(LoreRepository.update_entity)
-    delete_source = inspect.getsource(LoreRepository.delete_entity)
+    update_source = inspect.getsource(LoreRepository._update_entity_in_session)
+    delete_source = inspect.getsource(LoreRepository._delete_entity_in_session)
     assert ".with_for_update()" in update_source
     assert ".with_for_update()" in delete_source
     assert "require_expected_updated_at" in update_source
@@ -93,6 +97,15 @@ def test_entity_update_and_delete_lock_target_row_for_cas() -> None:
 def test_entity_delete_locks_novel_before_counting_references_and_deleting() -> None:
     source = inspect.getsource(LoreRepository.delete_entity)
     lock_index = source.index("_lock_novel")
-    assert lock_index < source.index("_entity_delete_references")
-    assert lock_index < source.index("delete(model)")
+    assert lock_index < source.index("_delete_entity_in_session")
+    helper_source = inspect.getsource(LoreRepository._delete_entity_in_session)
+    assert "_entity_delete_references" in helper_source
+    assert "delete(model)" in helper_source
     assert "pg_advisory_xact_lock(:key)" in inspect.getsource(LoreRepository._lock_novel)
+
+
+def test_entity_batch_uses_one_transaction_and_one_novel_lock() -> None:
+    source = inspect.getsource(LoreRepository.apply_entity_mutations)
+    assert source.count("session.begin()") == 1
+    assert source.count("_lock_novel") == 1
+    assert source.index("_lock_novel") < source.index("for mutation in mutations")

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +23,7 @@ from inkforge_core.db.models import (
     WritingStyle,
 )
 from inkforge_core.errors import ApiError
-from inkforge_core.lore.repository import LoreRepository
+from inkforge_core.lore.repository import EntityMutation, LoreRepository
 from inkforge_core.lore.schemas import (
     CreateCharacterRequest,
     CreateCharacterResponse,
@@ -209,6 +209,10 @@ async def test_each_entity_has_stable_create_identity_and_cas(
             created["updatedAt"],
         )
         assert unchanged["updatedAt"] == created["updatedAt"]
+        replayed_after_noop = await repository.create_entity(
+            "novel-1", "user-1", kind, request_id, created_fields
+        )
+        assert replayed_after_noop["effective"] is False
 
         changed = await repository.update_entity(
             "novel-1",
@@ -238,6 +242,21 @@ async def test_each_entity_has_stable_create_identity_and_cas(
             )
         assert replay_after_update.value.code == "RESOURCE_CREATE_CONFLICT"
 
+        restored = await repository.update_entity(
+            "novel-1",
+            "user-1",
+            kind,
+            created["id"],
+            {name: created_fields[name] for name in changed_fields},
+            changed["updatedAt"],
+        )
+        assert restored["updatedAt"] > changed["updatedAt"]
+        with pytest.raises(ApiError) as replay_after_restore:
+            await repository.create_entity(
+                "novel-1", "user-1", kind, request_id, created_fields
+            )
+        assert replay_after_restore.value.code == "RESOURCE_CREATE_CONFLICT"
+
         with pytest.raises(ApiError) as stale_delete:
             await repository.delete_entity(
                 "novel-1", "user-1", kind, created["id"], created["updatedAt"]
@@ -245,7 +264,7 @@ async def test_each_entity_has_stable_create_identity_and_cas(
         assert stale_delete.value.code == "LORE_ENTITY_VERSION_CONFLICT"
 
         deleted = await repository.delete_entity(
-            "novel-1", "user-1", kind, created["id"], changed["updatedAt"]
+            "novel-1", "user-1", kind, created["id"], restored["updatedAt"]
         )
         assert deleted == {
             "deletedType": kind,
@@ -258,6 +277,88 @@ async def test_each_entity_has_stable_create_identity_and_cas(
         )
         assert recreated["id"] == created["id"]
         assert recreated["effective"] is True
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_entity_batch_rolls_back_create_when_later_cas_fails(tmp_path: Path) -> None:
+    engine, factory = await _create_database(tmp_path / "批量原子性.db")
+    try:
+        await _seed_novels(factory)
+        repository = LoreRepository(factory)
+        target = await repository.create_entity(
+            "novel-1", "user-1", "items", "target-item-00001", {"name": "旧物品"}
+        )
+        create_request_id = "batch-glossary-1"
+        created_id = command_resource_id(
+            "glossary", "user-1", "novel-1", create_request_id
+        )
+
+        with pytest.raises(ApiError) as caught:
+            await repository.apply_entity_mutations(
+                "novel-1",
+                "user-1",
+                [
+                    EntityMutation(
+                        action="create",
+                        kind="glossary",
+                        fields={"term": "批量术语", "definition": "不会落库"},
+                        client_request_id=create_request_id,
+                    ),
+                    EntityMutation(
+                        action="update",
+                        kind="items",
+                        fields={"name": "陈旧覆盖"},
+                        entity_id=target["id"],
+                        expected_updated_at=target["updatedAt"] - timedelta(seconds=1),
+                    ),
+                ],
+            )
+        assert caught.value.code == "LORE_ENTITY_VERSION_CONFLICT"
+
+        async with factory() as session:
+            assert await session.get(Glossary, created_id) is None
+            current = await session.get(Item, target["id"])
+        assert current is not None
+        assert current.name == "旧物品"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_entity_batch_rolls_back_on_resolution_value_error(tmp_path: Path) -> None:
+    engine, factory = await _create_database(tmp_path / "批量解析回滚.db")
+    try:
+        await _seed_novels(factory)
+        repository = LoreRepository(factory)
+        create_request_id = "batch-item-00001"
+        created_id = command_resource_id("items", "user-1", "novel-1", create_request_id)
+
+        with pytest.raises(ValueError, match="无法唯一解析"):
+            await repository.apply_entity_mutations(
+                "novel-1",
+                "user-1",
+                [
+                    EntityMutation(
+                        action="create",
+                        kind="items",
+                        fields={"name": "不会落库"},
+                        client_request_id=create_request_id,
+                    ),
+                    EntityMutation(
+                        action="update",
+                        kind="items",
+                        fields={"name": "无法更新"},
+                        expected_updated_at=datetime(2026, 8, 6, tzinfo=UTC),
+                        lookup_field="name",
+                        lookup_value="不存在",
+                    ),
+                ],
+            )
+
+        async with factory() as session:
+            assert await session.get(Item, created_id) is None
     finally:
         await engine.dispose()
 

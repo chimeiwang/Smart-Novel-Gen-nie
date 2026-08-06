@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 import pytest
+from inkforge_core.lore.repository import EntityMutation
 from inkforge_core.reviews.updates import AgentUpdatesExecutor
 
 
@@ -14,48 +15,11 @@ class FakeLore:
             return [{"id": "character-1", "name": "甲"}]
         return []
 
-    async def create_entity(
-        self,
-        novel_id: str,
-        user_id: str,
-        kind: str,
-        client_request_id: str,
-        fields: dict,
+    async def apply_entity_mutations(
+        self, novel_id: str, user_id: str, mutations: list[EntityMutation]
     ):
-        self.calls.append(("create", novel_id, user_id, kind, client_request_id, fields))
-
-    async def update_entity(
-        self,
-        novel_id: str,
-        user_id: str,
-        kind: str,
-        entity_id: str,
-        fields: dict,
-        expected_updated_at: datetime,
-    ):
-        self.calls.append(
-            (
-                "update",
-                novel_id,
-                user_id,
-                kind,
-                entity_id,
-                fields,
-                expected_updated_at,
-            )
-        )
-
-    async def delete_entity(
-        self,
-        novel_id: str,
-        user_id: str,
-        kind: str,
-        entity_id: str,
-        expected_updated_at: datetime,
-    ):
-        self.calls.append(
-            ("delete", novel_id, user_id, kind, entity_id, expected_updated_at)
-        )
+        self.calls.append(("entity_batch", novel_id, user_id, mutations))
+        return []
 
     async def upsert_content(
         self,
@@ -99,7 +63,7 @@ class FakeReferences:
 
 
 @pytest.mark.asyncio
-async def test_executor_sanitizes_control_fields_and_resolves_existing_name() -> None:
+async def test_executor_sanitizes_controls_and_defers_name_resolution_to_batch() -> None:
     lore = FakeLore()
     executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
 
@@ -123,13 +87,20 @@ async def test_executor_sanitizes_control_fields_and_resolves_existing_name() ->
     assert count == 2
     assert lore.calls == [
         (
-            "update",
+            "entity_batch",
             "novel-1",
             "user-1",
-            "characters",
-            "character-1",
-            {"name": "甲", "personality": "谨慎"},
-            datetime(2026, 8, 6, tzinfo=UTC),
+            [
+                EntityMutation(
+                    action="update",
+                    kind="characters",
+                    fields={"name": "甲", "personality": "谨慎"},
+                    expected_updated_at=datetime(2026, 8, 6, tzinfo=UTC),
+                    lookup_field="name",
+                    lookup_value="甲",
+                    error_label="characters",
+                )
+            ],
         ),
         (
             "content",
@@ -197,14 +168,27 @@ async def test_entity_create_and_delete_forward_controls_separately() -> None:
 
     assert count == 2
     assert lore.calls == [
-        ("create", "novel-1", "user-1", "items", "artifact-create-1", {"name": "信物"}),
         (
-            "delete",
+            "entity_batch",
             "novel-1",
             "user-1",
-            "items",
-            "item-1",
-            datetime(2026, 8, 6, tzinfo=UTC),
+            [
+                EntityMutation(
+                    action="create",
+                    kind="items",
+                    fields={"name": "信物"},
+                    client_request_id="artifact-create-1",
+                    error_label="items",
+                ),
+                EntityMutation(
+                    action="delete",
+                    kind="items",
+                    fields={},
+                    entity_id="item-1",
+                    expected_updated_at=datetime(2026, 8, 6, tzinfo=UTC),
+                    error_label="items",
+                ),
+            ],
         ),
     ]
 

@@ -4,6 +4,8 @@ from copy import deepcopy
 from datetime import datetime
 from typing import Any, Protocol
 
+from ..lore.repository import EntityMutation
+
 ARRAY_SECTIONS = (
     "characters",
     "locations",
@@ -75,31 +77,9 @@ class LoreUpdatesPort(Protocol):
     async def list_entities(
         self, novel_id: str, user_id: str, kind: str
     ) -> list[dict[str, Any]]: ...
-    async def create_entity(
-        self,
-        novel_id: str,
-        user_id: str,
-        kind: str,
-        client_request_id: str,
-        fields: dict[str, Any],
-    ) -> dict[str, Any]: ...
-    async def update_entity(
-        self,
-        novel_id: str,
-        user_id: str,
-        kind: str,
-        entity_id: str,
-        fields: dict[str, Any],
-        expected_updated_at: datetime,
-    ) -> dict[str, Any]: ...
-    async def delete_entity(
-        self,
-        novel_id: str,
-        user_id: str,
-        kind: str,
-        entity_id: str,
-        expected_updated_at: datetime,
-    ) -> dict[str, Any]: ...
+    async def apply_entity_mutations(
+        self, novel_id: str, user_id: str, mutations: list[EntityMutation]
+    ) -> list[dict[str, Any]]: ...
     async def create_experience(
         self, novel_id: str, user_id: str, character_id: str, fields: dict[str, Any]
     ) -> dict[str, Any]: ...
@@ -187,23 +167,15 @@ class AgentUpdatesExecutor:
                         raise ValueError(f"{section} 更新项结构无效")
                     _validate_entity_item(item, section)
                     entity_items.append((section, kind, id_fields, name_field, item))
-        for (
-            mutation_section,
-            mutation_kind,
-            mutation_id_fields,
-            mutation_name_field,
-            mutation_item,
-        ) in entity_items:
-            await self._apply_entity(
-                novel_id,
-                user_id,
-                mutation_section,
-                mutation_kind,
-                mutation_id_fields,
-                mutation_name_field,
-                mutation_item,
+        entity_mutations = [
+            self._build_entity_mutation(section, kind, id_fields, name_field, item)
+            for section, kind, id_fields, name_field, item in entity_items
+        ]
+        if entity_mutations:
+            await self._lore.apply_entity_mutations(
+                novel_id, user_id, entity_mutations
             )
-            count += 1
+            count += len(entity_mutations)
         experiences = updates.get("characterExperiences")
         if isinstance(experiences, list):
             for item in experiences:
@@ -244,16 +216,14 @@ class AgentUpdatesExecutor:
             raise ValueError("agent_updates 不包含可应用更新")
         return count
 
-    async def _apply_entity(
-        self,
-        novel_id: str,
-        user_id: str,
+    @staticmethod
+    def _build_entity_mutation(
         section: str,
         kind: str,
         id_fields: tuple[str, ...],
         name_field: str,
         item: dict[str, Any],
-    ) -> None:
+    ) -> EntityMutation:
         action = item.get("action")
         if action not in {"create", "update", "delete"}:
             raise ValueError(f"{section} action 无效")
@@ -267,34 +237,38 @@ class AgentUpdatesExecutor:
             client_request_id = item.get("clientRequestId")
             if not isinstance(client_request_id, str) or not 16 <= len(client_request_id) <= 256:
                 raise ValueError(f"{section} create 必须提供 16..256 字符的 clientRequestId")
-            await self._lore.create_entity(
-                novel_id, user_id, kind, client_request_id, fields
+            return EntityMutation(
+                action="create",
+                kind=kind,
+                fields=fields,
+                client_request_id=client_request_id,
+                error_label=section,
             )
-            return
         entity_id = next(
             (item[field] for field in id_fields if isinstance(item.get(field), str)), None
         )
-        if entity_id is None:
-            name = item.get(name_field)
-            values = await self._lore.list_entities(novel_id, user_id, kind)
-            matches = [value for value in values if value.get(name_field) == name]
-            if len(matches) != 1 or not isinstance(matches[0].get("id"), str):
-                raise ValueError(f"{section} 无法唯一解析已有实体")
-            entity_id = matches[0]["id"]
         expected_updated_at = _require_entity_expected_updated_at(item, section)
         if action == "delete":
-            await self._lore.delete_entity(
-                novel_id, user_id, kind, entity_id, expected_updated_at
+            return EntityMutation(
+                action="delete",
+                kind=kind,
+                fields=fields,
+                entity_id=entity_id,
+                expected_updated_at=expected_updated_at,
+                lookup_field=name_field if entity_id is None else None,
+                lookup_value=item.get(name_field) if entity_id is None else None,
+                error_label=section,
             )
-        else:
-            await self._lore.update_entity(
-                novel_id,
-                user_id,
-                kind,
-                entity_id,
-                fields,
-                expected_updated_at,
-            )
+        return EntityMutation(
+            action="update",
+            kind=kind,
+            fields=fields,
+            entity_id=entity_id,
+            expected_updated_at=expected_updated_at,
+            lookup_field=name_field if entity_id is None else None,
+            lookup_value=item.get(name_field) if entity_id is None else None,
+            error_label=section,
+        )
 
     async def _apply_experience(self, novel_id: str, user_id: str, item: dict[str, Any]) -> None:
         action = item.get("action")

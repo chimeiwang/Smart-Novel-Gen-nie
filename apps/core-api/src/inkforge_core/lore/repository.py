@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from pydantic import JsonValue
 from sqlalchemy import delete, func, or_, select, text, update
@@ -84,6 +85,19 @@ _ENTITY_FIELDS: dict[str, tuple[str, ...]] = {
 }
 
 
+@dataclass(frozen=True, slots=True)
+class EntityMutation:
+    action: Literal["create", "update", "delete"]
+    kind: str
+    fields: dict[str, Any]
+    entity_id: str | None = None
+    client_request_id: str | None = None
+    expected_updated_at: datetime | None = None
+    lookup_field: str | None = None
+    lookup_value: str | None = None
+    error_label: str = "设定实体"
+
+
 def _utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
@@ -127,42 +141,18 @@ class LoreRepository:
         client_request_id: str,
         fields: dict[str, Any],
     ) -> dict[str, Any]:
-        model = self._entity_model(kind)
-        entity_id = command_resource_id(kind, user_id, novel_id, client_request_id)
-        create_fields = self._entity_create_fields(kind, fields)
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
                 await self._lock_novel(session, novel_id)
-                value = await session.scalar(
-                    select(model).where(model.id == entity_id).with_for_update()
+                return await self._create_entity_in_session(
+                    session,
+                    novel_id,
+                    user_id,
+                    kind,
+                    client_request_id,
+                    fields,
                 )
-                if value is not None:
-                    current_fields = {
-                        name: getattr(value, name) for name in _ENTITY_FIELDS[kind]
-                    }
-                    if value.novelId == novel_id and current_fields == create_fields:
-                        return {**_model_dict(value), "effective": False}
-                    raise ApiError(
-                        status_code=409,
-                        code="RESOURCE_CREATE_CONFLICT",
-                        message="创建请求已绑定其他内容",
-                    )
-                await self._validate_entity_links(
-                    session, novel_id, kind, entity_id, create_fields
-                )
-                created_at = _database_utc(next_utc_timestamp(None))
-                value = model(
-                    id=entity_id,
-                    novelId=novel_id,
-                    **create_fields,
-                    createdAt=created_at,
-                    updatedAt=created_at,
-                )
-                session.add(value)
-                await session.flush()
-                result = {**_model_dict(value), "effective": True}
-        return result
 
     async def update_entity(
         self,
@@ -173,34 +163,18 @@ class LoreRepository:
         fields: dict[str, Any],
         expected_updated_at: datetime,
     ) -> dict[str, Any]:
-        model = self._entity_model(kind)
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
                 await self._lock_novel(session, novel_id)
-                value = await session.scalar(
-                    select(model)
-                    .where(model.id == entity_id, model.novelId == novel_id)
-                    .with_for_update()
-                )
-                if value is None:
-                    raise self._not_found(kind)
-                current_updated_at = _utc(value.updatedAt)
-                require_expected_updated_at(
-                    current_updated_at,
+                return await self._update_entity_in_session(
+                    session,
+                    novel_id,
+                    kind,
+                    entity_id,
+                    fields,
                     expected_updated_at,
-                    code="LORE_ENTITY_VERSION_CONFLICT",
                 )
-                if any(getattr(value, name) != requested for name, requested in fields.items()):
-                    await self._validate_entity_links(
-                        session, novel_id, kind, entity_id, fields
-                    )
-                    for name, requested in fields.items():
-                        setattr(value, name, requested)
-                    value.updatedAt = _database_utc(next_utc_timestamp(current_updated_at))
-                    await session.flush()
-                result = _model_dict(value)
-        return result
 
     async def delete_entity(
         self,
@@ -210,42 +184,216 @@ class LoreRepository:
         entity_id: str,
         expected_updated_at: datetime,
     ) -> dict[str, Any]:
-        model = self._entity_model(kind)
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
                 await self._lock_novel(session, novel_id)
-                value = await session.scalar(
-                    select(model)
-                    .where(model.id == entity_id, model.novelId == novel_id)
-                    .with_for_update()
-                )
-                if value is None:
-                    raise self._not_found(kind)
-                require_expected_updated_at(
-                    _utc(value.updatedAt),
+                return await self._delete_entity_in_session(
+                    session,
+                    novel_id,
+                    kind,
+                    entity_id,
                     expected_updated_at,
-                    code="LORE_ENTITY_VERSION_CONFLICT",
                 )
-                references = await self._entity_delete_references(
-                    session, kind, entity_id
-                )
-                if references:
-                    raise ApiError(
-                        status_code=409,
-                        code="LORE_ENTITY_REFERENCED",
-                        message="设定实体仍被引用，不能删除",
-                        details=references,
-                    )
-                outcome = cast(
-                    CursorResult[Any],
-                    await session.execute(
-                        delete(model).where(model.id == entity_id, model.novelId == novel_id)
-                    ),
-                )
-                if outcome.rowcount != 1:
-                    raise self._not_found(kind)
+
+    async def apply_entity_mutations(
+        self,
+        novel_id: str,
+        user_id: str,
+        mutations: list[EntityMutation],
+    ) -> list[dict[str, Any]]:
+        async with self._session_factory() as session:
+            async with session.begin():
+                await self._require_owner(session, novel_id, user_id)
+                await self._lock_novel(session, novel_id)
+                results: list[dict[str, Any]] = []
+                for mutation in mutations:
+                    if mutation.action == "create":
+                        if mutation.client_request_id is None:
+                            raise ValueError(
+                                f"{mutation.error_label} create 缺少 clientRequestId"
+                            )
+                        result = await self._create_entity_in_session(
+                            session,
+                            novel_id,
+                            user_id,
+                            mutation.kind,
+                            mutation.client_request_id,
+                            mutation.fields,
+                        )
+                    else:
+                        entity_id = mutation.entity_id
+                        if entity_id is None:
+                            entity_id = await self._resolve_entity_id_in_session(
+                                session,
+                                novel_id,
+                                mutation.kind,
+                                mutation.lookup_field,
+                                mutation.lookup_value,
+                                mutation.error_label,
+                            )
+                        if mutation.expected_updated_at is None:
+                            raise ValueError(
+                                f"{mutation.error_label} {mutation.action} 缺少 expectedUpdatedAt"
+                            )
+                        if mutation.action == "update":
+                            result = await self._update_entity_in_session(
+                                session,
+                                novel_id,
+                                mutation.kind,
+                                entity_id,
+                                mutation.fields,
+                                mutation.expected_updated_at,
+                            )
+                        else:
+                            result = await self._delete_entity_in_session(
+                                session,
+                                novel_id,
+                                mutation.kind,
+                                entity_id,
+                                mutation.expected_updated_at,
+                            )
+                    results.append(result)
+                return results
+
+    async def _create_entity_in_session(
+        self,
+        session: AsyncSession,
+        novel_id: str,
+        user_id: str,
+        kind: str,
+        client_request_id: str,
+        fields: dict[str, Any],
+    ) -> dict[str, Any]:
+        model = self._entity_model(kind)
+        entity_id = command_resource_id(kind, user_id, novel_id, client_request_id)
+        create_fields = self._entity_create_fields(kind, fields)
+        value = await session.scalar(
+            select(model).where(model.id == entity_id).with_for_update()
+        )
+        if value is not None:
+            current_fields = {name: getattr(value, name) for name in _ENTITY_FIELDS[kind]}
+            is_initial_version = _utc(value.createdAt) == _utc(value.updatedAt)
+            if (
+                value.novelId == novel_id
+                and is_initial_version
+                and current_fields == create_fields
+            ):
+                return {**_model_dict(value), "effective": False}
+            raise ApiError(
+                status_code=409,
+                code="RESOURCE_CREATE_CONFLICT",
+                message="创建请求已绑定其他内容",
+            )
+        await self._validate_entity_links(session, novel_id, kind, entity_id, create_fields)
+        created_at = _database_utc(next_utc_timestamp(None))
+        value = model(
+            id=entity_id,
+            novelId=novel_id,
+            **create_fields,
+            createdAt=created_at,
+            updatedAt=created_at,
+        )
+        session.add(value)
+        await session.flush()
+        return {**_model_dict(value), "effective": True}
+
+    async def _update_entity_in_session(
+        self,
+        session: AsyncSession,
+        novel_id: str,
+        kind: str,
+        entity_id: str,
+        fields: dict[str, Any],
+        expected_updated_at: datetime,
+    ) -> dict[str, Any]:
+        model = self._entity_model(kind)
+        value = await session.scalar(
+            select(model)
+            .where(model.id == entity_id, model.novelId == novel_id)
+            .with_for_update()
+        )
+        if value is None:
+            raise self._not_found(kind)
+        current_updated_at = _utc(value.updatedAt)
+        require_expected_updated_at(
+            current_updated_at,
+            expected_updated_at,
+            code="LORE_ENTITY_VERSION_CONFLICT",
+        )
+        if any(getattr(value, name) != requested for name, requested in fields.items()):
+            await self._validate_entity_links(session, novel_id, kind, entity_id, fields)
+            for name, requested in fields.items():
+                setattr(value, name, requested)
+            value.updatedAt = _database_utc(next_utc_timestamp(current_updated_at))
+            await session.flush()
+        return _model_dict(value)
+
+    async def _delete_entity_in_session(
+        self,
+        session: AsyncSession,
+        novel_id: str,
+        kind: str,
+        entity_id: str,
+        expected_updated_at: datetime,
+    ) -> dict[str, Any]:
+        model = self._entity_model(kind)
+        value = await session.scalar(
+            select(model)
+            .where(model.id == entity_id, model.novelId == novel_id)
+            .with_for_update()
+        )
+        if value is None:
+            raise self._not_found(kind)
+        require_expected_updated_at(
+            _utc(value.updatedAt),
+            expected_updated_at,
+            code="LORE_ENTITY_VERSION_CONFLICT",
+        )
+        references = await self._entity_delete_references(session, kind, entity_id)
+        if references:
+            raise ApiError(
+                status_code=409,
+                code="LORE_ENTITY_REFERENCED",
+                message="设定实体仍被引用，不能删除",
+                details=references,
+            )
+        outcome = cast(
+            CursorResult[Any],
+            await session.execute(
+                delete(model).where(model.id == entity_id, model.novelId == novel_id)
+            ),
+        )
+        if outcome.rowcount != 1:
+            raise self._not_found(kind)
         return {"deletedType": kind, "deletedId": entity_id, "affected": {}}
+
+    async def _resolve_entity_id_in_session(
+        self,
+        session: AsyncSession,
+        novel_id: str,
+        kind: str,
+        lookup_field: str | None,
+        lookup_value: str | None,
+        error_label: str,
+    ) -> str:
+        model = self._entity_model(kind)
+        if lookup_field not in _ENTITY_FIELDS[kind] or lookup_value is None:
+            raise ValueError(f"{error_label} 无法唯一解析已有实体")
+        entity_ids = (
+            await session.scalars(
+                select(model.id)
+                .where(
+                    model.novelId == novel_id,
+                    getattr(model, lookup_field) == lookup_value,
+                )
+                .limit(2)
+                .with_for_update()
+            )
+        ).all()
+        if len(entity_ids) != 1:
+            raise ValueError(f"{error_label} 无法唯一解析已有实体")
+        return cast(str, entity_ids[0])
 
     @staticmethod
     def _entity_create_fields(kind: str, fields: dict[str, Any]) -> dict[str, Any]:
