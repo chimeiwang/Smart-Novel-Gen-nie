@@ -11,6 +11,7 @@ from inkforge_core.lore.schemas import (
     WritingBibleRequest,
 )
 from inkforge_core.lore.service import LoreService
+from pydantic import ValidationError
 
 
 class RecordingRepository:
@@ -19,9 +20,12 @@ class RecordingRepository:
         self.content: object | None = None
         self.expected_updated_at: datetime | None = None
 
-    async def update_entity(self, novel_id, user_id, kind, entity_id, fields):
+    async def update_entity(
+        self, novel_id, user_id, kind, entity_id, fields, expected_updated_at
+    ):
         del novel_id, user_id, kind, entity_id
         self.fields = fields
+        self.expected_updated_at = expected_updated_at
         return {"id": "character-1", "name": "角色"}
 
     async def upsert_content(self, novel_id, user_id, kind, content, expected_updated_at):
@@ -35,9 +39,11 @@ class RecordingRepository:
 async def test_explicit_null_is_distinct_from_omitted_field() -> None:
     repository = RecordingRepository()
     service = LoreService(repository)  # type: ignore[arg-type]
-    request = UpdateCharacterRequest(factionId=None)
+    expected = datetime(2026, 8, 6, tzinfo=UTC)
+    request = UpdateCharacterRequest(factionId=None, expectedUpdatedAt=expected)
     await service.update_entity("user-1", "novel-1", "characters", "character-1", request)
     assert repository.fields == {"factionId": None}
+    assert repository.expected_updated_at == expected
 
 
 @pytest.mark.asyncio
@@ -74,9 +80,17 @@ async def test_story_progress_rejects_30001_without_truncating() -> None:
 @pytest.mark.parametrize(
     ("kind", "body"),
     [
-        ("characters", UpdateCharacterRequest(name=None)),
-        ("characters", UpdateCharacterRequest(currentStatus=None)),
-        ("items", UpdateItemRequest(name=None)),
+        (
+            "characters",
+            UpdateCharacterRequest(name=None, expectedUpdatedAt="2026-08-06T00:00:00Z"),
+        ),
+        (
+            "characters",
+            UpdateCharacterRequest(
+                currentStatus=None, expectedUpdatedAt="2026-08-06T00:00:00Z"
+            ),
+        ),
+        ("items", UpdateItemRequest(name=None, expectedUpdatedAt="2026-08-06T00:00:00Z")),
     ],
 )
 async def test_patch_rejects_explicit_null_for_non_nullable_fields(kind, body) -> None:
@@ -91,20 +105,20 @@ async def test_patch_rejects_explicit_null_for_non_nullable_fields(kind, body) -
 @pytest.mark.parametrize(
     ("kind", "payload"),
     [
-        ("characters", {}),
+        ("characters", {"expectedUpdatedAt": "2026-08-06T00:00:00Z"}),
         ("writing-bible", {"expectedUpdatedAt": None}),
     ],
 )
 async def test_empty_lore_update_is_rejected(kind, payload) -> None:
     repository = RecordingRepository()
     service = LoreService(repository)  # type: ignore[arg-type]
+    if kind == "characters":
+        with pytest.raises(ValidationError):
+            UpdateCharacterRequest.model_validate(payload)
+        return
     with pytest.raises(ApiError) as caught:
-        if kind == "writing-bible":
-            body = WritingBibleRequest.model_validate(payload)
-            await service.upsert_content("user-1", "novel-1", kind, body)
-        else:
-            body = UpdateCharacterRequest.model_validate(payload)
-            await service.update_entity("user-1", "novel-1", kind, "entity-1", body)
+        body = WritingBibleRequest.model_validate(payload)
+        await service.upsert_content("user-1", "novel-1", kind, body)
     assert caught.value.code == "EMPTY_UPDATE"
 
 

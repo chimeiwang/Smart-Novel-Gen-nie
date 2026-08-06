@@ -75,15 +75,24 @@ async def test_null_owner_is_always_rejected() -> None:
 
 
 @pytest.mark.parametrize("method_name", ["create_entity", "update_entity"])
-def test_location_mutation_locks_novel_before_validating_parent_chain(method_name: str) -> None:
+def test_entity_mutation_locks_novel_before_validating_links(method_name: str) -> None:
     source = inspect.getsource(getattr(LoreRepository, method_name))
     assert source.index("_lock_novel") < source.index("_validate_entity_links")
     assert "pg_advisory_xact_lock(:key)" in inspect.getsource(LoreRepository._lock_novel)
 
 
-def test_location_delete_locks_novel_before_checking_children_and_deleting() -> None:
+def test_entity_update_and_delete_lock_target_row_for_cas() -> None:
+    update_source = inspect.getsource(LoreRepository.update_entity)
+    delete_source = inspect.getsource(LoreRepository.delete_entity)
+    assert ".with_for_update()" in update_source
+    assert ".with_for_update()" in delete_source
+    assert "require_expected_updated_at" in update_source
+    assert "require_expected_updated_at" in delete_source
+
+
+def test_entity_delete_locks_novel_before_counting_references_and_deleting() -> None:
     source = inspect.getsource(LoreRepository.delete_entity)
     lock_index = source.index("_lock_novel")
-    assert lock_index < source.index("select(Location.id)")
+    assert lock_index < source.index("_entity_delete_references")
     assert lock_index < source.index("delete(model)")
     assert "pg_advisory_xact_lock(:key)" in inspect.getsource(LoreRepository._lock_novel)

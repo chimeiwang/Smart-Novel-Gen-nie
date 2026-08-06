@@ -76,14 +76,30 @@ class LoreUpdatesPort(Protocol):
         self, novel_id: str, user_id: str, kind: str
     ) -> list[dict[str, Any]]: ...
     async def create_entity(
-        self, novel_id: str, user_id: str, kind: str, fields: dict[str, Any]
+        self,
+        novel_id: str,
+        user_id: str,
+        kind: str,
+        client_request_id: str,
+        fields: dict[str, Any],
     ) -> dict[str, Any]: ...
     async def update_entity(
-        self, novel_id: str, user_id: str, kind: str, entity_id: str, fields: dict[str, Any]
+        self,
+        novel_id: str,
+        user_id: str,
+        kind: str,
+        entity_id: str,
+        fields: dict[str, Any],
+        expected_updated_at: datetime,
     ) -> dict[str, Any]: ...
     async def delete_entity(
-        self, novel_id: str, user_id: str, kind: str, entity_id: str
-    ) -> None: ...
+        self,
+        novel_id: str,
+        user_id: str,
+        kind: str,
+        entity_id: str,
+        expected_updated_at: datetime,
+    ) -> dict[str, Any]: ...
     async def create_experience(
         self, novel_id: str, user_id: str, character_id: str, fields: dict[str, Any]
     ) -> dict[str, Any]: ...
@@ -160,16 +176,34 @@ class AgentUpdatesExecutor:
         expected_outline_updated_at: datetime | None = None,
     ) -> int:
         count = 0
+        entity_items: list[
+            tuple[str, str, tuple[str, ...], str, dict[str, Any]]
+        ] = []
         for section, (kind, id_fields, name_field) in _ENTITY_CONFIG.items():
             items = updates.get(section)
             if isinstance(items, list):
                 for item in items:
                     if not isinstance(item, dict):
                         raise ValueError(f"{section} 更新项结构无效")
-                    await self._apply_entity(
-                        novel_id, user_id, section, kind, id_fields, name_field, item
-                    )
-                    count += 1
+                    _validate_entity_item(item, section)
+                    entity_items.append((section, kind, id_fields, name_field, item))
+        for (
+            mutation_section,
+            mutation_kind,
+            mutation_id_fields,
+            mutation_name_field,
+            mutation_item,
+        ) in entity_items:
+            await self._apply_entity(
+                novel_id,
+                user_id,
+                mutation_section,
+                mutation_kind,
+                mutation_id_fields,
+                mutation_name_field,
+                mutation_item,
+            )
+            count += 1
         experiences = updates.get("characterExperiences")
         if isinstance(experiences, list):
             for item in experiences:
@@ -223,9 +257,19 @@ class AgentUpdatesExecutor:
         action = item.get("action")
         if action not in {"create", "update", "delete"}:
             raise ValueError(f"{section} action 无效")
-        fields = _strict_fields(item, _ENTITY_FIELDS[section], section)
+        fields = _strict_fields(
+            item,
+            _ENTITY_FIELDS[section],
+            section,
+            extra_control={"clientRequestId", "expectedUpdatedAt"},
+        )
         if action == "create":
-            await self._lore.create_entity(novel_id, user_id, kind, fields)
+            client_request_id = item.get("clientRequestId")
+            if not isinstance(client_request_id, str) or not 16 <= len(client_request_id) <= 256:
+                raise ValueError(f"{section} create 必须提供 16..256 字符的 clientRequestId")
+            await self._lore.create_entity(
+                novel_id, user_id, kind, client_request_id, fields
+            )
             return
         entity_id = next(
             (item[field] for field in id_fields if isinstance(item.get(field), str)), None
@@ -237,10 +281,20 @@ class AgentUpdatesExecutor:
             if len(matches) != 1 or not isinstance(matches[0].get("id"), str):
                 raise ValueError(f"{section} 无法唯一解析已有实体")
             entity_id = matches[0]["id"]
+        expected_updated_at = _require_entity_expected_updated_at(item, section)
         if action == "delete":
-            await self._lore.delete_entity(novel_id, user_id, kind, entity_id)
+            await self._lore.delete_entity(
+                novel_id, user_id, kind, entity_id, expected_updated_at
+            )
         else:
-            await self._lore.update_entity(novel_id, user_id, kind, entity_id, fields)
+            await self._lore.update_entity(
+                novel_id,
+                user_id,
+                kind,
+                entity_id,
+                fields,
+                expected_updated_at,
+            )
 
     async def _apply_experience(self, novel_id: str, user_id: str, item: dict[str, Any]) -> None:
         action = item.get("action")
@@ -431,7 +485,13 @@ def filter_agent_updates_by_selection(
     return output
 
 
-def _strict_fields(item: dict[str, Any], allowed: set[str], section: str) -> dict[str, Any]:
+def _strict_fields(
+    item: dict[str, Any],
+    allowed: set[str],
+    section: str,
+    *,
+    extra_control: set[str] | None = None,
+) -> dict[str, Any]:
     control = {
         "action",
         "id",
@@ -450,11 +510,45 @@ def _strict_fields(item: dict[str, Any], allowed: set[str], section: str) -> dic
         "fieldChanges",
         "payoffNote",
     }
+    if extra_control is not None:
+        control.update(extra_control)
     unknown = set(item) - allowed - control
     if unknown:
         names = "、".join(sorted(unknown))
         raise ValueError(f"{section} 包含无法持久化字段：{names}")
     return {key: deepcopy(value) for key, value in item.items() if key in allowed}
+
+
+def _require_entity_expected_updated_at(item: dict[str, Any], section: str) -> datetime:
+    value = item.get("expectedUpdatedAt")
+    if isinstance(value, datetime):
+        return value
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{section} update/delete 必须提供非空 expectedUpdatedAt")
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError(f"{section} expectedUpdatedAt 格式无效") from error
+
+
+def _validate_entity_item(item: dict[str, Any], section: str) -> None:
+    action = item.get("action")
+    if action not in {"create", "update", "delete"}:
+        raise ValueError(f"{section} action 无效")
+    fields = _strict_fields(
+        item,
+        _ENTITY_FIELDS[section],
+        section,
+        extra_control={"clientRequestId", "expectedUpdatedAt"},
+    )
+    if action == "create":
+        client_request_id = item.get("clientRequestId")
+        if not isinstance(client_request_id, str) or not 16 <= len(client_request_id) <= 256:
+            raise ValueError(f"{section} create 必须提供 16..256 字符的 clientRequestId")
+        return
+    _require_entity_expected_updated_at(item, section)
+    if action == "update" and not fields:
+        raise ValueError(f"{section} update 至少需要一个业务字段")
 
 
 def _resolve_named_id(

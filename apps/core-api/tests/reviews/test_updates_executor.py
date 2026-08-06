@@ -14,16 +14,48 @@ class FakeLore:
             return [{"id": "character-1", "name": "甲"}]
         return []
 
-    async def create_entity(self, novel_id: str, user_id: str, kind: str, fields: dict):
-        self.calls.append(("create", novel_id, user_id, kind, fields))
+    async def create_entity(
+        self,
+        novel_id: str,
+        user_id: str,
+        kind: str,
+        client_request_id: str,
+        fields: dict,
+    ):
+        self.calls.append(("create", novel_id, user_id, kind, client_request_id, fields))
 
     async def update_entity(
-        self, novel_id: str, user_id: str, kind: str, entity_id: str, fields: dict
+        self,
+        novel_id: str,
+        user_id: str,
+        kind: str,
+        entity_id: str,
+        fields: dict,
+        expected_updated_at: datetime,
     ):
-        self.calls.append(("update", novel_id, user_id, kind, entity_id, fields))
+        self.calls.append(
+            (
+                "update",
+                novel_id,
+                user_id,
+                kind,
+                entity_id,
+                fields,
+                expected_updated_at,
+            )
+        )
 
-    async def delete_entity(self, novel_id: str, user_id: str, kind: str, entity_id: str):
-        self.calls.append(("delete", novel_id, user_id, kind, entity_id))
+    async def delete_entity(
+        self,
+        novel_id: str,
+        user_id: str,
+        kind: str,
+        entity_id: str,
+        expected_updated_at: datetime,
+    ):
+        self.calls.append(
+            ("delete", novel_id, user_id, kind, entity_id, expected_updated_at)
+        )
 
     async def upsert_content(
         self,
@@ -80,6 +112,7 @@ async def test_executor_sanitizes_control_fields_and_resolves_existing_name() ->
                     "action": "update",
                     "name": "甲",
                     "personality": "谨慎",
+                    "expectedUpdatedAt": "2026-08-06T00:00:00Z",
                     "fieldChanges": [{"field": "personality"}],
                 }
             ],
@@ -96,6 +129,7 @@ async def test_executor_sanitizes_control_fields_and_resolves_existing_name() ->
             "characters",
             "character-1",
             {"name": "甲", "personality": "谨慎"},
+            datetime(2026, 8, 6, tzinfo=UTC),
         ),
         (
             "content",
@@ -106,6 +140,97 @@ async def test_executor_sanitizes_control_fields_and_resolves_existing_name() ->
             None,
         ),
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("item", "message"),
+    [
+        ({"action": "create", "name": "甲"}, "clientRequestId"),
+        (
+            {"action": "create", "clientRequestId": "too-short", "name": "甲"},
+            "clientRequestId",
+        ),
+        ({"action": "update", "id": "character-1", "name": "甲"}, "expectedUpdatedAt"),
+        (
+            {
+                "action": "update",
+                "id": "character-1",
+                "name": "甲",
+                "expectedUpdatedAt": "not-a-time",
+            },
+            "expectedUpdatedAt",
+        ),
+        ({"action": "delete", "id": "character-1"}, "expectedUpdatedAt"),
+    ],
+)
+async def test_entity_updates_require_safe_operation_controls(item: dict, message: str) -> None:
+    executor = AgentUpdatesExecutor(FakeLore(), FakeOutlines(), FakeReferences())
+
+    with pytest.raises(ValueError, match=message):
+        await executor.apply("novel-1", "user-1", {"characters": [item]})
+
+
+@pytest.mark.asyncio
+async def test_entity_create_and_delete_forward_controls_separately() -> None:
+    lore = FakeLore()
+    executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
+
+    count = await executor.apply(
+        "novel-1",
+        "user-1",
+        {
+            "items": [
+                {
+                    "action": "create",
+                    "clientRequestId": "artifact-create-1",
+                    "name": "信物",
+                },
+                {
+                    "action": "delete",
+                    "id": "item-1",
+                    "expectedUpdatedAt": "2026-08-06T00:00:00Z",
+                },
+            ]
+        },
+    )
+
+    assert count == 2
+    assert lore.calls == [
+        ("create", "novel-1", "user-1", "items", "artifact-create-1", {"name": "信物"}),
+        (
+            "delete",
+            "novel-1",
+            "user-1",
+            "items",
+            "item-1",
+            datetime(2026, 8, 6, tzinfo=UTC),
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_all_entity_controls_are_validated_before_any_write() -> None:
+    lore = FakeLore()
+    executor = AgentUpdatesExecutor(lore, FakeOutlines(), FakeReferences())
+
+    with pytest.raises(ValueError, match="expectedUpdatedAt"):
+        await executor.apply(
+            "novel-1",
+            "user-1",
+            {
+                "items": [
+                    {
+                        "action": "create",
+                        "clientRequestId": "artifact-create-1",
+                        "name": "信物",
+                    },
+                    {"action": "update", "id": "item-1", "name": "新信物"},
+                ]
+            },
+        )
+
+    assert lore.calls == []
 
 
 @pytest.mark.asyncio

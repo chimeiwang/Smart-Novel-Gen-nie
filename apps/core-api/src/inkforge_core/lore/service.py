@@ -6,7 +6,7 @@ from typing import Any, Protocol
 from pydantic import BaseModel
 
 from ..errors import ApiError
-from .schemas import ContentRequest, WritingBibleRequest
+from .schemas import ContentRequest, DeleteEntityRequest, WritingBibleRequest
 
 
 class LoreRepositoryPort(Protocol):
@@ -14,10 +14,21 @@ class LoreRepositoryPort(Protocol):
         self, novel_id: str, user_id: str, kind: str
     ) -> list[dict[str, Any]]: ...
     async def create_entity(
-        self, novel_id: str, user_id: str, kind: str, fields: dict[str, Any]
+        self,
+        novel_id: str,
+        user_id: str,
+        kind: str,
+        client_request_id: str,
+        fields: dict[str, Any],
     ) -> dict[str, Any]: ...
     async def update_entity(
-        self, novel_id: str, user_id: str, kind: str, entity_id: str, fields: dict[str, Any]
+        self,
+        novel_id: str,
+        user_id: str,
+        kind: str,
+        entity_id: str,
+        fields: dict[str, Any],
+        expected_updated_at: datetime,
     ) -> dict[str, Any]: ...
     async def upsert_content(
         self,
@@ -28,8 +39,13 @@ class LoreRepositoryPort(Protocol):
         expected_updated_at: datetime | None,
     ) -> dict[str, Any]: ...
     async def delete_entity(
-        self, novel_id: str, user_id: str, kind: str, entity_id: str
-    ) -> None: ...
+        self,
+        novel_id: str,
+        user_id: str,
+        kind: str,
+        entity_id: str,
+        expected_updated_at: datetime,
+    ) -> dict[str, Any]: ...
     async def create_experience(
         self, novel_id: str, user_id: str, character_id: str, fields: dict[str, Any]
     ) -> dict[str, Any]: ...
@@ -60,21 +76,48 @@ class LoreService:
     async def create_entity(
         self, user_id: str, novel_id: str, kind: str, request: BaseModel
     ) -> dict[str, Any]:
-        fields = request.model_dump(exclude_unset=True)
-        self._require_update_fields(fields)
+        client_request_id = getattr(request, "clientRequestId", None)
+        if not isinstance(client_request_id, str):
+            raise TypeError("实体创建请求缺少 clientRequestId")
+        fields = request.model_dump(exclude={"clientRequestId"})
         self._require_name(kind, fields)
-        return await self._repository.create_entity(novel_id, user_id, kind, fields)
+        return await self._repository.create_entity(
+            novel_id, user_id, kind, client_request_id, fields
+        )
 
     async def update_entity(
         self, user_id: str, novel_id: str, kind: str, entity_id: str, request: BaseModel
     ) -> dict[str, Any]:
-        fields = request.model_dump(exclude_unset=True)
+        expected_updated_at = getattr(request, "expectedUpdatedAt", None)
+        if not isinstance(expected_updated_at, datetime):
+            raise TypeError("实体更新请求缺少 expectedUpdatedAt")
+        fields = request.model_dump(exclude={"expectedUpdatedAt"}, exclude_unset=True)
         self._require_update_fields(fields)
         self._require_name(kind, fields)
-        return await self._repository.update_entity(novel_id, user_id, kind, entity_id, fields)
+        return await self._repository.update_entity(
+            novel_id,
+            user_id,
+            kind,
+            entity_id,
+            fields,
+            expected_updated_at,
+        )
 
-    async def delete_entity(self, user_id: str, novel_id: str, kind: str, entity_id: str) -> None:
-        await self._repository.delete_entity(novel_id, user_id, kind, entity_id)
+    async def delete_entity(
+        self,
+        user_id: str,
+        novel_id: str,
+        kind: str,
+        entity_id: str,
+        request: DeleteEntityRequest,
+    ) -> dict[str, Any]:
+        return await self._repository.delete_entity(
+            novel_id,
+            user_id,
+            kind,
+            entity_id,
+            request.expectedUpdatedAt,
+        )
 
     async def create_experience(
         self, user_id: str, novel_id: str, character_id: str, request: BaseModel

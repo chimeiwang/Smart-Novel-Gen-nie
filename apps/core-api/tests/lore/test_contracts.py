@@ -28,11 +28,31 @@ from pydantic import ValidationError
 @pytest.mark.parametrize(
     ("schema", "payload"),
     [
-        (CreateCharacterRequest, {"name": "角色", "unknown": "x"}),
-        (CreateItemRequest, {"name": "物品", "unknown": "x"}),
-        (CreateLocationRequest, {"name": "地点", "unknown": "x"}),
-        (CreateFactionRequest, {"name": "势力", "unknown": "x"}),
-        (CreateGlossaryRequest, {"term": "术语", "definition": "释义", "unknown": "x"}),
+        (
+            CreateCharacterRequest,
+            {"name": "角色", "clientRequestId": "contract-request", "unknown": "x"},
+        ),
+        (
+            CreateItemRequest,
+            {"name": "物品", "clientRequestId": "contract-request", "unknown": "x"},
+        ),
+        (
+            CreateLocationRequest,
+            {"name": "地点", "clientRequestId": "contract-request", "unknown": "x"},
+        ),
+        (
+            CreateFactionRequest,
+            {"name": "势力", "clientRequestId": "contract-request", "unknown": "x"},
+        ),
+        (
+            CreateGlossaryRequest,
+            {
+                "term": "术语",
+                "definition": "释义",
+                "clientRequestId": "contract-request",
+                "unknown": "x",
+            },
+        ),
         (
             RelationRequest,
             {"characterId": "a", "targetId": "b", "relationType": "friend", "unknown": "x"},
@@ -50,7 +70,13 @@ def test_all_lore_requests_reject_unknown_fields(schema, payload) -> None:
 )
 def test_character_status_is_exact_literal(status: object) -> None:
     with pytest.raises(ValidationError):
-        CreateCharacterRequest.model_validate({"name": "角色", "currentStatus": status})
+        CreateCharacterRequest.model_validate(
+            {
+                "name": "角色",
+                "currentStatus": status,
+                "clientRequestId": "contract-request",
+            }
+        )
 
 
 @pytest.mark.parametrize(
@@ -237,3 +263,4 @@ def test_lore_success_response_is_filtered_by_declared_dto() -> None:
     assert response.status_code == 200
     assert response.json()[0]["id"] == "item-1"
     assert "novelId" not in response.json()[0]
+    assert "effective" not in response.json()[0]

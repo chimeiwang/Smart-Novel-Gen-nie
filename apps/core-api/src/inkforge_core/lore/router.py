@@ -3,7 +3,7 @@ from __future__ import annotations
 # mypy: disable-error-code="no-untyped-def"
 from typing import Annotated, Any, cast
 
-from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi import APIRouter, Depends, Request, Response
 
 from ..auth.dependencies import get_current_user
 from ..auth.repository import AuthUser
@@ -13,10 +13,17 @@ from .schemas import (
     ContentRequest,
     ContentResponse,
     CreateCharacterRequest,
+    CreateCharacterResponse,
     CreateFactionRequest,
+    CreateFactionResponse,
     CreateGlossaryRequest,
+    CreateGlossaryResponse,
     CreateItemRequest,
+    CreateItemResponse,
     CreateLocationRequest,
+    CreateLocationResponse,
+    DeleteEntityRequest,
+    DeleteImpactResponse,
     ExperienceRequest,
     ExperienceResponse,
     FactionResponse,
@@ -67,10 +74,14 @@ async def _update(
 
 
 async def _delete(
-    user: AuthUser, service: LoreService, novel_id: str, kind: str, entity_id: str
-) -> Response:
-    await service.delete_entity(user.id, novel_id, kind, entity_id)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    user: AuthUser,
+    service: LoreService,
+    novel_id: str,
+    kind: str,
+    entity_id: str,
+    body: DeleteEntityRequest,
+):
+    return await service.delete_entity(user.id, novel_id, kind, entity_id, body)
 
 
 @router.get("/novels/{novel_id}/characters", response_model=list[CharacterResponse])
@@ -78,7 +89,9 @@ async def list_characters(novel_id: str, user: User, service: Service):
     return await _list(user, service, novel_id, "characters")
 
 
-@router.post("/novels/{novel_id}/characters", response_model=CharacterResponse, status_code=201)
+@router.post(
+    "/novels/{novel_id}/characters", response_model=CreateCharacterResponse, status_code=201
+)
 async def create_character(
     novel_id: str, body: CreateCharacterRequest, user: User, service: Service
 ):
@@ -92,9 +105,17 @@ async def update_character(
     return await _update(user, service, novel_id, "characters", entity_id, body)
 
 
-@router.delete("/novels/{novel_id}/characters/{entity_id}", status_code=204)
-async def delete_character(novel_id: str, entity_id: str, user: User, service: Service):
-    return await _delete(user, service, novel_id, "characters", entity_id)
+@router.delete(
+    "/novels/{novel_id}/characters/{entity_id}", response_model=DeleteImpactResponse
+)
+async def delete_character(
+    novel_id: str,
+    entity_id: str,
+    body: DeleteEntityRequest,
+    user: User,
+    service: Service,
+):
+    return await _delete(user, service, novel_id, "characters", entity_id, body)
 
 
 @router.get("/novels/{novel_id}/items", response_model=list[ItemResponse])
@@ -102,7 +123,7 @@ async def list_items(novel_id: str, user: User, service: Service):
     return await _list(user, service, novel_id, "items")
 
 
-@router.post("/novels/{novel_id}/items", response_model=ItemResponse, status_code=201)
+@router.post("/novels/{novel_id}/items", response_model=CreateItemResponse, status_code=201)
 async def create_item(novel_id: str, body: CreateItemRequest, user: User, service: Service):
     return await _create(user, service, novel_id, "items", body)
 
@@ -114,9 +135,15 @@ async def update_item(
     return await _update(user, service, novel_id, "items", entity_id, body)
 
 
-@router.delete("/novels/{novel_id}/items/{entity_id}", status_code=204)
-async def delete_item(novel_id: str, entity_id: str, user: User, service: Service):
-    return await _delete(user, service, novel_id, "items", entity_id)
+@router.delete("/novels/{novel_id}/items/{entity_id}", response_model=DeleteImpactResponse)
+async def delete_item(
+    novel_id: str,
+    entity_id: str,
+    body: DeleteEntityRequest,
+    user: User,
+    service: Service,
+):
+    return await _delete(user, service, novel_id, "items", entity_id, body)
 
 
 @router.get("/novels/{novel_id}/locations", response_model=list[LocationResponse])
@@ -124,7 +151,9 @@ async def list_locations(novel_id: str, user: User, service: Service):
     return await _list(user, service, novel_id, "locations")
 
 
-@router.post("/novels/{novel_id}/locations", response_model=LocationResponse, status_code=201)
+@router.post(
+    "/novels/{novel_id}/locations", response_model=CreateLocationResponse, status_code=201
+)
 async def create_location(novel_id: str, body: CreateLocationRequest, user: User, service: Service):
     return await _create(user, service, novel_id, "locations", body)
 
@@ -136,9 +165,17 @@ async def update_location(
     return await _update(user, service, novel_id, "locations", entity_id, body)
 
 
-@router.delete("/novels/{novel_id}/locations/{entity_id}", status_code=204)
-async def delete_location(novel_id: str, entity_id: str, user: User, service: Service):
-    return await _delete(user, service, novel_id, "locations", entity_id)
+@router.delete(
+    "/novels/{novel_id}/locations/{entity_id}", response_model=DeleteImpactResponse
+)
+async def delete_location(
+    novel_id: str,
+    entity_id: str,
+    body: DeleteEntityRequest,
+    user: User,
+    service: Service,
+):
+    return await _delete(user, service, novel_id, "locations", entity_id, body)
 
 
 @router.get("/novels/{novel_id}/factions", response_model=list[FactionResponse])
@@ -146,7 +183,9 @@ async def list_factions(novel_id: str, user: User, service: Service):
     return await _list(user, service, novel_id, "factions")
 
 
-@router.post("/novels/{novel_id}/factions", response_model=FactionResponse, status_code=201)
+@router.post(
+    "/novels/{novel_id}/factions", response_model=CreateFactionResponse, status_code=201
+)
 async def create_faction(novel_id: str, body: CreateFactionRequest, user: User, service: Service):
     return await _create(user, service, novel_id, "factions", body)
 
@@ -158,9 +197,17 @@ async def update_faction(
     return await _update(user, service, novel_id, "factions", entity_id, body)
 
 
-@router.delete("/novels/{novel_id}/factions/{entity_id}", status_code=204)
-async def delete_faction(novel_id: str, entity_id: str, user: User, service: Service):
-    return await _delete(user, service, novel_id, "factions", entity_id)
+@router.delete(
+    "/novels/{novel_id}/factions/{entity_id}", response_model=DeleteImpactResponse
+)
+async def delete_faction(
+    novel_id: str,
+    entity_id: str,
+    body: DeleteEntityRequest,
+    user: User,
+    service: Service,
+):
+    return await _delete(user, service, novel_id, "factions", entity_id, body)
 
 
 @router.get("/novels/{novel_id}/glossary", response_model=list[GlossaryResponse])
@@ -168,7 +215,9 @@ async def list_glossary(novel_id: str, user: User, service: Service):
     return await _list(user, service, novel_id, "glossary")
 
 
-@router.post("/novels/{novel_id}/glossary", response_model=GlossaryResponse, status_code=201)
+@router.post(
+    "/novels/{novel_id}/glossary", response_model=CreateGlossaryResponse, status_code=201
+)
 async def create_glossary(novel_id: str, body: CreateGlossaryRequest, user: User, service: Service):
     return await _create(user, service, novel_id, "glossary", body)
 
@@ -180,9 +229,17 @@ async def update_glossary(
     return await _update(user, service, novel_id, "glossary", entity_id, body)
 
 
-@router.delete("/novels/{novel_id}/glossary/{entity_id}", status_code=204)
-async def delete_glossary(novel_id: str, entity_id: str, user: User, service: Service):
-    return await _delete(user, service, novel_id, "glossary", entity_id)
+@router.delete(
+    "/novels/{novel_id}/glossary/{entity_id}", response_model=DeleteImpactResponse
+)
+async def delete_glossary(
+    novel_id: str,
+    entity_id: str,
+    body: DeleteEntityRequest,
+    user: User,
+    service: Service,
+):
+    return await _delete(user, service, novel_id, "glossary", entity_id, body)
 
 
 @router.post(

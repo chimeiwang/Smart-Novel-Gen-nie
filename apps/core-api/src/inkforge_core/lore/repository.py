@@ -4,11 +4,12 @@ import hashlib
 from datetime import UTC, datetime
 from typing import Any, cast
 
-from sqlalchemy import delete, func, select, text, update
+from pydantic import JsonValue
+from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ..concurrency import next_utc_timestamp, require_expected_updated_at
+from ..concurrency import command_resource_id, next_utc_timestamp, require_expected_updated_at
 from ..db.models import (
     Chapter,
     Character,
@@ -36,6 +37,50 @@ _CONTENT_MODELS: dict[str, type[Any]] = {
     "story-background": StoryBackground,
     "world-setting": WorldSetting,
     "writing-bible": WritingBible,
+}
+_ENTITY_FIELDS: dict[str, tuple[str, ...]] = {
+    "characters": (
+        "name",
+        "aliases",
+        "gender",
+        "age",
+        "appearance",
+        "personality",
+        "identity",
+        "background",
+        "coreDesire",
+        "behaviorBoundaries",
+        "speechStyle",
+        "relationshipPrinciples",
+        "shortTermGoal",
+        "factionId",
+        "powerLevel",
+        "combatAbility",
+        "specialSkills",
+        "currentStatus",
+        "statusNote",
+    ),
+    "items": (
+        "name",
+        "aliases",
+        "type",
+        "rarity",
+        "effect",
+        "origin",
+        "description",
+        "ownerId",
+    ),
+    "locations": (
+        "name",
+        "aliases",
+        "type",
+        "parentId",
+        "climate",
+        "culture",
+        "description",
+    ),
+    "factions": ("name", "aliases", "type", "baseId", "description"),
+    "glossary": ("term", "definition", "category"),
 }
 
 
@@ -75,19 +120,48 @@ class LoreRepository:
         return [_model_dict(value) for value in values]
 
     async def create_entity(
-        self, novel_id: str, user_id: str, kind: str, fields: dict[str, Any]
+        self,
+        novel_id: str,
+        user_id: str,
+        kind: str,
+        client_request_id: str,
+        fields: dict[str, Any],
     ) -> dict[str, Any]:
         model = self._entity_model(kind)
+        entity_id = command_resource_id(kind, user_id, novel_id, client_request_id)
+        create_fields = self._entity_create_fields(kind, fields)
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
-                if kind == "locations":
-                    await self._lock_novel(session, novel_id)
-                await self._validate_entity_links(session, novel_id, kind, None, fields)
-                value = model(novelId=novel_id, **fields)
+                await self._lock_novel(session, novel_id)
+                value = await session.scalar(
+                    select(model).where(model.id == entity_id).with_for_update()
+                )
+                if value is not None:
+                    current_fields = {
+                        name: getattr(value, name) for name in _ENTITY_FIELDS[kind]
+                    }
+                    if value.novelId == novel_id and current_fields == create_fields:
+                        return {**_model_dict(value), "effective": False}
+                    raise ApiError(
+                        status_code=409,
+                        code="RESOURCE_CREATE_CONFLICT",
+                        message="创建请求已绑定其他内容",
+                    )
+                await self._validate_entity_links(
+                    session, novel_id, kind, entity_id, create_fields
+                )
+                created_at = _database_utc(next_utc_timestamp(None))
+                value = model(
+                    id=entity_id,
+                    novelId=novel_id,
+                    **create_fields,
+                    createdAt=created_at,
+                    updatedAt=created_at,
+                )
                 session.add(value)
                 await session.flush()
-                result = _model_dict(value)
+                result = {**_model_dict(value), "effective": True}
         return result
 
     async def update_entity(
@@ -97,46 +171,72 @@ class LoreRepository:
         kind: str,
         entity_id: str,
         fields: dict[str, Any],
+        expected_updated_at: datetime,
     ) -> dict[str, Any]:
         model = self._entity_model(kind)
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
-                if kind == "locations":
-                    await self._lock_novel(session, novel_id)
-                await self._validate_entity_links(session, novel_id, kind, entity_id, fields)
-                statement = (
-                    update(model)
-                    .where(model.id == entity_id, model.novelId == novel_id)
-                    .values(**fields)
-                )
-                outcome = cast(CursorResult[Any], await session.execute(statement))
-                if outcome.rowcount != 1:
-                    raise self._not_found(kind)
+                await self._lock_novel(session, novel_id)
                 value = await session.scalar(
-                    select(model).where(model.id == entity_id, model.novelId == novel_id)
+                    select(model)
+                    .where(model.id == entity_id, model.novelId == novel_id)
+                    .with_for_update()
                 )
                 if value is None:
                     raise self._not_found(kind)
+                current_updated_at = _utc(value.updatedAt)
+                require_expected_updated_at(
+                    current_updated_at,
+                    expected_updated_at,
+                    code="LORE_ENTITY_VERSION_CONFLICT",
+                )
+                if any(getattr(value, name) != requested for name, requested in fields.items()):
+                    await self._validate_entity_links(
+                        session, novel_id, kind, entity_id, fields
+                    )
+                    for name, requested in fields.items():
+                        setattr(value, name, requested)
+                    value.updatedAt = _database_utc(next_utc_timestamp(current_updated_at))
+                    await session.flush()
                 result = _model_dict(value)
         return result
 
-    async def delete_entity(self, novel_id: str, user_id: str, kind: str, entity_id: str) -> None:
+    async def delete_entity(
+        self,
+        novel_id: str,
+        user_id: str,
+        kind: str,
+        entity_id: str,
+        expected_updated_at: datetime,
+    ) -> dict[str, Any]:
         model = self._entity_model(kind)
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
-                if kind == "locations":
-                    await self._lock_novel(session, novel_id)
-                    child = await session.scalar(
-                        select(Location.id).where(Location.parentId == entity_id).limit(1)
+                await self._lock_novel(session, novel_id)
+                value = await session.scalar(
+                    select(model)
+                    .where(model.id == entity_id, model.novelId == novel_id)
+                    .with_for_update()
+                )
+                if value is None:
+                    raise self._not_found(kind)
+                require_expected_updated_at(
+                    _utc(value.updatedAt),
+                    expected_updated_at,
+                    code="LORE_ENTITY_VERSION_CONFLICT",
+                )
+                references = await self._entity_delete_references(
+                    session, kind, entity_id
+                )
+                if references:
+                    raise ApiError(
+                        status_code=409,
+                        code="LORE_ENTITY_REFERENCED",
+                        message="设定实体仍被引用，不能删除",
+                        details=references,
                     )
-                    if child is not None:
-                        raise ApiError(
-                            status_code=409,
-                            code="LOCATION_HAS_CHILDREN",
-                            message="地点仍有子地点，不能删除",
-                        )
                 outcome = cast(
                     CursorResult[Any],
                     await session.execute(
@@ -145,6 +245,56 @@ class LoreRepository:
                 )
                 if outcome.rowcount != 1:
                     raise self._not_found(kind)
+        return {"deletedType": kind, "deletedId": entity_id, "affected": {}}
+
+    @staticmethod
+    def _entity_create_fields(kind: str, fields: dict[str, Any]) -> dict[str, Any]:
+        defaults: dict[str, Any] = {"currentStatus": "active"}
+        return {
+            name: fields[name] if name in fields else defaults.get(name)
+            for name in _ENTITY_FIELDS[kind]
+        }
+
+    @staticmethod
+    async def _entity_delete_references(
+        session: AsyncSession, kind: str, entity_id: str
+    ) -> dict[str, JsonValue]:
+        statements: dict[str, Any]
+        if kind == "characters":
+            statements = {
+                "relations": select(func.count(CharacterRelation.id)).where(
+                    or_(
+                        CharacterRelation.characterId == entity_id,
+                        CharacterRelation.targetId == entity_id,
+                    )
+                ),
+                "experiences": select(func.count(CharacterExperience.id)).where(
+                    CharacterExperience.characterId == entity_id
+                ),
+                "ownedItems": select(func.count(Item.id)).where(Item.ownerId == entity_id),
+            }
+        elif kind == "locations":
+            statements = {
+                "childLocations": select(func.count(Location.id)).where(
+                    Location.parentId == entity_id
+                ),
+                "basedFactions": select(func.count(Faction.id)).where(
+                    Faction.baseId == entity_id
+                ),
+            }
+        elif kind == "factions":
+            statements = {
+                "characters": select(func.count(Character.id)).where(
+                    Character.factionId == entity_id
+                )
+            }
+        else:
+            return {}
+        counts = {
+            name: int(await session.scalar(statement) or 0)
+            for name, statement in statements.items()
+        }
+        return {name: count for name, count in counts.items() if count > 0}
 
     async def create_experience(
         self, novel_id: str, user_id: str, character_id: str, fields: dict[str, Any]

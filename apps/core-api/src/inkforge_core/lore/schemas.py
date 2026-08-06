@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 CharacterStatus = Literal["active", "missing", "dead", "imprisoned", "unknown"]
 RelationType = Literal[
@@ -36,7 +36,7 @@ def _parse_json_datetime(value: object) -> object:
 JsonDatetime = Annotated[datetime, BeforeValidator(_parse_json_datetime)]
 
 
-class CreateCharacterRequest(StrictModel):
+class CharacterFields(StrictModel):
     name: str
     aliases: str | None = None
     gender: str | None = None
@@ -58,7 +58,7 @@ class CreateCharacterRequest(StrictModel):
     statusNote: str | None = None
 
 
-class UpdateCharacterRequest(StrictModel):
+class CharacterPatch(StrictModel):
     name: str | None = None
     aliases: str | None = None
     gender: str | None = None
@@ -80,7 +80,7 @@ class UpdateCharacterRequest(StrictModel):
     statusNote: str | None = None
 
 
-class CreateItemRequest(StrictModel):
+class ItemFields(StrictModel):
     name: str
     aliases: str | None = None
     type: str | None = None
@@ -91,7 +91,7 @@ class CreateItemRequest(StrictModel):
     ownerId: str | None = None
 
 
-class UpdateItemRequest(StrictModel):
+class ItemPatch(StrictModel):
     name: str | None = None
     aliases: str | None = None
     type: str | None = None
@@ -102,7 +102,7 @@ class UpdateItemRequest(StrictModel):
     ownerId: str | None = None
 
 
-class CreateLocationRequest(StrictModel):
+class LocationFields(StrictModel):
     name: str
     aliases: str | None = None
     type: str | None = None
@@ -112,7 +112,7 @@ class CreateLocationRequest(StrictModel):
     description: str | None = None
 
 
-class UpdateLocationRequest(StrictModel):
+class LocationPatch(StrictModel):
     name: str | None = None
     aliases: str | None = None
     type: str | None = None
@@ -122,7 +122,7 @@ class UpdateLocationRequest(StrictModel):
     description: str | None = None
 
 
-class CreateFactionRequest(StrictModel):
+class FactionFields(StrictModel):
     name: str
     aliases: str | None = None
     type: str | None = None
@@ -130,7 +130,7 @@ class CreateFactionRequest(StrictModel):
     description: str | None = None
 
 
-class UpdateFactionRequest(StrictModel):
+class FactionPatch(StrictModel):
     name: str | None = None
     aliases: str | None = None
     type: str | None = None
@@ -138,16 +138,96 @@ class UpdateFactionRequest(StrictModel):
     description: str | None = None
 
 
-class CreateGlossaryRequest(StrictModel):
+class GlossaryFields(StrictModel):
     term: str
     definition: str
     category: str | None = None
 
 
-class UpdateGlossaryRequest(StrictModel):
+class GlossaryPatch(StrictModel):
     term: str | None = None
     definition: str | None = None
     category: str | None = None
+
+
+class CreateCharacterRequest(CharacterFields):
+    clientRequestId: str = Field(min_length=16, max_length=256)
+
+
+class UpdateCharacterRequest(CharacterPatch):
+    expectedUpdatedAt: JsonDatetime
+
+    @model_validator(mode="after")
+    def require_business_field(self) -> UpdateCharacterRequest:
+        _require_patch_field(self)
+        return self
+
+
+class CreateItemRequest(ItemFields):
+    clientRequestId: str = Field(min_length=16, max_length=256)
+
+
+class UpdateItemRequest(ItemPatch):
+    expectedUpdatedAt: JsonDatetime
+
+    @model_validator(mode="after")
+    def require_business_field(self) -> UpdateItemRequest:
+        _require_patch_field(self)
+        return self
+
+
+class CreateLocationRequest(LocationFields):
+    clientRequestId: str = Field(min_length=16, max_length=256)
+
+
+class UpdateLocationRequest(LocationPatch):
+    expectedUpdatedAt: JsonDatetime
+
+    @model_validator(mode="after")
+    def require_business_field(self) -> UpdateLocationRequest:
+        _require_patch_field(self)
+        return self
+
+
+class CreateFactionRequest(FactionFields):
+    clientRequestId: str = Field(min_length=16, max_length=256)
+
+
+class UpdateFactionRequest(FactionPatch):
+    expectedUpdatedAt: JsonDatetime
+
+    @model_validator(mode="after")
+    def require_business_field(self) -> UpdateFactionRequest:
+        _require_patch_field(self)
+        return self
+
+
+class CreateGlossaryRequest(GlossaryFields):
+    clientRequestId: str = Field(min_length=16, max_length=256)
+
+
+class UpdateGlossaryRequest(GlossaryPatch):
+    expectedUpdatedAt: JsonDatetime
+
+    @model_validator(mode="after")
+    def require_business_field(self) -> UpdateGlossaryRequest:
+        _require_patch_field(self)
+        return self
+
+
+def _require_patch_field(value: BaseModel) -> None:
+    if not value.model_fields_set - {"expectedUpdatedAt"}:
+        raise ValueError("至少需要提供一个更新字段")
+
+
+class DeleteEntityRequest(StrictModel):
+    expectedUpdatedAt: JsonDatetime
+
+
+class DeleteImpactResponse(StrictModel):
+    deletedType: LoreKind
+    deletedId: str
+    affected: dict[str, int]
 
 
 class ExperienceRequest(StrictModel):
@@ -196,34 +276,54 @@ class WritingBibleRequest(WritingBibleFields):
     expectedUpdatedAt: JsonDatetime | None
 
 
-class CharacterResponse(CreateCharacterRequest):
+class CharacterResponse(CharacterFields):
     id: str
     createdAt: datetime
     updatedAt: datetime
 
 
-class ItemResponse(CreateItemRequest):
+class CreateCharacterResponse(CharacterResponse):
+    effective: bool
+
+
+class ItemResponse(ItemFields):
     id: str
     createdAt: datetime
     updatedAt: datetime
 
 
-class LocationResponse(CreateLocationRequest):
+class CreateItemResponse(ItemResponse):
+    effective: bool
+
+
+class LocationResponse(LocationFields):
     id: str
     createdAt: datetime
     updatedAt: datetime
 
 
-class FactionResponse(CreateFactionRequest):
+class CreateLocationResponse(LocationResponse):
+    effective: bool
+
+
+class FactionResponse(FactionFields):
     id: str
     createdAt: datetime
     updatedAt: datetime
 
 
-class GlossaryResponse(CreateGlossaryRequest):
+class CreateFactionResponse(FactionResponse):
+    effective: bool
+
+
+class GlossaryResponse(GlossaryFields):
     id: str
     createdAt: datetime
     updatedAt: datetime
+
+
+class CreateGlossaryResponse(GlossaryResponse):
+    effective: bool
 
 
 class ExperienceResponse(StrictModel):
