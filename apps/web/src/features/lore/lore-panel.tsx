@@ -8,6 +8,11 @@ import { Form, Input, Select, InputNumber, Button, Space, Divider, Popconfirm, C
 import { browserApi } from "@/lib/api/browser";
 import { createClientRequestId } from "@/lib/api/client-request-id";
 import { ApiResponseError, requireApiData } from "@/lib/api/response";
+import {
+  captureEditBaseline,
+  requireEditBaseline,
+  type EditBaseline,
+} from "@/features/workspace/edit-baseline";
 import { buildLoreListItems, type LoreListKind } from "./lore-list-presenter";
 import { buildChildMutationPlan, executeChildMutationPlan } from "./lore-mutation-plan";
 
@@ -38,6 +43,14 @@ type RelationDraft = {
   description: string;
   startDate: string;
   endDate: string;
+};
+
+type LoreEditBaselineValue = {
+  id: string;
+  kind: LoreTabKey;
+  updatedAt: string;
+  experiences?: ExperienceDraft[];
+  relations?: RelationDraft[];
 };
 
 const LORE_TAB_LABELS: Record<LoreTabKey, string> = {
@@ -91,6 +104,7 @@ export function LorePanel({
   const activeTab = selectedTab ?? internalActiveTab;
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editBaseline, setEditBaseline] = useState<EditBaseline<LoreEditBaselineValue> | null>(null);
   const [entityClientRequestId, setEntityClientRequestId] = useState(createClientRequestId);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [form] = Form.useForm();
@@ -164,6 +178,7 @@ export function LorePanel({
 
   const openCreateModal = () => {
     setEditingId(null);
+    setEditBaseline(null);
     setEntityClientRequestId(createClientRequestId());
     setSaveError(null);
     // 重置当前 tab 的表单
@@ -234,11 +249,36 @@ export function LorePanel({
 
   const openEditModal = (id: string) => {
     setEditingId(id);
+    setEditBaseline(null);
     setSaveError(null);
     // 根据当前 tab 和 id 加载数据
     if (activeTab === "characters") {
       const character = characters.find((c) => c.id === id);
       if (character) {
+        const experiences: ExperienceDraft[] = character.experiences.map((e) => ({
+          id: e.id,
+          updatedAt: e.updatedAt,
+          chapterId: e.chapterId || "",
+          content: e.content,
+          order: e.order,
+        }));
+        const relations: RelationDraft[] = character.outgoingRelations.map((r) => ({
+          id: r.id,
+          updatedAt: r.updatedAt,
+          targetId: r.targetId,
+          relationType: r.relationType,
+          intimacy: r.intimacy,
+          description: r.description || "",
+          startDate: r.startDate || "",
+          endDate: r.endDate || "",
+        }));
+        setEditBaseline(captureEditBaseline({
+          id: character.id,
+          kind: "characters",
+          updatedAt: character.updatedAt,
+          experiences,
+          relations,
+        }));
         setCharacterForm({
           name: character.name,
           aliases: character.aliases || "",
@@ -261,29 +301,15 @@ export function LorePanel({
           // 新增：当前状态
           currentStatus: character.currentStatus,
           statusNote: character.statusNote || "",
-          experiences: character.experiences.map((e) => ({
-            id: e.id,
-            updatedAt: e.updatedAt,
-            chapterId: e.chapterId || "",
-            content: e.content,
-            order: e.order,
-          })),
+          experiences,
           // 角色关系
-          relations: character.outgoingRelations.map((r) => ({
-            id: r.id,
-            updatedAt: r.updatedAt,
-            targetId: r.targetId,
-            relationType: r.relationType,
-            intimacy: r.intimacy,
-            description: r.description || "",
-            startDate: r.startDate || "",
-            endDate: r.endDate || "",
-          })),
+          relations,
         });
       }
     } else if (activeTab === "items") {
       const item = items.find((i) => i.id === id);
       if (item) {
+        setEditBaseline(captureEditBaseline({ id: item.id, kind: "items", updatedAt: item.updatedAt }));
         setItemForm({
           name: item.name,
           aliases: item.aliases || "",
@@ -298,6 +324,7 @@ export function LorePanel({
     } else if (activeTab === "locations") {
       const location = locations.find((l) => l.id === id);
       if (location) {
+        setEditBaseline(captureEditBaseline({ id: location.id, kind: "locations", updatedAt: location.updatedAt }));
         setLocationForm({
           name: location.name,
           aliases: location.aliases || "",
@@ -311,6 +338,7 @@ export function LorePanel({
     } else if (activeTab === "factions") {
       const faction = factions.find((f) => f.id === id);
       if (faction) {
+        setEditBaseline(captureEditBaseline({ id: faction.id, kind: "factions", updatedAt: faction.updatedAt }));
         setFactionForm({
           name: faction.name,
           aliases: faction.aliases || "",
@@ -322,6 +350,7 @@ export function LorePanel({
     } else if (activeTab === "glossaries") {
       const glossary = glossaries.find((g) => g.id === id);
       if (glossary) {
+        setEditBaseline(captureEditBaseline({ id: glossary.id, kind: "glossaries", updatedAt: glossary.updatedAt }));
         setGlossaryForm({
           term: glossary.term,
           definition: glossary.definition,
@@ -336,20 +365,21 @@ export function LorePanel({
     if (pending) return;
     setIsModalOpen(false);
     setEditingId(null);
+    setEditBaseline(null);
   };
 
-  const currentEntity = () => {
-    if (!editingId) return undefined;
-    if (activeTab === "characters") return characters.find((item) => item.id === editingId);
-    if (activeTab === "items") return items.find((item) => item.id === editingId);
-    if (activeTab === "locations") return locations.find((item) => item.id === editingId);
-    if (activeTab === "factions") return factions.find((item) => item.id === editingId);
-    return glossaries.find((item) => item.id === editingId);
+  const requireCurrentEditBaseline = () => {
+    const baseline = requireEditBaseline(editingId, editBaseline);
+    if (baseline && baseline.kind !== activeTab) {
+      throw new Error("编辑基线类型不匹配，不能保存或删除");
+    }
+    return baseline;
   };
 
   const finishMutation = () => {
     setIsModalOpen(false);
     setEditingId(null);
+    setEditBaseline(null);
     setSaveError(null);
     onChanged?.();
     router.refresh();
@@ -365,15 +395,9 @@ export function LorePanel({
 
   const saveCharacterChildren = async (
     characterId: string,
-    character: components["schemas"]["CharacterDto"] | undefined,
+    originalExperiences: readonly ExperienceDraft[],
+    originalRelations: readonly RelationDraft[],
   ) => {
-    const originalExperiences: ExperienceDraft[] = (character?.experiences ?? []).map((item) => ({
-      id: item.id,
-      updatedAt: item.updatedAt,
-      chapterId: item.chapterId ?? "",
-      content: item.content,
-      order: item.order,
-    }));
     const experienceDraft = characterForm.experiences
       .filter((item) => item.content.trim())
       .map((item, order) => ({ ...item, order }));
@@ -423,16 +447,6 @@ export function LorePanel({
       },
     );
 
-    const originalRelations: RelationDraft[] = (character?.outgoingRelations ?? []).map((item) => ({
-      id: item.id,
-      updatedAt: item.updatedAt,
-      targetId: item.targetId,
-      relationType: item.relationType,
-      intimacy: item.intimacy,
-      description: item.description ?? "",
-      startDate: item.startDate ?? "",
-      endDate: item.endDate ?? "",
-    }));
     const relationDraft = characterForm.relations.filter((item) => item.targetId);
     await executeChildMutationPlan(
       buildChildMutationPlan(originalRelations, relationDraft),
@@ -485,12 +499,13 @@ export function LorePanel({
   };
 
   const handleDelete = () => {
-    const entity = currentEntity();
-    if (!editingId || !entity) return;
+    if (!editingId) return;
     startTransition(async () => {
       setSaveError(null);
-      const request = { expectedUpdatedAt: entity.updatedAt };
       try {
+        const baseline = requireCurrentEditBaseline();
+        if (!baseline) throw new Error("编辑基线缺失，不能删除");
+        const request = { expectedUpdatedAt: baseline.updatedAt };
         if (activeTab === "characters") {
           requireApiData(await browserApi.DELETE("/api/v1/novels/{novel_id}/characters/{entity_id}", {
             params: { path: { novel_id: novelId, entity_id: editingId } }, body: request,
@@ -523,6 +538,7 @@ export function LorePanel({
     startTransition(async () => {
       setSaveError(null);
       try {
+        const baseline = requireCurrentEditBaseline();
         if (activeTab === "characters") {
         const characterPayload = {
           name: characterForm.name,
@@ -545,18 +561,20 @@ export function LorePanel({
           currentStatus: characterForm.currentStatus,
           statusNote: characterForm.statusNote,
         };
-        const character = editingId
-          ? characters.find((item) => item.id === editingId)
-          : undefined;
-        if (editingId && character) {
+        if (editingId !== null) {
+          if (!baseline) throw new Error("编辑基线缺失，不能保存");
           requireApiData(await browserApi.PATCH(
             "/api/v1/novels/{novel_id}/characters/{entity_id}",
             {
               params: { path: { novel_id: novelId, entity_id: editingId } },
-              body: { ...characterPayload, expectedUpdatedAt: character.updatedAt },
+              body: { ...characterPayload, expectedUpdatedAt: baseline.updatedAt },
             },
           ));
-          await saveCharacterChildren(editingId, character);
+          await saveCharacterChildren(
+            editingId,
+            baseline.experiences ?? [],
+            baseline.relations ?? [],
+          );
         } else {
           const characterId = requireApiData(await browserApi.POST(
             "/api/v1/novels/{novel_id}/characters",
@@ -565,14 +583,13 @@ export function LorePanel({
               body: { ...characterPayload, clientRequestId: entityClientRequestId },
             },
           )).id;
-          await saveCharacterChildren(characterId, undefined);
+          await saveCharacterChildren(characterId, [], []);
         }
       } else if (activeTab === "items") {
-        if (editingId) {
-          const item = items.find((value) => value.id === editingId);
-          if (!item) throw new Error("物品不存在");
+        if (editingId !== null) {
+          if (!baseline) throw new Error("编辑基线缺失，不能保存");
           requireApiData(await browserApi.PATCH("/api/v1/novels/{novel_id}/items/{entity_id}", {
-            params: { path: { novel_id: novelId, entity_id: editingId } }, body: { ...itemForm, expectedUpdatedAt: item.updatedAt },
+            params: { path: { novel_id: novelId, entity_id: editingId } }, body: { ...itemForm, expectedUpdatedAt: baseline.updatedAt },
           }));
         } else {
           requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/items", {
@@ -580,11 +597,10 @@ export function LorePanel({
           }));
         }
       } else if (activeTab === "locations") {
-        if (editingId) {
-          const location = locations.find((value) => value.id === editingId);
-          if (!location) throw new Error("地点不存在");
+        if (editingId !== null) {
+          if (!baseline) throw new Error("编辑基线缺失，不能保存");
           requireApiData(await browserApi.PATCH("/api/v1/novels/{novel_id}/locations/{entity_id}", {
-            params: { path: { novel_id: novelId, entity_id: editingId } }, body: { ...locationForm, expectedUpdatedAt: location.updatedAt },
+            params: { path: { novel_id: novelId, entity_id: editingId } }, body: { ...locationForm, expectedUpdatedAt: baseline.updatedAt },
           }));
         } else {
           requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/locations", {
@@ -592,11 +608,10 @@ export function LorePanel({
           }));
         }
       } else if (activeTab === "factions") {
-        if (editingId) {
-          const faction = factions.find((value) => value.id === editingId);
-          if (!faction) throw new Error("势力不存在");
+        if (editingId !== null) {
+          if (!baseline) throw new Error("编辑基线缺失，不能保存");
           requireApiData(await browserApi.PATCH("/api/v1/novels/{novel_id}/factions/{entity_id}", {
-            params: { path: { novel_id: novelId, entity_id: editingId } }, body: { ...factionForm, expectedUpdatedAt: faction.updatedAt },
+            params: { path: { novel_id: novelId, entity_id: editingId } }, body: { ...factionForm, expectedUpdatedAt: baseline.updatedAt },
           }));
         } else {
           requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/factions", {
@@ -604,11 +619,10 @@ export function LorePanel({
           }));
         }
       } else if (activeTab === "glossaries") {
-        if (editingId) {
-          const glossary = glossaries.find((value) => value.id === editingId);
-          if (!glossary) throw new Error("术语不存在");
+        if (editingId !== null) {
+          if (!baseline) throw new Error("编辑基线缺失，不能保存");
           requireApiData(await browserApi.PATCH("/api/v1/novels/{novel_id}/glossary/{entity_id}", {
-            params: { path: { novel_id: novelId, entity_id: editingId } }, body: { ...glossaryForm, expectedUpdatedAt: glossary.updatedAt },
+            params: { path: { novel_id: novelId, entity_id: editingId } }, body: { ...glossaryForm, expectedUpdatedAt: baseline.updatedAt },
           }));
         } else {
           requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/glossary", {

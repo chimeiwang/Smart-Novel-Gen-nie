@@ -8,6 +8,11 @@ import { browserApi } from "@/lib/api/browser";
 import { createClientRequestId } from "@/lib/api/client-request-id";
 import { ApiResponseError, requireApiData } from "@/lib/api/response";
 import {
+  captureEditBaseline,
+  requireEditBaseline,
+  type EditBaseline,
+} from "@/features/workspace/edit-baseline";
+import {
   advanceReferenceCreateIdentity,
   buildReferenceDeleteBody,
   buildReferenceUpdateBody,
@@ -33,6 +38,7 @@ export function ReferencePanel({ novelId, references, onChanged }: ReferencePane
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [editBaseline, setEditBaseline] = useState<EditBaseline<ReferenceDto> | null>(null);
   const [title, setTitle] = useState("");
   const [type, setType] = useState<ReferenceType>("note");
   const [content, setContent] = useState("");
@@ -44,6 +50,7 @@ export function ReferencePanel({ novelId, references, onChanged }: ReferencePane
 
   const resetForm = () => {
     setEditingId(null);
+    setEditBaseline(null);
     setTitle("");
     setType("note");
     setContent("");
@@ -66,16 +73,15 @@ export function ReferencePanel({ novelId, references, onChanged }: ReferencePane
   const handleSubmit = () => {
     startTransition(async () => {
       setSaveError(null);
-      const selected = editingId
-        ? references.find((reference) => reference.id === editingId)
-        : undefined;
       try {
-        if (selected) {
+        const baseline = requireEditBaseline(editingId, editBaseline);
+        if (editingId !== null) {
+          if (!baseline) throw new Error("编辑基线缺失，不能保存");
           requireApiData(await browserApi.PATCH(
             "/api/v1/novels/{novel_id}/references/{reference_id}",
             {
-              params: { path: { novel_id: novelId, reference_id: selected.id } },
-              body: buildReferenceUpdateBody(selected, {
+              params: { path: { novel_id: novelId, reference_id: baseline.id } },
+              body: buildReferenceUpdateBody(baseline, {
                 title,
                 type,
                 content,
@@ -110,6 +116,7 @@ export function ReferencePanel({ novelId, references, onChanged }: ReferencePane
 
   const handleEdit = (reference: ReferenceDto) => {
     setSaveError(null);
+    setEditBaseline(captureEditBaseline(reference));
     setEditingId(reference.id);
     setTitle(reference.title);
     setType(reference.type);
@@ -121,11 +128,15 @@ export function ReferencePanel({ novelId, references, onChanged }: ReferencePane
     startTransition(async () => {
       setSaveError(null);
       try {
+        const target = editingId === reference.id
+          ? requireEditBaseline(editingId, editBaseline)
+          : reference;
+        if (!target) throw new Error("编辑基线缺失，不能删除");
         requireApiData(await browserApi.DELETE(
           "/api/v1/novels/{novel_id}/references/{reference_id}",
           {
-            params: { path: { novel_id: novelId, reference_id: reference.id } },
-            body: buildReferenceDeleteBody(reference),
+            params: { path: { novel_id: novelId, reference_id: target.id } },
+            body: buildReferenceDeleteBody(target),
           },
         ));
         if (editingId === reference.id) resetForm();
