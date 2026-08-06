@@ -31,6 +31,12 @@ class UpdatePortraitSectionRequest(StrictModel):
 
 class ApplyStyleRequest(StrictModel):
     styleId: str | None
+    expectedStyleId: str | None
+
+
+class ApplyStyleResponse(StrictModel):
+    styleId: str | None
+    effective: bool
 
 
 class StyleReferenceResponse(StrictModel):

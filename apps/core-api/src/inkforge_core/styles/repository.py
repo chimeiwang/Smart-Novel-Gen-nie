@@ -394,7 +394,8 @@ class StyleRepository:
         novel_id: str,
         user_id: str,
         style_id: str | None,
-    ) -> None:
+        expected_style_id: str | None,
+    ) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
                 novel = cast(
@@ -411,6 +412,16 @@ class StyleRepository:
                         code="NOVEL_NOT_FOUND",
                         message="小说不存在",
                     )
+                current_style_id = novel.appliedStyleId
+                if current_style_id != expected_style_id:
+                    raise ApiError(
+                        status_code=409,
+                        code="APPLIED_STYLE_VERSION_CONFLICT",
+                        message="小说当前应用文风已发生变化",
+                        details={"currentStyleId": current_style_id},
+                    )
+                if current_style_id == style_id:
+                    return {"styleId": current_style_id, "effective": False}
                 if style_id is not None:
                     style = await self._lock_owned_style(session, user_id, style_id)
                     if not style.portraitMarkdown:
@@ -420,6 +431,8 @@ class StyleRepository:
                             message="文风画像尚未完整生成",
                         )
                 novel.appliedStyleId = style_id
+                await session.flush()
+                return {"styleId": style_id, "effective": True}
 
     @staticmethod
     async def _lock_owned_style(

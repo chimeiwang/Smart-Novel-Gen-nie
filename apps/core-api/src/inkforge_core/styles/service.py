@@ -11,6 +11,7 @@ from inkforge_contracts.jobs import AgentJobStatus
 from ..errors import ApiError
 from .schemas import (
     ApplyStyleRequest,
+    ApplyStyleResponse,
     CreateStyleRequest,
     FullPortraitSuccessRequest,
     PortraitAcceptedResponse,
@@ -60,7 +61,13 @@ class StyleRepositoryPort(Protocol):
     async def update_section(
         self, user_id: str, style_id: str, section: PortraitSection, content: str
     ) -> dict[str, Any]: ...
-    async def apply_style(self, novel_id: str, user_id: str, style_id: str | None) -> None: ...
+    async def apply_style(
+        self,
+        novel_id: str,
+        user_id: str,
+        style_id: str | None,
+        expected_style_id: str | None,
+    ) -> dict[str, Any]: ...
 
 
 class PortraitRunSubmitter(Protocol):
@@ -272,8 +279,20 @@ class StyleService:
             await self._repository.update_section(user_id, style_id, section, content)
         )
 
-    async def apply_style(self, user_id: str, novel_id: str, request: ApplyStyleRequest) -> None:
-        await self._repository.apply_style(novel_id, user_id, request.styleId)
+    async def apply_style(
+        self,
+        user_id: str,
+        novel_id: str,
+        request: ApplyStyleRequest,
+    ) -> ApplyStyleResponse:
+        return ApplyStyleResponse.model_validate(
+            await self._repository.apply_style(
+                novel_id,
+                user_id,
+                request.styleId,
+                request.expectedStyleId,
+            )
+        )
 
     @staticmethod
     def _require_run(task_id: str, run_id: str) -> None:

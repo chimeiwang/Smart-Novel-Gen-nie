@@ -82,7 +82,10 @@ class ApiStyleService:
         return await self.create_style(user_id, type("Body", (), {"name": "私有文风"})())
 
     async def apply_style(self, user_id, novel_id, body):
-        self.calls.append(("apply", user_id, novel_id, body.styleId))
+        self.calls.append(
+            ("apply", user_id, novel_id, body.styleId, body.expectedStyleId)
+        )
+        return {"styleId": body.styleId, "effective": body.styleId != body.expectedStyleId}
 
 
 @asynccontextmanager
@@ -129,7 +132,7 @@ async def client(
         (
             "PATCH",
             "/api/v1/novels/novel-1/applied-style",
-            {"json": {"styleId": None}},
+            {"json": {"styleId": None, "expectedStyleId": None}},
         ),
     ],
 )
@@ -166,11 +169,14 @@ async def test_public_style_route_matrix_and_multipart_upload() -> None:
                 "/api/v1/styles/style-1/sections/styleTraits", json={"content": "特质"}
             )
         ).status_code == 200
-        assert (
-            await value.patch("/api/v1/novels/novel-1/applied-style", json={"styleId": None})
-        ).status_code == 204
+        apply_response = await value.patch(
+            "/api/v1/novels/novel-1/applied-style",
+            json={"styleId": "style-1", "expectedStyleId": None},
+        )
+        assert apply_response.status_code == 200
+        assert apply_response.json() == {"styleId": "style-1", "effective": True}
         assert (await value.delete("/api/v1/styles/style-1")).status_code == 204
-    assert ("apply", "cookie-user", "novel-1", None) in service.calls
+    assert ("apply", "cookie-user", "novel-1", "style-1", None) in service.calls
     assert ("list", "cookie-user") in service.calls
     assert ("create", "cookie-user", "共享文风") in service.calls
     assert ("delete-style", "cookie-user", "style-1") in service.calls
@@ -180,6 +186,25 @@ async def test_public_style_route_matrix_and_multipart_upload() -> None:
     assert ("section", "cookie-user", "style-1", "styleTraits", "特质") in service.calls
     assert ("portrait", "cookie-user", "style-1", None) in service.calls
     assert ("portrait", "cookie-user", "style-1", "uniqueMarkers") in service.calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"styleId": None},
+        {"expectedStyleId": None},
+    ],
+)
+async def test_apply_style_route_requires_both_nullable_fields(
+    body: dict[str, object | None],
+) -> None:
+    async with client(ApiStyleService()) as value:
+        response = await value.patch(
+            "/api/v1/novels/novel-1/applied-style",
+            json=body,
+        )
+    assert response.status_code == 422
 
 
 def test_openapi_publishes_strict_dtos_and_hides_internal_callbacks() -> None:
@@ -192,8 +217,15 @@ def test_openapi_publishes_strict_dtos_and_hides_internal_callbacks() -> None:
     assert "/api/v1/portrait-tasks/{task_id}" in paths
     assert "/api/v1/novels/{novel_id}/applied-style" in paths
     assert not any(path.startswith("/internal/") for path in paths)
-    for name in ("CreateStyleRequest", "UpdatePortraitSectionRequest", "ApplyStyleRequest"):
+    for name in (
+        "CreateStyleRequest",
+        "UpdatePortraitSectionRequest",
+        "ApplyStyleRequest",
+        "ApplyStyleResponse",
+    ):
         assert schema["components"]["schemas"][name]["additionalProperties"] is False
+    apply_schema = schema["components"]["schemas"]["ApplyStyleRequest"]
+    assert set(apply_schema["required"]) == {"styleId", "expectedStyleId"}
     assert "filepath" not in schema["components"]["schemas"]["StyleReferenceResponse"][
         "properties"
     ]

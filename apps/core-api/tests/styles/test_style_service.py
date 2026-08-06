@@ -198,7 +198,7 @@ class MemoryRepository:
         )
         return style
 
-    async def apply_style(self, novel_id, user_id, style_id):
+    async def apply_style(self, novel_id, user_id, style_id, expected_style_id):
         if user_id != "user-1":
             raise ApiError(status_code=404, code="NOVEL_NOT_FOUND", message="小说不存在")
         if style_id is not None:
@@ -208,6 +208,7 @@ class MemoryRepository:
                 status_code=409, code="STYLE_PORTRAIT_INCOMPLETE", message="文风画像不完整"
             )
         self.applied = (novel_id, user_id, style_id)
+        return {"styleId": style_id, "effective": style_id != expected_style_id}
 
 
 class RecordingSubmitter:
@@ -593,11 +594,29 @@ async def test_apply_rechecks_novel_owner_and_requires_complete_portrait(tmp_pat
     repository = MemoryRepository()
     style_service = service(tmp_path, repository)
     with pytest.raises(ApiError):
-        await style_service.apply_style("attacker", "novel-1", ApplyStyleRequest(styleId=None))
+        await style_service.apply_style(
+            "attacker",
+            "novel-1",
+            ApplyStyleRequest(styleId=None, expectedStyleId=None),
+        )
     with pytest.raises(ApiError) as caught:
-        await style_service.apply_style("user-1", "novel-1", ApplyStyleRequest(styleId="style-1"))
+        await style_service.apply_style(
+            "user-1",
+            "novel-1",
+            ApplyStyleRequest(styleId="style-1", expectedStyleId=None),
+        )
     assert caught.value.code == "STYLE_PORTRAIT_INCOMPLETE"
     repository.styles["style-1"]["portraitMarkdown"] = "完整画像"
-    await style_service.apply_style("user-1", "novel-1", ApplyStyleRequest(styleId="style-1"))
-    await style_service.apply_style("user-1", "novel-1", ApplyStyleRequest(styleId=None))
+    applied = await style_service.apply_style(
+        "user-1",
+        "novel-1",
+        ApplyStyleRequest(styleId="style-1", expectedStyleId=None),
+    )
+    cleared = await style_service.apply_style(
+        "user-1",
+        "novel-1",
+        ApplyStyleRequest(styleId=None, expectedStyleId="style-1"),
+    )
+    assert applied.model_dump() == {"styleId": "style-1", "effective": True}
+    assert cleared.model_dump() == {"styleId": None, "effective": True}
     assert repository.applied == ("novel-1", "user-1", None)

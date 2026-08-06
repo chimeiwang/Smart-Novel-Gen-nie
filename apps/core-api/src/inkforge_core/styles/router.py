@@ -9,6 +9,7 @@ from ..auth.repository import AuthUser
 from ..errors import ApiError
 from .schemas import (
     ApplyStyleRequest,
+    ApplyStyleResponse,
     CreateStyleRequest,
     PortraitAcceptedResponse,
     PortraitSection,
@@ -125,13 +126,12 @@ async def update_section(
 
 @router.patch(
     "/novels/{novel_id}/applied-style",
-    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=ApplyStyleResponse,
 )
 async def apply_style(
     novel_id: str,
     body: ApplyStyleRequest,
     user: User,
     service: Service,
-) -> Response:
-    await service.apply_style(user.id, novel_id, body)
-    return Response(status_code=204)
+) -> ApplyStyleResponse:
+    return await service.apply_style(user.id, novel_id, body)
