@@ -3,16 +3,26 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
+from inkforge_contracts.long_serial import SourceBinding
 from inkforge_core.db.base import utc_now
-from inkforge_core.db.models import ReviewArtifact, WritingRunCommand, WritingTask
+from inkforge_core.db.models import (
+    Chapter,
+    Novel,
+    ReviewArtifact,
+    WritingRunCommand,
+    WritingTask,
+)
 from inkforge_core.errors import ApiError
+from inkforge_core.writing import commands as commands_module
 from inkforge_core.writing.commands import (
     WritingRunCommandRepository,
     command_idempotency_key,
 )
+from inkforge_core.writing.schemas import StartWritingRunRequest
+from inkforge_core.writing.transaction_locks import LockedWritingRows
 from sqlalchemy.dialects import postgresql
 
 
@@ -829,6 +839,127 @@ def test_command_idempotency_key_is_user_scoped() -> None:
     assert command_idempotency_key("user-2", "request-1") != command_idempotency_key(
         "user-1", "request-1"
     )
+
+
+class NaturalStartSession(CommandSession):
+    async def flush(self) -> None:
+        now = utc_now()
+        for value in self.added:
+            if isinstance(value, WritingTask):
+                value.id = value.id or "task-natural"
+                value.createdAt = value.createdAt or now
+                value.updatedAt = value.updatedAt or now
+            elif isinstance(value, WritingRunCommand):
+                value.id = value.id or "command-natural"
+                value.createdAt = value.createdAt or now
+                value.updatedAt = value.updatedAt or now
+
+
+@pytest.mark.asyncio
+async def test_natural_long_start_freezes_sources_without_explicit_operation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = NaturalStartSession()
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+    order: list[str] = []
+    binding = SourceBinding(
+        resourceType="chapter",
+        resourceId="chapter-1",
+        exists=True,
+        updatedAt=datetime(2026, 8, 6, tzinfo=UTC),
+        contentSha256="a" * 64,
+        revision=None,
+        absenceSentinel=None,
+    )
+
+    async def no_existing(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+
+    async def idempotency(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        order.append("idempotency")
+
+    async def advisory(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        order.append("advisory")
+
+    async def locked(*args: object, **kwargs: object) -> LockedWritingRows:
+        del args, kwargs
+        order.append("lock")
+        return LockedWritingRows(
+            novel=Novel(id="novel-1", userId="user-1"),
+            chapters=(Chapter(id="chapter-1", novelId="novel-1"),),
+            task=None,
+            artifact=None,
+            command=None,
+        )
+
+    async def profile(*args: object, **kwargs: object) -> str:
+        del args, kwargs
+        order.append("profile")
+        return "long_serial"
+
+    async def busy(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        order.append("busy")
+
+    async def captured(*args: object, **kwargs: object) -> tuple[SourceBinding, ...]:
+        del args, kwargs
+        order.append("capture")
+        return (binding,)
+
+    monkeypatch.setattr(repository, "_get_existing_response", no_existing)
+    monkeypatch.setattr(repository, "_get_by_idempotency_key", idempotency)
+    monkeypatch.setattr(commands_module, "_require_chapter", no_existing)
+    monkeypatch.setattr(commands_module, "acquire_idempotency_lock", advisory)
+    monkeypatch.setattr(commands_module, "lock_writing_rows", locked)
+    monkeypatch.setattr(
+        commands_module,
+        "_story_length_profile",
+        profile,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        commands_module,
+        "_require_no_active_long_serial_mutation",
+        busy,
+    )
+    monkeypatch.setattr(
+        commands_module,
+        "capture_chapter_source_bindings",
+        captured,
+    )
+
+    await repository.create_start_with_task(
+        "user-1",
+        StartWritingRunRequest(
+            clientRequestId="natural-start-000001",
+            novelId="novel-1",
+            chapterId="chapter-1",
+            targetWordCount=4_000,
+            selectedAgents=["写作", "编辑"],
+            userMessage="续写本章",
+        ),
+    )
+
+    command_model = next(
+        value for value in session.added if isinstance(value, WritingRunCommand)
+    )
+    payload = json.loads(command_model.payloadJson)
+    assert payload["sourceBindings"][0]["resourceType"] == "chapter"
+    assert "workflow" not in payload
+    assert "operation" not in payload
+    assert order == [
+        "advisory",
+        "idempotency",
+        "lock",
+        "profile",
+        "idempotency",
+        "busy",
+        "capture",
+    ]
 
 
 @pytest.mark.asyncio

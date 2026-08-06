@@ -56,6 +56,7 @@ from .schemas import (
     ResumeWritingRunRequest,
     ResumeWritingRunResponse,
     ShortMediumStartWritingRunRequest,
+    StartWritingRunRequest,
     WritingRunResponse,
     WritingRunStartRequest,
     WritingRunStatusResponse,
@@ -101,6 +102,8 @@ class WritingRunCommandRepository:
     ) -> WritingRunResponse:
         if isinstance(request, LongSerialStartWritingRunRequest):
             return await self._create_long_serial_start(user_id, request)
+        if isinstance(request, StartWritingRunRequest):
+            return await self._create_natural_start(user_id, request)
         key = command_idempotency_key(user_id, request.clientRequestId)
         existing = await self._get_existing_response(user_id, request.clientRequestId)
         if isinstance(existing, WritingRunResponse):
@@ -112,12 +115,50 @@ class WritingRunCommandRepository:
                     if existing_row is not None:
                         command, task, _owner_id = existing_row
                         return _run_response(task, command)
-                    if isinstance(request, ShortMediumStartWritingRunRequest):
-                        return await self._create_short_medium_start(
-                            session, user_id, request, key
-                        )
-                    await _require_chapter(
-                        session, user_id, request.novelId, request.chapterId
+                    return await self._create_short_medium_start(
+                        session, user_id, request, key
+                    )
+        except IntegrityError as exc:
+            raced = await self._get_existing_response(user_id, request.clientRequestId)
+            if isinstance(raced, WritingRunResponse):
+                return raced
+            raise ApiError(
+                status_code=409,
+                code="WRITING_COMMAND_CONFLICT",
+                message="写作启动请求发生并发冲突",
+            ) from exc
+
+    async def _create_natural_start(
+        self,
+        user_id: str,
+        request: StartWritingRunRequest,
+    ) -> WritingRunResponse:
+        key = command_idempotency_key(user_id, request.clientRequestId)
+        try:
+            async with self._session_factory() as session:
+                async with session.begin():
+                    await acquire_idempotency_lock(
+                        session,
+                        user_id=user_id,
+                        client_request_id=request.clientRequestId,
+                    )
+                    existing_row = await self._get_by_idempotency_key(
+                        session, key
+                    )
+                    if existing_row is not None:
+                        command, task, _owner_id = existing_row
+                        return _run_response(task, command)
+
+                    await lock_writing_rows(
+                        session,
+                        user_id=user_id,
+                        request=WritingLockRequest(
+                            novel_id=request.novelId,
+                            chapter_ids=(request.chapterId,),
+                        ),
+                    )
+                    story_length_profile = await _story_length_profile(
+                        session, request.novelId
                     )
                     if request.writingSessionId is not None:
                         await _require_session_binding(
@@ -127,6 +168,35 @@ class WritingRunCommandRepository:
                             request.novelId,
                             request.chapterId,
                         )
+
+                    existing_row = await self._get_by_idempotency_key(
+                        session, key
+                    )
+                    if existing_row is not None:
+                        command, task, _owner_id = existing_row
+                        return _run_response(task, command)
+
+                    payload: dict[str, Any] = {
+                        "version": 1,
+                        "resume": False,
+                        "chapterId": request.chapterId,
+                        "writingSessionId": request.writingSessionId,
+                        "resumeInput": None,
+                    }
+                    if story_length_profile == "long_serial":
+                        await _require_no_active_long_serial_mutation(
+                            session, request.chapterId
+                        )
+                        bindings = await capture_chapter_source_bindings(
+                            session,
+                            novel_id=request.novelId,
+                            chapter_id=request.chapterId,
+                        )
+                        payload["sourceBindings"] = [
+                            binding.model_dump(mode="json")
+                            for binding in bindings
+                        ]
+
                     task = WritingTask(
                         novelId=request.novelId,
                         chapterId=request.chapterId,
@@ -153,24 +223,22 @@ class WritingRunCommandRepository:
                                 ),
                             )
                         )
-                        await _touch_writing_session(session, request.writingSessionId)
+                        await _touch_writing_session(
+                            session, request.writingSessionId
+                        )
                     command = _new_command(
                         task,
                         kind="start",
                         key=key,
-                        payload={
-                            "version": 1,
-                            "resume": False,
-                            "chapterId": task.chapterId,
-                            "writingSessionId": task.writingSessionId,
-                            "resumeInput": None,
-                        },
+                        payload=payload,
                     )
                     session.add(command)
                     await session.flush()
                     return _run_response(task, command)
         except IntegrityError as exc:
-            raced = await self._get_existing_response(user_id, request.clientRequestId)
+            raced = await self._get_existing_response(
+                user_id, request.clientRequestId
+            )
             if isinstance(raced, WritingRunResponse):
                 return raced
             raise ApiError(
@@ -1076,11 +1144,7 @@ async def _require_long_serial_profile(
     session: AsyncSession,
     novel_id: str,
 ) -> None:
-    profile = await session.scalar(
-        select(WritingBible.storyLengthProfile)
-        .where(WritingBible.novelId == novel_id)
-        .with_for_update()
-    )
+    profile = await _story_length_profile(session, novel_id)
     if profile != "long_serial":
         raise ApiError(
             status_code=409,
@@ -1088,6 +1152,20 @@ async def _require_long_serial_profile(
             message="目标小说不是长篇作品",
             details={"novelId": novel_id},
         )
+
+
+async def _story_length_profile(
+    session: AsyncSession,
+    novel_id: str,
+) -> str | None:
+    return cast(
+        str | None,
+        await session.scalar(
+            select(WritingBible.storyLengthProfile)
+            .where(WritingBible.novelId == novel_id)
+            .with_for_update()
+        ),
+    )
 
 
 async def _require_no_active_long_serial_mutation(

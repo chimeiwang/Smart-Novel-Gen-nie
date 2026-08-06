@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from inkforge_contracts.long_serial import SourceBinding
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -152,6 +153,7 @@ class WritingContextRepository:
                 session, task.novelId
             )
             active_artifact = await self._active_artifact(session, task)
+            source_bindings = await self._source_bindings(session, task)
             conversation_history = _conversation_history(task.conversationHistory)
             prior_conversation_history, latest_user_message = (
                 _split_current_user_message(conversation_history)
@@ -177,6 +179,7 @@ class WritingContextRepository:
                 "outlinePath": outline_path,
                 "foreshadowingSummaries": foreshadowing_summaries,
                 "activeArtifact": active_artifact,
+                "sourceBindings": source_bindings,
                 "phase": task.phase,
                 "targetWordCount": task.targetWordCount,
                 "selectedAgents": [item for item in task.selectedAgents.split(",") if item],
@@ -184,6 +187,46 @@ class WritingContextRepository:
                 "userMessage": latest_user_message,
                 "graphState": (json.loads(task.graphStateJson) if task.graphStateJson else None),
             }
+
+    async def _source_bindings(
+        self,
+        session: AsyncSession,
+        task: WritingTask,
+    ) -> list[dict[str, Any]]:
+        command = await session.scalar(
+            select(WritingRunCommand)
+            .where(
+                WritingRunCommand.taskId == task.id,
+                WritingRunCommand.kind == "start",
+            )
+            .order_by(
+                WritingRunCommand.createdAt.asc(),
+                WritingRunCommand.id.asc(),
+            )
+            .limit(1)
+        )
+        if command is None:
+            return []
+        try:
+            payload = json.loads(command.payloadJson)
+        except (json.JSONDecodeError, TypeError):
+            raise _source_bindings_invalid() from None
+        if not isinstance(payload, dict):
+            raise _source_bindings_invalid()
+        job = payload.get("job")
+        source = job if isinstance(job, dict) else payload
+        raw_bindings = source.get("sourceBindings")
+        if raw_bindings is None:
+            return []
+        if not isinstance(raw_bindings, list):
+            raise _source_bindings_invalid()
+        try:
+            return [
+                SourceBinding.model_validate(binding).model_dump(mode="json")
+                for binding in raw_bindings
+            ]
+        except (TypeError, ValueError):
+            raise _source_bindings_invalid() from None
 
     async def _chapter_groups(
         self, session: AsyncSession, novel_id: str
@@ -347,6 +390,14 @@ def _artifact_payload_invalid() -> ApiError:
         status_code=409,
         code="ARTIFACT_PAYLOAD_INVALID",
         message="待审核草案的持久化内容格式无效",
+    )
+
+
+def _source_bindings_invalid() -> ApiError:
+    return ApiError(
+        status_code=409,
+        code="WRITING_SOURCE_BINDINGS_INVALID",
+        message="写作任务的冻结来源格式无效",
     )
 
 

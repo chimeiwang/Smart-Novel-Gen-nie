@@ -2,6 +2,7 @@ import json
 from typing import Any, cast
 
 import pytest
+from inkforge_contracts.long_serial import SourceBinding
 from inkforge_core.db.models import Foreshadowing, ReviewArtifact, WritingRunCommand, WritingTask
 from inkforge_core.errors import ApiError
 from inkforge_core.writing.context import (
@@ -123,6 +124,40 @@ class FakeScalarsSession:
     async def scalars(self, statement: object) -> FakeScalarsResult:
         self.statement = statement
         return FakeScalarsResult(self.values)
+
+
+@pytest.mark.asyncio
+async def test_context_reads_frozen_sources_from_natural_start_command() -> None:
+    binding = SourceBinding(
+        resourceType="chapter",
+        resourceId="chapter-1",
+        exists=True,
+        updatedAt="2026-08-06T00:00:00Z",
+        contentSha256="a" * 64,
+        revision=None,
+        absenceSentinel=None,
+    )
+    start = WritingRunCommand(
+        id="command-start",
+        taskId="task-1",
+        kind="start",
+        status="pending",
+        idempotencyKey="user-1:natural-start-000001",
+        payloadJson=json.dumps(
+            {
+                "version": 1,
+                "resume": False,
+                "chapterId": "chapter-1",
+                "sourceBindings": [binding.model_dump(mode="json")],
+            }
+        ),
+    )
+    repository = WritingContextRepository(cast(Any, None))
+    session = cast(AsyncSession, FakeScalarSession([start]))
+
+    result = await repository._source_bindings(session, _task_with_active_artifact())
+
+    assert result == [binding.model_dump(mode="json")]
 
 
 @pytest.mark.asyncio
