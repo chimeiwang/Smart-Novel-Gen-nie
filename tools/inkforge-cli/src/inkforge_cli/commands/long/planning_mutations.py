@@ -80,10 +80,13 @@ def save_story_progress(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
 def save_writing_bible(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
     require_payload_fields(payload, required=_STRUCTURED_REQUIRED_FIELDS)
     data = require_data_fields(payload, allowed=_WRITING_BIBLE_FIELDS)
-    if data.get("storyLengthProfile") == "short_medium":
+    if (
+        "storyLengthProfile" in data
+        and data["storyLengthProfile"] != "long_serial"
+    ):
         raise CliInputError(
             "INVALID_STORY_LENGTH_PROFILE",
-            "长篇作品圣经不接受 storyLengthProfile=short_medium",
+            "长篇作品圣经的 storyLengthProfile 必须严格等于字符串 long_serial",
         )
     response = runtime.require_api().request(
         "PUT",

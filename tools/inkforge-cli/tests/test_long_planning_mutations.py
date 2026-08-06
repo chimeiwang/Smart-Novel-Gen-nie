@@ -279,23 +279,46 @@ def test_structured_data_requires_allowed_business_fields(
     assert api.calls == []
 
 
-def test_writing_bible_rejects_short_medium_profile() -> None:
+@pytest.mark.parametrize("story_length_profile", [None, "other", "short_medium", 7])
+def test_writing_bible_rejects_non_long_serial_profile(
+    story_length_profile: object,
+) -> None:
     module = _module()
     spec = _spec(module, "long.lore.writing-bible.save")
     api = RecordingApi()
 
-    with pytest.raises(CliInputError, match="short_medium") as caught:
+    with pytest.raises(CliInputError, match="long_serial") as caught:
         spec.handler(
             _runtime(spec, api),
             {
                 "novelId": "novel-1",
                 "expectedUpdatedAt": None,
-                "data": {"storyLengthProfile": "short_medium"},
+                "data": {"storyLengthProfile": story_length_profile},
             },
         )
 
     assert command_exit_code(spec, caught.value) == 2
     assert api.calls == []
+
+
+def test_writing_bible_accepts_long_serial_profile() -> None:
+    module = _module()
+    spec = _spec(module, "long.lore.writing-bible.save")
+    api = RecordingApi()
+
+    spec.handler(
+        _runtime(spec, api),
+        {
+            "novelId": "novel-1",
+            "expectedUpdatedAt": None,
+            "data": {"storyLengthProfile": "long_serial"},
+        },
+    )
+
+    assert api.calls[0][2]["json"] == {
+        "storyLengthProfile": "long_serial",
+        "expectedUpdatedAt": None,
+    }
 
 
 @pytest.mark.parametrize("novel_id", [None, "", 7])
