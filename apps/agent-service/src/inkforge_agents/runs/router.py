@@ -139,5 +139,7 @@ async def cancel_run(
         run_id=body.runId,
         novel_id=body.novelId,
     )
-    await queue.cancel(job_id)
+    cancelled = await queue.cancel(job_id)
+    if not cancelled and await queue.status(job_id) is None:
+        raise HTTPException(status_code=503, detail="智能体运行取消状态未持久化")
     return Response(status_code=status.HTTP_204_NO_CONTENT)

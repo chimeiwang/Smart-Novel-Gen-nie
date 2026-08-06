@@ -98,3 +98,79 @@ def test_duplicate_run_submission_returns_existing_terminal_status() -> None:
 
     assert response.status_code == 202
     assert response.json()["status"] == "failed"
+
+
+def test_cancel_before_submission_is_idempotent_and_rejects_late_force_submission() -> None:
+    queue = RedisRunQueue(fakeredis.aioredis.FakeRedis(), prefix="test:runs")
+    client = TestClient(
+        create_app(testing=True, run_queue=queue, core_request_verifier=Verifier()),
+        client=("127.0.0.1", 50000),
+    )
+    headers = {
+        "Authorization": "Bearer signed",
+        "Idempotency-Key": "job-1",
+        "X-InkForge-Timestamp": "1",
+        "X-InkForge-Body-SHA256": "0" * 64,
+    }
+    cancel_body = {
+        "protocolVersion": "1.0",
+        "runId": "run-1",
+        "taskId": "task-1",
+        "novelId": "novel-1",
+    }
+    forced = {**body(), "force": True}
+
+    with client:
+        first = client.request(
+            "DELETE", "/internal/v1/runs/job-1", json=cancel_body, headers=headers
+        )
+        second = client.request(
+            "DELETE", "/internal/v1/runs/job-1", json=cancel_body, headers=headers
+        )
+        late = client.post("/internal/v1/runs", json=forced, headers=headers)
+
+    assert first.status_code == 204
+    assert second.status_code == 204
+    assert late.status_code == 202
+    assert late.json()["status"] == "cancelled"
+
+
+def test_cancel_rejects_response_when_tombstone_cannot_be_observed() -> None:
+    class IncompleteCancellationQueue:
+        async def cancel(self, job_id: str) -> bool:
+            assert job_id == "job-1"
+            return False
+
+        async def status(self, job_id: str) -> None:
+            assert job_id == "job-1"
+            return None
+
+    client = TestClient(
+        create_app(
+            testing=True,
+            run_queue=IncompleteCancellationQueue(),  # type: ignore[arg-type]
+            core_request_verifier=Verifier(),
+        ),
+        client=("127.0.0.1", 50000),
+    )
+    headers = {
+        "Authorization": "Bearer signed",
+        "Idempotency-Key": "job-1",
+        "X-InkForge-Timestamp": "1",
+        "X-InkForge-Body-SHA256": "0" * 64,
+    }
+
+    with client:
+        response = client.request(
+            "DELETE",
+            "/internal/v1/runs/job-1",
+            json={
+                "protocolVersion": "1.0",
+                "runId": "run-1",
+                "taskId": "task-1",
+                "novelId": "novel-1",
+            },
+            headers=headers,
+        )
+
+    assert response.status_code == 503

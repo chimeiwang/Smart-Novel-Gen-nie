@@ -442,7 +442,7 @@ return recovered
 
 _CANCEL_SCRIPT = """
 local status = redis.call('HGET', KEYS[4], ARGV[1])
-if not status or status == 'completed' or status == 'failed' or status == 'cancelled' then
+if status == 'completed' or status == 'failed' or status == 'cancelled' then
   return 0
 end
 redis.call('ZREM', KEYS[1], ARGV[1])

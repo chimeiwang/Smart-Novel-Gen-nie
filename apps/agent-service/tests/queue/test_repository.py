@@ -3,6 +3,7 @@ from typing import cast
 
 import fakeredis.aioredis
 import pytest
+from inkforge_agents.queue.cancellation import JobCancelledError, RedisRunCancellation
 from inkforge_agents.queue.repository import JobStatus, QueueJob, RedisRunQueue
 
 
@@ -89,6 +90,45 @@ async def test_cancel_cleans_runtime_metadata_and_records_tombstone() -> None:
     assert await redis.hget("test:queue:scores", "terminal-cancel") is None
     assert await redis.hget("test:queue:statuses", "terminal-cancel") == b"cancelled"
     assert await redis.zscore("test:queue:terminal", "terminal-cancel") is not None
+
+
+@pytest.mark.asyncio
+async def test_cancel_before_enqueue_persists_tombstone_and_rejects_late_force_enqueue() -> None:
+    redis = fakeredis.aioredis.FakeRedis()
+    queue = RedisRunQueue(redis, prefix="test:queue")
+    cancelled_at = datetime.now(UTC)
+
+    assert await queue.cancel("late-job", now=cancelled_at) is True
+    assert await queue.status("late-job") == "cancelled"
+    assert await queue.enqueue(job("late-job")) is False
+    assert await queue.enqueue(job("late-job"), force=True) is False
+    assert await redis.zscore("test:queue:terminal", "late-job") == pytest.approx(
+        cancelled_at.timestamp() * 1000
+    )
+
+
+@pytest.mark.asyncio
+async def test_cancel_before_enqueue_is_idempotent_and_expires_with_terminal_retention() -> None:
+    redis = fakeredis.aioredis.FakeRedis()
+    queue = RedisRunQueue(redis, prefix="test:queue")
+    cancelled_at = datetime.now(UTC)
+
+    assert await queue.cancel("expired-cancel", now=cancelled_at) is True
+    assert await queue.cancel("expired-cancel", now=cancelled_at) is False
+    assert await queue.purge_terminal(cancelled_at + timedelta(days=8)) == 1
+    assert await queue.status("expired-cancel") is None
+    assert await queue.enqueue(job("expired-cancel")) is True
+
+
+@pytest.mark.asyncio
+async def test_redis_run_cancellation_only_interrupts_cancelled_job() -> None:
+    queue = RedisRunQueue(fakeredis.aioredis.FakeRedis(), prefix="test:queue")
+    cancellation = RedisRunCancellation(queue)
+
+    await cancellation.ensure_active("active-job")
+    await queue.cancel("cancelled-job")
+    with pytest.raises(JobCancelledError, match="运行任务已取消"):
+        await cancellation.ensure_active("cancelled-job")
 
 
 @pytest.mark.asyncio
