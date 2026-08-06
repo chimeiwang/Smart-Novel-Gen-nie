@@ -7,6 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 from inkforge_agents.app import create_app
 from inkforge_agents.config import Settings
+from inkforge_agents.queue.cancellation import RedisRunCancellation
 from inkforge_agents.queue.consumer import QueueConsumer
 from inkforge_agents.supervision import CoroutineSupervisor
 from redis.exceptions import ResponseError
@@ -380,9 +381,11 @@ async def test_应用装配向模型运行时传入相同输出预算并复用�
             registry: object,
             *,
             max_output_tokens: int,
+            cancellation: object | None = None,
         ) -> None:
             del model_runtime, registry
             captured["agent"] = max_output_tokens
+            captured["cancellation"] = cancellation
 
     class CapturingPortraitGenerator:
         def __init__(
@@ -454,6 +457,7 @@ async def test_应用装配向模型运行时传入相同输出预算并复用�
         assert captured["agent"] == 456_789
         assert captured["portrait"] == 456_789
         assert captured["short"] == 456_789
+        assert isinstance(captured["cancellation"], RedisRunCancellation)
         assert captured["short_log"] is not None
         assert captured["short_log"] is app.state.workflow_log
     finally:

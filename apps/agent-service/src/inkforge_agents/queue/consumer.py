@@ -200,11 +200,18 @@ class QueueConsumer:
                         claim,
                         visibility_timeout=self._visibility_timeout,
                     )
+                    status = (
+                        None
+                        if extended
+                        else await self._queue.status(claim.job.jobId)
+                    )
                 except Exception as exc:
                     if _is_transient_infrastructure_error(exc):
                         raise _QueueHeartbeatInfrastructureError from exc
                     raise
                 if not extended:
+                    if status == "cancelled":
+                        raise JobCancelledError()
                     raise RuntimeError("任务租约已失效")
             await task
         except BaseException:

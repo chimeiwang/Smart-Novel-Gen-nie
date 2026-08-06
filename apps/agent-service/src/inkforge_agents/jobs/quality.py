@@ -101,6 +101,7 @@ class QualityJobHandler:
                         novelId=job.novelId,
                         taskId=job.taskId,
                         runId=job.runId,
+                        jobId=job.jobId,
                         agentId=QUALITY_AGENT_ID,
                     ),
                 )

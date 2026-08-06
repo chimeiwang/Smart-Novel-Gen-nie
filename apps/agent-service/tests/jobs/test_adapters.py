@@ -148,9 +148,9 @@ def test_artifact_port_hydrates_authority_with_current_runtime_identity() -> Non
 
     context = port.review_context("artifact-1")
     assert context["runId"] == "run-1"
+    assert context["jobId"] == "job-1"
     assert context["artifactKey"] == "authority-key"
     assert context["revision"] == 2
-    assert "jobId" not in context
 
 
 @pytest.mark.parametrize(

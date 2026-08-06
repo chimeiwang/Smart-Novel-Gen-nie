@@ -313,6 +313,86 @@ async def test_consumer_cancels_handler_when_heartbeat_infrastructure_fails() ->
 
 
 @pytest.mark.asyncio
+async def test_consumer_treats_heartbeat_lease_loss_after_cancel_as_cancellation() -> None:
+    queue = RedisRunQueue(
+        fakeredis.aioredis.FakeRedis(),
+        prefix="test:heartbeat-cancel",
+    )
+    await queue.enqueue(job("heartbeat-cancel"))
+    started = asyncio.Event()
+    release = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def handler(current: QueueJob) -> None:
+        assert current.jobId == "heartbeat-cancel"
+        started.set()
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    consumer = QueueConsumer(
+        queue,
+        {"writing": handler},
+        visibility_timeout=timedelta(milliseconds=30),
+    )
+    run = asyncio.create_task(consumer.run_once())
+    await asyncio.wait_for(started.wait(), timeout=1)
+
+    assert await queue.cancel("heartbeat-cancel") is True
+    try:
+        assert await asyncio.wait_for(run, timeout=1) is True
+    finally:
+        release.set()
+
+    assert cancelled.is_set() is True
+    assert await queue.status("heartbeat-cancel") == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_consumer_still_raises_for_non_cancelled_heartbeat_lease_loss() -> None:
+    queue = RedisRunQueue(
+        fakeredis.aioredis.FakeRedis(),
+        prefix="test:heartbeat-lease-loss",
+    )
+    await queue.enqueue(job("heartbeat-lease-loss"))
+    started = asyncio.Event()
+    release = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def handler(current: QueueJob) -> None:
+        assert current.jobId == "heartbeat-lease-loss"
+        started.set()
+        try:
+            await release.wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    consumer = QueueConsumer(
+        queue,
+        {"writing": handler},
+        visibility_timeout=timedelta(milliseconds=30),
+    )
+    run = asyncio.create_task(consumer.run_once())
+    await asyncio.wait_for(started.wait(), timeout=1)
+    assert (
+        await queue.recover_expired(now=datetime.now(UTC) + timedelta(seconds=1))
+        == 1
+    )
+
+    try:
+        with pytest.raises(RuntimeError, match="任务租约已失效"):
+            await asyncio.wait_for(run, timeout=1)
+    finally:
+        release.set()
+
+    assert cancelled.is_set() is True
+    assert await queue.status("heartbeat-lease-loss") == "queued"
+
+
+@pytest.mark.asyncio
 async def test_consumer_backfills_legacy_terminal_status_before_purge() -> None:
     redis = fakeredis.aioredis.FakeRedis()
     queue = RedisRunQueue(redis, prefix="test:queue")
