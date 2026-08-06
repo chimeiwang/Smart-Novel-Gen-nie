@@ -63,10 +63,21 @@ class ReferenceRepositoryPort(Protocol):
     async def require_reference(
         self, novel_id: str, user_id: str, reference_id: str
     ) -> dict[str, Any]: ...
+    async def require_index_context(
+        self,
+        novel_id: str,
+        user_id: str,
+        reference_id: str,
+        task_id: str,
+        run_id: str,
+        expected_content_hash: str,
+    ) -> dict[str, Any]: ...
     async def replace_index(
         self,
         novel_id: str,
         reference_id: str,
+        task_id: str,
+        run_id: str,
         expected_content_hash: str,
         embeddings: list[list[float]],
     ) -> dict[str, Any]: ...
@@ -81,6 +92,8 @@ class ReferenceRepositoryPort(Protocol):
         self,
         novel_id: str,
         reference_id: str,
+        task_id: str,
+        run_id: str,
         expected_content_hash: str,
         message: str,
     ) -> None: ...
@@ -213,11 +226,18 @@ class ReferenceService:
         self,
         novel_id: str,
         reference_id: str,
+        task_id: str,
+        run_id: str,
         expected_content_hash: str,
         embeddings: list[list[float]],
     ) -> ReferenceMaterialResponse:
         value = await self._repository.replace_index(
-            novel_id, reference_id, expected_content_hash, embeddings
+            novel_id,
+            reference_id,
+            task_id,
+            run_id,
+            expected_content_hash,
+            embeddings,
         )
         return ReferenceMaterialResponse.model_validate(value)
 
@@ -226,9 +246,18 @@ class ReferenceService:
         user_id: str,
         novel_id: str,
         reference_id: str,
+        task_id: str,
+        run_id: str,
         expected_content_hash: str,
     ) -> dict[str, Any]:
-        value = await self._repository.require_reference(novel_id, user_id, reference_id)
+        value = await self._repository.require_index_context(
+            novel_id,
+            user_id,
+            reference_id,
+            task_id,
+            run_id,
+            expected_content_hash,
+        )
         content = value.get("content")
         content_hash = value.get("contentHash")
         if not isinstance(content, str) or content_hash != expected_content_hash:
@@ -246,12 +275,19 @@ class ReferenceService:
         self,
         novel_id: str,
         reference_id: str,
+        task_id: str,
+        run_id: str,
         expected_content_hash: str,
         message: str,
     ) -> None:
         del message
         await self._repository.mark_index_failed(
-            novel_id, reference_id, expected_content_hash, "索引生成失败"
+            novel_id,
+            reference_id,
+            task_id,
+            run_id,
+            expected_content_hash,
+            "索引生成失败",
         )
 
     async def search(

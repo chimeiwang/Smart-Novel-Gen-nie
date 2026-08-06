@@ -13,6 +13,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from ..concurrency import command_resource_id, next_utc_timestamp, require_expected_updated_at
 from ..db.models import Novel, RagChunk, RagDocument, ReferenceMaterial
 from ..errors import ApiError
+from .job_identity import build_rag_job_identity
 from .rag import (
     EMBEDDING_BATCH_SIZE,
     chunk_text_losslessly,
@@ -108,6 +109,30 @@ class ReferenceRepository:
                 raise self._not_found()
             document = await self._document(session, reference_id)
         return self._dto(reference, document.status if document else None, document)
+
+    async def require_index_context(
+        self,
+        novel_id: str,
+        user_id: str,
+        reference_id: str,
+        task_id: str,
+        run_id: str,
+        expected_content_hash: str,
+    ) -> dict[str, Any]:
+        async with self._session_factory() as session:
+            async with session.begin():
+                await self._require_owner(session, novel_id, user_id)
+                reference, document = await self._lock_reference_and_document(
+                    session, novel_id, reference_id
+                )
+                self._require_current_job_identity(
+                    reference,
+                    document,
+                    expected_content_hash,
+                    task_id,
+                    run_id,
+                )
+                return self._dto(reference, document.status, document)
 
     async def update_reference(
         self,
@@ -411,6 +436,8 @@ class ReferenceRepository:
         self,
         novel_id: str,
         reference_id: str,
+        task_id: str,
+        run_id: str,
         expected_content_hash: str,
         embeddings: list[list[float]],
     ) -> dict[str, Any]:
@@ -419,7 +446,13 @@ class ReferenceRepository:
                 reference, document = await self._lock_reference_and_document(
                     session, novel_id, reference_id
                 )
-                self._require_current_hash(reference, document, expected_content_hash)
+                self._require_current_job_identity(
+                    reference,
+                    document,
+                    expected_content_hash,
+                    task_id,
+                    run_id,
+                )
                 chunks = validate_chunk_capacity(chunk_text_losslessly(reference.content))
                 if chunks:
                     normalized = normalize_embeddings(embeddings)
@@ -495,6 +528,8 @@ class ReferenceRepository:
         self,
         novel_id: str,
         reference_id: str,
+        task_id: str,
+        run_id: str,
         expected_content_hash: str,
         message: str,
     ) -> None:
@@ -503,7 +538,13 @@ class ReferenceRepository:
                 reference, document = await self._lock_reference_and_document(
                     session, novel_id, reference_id
                 )
-                self._require_current_hash(reference, document, expected_content_hash)
+                self._require_current_job_identity(
+                    reference,
+                    document,
+                    expected_content_hash,
+                    task_id,
+                    run_id,
+                )
                 self._require_failure_target(document)
                 document.status = "failed"
                 document.errorMessage = message
@@ -639,6 +680,27 @@ class ReferenceRepository:
             content_sha256(reference.content) != expected_content_hash
             or document.contentHash != expected_content_hash
         ):
+            raise cls._stale_index()
+
+    @classmethod
+    def _require_current_job_identity(
+        cls,
+        reference: ReferenceMaterial,
+        document: RagDocument,
+        expected_content_hash: str,
+        task_id: str,
+        run_id: str,
+    ) -> None:
+        cls._require_current_hash(reference, document, expected_content_hash)
+        generation = _utc(document.updatedAt)
+        if generation is None:
+            raise cls._stale_index()
+        current = build_rag_job_identity(
+            reference.id,
+            expected_content_hash,
+            generation,
+        )
+        if current.task_id != task_id or current.run_id != run_id:
             raise cls._stale_index()
 
     @classmethod

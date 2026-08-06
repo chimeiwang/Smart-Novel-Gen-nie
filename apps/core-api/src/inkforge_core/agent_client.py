@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Protocol, cast
 from urllib.parse import urlencode
 
@@ -17,6 +17,7 @@ from inkforge_service_auth import ServiceTokenSigner, canonical_json_body
 from pydantic import JsonValue
 
 from .errors import ApiError
+from .references.job_identity import build_rag_job_identity
 from .writing.commands import WritingCommandRecord
 from .writing.idempotency import parse_command_envelope
 from .writing.job_identity import build_writing_job_id
@@ -309,29 +310,14 @@ class RagAgentSubmitter:
         content_hash: str,
         generation: datetime,
     ) -> AgentJobStatus:
-        task_digest = hashlib.sha256(
-            f"rag:{reference_id}:{content_hash}".encode()
-        ).hexdigest()[:32]
-        task_id = f"rag-{task_digest}"
-        generation_utc = (
-            generation.replace(tzinfo=UTC)
-            if generation.tzinfo is None
-            else generation.astimezone(UTC)
-        )
-        generation_text = generation_utc.isoformat(timespec="milliseconds").replace(
-            "+00:00", "Z"
-        )
-        run_digest = hashlib.sha256(
-            f"rag:{reference_id}:{content_hash}:{generation_text}".encode()
-        ).hexdigest()[:32]
-        run_id = f"rag-{run_digest}"
+        identity = build_rag_job_identity(reference_id, content_hash, generation)
         accepted = await self._client.submit(
             AgentJobRequest(
                 protocolVersion="1.0",
-                jobId=run_id,
+                jobId=identity.run_id,
                 kind="rag",
-                runId=run_id,
-                taskId=task_id,
+                runId=identity.run_id,
+                taskId=identity.task_id,
                 novelId=novel_id,
                 userId=user_id,
                 priority=30,

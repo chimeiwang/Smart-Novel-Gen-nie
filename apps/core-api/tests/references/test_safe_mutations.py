@@ -6,6 +6,8 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+from inkforge_contracts.jobs import AgentJobAccepted, AgentJobRequest
+from inkforge_core.agent_client import RagAgentSubmitter
 from inkforge_core.app import create_app
 from inkforge_core.auth.dependencies import get_current_user
 from inkforge_core.auth.repository import AuthUser
@@ -73,6 +75,56 @@ def _fields(content: str = "初始正文") -> dict[str, Any]:
         "content": content,
         "sourceUrl": None,
     }
+
+
+async def _rag_identity(
+    reference_id: str, content_hash: str, generation: datetime
+) -> tuple[str, str]:
+    captured: list[AgentJobRequest] = []
+
+    class Client:
+        async def submit(self, request: AgentJobRequest) -> AgentJobAccepted:
+            captured.append(request)
+            return AgentJobAccepted(
+                jobId=request.jobId,
+                runId=request.runId,
+                taskId=request.taskId,
+                status="queued",
+            )
+
+    await RagAgentSubmitter(Client()).submit(  # type: ignore[arg-type]
+        "user-1",
+        "novel-1",
+        reference_id,
+        content_hash,
+        generation,
+    )
+    return captured[0].taskId, captured[0].runId
+
+
+async def _advance_to_second_generation(
+    factory: async_sessionmaker,
+    repository: ReferenceRepository,
+    created: dict[str, Any],
+) -> tuple[tuple[str, str], tuple[str, str]]:
+    old_identity = await _rag_identity(
+        created["id"], created["contentHash"], created["indexGeneration"]
+    )
+    async with factory() as session, session.begin():
+        document = await session.scalar(
+            select(RagDocument).where(RagDocument.sourceId == created["id"])
+        )
+        assert document is not None
+        document.status = "failed"
+        document.errorMessage = "上一代失败"
+    intent = await repository.prepare_reindex(
+        "novel-1", "user-1", created["id"], created["contentHash"]
+    )
+    new_identity = await _rag_identity(
+        created["id"], created["contentHash"], intent["indexGeneration"]
+    )
+    assert old_identity != new_identity
+    return old_identity, new_identity
 
 
 def test_reference_mutation_dtos_are_strict_and_separate_operation_fields() -> None:
@@ -536,6 +588,146 @@ async def test_reindex_requires_matching_formal_and_document_hash_before_mutatio
         )
         assert third["contentHash"] == expected_hash
         assert third["indexGeneration"] != second["indexGeneration"]
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_old_generation_context_and_wrong_task_are_rejected(tmp_path: Path) -> None:
+    engine, factory = await _create_database(tmp_path / "旧代次上下文.db")
+    try:
+        await _seed_novels(factory)
+        repository = ReferenceRepository(factory)
+        created = await repository.create_reference(
+            "novel-1",
+            "user-1",
+            "reference-context-generation",
+            _fields(),
+            index_enabled=True,
+        )
+        old_identity, new_identity = await _advance_to_second_generation(
+            factory, repository, created
+        )
+
+        with pytest.raises(ApiError) as old_context:
+            await repository.require_index_context(
+                "novel-1",
+                "user-1",
+                created["id"],
+                old_identity[0],
+                old_identity[1],
+                created["contentHash"],
+            )
+        assert old_context.value.code == "RAG_INDEX_STALE"
+
+        with pytest.raises(ApiError) as wrong_task:
+            await repository.require_index_context(
+                "novel-1",
+                "user-1",
+                created["id"],
+                "rag-wrong-task",
+                new_identity[1],
+                created["contentHash"],
+            )
+        assert wrong_task.value.code == "RAG_INDEX_STALE"
+
+        current = await repository.require_index_context(
+            "novel-1",
+            "user-1",
+            created["id"],
+            new_identity[0],
+            new_identity[1],
+            created["contentHash"],
+        )
+        assert current["content"] == "初始正文"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_old_generation_completion_is_rejected_before_chunk_mutation(
+    tmp_path: Path,
+) -> None:
+    engine, factory = await _create_database(tmp_path / "旧代次完成回调.db")
+    try:
+        await _seed_novels(factory)
+        repository = ReferenceRepository(factory)
+        created = await repository.create_reference(
+            "novel-1",
+            "user-1",
+            "reference-complete-generation",
+            _fields(),
+            index_enabled=True,
+        )
+        old_identity, new_identity = await _advance_to_second_generation(
+            factory, repository, created
+        )
+
+        with pytest.raises(ApiError) as old_completion:
+            await repository.replace_index(
+                "novel-1",
+                created["id"],
+                old_identity[0],
+                old_identity[1],
+                created["contentHash"],
+                [[1.0]],
+            )
+        assert old_completion.value.code == "RAG_INDEX_STALE"
+        async with factory() as session:
+            pending = await session.scalar(
+                select(RagDocument).where(RagDocument.sourceId == created["id"])
+            )
+            chunk_count = await session.scalar(select(func.count()).select_from(RagChunk))
+        assert pending is not None and pending.status == "disabled"
+        assert pending.errorMessage == "等待重新索引"
+        assert chunk_count == 0
+
+        completed = await repository.replace_index(
+            "novel-1",
+            created["id"],
+            new_identity[0],
+            new_identity[1],
+            created["contentHash"],
+            [[1.0]],
+        )
+        assert completed["ragStatus"] == "ready"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_old_generation_failure_is_rejected_without_changing_new_pending(
+    tmp_path: Path,
+) -> None:
+    engine, factory = await _create_database(tmp_path / "旧代次失败回调.db")
+    try:
+        await _seed_novels(factory)
+        repository = ReferenceRepository(factory)
+        created = await repository.create_reference(
+            "novel-1",
+            "user-1",
+            "reference-failure-generation",
+            _fields(),
+            index_enabled=True,
+        )
+        old_identity, _ = await _advance_to_second_generation(factory, repository, created)
+
+        with pytest.raises(ApiError) as old_failure:
+            await repository.mark_index_failed(
+                "novel-1",
+                created["id"],
+                old_identity[0],
+                old_identity[1],
+                created["contentHash"],
+                "旧任务失败",
+            )
+        assert old_failure.value.code == "RAG_INDEX_STALE"
+        async with factory() as session:
+            pending = await session.scalar(
+                select(RagDocument).where(RagDocument.sourceId == created["id"])
+            )
+        assert pending is not None and pending.status == "disabled"
+        assert pending.errorMessage == "等待重新索引"
     finally:
         await engine.dispose()
 

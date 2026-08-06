@@ -53,8 +53,9 @@ class RecordingService:
         self.completed = None
         self.failed = None
 
-    async def complete_index(self, novel_id, reference_id, expected_hash, embeddings):
-        self.completed = (novel_id, reference_id, expected_hash, embeddings)
+    async def complete_index(self, novel_id, reference_id, *args):
+        self.completed = (novel_id, reference_id, *args)
+        expected_hash = args[-2]
         now = datetime(2026, 7, 11, tzinfo=UTC)
         return {
             "id": reference_id,
@@ -69,11 +70,12 @@ class RecordingService:
             "updatedAt": now,
         }
 
-    async def fail_index(self, novel_id, reference_id, expected_hash, message):
-        self.failed = (novel_id, reference_id, expected_hash, message)
+    async def fail_index(self, novel_id, reference_id, *args):
+        self.failed = (novel_id, reference_id, *args)
 
-    async def get_index_context(self, user_id, novel_id, reference_id, expected_hash):
-        self.context = (user_id, novel_id, reference_id, expected_hash)
+    async def get_index_context(self, user_id, novel_id, reference_id, *args):
+        self.context = (user_id, novel_id, reference_id, *args)
+        expected_hash = args[-1]
         return {"contentHash": expected_hash, "chunks": ["正文"]}
 
 
@@ -256,7 +258,14 @@ def test_success_callback_binds_raw_body_path_scope_and_resources() -> None:
     assert verifier.kwargs["task_id"] == "task-1"
     assert verifier.kwargs["run_id"] == "run-1"
     assert verifier.kwargs["novel_id"] == "novel-1"
-    assert service.completed == ("novel-1", "reference-1", HASH, [[1.0]])
+    assert service.completed == (
+        "novel-1",
+        "reference-1",
+        "task-1",
+        "run-1",
+        HASH,
+        [[1.0]],
+    )
 
 
 def test_failure_callback_uses_same_signed_boundary() -> None:
@@ -277,7 +286,14 @@ def test_failure_callback_uses_same_signed_boundary() -> None:
     )
     assert response.status_code == 204
     assert verifier.kwargs["required_scope"] is ServiceScope.RAG_INDEX_WRITE
-    assert service.failed == ("novel-1", "reference-1", HASH, "嵌入服务失败")
+    assert service.failed == (
+        "novel-1",
+        "reference-1",
+        "task-1",
+        "run-1",
+        HASH,
+        "嵌入服务失败",
+    )
 
 
 def test_index_context_revalidates_user_and_signed_resources() -> None:
@@ -300,7 +316,14 @@ def test_index_context_revalidates_user_and_signed_resources() -> None:
     assert response.status_code == 200
     assert response.json() == {"contentHash": HASH, "chunks": ["正文"]}
     assert verifier.kwargs["required_scope"] is ServiceScope.RAG_INDEX_WRITE
-    assert service.context == ("user-1", "novel-1", "reference-1", HASH)
+    assert service.context == (
+        "user-1",
+        "novel-1",
+        "reference-1",
+        "task-1",
+        "run-1",
+        HASH,
+    )
 
 
 def test_real_ed25519_callback_consumes_redis_replay_token(tmp_path) -> None:

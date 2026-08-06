@@ -120,6 +120,8 @@ async def complete_reference_index(
     return await service.complete_index(
         novel_id,
         reference_id,
+        body.taskId,
+        body.runId,
         body.expectedContentHash,
         body.embeddings,
     )
@@ -148,6 +150,8 @@ async def get_reference_index_context(
         body.userId,
         novel_id,
         reference_id,
+        body.taskId,
+        body.runId,
         body.expectedContentHash,
     )
     return ReferenceIndexContextResponse.model_validate(value)
@@ -175,6 +179,8 @@ async def fail_reference_index(
     await service.fail_index(
         novel_id,
         reference_id,
+        body.taskId,
+        body.runId,
         body.expectedContentHash,
         body.message,
     )

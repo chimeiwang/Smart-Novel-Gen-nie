@@ -76,11 +76,75 @@ class RecordingRepository:
         self.prepared.append((novel_id, user_id, reference_id, expected_content_hash))
         return {"contentHash": HASH, "indexGeneration": NOW}
 
-    async def mark_index_failed(self, novel_id, reference_id, expected_content_hash, message):
-        self.failed = (novel_id, reference_id, expected_content_hash, message)
+    async def replace_index(
+        self,
+        novel_id,
+        reference_id,
+        task_id,
+        run_id,
+        expected_content_hash,
+        embeddings,
+    ):
+        self.completed = (
+            novel_id,
+            reference_id,
+            task_id,
+            run_id,
+            expected_content_hash,
+            embeddings,
+        )
+        return {
+            "id": reference_id,
+            "title": "资料",
+            "type": "note",
+            "content": "正文",
+            "sourceUrl": None,
+            "ragStatus": "ready",
+            "contentHash": expected_content_hash,
+            "errorMessage": None,
+            "createdAt": NOW,
+            "updatedAt": NOW,
+        }
+
+    async def mark_index_failed(
+        self,
+        novel_id,
+        reference_id,
+        task_id,
+        run_id,
+        expected_content_hash,
+        message,
+    ):
+        self.failed = (
+            novel_id,
+            reference_id,
+            task_id,
+            run_id,
+            expected_content_hash,
+            message,
+        )
 
     async def require_reference(self, novel_id, user_id, reference_id):
         assert (novel_id, user_id, reference_id) == ("novel-1", "user-1", "reference-1")
+        return {"content": "甲" * 1800 + "乙", "contentHash": HASH}
+
+    async def require_index_context(
+        self,
+        novel_id,
+        user_id,
+        reference_id,
+        task_id,
+        run_id,
+        expected_content_hash,
+    ):
+        self.context = (
+            novel_id,
+            user_id,
+            reference_id,
+            task_id,
+            run_id,
+            expected_content_hash,
+        )
         return {"content": "甲" * 1800 + "乙", "contentHash": HASH}
 
 
@@ -164,10 +228,71 @@ async def test_index_context_revalidates_owner_hash_and_returns_lossless_chunks(
     service = ReferenceService(RecordingRepository(), submitter=None)  # type: ignore[arg-type]
 
     context = await service.get_index_context(
-        "user-1", "novel-1", "reference-1", HASH
+        "user-1",
+        "novel-1",
+        "reference-1",
+        "task-1",
+        "run-1",
+        HASH,
     )
 
     assert context == {"contentHash": HASH, "chunks": ["甲" * 1800, "乙"]}
+    assert service._repository.context == (  # type: ignore[attr-defined]
+        "novel-1",
+        "user-1",
+        "reference-1",
+        "task-1",
+        "run-1",
+        HASH,
+    )
+
+
+@pytest.mark.asyncio
+async def test_complete_index_forwards_signed_job_identity() -> None:
+    repository = RecordingRepository()
+    service = ReferenceService(repository, submitter=None)  # type: ignore[arg-type]
+
+    await service.complete_index(
+        "novel-1",
+        "reference-1",
+        "task-1",
+        "run-1",
+        HASH,
+        [[1.0]],
+    )
+
+    assert repository.completed == (
+        "novel-1",
+        "reference-1",
+        "task-1",
+        "run-1",
+        HASH,
+        [[1.0]],
+    )
+
+
+@pytest.mark.asyncio
+async def test_fail_index_forwards_signed_job_identity() -> None:
+    repository = RecordingRepository()
+    service = ReferenceService(repository, submitter=None)  # type: ignore[arg-type]
+
+    await service.fail_index(
+        "novel-1",
+        "reference-1",
+        "task-1",
+        "run-1",
+        HASH,
+        "内部细节",
+    )
+
+    assert repository.failed == (
+        "novel-1",
+        "reference-1",
+        "task-1",
+        "run-1",
+        HASH,
+        "索引生成失败",
+    )
 
 
 @pytest.mark.asyncio
