@@ -271,6 +271,7 @@ class WritingRunOutcome(WritingSchema):
         "waiting_user",
         "succeeded",
         "failed",
+        "cancelled",
         "inconsistent",
     ]
     code: str
@@ -282,11 +283,49 @@ class WritingRunOutcome(WritingSchema):
     observedAt: datetime
 
 
+class WritingRunCheckpointResponse(WritingSchema):
+    eventSequence: int
+    phase: str
+    operationStage: str | None
+    operationStep: str | None
+
+
+class WritingRunListItem(WritingSchema):
+    taskId: str
+    novelId: str
+    chapterId: str
+    writingSessionId: str | None
+    workflow: Literal["long_serial", "short_medium"]
+    operation: str | None
+    target: dict[str, JsonValue]
+    scope: dict[str, JsonValue]
+    phase: str
+    outcome: WritingRunOutcome
+    activeArtifactId: str | None
+    recoverable: bool
+    createdAt: datetime
+    updatedAt: datetime
+
+
+class WritingRunListResponse(WritingSchema):
+    items: list[WritingRunListItem]
+    nextCursor: str | None
+
+
 class WritingRunStatusResponse(WritingSchema):
     taskId: str
     novelId: str
     chapterId: str
+    writingSessionId: str | None = None
+    workflow: Literal["long_serial", "short_medium"] = "long_serial"
+    target: dict[str, JsonValue] | None = None
+    scope: dict[str, JsonValue] | None = None
     phase: str
+    checkpoint: WritingRunCheckpointResponse | None = None
+    activeArtifactId: str | None = None
+    recoverable: bool = False
+    reviewReport: str | None = None
+    createdAt: datetime | None = None
     updatedAt: datetime
     commandId: str | None
     commandStatus: WritingCommandStatus | None
@@ -295,6 +334,9 @@ class WritingRunStatusResponse(WritingSchema):
         "generate_manuscript",
         "replace_selection",
         "full_check",
+        "plan_chapter",
+        "write_chapter",
+        "review_chapter",
     ] | None
     candidateVersionId: str | None
     checkReport: dict[str, JsonValue] | None

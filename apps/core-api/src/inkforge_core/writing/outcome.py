@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Literal, cast
 
@@ -35,6 +35,9 @@ class WritingRunOutcomeFacts:
     result_kind: ResultKind
     result_id: str | None
     result_ready: bool
+    effective_command_status: str | None = None
+    cancel_effective: bool | None = None
+    cancel_chain_valid: bool = True
 
 
 def project_writing_run_outcome(
@@ -51,7 +54,34 @@ def project_writing_run_outcome(
     )
     task_terminal = facts.task_phase in {"completed", "error"}
 
-    if _has_terminal_conflict(facts):
+    if facts.cancel_effective is True:
+        return _outcome(
+            "cancelled",
+            "WRITING_RUN_CANCELLED",
+            True,
+            command,
+            result,
+            observed,
+        )
+
+    if facts.cancel_effective is False and not facts.cancel_chain_valid:
+        return _outcome(
+            "inconsistent",
+            "CANCEL_PRIOR_OUTCOME_INVALID",
+            task_terminal,
+            command,
+            result,
+            observed,
+        )
+
+    effective_facts = facts
+    if facts.effective_command_status is not None:
+        effective_facts = replace(
+            facts,
+            command_status=facts.effective_command_status,
+        )
+
+    if _has_terminal_conflict(effective_facts):
         return _outcome(
             "inconsistent",
             "TASK_COMMAND_TERMINAL_CONFLICT",
@@ -61,14 +91,14 @@ def project_writing_run_outcome(
             observed,
         )
 
-    if facts.command_status == "pending":
+    if effective_facts.command_status == "pending":
         return _outcome("queued", "COMMAND_PENDING", task_terminal, command, result, observed)
-    if facts.command_status in {"submitted", "processing"}:
+    if effective_facts.command_status in {"submitted", "processing"}:
         return _outcome("running", "COMMAND_RUNNING", task_terminal, command, result, observed)
 
-    if facts.workflow == "short_medium":
-        return _project_short_medium(facts, command, result, observed)
-    return _project_long_form(facts, command, result, observed)
+    if effective_facts.workflow == "short_medium":
+        return _project_short_medium(effective_facts, command, result, observed)
+    return _project_long_form(effective_facts, command, result, observed)
 
 
 def _project_short_medium(
@@ -225,6 +255,7 @@ def _outcome(
         "waiting_user",
         "succeeded",
         "failed",
+        "cancelled",
         "inconsistent",
     ],
     code: str,
@@ -235,7 +266,13 @@ def _outcome(
     *,
     reconciliation_required: bool = False,
 ) -> WritingRunOutcome:
-    should_close = state in {"waiting_user", "succeeded", "failed", "inconsistent"}
+    should_close = state in {
+        "waiting_user",
+        "succeeded",
+        "failed",
+        "cancelled",
+        "inconsistent",
+    }
     if state == "inconsistent" and result.ready:
         result = result.model_copy(update={"ready": False})
     return WritingRunOutcome(

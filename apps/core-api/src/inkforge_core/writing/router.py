@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from ..auth.dependencies import get_current_user
 from ..auth.repository import AuthUser
 from ..errors import ApiError
+from .commands import WritingRunCommandRepository
 from .outbox import WritingOutboxRepository
 from .schemas import (
     CreateMessageRequest,
@@ -16,6 +17,7 @@ from .schemas import (
     ResumeWritingRunRequest,
     ResumeWritingRunResponse,
     UpdateWritingSessionRequest,
+    WritingRunListResponse,
     WritingRunOutcome,
     WritingRunResponse,
     WritingRunStartRequest,
@@ -80,6 +82,20 @@ def get_writing_task_repository(request: Request) -> WritingTaskRepository:
     return repository
 
 
+def get_writing_run_command_repository(request: Request) -> WritingRunCommandRepository:
+    repository = cast(
+        WritingRunCommandRepository | None,
+        getattr(request.app.state, "writing_command_repository", None),
+    )
+    if repository is None:
+        raise ApiError(
+            status_code=503,
+            code="WRITING_TASK_UNAVAILABLE",
+            message="写作任务服务暂时不可用",
+        )
+    return repository
+
+
 def get_writing_event_store(request: Request) -> object:
     store = getattr(request.app.state, "writing_event_store", None)
     if store is None:
@@ -99,6 +115,10 @@ OutboxRepository = Annotated[
     Depends(get_writing_outbox_repository),
 ]
 TaskRepository = Annotated[WritingTaskRepository, Depends(get_writing_task_repository)]
+RunCommandRepository = Annotated[
+    WritingRunCommandRepository,
+    Depends(get_writing_run_command_repository),
+]
 EventStore = Annotated[object, Depends(get_writing_event_store)]
 
 
@@ -171,6 +191,44 @@ async def start_writing_run(
     service: TaskService,
 ) -> WritingRunResponse:
     return await service.start(user.id, body)
+
+
+@router.get("/runs", response_model=WritingRunListResponse)
+async def list_writing_runs(
+    user: User,
+    repository: RunCommandRepository,
+    novel_id: Annotated[str, Query(alias="novelId", min_length=1)],
+    chapter_id: Annotated[str | None, Query(alias="chapterId", min_length=1)] = None,
+    writing_session_id: Annotated[
+        str | None, Query(alias="writingSessionId", min_length=1)
+    ] = None,
+    operation: Annotated[str | None, Query(min_length=1)] = None,
+    outcome: Annotated[
+        Literal[
+            "queued",
+            "running",
+            "waiting_user",
+            "succeeded",
+            "failed",
+            "cancelled",
+            "inconsistent",
+        ]
+        | None,
+        Query(),
+    ] = None,
+    cursor: Annotated[str | None, Query(min_length=1)] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> WritingRunListResponse:
+    return await repository.list_run_statuses(
+        user.id,
+        novel_id=novel_id,
+        chapter_id=chapter_id,
+        writing_session_id=writing_session_id,
+        operation=operation,
+        outcome=outcome,
+        cursor=cursor,
+        limit=limit,
+    )
 
 
 @router.get("/runs/{task_id}", response_model=WritingRunStatusResponse)

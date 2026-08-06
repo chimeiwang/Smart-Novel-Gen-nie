@@ -31,3 +31,24 @@ def test_openapi_exposes_strict_long_serial_start_contract() -> None:
         "ShortMediumStartWritingRunRequest",
         "LongSerialStartWritingRunRequest",
     }
+
+
+def test_openapi_exposes_filtered_writing_run_list() -> None:
+    document = create_app(testing=True).openapi()
+    operation = document["paths"]["/api/v1/writing/runs"]["get"]
+    parameters = {
+        parameter["name"]: parameter for parameter in operation["parameters"]
+    }
+
+    assert parameters["novelId"]["required"] is True
+    assert {
+        "novelId",
+        "chapterId",
+        "writingSessionId",
+        "operation",
+        "outcome",
+        "cursor",
+        "limit",
+    } <= set(parameters)
+    assert parameters["limit"]["schema"]["default"] == 50
+    assert parameters["limit"]["schema"]["maximum"] == 100

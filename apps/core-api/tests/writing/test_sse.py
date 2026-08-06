@@ -34,9 +34,9 @@ def _run_outcome(
     return WritingRunOutcome(
         state=state,
         code=code,
-        taskTerminal=state in {"succeeded", "failed"},
+        taskTerminal=state in {"succeeded", "failed", "cancelled"},
         streamShouldClose=state
-        in {"waiting_user", "succeeded", "failed", "inconsistent"},
+        in {"waiting_user", "succeeded", "failed", "cancelled", "inconsistent"},
         reconciliationRequired=state == "inconsistent",
         currentCommand=None,
         result=WritingRunOutcomeResult(kind="none", ready=False),
@@ -165,7 +165,7 @@ async def test_legacy_terminal_event_does_not_close_a_running_outcome() -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "state",
-    ["waiting_user", "succeeded", "failed", "inconsistent"],
+    ["waiting_user", "succeeded", "failed", "cancelled", "inconsistent"],
 )
 async def test_stream_closes_from_postgres_outcome_without_redis_event(
     state: str,

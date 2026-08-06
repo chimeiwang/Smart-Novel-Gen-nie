@@ -330,3 +330,48 @@ def test_short_medium_failed_task_with_a_success_product_is_inconsistent() -> No
     assert outcome.state == "inconsistent"
     assert outcome.result.ready is False
     assert outcome.reconciliationRequired is True
+
+
+def test_cancelled_task_projects_a_terminal_cancelled_outcome() -> None:
+    module = _outcome_module()
+
+    outcome = module.project_writing_run_outcome(
+        _facts(
+            module,
+            task_phase="error",
+            command_kind="cancel",
+            command_status="succeeded",
+            cancel_effective=True,
+        ),
+        observed_at=NOW,
+    )
+
+    assert outcome.state == "cancelled"
+    assert outcome.taskTerminal is True
+    assert outcome.streamShouldClose is True
+    assert outcome.reconciliationRequired is False
+
+
+def test_terminal_noop_cancel_keeps_prior_success_and_current_cancel_identity() -> None:
+    module = _outcome_module()
+
+    outcome = module.project_writing_run_outcome(
+        _facts(
+            module,
+            task_phase="completed",
+            command_id="cancel-2",
+            command_kind="cancel",
+            command_status="succeeded",
+            effective_command_status="succeeded",
+            cancel_effective=False,
+            result_kind="final_message",
+            result_ready=True,
+        ),
+        observed_at=NOW,
+    )
+
+    assert outcome.state == "succeeded"
+    assert outcome.result.kind == "final_message"
+    assert outcome.result.ready is True
+    assert outcome.currentCommand is not None
+    assert outcome.currentCommand.id == "cancel-2"
