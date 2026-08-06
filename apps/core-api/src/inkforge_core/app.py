@@ -224,6 +224,7 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
         lore_repository,
         outline_repository,
         reference_repository,
+        reference_index_enabled=rag_submitter is not None,
     )
     artifact_applier = FormalArtifactApplier(
         FormalWriteRepository(session_factory),

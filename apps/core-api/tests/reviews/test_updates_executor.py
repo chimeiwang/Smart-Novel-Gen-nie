@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 
 import pytest
 from inkforge_core.lore.repository import EntityMutation
+from inkforge_core.references.repository import ReferenceMutation
 from inkforge_core.reviews.updates import AgentUpdatesExecutor
 
 
@@ -63,7 +64,138 @@ class FakeOutlines:
 
 
 class FakeReferences:
-    pass
+    def __init__(self) -> None:
+        self.calls: list[tuple[object, ...]] = []
+
+    async def apply_reference_mutations(
+        self, novel_id, user_id, mutations, *, index_enabled=False
+    ):
+        self.calls.append(("reference_batch", novel_id, user_id, mutations))
+        assert index_enabled is False
+        return []
+
+
+@pytest.mark.asyncio
+async def test_references_use_one_batch_and_keep_controls_out_of_business_fields() -> None:
+    references = FakeReferences()
+    executor = AgentUpdatesExecutor(FakeLore(), FakeOutlines(), references)
+
+    count = await executor.apply(
+        "novel-1",
+        "user-1",
+        {
+            "references": [
+                {
+                    "action": "create",
+                    "clientRequestId": "artifact-reference-create",
+                    "title": "新资料",
+                    "type": "book",
+                    "content": "完整正文",
+                    "sourceUrl": None,
+                    "fieldChanges": [{"field": "content"}],
+                },
+                {
+                    "action": "update",
+                    "id": "reference-1",
+                    "expectedUpdatedAt": "2026-08-06T00:00:00Z",
+                    "title": "新标题",
+                },
+                {
+                    "action": "delete",
+                    "referenceId": "reference-2",
+                    "expectedUpdatedAt": "2026-08-06T00:00:01Z",
+                },
+            ]
+        },
+    )
+
+    assert count == 3
+    assert len(references.calls) == 1
+    call = references.calls[0]
+    assert call[:3] == ("reference_batch", "novel-1", "user-1")
+    mutations = call[3]
+    assert all(isinstance(mutation, ReferenceMutation) for mutation in mutations)
+    assert [mutation.action for mutation in mutations] == ["create", "update", "delete"]
+    assert mutations[0].client_request_id == "artifact-reference-create"
+    assert mutations[0].fields == {
+        "title": "新资料",
+        "type": "book",
+        "content": "完整正文",
+        "sourceUrl": None,
+    }
+    assert mutations[1].reference_id == "reference-1"
+    assert mutations[1].expected_updated_at == datetime(2026, 8, 6, tzinfo=UTC)
+    assert mutations[1].fields == {"title": "新标题"}
+    assert mutations[2].reference_id == "reference-2"
+    assert mutations[2].expected_updated_at == datetime(
+        2026, 8, 6, 0, 0, 1, tzinfo=UTC
+    )
+    assert mutations[2].fields == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("item", "message"),
+    [
+        (
+            {"action": "create", "title": "资料", "type": "note", "content": "正文"},
+            "clientRequestId",
+        ),
+        (
+            {
+                "action": "create",
+                "clientRequestId": "artifact-reference-create",
+                "title": "资料",
+                "type": "note",
+                "content": "正文",
+                "expectedUpdatedAt": "2026-08-06T00:00:00Z",
+            },
+            "无法持久化字段",
+        ),
+        (
+            {"action": "update", "id": "reference-1", "title": "新标题"},
+            "expectedUpdatedAt",
+        ),
+        (
+            {
+                "action": "update",
+                "id": "reference-1",
+                "expectedUpdatedAt": "2026-08-06T00:00:00Z",
+                "clientRequestId": "artifact-reference-create",
+                "title": "新标题",
+            },
+            "无法持久化字段",
+        ),
+        (
+            {
+                "action": "delete",
+                "id": "reference-1",
+                "expectedUpdatedAt": "2026-08-06T00:00:00Z",
+                "content": "不能附带业务字段",
+            },
+            "无法持久化字段",
+        ),
+        (
+            {
+                "action": "delete",
+                "id": "reference-1",
+                "expectedUpdatedAt": "2026-08-06T00:00:00Z",
+                "characterId": "character-1",
+            },
+            "无法持久化字段",
+        ),
+    ],
+)
+async def test_reference_actions_use_exact_dto_whitelists(
+    item: dict[str, object], message: str
+) -> None:
+    references = FakeReferences()
+    executor = AgentUpdatesExecutor(FakeLore(), FakeOutlines(), references)
+
+    with pytest.raises(ValueError, match=message):
+        await executor.apply("novel-1", "user-1", {"references": [item]})
+
+    assert references.calls == []
 
 
 @pytest.mark.asyncio

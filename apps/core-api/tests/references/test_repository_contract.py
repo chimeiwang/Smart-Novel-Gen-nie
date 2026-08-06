@@ -6,15 +6,16 @@ from inkforge_core.references.repository import ReferenceRepository
 
 
 def test_reference_content_change_explicitly_deletes_old_chunks_and_disables_document() -> None:
-    source = inspect.getsource(ReferenceRepository.update_reference)
+    source = inspect.getsource(ReferenceRepository._update_reference_in_session)
     assert "delete(RagChunk)" in source
     assert 'document.status = "disabled"' in source
     assert '"title", "content"' in source
 
 
 def test_reference_delete_explicitly_deletes_rag_document_before_source() -> None:
-    source = inspect.getsource(ReferenceRepository.delete_reference)
+    source = inspect.getsource(ReferenceRepository._delete_reference_in_session)
     assert source.index("_lock_reference_and_document") < source.index("delete(RagDocument)")
+    assert source.index("delete(RagChunk)") < source.index("delete(RagDocument)")
     assert source.index("delete(RagDocument)") < source.index("delete(ReferenceMaterial)")
     assert "rowcount != 1" in source
 
@@ -23,6 +24,23 @@ def test_reference_and_document_lock_order_is_stable() -> None:
     source = inspect.getsource(ReferenceRepository._lock_reference_and_document)
     assert source.count("with_for_update") == 2
     assert source.index("select(ReferenceMaterial)") < source.index("select(RagDocument)")
+
+
+def test_reference_mutations_lock_owner_and_novel_before_resource_rows() -> None:
+    for name in ("create_reference", "update_reference", "delete_reference", "prepare_reindex"):
+        source = inspect.getsource(getattr(ReferenceRepository, name))
+        assert source.index("_require_owner") < source.index("_lock_novel")
+    assert "with_for_update" in inspect.getsource(ReferenceRepository._lock_novel)
+
+
+def test_review_reference_batch_reuses_one_session_and_one_novel_lock() -> None:
+    source = inspect.getsource(ReferenceRepository.apply_reference_mutations)
+    assert source.count("self._session_factory()") == 1
+    assert source.count("session.begin()") == 1
+    assert source.count("_lock_novel") == 1
+    assert "_create_reference_in_session" in source
+    assert "_update_reference_in_session" in source
+    assert "_delete_reference_in_session" in source
 
 
 def test_reference_source_url_is_never_fetched() -> None:

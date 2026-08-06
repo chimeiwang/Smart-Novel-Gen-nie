@@ -21,6 +21,8 @@ from ..lore.schemas import (
     UpdateItemRequest,
     UpdateLocationRequest,
 )
+from ..references.repository import ReferenceMutation
+from ..references.schemas import CreateReferenceRequest, UpdateReferenceRequest
 
 ARRAY_SECTIONS = (
     "characters",
@@ -86,6 +88,17 @@ _EXPERIENCE_ACTION_TARGETS = {
     "update": set(),
     "delete": set(),
 }
+_REFERENCE_CREATE_FIELDS = set(CreateReferenceRequest.model_fields) - {
+    "clientRequestId"
+}
+_REFERENCE_UPDATE_FIELDS = set(UpdateReferenceRequest.model_fields) - {
+    "expectedUpdatedAt"
+}
+_REFERENCE_ACTION_CONTROLS = {
+    "create": {"action", "fieldChanges", "clientRequestId"},
+    "update": {"action", "fieldChanges", "id", "referenceId", "expectedUpdatedAt"},
+    "delete": {"action", "fieldChanges", "id", "referenceId", "expectedUpdatedAt"},
+}
 
 
 class LoreUpdatesPort(Protocol):
@@ -137,14 +150,14 @@ class OutlineUpdatesPort(Protocol):
 
 
 class ReferenceUpdatesPort(Protocol):
-    async def list_references(self, novel_id: str, user_id: str) -> list[dict[str, Any]]: ...
-    async def create_reference(
-        self, novel_id: str, user_id: str, fields: dict[str, Any]
-    ) -> dict[str, Any]: ...
-    async def update_reference(
-        self, novel_id: str, user_id: str, reference_id: str, fields: dict[str, Any]
-    ) -> dict[str, Any]: ...
-    async def delete_reference(self, novel_id: str, user_id: str, reference_id: str) -> None: ...
+    async def apply_reference_mutations(
+        self,
+        novel_id: str,
+        user_id: str,
+        mutations: list[ReferenceMutation],
+        *,
+        index_enabled: bool = False,
+    ) -> list[dict[str, Any]]: ...
 
 
 class AgentUpdatesExecutor:
@@ -153,10 +166,13 @@ class AgentUpdatesExecutor:
         lore: LoreUpdatesPort,
         outlines: OutlineUpdatesPort,
         references: ReferenceUpdatesPort,
+        *,
+        reference_index_enabled: bool = False,
     ) -> None:
         self._lore = lore
         self._outlines = outlines
         self._references = references
+        self._reference_index_enabled = reference_index_enabled
 
     async def apply(
         self,
@@ -485,31 +501,106 @@ class AgentUpdatesExecutor:
         self, novel_id: str, user_id: str, updates: dict[str, object]
     ) -> int:
         items = updates.get("references")
-        if not isinstance(items, list):
+        if "references" not in updates:
             return 0
-        existing = await self._references.list_references(novel_id, user_id)
+        if not isinstance(items, list):
+            raise ValueError("references 必须是数组")
+        mutations: list[ReferenceMutation] = []
         for item in items:
             if not isinstance(item, dict):
                 raise ValueError("references 更新项结构无效")
-            action = item.get("action")
-            fields = _strict_fields(item, {"title", "type", "content"}, "references")
-            if action == "create":
-                if not isinstance(fields.get("type"), str) or not isinstance(
-                    fields.get("content"), str
-                ):
-                    raise ValueError("新建参考资料必须提供 type 和完整 content")
-                await self._references.create_reference(novel_id, user_id, fields)
-                continue
-            item_id = _resolve_named_id(item, existing, ("id", "referenceId"), "title")
-            if item_id is None:
-                raise ValueError("references 无法唯一解析已有参考资料")
-            if action == "update":
-                await self._references.update_reference(novel_id, user_id, item_id, fields)
-            elif action == "delete":
-                await self._references.delete_reference(novel_id, user_id, item_id)
-            else:
-                raise ValueError("references action 无效")
+            mutations.append(_build_reference_mutation(item))
+        if mutations:
+            await self._references.apply_reference_mutations(
+                novel_id,
+                user_id,
+                mutations,
+                index_enabled=self._reference_index_enabled,
+            )
         return len(items)
+
+
+def _build_reference_mutation(item: dict[str, Any]) -> ReferenceMutation:
+    action = item.get("action")
+    if action not in {"create", "update", "delete"}:
+        raise ValueError("references action 无效")
+    business_fields = (
+        _REFERENCE_CREATE_FIELDS
+        if action == "create"
+        else _REFERENCE_UPDATE_FIELDS if action == "update" else set()
+    )
+    allowed = business_fields | _REFERENCE_ACTION_CONTROLS[action]
+    unknown = set(item) - allowed
+    if unknown:
+        names = "、".join(sorted(unknown))
+        raise ValueError(f"references 包含无法持久化字段：{names}")
+    fields = {
+        key: deepcopy(value)
+        for key, value in item.items()
+        if key in business_fields
+    }
+    if action == "create":
+        client_request_id = item.get("clientRequestId")
+        if not isinstance(client_request_id, str) or not 16 <= len(client_request_id) <= 256:
+            raise ValueError("references create 必须提供 16..256 字符的 clientRequestId")
+        try:
+            validated = CreateReferenceRequest.model_validate(
+                {**fields, "clientRequestId": client_request_id}
+            )
+        except ValueError as error:
+            raise ValueError("references create 业务字段无效") from error
+        if not validated.title.strip():
+            raise ValueError("references title 不能为空")
+        return ReferenceMutation(
+            action="create",
+            fields=validated.model_dump(exclude={"clientRequestId"}),
+            client_request_id=client_request_id,
+        )
+    reference_id = item.get("id") or item.get("referenceId")
+    if not isinstance(reference_id, str) or not reference_id:
+        raise ValueError(f"references {action} 缺少有效 referenceId")
+    for field in ("id", "referenceId"):
+        if field in item and (
+            not isinstance(item[field], str) or not item[field]
+        ):
+            raise ValueError(f"references {field} 标识必须是非空字符串")
+    if (
+        isinstance(item.get("id"), str)
+        and isinstance(item.get("referenceId"), str)
+        and item["id"] != item["referenceId"]
+    ):
+        raise ValueError("references id 与 referenceId 不一致")
+    expected_updated_at = _require_entity_expected_updated_at(item, "references")
+    if action == "update":
+        try:
+            validated_update = UpdateReferenceRequest.model_validate(
+                {**fields, "expectedUpdatedAt": expected_updated_at}
+            )
+        except ValueError as error:
+            raise ValueError("references update 业务字段无效") from error
+        validated_fields = validated_update.model_dump(
+            exclude={"expectedUpdatedAt"}, exclude_unset=True
+        )
+        if any(
+            validated_fields.get(field) is None
+            for field in ("title", "type", "content")
+            if field in validated_fields
+        ):
+            raise ValueError("references title/type/content 不能为 null")
+        if "title" in validated_fields and not validated_fields["title"].strip():
+            raise ValueError("references title 不能为空")
+        return ReferenceMutation(
+            action="update",
+            fields=validated_fields,
+            reference_id=reference_id,
+            expected_updated_at=expected_updated_at,
+        )
+    return ReferenceMutation(
+        action="delete",
+        fields={},
+        reference_id=reference_id,
+        expected_updated_at=expected_updated_at,
+    )
 
 
 def filter_agent_updates_by_selection(

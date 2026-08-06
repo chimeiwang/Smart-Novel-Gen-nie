@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import replace
 from typing import Any
@@ -350,6 +351,36 @@ async def test_portrait_and_rag_submitters_propagate_agent_job_status() -> None:
         await rag.submit("user-1", "novel-1", "reference-1", "a" * 64)
         == "cancelled"
     )
+
+
+@pytest.mark.asyncio
+async def test_rag_submitter_reuses_deterministic_job_identity_for_same_reference_hash() -> None:
+    captured: list[AgentJobRequest] = []
+
+    class Client:
+        async def submit(self, request: AgentJobRequest) -> AgentJobAccepted:
+            captured.append(request)
+            return AgentJobAccepted(
+                jobId=request.jobId,
+                runId=request.runId,
+                taskId=request.taskId,
+                status="queued",
+            )
+
+    submitter = RagAgentSubmitter(Client())  # type: ignore[arg-type]
+    content_hash = "a" * 64
+    expected_digest = hashlib.sha256(
+        f"rag:reference-1:{content_hash}".encode()
+    ).hexdigest()[:32]
+
+    await submitter.submit("user-1", "novel-1", "reference-1", content_hash)
+    await submitter.submit("user-1", "novel-1", "reference-1", content_hash)
+
+    assert len(captured) == 2
+    assert {
+        (request.jobId, request.runId, request.taskId) for request in captured
+    } == {(f"rag-{expected_digest}",) * 3}
+    assert captured[0].model_dump() == captured[1].model_dump()
 
 
 @pytest.mark.asyncio

@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 from inkforge_contracts.jobs import AgentJobStatus
-from sqlalchemy import and_, delete, insert, select, update
+from sqlalchemy import and_, delete, func, insert, select
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ..concurrency import command_resource_id, next_utc_timestamp, require_expected_updated_at
 from ..db.models import Novel, RagChunk, RagDocument, ReferenceMaterial
 from ..errors import ApiError
 from .rag import (
@@ -23,11 +25,26 @@ from .rag import (
 )
 from .rag_dispatcher import RagDispatchRecord
 
+_REFERENCE_FIELDS = ("title", "type", "content", "sourceUrl")
+
+
+@dataclass(frozen=True, slots=True)
+class ReferenceMutation:
+    action: Literal["create", "update", "delete"]
+    fields: dict[str, Any]
+    reference_id: str | None = None
+    client_request_id: str | None = None
+    expected_updated_at: datetime | None = None
+
 
 def _utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _database_utc(value: datetime) -> datetime:
+    return value.astimezone(UTC).replace(tzinfo=None)
 
 
 class ReferenceRepository:
@@ -62,6 +79,7 @@ class ReferenceRepository:
         self,
         novel_id: str,
         user_id: str,
+        client_request_id: str,
         fields: dict[str, Any],
         *,
         index_enabled: bool = False,
@@ -69,22 +87,15 @@ class ReferenceRepository:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
-                reference = ReferenceMaterial(novelId=novel_id, **fields)
-                session.add(reference)
-                await session.flush()
-                document = RagDocument(
-                    novelId=novel_id,
-                    sourceType="reference_material",
-                    sourceId=reference.id,
-                    title=reference.title,
-                    contentHash=content_sha256(reference.content),
-                    status="disabled",
-                    errorMessage=("等待重新索引" if index_enabled else "检索索引服务未配置"),
+                await self._lock_novel(session, novel_id)
+                return await self._create_reference_in_session(
+                    session,
+                    novel_id,
+                    user_id,
+                    client_request_id,
+                    fields,
+                    index_enabled=index_enabled,
                 )
-                session.add(document)
-                await session.flush()
-                result = self._dto(reference, document.status, document)
-        return result
 
     async def require_reference(
         self, novel_id: str, user_id: str, reference_id: str
@@ -103,57 +114,238 @@ class ReferenceRepository:
         user_id: str,
         reference_id: str,
         fields: dict[str, Any],
+        expected_updated_at: datetime,
         *,
         index_enabled: bool = False,
     ) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
-                reference = await self._find(session, novel_id, reference_id)
-                if reference is None:
-                    raise self._not_found()
-                changed_index_input = bool({"title", "content"} & fields.keys())
-                outcome = cast(
-                    CursorResult[Any],
-                    await session.execute(
-                        update(ReferenceMaterial)
-                        .where(
-                            ReferenceMaterial.id == reference_id,
-                            ReferenceMaterial.novelId == novel_id,
-                        )
-                        .values(**fields)
-                    ),
+                await self._lock_novel(session, novel_id)
+                return await self._update_reference_in_session(
+                    session,
+                    novel_id,
+                    reference_id,
+                    fields,
+                    expected_updated_at,
+                    index_enabled=index_enabled,
                 )
-                if outcome.rowcount != 1:
-                    raise self._not_found()
-                await session.refresh(reference)
+
+    async def apply_reference_mutations(
+        self,
+        novel_id: str,
+        user_id: str,
+        mutations: list[ReferenceMutation],
+        *,
+        index_enabled: bool = False,
+    ) -> list[dict[str, Any]]:
+        async with self._session_factory() as session:
+            async with session.begin():
+                await self._require_owner(session, novel_id, user_id)
+                await self._lock_novel(session, novel_id)
+                results: list[dict[str, Any]] = []
+                for mutation in mutations:
+                    if mutation.action == "create":
+                        if mutation.client_request_id is None:
+                            raise ValueError("references create 缺少 clientRequestId")
+                        result = await self._create_reference_in_session(
+                            session,
+                            novel_id,
+                            user_id,
+                            mutation.client_request_id,
+                            mutation.fields,
+                            index_enabled=index_enabled,
+                        )
+                    else:
+                        if mutation.reference_id is None:
+                            raise ValueError(f"references {mutation.action} 缺少 referenceId")
+                        if mutation.expected_updated_at is None:
+                            raise ValueError(
+                                f"references {mutation.action} 缺少 expectedUpdatedAt"
+                            )
+                        if mutation.action == "update":
+                            result = await self._update_reference_in_session(
+                                session,
+                                novel_id,
+                                mutation.reference_id,
+                                mutation.fields,
+                                mutation.expected_updated_at,
+                                index_enabled=index_enabled,
+                            )
+                        else:
+                            result = await self._delete_reference_in_session(
+                                session,
+                                novel_id,
+                                mutation.reference_id,
+                                mutation.expected_updated_at,
+                            )
+                    results.append(result)
+                return results
+
+    async def _create_reference_in_session(
+        self,
+        session: AsyncSession,
+        novel_id: str,
+        user_id: str,
+        client_request_id: str,
+        fields: dict[str, Any],
+        *,
+        index_enabled: bool,
+    ) -> dict[str, Any]:
+        reference_id = command_resource_id(
+            "reference", user_id, novel_id, client_request_id
+        )
+        create_fields = {name: fields.get(name) for name in _REFERENCE_FIELDS}
+        reference = cast(
+            ReferenceMaterial | None,
+            await session.scalar(
+                select(ReferenceMaterial)
+                .where(ReferenceMaterial.id == reference_id)
+                .with_for_update()
+            ),
+        )
+        if reference is not None:
+            current_fields = {name: getattr(reference, name) for name in _REFERENCE_FIELDS}
+            if (
+                reference.novelId == novel_id
+                and _utc(reference.createdAt) == _utc(reference.updatedAt)
+                and current_fields == create_fields
+            ):
                 document = await self._document(session, reference_id)
-                if document is None:
-                    document = RagDocument(
-                        novelId=novel_id,
-                        sourceType="reference_material",
-                        sourceId=reference_id,
-                        title=reference.title,
-                        contentHash=content_sha256(reference.content),
-                        status="disabled",
-                        errorMessage=(
-                            "等待重新索引" if index_enabled else "检索索引服务未配置"
-                        ),
-                    )
-                    session.add(document)
-                    await session.flush()
-                elif changed_index_input:
-                    await session.execute(
-                        delete(RagChunk).where(RagChunk.documentId == document.id)
-                    )
-                    document.title = reference.title
-                    document.contentHash = content_sha256(reference.content)
-                    document.status = "disabled"
-                    document.errorMessage = (
-                        "等待重新索引" if index_enabled else "检索索引服务未配置"
-                    )
-                result = self._dto(reference, document.status, document)
-        return result
+                return {
+                    **self._dto(
+                        reference,
+                        document.status if document is not None else None,
+                        document,
+                    ),
+                    "effective": False,
+                }
+            raise ApiError(
+                status_code=409,
+                code="RESOURCE_CREATE_CONFLICT",
+                message="创建请求已绑定其他内容",
+            )
+        created_at = _database_utc(next_utc_timestamp(None))
+        reference = ReferenceMaterial(
+            id=reference_id,
+            novelId=novel_id,
+            **create_fields,
+            createdAt=created_at,
+            updatedAt=created_at,
+        )
+        document = RagDocument(
+            novelId=novel_id,
+            sourceType="reference_material",
+            sourceId=reference_id,
+            title=reference.title,
+            contentHash=content_sha256(reference.content),
+            status="disabled",
+            errorMessage=("等待重新索引" if index_enabled else "检索索引服务未配置"),
+            createdAt=created_at,
+            updatedAt=created_at,
+        )
+        session.add_all((reference, document))
+        await session.flush()
+        return {
+            **self._dto(reference, document.status, document),
+            "effective": True,
+        }
+
+    async def _update_reference_in_session(
+        self,
+        session: AsyncSession,
+        novel_id: str,
+        reference_id: str,
+        fields: dict[str, Any],
+        expected_updated_at: datetime,
+        *,
+        index_enabled: bool,
+    ) -> dict[str, Any]:
+        reference, document = await self._lock_reference_and_document(
+            session, novel_id, reference_id
+        )
+        current_updated_at = _utc(reference.updatedAt)
+        require_expected_updated_at(
+            current_updated_at,
+            expected_updated_at,
+            code="REFERENCE_VERSION_CONFLICT",
+        )
+        changed_fields = {
+            name: requested
+            for name, requested in fields.items()
+            if getattr(reference, name) != requested
+        }
+        if not changed_fields:
+            return {
+                **self._dto(reference, document.status, document),
+                "indexRefreshRequired": False,
+            }
+        for name, requested in changed_fields.items():
+            setattr(reference, name, requested)
+        reference.updatedAt = _database_utc(next_utc_timestamp(current_updated_at))
+        index_refresh_required = bool({"title", "content"} & changed_fields.keys())
+        if index_refresh_required:
+            await session.execute(delete(RagChunk).where(RagChunk.documentId == document.id))
+            document.title = reference.title
+            document.contentHash = content_sha256(reference.content)
+            document.status = "disabled"
+            document.errorMessage = (
+                "等待重新索引" if index_enabled else "检索索引服务未配置"
+            )
+        await session.flush()
+        return {
+            **self._dto(reference, document.status, document),
+            "indexRefreshRequired": index_refresh_required,
+        }
+
+    async def _delete_reference_in_session(
+        self,
+        session: AsyncSession,
+        novel_id: str,
+        reference_id: str,
+        expected_updated_at: datetime,
+    ) -> dict[str, Any]:
+        reference, document = await self._lock_reference_and_document(
+            session, novel_id, reference_id
+        )
+        require_expected_updated_at(
+            _utc(reference.updatedAt),
+            expected_updated_at,
+            code="REFERENCE_VERSION_CONFLICT",
+        )
+        chunk_count = int(
+            await session.scalar(
+                select(func.count()).select_from(RagChunk).where(
+                    RagChunk.documentId == document.id
+                )
+            )
+            or 0
+        )
+        await session.execute(delete(RagChunk).where(RagChunk.documentId == document.id))
+        document_outcome = cast(
+            CursorResult[Any],
+            await session.execute(delete(RagDocument).where(RagDocument.id == document.id)),
+        )
+        reference_outcome = cast(
+            CursorResult[Any],
+            await session.execute(
+                delete(ReferenceMaterial).where(
+                    ReferenceMaterial.id == reference_id,
+                    ReferenceMaterial.novelId == novel_id,
+                )
+            ),
+        )
+        if reference_outcome.rowcount != 1:
+            raise self._not_found()
+        return {
+            "deletedType": "reference",
+            "deletedId": reference_id,
+            "affected": {
+                "reference": 1,
+                "ragDocuments": int(document_outcome.rowcount or 0),
+                "ragChunks": chunk_count,
+            },
+        }
 
     async def list_pending_rag_documents(self, limit: int) -> list[RagDispatchRecord]:
         async with self._session_factory() as session:
@@ -191,25 +383,20 @@ class ReferenceRepository:
             )
         return records
 
-    async def delete_reference(self, novel_id: str, user_id: str, reference_id: str) -> None:
+    async def delete_reference(
+        self,
+        novel_id: str,
+        user_id: str,
+        reference_id: str,
+        expected_updated_at: datetime,
+    ) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
-                _, document = await self._lock_reference_and_document(
-                    session, novel_id, reference_id
+                await self._lock_novel(session, novel_id)
+                return await self._delete_reference_in_session(
+                    session, novel_id, reference_id, expected_updated_at
                 )
-                await session.execute(delete(RagDocument).where(RagDocument.id == document.id))
-                outcome = cast(
-                    CursorResult[Any],
-                    await session.execute(
-                        delete(ReferenceMaterial).where(
-                            ReferenceMaterial.id == reference_id,
-                            ReferenceMaterial.novelId == novel_id,
-                        )
-                    ),
-                )
-                if outcome.rowcount != 1:
-                    raise self._not_found()
 
     async def replace_index(
         self,
@@ -262,20 +449,27 @@ class ReferenceRepository:
                 result = self._dto(reference, document.status, document)
         return result
 
-    async def prepare_reindex(self, novel_id: str, user_id: str, reference_id: str) -> str:
+    async def prepare_reindex(
+        self,
+        novel_id: str,
+        user_id: str,
+        reference_id: str,
+        expected_content_hash: str,
+    ) -> str:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
+                await self._lock_novel(session, novel_id)
                 reference, document = await self._lock_reference_and_document(
                     session, novel_id, reference_id
                 )
-                current_hash = content_sha256(reference.content)
+                self._require_current_hash(reference, document, expected_content_hash)
                 await session.execute(delete(RagChunk).where(RagChunk.documentId == document.id))
                 document.title = reference.title
-                document.contentHash = current_hash
+                document.contentHash = expected_content_hash
                 document.status = "disabled"
                 document.errorMessage = "等待重新索引"
-                return current_hash
+                return expected_content_hash
 
     async def mark_index_failed(
         self,
@@ -344,6 +538,14 @@ class ReferenceRepository:
     async def _require_owner(session: AsyncSession, novel_id: str, user_id: str) -> None:
         owner = await session.scalar(select(Novel.userId).where(Novel.id == novel_id))
         if owner is None or owner != user_id:
+            raise ApiError(status_code=403, code="NOVEL_FORBIDDEN", message="无权访问该小说")
+
+    @staticmethod
+    async def _lock_novel(session: AsyncSession, novel_id: str) -> None:
+        value = await session.scalar(
+            select(Novel.id).where(Novel.id == novel_id).with_for_update()
+        )
+        if value is None:
             raise ApiError(status_code=403, code="NOVEL_FORBIDDEN", message="无权访问该小说")
 
     @staticmethod

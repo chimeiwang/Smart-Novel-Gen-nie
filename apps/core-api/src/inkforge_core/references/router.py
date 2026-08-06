@@ -3,17 +3,21 @@ from __future__ import annotations
 # mypy: disable-error-code="no-untyped-def"
 from typing import Annotated, cast
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import APIRouter, Depends, Request
 
 from ..auth.dependencies import get_current_user
 from ..auth.repository import AuthUser
 from ..errors import ApiError
 from .schemas import (
     CreateReferenceRequest,
+    CreateReferenceResponse,
+    DeleteReferenceImpactResponse,
+    DeleteReferenceRequest,
     RagSearchRequest,
     RagSearchResult,
     ReferenceMaterialResponse,
     ReindexAcceptedResponse,
+    ReindexReferenceRequest,
     UpdateReferenceRequest,
 )
 from .service import ReferenceService
@@ -42,7 +46,7 @@ async def list_references(novel_id: str, user: User, service: Service):
 
 
 @router.post(
-    "/novels/{novel_id}/references", response_model=ReferenceMaterialResponse, status_code=201
+    "/novels/{novel_id}/references", response_model=CreateReferenceResponse, status_code=201
 )
 async def create_reference(
     novel_id: str, body: CreateReferenceRequest, user: User, service: Service
@@ -63,10 +67,18 @@ async def update_reference(
     return await service.update(user.id, novel_id, reference_id, body)
 
 
-@router.delete("/novels/{novel_id}/references/{reference_id}", status_code=204)
-async def delete_reference(novel_id: str, reference_id: str, user: User, service: Service):
-    await service.delete(user.id, novel_id, reference_id)
-    return Response(status_code=204)
+@router.delete(
+    "/novels/{novel_id}/references/{reference_id}",
+    response_model=DeleteReferenceImpactResponse,
+)
+async def delete_reference(
+    novel_id: str,
+    reference_id: str,
+    body: DeleteReferenceRequest,
+    user: User,
+    service: Service,
+):
+    return await service.delete(user.id, novel_id, reference_id, body)
 
 
 @router.post(
@@ -74,8 +86,14 @@ async def delete_reference(novel_id: str, reference_id: str, user: User, service
     response_model=ReindexAcceptedResponse,
     status_code=202,
 )
-async def reindex_reference(novel_id: str, reference_id: str, user: User, service: Service):
-    await service.reindex(user.id, novel_id, reference_id)
+async def reindex_reference(
+    novel_id: str,
+    reference_id: str,
+    body: ReindexReferenceRequest,
+    user: User,
+    service: Service,
+):
+    await service.reindex(user.id, novel_id, reference_id, body)
     return ReindexAcceptedResponse(accepted=True)
 
 

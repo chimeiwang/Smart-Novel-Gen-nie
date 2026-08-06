@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any, Protocol
 
 from inkforge_contracts.jobs import AgentJobStatus
 
 from ..errors import ApiError
 from .rag import chunk_text_losslessly, validate_chunk_capacity
-from .schemas import CreateReferenceRequest, ReferenceMaterialResponse, UpdateReferenceRequest
+from .schemas import (
+    CreateReferenceRequest,
+    CreateReferenceResponse,
+    DeleteReferenceImpactResponse,
+    DeleteReferenceRequest,
+    ReferenceMaterialResponse,
+    ReindexReferenceRequest,
+    UpdateReferenceRequest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +36,7 @@ class ReferenceRepositoryPort(Protocol):
         self,
         novel_id: str,
         user_id: str,
+        client_request_id: str,
         fields: dict[str, Any],
         *,
         index_enabled: bool = False,
@@ -38,10 +48,17 @@ class ReferenceRepositoryPort(Protocol):
         user_id: str,
         reference_id: str,
         fields: dict[str, Any],
+        expected_updated_at: datetime,
         *,
         index_enabled: bool = False,
     ) -> dict[str, Any]: ...
-    async def delete_reference(self, novel_id: str, user_id: str, reference_id: str) -> None: ...
+    async def delete_reference(
+        self,
+        novel_id: str,
+        user_id: str,
+        reference_id: str,
+        expected_updated_at: datetime,
+    ) -> dict[str, Any]: ...
     async def require_reference(
         self, novel_id: str, user_id: str, reference_id: str
     ) -> dict[str, Any]: ...
@@ -52,7 +69,13 @@ class ReferenceRepositoryPort(Protocol):
         expected_content_hash: str,
         embeddings: list[list[float]],
     ) -> dict[str, Any]: ...
-    async def prepare_reindex(self, novel_id: str, user_id: str, reference_id: str) -> str: ...
+    async def prepare_reindex(
+        self,
+        novel_id: str,
+        user_id: str,
+        reference_id: str,
+        expected_content_hash: str,
+    ) -> str: ...
     async def mark_index_failed(
         self,
         novel_id: str,
@@ -78,16 +101,17 @@ class ReferenceService:
 
     async def create_reference(
         self, user_id: str, novel_id: str, request: CreateReferenceRequest
-    ) -> ReferenceMaterialResponse:
+    ) -> CreateReferenceResponse:
         if not request.title.strip():
             raise ApiError(status_code=422, code="REFERENCE_TITLE_REQUIRED", message="标题不能为空")
         value = await self._repository.create_reference(
             novel_id,
             user_id,
-            request.model_dump(),
+            request.clientRequestId,
+            request.model_dump(exclude={"clientRequestId"}),
             index_enabled=self._submitter is not None,
         )
-        if self._submitter is not None:
+        if self._submitter is not None and value.get("effective") is True:
             try:
                 await self._submitter.submit(
                     user_id,
@@ -97,14 +121,12 @@ class ReferenceService:
                 )
             except Exception:
                 logger.warning("参考资料索引任务提交失败", extra={"referenceId": value["id"]})
-        return ReferenceMaterialResponse.model_validate(value)
+        return CreateReferenceResponse.model_validate(value)
 
     async def update(
         self, user_id: str, novel_id: str, reference_id: str, request: UpdateReferenceRequest
     ) -> ReferenceMaterialResponse:
-        fields = request.model_dump(exclude_unset=True)
-        if not fields:
-            raise ApiError(status_code=422, code="EMPTY_UPDATE", message="至少需要提供一个更新字段")
+        fields = request.model_dump(exclude={"expectedUpdatedAt"}, exclude_unset=True)
         if any(
             fields.get(field) is None for field in ("title", "type", "content") if field in fields
         ):
@@ -120,9 +142,11 @@ class ReferenceService:
             user_id,
             reference_id,
             fields,
+            request.expectedUpdatedAt,
             index_enabled=self._submitter is not None,
         )
-        if self._submitter is not None and {"title", "content"} & fields.keys():
+        index_refresh_required = value.pop("indexRefreshRequired", False)
+        if self._submitter is not None and index_refresh_required:
             try:
                 await self._submitter.submit(
                     user_id,
@@ -134,17 +158,37 @@ class ReferenceService:
                 logger.warning("参考资料索引任务提交失败", extra={"referenceId": reference_id})
         return ReferenceMaterialResponse.model_validate(value)
 
-    async def delete(self, user_id: str, novel_id: str, reference_id: str) -> None:
-        await self._repository.delete_reference(novel_id, user_id, reference_id)
+    async def delete(
+        self,
+        user_id: str,
+        novel_id: str,
+        reference_id: str,
+        request: DeleteReferenceRequest,
+    ) -> DeleteReferenceImpactResponse:
+        value = await self._repository.delete_reference(
+            novel_id, user_id, reference_id, request.expectedUpdatedAt
+        )
+        return DeleteReferenceImpactResponse.model_validate(value)
 
-    async def reindex(self, user_id: str, novel_id: str, reference_id: str) -> None:
+    async def reindex(
+        self,
+        user_id: str,
+        novel_id: str,
+        reference_id: str,
+        request: ReindexReferenceRequest,
+    ) -> None:
         if self._submitter is None:
             raise ApiError(
                 status_code=503,
                 code="RAG_INDEX_UNAVAILABLE",
                 message="检索索引服务暂时不可用",
             )
-        content_hash = await self._repository.prepare_reindex(novel_id, user_id, reference_id)
+        content_hash = await self._repository.prepare_reindex(
+            novel_id,
+            user_id,
+            reference_id,
+            request.expectedContentHash,
+        )
         try:
             await self._submitter.submit(user_id, novel_id, reference_id, content_hash)
         except Exception:
