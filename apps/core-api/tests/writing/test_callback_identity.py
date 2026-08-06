@@ -13,7 +13,12 @@ from inkforge_contracts.events import (
     RunCompletionCallback,
     RunFailureCallback,
 )
-from inkforge_core.db.models import WritingEventOutbox, WritingRunCommand, WritingTask
+from inkforge_core.db.models import (
+    ReviewArtifact,
+    WritingEventOutbox,
+    WritingRunCommand,
+    WritingTask,
+)
 from inkforge_core.errors import ApiError
 from inkforge_core.writing.job_identity import build_writing_job_id
 from inkforge_core.writing.outbox import BoundaryEvent
@@ -176,6 +181,140 @@ async def test_old_job_callback_never_mutates_new_active_command(callback: str) 
     assert task.phase == "awaiting_user_review"
     assert new_command.status == "processing"
     assert old_command.status == "succeeded"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cancel_status", ["pending", "succeeded"])
+@pytest.mark.parametrize("callback", ["event", "checkpoint", "complete", "fail"])
+async def test_cancelled_job_callbacks_are_rejected_without_side_effects(
+    cancel_status: str,
+    callback: str,
+) -> None:
+    task = _task()
+    task.phase = "active" if cancel_status == "pending" else "error"
+    old_command = _command("command-cancelled", "failed")
+    old_command.lastError = "WRITING_RUN_CANCELLED_BY_USER"
+    cancel_command = _command("command-cancel", cancel_status)
+    cancel_command.kind = "cancel"
+    cancel_command.resultJson = (
+        None if cancel_status == "pending" else json.dumps({"effective": True})
+    )
+    artifact = ReviewArtifact(
+        id="artifact-1",
+        novelId=task.novelId,
+        chapterId=task.chapterId,
+        taskId=task.id,
+        kind="chapter_draft",
+        status="draft",
+        payloadJson=json.dumps({"kind": "chapter_draft", "content": "原草案"}),
+        revision=1,
+    )
+    session = CallbackSession(
+        task,
+        {old_command.id: old_command, cancel_command.id: cancel_command},
+        active_command_id=(cancel_command.id if cancel_status == "pending" else None),
+        latest_command_id=cancel_command.id,
+    )
+    repository = WritingTaskRepository(lambda: session)  # type: ignore[arg-type]
+    store = InMemoryWritingEventStore()
+    service = WritingCallbackService(repository, store)
+    original_task = (
+        task.graphStateJson,
+        task.phase,
+        task.finalContent,
+        task.agentOutputs,
+    )
+    original_artifact = (
+        artifact.status,
+        artifact.payloadJson,
+        artifact.revision,
+        artifact.appliedAt,
+    )
+    original_cancel = (
+        cancel_command.status,
+        cancel_command.resultJson,
+        cancel_command.completedAt,
+        cancel_command.lastError,
+    )
+    occurred_at = datetime.now(UTC)
+
+    if callback == "event":
+        receipt = await service.accept_event(
+            AgentEvent(
+                protocolVersion="1.1",
+                eventId="event-late",
+                jobId=old_command.id,
+                runId=task.id,
+                taskId=task.id,
+                sequence=21,
+                event="agent_start",
+                data={},
+                occurredAt=occurred_at,
+            )
+        )
+    elif callback == "checkpoint":
+        receipt = await service.save_checkpoint(
+            CheckpointCallback(
+                protocolVersion="1.1",
+                eventId="checkpoint-late",
+                jobId=old_command.id,
+                runId=task.id,
+                taskId=task.id,
+                sequence=21,
+                checkpoint=_checkpoint(21),
+                occurredAt=occurred_at,
+            ),
+            user_id="user-1",
+            novel_id=task.novelId,
+        )
+    elif callback == "complete":
+        receipt = await service.complete(
+            RunCompletionCallback(
+                protocolVersion="1.1",
+                eventId="complete-late",
+                jobId=old_command.id,
+                runId=task.id,
+                taskId=task.id,
+                sequence=21,
+                result={"finalResponse": "迟到正文"},
+                occurredAt=occurred_at,
+            )
+        )
+    else:
+        receipt = await service.fail(
+            RunFailureCallback(
+                protocolVersion="1.1",
+                eventId="fail-late",
+                jobId=old_command.id,
+                runId=task.id,
+                taskId=task.id,
+                sequence=21,
+                code="LATE_FAILURE",
+                message="迟到失败",
+                recoverable=False,
+                occurredAt=occurred_at,
+            )
+        )
+
+    assert receipt.disposition == "rejected"
+    assert receipt.reasonCode == "WRITING_JOB_MISMATCH"
+    assert (task.graphStateJson, task.phase, task.finalContent, task.agentOutputs) == (
+        original_task
+    )
+    assert (
+        artifact.status,
+        artifact.payloadJson,
+        artifact.revision,
+        artifact.appliedAt,
+    ) == original_artifact
+    assert (
+        cancel_command.status,
+        cancel_command.resultJson,
+        cancel_command.completedAt,
+        cancel_command.lastError,
+    ) == original_cancel
+    assert session.added == []
+    assert await store.replay(task.id, None) == []
 
 
 @pytest.mark.asyncio

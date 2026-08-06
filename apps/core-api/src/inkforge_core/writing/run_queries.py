@@ -645,7 +645,7 @@ def _artifact_decision_matches(
 ) -> bool:
     if command is None:
         return False
-    payload = _json_object(command.payloadJson)
+    payload = _command_job(command)
     resume_input = payload.get("resumeInput")
     result = _full_result(command)
     return bool(

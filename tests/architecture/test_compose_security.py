@@ -30,6 +30,32 @@ def test_compose_keeps_database_out_of_agent_trust_boundary() -> None:
     assert "agent_net" in agent
 
 
+def test_cancel_uses_postgres_outcome_instead_of_outbox_boundary() -> None:
+    cancellation = (
+        ROOT
+        / "apps"
+        / "core-api"
+        / "src"
+        / "inkforge_core"
+        / "writing"
+        / "cancellation.py"
+    ).read_text(encoding="utf-8")
+    sse = (
+        ROOT
+        / "apps"
+        / "core-api"
+        / "src"
+        / "inkforge_core"
+        / "writing"
+        / "sse.py"
+    ).read_text(encoding="utf-8")
+
+    assert "WritingEventOutbox" not in cancellation
+    assert "supersede_waiting_for_new_command" not in cancellation
+    assert "outcome_provider" in sse
+    assert "format_run_outcome" in sse
+
+
 def test_only_nginx_publishes_ports_and_internal_routes_are_blocked() -> None:
     source = COMPOSE.read_text(encoding="utf-8")
     for service in PRODUCTION_SERVICES[1:]:

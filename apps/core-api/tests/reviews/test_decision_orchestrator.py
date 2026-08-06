@@ -15,7 +15,11 @@ from inkforge_core.reviews.schemas import (
     ReviewArtifactDecisionRequest,
 )
 from inkforge_core.writing.commands import WritingCommandRecord
-from inkforge_core.writing.idempotency import request_fingerprint
+from inkforge_core.writing.idempotency import (
+    IdempotencyResolution,
+    InkForgeCommandMetadata,
+    request_fingerprint,
+)
 from inkforge_core.writing.records import TaskRecord
 
 
@@ -50,6 +54,11 @@ class OuterSession:
 
     async def connection(self) -> object:
         return object()
+
+    async def execute(
+        self, statement: object, params: dict[str, object] | None = None
+    ) -> None:
+        del statement, params
 
 
 class OuterFactory:
@@ -136,13 +145,60 @@ def command(*, result: dict[str, Any] | None = None) -> WritingCommandRecord:
 class Lookup:
     def __init__(self, existing: WritingCommandRecord | None = None) -> None:
         self.existing = existing
+        self.calls = 0
 
     async def get_by_idempotency_key(
         self, user_id: str, client_request_id: str
     ) -> WritingCommandRecord | None:
         assert user_id == "user-1"
         assert client_request_id == "request-00000001"
+        self.calls += 1
         return self.existing
+
+
+class Resolver:
+    def __init__(self, resolution: IdempotencyResolution | None = None) -> None:
+        self.resolution = resolution
+        self.calls = 0
+
+    async def __call__(
+        self,
+        session: object,
+        *,
+        user_id: str,
+        client_request_id: str,
+        request_fingerprint: str,
+    ) -> IdempotencyResolution | None:
+        del session
+        assert user_id == "user-1"
+        assert client_request_id == "request-00000001"
+        self.calls += 1
+        if (
+            self.resolution is not None
+            and self.resolution.metadata.requestFingerprint
+            != request_fingerprint
+        ):
+            raise ApiError(
+                status_code=409,
+                code="IDEMPOTENCY_KEY_REUSED",
+                message="同一幂等标识已绑定其他请求",
+            )
+        return self.resolution
+
+
+def resolution_for(
+    persisted: WritingCommandRecord,
+    *,
+    record_kind: str = "writing_command",
+) -> IdempotencyResolution:
+    metadata = InkForgeCommandMetadata.model_validate(
+        persisted.payload["_inkforgeCommand"]
+    )
+    return IdempotencyResolution(
+        record_kind=record_kind,  # type: ignore[arg-type]
+        record_id=persisted.id,
+        metadata=metadata,
+    )
 
 
 class ArtifactRepository:
@@ -154,6 +210,11 @@ class ArtifactRepository:
         assert artifact_id == "artifact-1"
         self.required += 1
         return artifact()
+
+    async def lock_decision_scope(
+        self, user_id: str, artifact_id: str
+    ) -> ArtifactRecord:
+        return await self.require_artifact(user_id, artifact_id)
 
 
 class DecisionService:
@@ -179,6 +240,12 @@ class DecisionService:
 class CommandRepository:
     def __init__(self) -> None:
         self.created: dict[str, Any] | None = None
+
+    async def get_by_idempotency_key(
+        self, user_id: str, client_request_id: str
+    ) -> WritingCommandRecord | None:
+        del user_id, client_request_id
+        return None
 
     async def require_owned_task(self, user_id: str, task_id: str) -> TaskRecord:
         assert user_id == "user-1"
@@ -214,6 +281,7 @@ def fixture(*, fail: bool = False) -> Fixture:
     orchestrator = ReviewDecisionOrchestrator(
         OuterFactory(outer),  # type: ignore[arg-type]
         command_lookup=Lookup(),
+        idempotency_resolver=Resolver(),
         dependencies_builder=lambda _factory: dependencies,
         transactional_factory_builder=lambda _connection: object(),
     )
@@ -279,11 +347,13 @@ async def test_discard_retry_returns_original_command_before_artifact_lookup() -
         "savedCount": 0,
         "deleted": True,
     }
-    lookup = Lookup(command(result=saved))
+    persisted = command(result=saved)
+    lookup = Lookup(persisted)
     outer = OuterSession()
     orchestrator = ReviewDecisionOrchestrator(
         OuterFactory(outer),  # type: ignore[arg-type]
         command_lookup=lookup,
+        idempotency_resolver=Resolver(resolution_for(persisted)),
         dependencies_builder=lambda _factory: pytest.fail("不应再次读取已删除草案"),
         transactional_factory_builder=lambda _connection: object(),
     )
@@ -313,9 +383,11 @@ async def test_reused_client_request_id_with_different_revision_is_rejected() ->
         "savedCount": 0,
         "deleted": True,
     }
+    persisted = command(result=saved)
     orchestrator = ReviewDecisionOrchestrator(
         OuterFactory(OuterSession()),  # type: ignore[arg-type]
-        command_lookup=Lookup(command(result=saved)),
+        command_lookup=Lookup(persisted),
+        idempotency_resolver=Resolver(resolution_for(persisted)),
         dependencies_builder=lambda _factory: pytest.fail("不应执行新的草案决定"),
         transactional_factory_builder=lambda _connection: object(),
     )
@@ -332,3 +404,118 @@ async def test_reused_client_request_id_with_different_revision_is_rejected() ->
         )
 
     assert captured.value.code == "IDEMPOTENCY_KEY_REUSED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal", ["completed", "cancelled"])
+async def test_decision_retry_replays_accepted_response_after_terminal_update(
+    terminal: str,
+) -> None:
+    accepted = {
+        "artifactId": "artifact-1",
+        "taskId": "task-1",
+        "commandId": "command-1",
+        "decision": "discard",
+        "status": "pending",
+        "savedCount": 0,
+        "deleted": True,
+    }
+    if terminal == "completed":
+        persisted_result = {
+            **accepted,
+            "_inkforgeTerminalCallbackResult": {"finalResponse": "已完成"},
+        }
+    else:
+        persisted_result = {
+            "code": "WRITING_RUN_CANCELLED_BY_USER",
+            "cancelCommandId": "cancel-1",
+            "cancelledJobId": "command-1",
+            "_inkforgeArtifactDecisionAcceptedResponse": accepted,
+        }
+    persisted = command(result=persisted_result)
+    orchestrator = ReviewDecisionOrchestrator(
+        OuterFactory(OuterSession()),  # type: ignore[arg-type]
+        command_lookup=Lookup(persisted),
+        idempotency_resolver=Resolver(resolution_for(persisted)),
+        dependencies_builder=lambda _factory: pytest.fail(
+            "幂等重放不应再次执行草案决定"
+        ),
+        transactional_factory_builder=lambda _connection: object(),
+    )
+
+    response = await orchestrator.decide(
+        "user-1",
+        "artifact-1",
+        ReviewArtifactDecisionRequest(
+            clientRequestId="request-00000001",
+            expectedRevision=1,
+            decision="discard",
+        ),
+    )
+
+    assert response.model_dump(mode="json") == accepted
+
+
+@pytest.mark.asyncio
+async def test_decision_rejects_cross_table_idempotency_collision() -> None:
+    persisted = command()
+    collision = resolution_for(persisted, record_kind="workflow_run")
+    lookup = Lookup()
+    orchestrator = ReviewDecisionOrchestrator(
+        OuterFactory(OuterSession()),  # type: ignore[arg-type]
+        command_lookup=lookup,
+        idempotency_resolver=Resolver(collision),
+        dependencies_builder=lambda _factory: pytest.fail(
+            "跨表幂等冲突不应读取草案"
+        ),
+        transactional_factory_builder=lambda _connection: object(),
+    )
+
+    with pytest.raises(ApiError) as captured:
+        await orchestrator.decide(
+            "user-1",
+            "artifact-1",
+            ReviewArtifactDecisionRequest(
+                clientRequestId="request-00000001",
+                expectedRevision=1,
+                decision="discard",
+            ),
+        )
+
+    assert captured.value.code == "IDEMPOTENCY_KEY_REUSED"
+    assert lookup.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_historical_bare_decision_does_not_shadow_new_enveloped_request() -> None:
+    legacy = replace(command(), payload={"version": 1, "resume": True})
+    lookup = Lookup(legacy)
+    outer = OuterSession()
+    artifacts = ArtifactRepository()
+    commands = CommandRepository()
+    dependencies = ReviewDecisionDependencies(
+        repository=artifacts,
+        service=DecisionService(),
+        commands=commands,
+    )
+    orchestrator = ReviewDecisionOrchestrator(
+        OuterFactory(outer),  # type: ignore[arg-type]
+        command_lookup=lookup,
+        idempotency_resolver=Resolver(),
+        dependencies_builder=lambda _factory: dependencies,
+        transactional_factory_builder=lambda _connection: object(),
+    )
+
+    response = await orchestrator.decide(
+        "user-1",
+        "artifact-1",
+        ReviewArtifactDecisionRequest(
+            clientRequestId="request-00000001",
+            expectedRevision=1,
+            decision="discard",
+        ),
+    )
+
+    assert response.commandId != legacy.id
+    assert lookup.calls == 0
+    assert commands.created is not None

@@ -23,6 +23,7 @@ from ..db.models import (
 from ..errors import ApiError
 from ..short_medium.repository import is_short_medium_artifact_key
 from ..writing.source_bindings import verify_source_bindings
+from ..writing.transaction_locks import WritingLockRequest, lock_writing_rows
 from .schemas import (
     ArtifactEvaluationResponse,
     ArtifactKind,
@@ -74,6 +75,84 @@ class ReviewRepository:
                     message="无权访问该待审核草案",
                 )
             return _record(artifact)
+
+    async def lock_decision_scope(
+        self, user_id: str, artifact_id: str
+    ) -> ArtifactRecord:
+        async with self._session_factory() as session:
+            async with session.begin():
+                identity = (
+                    await session.execute(
+                        select(
+                            ReviewArtifact.novelId,
+                            ReviewArtifact.chapterId,
+                            ReviewArtifact.taskId,
+                        )
+                        .join(Novel, Novel.id == ReviewArtifact.novelId)
+                        .where(
+                            ReviewArtifact.id == artifact_id,
+                            Novel.userId == user_id,
+                        )
+                    )
+                ).one_or_none()
+                if identity is None:
+                    raise ApiError(
+                        status_code=403,
+                        code="REVIEW_ARTIFACT_FORBIDDEN",
+                        message="无权访问该待审核草案",
+                    )
+                novel_id, chapter_id, task_id = identity
+                if task_id is None:
+                    raise ApiError(
+                        status_code=409,
+                        code="ARTIFACT_TASK_MISSING",
+                        message="待审核草案没有关联写作任务",
+                    )
+                current_command_id = await _latest_command_id(session, task_id)
+                locked = await lock_writing_rows(
+                    session,
+                    user_id=user_id,
+                    request=WritingLockRequest(
+                        novel_id=novel_id,
+                        chapter_ids=(chapter_id,) if chapter_id is not None else (),
+                        task_id=task_id,
+                        artifact_id=artifact_id,
+                        command_id=current_command_id,
+                    ),
+                )
+                artifact = locked.artifact
+                task = locked.task
+                if artifact is None or task is None:
+                    raise RuntimeError("统一写作锁未返回草案决定资源")
+                if await _latest_command_id(session, task_id, lock=True) != current_command_id:
+                    raise ApiError(
+                        status_code=409,
+                        code="WRITING_COMMAND_ACTIVE",
+                        message="写作任务的当前命令已变化",
+                    )
+                active_command_id = await session.scalar(
+                    select(WritingRunCommand.id)
+                    .where(
+                        WritingRunCommand.taskId == task_id,
+                        WritingRunCommand.status.in_(("pending", "submitted", "processing")),
+                    )
+                    .with_for_update()
+                )
+                if active_command_id is not None:
+                    raise ApiError(
+                        status_code=409,
+                        code="WRITING_COMMAND_ACTIVE",
+                        message="该写作任务已有正在处理的命令",
+                        details={"taskId": task_id},
+                    )
+                if task.phase != "awaiting_user_review":
+                    raise ApiError(
+                        status_code=409,
+                        code="ARTIFACT_NOT_AWAITING_USER",
+                        message="当前写作任务不在等待草案决定状态",
+                    )
+                await _lock_artifact_source_commands(session, artifact)
+                return _record(artifact)
 
     async def prepare_decision(
         self,
@@ -584,6 +663,39 @@ async def _require_current_writing_job(
             code="WRITING_JOB_MISMATCH",
             message="待审核草案写入作业不是当前活动命令",
         )
+
+
+async def _latest_command_id(
+    session: AsyncSession,
+    task_id: str,
+    *,
+    lock: bool = False,
+) -> str | None:
+    statement = (
+        select(WritingRunCommand.id)
+        .where(WritingRunCommand.taskId == task_id)
+        .order_by(WritingRunCommand.createdAt.desc(), WritingRunCommand.id.desc())
+        .limit(1)
+    )
+    if lock:
+        statement = statement.with_for_update()
+    return cast(str | None, await session.scalar(statement))
+
+
+async def _lock_artifact_source_commands(
+    session: AsyncSession,
+    artifact: ReviewArtifact,
+) -> None:
+    payload = _parse_json(artifact.payloadJson, {})
+    control = payload.get("_inkforgeControl") if isinstance(payload, dict) else None
+    source_command_id = control.get("sourceCommandId") if isinstance(control, dict) else None
+    if not isinstance(source_command_id, str) or not source_command_id:
+        return
+    await session.scalar(
+        select(WritingRunCommand)
+        .where(WritingRunCommand.id == source_command_id)
+        .with_for_update()
+    )
 
 
 async def _source_bindings_for_task(

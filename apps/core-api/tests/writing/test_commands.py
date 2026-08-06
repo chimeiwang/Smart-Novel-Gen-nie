@@ -639,6 +639,120 @@ async def test_same_client_request_returns_existing_command() -> None:
     )
 
 
+@pytest.mark.asyncio
+async def test_artifact_decision_inherits_explicit_long_serial_start_job() -> None:
+    owned_task = task()
+    owned_task.phase = "awaiting_user_review"
+    start_job = {
+        "version": 1,
+        "workflow": "long_serial",
+        "chapterId": "chapter-1",
+        "writingSessionId": "session-1",
+        "operation": "write_chapter",
+        "target": {"type": "chapter", "id": "chapter-1"},
+        "scope": {"kind": "chapter", "chapterId": "chapter-1"},
+        "sourceBindings": [
+            {
+                "resourceType": "chapter",
+                "resourceId": "chapter-1",
+                "exists": True,
+                "updatedAt": "2026-08-06T08:00:00Z",
+                "contentSha256": "a" * 64,
+                "revision": 3,
+                "absenceSentinel": None,
+            }
+        ],
+        "targetWordCount": 5200,
+        "userInstruction": "写出雨夜里的不可逆选择",
+        "resume": False,
+        "resumeInput": None,
+    }
+    start_payload = json.dumps(
+        {
+            "_inkforgeCommand": {
+                "schemaVersion": 1,
+                "clientRequestId": "long-start-request-0001",
+                "commandKind": "start",
+                "resourceIdentity": {
+                    "novelId": "novel-1",
+                    "chapterId": "chapter-1",
+                },
+                "normalizedBody": {"workflow": "long_serial"},
+                "requestFingerprint": "a" * 64,
+            },
+            "job": start_job,
+        }
+    )
+    session = StatusSession(
+        [
+            RowResult(None),
+            RowResult((owned_task, "user-1")),
+            RowResult(None),
+        ],
+        [start_payload],
+    )
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory([session])
+    )
+    accepted = {
+        "artifactId": "artifact-1",
+        "taskId": owned_task.id,
+        "commandId": "decision-1",
+        "decision": "approve",
+        "status": "pending",
+        "savedCount": 1,
+        "deleted": False,
+    }
+
+    await repository.create_artifact_decision(
+        command_id="decision-1",
+        user_id="user-1",
+        task_id=owned_task.id,
+        artifact_id="artifact-1",
+        decision="approve",
+        client_request_id="decision-request-0001",
+        payload={
+            "_inkforgeCommand": {
+                "schemaVersion": 1,
+                "clientRequestId": "decision-request-0001",
+                "commandKind": "artifact_decision",
+                "resourceIdentity": {"artifactId": "artifact-1"},
+                "normalizedBody": {
+                    "expectedRevision": 1,
+                    "decision": "approve",
+                },
+                "requestFingerprint": "b" * 64,
+            },
+            "job": {
+                "version": 1,
+                "resume": True,
+                "chapterId": "chapter-1",
+                "writingSessionId": "session-1",
+                "resumeInput": {
+                    "artifactId": "artifact-1",
+                    "decision": "approve",
+                },
+            },
+        },
+        result=accepted,
+    )
+
+    persisted = next(
+        value for value in session.added if isinstance(value, WritingRunCommand)
+    )
+    payload = json.loads(persisted.payloadJson)
+    assert payload["job"] == {
+        **start_job,
+        "resume": True,
+        "resumeInput": {
+            "artifactId": "artifact-1",
+            "decision": "approve",
+        },
+    }
+    result = json.loads(persisted.resultJson)
+    assert result["_inkforgeArtifactDecisionAcceptedResponse"] == accepted
+
+
 def test_recovery_checkpoint_requires_a_bound_snapshot_and_terminal_command() -> None:
     owned_task = task()
     source = command(status="succeeded")

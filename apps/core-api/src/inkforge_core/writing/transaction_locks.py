@@ -126,10 +126,6 @@ async def lock_writing_rows(
                 request.task_id is not None
                 and command.taskId != request.task_id
             )
-            or (
-                request.artifact_id is not None
-                and command.artifactId != request.artifact_id
-            )
         ):
             raise _not_found(
                 "WRITING_COMMAND_NOT_FOUND",

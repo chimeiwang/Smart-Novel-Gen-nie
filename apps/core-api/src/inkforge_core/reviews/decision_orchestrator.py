@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 
@@ -16,11 +16,18 @@ from ..errors import ApiError
 from ..lore.repository import LoreRepository
 from ..outlines.repository import OutlineRepository
 from ..references.repository import ReferenceRepository
-from ..writing.commands import WritingCommandRecord, WritingRunCommandRepository
+from ..writing.commands import (
+    ARTIFACT_DECISION_ACCEPTED_RESPONSE_FIELD,
+    WritingCommandRecord,
+    WritingRunCommandRepository,
+)
 from ..writing.idempotency import (
+    IdempotencyResolution,
+    acquire_idempotency_lock,
     normalize_json_value,
     parse_command_envelope,
     request_fingerprint,
+    resolve_idempotency,
 )
 from ..writing.records import TaskRecord
 from .apply import FormalArtifactApplier
@@ -39,6 +46,10 @@ logger = logging.getLogger(__name__)
 
 class ReviewArtifactRepositoryPort(Protocol):
     async def require_artifact(
+        self, user_id: str, artifact_id: str
+    ) -> ArtifactRecord: ...
+
+    async def lock_decision_scope(
         self, user_id: str, artifact_id: str
     ) -> ArtifactRecord: ...
 
@@ -96,12 +107,16 @@ class ReviewDecisionOrchestrator:
         session_factory: async_sessionmaker[AsyncSession],
         *,
         command_lookup: ReviewCommandLookupPort | None = None,
+        idempotency_resolver: Callable[
+            ..., Awaitable[IdempotencyResolution | None]
+        ] = resolve_idempotency,
         dependencies_builder: Callable[[Any], ReviewDecisionDependencies] | None = None,
         transactional_factory_builder: Callable[[Any], Any] | None = None,
         dispatcher: ImmediateDispatcherPort | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._command_lookup = command_lookup or WritingRunCommandRepository(session_factory)
+        self._idempotency_resolver = idempotency_resolver
         self._dependencies_builder = dependencies_builder or _build_dependencies
         self._transactional_factory_builder = (
             transactional_factory_builder or _build_transactional_factory
@@ -124,21 +139,40 @@ class ReviewDecisionOrchestrator:
             resource_identity={"artifactId": artifact_id},
             body=normalized_body,
         )
-        existing = await self._command_lookup.get_by_idempotency_key(
-            user_id, request.clientRequestId
-        )
-        if existing is not None:
-            return _accepted_response_from_command(existing, fingerprint)
-
         accepted: ArtifactDecisionAcceptedResponse
         async with self._session_factory() as outer:
             async with outer.begin():
+                await acquire_idempotency_lock(
+                    outer,
+                    user_id=user_id,
+                    client_request_id=request.clientRequestId,
+                )
+                replay = await _resolve_decision_replay(
+                    outer,
+                    self._command_lookup,
+                    self._idempotency_resolver,
+                    user_id=user_id,
+                    client_request_id=request.clientRequestId,
+                    fingerprint=fingerprint,
+                )
+                if replay is not None:
+                    return replay
                 connection = await outer.connection()
                 transactional_factory = self._transactional_factory_builder(connection)
                 dependencies = self._dependencies_builder(transactional_factory)
-                artifact = await dependencies.repository.require_artifact(
+                artifact = await dependencies.repository.lock_decision_scope(
                     user_id, artifact_id
                 )
+                replay = await _resolve_decision_replay(
+                    outer,
+                    self._command_lookup,
+                    self._idempotency_resolver,
+                    user_id=user_id,
+                    client_request_id=request.clientRequestId,
+                    fingerprint=fingerprint,
+                )
+                if replay is not None:
+                    return replay
                 if artifact.task_id is None:
                     raise ApiError(
                         status_code=409,
@@ -238,14 +272,59 @@ def _accepted_response_from_command(
             code="IDEMPOTENCY_KEY_REUSED",
             message="同一幂等标识已绑定其他请求",
         )
+    persisted_result = command.result
+    nested = persisted_result.get(ARTIFACT_DECISION_ACCEPTED_RESPONSE_FIELD)
+    source = nested if isinstance(nested, dict) else persisted_result
+    accepted_result = {
+        field: source[field]
+        for field in ArtifactDecisionAcceptedResponse.model_fields
+        if field in source
+    }
     try:
-        return ArtifactDecisionAcceptedResponse.model_validate(command.result)
+        return ArtifactDecisionAcceptedResponse.model_validate(accepted_result)
     except ValueError as exc:
         raise ApiError(
             status_code=409,
             code="WRITING_COMMAND_RESULT_INVALID",
             message="写作命令受理结果无效",
         ) from exc
+
+
+async def _resolve_decision_replay(
+    session: AsyncSession,
+    command_lookup: ReviewCommandLookupPort,
+    resolver: Callable[..., Awaitable[IdempotencyResolution | None]],
+    *,
+    user_id: str,
+    client_request_id: str,
+    fingerprint: str,
+) -> ArtifactDecisionAcceptedResponse | None:
+    resolution = await resolver(
+        session,
+        user_id=user_id,
+        client_request_id=client_request_id,
+        request_fingerprint=fingerprint,
+    )
+    if resolution is None:
+        return None
+    if resolution.record_kind != "writing_command":
+        raise _idempotency_reused(client_request_id)
+    command = await command_lookup.get_by_idempotency_key(
+        user_id,
+        client_request_id,
+    )
+    if command is None or command.id != resolution.record_id:
+        raise _idempotency_reused(client_request_id)
+    return _accepted_response_from_command(command, fingerprint)
+
+
+def _idempotency_reused(client_request_id: str) -> ApiError:
+    return ApiError(
+        status_code=409,
+        code="IDEMPOTENCY_KEY_REUSED",
+        message="同一幂等标识已绑定其他请求",
+        details={"clientRequestId": client_request_id},
+    )
 
 
 def _build_transactional_factory(

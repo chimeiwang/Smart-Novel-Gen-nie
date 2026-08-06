@@ -99,8 +99,17 @@ def test_long_serial_resume_requires_checkpoint_input_and_keeps_full_context() -
         "artifactId": "artifact-1",
         "decision": "approve",
     }
+    decision_resume = LONG_SERIAL_RUN_PAYLOAD_ADAPTER.validate_python(
+        artifact_decision
+    )
+
+    assert decision_resume.resumeInput.artifactId == "artifact-1"
+    assert decision_resume.resumeInput.decision == "approve"
+
+    incomplete_decision = deepcopy(artifact_decision)
+    incomplete_decision["resumeInput"] = {"artifactId": "artifact-1"}
     with pytest.raises(ValidationError):
-        LONG_SERIAL_RUN_PAYLOAD_ADAPTER.validate_python(artifact_decision)
+        LONG_SERIAL_RUN_PAYLOAD_ADAPTER.validate_python(incomplete_decision)
 
 
 def test_new_long_serial_payload_rejects_historical_sync_lore() -> None:

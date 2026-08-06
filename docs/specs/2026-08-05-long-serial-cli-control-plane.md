@@ -353,6 +353,11 @@ ReviewArtifact decision 接口。
 `writingSessionId` 和 `userMessage` 保持可选，额外字段严格拒绝。Core 继续校验可选会话与任务绑定，
 并把规范化请求指纹写入 resume command；空消息只能继续一个确实处于可恢复 checkpoint 的任务。
 
+ReviewArtifact decision 生成的内部恢复命令必须继承原始显式长篇 start job 的 `workflow`、`operation`、
+`target`、`scope`、`sourceBindings`、`targetWordCount` 和 `userInstruction`，只把 `resume` 改为 true，
+并在严格 `resumeInput` 中同时保存 `artifactId`、`decision` 和可选 `userMessage`。这组内部字段不因此开放给
+公共 resume 接口；Agent Service 必须从显式 payload 恢复 `resumeDecision`，不能退回无类型字典分支。
+
 现有 Web 已使用 decision 接口处理草案动作；普通聊天和章节目标确认的 resume 行为保持不变。
 
 ## 服务端取消
@@ -586,6 +591,10 @@ canonical JSON 使用 UTF-8、递归 key 排序、无多余空白、非 ASCII �
 advisory lock，然后查询已有幂等记录；取得下述关系行锁后、判断业务状态前再查询一次。相同请求返回
 首个已保存响应，不同指纹返回 409。不能只依赖事务外预查或最后的唯一约束把并发重复变成随机状态
 冲突；start 也必须在 Chapter 锁内重查幂等记录后再判断 `WRITING_TARGET_BUSY`。
+
+Artifact decision 的首次 accepted 公共响应必须在 command result 中独立保留。后续终态 callback 追加结果、
+或服务端取消把原 command 标为失败时，都不能覆盖这份响应；同一 clientRequestId 重放仍返回首次 202 的
+稳定公共字段，同时 outcome projector 继续读取原有顶层 decision/cancel 事实。
 
 该查询是跨命令族的统一 resolver：同时检查带新幂等 envelope 的 WritingRunCommand 和 WorkflowRun
 input。不能让同一 clientRequestId 因为落在不同表、不同 task 或不同 commandKind 而绕过冲突检查。

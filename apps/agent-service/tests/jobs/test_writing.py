@@ -407,6 +407,48 @@ async def test_full_explicit_long_serial_resume_matches_authoritative_snapshot()
 
 
 @pytest.mark.asyncio
+async def test_full_explicit_long_serial_decision_resume_injects_decision() -> None:
+    context = {
+        "workspace": {},
+        "planning": {
+            "chapterId": "chapter-1",
+            "conversationHistory": [],
+            "userMessage": "",
+            "graphState": _long_serial_snapshot(),
+        },
+    }
+    parent = Graph({"phase": "error", "errorMessage": "不应重新分类"})
+    operation = Graph({"phase": "completed", "finalResponse": "决定已处理"})
+    handler = WritingJobHandler(
+        CoreClient(context),
+        parent_graph=parent,
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
+
+    await handler(
+        _explicit_job(
+            resume=True,
+            resume_input={
+                "artifactId": "artifact-1",
+                "decision": "approve",
+                "userMessage": "采用并继续",
+            },
+        )
+    )
+
+    assert parent.inputs == []
+    resumed = operation.inputs[0]
+    assert resumed["resumeDecision"] == {
+        "artifactId": "artifact-1",
+        "decision": "approve",
+        "userMessage": "采用并继续",
+    }
+    assert resumed["userMessage"] == "采用并继续"
+    assert resumed["sourceBindings"] == _source_bindings()
+
+
+@pytest.mark.asyncio
 async def test_new_writing_job_runs_parent_graph_and_persists_completion() -> None:
     core = CoreClient(
         {

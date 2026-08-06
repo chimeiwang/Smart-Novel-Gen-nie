@@ -101,6 +101,14 @@ class SourceBinding(StrictModel):
 
 class LongSerialResumeInput(StrictModel):
     userMessage: str | None = None
+    artifactId: Identifier | None = None
+    decision: Literal["approve", "discard", "revise"] | None = None
+
+    @model_validator(mode="after")
+    def validate_artifact_decision(self) -> Self:
+        if (self.artifactId is None) != (self.decision is None):
+            raise ValueError("草案决定恢复输入必须同时包含 artifactId 和 decision")
+        return self
 
 
 class LongSerialRunBase(StrictModel):

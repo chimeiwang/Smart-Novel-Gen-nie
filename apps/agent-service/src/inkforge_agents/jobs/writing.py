@@ -366,6 +366,14 @@ class WritingJobHandler:
                 explicit_resume_input = explicit_payload.resumeInput
                 if explicit_resume_input is None:
                     raise ValueError("显式长篇恢复任务缺少恢复输入")
+                if (
+                    explicit_resume_input.artifactId is not None
+                    and explicit_resume_input.decision is not None
+                ):
+                    state["resumeDecision"] = explicit_resume_input.model_dump(
+                        mode="json",
+                        exclude_none=True,
+                    )
                 message = explicit_resume_input.userMessage
                 if message:
                     state["userMessage"] = message

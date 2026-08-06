@@ -128,12 +128,46 @@ def _decision_command(
     )
     command.payloadJson = json.dumps(
         {
-            "version": 1,
-            "resume": True,
-            "chapterId": "chapter-1",
-            "resumeInput": {
-                "artifactId": "artifact-1",
-                "decision": decision,
+            "_inkforgeCommand": {
+                "schemaVersion": 1,
+                "clientRequestId": f"decision-{decision}-request",
+                "commandKind": "artifact_decision",
+                "resourceIdentity": {"artifactId": "artifact-1"},
+                "normalizedBody": {
+                    "expectedRevision": 1,
+                    "decision": decision,
+                    "editedContent": None,
+                    "selectedUpdateRefs": None,
+                    "userMessage": None,
+                },
+                "requestFingerprint": "a" * 64,
+            },
+            "job": {
+                "version": 1,
+                "workflow": "long_serial",
+                "chapterId": "chapter-1",
+                "writingSessionId": "session-1",
+                "operation": operation,
+                "target": {"type": "chapter", "id": "chapter-1"},
+                "scope": {"kind": "chapter", "chapterId": "chapter-1"},
+                "sourceBindings": [
+                    {
+                        "resourceType": "chapter",
+                        "resourceId": "chapter-1",
+                        "exists": True,
+                        "updatedAt": "2026-08-05T12:30:00Z",
+                        "contentSha256": "b" * 64,
+                        "revision": 1,
+                        "absenceSentinel": None,
+                    }
+                ],
+                "targetWordCount": 4000,
+                "userInstruction": "规划本章",
+                "resume": True,
+                "resumeInput": {
+                    "artifactId": "artifact-1",
+                    "decision": decision,
+                },
             },
         }
     )

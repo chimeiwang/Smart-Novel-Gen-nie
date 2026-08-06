@@ -68,6 +68,9 @@ WritingCommandStatus = Literal["pending", "submitted", "processing", "succeeded"
 
 ACTIVE_COMMAND_STATUSES = frozenset({"pending", "submitted", "processing"})
 TERMINAL_COMMAND_STATUSES = frozenset({"succeeded", "failed"})
+ARTIFACT_DECISION_ACCEPTED_RESPONSE_FIELD = (
+    "_inkforgeArtifactDecisionAcceptedResponse"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -805,6 +808,20 @@ class WritingRunCommandRepository:
                         message="终态写作任务不能受理草案决定",
                     )
                 await self._require_no_active_command(session, task_id)
+                job = payload.get("job")
+                resume_input = job.get("resumeInput") if isinstance(job, dict) else None
+                if isinstance(resume_input, dict):
+                    long_serial_job = await _load_long_serial_resume_job(
+                        session,
+                        task,
+                        resume_input,
+                    )
+                    if long_serial_job is not None:
+                        payload = {**payload, "job": long_serial_job}
+                persisted_result = {
+                    **result,
+                    ARTIFACT_DECISION_ACCEPTED_RESPONSE_FIELD: dict(result),
+                }
                 command = WritingRunCommand(
                     id=command_id,
                     taskId=task_id,
@@ -812,7 +829,7 @@ class WritingRunCommandRepository:
                     artifactId=artifact_id,
                     decision=decision,
                     payloadJson=_dump_json(payload),
-                    resultJson=_dump_json(result),
+                    resultJson=_dump_json(persisted_result),
                     idempotencyKey=key,
                     status="pending",
                     attemptCount=0,
@@ -1346,7 +1363,13 @@ async def _load_long_serial_resume_job(
         resume = LONG_SERIAL_RUN_PAYLOAD_ADAPTER.validate_python(raw_resume)
     except ValidationError as exc:
         raise RuntimeError("显式长篇恢复 job 无效") from exc
-    return resume.model_dump(mode="json")
+    serialized = resume.model_dump(mode="json")
+    if resume.resumeInput is not None:
+        serialized["resumeInput"] = resume.resumeInput.model_dump(
+            mode="json",
+            exclude_none=True,
+        )
+    return serialized
 
 
 async def _resolve_long_serial_resume_response(

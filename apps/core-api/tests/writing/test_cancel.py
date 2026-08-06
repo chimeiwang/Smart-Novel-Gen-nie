@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
+
 import pytest
+from inkforge_core.db.models import WritingRunCommand
 from inkforge_core.writing.cancellation import (
     WritingRunCancellationService,
     build_cancel_command_payload,
+    build_cancelled_command_result,
 )
 from inkforge_core.writing.schemas import (
     CancelWritingRunRequest,
@@ -26,6 +30,42 @@ def test_cancel_command_payload_only_describes_the_cancelled_job() -> None:
     assert payload["job"] == {
         "cancelledCommandId": "command-1",
         "cancelledJobId": "job-1",
+    }
+
+
+def test_active_artifact_decision_cancel_preserves_accepted_response() -> None:
+    accepted = {
+        "artifactId": "artifact-1",
+        "taskId": "task-1",
+        "commandId": "decision-1",
+        "decision": "approve",
+        "status": "pending",
+        "savedCount": 1,
+        "deleted": False,
+    }
+    current = WritingRunCommand(
+        id="decision-1",
+        taskId="task-1",
+        kind="artifact_decision",
+        resultJson=json.dumps(
+            {
+                **accepted,
+                "_inkforgeArtifactDecisionAcceptedResponse": accepted,
+            }
+        ),
+    )
+
+    result = build_cancelled_command_result(
+        current,
+        cancel_command_id="cancel-1",
+        cancelled_job_id="decision-1",
+    )
+
+    assert result == {
+        "code": "WRITING_RUN_CANCELLED_BY_USER",
+        "cancelCommandId": "cancel-1",
+        "cancelledJobId": "decision-1",
+        "_inkforgeArtifactDecisionAcceptedResponse": accepted,
     }
 
 

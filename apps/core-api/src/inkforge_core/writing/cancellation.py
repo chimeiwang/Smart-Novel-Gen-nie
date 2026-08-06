@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from ..db.base import generate_id, utc_now
 from ..db.models import Novel, ReviewArtifact, WritingRunCommand, WritingTask
 from ..errors import ApiError
+from .commands import ARTIFACT_DECISION_ACCEPTED_RESPONSE_FIELD
 from .idempotency import (
     JsonValue,
     acquire_idempotency_lock,
@@ -173,11 +174,11 @@ class WritingRunCancellationRepository:
                         current.updatedAt = now
                         current.lastError = "WRITING_RUN_CANCELLED_BY_USER"
                         current.resultJson = _dump_json(
-                            {
-                                "code": "WRITING_RUN_CANCELLED_BY_USER",
-                                "cancelCommandId": cancel_id,
-                                "cancelledJobId": cancelled_job_id,
-                            }
+                            build_cancelled_command_result(
+                                current,
+                                cancel_command_id=cancel_id,
+                                cancelled_job_id=cancelled_job_id,
+                            )
                         )
                     else:
                         terminal = True
@@ -376,6 +377,28 @@ def build_cancel_command_payload(
             "cancelledJobId": cancelled_job_id,
         },
     }
+
+
+def build_cancelled_command_result(
+    command: WritingRunCommand,
+    *,
+    cancel_command_id: str,
+    cancelled_job_id: str,
+) -> dict[str, object]:
+    result: dict[str, object] = {
+        "code": "WRITING_RUN_CANCELLED_BY_USER",
+        "cancelCommandId": cancel_command_id,
+        "cancelledJobId": cancelled_job_id,
+    }
+    if command.kind != "artifact_decision":
+        return result
+    persisted = _json_object(command.resultJson)
+    accepted = persisted.get(ARTIFACT_DECISION_ACCEPTED_RESPONSE_FIELD)
+    if not isinstance(accepted, dict):
+        accepted = persisted
+    if accepted:
+        result[ARTIFACT_DECISION_ACCEPTED_RESPONSE_FIELD] = accepted
+    return result
 
 
 def _prior_outcome(

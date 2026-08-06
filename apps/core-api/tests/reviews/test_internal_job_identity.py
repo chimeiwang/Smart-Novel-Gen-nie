@@ -5,17 +5,18 @@ from types import SimpleNamespace
 import pytest
 from inkforge_core.errors import ApiError
 from inkforge_core.reviews.repository import ReviewRepository
-from inkforge_core.reviews.schemas import CreateArtifactRequest
+from inkforge_core.reviews.schemas import (
+    CreateArtifactRequest,
+    SubmitArtifactEvaluationRequest,
+)
 
 
 class _Session:
-    def __init__(self) -> None:
+    def __init__(self, results: list[object] | None = None) -> None:
         self.added: list[object] = []
         self._results = iter(
-            [
-                SimpleNamespace(id="task-1", chapterId="chapter-1"),
-                None,
-            ]
+            results
+            or [SimpleNamespace(id="task-1", chapterId="chapter-1"), None]
         )
 
     async def __aenter__(self) -> _Session:
@@ -53,6 +54,35 @@ async def test_cancelled_or_old_job_cannot_create_artifact() -> None:
 
     with pytest.raises(ApiError) as caught:
         await repository.create_or_revise("user-1", request)
+
+    assert caught.value.status_code == 409
+    assert caught.value.code == "WRITING_JOB_MISMATCH"
+    assert session.added == []
+
+
+@pytest.mark.asyncio
+async def test_cancelled_or_old_job_cannot_submit_artifact_evaluation() -> None:
+    session = _Session(
+        [
+            SimpleNamespace(id="task-1", chapterId="chapter-1"),
+            SimpleNamespace(id="artifact-1", revision=1),
+            None,
+        ]
+    )
+    repository = ReviewRepository(lambda: session)  # type: ignore[arg-type]
+    request = SubmitArtifactEvaluationRequest(
+        runId="run-1",
+        taskId="task-1",
+        novelId="novel-1",
+        jobId="cancelled-command",
+        revision=1,
+        evaluatorAgent="编辑",
+        verdict="pass",
+        summary="通过",
+    )
+
+    with pytest.raises(ApiError) as caught:
+        await repository.submit_evaluation("user-1", "artifact-1", request)
 
     assert caught.value.status_code == 409
     assert caught.value.code == "WRITING_JOB_MISMATCH"
