@@ -94,6 +94,7 @@ def _default_specs() -> list[CommandSpec]:
         list_novels as list_long_novels,
     )
     from .commands.long.tasks import get_task, list_tasks
+    from .commands.long.tasks import watch as watch_task
     from .commands.short.agents import (
         start as agent_start,
     )
@@ -316,6 +317,16 @@ def _default_specs() -> list[CommandSpec]:
         long_read_spec("long.foreshadowing.list", list_foreshadowings),
         long_read_spec("long.task.list", list_tasks),
         long_read_spec("long.task.get", get_task),
+        CommandSpec(
+            name="long.task.watch",
+            handler=watch_task,
+            inputMode="json",
+            outputMode="jsonl",
+            fileOutput=no_file,
+            mutation=False,
+            requiresIdentity=True,
+            requiresClientRequestId=False,
+        ),
         long_read_spec("long.artifact.list", list_artifacts),
         long_read_spec("long.artifact.get", get_artifact),
         long_read_spec("long.quality.get", get_quality_check),

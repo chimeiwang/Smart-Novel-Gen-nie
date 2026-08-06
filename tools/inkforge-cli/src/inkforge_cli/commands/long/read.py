@@ -28,8 +28,10 @@ def validate_read_payload(
     *,
     required: tuple[str, ...] = (),
     optional: tuple[str, ...] = (),
+    allow_output_file: bool = True,
 ) -> None:
-    allowed = set(required) | set(optional) | _LOCAL_READ_FIELDS
+    local_fields = _LOCAL_READ_FIELDS if allow_output_file else {"profile"}
+    allowed = set(required) | set(optional) | local_fields
     unknown = sorted(set(payload) - allowed)
     if unknown:
         raise CliInputError(

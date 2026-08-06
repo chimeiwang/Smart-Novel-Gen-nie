@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import getpass
 import json
+import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, TextIO, cast
@@ -35,6 +36,8 @@ class CliDependencies:
     credential_store: CredentialStore
     getpass_fn: Callable[[str], str]
     stdin_isatty: Callable[[], bool]
+    monotonic_fn: Callable[[], float] = time.monotonic
+    sleep_fn: Callable[[float], None] = time.sleep
 
 
 class CliInputError(RuntimeError):

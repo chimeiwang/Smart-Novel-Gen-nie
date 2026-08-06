@@ -74,6 +74,7 @@ def test_registry_has_unique_existing_command_names_and_declares_special_modes()
         "long.foreshadowing.list",
         "long.task.list",
         "long.task.get",
+        "long.task.watch",
         "long.artifact.list",
         "long.artifact.get",
         "long.quality.get",
