@@ -136,6 +136,14 @@ def test_writing_run_requests_require_stable_client_request_id() -> None:
         {"clientRequestId": "request-00000001", "userMessage": "继续"}
     )
     assert valid.clientRequestId == "request-00000001"
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        ResumeWritingRunRequest.model_validate(
+            {
+                "clientRequestId": "request-00000001",
+                "artifactId": "artifact-1",
+                "decision": "approve",
+            }
+        )
 
 
 @pytest.mark.asyncio

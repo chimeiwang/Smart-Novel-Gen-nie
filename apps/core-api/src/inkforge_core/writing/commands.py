@@ -12,6 +12,7 @@ from inkforge_contracts.long_serial import (
     ChapterScope,
 )
 from inkforge_contracts.operations import PublicOperationDefinition
+from pydantic import ValidationError
 from sqlalchemy import and_, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -541,24 +542,53 @@ class WritingRunCommandRepository:
         task_id: str,
         request: ResumeWritingRunRequest,
     ) -> ResumeWritingRunResponse:
-        key = command_idempotency_key(user_id, request.clientRequestId)
-        existing = await self._get_existing_response(user_id, request.clientRequestId)
-        if isinstance(existing, ResumeWritingRunResponse):
-            return existing
+        normalized = normalize_json_value(
+            request.model_dump(mode="json", exclude={"clientRequestId"})
+        )
+        if not isinstance(normalized, dict):
+            raise RuntimeError("写作恢复请求规范化后不是 JSON 对象")
+        normalized_body = normalized
+        resource_identity: dict[str, JsonValue] = {"taskId": task_id}
+        fingerprint = request_fingerprint(
+            command_kind="resume",
+            resource_identity=resource_identity,
+            body=normalized_body,
+        )
+        key = enveloped_command_idempotency_key(
+            user_id,
+            request.clientRequestId,
+        )
         try:
             async with self._session_factory() as session:
                 async with session.begin():
-                    existing_row = await self._get_by_idempotency_key(session, key)
-                    if existing_row is not None:
-                        command, _task, _owner_id = existing_row
-                        return _resume_response(command)
+                    await acquire_idempotency_lock(
+                        session,
+                        user_id=user_id,
+                        client_request_id=request.clientRequestId,
+                    )
+                    replay = await _resolve_long_serial_resume_response(
+                        self,
+                        session,
+                        user_id=user_id,
+                        task_id=task_id,
+                        client_request_id=request.clientRequestId,
+                        fingerprint=fingerprint,
+                    )
+                    if replay is not None:
+                        return replay
                     task, _owner_id = await self._require_owned_task(
                         session, user_id, task_id
                     )
-                    existing_row = await self._get_by_idempotency_key(session, key)
-                    if existing_row is not None:
-                        command, _task, _owner_id = existing_row
-                        return _resume_response(command)
+                    replay = await _resolve_long_serial_resume_response(
+                        self,
+                        session,
+                        user_id=user_id,
+                        task_id=task_id,
+                        client_request_id=request.clientRequestId,
+                        fingerprint=fingerprint,
+                    )
+                    if replay is not None:
+                        return replay
                     if task.phase in {"completed", "error"}:
                         raise ApiError(
                             status_code=409,
@@ -596,17 +626,38 @@ class WritingRunCommandRepository:
                         exclude={"clientRequestId", "writingSessionId"},
                         exclude_none=True,
                     )
-                    command = _new_command(
+                    long_serial_job = await _load_long_serial_resume_job(
+                        session,
                         task,
-                        kind="resume",
-                        key=key,
-                        payload={
+                        resume_input,
+                    )
+                    job = (
+                        long_serial_job
+                        if long_serial_job is not None
+                        else {
                             "version": 1,
                             "resume": True,
                             "chapterId": task.chapterId,
                             "writingSessionId": task.writingSessionId,
                             "resumeInput": resume_input,
+                        }
+                    )
+                    envelope = {
+                        "_inkforgeCommand": {
+                            "schemaVersion": 1,
+                            "clientRequestId": request.clientRequestId,
+                            "commandKind": "resume",
+                            "resourceIdentity": resource_identity,
+                            "normalizedBody": normalized_body,
+                            "requestFingerprint": fingerprint,
                         },
+                        "job": job,
+                    }
+                    command = _new_command(
+                        task,
+                        kind="resume",
+                        key=key,
+                        payload=envelope,
                     )
                     session.add(command)
                     await session.flush()
@@ -616,9 +667,17 @@ class WritingRunCommandRepository:
                     )
                     return _resume_response(command)
         except IntegrityError as exc:
-            raced = await self._get_existing_response(user_id, request.clientRequestId)
-            if isinstance(raced, ResumeWritingRunResponse):
-                return raced
+            async with self._session_factory() as session:
+                replay = await _resolve_long_serial_resume_response(
+                    self,
+                    session,
+                    user_id=user_id,
+                    task_id=task_id,
+                    client_request_id=request.clientRequestId,
+                    fingerprint=fingerprint,
+                )
+            if replay is not None:
+                return replay
             raise _active_command_error(task_id) from exc
 
     async def create_resume(
@@ -1104,6 +1163,109 @@ def _start_payload_is_mutating(payload_json: object) -> bool:
         return True
     definition = PUBLIC_LONG_SERIAL_OPERATIONS.get(operation)
     return definition is None or definition.mutating
+
+
+async def _load_long_serial_resume_job(
+    session: AsyncSession,
+    task: WritingTask,
+    resume_input: dict[str, Any],
+) -> dict[str, Any] | None:
+    start_payload_json = await session.scalar(
+        select(WritingRunCommand.payloadJson)
+        .where(
+            WritingRunCommand.taskId == task.id,
+            WritingRunCommand.kind == "start",
+        )
+        .order_by(WritingRunCommand.createdAt.asc(), WritingRunCommand.id.asc())
+        .limit(1)
+    )
+    if not isinstance(start_payload_json, str):
+        return None
+    payload = _load_json_object(start_payload_json, field="payloadJson")
+    try:
+        metadata = parse_command_envelope(payload)
+    except ValueError as exc:
+        raise RuntimeError("显式长篇启动命令 envelope 无效") from exc
+    if metadata is None:
+        return None
+    job = payload.get("job")
+    declares_long_serial = metadata.normalizedBody.get("workflow") == "long_serial"
+    if not declares_long_serial and (
+        not isinstance(job, dict) or job.get("workflow") != "long_serial"
+    ):
+        return None
+    if (
+        metadata.commandKind != "start"
+        or set(payload) != {"_inkforgeCommand", "job"}
+        or not isinstance(job, dict)
+    ):
+        raise RuntimeError("显式长篇启动命令缺少权威 job")
+    try:
+        start = LONG_SERIAL_RUN_PAYLOAD_ADAPTER.validate_python(job)
+    except ValidationError as exc:
+        raise RuntimeError("显式长篇启动命令 job 无效") from exc
+    if start.resume:
+        raise RuntimeError("显式长篇启动命令不能是恢复载荷")
+    if (
+        start.chapterId != task.chapterId
+        or start.writingSessionId != task.writingSessionId
+        or start.target.id != task.chapterId
+    ):
+        raise RuntimeError("显式长篇启动命令与任务身份不一致")
+    raw_resume = {
+        **start.model_dump(mode="json"),
+        "resume": True,
+        "resumeInput": resume_input,
+    }
+    try:
+        resume = LONG_SERIAL_RUN_PAYLOAD_ADAPTER.validate_python(raw_resume)
+    except ValidationError as exc:
+        raise RuntimeError("显式长篇恢复 job 无效") from exc
+    return resume.model_dump(mode="json")
+
+
+async def _resolve_long_serial_resume_response(
+    repository: WritingRunCommandRepository,
+    session: AsyncSession,
+    *,
+    user_id: str,
+    task_id: str,
+    client_request_id: str,
+    fingerprint: str,
+) -> ResumeWritingRunResponse | None:
+    resolution = await resolve_idempotency(
+        session,
+        user_id=user_id,
+        client_request_id=client_request_id,
+        request_fingerprint=fingerprint,
+    )
+    if resolution is None:
+        return None
+    if resolution.record_kind != "writing_command":
+        raise _idempotency_reused_error(client_request_id)
+    row = await repository._get_by_id(
+        session,
+        resolution.record_id,
+        for_update=False,
+    )
+    if row is None:
+        raise _idempotency_reused_error(client_request_id)
+    command, task, owner_id = row
+    if (
+        owner_id != user_id
+        or task.id != task_id
+        or command.kind != "resume"
+    ):
+        raise _idempotency_reused_error(client_request_id)
+    payload = _load_json_object(command.payloadJson, field="payloadJson")
+    job = payload.get("job")
+    if (
+        set(payload) != {"_inkforgeCommand", "job"}
+        or not isinstance(job, dict)
+        or job.get("resume") is not True
+    ):
+        raise _idempotency_reused_error(client_request_id)
+    return _resume_response(command)
 
 
 async def _resolve_long_serial_start_response(

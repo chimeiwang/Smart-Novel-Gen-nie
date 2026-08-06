@@ -14,6 +14,10 @@ class GraphState(TypedDict, total=False):
     userId: str
     novelId: str
     chapterId: str
+    workflow: Literal["long_serial"]
+    target: dict[str, Any]
+    scope: dict[str, Any]
+    sourceBindings: list[dict[str, Any]]
     targetWordCount: int
     phase: Literal["idle", "active", "waiting_user", "completed", "error"]
     userMessage: str

@@ -4,9 +4,10 @@ import json
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, cast
 
+from inkforge_contracts.long_serial import ChapterTarget, LongSerialScope, SourceBinding
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, Send, interrupt
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
 from ..definitions.agents import AgentId
 from ..graph.context import build_operation_context
@@ -18,6 +19,11 @@ from .artifact_contract import (
 )
 from .contracts import CreativeOperation, CreativeOperationKind
 from .definitions import OPERATION_DEFINITIONS, OperationDefinition
+
+_LONG_SERIAL_SCOPE_ADAPTER: TypeAdapter[LongSerialScope] = TypeAdapter(LongSerialScope)
+_SOURCE_BINDINGS_ADAPTER: TypeAdapter[list[SourceBinding]] = TypeAdapter(
+    list[SourceBinding]
+)
 
 
 class AgentExecutorPort(Protocol):
@@ -135,6 +141,14 @@ def build_operation_graph(
             "operationStage": "准备操作上下文",
             "phase": "active",
         }
+
+    def route_from_start(state: GraphState) -> str:
+        _operation(state)
+        return (
+            "resumeUserDecision"
+            if state.get("resumeDecision") and state.get("activeArtifactId")
+            else "prepareOperationContext"
+        )
 
     async def execute(state: GraphState) -> dict[str, Any]:
         operation = _operation(state)
@@ -465,11 +479,7 @@ def build_operation_graph(
     builder.add_node("suggestNextAction", suggest)
     builder.add_conditional_edges(
         START,
-        lambda state: (
-            "resumeUserDecision"
-            if state.get("resumeDecision") and state.get("activeArtifactId")
-            else "prepareOperationContext"
-        ),
+        route_from_start,
     )
     builder.add_edge("prepareOperationContext", "executeOperation")
     builder.add_edge("executeOperation", "submitArtifactOrRespond")
@@ -487,7 +497,69 @@ def _operation(state: GraphState) -> CreativeOperation:
     operation = state.get("currentOperation")
     if operation is None:
         raise ValueError("图状态缺少当前创作操作")
-    return CreativeOperation.model_validate(operation)
+    validated = CreativeOperation.model_validate(operation)
+    has_long_serial_controls = any(
+        field in state for field in ("workflow", "target", "scope", "sourceBindings")
+    )
+    if has_long_serial_controls and state.get("workflow") != "long_serial":
+        raise ValueError("显式长篇图状态缺少有效工作流标识")
+    if has_long_serial_controls:
+        _validate_explicit_long_serial_state(state, validated)
+    return validated
+
+
+def _validate_explicit_long_serial_state(
+    state: GraphState,
+    operation: CreativeOperation,
+) -> None:
+    definition = _operation_definition(operation)
+    try:
+        public = definition.to_public_definition()
+    except ValueError as exc:
+        raise ValueError("显式长篇 Operation 未开放") from exc
+
+    raw_target = state.get("target")
+    try:
+        target = ChapterTarget.model_validate(raw_target)
+    except ValidationError as exc:
+        raise ValueError("显式长篇目标无效") from exc
+    if (
+        target.type != public.targetKind
+        or target.id != state.get("chapterId")
+        or operation.targetType != public.targetKind
+        or operation.targetId != target.id
+    ):
+        raise ValueError("显式长篇目标与 Operation 不一致")
+
+    raw_scope = state.get("scope")
+    try:
+        scope = _LONG_SERIAL_SCOPE_ADAPTER.validate_python(raw_scope)
+    except ValidationError as exc:
+        raise ValueError("显式长篇执行范围无效") from exc
+    if scope.kind not in public.allowedScopeKinds:
+        raise ValueError("显式长篇执行范围超出 Operation 授权")
+    if scope.kind == "chapter" and scope.chapterId != target.id:
+        raise ValueError("显式长篇章节范围与目标不一致")
+
+    raw_bindings = state.get("sourceBindings")
+    try:
+        bindings = _SOURCE_BINDINGS_ADAPTER.validate_python(raw_bindings)
+    except ValidationError as exc:
+        raise ValueError("显式长篇来源绑定无效") from exc
+    if not bindings:
+        raise ValueError("显式长篇来源绑定不能为空")
+
+    if operation.primaryAgent != definition.primaryAgent:
+        raise ValueError("显式长篇主责智能体与 Operation 定义不一致")
+    if operation.reviewers != list(definition.reviewers):
+        raise ValueError("显式长篇复审智能体与 Operation 定义不一致")
+    if operation.outputKind != definition.outputKind:
+        raise ValueError("显式长篇输出类型与 Operation 定义不一致")
+    if (
+        operation.requiresArtifact != definition.requiresArtifact
+        or operation.requiresUserApproval != definition.requiresUserApproval
+    ):
+        raise ValueError("显式长篇产物策略与 Operation 定义不一致")
 
 
 def _operation_definition(operation: CreativeOperation) -> OperationDefinition:

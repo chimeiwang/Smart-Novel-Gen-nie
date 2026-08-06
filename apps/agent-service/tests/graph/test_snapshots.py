@@ -29,6 +29,63 @@ def test_snapshot_uses_versioned_envelope_and_round_trips_stable_state() -> None
     assert "runtime" not in rollback
 
 
+def test_snapshot_preserves_long_serial_control_fields_in_all_projections() -> None:
+    stable = dict(
+        create_initial_state(
+            task_id="task-long-1",
+            user_id="user-1",
+            novel_id="novel-1",
+            chapter_id="chapter-1",
+            user_message="生成本章正文草案",
+        )
+    )
+    control_fields = {
+        "workflow": "long_serial",
+        "target": {"type": "chapter", "id": "chapter-1"},
+        "scope": {"kind": "chapter", "chapterId": "chapter-1"},
+        "sourceBindings": [
+            {
+                "resourceType": "chapter",
+                "resourceId": "chapter-1",
+                "exists": True,
+                "updatedAt": "2026-08-06T08:00:00Z",
+                "contentSha256": "a" * 64,
+                "revision": None,
+                "absenceSentinel": None,
+            }
+        ],
+    }
+    stable.update(control_fields)
+
+    serialized = serialize_snapshot(stable)
+    restored = deserialize_snapshot(serialized)
+    typescript = to_typescript_snapshot(serialized)
+    restored_from_typescript = deserialize_snapshot(typescript)
+
+    for field, expected in control_fields.items():
+        assert serialized["state"][field] == expected
+        assert restored.get(field) == expected
+        assert typescript[field] == expected
+        assert restored_from_typescript.get(field) == expected
+
+
+def test_snapshot_accepts_legacy_state_without_long_serial_control_fields() -> None:
+    legacy = create_initial_state(
+        task_id="task-legacy-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="继续讨论",
+    )
+
+    restored = deserialize_snapshot(serialize_snapshot(legacy))
+    typescript = to_typescript_snapshot(serialize_snapshot(legacy))
+
+    for field in ("workflow", "target", "scope", "sourceBindings"):
+        assert field not in restored
+        assert field not in typescript
+
+
 def test_snapshot_accepts_core_flat_compatibility_state() -> None:
     state = create_initial_state(
         task_id="task-1",

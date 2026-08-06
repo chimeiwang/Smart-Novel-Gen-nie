@@ -25,8 +25,12 @@ from inkforge_core.writing.commands import (
     _require_long_serial_profile,
     _require_no_active_long_serial_mutation,
 )
+from inkforge_core.writing.idempotency import request_fingerprint
 from inkforge_core.writing.recovery import deserialize_graph_snapshot
-from inkforge_core.writing.schemas import LongSerialStartWritingRunRequest
+from inkforge_core.writing.schemas import (
+    LongSerialStartWritingRunRequest,
+    ResumeWritingRunRequest,
+)
 from inkforge_core.writing.transaction_locks import LockedWritingRows
 from pydantic import ValidationError
 
@@ -217,8 +221,9 @@ async def test_review_task_does_not_occupy_mutating_conflict_key() -> None:
 
 
 class TransactionSession:
-    def __init__(self) -> None:
+    def __init__(self, scalar_values: list[object | None] | None = None) -> None:
         self.added: list[object] = []
+        self.scalar_values = list(scalar_values or [])
 
     async def __aenter__(self) -> TransactionSession:
         return self
@@ -243,6 +248,12 @@ class TransactionSession:
                 value.id = value.id or "command-created"
                 value.createdAt = value.createdAt or NOW.replace(tzinfo=None)
                 value.updatedAt = value.updatedAt or NOW.replace(tzinfo=None)
+
+    async def scalar(self, statement: object) -> object | None:
+        del statement
+        if not self.scalar_values:
+            raise AssertionError("收到未预期的标量查询")
+        return self.scalar_values.pop(0)
 
 
 class SessionFactory:
@@ -328,6 +339,118 @@ async def test_long_serial_start_persists_authoritative_envelope_and_job(
         "kind": "chapter",
         "chapterId": "chapter-1",
     }
+
+
+def _long_serial_start_envelope() -> str:
+    job = {
+        "version": 1,
+        "workflow": "long_serial",
+        "chapterId": "chapter-1",
+        "writingSessionId": None,
+        "operation": "write_chapter",
+        "target": {"type": "chapter", "id": "chapter-1"},
+        "scope": {"kind": "chapter", "chapterId": "chapter-1"},
+        "sourceBindings": [
+            binding.model_dump(mode="json") for binding in source_bindings()
+        ],
+        "targetWordCount": 4_000,
+        "userInstruction": "写出雨夜的不可逆选择",
+        "resume": False,
+        "resumeInput": None,
+    }
+    return json.dumps(
+        {
+            "_inkforgeCommand": {
+                "schemaVersion": 1,
+                "clientRequestId": "long-start-00000001",
+                "commandKind": "start",
+                "resourceIdentity": {
+                    "novelId": "novel-1",
+                    "chapterId": "chapter-1",
+                },
+                "normalizedBody": {"workflow": "long_serial"},
+                "requestFingerprint": "b" * 64,
+            },
+            "job": job,
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_long_serial_resume_reuses_authoritative_start_job(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    owned_task = WritingTask(
+        id="task-1",
+        novelId="novel-1",
+        chapterId="chapter-1",
+        writingSessionId=None,
+        phase="active",
+        targetWordCount=4_000,
+        selectedAgents="写作,校验,编辑",
+        createdAt=NOW.replace(tzinfo=None),
+        updatedAt=NOW.replace(tzinfo=None),
+    )
+    session = TransactionSession([_long_serial_start_envelope()])
+    repository = WritingRunCommandRepository(  # type: ignore[arg-type]
+        SessionFactory(session)
+    )
+
+    async def no_existing(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+
+    async def owned(*args: object, **kwargs: object) -> tuple[WritingTask, str]:
+        del args, kwargs
+        return owned_task, "user-1"
+
+    monkeypatch.setattr(commands_module, "acquire_idempotency_lock", no_existing)
+    monkeypatch.setattr(
+        commands_module,
+        "_resolve_long_serial_resume_response",
+        no_existing,
+        raising=False,
+    )
+    monkeypatch.setattr(repository, "_require_owned_task", owned)
+    monkeypatch.setattr(repository, "_require_no_active_command", no_existing)
+    monkeypatch.setattr(commands_module, "supersede_waiting_for_new_command", no_existing)
+
+    await repository.create_resume_with_message(
+        "user-1",
+        "task-1",
+        ResumeWritingRunRequest(
+            clientRequestId="long-resume-000001",
+            userMessage="保留当前视角，继续",
+        ),
+    )
+
+    command = next(
+        value for value in session.added if isinstance(value, WritingRunCommand)
+    )
+    envelope = json.loads(command.payloadJson)
+    metadata = envelope["_inkforgeCommand"]
+    job = envelope["job"]
+    normalized_body = {
+        "writingSessionId": None,
+        "userMessage": "保留当前视角，继续",
+    }
+    assert command.idempotencyKey == "v1:user-1:long-resume-000001"
+    assert metadata["commandKind"] == "resume"
+    assert metadata["resourceIdentity"] == {"taskId": "task-1"}
+    assert metadata["normalizedBody"] == normalized_body
+    assert metadata["requestFingerprint"] == request_fingerprint(
+        command_kind="resume",
+        resource_identity={"taskId": "task-1"},
+        body=normalized_body,
+    )
+    assert job["workflow"] == "long_serial"
+    assert job["operation"] == "write_chapter"
+    assert job["target"] == {"type": "chapter", "id": "chapter-1"}
+    assert job["scope"] == {"kind": "chapter", "chapterId": "chapter-1"}
+    assert job["sourceBindings"][0]["resourceType"] == "chapter"
+    assert job["targetWordCount"] == 4_000
+    assert job["userInstruction"] == "写出雨夜的不可逆选择"
+    assert job["resume"] is True
+    assert job["resumeInput"] == {"userMessage": "保留当前视角，继续"}
 
 
 @pytest.mark.asyncio

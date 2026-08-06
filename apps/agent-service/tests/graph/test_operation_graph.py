@@ -46,6 +46,48 @@ def _state(**kwargs: Any) -> dict[str, Any]:
     return state
 
 
+def _explicit_write_state() -> dict[str, Any]:
+    state = _state(
+        task_id="task-explicit-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="写出雨夜里的不可逆选择",
+    )
+    state.update(
+        {
+            "workflow": "long_serial",
+            "target": {"type": "chapter", "id": "chapter-1"},
+            "scope": {"kind": "chapter", "chapterId": "chapter-1"},
+            "sourceBindings": [
+                {
+                    "resourceType": "chapter",
+                    "resourceId": "chapter-1",
+                    "exists": True,
+                    "updatedAt": "2026-08-06T08:00:00Z",
+                    "contentSha256": "a" * 64,
+                    "revision": 3,
+                    "absenceSentinel": None,
+                }
+            ],
+            "currentOperation": {
+                "kind": "write_chapter",
+                "targetType": "chapter",
+                "targetId": "chapter-1",
+                "userGoal": "写出雨夜里的不可逆选择",
+                "primaryAgent": "写作",
+                "reviewers": ["校验", "编辑"],
+                "outputKind": "chapter_text",
+                "requiresArtifact": True,
+                "requiresUserApproval": True,
+                "confidence": 1.0,
+                "reasoning": "显式长篇任务按服务端定义执行。",
+            },
+        }
+    )
+    return state
+
+
 class AgentExecutor:
     async def run(
         self,
@@ -613,3 +655,84 @@ async def test_graph_passes_explicit_modes_and_revises_without_patch_node() -> N
     assert all(kind == "write_chapter" for _, _, kind in executor.calls)
     assert artifacts.actions == ["submit", "revise", "await"]
     assert "applyArtifactPatch" not in graph.get_graph().nodes
+
+
+@pytest.mark.asyncio
+async def test_operation_graph_accepts_authoritative_explicit_long_serial_state() -> None:
+    graph = build_operation_graph(
+        OperationDependencies(agentExecutor=AgentExecutor(), artifacts=ArtifactPort()),
+        checkpointer=InMemorySaver(),
+    )
+
+    result = await graph.ainvoke(
+        _explicit_write_state(),
+        {"configurable": {"thread_id": "valid-explicit-long-serial"}},
+    )
+
+    assert result["__interrupt__"]
+    assert result["activeArtifactId"] == "artifact-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tamper", "error"),
+    [
+        ({"primaryAgent": "剧情"}, "主责智能体"),
+        ({"reviewers": ["校验"]}, "复审智能体"),
+        ({"outputKind": "review_report"}, "输出类型"),
+        ({"requiresArtifact": False}, "产物策略"),
+    ],
+)
+async def test_operation_graph_rejects_explicit_operation_definition_tampering(
+    tamper: dict[str, Any],
+    error: str,
+) -> None:
+    state = _explicit_write_state()
+    operation = dict(state["currentOperation"])
+    operation.update(tamper)
+    state["currentOperation"] = operation
+    graph = build_operation_graph(
+        OperationDependencies(agentExecutor=AgentExecutor(), artifacts=ArtifactPort())
+    )
+
+    with pytest.raises(ValueError, match=error):
+        await graph.ainvoke(state)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "value", "error"),
+    [
+        ("target", {"type": "chapter", "id": "chapter-2"}, "目标"),
+        ("scope", {"kind": "novel"}, "范围"),
+        ("sourceBindings", [], "来源绑定"),
+    ],
+)
+async def test_operation_graph_rejects_explicit_control_scope_tampering(
+    field: str,
+    value: object,
+    error: str,
+) -> None:
+    state = _explicit_write_state()
+    state[field] = value
+    graph = build_operation_graph(
+        OperationDependencies(agentExecutor=AgentExecutor(), artifacts=ArtifactPort())
+    )
+
+    with pytest.raises(ValueError, match=error):
+        await graph.ainvoke(state)
+
+
+@pytest.mark.asyncio
+async def test_operation_graph_rejects_removed_explicit_workflow_discriminator() -> None:
+    state = _explicit_write_state()
+    del state["workflow"]
+    operation = dict(state["currentOperation"])
+    operation["primaryAgent"] = "剧情"
+    state["currentOperation"] = operation
+    graph = build_operation_graph(
+        OperationDependencies(agentExecutor=AgentExecutor(), artifacts=ArtifactPort())
+    )
+
+    with pytest.raises(ValueError, match="工作流标识"):
+        await graph.ainvoke(state)

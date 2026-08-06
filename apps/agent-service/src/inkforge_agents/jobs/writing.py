@@ -3,11 +3,19 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Protocol, cast
 
-from pydantic import JsonValue
+from inkforge_contracts.long_serial import (
+    LONG_SERIAL_RUN_PAYLOAD_ADAPTER,
+    PUBLIC_LONG_SERIAL_OPERATIONS,
+    LongSerialResumeInput,
+    LongSerialRunPayload,
+)
+from pydantic import JsonValue, ValidationError
 
 from ..clients.core import RunResource
 from ..graph.snapshots import deserialize_snapshot, serialize_snapshot, to_typescript_snapshot
 from ..graph.state import GraphState, create_initial_state
+from ..operations.contracts import CreativeOperation, CreativeOperationKind
+from ..operations.definitions import OPERATION_DEFINITIONS, OperationDefinition
 from ..queue.consumer import NonRetryableJobError
 from ..queue.repository import QueueJob
 from .workflow_log import WorkflowLogPort
@@ -308,11 +316,17 @@ class WritingJobHandler:
         *,
         current_job_state: GraphState | None = None,
     ) -> tuple[GraphState, GraphPort]:
+        explicit_payload = _explicit_long_serial_payload(job)
         planning = context.get("planning")
         if not isinstance(planning, dict):
             raise ValueError("核心服务缺少写作规划上下文")
         snapshot = planning.get("graphState")
         if current_job_state is not None:
+            if explicit_payload is not None:
+                _require_snapshot_matches_explicit_payload(
+                    current_job_state,
+                    explicit_payload,
+                )
             _apply_planning_history(current_job_state, planning)
             return (
                 _attach_runtime_context(current_job_state, context, _resource(job)),
@@ -323,12 +337,43 @@ class WritingJobHandler:
             if not isinstance(snapshot, dict):
                 raise ValueError("恢复写作任务缺少稳定快照")
             state = deserialize_snapshot(snapshot)
-            resume_input = job.payload.get("resumeInput")
-            if isinstance(resume_input, dict):
-                state["resumeDecision"] = dict(resume_input)
-                message = resume_input.get("userMessage")
-                if isinstance(message, str) and message:
+            if explicit_payload is not None:
+                _require_snapshot_matches_explicit_payload(state, explicit_payload)
+                explicit_resume_input = explicit_payload.resumeInput
+                if explicit_resume_input is None:
+                    raise ValueError("显式长篇恢复任务缺少恢复输入")
+                message = explicit_resume_input.userMessage
+                if message:
                     state["userMessage"] = message
+            else:
+                resume_input = job.payload.get("resumeInput")
+                if (
+                    state.get("workflow") == "long_serial"
+                    and isinstance(resume_input, dict)
+                    and "artifactId" not in resume_input
+                    and "decision" not in resume_input
+                ):
+                    try:
+                        ordinary_resume = LongSerialResumeInput.model_validate(
+                            resume_input
+                        )
+                    except ValidationError as exc:
+                        raise ValueError("显式长篇恢复输入无效") from exc
+                    if ordinary_resume.userMessage:
+                        state["userMessage"] = ordinary_resume.userMessage
+                elif isinstance(resume_input, dict):
+                    state["resumeDecision"] = dict(resume_input)
+                    legacy_message = resume_input.get("userMessage")
+                    if isinstance(legacy_message, str) and legacy_message:
+                        state["userMessage"] = legacy_message
+            _apply_planning_history(state, planning)
+            return (
+                _attach_runtime_context(state, context, _resource(job)),
+                self._operation_graph,
+            )
+
+        if explicit_payload is not None:
+            state = _create_explicit_long_serial_state(job, explicit_payload)
             _apply_planning_history(state, planning)
             return (
                 _attach_runtime_context(state, context, _resource(job)),
@@ -357,6 +402,94 @@ class WritingJobHandler:
             _attach_runtime_context(state, context, _resource(job)),
             self._parent_graph,
         )
+
+
+def _explicit_long_serial_payload(job: QueueJob) -> LongSerialRunPayload | None:
+    if job.payload.get("workflow") != "long_serial":
+        return None
+    try:
+        payload = LONG_SERIAL_RUN_PAYLOAD_ADAPTER.validate_python(job.payload)
+    except ValidationError as exc:
+        raise ValueError("显式长篇任务载荷无效") from exc
+    _explicit_operation_definition(payload.operation)
+    if payload.chapterId != payload.target.id:
+        raise ValueError("显式长篇任务的章节锚点与目标不一致")
+    if payload.scope.kind not in PUBLIC_LONG_SERIAL_OPERATIONS[
+        payload.operation
+    ].allowedScopeKinds:
+        raise ValueError("显式长篇任务的执行范围未开放")
+    if (
+        payload.scope.kind == "chapter"
+        and payload.scope.chapterId != payload.target.id
+    ):
+        raise ValueError("显式长篇任务的章节范围与目标不一致")
+    return payload
+
+
+def _explicit_operation_definition(operation: str) -> OperationDefinition:
+    public = PUBLIC_LONG_SERIAL_OPERATIONS.get(operation)
+    if public is None:
+        raise ValueError(f"显式长篇 Operation 未开放：{operation}")
+    definition = OPERATION_DEFINITIONS.get(cast(CreativeOperationKind, operation))
+    if definition is None or definition.to_public_definition() != public:
+        raise ValueError(f"显式长篇 Operation 定义无效：{operation}")
+    return definition
+
+
+def _create_explicit_long_serial_state(
+    job: QueueJob,
+    payload: LongSerialRunPayload,
+) -> GraphState:
+    definition = _explicit_operation_definition(payload.operation)
+    state = create_initial_state(
+        task_id=job.taskId,
+        user_id=job.userId,
+        novel_id=job.novelId,
+        chapter_id=payload.chapterId,
+        user_message=payload.userInstruction,
+        target_word_count=payload.targetWordCount,
+    )
+    state["workflow"] = "long_serial"
+    state["target"] = payload.target.model_dump(mode="json")
+    state["scope"] = payload.scope.model_dump(mode="json")
+    state["sourceBindings"] = [
+        binding.model_dump(mode="json") for binding in payload.sourceBindings
+    ]
+    state["currentOperation"] = CreativeOperation(
+        kind=definition.kind,
+        targetType=definition.targetType,
+        targetId=payload.target.id,
+        userGoal=payload.userInstruction,
+        primaryAgent=definition.primaryAgent,
+        reviewers=list(definition.reviewers),
+        outputKind=definition.outputKind,
+        requiresArtifact=definition.requiresArtifact,
+        requiresUserApproval=definition.requiresUserApproval,
+        confidence=1.0,
+        reasoning="显式长篇任务按服务端 Operation 定义执行。",
+    ).model_dump(mode="json")
+    return state
+
+
+def _require_snapshot_matches_explicit_payload(
+    state: GraphState,
+    payload: LongSerialRunPayload,
+) -> None:
+    expected = {
+        "workflow": "long_serial",
+        "chapterId": payload.chapterId,
+        "target": payload.target.model_dump(mode="json"),
+        "scope": payload.scope.model_dump(mode="json"),
+        "sourceBindings": [
+            binding.model_dump(mode="json") for binding in payload.sourceBindings
+        ],
+    }
+    for field, value in expected.items():
+        if state.get(field) != value:
+            raise ValueError(f"显式长篇恢复快照的 {field} 与任务载荷不一致")
+    operation = state.get("currentOperation")
+    if not isinstance(operation, dict) or operation.get("kind") != payload.operation:
+        raise ValueError("显式长篇恢复快照的 Operation 与任务载荷不一致")
 
 
 def _current_job_snapshot(

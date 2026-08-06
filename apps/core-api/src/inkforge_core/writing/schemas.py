@@ -220,8 +220,6 @@ class ResumeWritingRunRequest(WritingSchema):
     clientRequestId: str = Field(min_length=16, max_length=128)
     writingSessionId: str | None = Field(default=None, min_length=1, max_length=256)
     userMessage: str | None = None
-    artifactId: str | None = Field(default=None, min_length=1, max_length=256)
-    decision: Literal["approve", "discard", "revise"] | None = None
 
 
 class WritingRunResponse(WritingSchema):

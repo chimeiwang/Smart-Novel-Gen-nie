@@ -140,6 +140,229 @@ def _job(*, resume: bool = False, resume_input: dict[str, Any] | None = None) ->
     )
 
 
+def _source_bindings() -> list[dict[str, Any]]:
+    return [
+        {
+            "resourceType": "chapter",
+            "resourceId": "chapter-1",
+            "exists": True,
+            "updatedAt": "2026-08-06T08:00:00Z",
+            "contentSha256": "a" * 64,
+            "revision": 3,
+            "absenceSentinel": None,
+        }
+    ]
+
+
+def _explicit_job(
+    *,
+    resume: bool = False,
+    resume_input: dict[str, Any] | None = None,
+    payload_updates: dict[str, Any] | None = None,
+) -> QueueJob:
+    payload: dict[str, Any] = {
+        "version": 1,
+        "workflow": "long_serial",
+        "chapterId": "chapter-1",
+        "writingSessionId": "session-1",
+        "operation": "write_chapter",
+        "target": {"type": "chapter", "id": "chapter-1"},
+        "scope": {"kind": "chapter", "chapterId": "chapter-1"},
+        "sourceBindings": _source_bindings(),
+        "targetWordCount": 5200,
+        "userInstruction": "写出雨夜里的不可逆选择",
+        "resume": resume,
+        "resumeInput": resume_input,
+    }
+    if payload_updates:
+        payload.update(payload_updates)
+    return QueueJob(
+        jobId="job-1",
+        kind="writing",
+        runId="run-1",
+        taskId="task-1",
+        novelId="novel-1",
+        userId="user-1",
+        priority=10,
+        payload=payload,
+        createdAt=datetime.now(UTC),
+    )
+
+
+def _long_serial_snapshot() -> dict[str, Any]:
+    state = create_initial_state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="写出雨夜里的不可逆选择",
+        target_word_count=5200,
+    )
+    state.update(
+        {
+            "workflow": "long_serial",
+            "target": {"type": "chapter", "id": "chapter-1"},
+            "scope": {"kind": "chapter", "chapterId": "chapter-1"},
+            "sourceBindings": _source_bindings(),
+            "currentOperation": {
+                "kind": "write_chapter",
+                "targetType": "chapter",
+                "targetId": "chapter-1",
+                "userGoal": "写出雨夜里的不可逆选择",
+                "primaryAgent": "写作",
+                "reviewers": ["校验", "编辑"],
+                "outputKind": "chapter_text",
+                "requiresArtifact": True,
+                "requiresUserApproval": True,
+                "confidence": 1.0,
+                "reasoning": "显式长篇任务按服务端定义执行。",
+            },
+        }
+    )
+    return to_typescript_snapshot(serialize_snapshot(state))
+
+
+@pytest.mark.asyncio
+async def test_explicit_long_serial_job_bypasses_parent_with_trusted_operation() -> None:
+    context = {
+        "workspace": {},
+        "planning": {
+            "chapterId": "chapter-from-planning",
+            "targetWordCount": 100,
+            "conversationHistory": [],
+            "userMessage": "让自然语言分类器自行决定",
+            "graphState": None,
+        },
+    }
+    parent = Graph({"phase": "error", "errorMessage": "不应进入父图"})
+    operation = Graph({"phase": "completed", "finalResponse": "草案已生成"})
+    handler = WritingJobHandler(
+        CoreClient(context),
+        parent_graph=parent,
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
+
+    await handler(_explicit_job())
+
+    assert parent.inputs == []
+    explicit = operation.inputs[0]
+    assert explicit["workflow"] == "long_serial"
+    assert explicit["chapterId"] == "chapter-1"
+    assert explicit["targetWordCount"] == 5200
+    assert explicit["userMessage"] == "写出雨夜里的不可逆选择"
+    assert explicit["target"] == {"type": "chapter", "id": "chapter-1"}
+    assert explicit["scope"] == {"kind": "chapter", "chapterId": "chapter-1"}
+    assert explicit["sourceBindings"] == _source_bindings()
+    assert explicit["currentOperation"] == {
+        "kind": "write_chapter",
+        "targetType": "chapter",
+        "targetId": "chapter-1",
+        "userGoal": "写出雨夜里的不可逆选择",
+        "primaryAgent": "写作",
+        "reviewers": ["校验", "编辑"],
+        "outputKind": "chapter_text",
+        "requiresArtifact": True,
+        "requiresUserApproval": True,
+        "confidence": 1.0,
+        "reasoning": "显式长篇任务按服务端 Operation 定义执行。",
+    }
+
+
+@pytest.mark.asyncio
+async def test_explicit_long_serial_job_rejects_untrusted_agent_field() -> None:
+    context = {
+        "workspace": {},
+        "planning": {
+            "chapterId": "chapter-1",
+            "conversationHistory": [],
+            "userMessage": "原请求",
+            "graphState": None,
+        },
+    }
+    parent = Graph({})
+    operation = Graph({})
+    handler = WritingJobHandler(
+        CoreClient(context),
+        parent_graph=parent,
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
+
+    with pytest.raises(ValueError, match="显式长篇任务载荷无效"):
+        await handler(_explicit_job(payload_updates={"primaryAgent": "剧情"}))
+
+    assert parent.inputs == []
+    assert operation.inputs == []
+
+
+@pytest.mark.asyncio
+async def test_long_serial_resume_reuses_snapshot_without_parent_classification() -> None:
+    context = {
+        "workspace": {},
+        "planning": {
+            "chapterId": "chapter-1",
+            "conversationHistory": [],
+            "userMessage": "",
+            "graphState": _long_serial_snapshot(),
+        },
+    }
+    parent = Graph({"phase": "error", "errorMessage": "不应重新分类"})
+    operation = Graph({"phase": "completed", "finalResponse": "继续完成"})
+    handler = WritingJobHandler(
+        CoreClient(context),
+        parent_graph=parent,
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
+
+    await handler(_job(resume=True, resume_input={"userMessage": "保留视角，继续"}))
+
+    assert parent.inputs == []
+    resumed = operation.inputs[0]
+    assert resumed["userMessage"] == "保留视角，继续"
+    assert resumed["resumeDecision"] is None
+    assert resumed["currentOperation"]["kind"] == "write_chapter"
+    assert resumed["currentOperation"]["primaryAgent"] == "写作"
+    assert resumed["scope"] == {"kind": "chapter", "chapterId": "chapter-1"}
+    assert resumed["sourceBindings"] == _source_bindings()
+
+
+@pytest.mark.asyncio
+async def test_full_explicit_long_serial_resume_matches_authoritative_snapshot() -> None:
+    context = {
+        "workspace": {},
+        "planning": {
+            "chapterId": "chapter-1",
+            "conversationHistory": [],
+            "userMessage": "",
+            "graphState": _long_serial_snapshot(),
+        },
+    }
+    parent = Graph({"phase": "error", "errorMessage": "不应重新分类"})
+    operation = Graph({"phase": "completed", "finalResponse": "继续完成"})
+    handler = WritingJobHandler(
+        CoreClient(context),
+        parent_graph=parent,
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
+
+    await handler(
+        _explicit_job(
+            resume=True,
+            resume_input={"userMessage": "保留视角，继续"},
+        )
+    )
+
+    assert parent.inputs == []
+    resumed = operation.inputs[0]
+    assert resumed["userMessage"] == "保留视角，继续"
+    assert resumed["resumeDecision"] is None
+    assert resumed["currentOperation"]["kind"] == "write_chapter"
+    assert resumed["scope"] == {"kind": "chapter", "chapterId": "chapter-1"}
+
+
 @pytest.mark.asyncio
 async def test_new_writing_job_runs_parent_graph_and_persists_completion() -> None:
     core = CoreClient(
