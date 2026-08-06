@@ -92,7 +92,12 @@ class LoreUpdatesPort(Protocol):
     ) -> dict[str, Any]: ...
     async def delete_experience(self, novel_id: str, user_id: str, experience_id: str) -> None: ...
     async def upsert_content(
-        self, novel_id: str, user_id: str, kind: str, content: Any
+        self,
+        novel_id: str,
+        user_id: str,
+        kind: str,
+        content: Any,
+        expected_updated_at: datetime | None,
     ) -> dict[str, Any]: ...
 
 
@@ -193,7 +198,13 @@ class AgentUpdatesExecutor:
                     expected_outline_updated_at,
                 )
             else:
-                await self._lore.upsert_content(novel_id, user_id, kind, content)
+                await self._lore.upsert_content(
+                    novel_id,
+                    user_id,
+                    kind,
+                    content,
+                    None,
+                )
             count += 1
         if count == 0:
             raise ValueError("agent_updates 不包含可应用更新")

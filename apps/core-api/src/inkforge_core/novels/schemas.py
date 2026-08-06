@@ -400,6 +400,7 @@ class WorkspaceLoreResponse(StrictModel):
 
 class WorkspacePlanningResponse(StrictModel):
     storyProgress: str | None
+    storyProgressUpdatedAt: datetime
     storyBackground: ContentDto | None
     worldSetting: ContentDto | None
     writingBible: WritingBibleDto | None

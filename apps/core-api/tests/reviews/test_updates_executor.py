@@ -25,8 +25,17 @@ class FakeLore:
     async def delete_entity(self, novel_id: str, user_id: str, kind: str, entity_id: str):
         self.calls.append(("delete", novel_id, user_id, kind, entity_id))
 
-    async def upsert_content(self, novel_id: str, user_id: str, kind: str, content: str):
-        self.calls.append(("content", novel_id, user_id, kind, content))
+    async def upsert_content(
+        self,
+        novel_id: str,
+        user_id: str,
+        kind: str,
+        content: str,
+        expected_updated_at: datetime | None,
+    ):
+        self.calls.append(
+            ("content", novel_id, user_id, kind, content, expected_updated_at)
+        )
 
 
 class FakeOutlines:
@@ -88,7 +97,14 @@ async def test_executor_sanitizes_control_fields_and_resolves_existing_name() ->
             "character-1",
             {"name": "甲", "personality": "谨慎"},
         ),
-        ("content", "novel-1", "user-1", "world-setting", "完整世界设定"),
+        (
+            "content",
+            "novel-1",
+            "user-1",
+            "world-setting",
+            "完整世界设定",
+            None,
+        ),
     ]
 
 

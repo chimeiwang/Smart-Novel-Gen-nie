@@ -5,10 +5,10 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from sqlalchemy import delete, func, select, text, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ..concurrency import next_utc_timestamp, require_expected_updated_at
 from ..db.models import (
     Chapter,
     Character,
@@ -43,6 +43,10 @@ def _utc(value: datetime | None) -> datetime | None:
     if value is None:
         return None
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _database_utc(value: datetime) -> datetime:
+    return value.astimezone(UTC).replace(tzinfo=None)
 
 
 def _model_dict(value: Any) -> dict[str, Any]:
@@ -313,18 +317,47 @@ class LoreRepository:
                     )
 
     async def upsert_content(
-        self, novel_id: str, user_id: str, kind: str, content: Any
+        self,
+        novel_id: str,
+        user_id: str,
+        kind: str,
+        content: Any,
+        expected_updated_at: datetime | None,
     ) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
+                await self._lock_novel(session, novel_id)
                 if kind == "story-progress":
-                    await session.execute(
-                        update(Novel)
+                    novel = await session.scalar(
+                        select(Novel)
                         .where(Novel.id == novel_id, Novel.userId == user_id)
-                        .values(storyProgress=content)
+                        .with_for_update()
                     )
-                    return {"id": novel_id, "content": content}
+                    if novel is None:
+                        raise ApiError(
+                            status_code=403,
+                            code="NOVEL_FORBIDDEN",
+                            message="无权访问该小说",
+                        )
+                    current_updated_at = _utc(novel.updatedAt)
+                    require_expected_updated_at(
+                        current_updated_at,
+                        expected_updated_at,
+                        code="LORE_CONTENT_VERSION_CONFLICT",
+                    )
+                    if novel.storyProgress != content:
+                        novel.storyProgress = content
+                        novel.updatedAt = _database_utc(
+                            next_utc_timestamp(current_updated_at)
+                        )
+                        await session.flush()
+                    return {
+                        "id": novel.id,
+                        "content": novel.storyProgress,
+                        "createdAt": _utc(novel.createdAt),
+                        "updatedAt": _utc(novel.updatedAt),
+                    }
                 model = _CONTENT_MODELS.get(kind)
                 if model is None:
                     raise ApiError(
@@ -335,13 +368,32 @@ class LoreRepository:
                     raise ApiError(
                         status_code=422, code="LORE_CONTENT_REQUIRED", message="内容不能为 null"
                     )
-                statement = (
-                    pg_insert(model)
-                    .values(novelId=novel_id, **fields)
-                    .on_conflict_do_update(index_elements=[model.novelId], set_=fields)
-                    .returning(model)
+                value = await session.scalar(
+                    select(model)
+                    .where(model.novelId == novel_id)
+                    .with_for_update()
                 )
-                value = (await session.scalars(statement)).one()
+                current_updated_at = _utc(value.updatedAt) if value is not None else None
+                require_expected_updated_at(
+                    current_updated_at,
+                    expected_updated_at,
+                    code="LORE_CONTENT_VERSION_CONFLICT",
+                )
+                if value is None:
+                    value = model(
+                        novelId=novel_id,
+                        **fields,
+                        updatedAt=_database_utc(next_utc_timestamp(None)),
+                    )
+                    session.add(value)
+                    await session.flush()
+                elif any(getattr(value, name) != requested for name, requested in fields.items()):
+                    for name, requested in fields.items():
+                        setattr(value, name, requested)
+                    value.updatedAt = _database_utc(
+                        next_utc_timestamp(current_updated_at)
+                    )
+                    await session.flush()
                 return _model_dict(value)
 
     async def _validate_entity_links(
@@ -390,6 +442,9 @@ class LoreRepository:
 
     @staticmethod
     async def _lock_novel(session: AsyncSession, novel_id: str) -> None:
+        await session.scalar(
+            select(Novel.id).where(Novel.id == novel_id).with_for_update()
+        )
         if session.bind is not None and session.bind.dialect.name == "postgresql":
             key = int.from_bytes(hashlib.sha256(novel_id.encode()).digest()[:8], "big", signed=True)
             await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": key})

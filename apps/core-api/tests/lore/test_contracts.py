@@ -8,14 +8,20 @@ from fastapi.testclient import TestClient
 from inkforge_core.app import create_app
 from inkforge_core.auth.dependencies import get_current_user
 from inkforge_core.auth.repository import AuthUser
+from inkforge_core.db.models import Novel
 from inkforge_core.lore.schemas import (
+    ContentRequest,
     CreateCharacterRequest,
     CreateFactionRequest,
     CreateGlossaryRequest,
     CreateItemRequest,
     CreateLocationRequest,
     RelationRequest,
+    WritingBibleRequest,
+    WritingBibleResponse,
 )
+from inkforge_core.novels.repository import NovelRepository
+from inkforge_core.novels.schemas import WorkspacePlanningResponse
 from pydantic import ValidationError
 
 
@@ -56,6 +62,73 @@ def test_relation_type_is_exact_literal(relation_type: object) -> None:
         RelationRequest.model_validate(
             {"characterId": "a", "targetId": "b", "relationType": relation_type}
         )
+
+
+@pytest.mark.parametrize("schema", [ContentRequest, WritingBibleRequest])
+def test_singleton_mutation_requires_explicit_nullable_expected_updated_at(schema) -> None:
+    with pytest.raises(ValidationError):
+        schema.model_validate({"content": "设定"} if schema is ContentRequest else {})
+
+    body = (
+        {"content": "设定", "expectedUpdatedAt": None}
+        if schema is ContentRequest
+        else {"expectedUpdatedAt": None}
+    )
+    assert schema.model_validate(body).expectedUpdatedAt is None
+
+
+def test_singleton_request_accepts_json_datetime() -> None:
+    request = ContentRequest.model_validate(
+        {"content": "设定", "expectedUpdatedAt": "2026-08-06T00:00:00Z"}
+    )
+
+    assert request.expectedUpdatedAt == datetime(2026, 8, 6, tzinfo=UTC)
+
+
+def test_writing_bible_response_never_contains_request_precondition() -> None:
+    now = datetime(2026, 8, 6, tzinfo=UTC)
+    response = WritingBibleResponse(
+        id="bible-1",
+        storyLengthProfile="long_serial",
+        createdAt=now,
+        updatedAt=now,
+    )
+
+    assert "expectedUpdatedAt" not in type(response).model_fields
+    assert "expectedUpdatedAt" not in response.model_dump()
+
+
+class EmptyPlanningSession:
+    async def scalar(self, statement):
+        del statement
+        return None
+
+    async def scalars(self, statement):
+        del statement
+
+        class EmptyValues:
+            def all(self):
+                return []
+
+        return EmptyValues()
+
+
+@pytest.mark.asyncio
+async def test_workspace_planning_returns_novel_version_for_story_progress() -> None:
+    updated_at = datetime(2026, 8, 6, 1, 2, 3)
+    novel = Novel(
+        id="novel-1",
+        userId="user-1",
+        name="作品",
+        storyProgress="推进到第一章",
+        updatedAt=updated_at,
+    )
+    repository = NovelRepository(lambda: None)  # type: ignore[arg-type]
+
+    result = await repository._load_planning(EmptyPlanningSession(), novel)  # type: ignore[arg-type]
+    response = WorkspacePlanningResponse.model_validate(result)
+
+    assert response.storyProgressUpdatedAt == updated_at.replace(tzinfo=UTC)
 
 
 def test_openapi_contains_complete_lore_outline_and_reference_routes() -> None:

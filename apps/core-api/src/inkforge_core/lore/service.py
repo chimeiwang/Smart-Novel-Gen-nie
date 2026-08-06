@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Protocol
 
 from pydantic import BaseModel
 
 from ..errors import ApiError
-from .schemas import ContentRequest
+from .schemas import ContentRequest, WritingBibleRequest
 
 
 class LoreRepositoryPort(Protocol):
@@ -19,7 +20,12 @@ class LoreRepositoryPort(Protocol):
         self, novel_id: str, user_id: str, kind: str, entity_id: str, fields: dict[str, Any]
     ) -> dict[str, Any]: ...
     async def upsert_content(
-        self, novel_id: str, user_id: str, kind: str, content: Any
+        self,
+        novel_id: str,
+        user_id: str,
+        kind: str,
+        content: Any,
+        expected_updated_at: datetime | None,
     ) -> dict[str, Any]: ...
     async def delete_entity(
         self, novel_id: str, user_id: str, kind: str, entity_id: str
@@ -119,17 +125,29 @@ class LoreService:
         await self._repository.delete_relation(novel_id, user_id, relation_id)
 
     async def upsert_content(
-        self, user_id: str, novel_id: str, kind: str, request: ContentRequest | BaseModel
+        self,
+        user_id: str,
+        novel_id: str,
+        kind: str,
+        request: ContentRequest | WritingBibleRequest,
     ) -> dict[str, Any]:
         if kind == "writing-bible":
-            content: Any = request.model_dump(exclude_unset=True)
-            self._require_update_fields(content)
-            if "storyLengthProfile" in content and content["storyLengthProfile"] is None:
+            if not isinstance(request, WritingBibleRequest):
+                raise TypeError("作品圣经请求类型无效")
+            story_length_profile = request.storyLengthProfile
+            if story_length_profile not in {None, "long_serial"}:
                 raise ApiError(
                     status_code=422,
-                    code="WRITING_BIBLE_PROFILE_REQUIRED",
-                    message="作品篇幅模式不能为 null",
+                    code="WRITING_BIBLE_PROFILE_MISMATCH",
+                    message="长篇作品不能改为中短篇模式",
                 )
+            content: Any = request.model_dump(
+                exclude={"expectedUpdatedAt"},
+                exclude_unset=True,
+            )
+            if content.get("storyLengthProfile") is None:
+                content.pop("storyLengthProfile", None)
+            self._require_update_fields(content)
         else:
             if not isinstance(request, ContentRequest):
                 raise TypeError("内容请求类型无效")
@@ -140,7 +158,14 @@ class LoreService:
                 code="STORY_PROGRESS_TOO_LONG",
                 message="故事进度不能超过 30000 个字符",
             )
-        return await self._repository.upsert_content(novel_id, user_id, kind, content)
+        expected_updated_at = request.expectedUpdatedAt
+        return await self._repository.upsert_content(
+            novel_id,
+            user_id,
+            kind,
+            content,
+            expected_updated_at,
+        )
 
     @staticmethod
     def _require_name(kind: str, fields: dict[str, Any]) -> None:

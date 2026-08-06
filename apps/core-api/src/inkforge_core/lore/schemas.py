@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 CharacterStatus = Literal["active", "missing", "dead", "imprisoned", "unknown"]
 RelationType = Literal[
@@ -25,6 +25,15 @@ ContentKind = Literal["story-background", "world-setting", "writing-bible", "sto
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
+
+
+def _parse_json_datetime(value: object) -> object:
+    if isinstance(value, str):
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return value
+
+
+JsonDatetime = Annotated[datetime, BeforeValidator(_parse_json_datetime)]
 
 
 class CreateCharacterRequest(StrictModel):
@@ -167,9 +176,10 @@ class UpdateRelationRequest(StrictModel):
 
 class ContentRequest(StrictModel):
     content: str | None
+    expectedUpdatedAt: JsonDatetime | None
 
 
-class WritingBibleRequest(StrictModel):
+class WritingBibleFields(StrictModel):
     storyLengthProfile: StoryLengthProfile | None = None
     targetTotalWordCount: int | None = Field(default=None, gt=0)
     genre: str | None = None
@@ -180,6 +190,10 @@ class WritingBibleRequest(StrictModel):
     taboo: str | None = None
     comparableTitles: str | None = None
     notes: str | None = None
+
+
+class WritingBibleRequest(WritingBibleFields):
+    expectedUpdatedAt: JsonDatetime | None
 
 
 class CharacterResponse(CreateCharacterRequest):
@@ -235,7 +249,7 @@ class ContentResponse(StrictModel):
     updatedAt: datetime | None = None
 
 
-class WritingBibleResponse(WritingBibleRequest):
+class WritingBibleResponse(WritingBibleFields):
     id: str
     storyLengthProfile: StoryLengthProfile
     createdAt: datetime

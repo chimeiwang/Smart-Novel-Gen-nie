@@ -176,6 +176,7 @@ class ApiNovelService:
         self.workspace_calls.append(("planning", user_id, None))
         return {
             "storyProgress": None,
+            "storyProgressUpdatedAt": datetime(2026, 7, 14, tzinfo=UTC),
             "storyBackground": None,
             "worldSetting": None,
             "writingBible": None,
@@ -301,6 +302,7 @@ async def test_workspace_group_routes_use_cookie_owner_and_preserve_chapter_sele
         ("planning", "cookie-user", None),
         ("resources", "cookie-user", None),
     ]
+    assert planning.json()["storyProgressUpdatedAt"] == "2026-07-14T00:00:00Z"
 
 
 def test_workspace_group_openapi_has_strict_response_boundaries() -> None:
@@ -320,6 +322,7 @@ def test_workspace_group_openapi_has_strict_response_boundaries() -> None:
     }
     assert set(schemas["WorkspacePlanningResponse"]["properties"]) == {
         "storyProgress",
+        "storyProgressUpdatedAt",
         "storyBackground",
         "worldSetting",
         "writingBible",

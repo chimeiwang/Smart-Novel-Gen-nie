@@ -864,6 +864,7 @@ class NovelRepository:
         plot = await self._one_for_novel(session, PlotProgress, novel_id)
         return {
             "storyProgress": novel.storyProgress,
+            "storyProgressUpdatedAt": utc_datetime(novel.updatedAt),
             "storyBackground": self._content_dict(background),
             "worldSetting": self._content_dict(world),
             "writingBible": self._bible_dict(bible),
