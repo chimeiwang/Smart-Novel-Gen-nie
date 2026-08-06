@@ -73,6 +73,8 @@ def _validate_spec(spec: CommandSpec) -> None:
 
 def _default_specs() -> list[CommandSpec]:
     from .commands.auth import login, logout, whoami
+    from .commands.long.artifacts import ARTIFACT_COMMAND_SPECS
+    from .commands.long.chapters import CHAPTER_COMMAND_SPECS
     from .commands.long.knowledge import (
         get_artifact,
         get_lore,
@@ -83,6 +85,7 @@ def _default_specs() -> list[CommandSpec]:
         list_foreshadowings,
         list_outline_nodes,
     )
+    from .commands.long.quality import QUALITY_COMMAND_SPECS
     from .commands.long.read import (
         get_chapter,
         get_novel,
@@ -93,6 +96,7 @@ def _default_specs() -> list[CommandSpec]:
     from .commands.long.read import (
         list_novels as list_long_novels,
     )
+    from .commands.long.task_mutations import TASK_MUTATION_COMMAND_SPECS
     from .commands.long.tasks import get_task, list_tasks
     from .commands.long.tasks import watch as watch_task
     from .commands.short.agents import (
@@ -330,6 +334,10 @@ def _default_specs() -> list[CommandSpec]:
         long_read_spec("long.artifact.list", list_artifacts),
         long_read_spec("long.artifact.get", get_artifact),
         long_read_spec("long.quality.get", get_quality_check),
+        *CHAPTER_COMMAND_SPECS,
+        *TASK_MUTATION_COMMAND_SPECS,
+        *ARTIFACT_COMMAND_SPECS,
+        *QUALITY_COMMAND_SPECS,
     ]
 
 

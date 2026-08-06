@@ -65,6 +65,9 @@ def test_registry_has_unique_existing_command_names_and_declares_special_modes()
         "long.novel.get",
         "long.chapter.list",
         "long.chapter.get",
+        "long.chapter.save",
+        "long.chapter.status",
+        "long.chapter.progress.save",
         "long.session.list",
         "long.session.get",
         "long.planning.get",
@@ -75,9 +78,18 @@ def test_registry_has_unique_existing_command_names_and_declares_special_modes()
         "long.task.list",
         "long.task.get",
         "long.task.watch",
+        "long.agent.start",
+        "long.task.resume",
+        "long.task.cancel",
         "long.artifact.list",
         "long.artifact.get",
+        "long.artifact.approve",
+        "long.artifact.revise",
+        "long.artifact.discard",
         "long.quality.get",
+        "long.quality.run",
+        "long.quality.skip",
+        "long.quality.reset",
     } == set(registry)
 
 
