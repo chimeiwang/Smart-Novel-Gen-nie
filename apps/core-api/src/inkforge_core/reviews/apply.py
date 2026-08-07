@@ -226,9 +226,7 @@ def _normalize_scene_beat(scene: object, *, index: int) -> dict[str, object]:
         legacy_refs = scene["foreshadowingReferences"]
         if not isinstance(legacy_refs, str):
             raise ValueError("章节计划旧场景 foreshadowingReferences 必须是字符串")
-        normalized["foreshadowingRefs"] = (
-            [] if legacy_refs.strip() in {"", "无"} else [legacy_refs]
-        )
+        normalized["foreshadowingRefs"] = [] if not legacy_refs.strip() else [legacy_refs]
         normalized.pop("foreshadowingReferences", None)
         changed = True
 

@@ -256,7 +256,7 @@ async def test_formal_applier_normalizes_production_legacy_scene_fields() -> Non
                 "goal": "暗巷接头：取得内城地图",
                 "conflict": "接头人被跟踪。",
                 "characters": ["纪寻", "线人"],
-                "foreshadowingRefs": [],
+                "foreshadowingRefs": ["无"],
                 "estimatedWords": 1300,
                 "acceptanceCriteria": "地图到手并暴露新的追兵。",
             },
