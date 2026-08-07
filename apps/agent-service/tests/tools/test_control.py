@@ -78,6 +78,8 @@ def test_beat_plan_rejects_string_characters() -> None:
     [
         (("beatCount",), True),
         (("beatCount",), "1"),
+        (("totalEstimatedWords",), True),
+        (("totalEstimatedWords",), "1000"),
         (("sceneBeats", 0, "order"), True),
         (("sceneBeats", 0, "order"), "1"),
         (("sceneBeats", 0, "estimatedWords"), False),

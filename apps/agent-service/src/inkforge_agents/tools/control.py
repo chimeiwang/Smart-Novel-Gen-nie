@@ -140,7 +140,7 @@ class BeatPlanArgs(StrictArgs):
     chapterGoal: str = Field(min_length=1, max_length=1000)
     mainPlotConnection: str | None = Field(default=None, max_length=1000)
     chapterAcceptanceCriteria: str | None = Field(default=None, max_length=1000)
-    totalEstimatedWords: int | None = Field(default=None, ge=0)
+    totalEstimatedWords: int | None = Field(default=None, strict=True, ge=0)
     sceneBeats: list[BeatPlanSceneArgs] = Field(min_length=1, max_length=50)
 
     @model_validator(mode="after")
