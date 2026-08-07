@@ -794,10 +794,17 @@ revise 必须提供非空 `userMessage`；discard 不接受编辑内容。
 `long.task.watch` 是 `mutation=false`、`outputMode=jsonl` 的只读观察命令，在 A 阶段随查询命令注册并
 开放；它不属于 B 阶段写命令，也不获得取消任务的隐含权限。
 
-### 后续结构化资料命令
+### 已开放的大纲正文命令
 
 ```text
 long.outline.save
+```
+
+该命令按 `2026-08-07-long-serial-outline-cli-write.md` 使用现有公共 Core CAS 契约开放。
+
+### 后续结构化资料命令
+
+```text
 long.outline-node.create
 long.outline-node.update
 long.outline-node.delete
@@ -1004,8 +1011,9 @@ long.quality.reset
 按 planning、outline node、foreshadowing、lore、reference、style 的垂直切片逐类补齐原子写入、
 幂等、CAS、删除影响和 sourceBindings，再注册对应 CLI 命令。不得为了凑齐命令表先暴露不安全接口。
 
-`2026-08-06-long-serial-creative-material-cli-writes.md` 规格定义的 32 条长篇创作资料写命令已经实现，
-但尚未部署到生产环境。大纲正文、大纲节点、伏笔和用户级文风库的写命令仍未开放。
+`2026-08-06-long-serial-creative-material-cli-writes.md` 规格定义的 32 条长篇创作资料写命令已经实现。
+`2026-08-07-long-serial-outline-cli-write.md` 另行开放受非空 `expectedUpdatedAt` 保护的大纲正文保存；大纲节点、
+伏笔和用户级文风库的写命令仍未开放。
 
 ### D. 生产操作
 

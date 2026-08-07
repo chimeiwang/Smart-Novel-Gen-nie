@@ -60,9 +60,12 @@ def require_expected_updated_at(
     if nullable and value is None:
         return None
     if not isinstance(value, str) or not value:
+        message = "expectedUpdatedAt 必须是非空字符串"
+        if nullable:
+            message += "或显式 null"
         raise CliInputError(
             "INVALID_EXPECTED_UPDATED_AT",
-            "expectedUpdatedAt 必须是非空字符串或显式 null",
+            message,
         )
     return value
 

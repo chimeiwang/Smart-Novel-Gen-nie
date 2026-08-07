@@ -58,7 +58,7 @@ Codex 的完整操作规程位于用户 Skill：
   approve、revise 或 discard 流程处理，不能直接写入正式内容。
 - `long.task.watch` 只观察权威 `outcome`，停止 watcher 不会取消服务端任务；真正取消必须显式执行
   `long.task.cancel`。
-- 本规格列出的设定、参考资料和小说文风应用命令已在本分支实现，待集成部署；大纲节点、伏笔和用户级文风资产写入仍未开放。
+- 本规格列出的整份大纲正文、设定、参考资料和小说文风应用命令已实现；大纲节点、伏笔和用户级文风资产写入仍未开放。
   任何调用都不能用读接口或批量请求绕过幂等、CAS、Diff 确认和来源绑定门槛。
 
 ## 命令清单
@@ -72,6 +72,7 @@ Codex 的完整操作规程位于用户 Skill：
 - 删除命令返回 Core 的完整影响报告。调用方必须先展示引用或影响，再由用户确认是否执行；CLI 不提供隐式级联清理。
 - 参考资料保存成功只代表正式资料已提交。`ragStatus=disabled` 表示等待索引，`failed` 表示索引失败；只有回拉到 `ready` 才能表述为索引完成。
 - 结构化写命令不接受 `outputFile`，不维护本地镜像，也不开放大纲节点、伏笔或用户级文风资产写入。
+- `long.outline.save` 必须携带读取大纲时得到的非空 `expectedUpdatedAt`；支持 `content` 或 UTF-8 `contentFile` 二选一。
 
 <!-- command-list:start -->
 ```text
@@ -120,6 +121,7 @@ long.artifact.discard
 long.quality.run
 long.quality.skip
 long.quality.reset
+long.outline.save
 long.lore.story-background.save
 long.lore.world-setting.save
 long.lore.writing-bible.save

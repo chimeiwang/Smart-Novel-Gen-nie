@@ -139,9 +139,15 @@ def test_long_structured_write_commands_never_offer_file_output() -> None:
         for name, spec in get_command_registry().items()
         if spec.mutation
         and name.startswith(
-            ("long.lore.", "long.plot-progress.", "long.reference.", "long.style.")
+            (
+                "long.lore.",
+                "long.outline.",
+                "long.plot-progress.",
+                "long.reference.",
+                "long.style.",
+            )
         )
     }
 
-    assert len(structured) == 32
+    assert len(structured) == 33
     assert all(spec.fileOutput.kind == "none" for spec in structured.values())

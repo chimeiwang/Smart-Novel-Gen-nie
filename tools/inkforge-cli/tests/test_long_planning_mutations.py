@@ -89,11 +89,16 @@ COMMAND_CASES = (
     ),
 )
 
+OUTLINE_COMMAND = "long.outline.save"
+
 
 def test_planning_command_specs_are_explicit_cas_mutations_without_request_ids() -> None:
     specs = _module().PLANNING_COMMAND_SPECS
 
-    assert {spec.name for spec in specs} == {case[0] for case in COMMAND_CASES}
+    assert {spec.name for spec in specs} == {
+        *(case[0] for case in COMMAND_CASES),
+        OUTLINE_COMMAND,
+    }
     assert all(spec.mutation and spec.requiresIdentity for spec in specs)
     assert all(not spec.requiresClientRequestId for spec in specs)
     assert all(spec.fileOutput.kind == "none" for spec in specs)
@@ -129,6 +134,34 @@ def test_planning_commands_send_exact_public_routes_and_bodies(
     )]
 
 
+def test_outline_save_sends_exact_public_route_and_body() -> None:
+    module = _module()
+    spec = _spec(module, OUTLINE_COMMAND)
+    api = RecordingApi()
+    novel_id = "novel/中文 ?"
+
+    result = spec.handler(
+        _runtime(spec, api),
+        {
+            "novelId": novel_id,
+            "content": "完整大纲",
+            "expectedUpdatedAt": "2026-08-07T00:00:00Z",
+        },
+    )
+
+    assert result == {"updatedAt": "2026-08-07T00:00:01Z"}
+    assert api.calls == [(
+        "PUT",
+        f"/api/v1/novels/{quote(novel_id, safe='')}/outline",
+        {
+            "json": {
+                "content": "完整大纲",
+                "expectedUpdatedAt": "2026-08-07T00:00:00Z",
+            }
+        },
+    )]
+
+
 @pytest.mark.parametrize("command", [case[0] for case in COMMAND_CASES])
 def test_expected_updated_at_must_be_explicit_and_may_be_null(command: str) -> None:
     module = _module()
@@ -154,6 +187,7 @@ def test_expected_updated_at_must_be_explicit_and_may_be_null(command: str) -> N
 @pytest.mark.parametrize(
     "command",
     [
+        OUTLINE_COMMAND,
         "long.lore.story-background.save",
         "long.lore.world-setting.save",
         "long.lore.story-progress.save",
@@ -201,6 +235,54 @@ def test_content_file_is_sent_as_exact_utf8_text(tmp_path: Path) -> None:
         "content": content,
         "expectedUpdatedAt": "2026-08-07T00:00:00Z",
     }
+
+
+def test_outline_content_file_is_sent_as_exact_utf8_text(tmp_path: Path) -> None:
+    module = _module()
+    spec = _spec(module, OUTLINE_COMMAND)
+    api = RecordingApi()
+    content = "大纲\r\n" + "章" * 80_000 + "尾部😀e\u0301\r\n"
+    content_file = tmp_path / "大纲.txt"
+    content_file.write_bytes(content.encode("utf-8"))
+
+    spec.handler(
+        _runtime(spec, api),
+        {
+            "novelId": "novel-1",
+            "contentFile": str(content_file),
+            "expectedUpdatedAt": "2026-08-07T00:00:00Z",
+        },
+    )
+
+    assert api.calls[0][2]["json"] == {
+        "content": content,
+        "expectedUpdatedAt": "2026-08-07T00:00:00Z",
+    }
+
+
+@pytest.mark.parametrize("expected_updated_at", [None, "", 7, False])
+def test_outline_expected_updated_at_must_be_a_non_empty_string(
+    expected_updated_at: object,
+) -> None:
+    module = _module()
+    spec = _spec(module, OUTLINE_COMMAND)
+    api = RecordingApi()
+
+    with pytest.raises(CliInputError) as caught:
+        spec.handler(
+            _runtime(spec, api),
+            {
+                "novelId": "novel-1",
+                "expectedUpdatedAt": expected_updated_at,
+                "content": "完整大纲",
+            },
+        )
+
+    assert caught.value.code == "INVALID_EXPECTED_UPDATED_AT"
+    assert "必须是非空字符串" in caught.value.message
+    assert "显式 null" not in caught.value.message
+    assert command_exit_code(spec, caught.value) == 2
+    assert api.calls == []
 
 
 @pytest.mark.parametrize("raw", [b"\xff", b"\xe4\xb8"])

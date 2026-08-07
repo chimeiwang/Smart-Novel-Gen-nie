@@ -45,6 +45,7 @@ def _save_text(
     payload: JsonObject,
     *,
     suffix: str,
+    expected_updated_at_nullable: bool = True,
 ) -> JsonObject:
     require_payload_fields(
         payload,
@@ -58,7 +59,7 @@ def _save_text(
             "content": require_content_source(payload),
             "expectedUpdatedAt": require_expected_updated_at(
                 payload,
-                nullable=True,
+                nullable=expected_updated_at_nullable,
             ),
         },
     )
@@ -75,6 +76,15 @@ def save_world_setting(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
 
 def save_story_progress(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
     return _save_text(runtime, payload, suffix="story-progress")
+
+
+def save_outline(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
+    return _save_text(
+        runtime,
+        payload,
+        suffix="outline",
+        expected_updated_at_nullable=False,
+    )
 
 
 def save_writing_bible(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
@@ -124,6 +134,16 @@ _NO_FILE = FileOutputSpec(kind="none")
 
 
 PLANNING_COMMAND_SPECS: tuple[CommandSpec, ...] = (
+    CommandSpec(
+        name="long.outline.save",
+        handler=save_outline,
+        inputMode="json",
+        outputMode="json",
+        fileOutput=_NO_FILE,
+        mutation=True,
+        requiresIdentity=True,
+        requiresClientRequestId=False,
+    ),
     CommandSpec(
         name="long.lore.story-background.save",
         handler=save_story_background,

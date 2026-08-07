@@ -66,6 +66,7 @@ EXPECTED_COMMANDS = {
     "long.lore.writing-bible.save",
     "long.lore.story-progress.save",
     "long.plot-progress.save",
+    "long.outline.save",
     "long.lore.character.create",
     "long.lore.character.update",
     "long.lore.character.delete",
@@ -113,6 +114,7 @@ EXPECTED_LONG_MUTATIONS = {
     "long.lore.writing-bible.save",
     "long.lore.story-progress.save",
     "long.plot-progress.save",
+    "long.outline.save",
     "long.lore.character.create",
     "long.lore.character.update",
     "long.lore.character.delete",
@@ -224,11 +226,11 @@ def test_long_mutation_and_watcher_capabilities_are_exact() -> None:
 def test_structured_mutation_capabilities_are_exact() -> None:
     registry = get_command_registry()
 
-    assert len(registry) == 77
+    assert len(registry) == 78
     assert sum(
         name.startswith("long.") and spec.mutation
         for name, spec in registry.items()
-    ) == 44
+    ) == 45
     assert {
         name for name in EXPECTED_STRUCTURED_WRITES if name in registry
     } == EXPECTED_STRUCTURED_WRITES
@@ -244,7 +246,6 @@ def test_excluded_stage_c_families_remain_unregistered() -> None:
     command_names = set(get_command_registry())
 
     assert not {
-        "long.outline.save",
         "long.outline-node.create",
         "long.outline-node.update",
         "long.outline-node.delete",
