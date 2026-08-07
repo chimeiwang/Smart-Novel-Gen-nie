@@ -115,7 +115,7 @@ class ShowArtifactArgs(StrictArgs):
 
 
 class BeatPlanSceneArgs(StrictArgs):
-    order: int | None = Field(default=None, ge=1)
+    order: int | None = Field(default=None, strict=True, ge=1)
     goal: str = Field(min_length=1, max_length=1000)
     conflict: str | None = Field(default=None, max_length=1000)
     characters: list[
@@ -124,7 +124,7 @@ class BeatPlanSceneArgs(StrictArgs):
     foreshadowingRefs: list[
         Annotated[str, Field(min_length=1, max_length=200)]
     ] | None = Field(default=None, max_length=50)
-    estimatedWords: int | None = Field(default=None, ge=0)
+    estimatedWords: int | None = Field(default=None, strict=True, ge=0)
     acceptanceCriteria: str | None = Field(
         default=None, min_length=1, max_length=1000
     )
@@ -132,7 +132,7 @@ class BeatPlanSceneArgs(StrictArgs):
 
 class BeatPlanArgs(StrictArgs):
     title: str = Field(min_length=1, max_length=200)
-    beatCount: int = Field(ge=1, le=50)
+    beatCount: int = Field(strict=True, ge=1, le=50)
     summary: str = Field(min_length=1, max_length=2000)
     artifactKey: str | None = Field(default=None, min_length=1, max_length=200)
     reviewerAgent: AgentId | None = None

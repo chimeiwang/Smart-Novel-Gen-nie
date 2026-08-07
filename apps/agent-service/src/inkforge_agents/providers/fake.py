@@ -120,6 +120,13 @@ def _select_tool(
                 "summary": "模拟章节计划草案。",
                 "chapterGoal": "推进当前章节。",
                 "totalEstimatedWords": 1000,
+                "sceneBeats": [
+                    {
+                        "order": 1,
+                        "goal": "推进当前章节。",
+                        "estimatedWords": 1000,
+                    }
+                ],
             },
         )
     if "submit_validation_report" in tool_names:

@@ -9,6 +9,7 @@ from inkforge_agents.providers.base import (
     ModelTurnResult,
     ModelUsage,
 )
+from inkforge_agents.providers.fake import FakeModelProvider
 from inkforge_agents.queue.cancellation import JobCancelledError
 from inkforge_agents.runtime.agent_runtime import AgentRuntime
 from inkforge_agents.runtime.model_runtime import ModelRuntime
@@ -99,6 +100,41 @@ def make_agent_runtime(
         max_output_tokens=16_384,
         **kwargs,
     )
+
+
+@pytest.mark.asyncio
+async def test_fake_provider_plan_chapter_uses_valid_strict_arguments() -> None:
+    registry = build_default_registry(RecordingGateway())
+    runtime = make_agent_runtime(ModelRuntime(FakeModelProvider()), registry)
+
+    result = await runtime.run(
+        messages=[{"role": "user", "content": "规划当前章节"}],
+        exposed_tools=registry.for_agent(
+            agent_id="剧情", capabilities={"control.beat"}
+        ),
+        context=context("剧情"),
+        terminal_control_tools={"submit_beat_plan"},
+    )
+
+    assert result.finishReason == "terminal_control_tool"
+    assert result.controlEvents == [
+        {
+            "type": "submit_beat_plan",
+            "title": "模拟章节计划",
+            "beatCount": 1,
+            "summary": "模拟章节计划草案。",
+            "chapterGoal": "推进当前章节。",
+            "totalEstimatedWords": 1000,
+            "sceneBeats": [
+                {
+                    "order": 1,
+                    "goal": "推进当前章节。",
+                    "characters": [],
+                    "estimatedWords": 1000,
+                }
+            ],
+        }
+    ]
 
 
 class Cancellation:

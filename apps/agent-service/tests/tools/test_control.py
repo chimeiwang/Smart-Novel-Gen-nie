@@ -49,14 +49,66 @@ def test_beat_plan_scene_uses_strict_normalized_contract() -> None:
     }
 
 
-def test_beat_plan_rejects_legacy_scene_shape() -> None:
+def test_beat_plan_rejects_legacy_scene_goal_field() -> None:
     payload = _valid_beat_plan_payload()
     payload["sceneBeats"] = [
-        {"sceneGoal": "发现关键线索。", "characters": "主角"}
+        {"goal": "发现关键线索。", "sceneGoal": "旧场景目标。"}
     ]
 
-    with pytest.raises(ValidationError):
+    with pytest.raises(ValidationError) as exc_info:
         BeatPlanArgs.model_validate(payload)
+
+    assert exc_info.value.errors()[0]["loc"] == ("sceneBeats", 0, "sceneGoal")
+
+
+def test_beat_plan_rejects_string_characters() -> None:
+    payload = _valid_beat_plan_payload()
+    payload["sceneBeats"] = [
+        {"goal": "发现关键线索。", "characters": "主角"}
+    ]
+
+    with pytest.raises(ValidationError) as exc_info:
+        BeatPlanArgs.model_validate(payload)
+
+    assert exc_info.value.errors()[0]["loc"] == ("sceneBeats", 0, "characters")
+
+
+@pytest.mark.parametrize(
+    ("location", "value"),
+    [
+        (("beatCount",), True),
+        (("beatCount",), "1"),
+        (("sceneBeats", 0, "order"), True),
+        (("sceneBeats", 0, "order"), "1"),
+        (("sceneBeats", 0, "estimatedWords"), False),
+        (("sceneBeats", 0, "estimatedWords"), "100"),
+    ],
+)
+def test_beat_plan_rejects_non_strict_integers(
+    location: tuple[str | int, ...], value: object
+) -> None:
+    payload = _valid_beat_plan_payload()
+    if len(location) == 1:
+        payload[location[0]] = value
+    else:
+        scene = payload["sceneBeats"]
+        assert isinstance(scene, list)
+        scene[0][location[-1]] = value
+
+    with pytest.raises(ValidationError) as exc_info:
+        BeatPlanArgs.model_validate(payload)
+
+    assert exc_info.value.errors()[0]["loc"] == location
+
+
+def test_beat_plan_schema_forbids_extra_fields_at_both_levels() -> None:
+    schema = BeatPlanArgs.model_json_schema()
+
+    assert schema["additionalProperties"] is False
+    assert schema["properties"]["sceneBeats"]["items"] == {
+        "$ref": "#/$defs/BeatPlanSceneArgs"
+    }
+    assert schema["$defs"]["BeatPlanSceneArgs"]["additionalProperties"] is False
 
 
 @pytest.mark.parametrize("field", ["chapterGoal", "sceneBeats"])
