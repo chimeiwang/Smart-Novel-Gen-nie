@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
 from inkforge_contracts import ConsistencyQualityReport
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
@@ -114,6 +114,22 @@ class ShowArtifactArgs(StrictArgs):
         return self
 
 
+class BeatPlanSceneArgs(StrictArgs):
+    order: int | None = Field(default=None, ge=1)
+    goal: str = Field(min_length=1, max_length=1000)
+    conflict: str | None = Field(default=None, max_length=1000)
+    characters: list[
+        Annotated[str, Field(min_length=1, max_length=100)]
+    ] = Field(default_factory=list, max_length=50)
+    foreshadowingRefs: list[
+        Annotated[str, Field(min_length=1, max_length=200)]
+    ] | None = Field(default=None, max_length=50)
+    estimatedWords: int | None = Field(default=None, ge=0)
+    acceptanceCriteria: str | None = Field(
+        default=None, min_length=1, max_length=1000
+    )
+
+
 class BeatPlanArgs(StrictArgs):
     title: str = Field(min_length=1, max_length=200)
     beatCount: int = Field(ge=1, le=50)
@@ -121,11 +137,17 @@ class BeatPlanArgs(StrictArgs):
     artifactKey: str | None = Field(default=None, min_length=1, max_length=200)
     reviewerAgent: AgentId | None = None
     submitForReview: bool | None = None
-    chapterGoal: str | None = Field(default=None, min_length=1, max_length=1000)
+    chapterGoal: str = Field(min_length=1, max_length=1000)
     mainPlotConnection: str | None = Field(default=None, max_length=1000)
     chapterAcceptanceCriteria: str | None = Field(default=None, max_length=1000)
     totalEstimatedWords: int | None = Field(default=None, ge=0)
-    sceneBeats: list[dict[str, JsonValue]] | None = Field(default=None, min_length=1, max_length=50)
+    sceneBeats: list[BeatPlanSceneArgs] = Field(min_length=1, max_length=50)
+
+    @model_validator(mode="after")
+    def require_matching_beat_count(self) -> Self:
+        if self.beatCount != len(self.sceneBeats):
+            raise ValueError("beatCount 必须等于 sceneBeats 的场景数量")
+        return self
 
 
 class ValidationReportArgs(StrictArgs):
