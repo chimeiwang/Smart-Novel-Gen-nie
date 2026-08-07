@@ -1,5 +1,7 @@
 # Python 后端一次性重构规格
 
+> 后续变更：本规格中的 Agent 单并发预算已由 `2026-08-06-agent-bounded-concurrency.md` 取代；单 Uvicorn worker、Redis 队列优先级和服务边界继续有效。
+
 ## 背景
 
 InkForge 当前把页面、服务器操作、接口路由、Prisma 数据访问、认证计费、文件处理、检索增强生成、LangGraph 编排和智能体运行时全部放在一个 Next.js 进程体系内。用户决定保留 Next.js 作为页面与搜索引擎优化层，将所有业务后端迁移到 Python，并在一次切换中交付生产可用的新架构。

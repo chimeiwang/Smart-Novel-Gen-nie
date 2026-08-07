@@ -58,7 +58,8 @@ docker compose -f infra/compose.yaml up --build -d
 - 新增或修改公共接口时，先改 FastAPI/Pydantic 契约，再运行 `npm run api:generate`，禁止手写重复 TypeScript DTO。
 - 新增 Agent 工具必须注册到 `apps/agent-service/src/inkforge_agents/tools/registry.py`，同时声明权限和并发属性。
 - 模型工具循环只能位于 `AgentRuntime`，LangGraph 编排只能使用现有 `StateGraph`、`Send`、`Command` 和 `interrupt()` 扩展。
-- 2 核 2 GB 部署默认每个 Python 服务一个 worker，同一时刻只执行一个模型任务。
+- 2 核 2 GB 部署默认每个 Python 服务一个 worker；Agent 在单进程内最多并行三个不同项目的队列任务，
+  同一 `novelId` 同时只能执行一个任务，并通过同一 `AGENT_MAX_CONCURRENCY` 全局限制最多三个模型调用，配置为 1 时回退串行。
 
 ## 前端规则
 

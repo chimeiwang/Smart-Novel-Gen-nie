@@ -8,17 +8,22 @@ import pytest
 from inkforge_agents.clients.core import CoreServiceError
 from inkforge_agents.queue.cancellation import JobCancelledError
 from inkforge_agents.queue.consumer import QueueConsumer
-from inkforge_agents.queue.repository import QueueJob, RedisRunQueue
+from inkforge_agents.queue.repository import JobKind, QueueJob, RedisRunQueue
 from redis.exceptions import ResponseError
 
 
-def job(job_id: str) -> QueueJob:
+def job(
+    job_id: str,
+    *,
+    novel_id: str = "novel-1",
+    kind: JobKind = "writing",
+) -> QueueJob:
     return QueueJob(
         jobId=job_id,
-        kind="writing",
+        kind=kind,
         runId=f"run-{job_id}",
         taskId=f"task-{job_id}",
-        novelId="novel-1",
+        novelId=novel_id,
         userId="user-1",
         priority=10,
         payload={},
@@ -48,6 +53,178 @@ async def test_consumer_runs_one_job_at_a_time_and_acknowledges() -> None:
     assert maximum == 1
     assert await queue.status("one") == "completed"
     assert await queue.status("two") == "completed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("max_concurrency", "expected_maximum"),
+    [(1, 1), (2, 2), (3, 3)],
+)
+async def test_consumer_limits_parallel_jobs(
+    max_concurrency: int,
+    expected_maximum: int,
+) -> None:
+    queue = RedisRunQueue(fakeredis.aioredis.FakeRedis(), prefix="test:queue")
+    job_ids = ("one", "two", "three", "four")
+    for index, job_id in enumerate(job_ids):
+        await queue.enqueue(job(job_id, novel_id=f"novel-{index}"))
+    active = 0
+    started = 0
+    maximum = 0
+    capacity_reached = asyncio.Event()
+    all_finished = asyncio.Event()
+    release = asyncio.Event()
+
+    async def handler(current: QueueJob) -> None:
+        nonlocal active, started, maximum
+        del current
+        active += 1
+        started += 1
+        maximum = max(maximum, active)
+        if started == expected_maximum:
+            capacity_reached.set()
+        await release.wait()
+        active -= 1
+        if started == len(job_ids) and active == 0:
+            all_finished.set()
+
+    consumer = QueueConsumer(
+        queue,
+        {"writing": handler},
+        max_concurrency=max_concurrency,
+        poll_interval=0.001,
+    )
+    consumer_task = asyncio.create_task(consumer.run())
+    try:
+        await asyncio.wait_for(capacity_reached.wait(), timeout=1)
+        await asyncio.sleep(0.01)
+        assert started == expected_maximum
+        assert maximum == expected_maximum
+        release.set()
+        await asyncio.wait_for(all_finished.wait(), timeout=1)
+    finally:
+        release.set()
+        consumer.request_stop()
+        await asyncio.wait_for(consumer_task, timeout=1)
+
+    for job_id in job_ids:
+        assert await queue.status(job_id) == "completed"
+
+
+@pytest.mark.asyncio
+async def test_consumer_serializes_same_project_without_blocking_other_project() -> None:
+    queue = RedisRunQueue(fakeredis.aioredis.FakeRedis(), prefix="test:queue")
+    await queue.enqueue(job("a-1-writing", novel_id="novel-a", kind="writing"))
+    await queue.enqueue(job("a-2-quality", novel_id="novel-a", kind="quality"))
+    await queue.enqueue(job("a-3-rag", novel_id="novel-a", kind="rag"))
+    await queue.enqueue(job("b-writing", novel_id="novel-b", kind="writing"))
+    await queue.enqueue(job("c-quality", novel_id="novel-c", kind="quality"))
+    active_projects: set[str] = set()
+    first_a_started = asyncio.Event()
+    second_a_started = asyncio.Event()
+    third_a_started = asyncio.Event()
+    b_started = asyncio.Event()
+    c_started = asyncio.Event()
+    release_initial = asyncio.Event()
+
+    async def handler(current: QueueJob) -> None:
+        assert current.novelId not in active_projects
+        active_projects.add(current.novelId)
+        try:
+            if current.jobId == "a-1-writing":
+                first_a_started.set()
+                await release_initial.wait()
+            elif current.jobId == "a-2-quality":
+                second_a_started.set()
+            elif current.jobId == "a-3-rag":
+                third_a_started.set()
+            elif current.jobId == "b-writing":
+                b_started.set()
+                await release_initial.wait()
+            else:
+                c_started.set()
+                await release_initial.wait()
+        finally:
+            active_projects.remove(current.novelId)
+
+    consumer = QueueConsumer(
+        queue,
+        {"writing": handler, "quality": handler, "rag": handler},
+        max_concurrency=3,
+        poll_interval=0.001,
+        project_deferral_delay=timedelta(milliseconds=5),
+    )
+    consumer_task = asyncio.create_task(consumer.run())
+    try:
+        await asyncio.wait_for(first_a_started.wait(), timeout=1)
+        await asyncio.wait_for(b_started.wait(), timeout=1)
+        await asyncio.wait_for(c_started.wait(), timeout=1)
+        await asyncio.sleep(0.02)
+        assert second_a_started.is_set() is False
+        assert third_a_started.is_set() is False
+
+        release_initial.set()
+        await asyncio.wait_for(second_a_started.wait(), timeout=1)
+        await asyncio.wait_for(third_a_started.wait(), timeout=1)
+    finally:
+        release_initial.set()
+        consumer.request_stop()
+        await asyncio.wait_for(consumer_task, timeout=1)
+
+    assert await queue.status("a-1-writing") == "completed"
+    assert await queue.status("a-2-quality") == "completed"
+    assert await queue.status("a-3-rag") == "completed"
+    assert await queue.status("b-writing") == "completed"
+    assert await queue.status("c-quality") == "completed"
+
+
+@pytest.mark.asyncio
+async def test_consumer_drains_claimed_job_before_supervisor_failure() -> None:
+    queue = RedisRunQueue(fakeredis.aioredis.FakeRedis(), prefix="test:queue")
+    for index, job_id in enumerate(("bad", "slow", "third")):
+        await queue.enqueue(job(job_id, novel_id=f"novel-{index}"))
+    slow_started = asyncio.Event()
+    release_slow = asyncio.Event()
+    third_started = asyncio.Event()
+
+    async def handler(current: QueueJob) -> None:
+        if current.jobId == "bad":
+            await slow_started.wait()
+            raise TypeError("模拟并发槽程序错误")
+        if current.jobId == "slow":
+            slow_started.set()
+            await release_slow.wait()
+            return
+        third_started.set()
+
+    consumer = QueueConsumer(
+        queue,
+        {"writing": handler},
+        max_concurrency=2,
+        poll_interval=0.001,
+    )
+    consumer_task = asyncio.create_task(consumer.run())
+    await asyncio.wait_for(slow_started.wait(), timeout=1)
+    await asyncio.sleep(0.01)
+
+    assert third_started.is_set() is False
+    assert consumer_task.done() is False
+    assert consumer.is_healthy() is False
+
+    release_slow.set()
+    with pytest.raises(TypeError, match="模拟并发槽程序错误"):
+        await asyncio.wait_for(consumer_task, timeout=1)
+
+    assert await queue.status("bad") == "failed"
+    assert await queue.status("slow") == "completed"
+    assert await queue.status("third") == "queued"
+
+    restarted = asyncio.create_task(consumer.run())
+    await asyncio.wait_for(third_started.wait(), timeout=1)
+    assert consumer.is_healthy() is True
+    consumer.request_stop()
+    await asyncio.wait_for(restarted, timeout=1)
+    assert await queue.status("third") == "completed"
 
 
 @pytest.mark.asyncio
@@ -257,6 +434,43 @@ async def test_consumer_graceful_stop_does_not_cancel_active_job() -> None:
 
 
 @pytest.mark.asyncio
+async def test_parallel_consumer_stops_claiming_and_drains_active_jobs() -> None:
+    queue = RedisRunQueue(fakeredis.aioredis.FakeRedis(), prefix="test:queue")
+    job_ids = ("one", "two", "three", "four")
+    for index, job_id in enumerate(job_ids):
+        await queue.enqueue(job(job_id, novel_id=f"novel-{index}"))
+    started: set[str] = set()
+    capacity_reached = asyncio.Event()
+    release = asyncio.Event()
+
+    async def handler(current: QueueJob) -> None:
+        started.add(current.jobId)
+        if len(started) == 3:
+            capacity_reached.set()
+        await release.wait()
+
+    consumer = QueueConsumer(
+        queue,
+        {"writing": handler},
+        max_concurrency=3,
+        poll_interval=0.001,
+    )
+    task = asyncio.create_task(consumer.run())
+    await asyncio.wait_for(capacity_reached.wait(), timeout=1)
+    consumer.request_stop()
+    await asyncio.sleep(0)
+
+    assert task.done() is False
+    assert len(started) == 3
+
+    release.set()
+    await asyncio.wait_for(task, timeout=1)
+    statuses = [await queue.status(job_id) for job_id in job_ids]
+    assert statuses.count("completed") == 3
+    assert statuses.count("queued") == 1
+
+
+@pytest.mark.asyncio
 async def test_consumer_cancels_handler_when_heartbeat_infrastructure_fails() -> None:
     inner = RedisRunQueue(fakeredis.aioredis.FakeRedis(), prefix="test:queue")
     await inner.enqueue(job("heartbeat"))
@@ -322,8 +536,12 @@ async def test_consumer_treats_heartbeat_lease_loss_after_cancel_as_cancellation
     started = asyncio.Event()
     release = asyncio.Event()
     cancelled = asyncio.Event()
+    follow_up_completed = asyncio.Event()
 
     async def handler(current: QueueJob) -> None:
+        if current.jobId == "after-cancel":
+            follow_up_completed.set()
+            return
         assert current.jobId == "heartbeat-cancel"
         started.set()
         try:
@@ -349,9 +567,14 @@ async def test_consumer_treats_heartbeat_lease_loss_after_cancel_as_cancellation
     assert cancelled.is_set() is True
     assert await queue.status("heartbeat-cancel") == "cancelled"
 
+    await queue.enqueue(job("after-cancel"))
+    assert await consumer.run_once() is True
+    assert follow_up_completed.is_set() is True
+    assert await queue.status("after-cancel") == "completed"
+
 
 @pytest.mark.asyncio
-async def test_consumer_still_raises_for_non_cancelled_heartbeat_lease_loss() -> None:
+async def test_consumer_treats_non_cancelled_heartbeat_lease_loss_as_known_condition() -> None:
     queue = RedisRunQueue(
         fakeredis.aioredis.FakeRedis(),
         prefix="test:heartbeat-lease-loss",
@@ -383,8 +606,7 @@ async def test_consumer_still_raises_for_non_cancelled_heartbeat_lease_loss() ->
     )
 
     try:
-        with pytest.raises(RuntimeError, match="任务租约已失效"):
-            await asyncio.wait_for(run, timeout=1)
+        assert await asyncio.wait_for(run, timeout=1) is True
     finally:
         release.set()
 
