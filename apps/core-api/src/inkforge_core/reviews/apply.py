@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any, Literal, Protocol
 
@@ -121,7 +122,141 @@ class FormalArtifactApplier:
             beat_plan = _beat_plan_from_text(content)
         if not isinstance(beat_plan, dict):
             raise ValueError("章节计划草案结构无效")
-        return await self._formal_writes.apply_beat_plan(artifact, user_id, beat_plan)
+        normalized_beat_plan = _normalize_beat_plan(beat_plan)
+        return await self._formal_writes.apply_beat_plan(
+            artifact,
+            user_id,
+            normalized_beat_plan,
+        )
+
+
+def _normalize_beat_plan(beat_plan: dict[str, object]) -> dict[str, object]:
+    scenes = beat_plan.get("sceneBeats")
+    if not isinstance(scenes, list) or not scenes:
+        raise ValueError("章节计划场景必须是非空列表")
+
+    normalized_scenes = [
+        _normalize_scene_beat(scene, index=index)
+        for index, scene in enumerate(scenes)
+    ]
+    if all(
+        normalized is original
+        for normalized, original in zip(normalized_scenes, scenes, strict=True)
+    ):
+        return beat_plan
+
+    normalized_plan = dict(beat_plan)
+    normalized_plan["sceneBeats"] = normalized_scenes
+    return normalized_plan
+
+
+def _normalize_scene_beat(scene: object, *, index: int) -> dict[str, object]:
+    if not isinstance(scene, dict):
+        raise ValueError("章节计划场景必须是对象")
+
+    allowed_fields = {
+        "order",
+        "goal",
+        "conflict",
+        "characters",
+        "foreshadowingRefs",
+        "estimatedWords",
+        "acceptanceCriteria",
+        "sceneName",
+        "sceneGoal",
+        "foreshadowingReferences",
+    }
+    unknown_fields = set(scene) - allowed_fields
+    if unknown_fields:
+        raise ValueError(
+            f"章节计划场景包含未知字段：{'、'.join(sorted(unknown_fields))}"
+        )
+
+    normalized = dict(scene)
+    changed = False
+
+    if "goal" in scene:
+        goal = scene["goal"]
+        if not isinstance(goal, str) or not goal:
+            raise ValueError("章节计划场景 goal 必须是非空字符串")
+        if "sceneName" in scene or "sceneGoal" in scene:
+            raise ValueError("章节计划场景不能同时包含规范目标和旧目标字段")
+    else:
+        scene_name = scene.get("sceneName")
+        scene_goal = scene.get("sceneGoal")
+        if not isinstance(scene_name, str) or not scene_name.strip():
+            raise ValueError("章节计划旧场景缺少有效 sceneName")
+        if not isinstance(scene_goal, str) or not scene_goal.strip():
+            raise ValueError("章节计划场景缺少有效 goal 或 sceneGoal")
+        normalized["goal"] = f"{scene_name.strip()}：{scene_goal.strip()}"
+        normalized.pop("sceneName", None)
+        normalized.pop("sceneGoal", None)
+        changed = True
+
+    if "order" not in scene:
+        normalized["order"] = index + 1
+        changed = True
+    else:
+        order = scene["order"]
+        if type(order) is not int or order < 1:
+            raise ValueError("章节计划场景 order 必须是正整数")
+
+    characters = scene.get("characters", [])
+    if isinstance(characters, str):
+        normalized["characters"] = [
+            name.strip() for name in re.split(r"[、，,]", characters) if name.strip()
+        ]
+        changed = True
+    else:
+        normalized_characters = _normalize_string_list(
+            characters,
+            field="characters",
+        )
+        if "characters" not in scene:
+            normalized["characters"] = normalized_characters
+            changed = True
+
+    if "foreshadowingRefs" in scene:
+        if "foreshadowingReferences" in scene:
+            raise ValueError("章节计划场景不能同时包含规范伏笔和旧伏笔字段")
+        refs = scene["foreshadowingRefs"]
+        if refs is not None:
+            _normalize_string_list(refs, field="foreshadowingRefs")
+    elif "foreshadowingReferences" in scene:
+        legacy_refs = scene["foreshadowingReferences"]
+        if not isinstance(legacy_refs, str):
+            raise ValueError("章节计划旧场景 foreshadowingReferences 必须是字符串")
+        normalized["foreshadowingRefs"] = (
+            [] if legacy_refs.strip() in {"", "无"} else [legacy_refs]
+        )
+        normalized.pop("foreshadowingReferences", None)
+        changed = True
+
+    estimated_words = scene.get("estimatedWords")
+    if estimated_words is not None and (
+        type(estimated_words) is not int or estimated_words < 0
+    ):
+        raise ValueError("章节计划场景 estimatedWords 必须是非负整数")
+
+    conflict = scene.get("conflict")
+    if conflict is not None and not isinstance(conflict, str):
+        raise ValueError("章节计划场景 conflict 必须是字符串")
+
+    acceptance_criteria = scene.get("acceptanceCriteria")
+    if acceptance_criteria is not None and (
+        not isinstance(acceptance_criteria, str) or not acceptance_criteria
+    ):
+        raise ValueError("章节计划场景 acceptanceCriteria 必须是非空字符串")
+
+    return normalized if changed else scene
+
+
+def _normalize_string_list(value: object, *, field: str) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError(f"章节计划场景 {field} 必须是字符串列表")
+    if any(not isinstance(item, str) or not item for item in value):
+        raise ValueError(f"章节计划场景 {field} 只能包含非空字符串")
+    return value
 
 
 def _beat_plan_from_text(content: str) -> dict[str, object]:

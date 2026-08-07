@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -143,6 +144,7 @@ async def test_generic_decision_rejects_short_medium_versions(decision: str) -> 
 class FakeFormalWrites:
     def __init__(self) -> None:
         self.content: str | None = None
+        self.beat_plan: dict[str, object] | None = None
 
     async def apply_outline(self, artifact: object, user_id: str, content: str) -> int:
         del artifact, user_id
@@ -158,6 +160,7 @@ class FakeFormalWrites:
         self, artifact: object, user_id: str, beat_plan: dict[str, object]
     ) -> int:
         del artifact, user_id
+        self.beat_plan = beat_plan
         self.content = str(beat_plan["chapterGoal"])
         return 1
 
@@ -180,6 +183,172 @@ class FakeUpdatesExecutor:
         self.expected_outline_updated_at = expected_outline_updated_at
         self.expected_lore_updated_at = expected_lore_updated_at
         return 1
+
+
+def _beat_plan_artifact(beat_plan: dict[str, object]) -> Artifact:
+    artifact = Artifact(kind="beat_plan", payload={"kind": "beat_plan", "beatPlan": beat_plan})
+    artifact.novel_id = "novel-1"
+    artifact.chapter_id = "chapter-1"
+    return artifact
+
+
+@pytest.mark.asyncio
+async def test_formal_applier_normalizes_production_legacy_scene_fields() -> None:
+    beat_plan: dict[str, object] = {
+        "title": "第一章计划",
+        "chapterGoal": "纪寻潜入栾城。",
+        "totalEstimatedWords": 2300,
+        "sceneBeats": [
+            {
+                "sceneName": "  城门试探  ",
+                "sceneGoal": "  混入入城队伍  ",
+                "conflict": "守卫临时加验路引。",
+                "characters": "纪寻、栾城守卫，商队领队",
+                "foreshadowingReferences": "破损路引上的旧印与第三章失窃案呼应。",
+                "estimatedWords": 1000,
+                "acceptanceCriteria": "纪寻成功入城但留下疑点。",
+            },
+            {
+                "sceneName": "暗巷接头",
+                "sceneGoal": "取得内城地图",
+                "conflict": "接头人被跟踪。",
+                "characters": "纪寻, 线人",
+                "foreshadowingReferences": "无",
+                "estimatedWords": 1300,
+                "acceptanceCriteria": "地图到手并暴露新的追兵。",
+            },
+            {
+                "sceneName": "城内落脚",
+                "sceneGoal": "避开搜查",
+                "conflict": "客栈掌柜盘问来历。",
+                "foreshadowingReferences": "",
+                "estimatedWords": 500,
+                "acceptanceCriteria": "纪寻取得临时藏身处。",
+            },
+        ],
+    }
+    original = deepcopy(beat_plan)
+    writes = FakeFormalWrites()
+
+    await FormalArtifactApplier(writes, FakeUpdatesExecutor()).apply(
+        _beat_plan_artifact(beat_plan),
+        user_id="user-1",
+        edited_content=None,
+        selected_update_refs=None,
+    )
+
+    assert writes.beat_plan == {
+        "title": "第一章计划",
+        "chapterGoal": "纪寻潜入栾城。",
+        "totalEstimatedWords": 2300,
+        "sceneBeats": [
+            {
+                "order": 1,
+                "goal": "城门试探：混入入城队伍",
+                "conflict": "守卫临时加验路引。",
+                "characters": ["纪寻", "栾城守卫", "商队领队"],
+                "foreshadowingRefs": ["破损路引上的旧印与第三章失窃案呼应。"],
+                "estimatedWords": 1000,
+                "acceptanceCriteria": "纪寻成功入城但留下疑点。",
+            },
+            {
+                "order": 2,
+                "goal": "暗巷接头：取得内城地图",
+                "conflict": "接头人被跟踪。",
+                "characters": ["纪寻", "线人"],
+                "foreshadowingRefs": [],
+                "estimatedWords": 1300,
+                "acceptanceCriteria": "地图到手并暴露新的追兵。",
+            },
+            {
+                "order": 3,
+                "goal": "城内落脚：避开搜查",
+                "conflict": "客栈掌柜盘问来历。",
+                "characters": [],
+                "foreshadowingRefs": [],
+                "estimatedWords": 500,
+                "acceptanceCriteria": "纪寻取得临时藏身处。",
+            },
+        ],
+    }
+    assert beat_plan == original
+
+
+@pytest.mark.asyncio
+async def test_formal_applier_preserves_canonical_beat_plan_values() -> None:
+    beat_plan: dict[str, object] = {
+        "title": "规范计划",
+        "chapterGoal": "推进主线。",
+        "sceneBeats": [
+            {
+                "order": 3,
+                "goal": "  保留目标两侧空格  ",
+                "conflict": "  保留冲突两侧空格  ",
+                "characters": ["  纪寻  "],
+                "foreshadowingRefs": ["  原始伏笔引用  "],
+                "estimatedWords": 0,
+                "acceptanceCriteria": "  保留验收标准两侧空格  ",
+            }
+        ],
+    }
+    writes = FakeFormalWrites()
+
+    await FormalArtifactApplier(writes, FakeUpdatesExecutor()).apply(
+        _beat_plan_artifact(beat_plan),
+        user_id="user-1",
+        edited_content=None,
+        selected_update_refs=None,
+    )
+
+    assert writes.beat_plan == beat_plan
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "scene_beats",
+    [
+        pytest.param([], id="empty-scenes"),
+        pytest.param("not-a-list", id="scenes-not-list"),
+        pytest.param(["not-a-scene"], id="scene-not-object"),
+        pytest.param([{"sceneName": "只有名称"}], id="missing-goal"),
+        pytest.param([{"goal": "目标", "characters": ["纪寻", 1]}], id="bad-character"),
+        pytest.param([{"goal": "目标", "characters": [""]}], id="empty-character"),
+        pytest.param([{"goal": "目标", "foreshadowingRefs": [1]}], id="bad-ref"),
+        pytest.param([{"goal": "目标", "foreshadowingRefs": [""]}], id="empty-ref"),
+        pytest.param([{"goal": "目标", "order": True}], id="bool-order"),
+        pytest.param([{"goal": "目标", "order": -1}], id="negative-order"),
+        pytest.param([{"goal": "目标", "estimatedWords": False}], id="bool-words"),
+        pytest.param([{"goal": "目标", "estimatedWords": -1}], id="negative-words"),
+        pytest.param([{"goal": "目标", "conflict": []}], id="bad-conflict"),
+        pytest.param(
+            [{"goal": "目标", "acceptanceCriteria": []}],
+            id="bad-acceptance-criteria",
+        ),
+        pytest.param(
+            [
+                {
+                    "sceneName": "场景",
+                    "sceneGoal": "目标",
+                    "foreshadowingReferences": [],
+                }
+            ],
+            id="bad-legacy-ref",
+        ),
+    ],
+)
+async def test_formal_applier_rejects_malformed_scene_beats(scene_beats: object) -> None:
+    beat_plan: dict[str, object] = {
+        "chapterGoal": "推进主线。",
+        "sceneBeats": scene_beats,
+    }
+
+    with pytest.raises(ValueError):
+        await FormalArtifactApplier(FakeFormalWrites(), FakeUpdatesExecutor()).apply(
+            _beat_plan_artifact(beat_plan),
+            user_id="user-1",
+            edited_content=None,
+            selected_update_refs=None,
+        )
 
 
 @pytest.mark.asyncio
