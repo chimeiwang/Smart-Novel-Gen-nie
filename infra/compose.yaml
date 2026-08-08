@@ -149,6 +149,7 @@ services:
     tmpfs:
       - /tmp:size=64m,mode=1777
     networks:
+      - public_net
       - agent_net
     depends_on:
       redis:

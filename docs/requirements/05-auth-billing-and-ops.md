@@ -116,7 +116,7 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 
 网络边界：
 
-- `public_net`：Nginx、Web、Core；
+- `public_net`：Nginx、Web、Core、Agent；Agent 不发布宿主机端口，仅使用该网络访问模型供应商；
 - `agent_net`：Core、Agent、Redis；
 - `data_net`：Core、Redis；Core 通过 Docker host gateway 访问宿主机 PostgreSQL；
 - Agent 不得加入 `data_net`。
