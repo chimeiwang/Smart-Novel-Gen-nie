@@ -109,6 +109,7 @@ long.task.watch
 long.artifact.list
 long.artifact.get
 long.quality.get
+long.chapter.create
 long.chapter.save
 long.chapter.status
 long.chapter.progress.save

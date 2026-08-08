@@ -57,6 +57,15 @@ def _chapter_content(payload: JsonObject) -> str:
     return read_utf8_text_exact(content_file)
 
 
+def create(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
+    novel_id = _require_string(payload, "novelId")
+    response = runtime.require_api().request(
+        "POST",
+        f"/api/v1/novels/{quote(novel_id, safe='')}/chapters",
+    )
+    return ensure_command_json_result(response)
+
+
 def save(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
     response = runtime.require_api().request(
         "PATCH",
@@ -109,6 +118,16 @@ def save_progress(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
 _NO_FILE = FileOutputSpec(kind="none")
 
 CHAPTER_COMMAND_SPECS: tuple[CommandSpec, ...] = (
+    CommandSpec(
+        name="long.chapter.create",
+        handler=create,
+        inputMode="json",
+        outputMode="json",
+        fileOutput=_NO_FILE,
+        mutation=True,
+        requiresIdentity=True,
+        requiresClientRequestId=False,
+    ),
     CommandSpec(
         name="long.chapter.save",
         handler=save,

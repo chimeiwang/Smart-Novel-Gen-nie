@@ -36,6 +36,7 @@ EXPECTED_COMMANDS = {
     "long.novel.get",
     "long.chapter.list",
     "long.chapter.get",
+    "long.chapter.create",
     "long.chapter.save",
     "long.chapter.status",
     "long.chapter.progress.save",
@@ -97,6 +98,7 @@ EXPECTED_COMMANDS = {
 }
 
 EXPECTED_LONG_MUTATIONS = {
+    "long.chapter.create",
     "long.chapter.save",
     "long.chapter.status",
     "long.chapter.progress.save",
@@ -145,6 +147,7 @@ EXPECTED_LONG_MUTATIONS = {
 }
 
 EXPECTED_STRUCTURED_WRITES = EXPECTED_LONG_MUTATIONS - {
+    "long.chapter.create",
     "long.chapter.save",
     "long.chapter.status",
     "long.chapter.progress.save",
@@ -226,11 +229,11 @@ def test_long_mutation_and_watcher_capabilities_are_exact() -> None:
 def test_structured_mutation_capabilities_are_exact() -> None:
     registry = get_command_registry()
 
-    assert len(registry) == 78
+    assert len(registry) == 79
     assert sum(
         name.startswith("long.") and spec.mutation
         for name, spec in registry.items()
-    ) == 45
+    ) == 46
     assert {
         name for name in EXPECTED_STRUCTURED_WRITES if name in registry
     } == EXPECTED_STRUCTURED_WRITES

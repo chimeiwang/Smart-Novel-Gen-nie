@@ -51,10 +51,11 @@ def _runtime(spec: Any, api: RecordingApi) -> CliRuntime:
     )
 
 
-def test_chapter_command_specs_are_cas_mutations_without_request_ids() -> None:
+def test_chapter_command_specs_are_mutations_without_request_ids() -> None:
     specs = _module().CHAPTER_COMMAND_SPECS
 
     assert {spec.name for spec in specs} == {
+        "long.chapter.create",
         "long.chapter.save",
         "long.chapter.status",
         "long.chapter.progress.save",
@@ -62,6 +63,37 @@ def test_chapter_command_specs_are_cas_mutations_without_request_ids() -> None:
     assert all(spec.mutation and spec.requiresIdentity for spec in specs)
     assert all(not spec.requiresClientRequestId for spec in specs)
     assert all(spec.fileOutput.kind == "none" for spec in specs)
+
+
+def test_chapter_create_sends_exact_public_route_without_request_body() -> None:
+    module = _module()
+    spec = _spec(module, "long.chapter.create")
+    api = RecordingApi()
+
+    result = spec.handler(
+        _runtime(spec, api),
+        {"novelId": "novel /?#", "profile": "production"},
+    )
+
+    assert result == {"updatedAt": "2026-08-06T00:00:01Z"}
+    assert api.calls == [("POST", "/api/v1/novels/novel%20%2F%3F%23/chapters", {})]
+
+
+@pytest.mark.parametrize("novel_id", [None, "", 1, True])
+def test_chapter_create_rejects_missing_or_invalid_novel_id(
+    novel_id: object,
+) -> None:
+    module = _module()
+    spec = _spec(module, "long.chapter.create")
+    api = RecordingApi()
+    payload: dict[str, object] = {}
+    if novel_id is not None:
+        payload["novelId"] = novel_id
+
+    with pytest.raises(CliInputError, match="novelId"):
+        spec.handler(_runtime(spec, api), payload)
+
+    assert api.calls == []
 
 
 @pytest.mark.parametrize(
