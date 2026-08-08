@@ -139,12 +139,6 @@ def _normalize_beat_plan(beat_plan: dict[str, object]) -> dict[str, object]:
         _normalize_scene_beat(scene, index=index)
         for index, scene in enumerate(scenes)
     ]
-    if all(
-        normalized is original
-        for normalized, original in zip(normalized_scenes, scenes, strict=True)
-    ):
-        return beat_plan
-
     normalized_plan = dict(beat_plan)
     normalized_plan["sceneBeats"] = normalized_scenes
     return normalized_plan
@@ -173,14 +167,14 @@ def _normalize_scene_beat(scene: object, *, index: int) -> dict[str, object]:
         )
 
     normalized = dict(scene)
-    changed = False
-
     if "goal" in scene:
         goal = scene["goal"]
         if not isinstance(goal, str) or not goal:
             raise ValueError("章节计划场景 goal 必须是非空字符串")
         if "sceneName" in scene or "sceneGoal" in scene:
-            raise ValueError("章节计划场景不能同时包含规范目标和旧目标字段")
+            raise ValueError(
+                "章节计划场景不能同时包含 goal 与 sceneName/sceneGoal"
+            )
     else:
         scene_name = scene.get("sceneName")
         scene_goal = scene.get("sceneGoal")
@@ -191,11 +185,9 @@ def _normalize_scene_beat(scene: object, *, index: int) -> dict[str, object]:
         normalized["goal"] = f"{scene_name.strip()}：{scene_goal.strip()}"
         normalized.pop("sceneName", None)
         normalized.pop("sceneGoal", None)
-        changed = True
 
     if "order" not in scene:
         normalized["order"] = index + 1
-        changed = True
     else:
         order = scene["order"]
         if type(order) is not int or order < 1:
@@ -206,7 +198,6 @@ def _normalize_scene_beat(scene: object, *, index: int) -> dict[str, object]:
         normalized["characters"] = [
             name.strip() for name in re.split(r"[、，,]", characters) if name.strip()
         ]
-        changed = True
     else:
         normalized_characters = _normalize_string_list(
             characters,
@@ -214,11 +205,13 @@ def _normalize_scene_beat(scene: object, *, index: int) -> dict[str, object]:
         )
         if "characters" not in scene:
             normalized["characters"] = normalized_characters
-            changed = True
 
     if "foreshadowingRefs" in scene:
         if "foreshadowingReferences" in scene:
-            raise ValueError("章节计划场景不能同时包含规范伏笔和旧伏笔字段")
+            raise ValueError(
+                "章节计划场景不能同时包含 foreshadowingRefs "
+                "与 foreshadowingReferences"
+            )
         refs = scene["foreshadowingRefs"]
         if refs is not None:
             _normalize_string_list(refs, field="foreshadowingRefs")
@@ -228,7 +221,6 @@ def _normalize_scene_beat(scene: object, *, index: int) -> dict[str, object]:
             raise ValueError("章节计划旧场景 foreshadowingReferences 必须是字符串")
         normalized["foreshadowingRefs"] = [] if not legacy_refs.strip() else [legacy_refs]
         normalized.pop("foreshadowingReferences", None)
-        changed = True
 
     estimated_words = scene.get("estimatedWords")
     if estimated_words is not None and (
@@ -246,7 +238,7 @@ def _normalize_scene_beat(scene: object, *, index: int) -> dict[str, object]:
     ):
         raise ValueError("章节计划场景 acceptanceCriteria 必须是非空字符串")
 
-    return normalized if changed else scene
+    return normalized
 
 
 def _normalize_string_list(value: object, *, field: str) -> list[str]:

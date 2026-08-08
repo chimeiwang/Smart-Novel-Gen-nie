@@ -97,6 +97,7 @@ async def test_apply_failure_returns_artifact_to_awaiting_user() -> None:
         await service.decide("user-1", "artifact-1", "approve", expected_revision=1)
 
     assert error.value.status_code == 409
+    assert error.value.code == "ARTIFACT_APPLY_FAILED"
     assert repository.transitions[-1] == ("applying", "awaiting_user")
 
 
@@ -143,16 +144,19 @@ async def test_generic_decision_rejects_short_medium_versions(decision: str) -> 
 
 class FakeFormalWrites:
     def __init__(self) -> None:
+        self.calls = 0
         self.content: str | None = None
         self.beat_plan: dict[str, object] | None = None
 
     async def apply_outline(self, artifact: object, user_id: str, content: str) -> int:
         del artifact, user_id
+        self.calls += 1
         self.content = content
         return 1
 
     async def apply_chapter(self, artifact: object, user_id: str, content: str) -> int:
         del artifact, user_id
+        self.calls += 1
         self.content = content
         return 1
 
@@ -160,6 +164,7 @@ class FakeFormalWrites:
         self, artifact: object, user_id: str, beat_plan: dict[str, object]
     ) -> int:
         del artifact, user_id
+        self.calls += 1
         self.beat_plan = beat_plan
         self.content = str(beat_plan["chapterGoal"])
         return 1
@@ -200,6 +205,7 @@ async def test_formal_applier_normalizes_production_legacy_scene_fields() -> Non
         "totalEstimatedWords": 2300,
         "sceneBeats": [
             {
+                "order": 7,
                 "sceneName": "  城门试探  ",
                 "sceneGoal": "  混入入城队伍  ",
                 "conflict": "守卫临时加验路引。",
@@ -243,7 +249,7 @@ async def test_formal_applier_normalizes_production_legacy_scene_fields() -> Non
         "totalEstimatedWords": 2300,
         "sceneBeats": [
             {
-                "order": 1,
+                "order": 7,
                 "goal": "城门试探：混入入城队伍",
                 "conflict": "守卫临时加验路引。",
                 "characters": ["纪寻", "栾城守卫", "商队领队"],
@@ -291,6 +297,7 @@ async def test_formal_applier_preserves_canonical_beat_plan_values() -> None:
             }
         ],
     }
+    original = deepcopy(beat_plan)
     writes = FakeFormalWrites()
 
     await FormalArtifactApplier(writes, FakeUpdatesExecutor()).apply(
@@ -300,7 +307,16 @@ async def test_formal_applier_preserves_canonical_beat_plan_values() -> None:
         selected_update_refs=None,
     )
 
-    assert writes.beat_plan == beat_plan
+    assert beat_plan == original
+    assert writes.beat_plan == original
+    assert writes.beat_plan is not beat_plan
+    assert writes.beat_plan is not None
+    written_scenes = writes.beat_plan["sceneBeats"]
+    input_scenes = beat_plan["sceneBeats"]
+    assert isinstance(written_scenes, list)
+    assert isinstance(input_scenes, list)
+    assert written_scenes is not input_scenes
+    assert written_scenes[0] is not input_scenes[0]
 
 
 @pytest.mark.asyncio
@@ -349,6 +365,82 @@ async def test_formal_applier_rejects_malformed_scene_beats(scene_beats: object)
             edited_content=None,
             selected_update_refs=None,
         )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("scene_beats", "message"),
+    [
+        pytest.param(
+            [{"goal": "目标", "unexpectedField": "意外值"}],
+            "章节计划场景包含未知字段：unexpectedField",
+            id="unknown-field",
+        ),
+        pytest.param(
+            [{"goal": "规范目标", "sceneName": "旧名称", "sceneGoal": "旧目标"}],
+            "章节计划场景不能同时包含 goal 与 sceneName/sceneGoal",
+            id="canonical-and-legacy-goal",
+        ),
+        pytest.param(
+            [
+                {
+                    "goal": "目标",
+                    "foreshadowingRefs": ["规范伏笔"],
+                    "foreshadowingReferences": "旧伏笔",
+                }
+            ],
+            (
+                "章节计划场景不能同时包含 foreshadowingRefs "
+                "与 foreshadowingReferences"
+            ),
+            id="canonical-and-legacy-foreshadowing",
+        ),
+    ],
+)
+async def test_formal_applier_rejects_malformed_scene_beats_with_clear_message(
+    scene_beats: object,
+    message: str,
+) -> None:
+    beat_plan: dict[str, object] = {
+        "chapterGoal": "推进主线。",
+        "sceneBeats": scene_beats,
+    }
+
+    with pytest.raises(ValueError, match=f"^{message}$"):
+        await FormalArtifactApplier(FakeFormalWrites(), FakeUpdatesExecutor()).apply(
+            _beat_plan_artifact(beat_plan),
+            user_id="user-1",
+            edited_content=None,
+            selected_update_refs=None,
+        )
+
+
+@pytest.mark.asyncio
+async def test_invalid_beat_plan_rolls_back_without_calling_formal_writes() -> None:
+    writes = FakeFormalWrites()
+    repository = FakeReviewRepository(
+        _beat_plan_artifact(
+            {
+                "chapterGoal": "推进主线。",
+                "sceneBeats": [],
+            }
+        )
+    )
+    service = ReviewService(
+        repository,
+        FormalArtifactApplier(writes, FakeUpdatesExecutor()),
+    )
+
+    with pytest.raises(ApiError) as error:
+        await service.decide("user-1", "artifact-1", "approve", expected_revision=1)
+
+    assert error.value.code == "ARTIFACT_APPLY_FAILED"
+    assert repository.transitions == [
+        ("awaiting_user", "applying"),
+        ("applying", "awaiting_user"),
+    ]
+    assert repository.artifact.status == "awaiting_user"
+    assert writes.calls == 0
 
 
 @pytest.mark.asyncio
