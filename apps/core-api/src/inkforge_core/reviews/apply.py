@@ -131,6 +131,28 @@ class FormalArtifactApplier:
 
 
 def _normalize_beat_plan(beat_plan: dict[str, object]) -> dict[str, object]:
+    chapter_goal = beat_plan.get("chapterGoal")
+    if not isinstance(chapter_goal, str) or not chapter_goal:
+        raise ValueError("章节计划 chapterGoal 必须是非空字符串")
+
+    main_plot_connection = beat_plan.get("mainPlotConnection")
+    if main_plot_connection is not None and not isinstance(
+        main_plot_connection, str
+    ):
+        raise ValueError("章节计划 mainPlotConnection 必须是字符串")
+
+    chapter_acceptance_criteria = beat_plan.get("chapterAcceptanceCriteria")
+    if chapter_acceptance_criteria is not None and not isinstance(
+        chapter_acceptance_criteria, str
+    ):
+        raise ValueError("章节计划 chapterAcceptanceCriteria 必须是字符串")
+
+    total_estimated_words = beat_plan.get("totalEstimatedWords")
+    if total_estimated_words is not None and (
+        type(total_estimated_words) is not int or total_estimated_words < 0
+    ):
+        raise ValueError("章节计划 totalEstimatedWords 必须是非负整数")
+
     scenes = beat_plan.get("sceneBeats")
     if not isinstance(scenes, list) or not scenes:
         raise ValueError("章节计划场景必须是非空列表")
@@ -203,8 +225,7 @@ def _normalize_scene_beat(scene: object, *, index: int) -> dict[str, object]:
             characters,
             field="characters",
         )
-        if "characters" not in scene:
-            normalized["characters"] = normalized_characters
+        normalized["characters"] = normalized_characters
 
     if "foreshadowingRefs" in scene:
         if "foreshadowingReferences" in scene:
@@ -214,7 +235,10 @@ def _normalize_scene_beat(scene: object, *, index: int) -> dict[str, object]:
             )
         refs = scene["foreshadowingRefs"]
         if refs is not None:
-            _normalize_string_list(refs, field="foreshadowingRefs")
+            normalized["foreshadowingRefs"] = _normalize_string_list(
+                refs,
+                field="foreshadowingRefs",
+            )
     elif "foreshadowingReferences" in scene:
         legacy_refs = scene["foreshadowingReferences"]
         if not isinstance(legacy_refs, str):
@@ -246,7 +270,7 @@ def _normalize_string_list(value: object, *, field: str) -> list[str]:
         raise ValueError(f"章节计划场景 {field} 必须是字符串列表")
     if any(not isinstance(item, str) or not item for item in value):
         raise ValueError(f"章节计划场景 {field} 只能包含非空字符串")
-    return value
+    return list(value)
 
 
 def _beat_plan_from_text(content: str) -> dict[str, object]:

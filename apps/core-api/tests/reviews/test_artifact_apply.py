@@ -317,6 +317,76 @@ async def test_formal_applier_preserves_canonical_beat_plan_values() -> None:
     assert isinstance(input_scenes, list)
     assert written_scenes is not input_scenes
     assert written_scenes[0] is not input_scenes[0]
+    written_scene = written_scenes[0]
+    input_scene = input_scenes[0]
+    assert isinstance(written_scene, dict)
+    assert isinstance(input_scene, dict)
+    assert written_scene["characters"] is not input_scene["characters"]
+    assert written_scene["foreshadowingRefs"] is not input_scene["foreshadowingRefs"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("invalid_fields", "message"),
+    [
+        pytest.param(
+            {},
+            "章节计划 chapterGoal 必须是非空字符串",
+            id="missing-chapter-goal",
+        ),
+        pytest.param(
+            {"chapterGoal": ""},
+            "章节计划 chapterGoal 必须是非空字符串",
+            id="empty-chapter-goal",
+        ),
+        pytest.param(
+            {"chapterGoal": 1},
+            "章节计划 chapterGoal 必须是非空字符串",
+            id="non-string-chapter-goal",
+        ),
+        pytest.param(
+            {"chapterGoal": "推进主线。", "mainPlotConnection": []},
+            "章节计划 mainPlotConnection 必须是字符串",
+            id="non-string-main-plot-connection",
+        ),
+        pytest.param(
+            {"chapterGoal": "推进主线。", "chapterAcceptanceCriteria": []},
+            "章节计划 chapterAcceptanceCriteria 必须是字符串",
+            id="non-string-chapter-acceptance-criteria",
+        ),
+        pytest.param(
+            {"chapterGoal": "推进主线。", "totalEstimatedWords": True},
+            "章节计划 totalEstimatedWords 必须是非负整数",
+            id="bool-total-estimated-words",
+        ),
+        pytest.param(
+            {"chapterGoal": "推进主线。", "totalEstimatedWords": -1},
+            "章节计划 totalEstimatedWords 必须是非负整数",
+            id="negative-total-estimated-words",
+        ),
+        pytest.param(
+            {"chapterGoal": "推进主线。", "totalEstimatedWords": "1000"},
+            "章节计划 totalEstimatedWords 必须是非负整数",
+            id="string-total-estimated-words",
+        ),
+    ],
+)
+async def test_formal_applier_rejects_invalid_canonical_beat_plan_fields(
+    invalid_fields: dict[str, object],
+    message: str,
+) -> None:
+    beat_plan: dict[str, object] = {
+        "sceneBeats": [{"goal": "目标"}],
+        **invalid_fields,
+    }
+
+    with pytest.raises(ValueError, match=f"^{message}$"):
+        await FormalArtifactApplier(FakeFormalWrites(), FakeUpdatesExecutor()).apply(
+            _beat_plan_artifact(beat_plan),
+            user_id="user-1",
+            edited_content=None,
+            selected_update_refs=None,
+        )
 
 
 @pytest.mark.asyncio
