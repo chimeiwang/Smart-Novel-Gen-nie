@@ -291,7 +291,7 @@ def test_request_rejects_agent_context_mismatch_and_unknown_fields() -> None:
             "primary",
             "write_chapter",
             "begin_artifact_output",
-            {"kind": "chapter_draft", "summary": "正文草案"},
+            {"kind": "chapter_draft", "summary": "正文草案", "content": "草案正文"},
         ),
         (
             "校验",
@@ -305,7 +305,7 @@ def test_request_rejects_agent_context_mismatch_and_unknown_fields() -> None:
             "reviser",
             "write_chapter",
             "begin_artifact_output",
-            {"kind": "chapter_draft", "summary": "返工正文"},
+            {"kind": "chapter_draft", "summary": "返工正文", "content": "返工正文"},
         ),
         (
             QUALITY_AGENT_ID,

@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import pytest
-from inkforge_agents.tools.control import BeatPlanArgs, QualityReportArgs
+from inkforge_agents.tools.control import (
+    BeatPlanArgs,
+    BeginArtifactArgs,
+    QualityReportArgs,
+)
 from inkforge_contracts import ConsistencyQualityReport
 from pydantic import ValidationError
 
@@ -9,6 +13,33 @@ from pydantic import ValidationError
 def test_quality_tool_reuses_shared_report_contract() -> None:
     assert issubclass(QualityReportArgs, ConsistencyQualityReport)
     assert QualityReportArgs.model_fields.keys() == ConsistencyQualityReport.model_fields.keys()
+
+
+def test_begin_artifact_requires_complete_content_in_tool_arguments() -> None:
+    artifact = BeginArtifactArgs.model_validate(
+        {
+            "kind": "chapter_draft",
+            "summary": "正文草案",
+            "content": "完整章节正文",
+        }
+    )
+
+    assert artifact.content == "完整章节正文"
+    assert "content" in BeginArtifactArgs.model_json_schema()["required"]
+
+
+@pytest.mark.parametrize("content", ["", " \r\n\t"])
+def test_begin_artifact_rejects_empty_or_whitespace_content(content: str) -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        BeginArtifactArgs.model_validate(
+            {
+                "kind": "chapter_draft",
+                "summary": "正文草案",
+                "content": content,
+            }
+        )
+
+    assert exc_info.value.errors()[0]["loc"] == ("content",)
 
 
 def _valid_beat_plan_payload() -> dict[str, object]:

@@ -92,8 +92,9 @@ async def test_fake_provider_creates_valid_chapter_artifact_call() -> None:
 
     assert result.toolCalls[0].name == "begin_artifact_output"
     assert result.toolCalls[0].arguments["kind"] == "chapter_draft"
-    assert "ARTIFACT_OUTPUT_START" in result.content
-    assert "ARTIFACT_OUTPUT_END" in result.content
+    assert result.toolCalls[0].arguments["content"] == (
+        "这是模拟模型生成的完整章节正文，用于验证待审核草案流程。"
+    )
 
 
 @pytest.mark.asyncio

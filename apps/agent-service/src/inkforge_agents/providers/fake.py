@@ -44,12 +44,6 @@ def _build_response(request: ModelTurnRequest) -> tuple[str, list[ModelToolCall]
     if name is None:
         name = request.tools[0].name
         arguments = {}
-    if name == "begin_artifact_output":
-        content = (
-            "ARTIFACT_OUTPUT_START\n"
-            "这是模拟模型生成的完整章节正文，用于验证待审核草案流程。\n"
-            "ARTIFACT_OUTPUT_END"
-        )
     return content, [
         ModelToolCall(
             id="fake-tool-call-1",
@@ -97,6 +91,7 @@ def _select_tool(
             {
                 "kind": "chapter_draft",
                 "summary": "模拟章节正文草案。",
+                "content": "这是模拟模型生成的完整章节正文，用于验证待审核草案流程。",
                 "artifactKey": "fake-chapter-draft",
                 "submitForReview": True,
             },

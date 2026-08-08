@@ -41,6 +41,32 @@ def test_text_submission_extracts_complete_content_and_generates_exact_stable_ke
     assert stable_artifact_key("task-1", "rewrite_scene") != expected
 
 
+def test_text_submission_uses_tool_content_without_visible_markers() -> None:
+    result = validate_artifact_submission(
+        definition=OPERATION_DEFINITIONS["write_chapter"],
+        events=[text_event(content="完整正文\n保留原始换行")],
+        visible_content="正文已经写完，提交审核。",
+        authoritative_artifact=None,
+        task_id="task-1",
+        operation_kind="write_chapter",
+    )
+
+    assert result.content == "完整正文\n保留原始换行"
+
+
+@pytest.mark.parametrize("content", [None, 1, "", " \r\n\t"])
+def test_text_submission_rejects_invalid_present_tool_content(content: object) -> None:
+    with pytest.raises(ValueError, match="ARTIFACT_CONTRACT_MISMATCH"):
+        validate_artifact_submission(
+            definition=OPERATION_DEFINITIONS["write_chapter"],
+            events=[text_event(content=content)],
+            visible_content="ARTIFACT_OUTPUT_START\n旧兼容正文\nARTIFACT_OUTPUT_END",
+            authoritative_artifact=None,
+            task_id="task-1",
+            operation_kind="write_chapter",
+        )
+
+
 @pytest.mark.parametrize(
     "events",
     [

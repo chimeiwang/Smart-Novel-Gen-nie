@@ -100,8 +100,8 @@ def test_chapter_brief_contains_complete_text_artifact_protocol() -> None:
         brief = build_execution_brief("primary", operation)  # type: ignore[arg-type]
 
         assert "begin_artifact_output" in brief
-        assert "ARTIFACT_OUTPUT_START" in brief
-        assert "ARTIFACT_OUTPUT_END" in brief
+        assert "content 参数" in brief
+        assert "不得省略、概述或截断" in brief
         assert "完整正文" in brief
 
 

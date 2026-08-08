@@ -124,8 +124,8 @@ def _operation_protocol(
     lines = [f"完成任务时必须且只能从以下终止工具中调用一个：{tools}。"]
     if operation.kind in {"write_chapter", "rewrite_scene"}:
         lines.append(
-            "调用 begin_artifact_output，并把完整正文放在 "
-            "ARTIFACT_OUTPUT_START 与 ARTIFACT_OUTPUT_END 之间；标记内只放正文。"
+            "调用 begin_artifact_output，并把完整正文直接放入 content 参数；"
+            "content 只放正文，不得省略、概述或截断。"
         )
     elif operation.kind == "plan_chapter":
         lines.append(

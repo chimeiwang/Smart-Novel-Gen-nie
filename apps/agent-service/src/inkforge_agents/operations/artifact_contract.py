@@ -114,12 +114,20 @@ def validate_artifact_submission(
     event_type = event.get("type")
     if event_type == "begin_artifact_output":
         actual_kind = event.get("kind")
-        try:
-            content = extract_artifact_content(visible_content)
-        except ValueError as exc:
-            raise ValueError(
-                f"ARTIFACT_CONTRACT_MISMATCH：长文本草案边界无效：{exc}"
-            ) from exc
+        if "content" in event:
+            raw_content = event["content"]
+            if not isinstance(raw_content, str) or not raw_content.strip():
+                raise ValueError(
+                    "ARTIFACT_CONTRACT_MISMATCH：长文本草案 content 必须是非空字符串"
+                )
+            content = raw_content
+        else:
+            try:
+                content = extract_artifact_content(visible_content)
+            except ValueError as exc:
+                raise ValueError(
+                    f"ARTIFACT_CONTRACT_MISMATCH：长文本草案边界无效：{exc}"
+                ) from exc
     elif event_type == "submit_beat_plan":
         actual_kind = "beat_plan"
         event["kind"] = actual_kind

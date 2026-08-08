@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal, Self
 
 from inkforge_contracts import ConsistencyQualityReport
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
 
 from .permissions import control_permission
 from .registry import ToolDefinition
@@ -97,9 +97,17 @@ class BeginArtifactArgs(StrictArgs):
         "freeform_markdown",
     ]
     summary: str = Field(min_length=1, max_length=1000)
+    content: str = Field(min_length=1)
     artifactKey: str | None = Field(default=None, min_length=1, max_length=200)
     reviewerAgent: AgentId | None = None
     submitForReview: bool | None = None
+
+    @field_validator("content")
+    @classmethod
+    def require_non_whitespace_content(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("content 必须包含完整的非空草案正文")
+        return value
 
 
 class ShowArtifactArgs(StrictArgs):
