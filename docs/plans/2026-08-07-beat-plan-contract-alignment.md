@@ -24,7 +24,7 @@
 - Modify: `apps/agent-service/tests/tools/test_control.py`
 - Modify: `apps/agent-service/src/inkforge_agents/tools/control.py`
 
-- [ ] **Step 1: 写 Agent 失败测试**
+- [x] **Step 1: 写 Agent 失败测试**
 
 在 `test_control.py` 增加测试，要求规范场景能精确序列化，旧字段和字符串角色被拒绝，顶层必填字段缺失被拒绝，`beatCount` 与场景数量不一致被拒绝：
 
@@ -76,7 +76,7 @@ def test_beat_plan_args_rejects_unapplicable_contract(change: dict[str, object])
         BeatPlanArgs.model_validate(payload)
 ```
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
 Run:
 
@@ -86,7 +86,7 @@ uv run pytest apps/agent-service/tests/tools/test_control.py -q
 
 Expected: 新测试失败；旧形态仍被宽松 `sceneBeats` 接受，且顶层字段仍可为空。
 
-- [ ] **Step 3: 实现最小严格模型**
+- [x] **Step 3: 实现最小严格模型**
 
 在 `control.py` 中加入并应用以下模型：
 
@@ -126,7 +126,7 @@ class BeatPlanArgs(StrictArgs):
         return self
 ```
 
-- [ ] **Step 4: 运行 Agent 测试并确认 GREEN**
+- [x] **Step 4: 运行 Agent 测试并确认 GREEN**
 
 Run:
 
@@ -142,7 +142,7 @@ Expected: 全部通过。
 - Modify: `apps/core-api/tests/reviews/test_artifact_apply.py`
 - Modify: `apps/core-api/src/inkforge_core/reviews/apply.py`
 
-- [ ] **Step 1: 扩展测试替身并写 Core 失败测试**
+- [x] **Step 1: 扩展测试替身并写 Core 失败测试**
 
 让 `FakeFormalWrites` 保存完整 `beat_plan`，再加入 revision 4 精确形态测试：
 
@@ -212,7 +212,7 @@ async def test_formal_applier_normalizes_current_legacy_beat_plan() -> None:
 
 再增加一个规范场景测试，断言输入与传给正式写入端口的对象相等。
 
-- [ ] **Step 2: 运行测试并确认 RED**
+- [x] **Step 2: 运行测试并确认 RED**
 
 Run:
 
@@ -222,7 +222,7 @@ uv run pytest apps/core-api/tests/reviews/test_artifact_apply.py -q
 
 Expected: 旧场景仍原样传递，断言失败。
 
-- [ ] **Step 3: 实现有限归一化**
+- [x] **Step 3: 实现有限归一化**
 
 在 `apply.py` 中引入 `re`，增加 `_normalize_beat_plan()`、`_normalize_scene_beat()`、
 `_normalize_string_list()`，只接受规范字段与规格列出的旧字段：
@@ -326,7 +326,7 @@ return await self._formal_writes.apply_beat_plan(
 )
 ```
 
-- [ ] **Step 4: 运行 Core 测试并确认 GREEN**
+- [x] **Step 4: 运行 Core 测试并确认 GREEN**
 
 Run:
 
@@ -341,7 +341,7 @@ Expected: 全部通过。
 **Files:**
 - Modify: `docs/plans/2026-08-07-beat-plan-contract-alignment.md`
 
-- [ ] **Step 1: 运行相关回归测试**
+- [x] **Step 1: 运行相关回归测试**
 
 ```powershell
 uv run pytest `
@@ -354,7 +354,7 @@ uv run pytest `
 
 Expected: 全部通过，0 failures。
 
-- [ ] **Step 2: 运行 Python 静态检查和完整测试**
+- [x] **Step 2: 运行 Python 静态检查和完整测试**
 
 ```powershell
 uv run ruff check apps/core-api/src apps/core-api/tests apps/agent-service/src apps/agent-service/tests
@@ -365,7 +365,7 @@ git diff --check
 
 Expected: 所有命令退出码为 0。
 
-- [ ] **Step 3: 显式暂存并提交实现**
+- [x] **Step 3: 显式暂存并提交实现**
 
 ```powershell
 git add -- `
