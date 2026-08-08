@@ -87,6 +87,7 @@ def _default_specs() -> list[CommandSpec]:
     )
     from .commands.long.lore_entities import LORE_ENTITY_COMMAND_SPECS
     from .commands.long.lore_relationships import LORE_RELATIONSHIP_COMMAND_SPECS
+    from .commands.long.novels import create_novel
     from .commands.long.planning_mutations import PLANNING_COMMAND_SPECS
     from .commands.long.quality import QUALITY_COMMAND_SPECS
     from .commands.long.read import (
@@ -315,6 +316,16 @@ def _default_specs() -> list[CommandSpec]:
         ),
         long_read_spec("long.novel.list", list_long_novels),
         long_read_spec("long.novel.get", get_novel),
+        CommandSpec(
+            name="long.novel.create",
+            handler=create_novel,
+            inputMode="json",
+            outputMode="json",
+            fileOutput=no_file,
+            mutation=True,
+            requiresIdentity=True,
+            requiresClientRequestId=False,
+        ),
         long_read_spec("long.chapter.list", list_chapters),
         long_read_spec("long.chapter.get", get_chapter, primary_content),
         long_read_spec("long.session.list", list_sessions),

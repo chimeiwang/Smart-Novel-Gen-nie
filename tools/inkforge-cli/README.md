@@ -52,6 +52,8 @@ Codex 的完整操作规程位于用户 Skill：
 - 小说、章节、任务、草案和质量状态始终以 Core 为权威；CLI 不创建 manifest、dirty 标志、本地章节
   镜像或任务账本。
 - `long.novel.list` 固定查询 `long_serial`；调用方不能覆盖篇幅过滤条件。
+- `long.novel.create` 固定创建 `long_serial`，成功后返回新作品和首章 ID。该接口当前没有幂等键；
+  网络结果不确定时先 list 定位候选，再回拉作品、规划和首章核对；无法唯一确认时停止，不能直接重试。
 - 普通查询默认完整内联返回。显式提供 `outputFile` 时，章节正文写为原始 UTF-8 文本，其余查询写为
   完整 JSON；不会按大小自动截断或切换输出形式。
 - 人工章节保存使用 `expectedUpdatedAt` 做并发检查。Agent 产物只能通过 ReviewArtifact 的
@@ -94,6 +96,7 @@ short.agent.start
 short.agent.watch
 long.novel.list
 long.novel.get
+long.novel.create
 long.chapter.list
 long.chapter.get
 long.session.list
