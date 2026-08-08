@@ -83,7 +83,7 @@ class ModelRuntime:
         context: ModelCallContext | None = None,
     ) -> ModelTurnResult:
         if not self._provider.billable or self._billing is None:
-            result = await self._provider.complete_turn(request)
+            result = await _complete_provider(self._provider, request)
             self._record(context, request, result)
             return result
         if context is None:
@@ -93,21 +93,24 @@ class ModelRuntime:
         estimated_prompt_tokens = sum(len(message.content) for message in request.messages) + sum(
             len(tool.model_dump_json()) for tool in request.tools
         )
-        authorization = await self._billing.authorize(
-            context,
-            {
-                "userId": context.userId,
-                "novelId": context.novelId,
-                "taskId": context.taskId,
-                "runId": context.runId,
-                "agentId": context.agentId,
-                "provider": self._provider.provider_name,
-                "model": self._provider.model_name,
-                "estimatedPromptTokens": estimated_prompt_tokens,
-                "requestedMaxOutputTokens": request.maxOutputTokens,
-            },
-            request_id,
-        )
+        try:
+            authorization = await self._billing.authorize(
+                context,
+                {
+                    "userId": context.userId,
+                    "novelId": context.novelId,
+                    "taskId": context.taskId,
+                    "runId": context.runId,
+                    "agentId": context.agentId,
+                    "provider": self._provider.provider_name,
+                    "model": self._provider.model_name,
+                    "estimatedPromptTokens": estimated_prompt_tokens,
+                    "requestedMaxOutputTokens": request.maxOutputTokens,
+                },
+                request_id,
+            )
+        except Exception as exc:
+            raise RuntimeError("MODEL_AUTHORIZATION_FAILED：模型授权失败") from exc
         granted_max = authorization.get("maxOutputTokens")
         grant_token = authorization.get("grantToken")
         grant_request_id = authorization.get("requestId")
@@ -127,22 +130,25 @@ class ModelRuntime:
             if granted_max == request.maxOutputTokens
             else request.model_copy(update={"maxOutputTokens": granted_max})
         )
-        result = await self._provider.complete_turn(provider_request)
-        await self._billing.report(
-            context,
-            {
-                "requestId": grant_request_id,
-                "taskId": context.taskId,
-                "runId": context.runId,
-                "novelId": context.novelId,
-                "grantToken": grant_token,
-                "promptTokens": result.usage.promptTokens,
-                "cachedTokens": result.usage.cachedTokens,
-                "completionTokens": result.usage.completionTokens,
-                "totalTokens": result.usage.totalTokens,
-            },
-            grant_request_id,
-        )
+        result = await _complete_provider(self._provider, provider_request)
+        try:
+            await self._billing.report(
+                context,
+                {
+                    "requestId": grant_request_id,
+                    "taskId": context.taskId,
+                    "runId": context.runId,
+                    "novelId": context.novelId,
+                    "grantToken": grant_token,
+                    "promptTokens": result.usage.promptTokens,
+                    "cachedTokens": result.usage.cachedTokens,
+                    "completionTokens": result.usage.completionTokens,
+                    "totalTokens": result.usage.totalTokens,
+                },
+                grant_request_id,
+            )
+        except Exception as exc:
+            raise RuntimeError("MODEL_USAGE_REPORT_FAILED：模型用量回报失败") from exc
         self._record(context, request, result)
         return result
 
@@ -164,6 +170,16 @@ class ModelRuntime:
             result.finishReason,
             result.rawFinishReason,
         )
+
+
+async def _complete_provider(
+    provider: ModelProvider,
+    request: ModelTurnRequest,
+) -> ModelTurnResult:
+    try:
+        return await provider.complete_turn(request)
+    except Exception as exc:
+        raise RuntimeError("MODEL_PROVIDER_FAILED：模型供应商调用失败") from exc
 
 
 def _model_request_id(

@@ -773,7 +773,7 @@ async def test_runtime_stops_at_max_iterations_and_surfaces_provider_failure() -
         ModelRuntime(ScriptedProvider([RuntimeError("供应商不可用")])),
         registry,
     )
-    with pytest.raises(RuntimeError, match="供应商不可用"):
+    with pytest.raises(RuntimeError, match="^MODEL_PROVIDER_FAILED："):
         await failing.run(
             messages=[{"role": "user", "content": "失败"}],
             exposed_tools=[],

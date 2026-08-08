@@ -877,6 +877,50 @@ async def test_writing_job_reports_stable_error_instead_of_completion() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("failure", "expected_code"),
+    [
+        (RuntimeError("MODEL_PROVIDER_FAILED：供应商调用失败"), "MODEL_PROVIDER_FAILED"),
+        (RuntimeError("普通图执行失败"), "AGENT_RUN_FAILED"),
+    ],
+)
+async def test_writing_job_reports_stable_failure_code(
+    failure: RuntimeError,
+    expected_code: str,
+) -> None:
+    class RaisingGraph(Graph):
+        async def ainvoke(self, value: dict[str, Any]) -> dict[str, Any]:
+            self.inputs.append(value)
+            raise failure
+
+    core = CoreClient(
+        {
+            "workspace": {},
+            "planning": {
+                "taskId": "task-1",
+                "novelId": "novel-1",
+                "chapterId": "chapter-1",
+                "targetWordCount": 4000,
+                "conversationHistory": [],
+                "userMessage": "继续写作",
+                "graphState": None,
+            },
+        }
+    )
+    handler = WritingJobHandler(
+        core,
+        parent_graph=RaisingGraph({}),
+        operation_graph=Graph({}),
+        artifacts=ArtifactHydration(),
+    )
+
+    with pytest.raises(NonRetryableJobError):
+        await handler(_job())
+
+    assert core.failures[0]["code"] == expected_code
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("failure_mode", ["graph_exception", "stable_error"])
 async def test_writing_job_keeps_failure_callback_transport_errors_retryable(
     failure_mode: str,

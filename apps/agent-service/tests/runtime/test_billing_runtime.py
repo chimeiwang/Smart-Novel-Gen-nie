@@ -230,6 +230,94 @@ async def test_billable_runtime_authorizes_then_reports_exact_usage() -> None:
 
 
 @pytest.mark.asyncio
+async def test_billable_runtime_classifies_authorization_failure() -> None:
+    class FailingBilling(Billing):
+        async def authorize(
+            self,
+            context: ModelCallContext,
+            payload: dict[str, Any],
+            request_id: str,
+        ) -> dict[str, Any]:
+            del context, payload, request_id
+            raise RuntimeError("授权服务不可用")
+
+    runtime = ModelRuntime(Provider(), billing=FailingBilling())  # type: ignore[arg-type]
+
+    with pytest.raises(RuntimeError, match="^MODEL_AUTHORIZATION_FAILED："):
+        await runtime.run_turn(
+            ModelTurnRequest(
+                messages=[{"role": "user", "content": "正文"}],
+                tools=[],
+                maxOutputTokens=128,
+            ),
+            context=ModelCallContext(
+                userId="user-1",
+                novelId="novel-1",
+                taskId="task-1",
+                runId="run-1",
+                agentId="写作",
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_billable_runtime_classifies_provider_failure() -> None:
+    class FailingProvider(Provider):
+        async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+            del request
+            raise RuntimeError("供应商拒绝请求")
+
+    runtime = ModelRuntime(FailingProvider(), billing=Billing())  # type: ignore[arg-type]
+
+    with pytest.raises(RuntimeError, match="^MODEL_PROVIDER_FAILED："):
+        await runtime.run_turn(
+            ModelTurnRequest(
+                messages=[{"role": "user", "content": "正文"}],
+                tools=[],
+                maxOutputTokens=128,
+            ),
+            context=ModelCallContext(
+                userId="user-1",
+                novelId="novel-1",
+                taskId="task-1",
+                runId="run-1",
+                agentId="写作",
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_billable_runtime_classifies_usage_report_failure() -> None:
+    class FailingBilling(Billing):
+        async def report(
+            self,
+            context: ModelCallContext,
+            payload: dict[str, Any],
+            request_id: str,
+        ) -> None:
+            del context, payload, request_id
+            raise RuntimeError("用量服务不可用")
+
+    runtime = ModelRuntime(Provider(), billing=FailingBilling())  # type: ignore[arg-type]
+
+    with pytest.raises(RuntimeError, match="^MODEL_USAGE_REPORT_FAILED："):
+        await runtime.run_turn(
+            ModelTurnRequest(
+                messages=[{"role": "user", "content": "正文"}],
+                tools=[],
+                maxOutputTokens=128,
+            ),
+            context=ModelCallContext(
+                userId="user-1",
+                novelId="novel-1",
+                taskId="task-1",
+                runId="run-1",
+                agentId="写作",
+            ),
+        )
+
+
+@pytest.mark.asyncio
 async def test_计费运行时使用较小授权且不修改原请求() -> None:
     class ReducedBilling(Billing):
         async def authorize(

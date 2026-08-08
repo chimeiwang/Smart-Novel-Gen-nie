@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any, Protocol, cast
 
@@ -177,7 +178,7 @@ class WritingJobHandler:
             await self._core.fail(
                 resource,
                 sequence=sequence + 1,
-                code="AGENT_RUN_FAILED",
+                code=_stable_failure_code(exc),
                 message=str(exc) or "智能体运行失败",
                 recoverable=True,
             )
@@ -229,7 +230,7 @@ class WritingJobHandler:
             await self._core.fail(
                 resource,
                 sequence=next_sequence + 1,
-                code="AGENT_RUN_FAILED",
+                code=_stable_failure_code(message),
                 message=message,
                 recoverable=True,
             )
@@ -545,6 +546,22 @@ def _resource(job: QueueJob) -> RunResource:
         runId=job.runId,
         jobId=job.jobId,
     )
+
+
+_STABLE_FAILURE_CODE = re.compile(r"^([A-Z][A-Z0-9_]{2,127})(?:：|:)")
+
+
+def _stable_failure_code(value: object) -> str:
+    current: BaseException | None = value if isinstance(value, BaseException) else None
+    visited: set[int] = set()
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        match = _STABLE_FAILURE_CODE.match(str(current))
+        if match is not None:
+            return match.group(1)
+        current = current.__cause__ or current.__context__
+    match = _STABLE_FAILURE_CODE.match(str(value))
+    return match.group(1) if match is not None else "AGENT_RUN_FAILED"
 
 
 def _attach_runtime_context(
