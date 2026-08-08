@@ -23,12 +23,17 @@ def _service_block(source: str, service: str) -> str:
 
 def test_compose_keeps_database_out_of_agent_trust_boundary() -> None:
     source = COMPOSE.read_text(encoding="utf-8")
+    core = _service_block(source, "core-api")
     agent = _service_block(source, "agent-service")
 
     assert "DATABASE_URL" not in agent
     assert "data_net" not in agent
     assert "agent_net" in agent
     assert "public_net" in agent
+    assert "AGENT_SERVICE_URL: http://agent-service-internal:8001" in core
+    assert "CORE_API_URL: http://core-api-internal:8000" in agent
+    assert "core-api-internal" in core
+    assert "agent-service-internal" in agent
 
 
 def test_agent_log_volume_initializer_is_not_a_compose_runtime_service() -> None:

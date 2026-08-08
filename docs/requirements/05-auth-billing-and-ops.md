@@ -120,6 +120,7 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 - `agent_net`：Core、Agent、Redis；
 - `data_net`：Core、Redis；Core 通过 Docker host gateway 访问宿主机 PostgreSQL；
 - Agent 不得加入 `data_net`。
+- Core 与 Agent 的内部服务 URL 必须使用 `agent_net` 专用别名，不能使用会解析到 `public_net` 的通用服务名。
 
 数据库约束：
 

@@ -83,7 +83,7 @@ services:
       CORE_SERVICE_PRIVATE_KEY_PATH: /run/inkforge-keys/core-to-agent-private.pem
       CORE_SERVICE_KEY_ID: ${CORE_SERVICE_KEY_ID:-core-api-v1}
       AGENT_SERVICE_PUBLIC_KEY_PATH: /run/inkforge-keys/agent-to-core-jwks.json
-      AGENT_SERVICE_URL: http://agent-service:8001
+      AGENT_SERVICE_URL: http://agent-service-internal:8001
       UPLOADS_ROOT: /data/uploads
       RAG_INDEX_ENABLED: ${RAG_INDEX_ENABLED:-false}
       WORKFLOW_EVENT_DEBUG_ENABLED: ${WORKFLOW_EVENT_DEBUG_ENABLED:-false}
@@ -96,9 +96,11 @@ services:
     tmpfs:
       - /tmp:size=32m,mode=1777
     networks:
-      - public_net
-      - agent_net
-      - data_net
+      public_net:
+      agent_net:
+        aliases:
+          - core-api-internal
+      data_net:
     depends_on:
       redis:
         condition: service_healthy
@@ -136,7 +138,7 @@ services:
       CORE_SERVICE_PUBLIC_KEY_PATH: /run/inkforge-keys/core-to-agent-jwks.json
       AGENT_SERVICE_PRIVATE_KEY_PATH: /run/inkforge-keys/agent-to-core-private.pem
       AGENT_SERVICE_KEY_ID: ${AGENT_SERVICE_KEY_ID:-agent-service-v1}
-      CORE_API_URL: http://core-api:8000
+      CORE_API_URL: http://core-api-internal:8000
       WORKFLOW_HUMAN_LOG_DIR: /data/agent-logs
       RAG_EMBEDDING_API_KEY: ${RAG_EMBEDDING_API_KEY:-}
       RAG_EMBEDDING_BASE_URL: ${RAG_EMBEDDING_BASE_URL:-}
@@ -149,8 +151,10 @@ services:
     tmpfs:
       - /tmp:size=64m,mode=1777
     networks:
-      - public_net
-      - agent_net
+      public_net:
+      agent_net:
+        aliases:
+          - agent-service-internal
     depends_on:
       redis:
         condition: service_healthy
