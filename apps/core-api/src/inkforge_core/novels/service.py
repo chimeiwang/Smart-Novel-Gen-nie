@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
 from ..errors import ApiError
@@ -9,6 +10,7 @@ from .schemas import (
     CreateNovelResponse,
     DashboardResponse,
     NovelResponse,
+    UpdateNovelSummaryRequest,
     WorkspaceBootstrapResponse,
     WorkspaceLoreResponse,
     WorkspacePlanningResponse,
@@ -47,6 +49,13 @@ class NovelRepositoryPort(Protocol):
         self, user_id: str, story_length_profile: str | None = None
     ) -> list[NovelResponse]: ...
     async def get_novel(self, novel_id: str, user_id: str) -> NovelResponse: ...
+    async def update_summary(
+        self,
+        novel_id: str,
+        user_id: str,
+        summary: str | None,
+        expected_updated_at: datetime,
+    ) -> NovelResponse: ...
     async def get_workspace(
         self, novel_id: str, user_id: str, chapter_id: str | None
     ) -> WorkspaceResponse: ...
@@ -140,6 +149,19 @@ class NovelService:
 
     async def get_novel(self, user_id: str, novel_id: str) -> NovelResponse:
         return await self._repository.get_novel(novel_id, user_id)
+
+    async def update_summary(
+        self,
+        user_id: str,
+        novel_id: str,
+        request: UpdateNovelSummaryRequest,
+    ) -> NovelResponse:
+        return await self._repository.update_summary(
+            novel_id,
+            user_id,
+            _clean_optional(request.summary),
+            request.expectedUpdatedAt,
+        )
 
     async def get_workspace(
         self, user_id: str, novel_id: str, chapter_id: str | None

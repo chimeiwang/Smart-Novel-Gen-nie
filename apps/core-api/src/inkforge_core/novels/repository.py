@@ -9,6 +9,7 @@ from typing import Any, TypeVar, cast
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ..concurrency import next_utc_timestamp, require_expected_updated_at
 from ..db.base import utc_now
 from ..db.models import (
     Chapter,
@@ -66,6 +67,10 @@ def utc_datetime(value: datetime | None) -> datetime | None:
     if value.tzinfo is None:
         return value.replace(tzinfo=UTC)
     return value.astimezone(UTC)
+
+
+def _database_utc(value: datetime) -> datetime:
+    return value.astimezone(UTC).replace(tzinfo=None)
 
 
 def count_text_length(value: str) -> int:
@@ -389,6 +394,37 @@ class NovelRepository:
             novel = await self._require_owner(session, novel_id, user_id)
             bible = await self._one_for_novel(session, WritingBible, novel_id)
         return NovelResponse.model_validate(self._novel_dict(novel, bible))
+
+    async def update_summary(
+        self,
+        novel_id: str,
+        user_id: str,
+        summary: str | None,
+        expected_updated_at: datetime,
+    ) -> NovelResponse:
+        async with self._session_factory() as session:
+            async with session.begin():
+                novel = await self._require_owner(
+                    session,
+                    novel_id,
+                    user_id,
+                    for_update=True,
+                )
+                current_updated_at = utc_datetime(novel.updatedAt)
+                require_expected_updated_at(
+                    current_updated_at,
+                    expected_updated_at,
+                    code="NOVEL_VERSION_CONFLICT",
+                )
+                if novel.summary != summary:
+                    novel.summary = summary
+                    novel.updatedAt = _database_utc(
+                        next_utc_timestamp(current_updated_at)
+                    )
+                    await session.flush()
+                bible = await self._one_for_novel(session, WritingBible, novel_id)
+                result = self._novel_dict(novel, bible)
+        return NovelResponse.model_validate(result)
 
     async def get_workspace(
         self, novel_id: str, user_id: str, chapter_id: str | None
@@ -1006,8 +1042,12 @@ class NovelRepository:
         user_id: str,
         *,
         hide_forbidden: bool = False,
+        for_update: bool = False,
     ) -> Novel:
-        novel = await session.scalar(select(Novel).where(Novel.id == novel_id))
+        statement = select(Novel).where(Novel.id == novel_id)
+        if for_update:
+            statement = statement.with_for_update()
+        novel = await session.scalar(statement)
         if novel is None or (hide_forbidden and novel.userId != user_id):
             raise ApiError(status_code=404, code="NOVEL_NOT_FOUND", message="小说不存在")
         if novel.userId is None or novel.userId != user_id:

@@ -13,6 +13,7 @@ from .schemas import (
     DashboardResponse,
     NovelResponse,
     StoryLengthProfile,
+    UpdateNovelSummaryRequest,
     WorkspaceBootstrapResponse,
     WorkspaceLoreResponse,
     WorkspacePlanningResponse,
@@ -68,6 +69,16 @@ async def get_novel(
     service: Annotated[NovelService, Depends(get_novel_service)],
 ) -> NovelResponse:
     return await service.get_novel(user.id, novel_id)
+
+
+@router.put("/novels/{novel_id}/summary", response_model=NovelResponse)
+async def update_novel_summary(
+    novel_id: str,
+    body: UpdateNovelSummaryRequest,
+    user: Annotated[AuthUser, Depends(get_current_user)],
+    service: Annotated[NovelService, Depends(get_novel_service)],
+) -> NovelResponse:
+    return await service.update_summary(user.id, novel_id, body)
 
 
 @router.get("/novels/{novel_id}/workspace", response_model=WorkspaceResponse)

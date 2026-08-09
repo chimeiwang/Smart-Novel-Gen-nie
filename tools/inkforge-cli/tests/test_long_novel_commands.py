@@ -51,11 +51,12 @@ def _dependencies(api: RecordingApi) -> CliDependencies:
 def _invoke(
     payload: dict[str, Any],
     api: RecordingApi,
+    command: str = "long.novel.create",
 ) -> tuple[int, dict[str, Any], str]:
     stdout = io.StringIO()
     stderr = io.StringIO()
     exit_code = run(
-        ["long.novel.create"],
+        [command],
         stdin=io.StringIO(json.dumps(payload, ensure_ascii=False)),
         stdout=stdout,
         stderr=stderr,
@@ -180,6 +181,112 @@ def test_long_novel_create_rejects_invalid_optional_fields_before_request(
 
 def test_long_novel_create_registry_metadata_is_exact() -> None:
     spec = get_command_registry()["long.novel.create"]
+
+    assert spec.inputMode == "json"
+    assert spec.outputMode == "json"
+    assert spec.fileOutput.kind == "none"
+    assert spec.mutation is True
+    assert spec.requiresIdentity is True
+    assert spec.requiresClientRequestId is False
+
+
+def test_long_novel_summary_save_puts_exact_cas_payload() -> None:
+    api = RecordingApi(response={"id": "novel-1", "summary": "新摘要"})
+
+    exit_code, output, stderr = _invoke(
+        {
+            "profile": "default",
+            "novelId": "novel/1",
+            "summary": "新摘要",
+            "expectedUpdatedAt": "2026-08-09T00:00:00Z",
+        },
+        api,
+        "long.novel.summary.save",
+    )
+
+    assert exit_code == 0
+    assert stderr == ""
+    assert output["data"] == {"id": "novel-1", "summary": "新摘要"}
+    assert api.calls == [
+        (
+            "PUT",
+            "/api/v1/novels/novel%2F1/summary",
+            {
+                "json": {
+                    "summary": "新摘要",
+                    "expectedUpdatedAt": "2026-08-09T00:00:00Z",
+                }
+            },
+        )
+    ]
+
+
+def test_long_novel_summary_save_supports_explicit_null() -> None:
+    api = RecordingApi(response={"id": "novel-1", "summary": None})
+
+    exit_code, _output, _stderr = _invoke(
+        {
+            "novelId": "novel-1",
+            "summary": None,
+            "expectedUpdatedAt": "2026-08-09T00:00:00Z",
+        },
+        api,
+        "long.novel.summary.save",
+    )
+
+    assert exit_code == 0
+    assert api.calls[0][2]["json"]["summary"] is None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"summary": "摘要", "expectedUpdatedAt": "2026-08-09T00:00:00Z"},
+        {"novelId": "novel-1", "expectedUpdatedAt": "2026-08-09T00:00:00Z"},
+        {"novelId": "novel-1", "summary": "摘要"},
+        {"novelId": "novel-1", "summary": 1, "expectedUpdatedAt": "v1"},
+        {"novelId": "novel-1", "summary": "摘要", "expectedUpdatedAt": ""},
+        {
+            "novelId": "novel-1",
+            "summary": "摘要",
+            "expectedUpdatedAt": "v1",
+            "outputFile": "result.json",
+        },
+        {
+            "novelId": "novel-1",
+            "summary": "摘要",
+            "expectedUpdatedAt": "v1",
+            "clientRequestId": "request-12345678",
+        },
+        {
+            "novelId": "novel-1",
+            "summary": "摘要",
+            "expectedUpdatedAt": "v1",
+            "unexpected": True,
+        },
+    ],
+)
+def test_long_novel_summary_save_rejects_invalid_payload(payload: dict[str, Any]) -> None:
+    api = RecordingApi()
+
+    exit_code, output, _stderr = _invoke(
+        payload,
+        api,
+        "long.novel.summary.save",
+    )
+
+    assert exit_code == 2
+    assert output["error"]["code"] in {
+        "FIELD_REQUIRED",
+        "INVALID_FIELD",
+        "INVALID_EXPECTED_UPDATED_AT",
+        "UNEXPECTED_FIELDS",
+    }
+    assert api.calls == []
+
+
+def test_long_novel_summary_save_registry_metadata_is_exact() -> None:
+    spec = get_command_registry()["long.novel.summary.save"]
 
     assert spec.inputMode == "json"
     assert spec.outputMode == "json"

@@ -54,6 +54,9 @@ Codex 的完整操作规程位于用户 Skill：
 - `long.novel.list` 固定查询 `long_serial`；调用方不能覆盖篇幅过滤条件。
 - `long.novel.create` 固定创建 `long_serial`，成功后返回新作品和首章 ID。该接口当前没有幂等键；
   网络结果不确定时先 list 定位候选，再回拉作品、规划和首章核对；无法唯一确认时停止，不能直接重试。
+- `long.novel.summary.save` 只修改已有作品摘要。写前先用 `long.novel.get` 取得摘要和
+  `updatedAt`，展示完整 Diff 并确认后携带 `expectedUpdatedAt` 写入，写后再次回读；遇到
+  `NOVEL_VERSION_CONFLICT` 必须重新读取、重新确认，不能自动替换版本重试。
 - 普通查询默认完整内联返回。显式提供 `outputFile` 时，章节正文写为原始 UTF-8 文本，其余查询写为
   完整 JSON；不会按大小自动截断或切换输出形式。
 - 人工章节保存使用 `expectedUpdatedAt` 做并发检查。Agent 产物只能通过 ReviewArtifact 的
@@ -97,6 +100,7 @@ short.agent.watch
 long.novel.list
 long.novel.get
 long.novel.create
+long.novel.summary.save
 long.chapter.list
 long.chapter.get
 long.session.list

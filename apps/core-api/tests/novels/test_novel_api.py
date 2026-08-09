@@ -44,10 +44,33 @@ class NovelCreation:
 class RecordingNovelRepository:
     def __init__(self) -> None:
         self.creation: NovelCreation | None = None
+        self.summary_update: tuple[str, str, str | None, datetime] | None = None
 
     async def create_novel(self, creation: NovelCreation):
         self.creation = creation
         return {"novelId": "novel-1", "chapterId": "chapter-1"}
+
+    async def update_summary(
+        self,
+        novel_id: str,
+        user_id: str,
+        summary: str | None,
+        expected_updated_at: datetime,
+    ):
+        self.summary_update = (novel_id, user_id, summary, expected_updated_at)
+        from inkforge_core.novels.schemas import NovelResponse
+
+        return NovelResponse(
+            id=novel_id,
+            name="作品",
+            summary=summary,
+            storyProgress=None,
+            appliedStyleId=None,
+            storyLengthProfile="long_serial",
+            targetTotalWordCount=1_000_000,
+            createdAt=expected_updated_at,
+            updatedAt=expected_updated_at,
+        )
 
 
 @pytest.mark.asyncio
@@ -111,6 +134,56 @@ def test_create_novel_request_rejects_unknown_fields() -> None:
         )
 
 
+def test_update_novel_summary_request_is_strict_and_requires_version() -> None:
+    from inkforge_core.novels.schemas import UpdateNovelSummaryRequest
+
+    expected = datetime(2026, 8, 9, tzinfo=UTC)
+    request = UpdateNovelSummaryRequest.model_validate(
+        {"summary": None, "expectedUpdatedAt": "2026-08-09T00:00:00Z"}
+    )
+    assert request.summary is None
+    assert request.expectedUpdatedAt == expected
+
+    for invalid in (
+        {"summary": "摘要"},
+        {"summary": 1, "expectedUpdatedAt": "2026-08-09T00:00:00Z"},
+        {
+            "summary": "摘要",
+            "expectedUpdatedAt": "2026-08-09T00:00:00Z",
+            "userId": "attacker",
+        },
+        {"summary": "摘要", "expectedUpdatedAt": "2026-08-09"},
+        {"summary": "摘要", "expectedUpdatedAt": "2026-08-09T00:00:00"},
+    ):
+        with pytest.raises(ValidationError):
+            UpdateNovelSummaryRequest.model_validate(invalid)
+
+
+@pytest.mark.asyncio
+async def test_update_summary_service_normalizes_value_and_passes_cas_version() -> None:
+    from inkforge_core.novels.schemas import UpdateNovelSummaryRequest
+
+    repository = RecordingNovelRepository()
+    service = NovelService(repository)  # type: ignore[arg-type]
+    expected = datetime(2026, 8, 9, tzinfo=UTC)
+
+    result = await service.update_summary(
+        "user-1",
+        "novel-1",
+        UpdateNovelSummaryRequest(summary="  新摘要  ", expectedUpdatedAt=expected),
+    )
+
+    assert result.summary == "新摘要"
+    assert repository.summary_update == ("novel-1", "user-1", "新摘要", expected)
+
+    await service.update_summary(
+        "user-1",
+        "novel-1",
+        UpdateNovelSummaryRequest(summary="   ", expectedUpdatedAt=expected),
+    )
+    assert repository.summary_update == ("novel-1", "user-1", None, expected)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [("targetTotalWordCount", "80000"), ("name", 123)],
@@ -140,6 +213,24 @@ class ApiNovelService:
         from inkforge_core.novels.schemas import CreateNovelResponse
 
         return CreateNovelResponse(novelId="novel-1", chapterId="chapter-1")
+
+    async def update_summary(self, user_id: str, novel_id: str, body):
+        self.user_id = user_id
+        self.summary_update = (novel_id, body.summary, body.expectedUpdatedAt)
+        from inkforge_core.novels.schemas import NovelResponse
+
+        now = datetime(2026, 8, 9, tzinfo=UTC)
+        return NovelResponse(
+            id=novel_id,
+            name="作品",
+            summary=body.summary,
+            storyProgress=None,
+            appliedStyleId=None,
+            storyLengthProfile="long_serial",
+            targetTotalWordCount=1_000_000,
+            createdAt=now,
+            updatedAt=now,
+        )
 
     async def get_workspace_bootstrap(
         self, user_id: str, novel_id: str, chapter_id: str | None
@@ -248,6 +339,38 @@ async def test_novel_api_rejects_owner_and_unknown_fields() -> None:
 
 
 @pytest.mark.asyncio
+async def test_update_novel_summary_api_uses_cookie_owner_and_strict_body() -> None:
+    service = ApiNovelService()
+    async with novel_api_client(service) as client:
+        response = await client.put(
+            "/api/v1/novels/novel-1/summary",
+            json={
+                "summary": "新摘要",
+                "expectedUpdatedAt": "2026-08-09T00:00:00Z",
+            },
+        )
+        rejected = await client.put(
+            "/api/v1/novels/novel-1/summary",
+            json={
+                "summary": "越权摘要",
+                "expectedUpdatedAt": "2026-08-09T00:00:00Z",
+                "userId": "attacker",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["summary"] == "新摘要"
+    assert service.user_id == "cookie-user"
+    assert service.summary_update == (
+        "novel-1",
+        "新摘要",
+        datetime(2026, 8, 9, tzinfo=UTC),
+    )
+    assert rejected.status_code == 422
+    assert rejected.json()["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.asyncio
 async def test_novel_http_rejects_string_encoded_number() -> None:
     async with novel_api_client(ApiNovelService()) as client:
         response = await client.post(
@@ -272,10 +395,129 @@ def test_domain_openapi_has_routes_and_does_not_publish_owner_input() -> None:
     assert "/api/v1/novels/{novel_id}/workspace/lore" in schema["paths"]
     assert "/api/v1/novels/{novel_id}/workspace/planning" in schema["paths"]
     assert "/api/v1/novels/{novel_id}/workspace/resources" in schema["paths"]
+    assert "/api/v1/novels/{novel_id}/summary" in schema["paths"]
     assert "/api/v1/chapters/{chapter_id}/progress" in schema["paths"]
     assert "/api/v1/quality-checks/{check_id}/run" in schema["paths"]
     properties = schema["components"]["schemas"]["CreateNovelRequest"]["properties"]
     assert "userId" not in properties
+
+
+@pytest.mark.asyncio
+async def test_repository_updates_summary_with_cas_and_preserves_idempotent_version(
+    tmp_path,
+) -> None:
+    from inkforge_core.db.models import Novel, User, WritingBible, WritingStyle
+    from inkforge_core.novels.repository import NovelRepository
+    from sqlalchemy import DefaultClause, MetaData, select, text
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    engine = create_async_engine(
+        f"sqlite+aiosqlite:///{(tmp_path / '作品摘要.db').as_posix()}",
+        execution_options={"schema_translate_map": {"public": None}},
+    )
+    async with engine.begin() as connection:
+        metadata = MetaData()
+        for table in (
+            User.__table__,
+            WritingStyle.__table__,
+            Novel.__table__,
+            WritingBible.__table__,
+        ):
+            table.to_metadata(metadata)
+        metadata.tables["public.WritingStyle"].c.sourceType.server_default = DefaultClause(
+            text("'manual'")
+        )
+        metadata.tables[
+            "public.WritingBible"
+        ].c.storyLengthProfile.server_default = DefaultClause(text("'long_serial'"))
+        await connection.run_sync(metadata.create_all)
+
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    original_version = datetime(2026, 8, 9, tzinfo=UTC)
+    try:
+        async with factory() as session, session.begin():
+            session.add_all(
+                [
+                    User(id="user-1", username="user-1", passwordHash="固定哈希"),
+                    User(id="user-2", username="user-2", passwordHash="固定哈希"),
+                ]
+            )
+            session.add_all(
+                [
+                    Novel(
+                    id="novel-1",
+                    userId="user-1",
+                    name="作品",
+                    summary="旧摘要",
+                    createdAt=original_version,
+                    updatedAt=original_version,
+                    ),
+                    Novel(
+                        id="novel-other",
+                        userId="user-2",
+                        name="他人作品",
+                        createdAt=original_version,
+                        updatedAt=original_version,
+                    ),
+                ]
+            )
+            session.add(
+                WritingBible(
+                    id="bible-1",
+                    novelId="novel-1",
+                    storyLengthProfile="long_serial",
+                    targetTotalWordCount=1_000_000,
+                )
+            )
+
+        repository = NovelRepository(factory)
+        unchanged = await repository.update_summary(
+            "novel-1", "user-1", "旧摘要", original_version
+        )
+        assert unchanged.updatedAt == original_version
+
+        changed = await repository.update_summary(
+            "novel-1", "user-1", "新摘要", original_version
+        )
+        assert changed.summary == "新摘要"
+        assert changed.updatedAt > original_version
+
+        with pytest.raises(ApiError) as caught:
+            await repository.update_summary(
+                "novel-1", "user-1", "陈旧覆盖", original_version
+            )
+        assert caught.value.status_code == 409
+        assert caught.value.code == "NOVEL_VERSION_CONFLICT"
+        assert caught.value.details == {
+            "currentUpdatedAt": changed.updatedAt.isoformat()
+        }
+
+        for novel_id, expected_code, expected_status in (
+            ("novel-other", "NOVEL_FORBIDDEN", 403),
+            ("novel-missing", "NOVEL_NOT_FOUND", 404),
+        ):
+            with pytest.raises(ApiError) as ownership_error:
+                await repository.update_summary(
+                    novel_id,
+                    "user-1",
+                    "不能写入",
+                    original_version,
+                )
+            assert ownership_error.value.code == expected_code
+            assert ownership_error.value.status_code == expected_status
+
+        cleared = await repository.update_summary(
+            "novel-1", "user-1", None, changed.updatedAt
+        )
+        assert cleared.summary is None
+        assert cleared.updatedAt > changed.updatedAt
+
+        async with factory() as session:
+            stored = await session.scalar(select(Novel).where(Novel.id == "novel-1"))
+        assert stored is not None
+        assert stored.summary is None
+    finally:
+        await engine.dispose()
 
 
 @pytest.mark.asyncio

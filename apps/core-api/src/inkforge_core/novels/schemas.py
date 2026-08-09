@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    model_validator,
+)
 
 
 class StrictModel(BaseModel):
@@ -35,6 +42,15 @@ type RelationType = Literal[
 ]
 type OutlineNodeKind = Literal["stage", "plot_unit", "chapter_group"]
 type OutlineNodeStatus = Literal["planned", "in_progress", "completed", "skipped"]
+
+
+def _parse_json_datetime(value: object) -> object:
+    if isinstance(value, str):
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return value
+
+
+JsonDatetime = Annotated[AwareDatetime, BeforeValidator(_parse_json_datetime)]
 
 
 class CreateNovelRequest(StrictModel):
@@ -73,6 +89,11 @@ class CreateNovelRequest(StrictModel):
 class CreateNovelResponse(StrictModel):
     novelId: str
     chapterId: str
+
+
+class UpdateNovelSummaryRequest(StrictModel):
+    summary: str | None
+    expectedUpdatedAt: JsonDatetime
 
 
 class StyleSummary(StrictModel):
