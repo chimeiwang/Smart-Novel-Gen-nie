@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 import pytest
 from inkforge_core.db.models import Chapter, ChapterQualityCheck, Novel
 from inkforge_core.errors import ApiError
-from inkforge_core.reviews.apply import FormalArtifactApplier
+from inkforge_core.reviews.apply import FormalArtifactApplier, resolve_apply_target
 from inkforge_core.reviews.formal_writes import FormalWriteRepository
 from inkforge_core.reviews.repository import _materialize_selection_payload, _selection_diff
 from inkforge_core.reviews.service import ReviewService
@@ -514,6 +514,52 @@ def test_selection_diff_contains_complete_before_after_and_replacement() -> None
     assert diff["before"] == "前缀旧文后缀"
     assert diff["after"] == "前缀新文后缀"
     assert diff["replacement"] == "新文"
+
+
+@pytest.mark.parametrize(
+    ("kind", "mode", "expected"),
+    [
+        ("chapter_draft", None, "chapter_content"),
+        ("chapter_draft", "existing_chapter", "chapter_content"),
+        ("chapter_draft", "new_next_chapter", "chapter_content"),
+        ("outline_draft", "normal_outline", "outline_content"),
+        ("chapter_draft", "future_mode", None),
+        ("outline_draft", "future_mode", None),
+    ],
+)
+def test_resolve_apply_target_rejects_unknown_modes(
+    kind: str, mode: str | None, expected: str | None
+) -> None:
+    payload: dict[str, object] = {"kind": kind}
+    if mode is not None:
+        payload["target"] = {"mode": mode}
+
+    assert resolve_apply_target(payload) == expected
+
+
+@pytest.mark.asyncio
+async def test_formal_applier_rejects_unknown_target_mode_before_full_write() -> None:
+    writes = FakeFormalWrites()
+    applier = FormalArtifactApplier(writes, FakeUpdatesExecutor())
+    artifact = Artifact(
+        kind="chapter_draft",
+        payload={
+            "kind": "chapter_draft",
+            "target": {"mode": "future_mode"},
+            "content": "不应写入",
+        },
+    )
+    artifact.novel_id = "novel-1"
+    artifact.chapter_id = "chapter-1"
+
+    with pytest.raises(ValueError):
+        await applier.apply(
+            artifact,
+            user_id="user-1",
+            edited_content=None,
+            selected_update_refs=None,
+        )
+    assert writes.content is None
 
 
 @pytest.mark.asyncio

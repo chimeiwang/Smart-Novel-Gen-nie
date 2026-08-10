@@ -12,13 +12,20 @@ ApplyTarget = Literal[
 
 def resolve_apply_target(payload: dict[str, Any]) -> ApplyTarget | None:
     target = payload.get("target")
-    if isinstance(target, dict) and target.get("mode") in {
-        "replace_selection",
-        "outline_content_selection",
-        "outline_node_content_selection",
-    }:
-        if payload.get("kind") in {"chapter_draft", "outline_draft"}:
-            return "selection"
+    if isinstance(target, dict):
+        mode = target.get("mode")
+        selection_modes = {
+            "replace_selection",
+            "outline_content_selection",
+            "outline_node_content_selection",
+        }
+        normal_modes = {"existing_chapter", "new_next_chapter", "normal_outline"}
+        if mode in selection_modes:
+            if payload.get("kind") in {"chapter_draft", "outline_draft"}:
+                return "selection"
+            return None
+        if mode is not None and mode not in normal_modes:
+            return None
     kind = payload.get("kind")
     if kind == "agent_updates":
         return "agent_updates"
