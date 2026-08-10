@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useOptimistic, useReducer, useRef, useState, useSyncExternalStore, useTransition, useEffect } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useOptimistic, useReducer, useRef, useState, useTransition, useEffect } from "react";
 import { parseSseFrame } from "@inkforge/api-client";
 
 import {
@@ -30,6 +29,7 @@ import {
   type UpdateDiffItem,
 } from "./review-artifact-diff";
 import { flushActiveChapterSave } from "@/features/editor/chapter-save-navigation";
+import { WorkspaceDialog } from "@/features/workspace/workspace-dialog";
 import {
   EMPTY_AGENT_ACTIVITY_STATE,
   reduceAgentActivityState,
@@ -103,18 +103,6 @@ import {
   isVisibleToolActivity,
 } from "./tool-activity";
 import "./writing-conversation.css";
-
-function subscribeToReviewRail() {
-  return () => undefined;
-}
-
-function getReviewRailHostSnapshot() {
-  return document.getElementById("workspace-review-rail");
-}
-
-function getServerReviewRailHostSnapshot(): HTMLElement | null {
-  return null;
-}
 
 type WritingConversationProps = {
   novelId: string;
@@ -802,12 +790,6 @@ export function WritingConversation({
   const [activityState, setActivityState] = useState<AgentActivityState>(EMPTY_AGENT_ACTIVITY_STATE);
   const activityStateRef = useRef<AgentActivityState>(EMPTY_AGENT_ACTIVITY_STATE);
 
-  const reviewRailHost = useSyncExternalStore(
-    subscribeToReviewRail,
-    getReviewRailHostSnapshot,
-    getServerReviewRailHostSnapshot,
-  );
-
   const applyAgentActivityAction = useCallback((action: AgentActivityAction) => {
     const next = reduceAgentActivityState(activityStateRef.current, action);
     activityStateRef.current = next;
@@ -1336,7 +1318,7 @@ export function WritingConversation({
     setMessages((prev) => attachReviewArtifactToConversation<Message, ReviewArtifactData>(prev, artifact, () => ({
       id: `restored-review-${artifact.id}`,
       role: "system",
-      content: "待确认变更已更新。请在下方卡片中查看、修改或应用。",
+      content: "待确认变更已更新。请从聊天顶部的待确认入口查看、修改或应用。",
       timestamp: Date.now(),
     })));
   }, [setActiveReviewArtifact, setPhase, setTaskId, taskId]);
@@ -2695,7 +2677,7 @@ export function WritingConversation({
                 className="button sm"
                 type="button"
                 disabled={isApplyDisabled}
-                onClick={() => handleArtifactDecision(
+                onClick={() => void handleArtifactDecision(
                   artifact,
                   "approve",
                   undefined,
@@ -2764,6 +2746,16 @@ export function WritingConversation({
       activeReviewArtifact?.id === artifact.id &&
       Boolean(taskId) &&
       taskId === artifact.taskId;
+    const approveArtifact = () => {
+      // eslint-disable-next-line react-hooks/refs -- 仅在用户点击批准后读取任务引用，不会在渲染阶段执行。
+      void handleArtifactDecision(
+        artifact,
+        "approve",
+        undefined,
+        canEditText ? reviewDraftText : undefined,
+        canEditText ? undefined : selectedUpdateRefsForApply,
+      );
+    };
 
     return (
       <div className={`review-dialog ${actionLocked ? "is-busy" : ""}`} aria-busy={actionLocked}>
@@ -2840,13 +2832,7 @@ export function WritingConversation({
                 className="button"
                 type="button"
                 disabled={isSending || isActing || actionLocked || (canEditText && !reviewDraftText.trim()) || hasEmptyStructuredSelection}
-                onClick={() => handleArtifactDecision(
-                  artifact,
-                  "approve",
-                  undefined,
-                  canEditText ? reviewDraftText : undefined,
-                  canEditText ? undefined : selectedUpdateRefsForApply
-                )}
+                onClick={approveArtifact}
               >
                 {getReviewArtifactActionButtonLabel(action, "approve") ?? (artifact.optimisticStatus === "applying" ? "应用中..." : "应用到项目")}
               </button>
@@ -3186,7 +3172,7 @@ export function WritingConversation({
                       className="review-artifact-message-hint"
                       onClick={() => openReviewArtifactModal(resolveMessageReviewArtifact(msg.reviewArtifact!))}
                     >
-                      这条回复包含待确认变更，已显示在右侧审核栏
+                      查看这条回复的待确认变更
                     </button>
                   ) : null}
                 </div>
@@ -3382,62 +3368,34 @@ export function WritingConversation({
       </div>
 
       {/* 待确认变更查看/审核弹窗 */}
-      {showReviewArtifactModal && modalReviewArtifact && typeof document !== "undefined" ? createPortal(
-        <div className="writing-chat modal-overlay" onClick={() => closeReviewArtifactModal()}>
-          <div className="modal-content review-artifact-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <span>{modalReviewArtifact.status === "awaiting_user" ? "待你确认" : "查看变更"}</span>
-              <button
-                className="modal-close"
-                onClick={() => closeReviewArtifactModal()}
-                disabled={isReviewArtifactModalLocked}
-                aria-label={isReviewArtifactModalLocked ? "操作进行中，暂不能关闭" : "关闭"}
-              >
-                ×
-              </button>
-            </div>
-            <div className="modal-body">
-              {renderArtifactReviewDialog(modalReviewArtifact)}
-            </div>
-          </div>
-        </div>,
-        document.body,
-      ) : null}
+      <WorkspaceDialog
+        open={showReviewArtifactModal && Boolean(modalReviewArtifact)}
+        title={modalReviewArtifact?.status === "awaiting_user" ? "待你确认" : "查看变更"}
+        description="审核完整差异后再决定应用、返工或丢弃"
+        variant="review"
+        closeDisabled={isReviewArtifactModalLocked}
+        onClose={() => closeReviewArtifactModal()}
+      >
+        {modalReviewArtifact ? renderArtifactReviewDialog(modalReviewArtifact) : null}
+      </WorkspaceDialog>
 
-      {showArtifactTray && (
-        <div className="modal-overlay" onClick={() => setShowArtifactTray(false)}>
-          <div className="modal-content artifact-tray-modal" onClick={e => e.stopPropagation()}>
-           <div className="modal-header">
-              <span>待确认变更</span>
-             <button className="modal-close" onClick={() => setShowArtifactTray(false)}>×</button>
-           </div>
-           <div className="modal-body artifact-tray-body">
-             {reviewRailArtifacts.length === 0 ? (
-                <div className="artifact-empty">暂无待确认变更。</div>
-             ) : reviewRailArtifacts.map((artifact) => (
-                <button
-                  key={artifact.id}
-                  className="artifact-tray-item"
-                  type="button"
-                  onClick={() => {
-                    inspectReviewArtifactFromTray(artifact);
-                  }}
-                >
-                  <span className="artifact-tray-main">
-                   <span className="artifact-tray-title">{artifact.summary || artifact.artifactKey || artifact.id}</span>
-                   <span className="artifact-tray-meta">
-                      {getReviewArtifactKindLabel(artifact.kind)} · {getReviewArtifactImpactLabel(artifact.kind)} · v{artifact.revision}
-                   </span>
-                  </span>
-                  <span className={`action-badge ${artifact.status}`}>
-                    {getReviewArtifactStatusLabel(artifact.status)}
-                  </span>
-                </button>
-              ))}
+      <WorkspaceDialog
+        open={showArtifactTray}
+        title="审核与确认"
+        description={`当前章节共有 ${reviewRailArtifacts.length} 项待确认变更`}
+        variant="compact"
+        onClose={() => setShowArtifactTray(false)}
+      >
+        <div className="artifact-tray-body">
+          {reviewRailArtifacts.length === 0 ? (
+            <div className="artifact-empty">暂无待确认变更。</div>
+          ) : reviewRailArtifacts.map((artifact) => (
+            <div className="artifact-tray-review-card" key={artifact.id}>
+              {renderArtifactReviewCard(artifact)}
             </div>
-          </div>
+          ))}
         </div>
-      )}
+      </WorkspaceDialog>
 
       {showSessionModal && (
         <div className="modal-overlay" onClick={() => setShowSessionModal(false)}>
@@ -3483,40 +3441,6 @@ export function WritingConversation({
         </div>
       )}
 
-      {reviewRailHost ? createPortal(
-        <div className="writing-chat workspace-review-content">
-          <div className="workspace-review-heading">
-            <span>审核与确认</span>
-            {reviewRailArtifacts.length > 0 ? (
-              <small>本章待确认 {reviewRailArtifacts.length} 项</small>
-            ) : null}
-          </div>
-          {reviewRailArtifacts.length > 0 ? (
-            <div className="workspace-review-artifacts">
-              {reviewRailArtifacts.map((artifact) => (
-                <div className="workspace-review-artifact" key={artifact.id}>
-                  {renderArtifactReviewCard(artifact)}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="workspace-review-empty">
-              <div>
-                <strong>{chapterContext?.title ?? "当前章节"}</strong>
-                <span>{chapterContext?.status ?? "未选择"} · {chapterContext?.wordCount ?? 0} 字</span>
-              </div>
-              {chapterContext?.approvedBeatPlan ? (
-                <p>
-                  已批准计划：{chapterContext.approvedBeatPlan.chapterGoal} · {chapterContext.approvedBeatPlan.sceneCount} 场 · 约 {chapterContext.approvedBeatPlan.totalEstimatedWords} 字
-                </p>
-              ) : <p>尚未批准章节计划</p>}
-              <p>待处理终检：{chapterContext?.openConsistencyCheckCount ?? 0}</p>
-              <div className="workspace-review-empty-state">当前没有待确认变更</div>
-            </div>
-          )}
-        </div>,
-        reviewRailHost,
-      ) : null}
     </div>
   );
 }

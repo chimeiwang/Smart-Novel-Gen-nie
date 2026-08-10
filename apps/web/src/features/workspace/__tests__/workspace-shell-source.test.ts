@@ -2,38 +2,37 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("工作区外壳常驻挂载三类主要面板", async () => {
+test("工作区外壳使用章节与创作资料平级分段导航", async () => {
   const shellUrl = new URL("../workspace-shell.tsx", import.meta.url);
   const source = await readFile(shellUrl, "utf8");
 
-  assert.match(source, />章节</);
-  assert.match(source, />创作资料</);
+  assert.match(source, /"章节"/);
+  assert.match(source, /"创作资料"/);
   assert.match(source, /history\.replaceState/);
   assert.match(source, /<SmartWritingPanel/);
   assert.match(source, /<ChapterEditor/);
   assert.match(source, /<LibraryPane/);
   assert.match(source, /<LibraryNavigation/);
   assert.match(source, /workspace-left-navigation/);
-  assert.match(source, /workspace-navigation-root/);
-  assert.match(source, /workspace-chapter-mode-switcher/);
-  assert.match(source, /AI 创作/);
-  assert.match(source, /阅读与小修/);
-  assert.match(source, /selectSection\("chapters", view\)/);
+  assert.match(source, /workspace-primary-switcher/);
+  assert.match(source, /"章节"/);
+  assert.match(source, /"创作资料"/);
+  assert.doesNotMatch(source, /workspace-navigation-root/);
+  assert.doesNotMatch(source, /workspace-chapter-mode-switcher/);
+  assert.doesNotMatch(source, />AI 创作</);
+  assert.doesNotMatch(source, />阅读与小修</);
   assert.match(source, /workspace-collaboration-dock/);
   assert.match(source, /showNavigation=\{false\}/);
   assert.doesNotMatch(source, /workspace-view-switcher/);
   assert.doesNotMatch(source, /key=\{activeView\}/);
-  assert.match(source, /workspace-collaboration-dock[\s\S]{0,1200}id="workspace-review-rail"/);
-  assert.doesNotMatch(source, /workspace-review-rail[^>]+hidden=/);
+  assert.doesNotMatch(source, /workspace-review-rail/);
   assert.match(source, /flushActiveChapterSave/);
   assert.match(source, /activeSection/);
-  assert.match(source, /const switched = await selectSection\("library"\)/);
-  assert.match(source, /if \(!switched\) return;/);
-  assert.match(source, /catch \(error\) \{[\s\S]{0,180}setViewError\(formatWorkspaceViewSaveError\(error\)\);[\s\S]{0,80}return false;/);
   const librarySelectionBody = source.match(/const selectLibraryItem = async[\s\S]*?\n  \};/)?.[0] ?? "";
-  assert.match(librarySelectionBody, /if \(!switched\) return;/);
+  assert.match(librarySelectionBody, /await flushActiveChapterSave\(\)/);
   assert.match(librarySelectionBody, /setActiveLibraryItem\(item\)/);
-  assert.doesNotMatch(librarySelectionBody, /else[\s\S]*flushActiveChapterSave/);
+  assert.match(librarySelectionBody, /setLibraryDialogOpen\(true\)/);
+  assert.match(librarySelectionBody, /catch \(error\)[\s\S]*setViewError\(formatWorkspaceViewSaveError\(error\)\)/);
   assert.match(source, /countUnhandledQualityChecks\([\s\S]{0,100}currentChapter\.qualityChecks\.filter/);
   assert.doesNotMatch(source, /check\.status === "pending" \|\| check\.status === "failed"/);
 });
@@ -55,34 +54,31 @@ test("长篇章节编辑器接收完整的章节进展版本来源", async () =>
   assert.doesNotMatch(source, /chapterProgress=\{currentChapter\.progress\?\.content/);
 });
 
-test("审核内容与审核弹窗使用独立 portal host", async () => {
+test("审核与确认只使用共享弹窗，不再挂载右侧审核栏", async () => {
   const conversationUrl = new URL("../../writing/writing-conversation.tsx", import.meta.url);
   const source = await readFile(conversationUrl, "utf8");
 
-  assert.match(source, /createPortal/);
-  assert.match(source, /getElementById\("workspace-review-rail"\)/);
-  assert.match(source, /createPortal\([\s\S]*document\.body/);
-  assert.match(source, /当前没有待确认变更/);
-  assert.match(source, /useSyncExternalStore/);
-  assert.match(source, /document\.getElementById\("workspace-review-rail"\)/);
-  assert.match(source, /function getServerReviewRailHostSnapshot[\s\S]{0,120}return null/);
-  assert.doesNotMatch(source, /setReviewRailHost/);
-  assert.doesNotMatch(source, /const reviewRailHost = typeof document/);
+  assert.match(source, /<WorkspaceDialog/);
+  assert.match(source, /title="审核与确认"/);
+  assert.doesNotMatch(source, /workspace-review-rail/);
+  assert.doesNotMatch(source, /getReviewRailHostSnapshot|reviewRailHost|useSyncExternalStore/);
 });
 
-test("审核弹窗 portal 根节点命中全屏遮罩样式", async () => {
+test("资料详情与审核弹窗复用同一 WorkspaceDialog 基础壳", async () => {
+  const shellUrl = new URL("../workspace-shell.tsx", import.meta.url);
   const conversationUrl = new URL("../../writing/writing-conversation.tsx", import.meta.url);
-  const cssUrl = new URL("../../writing/writing-conversation.css", import.meta.url);
-  const [conversationSource, cssSource] = await Promise.all([
+  const dialogUrl = new URL("../workspace-dialog.tsx", import.meta.url);
+  const [shellSource, conversationSource, dialogSource] = await Promise.all([
+    readFile(shellUrl, "utf8"),
     readFile(conversationUrl, "utf8"),
-    readFile(cssUrl, "utf8"),
+    readFile(dialogUrl, "utf8"),
   ]);
 
-  assert.match(conversationSource, /className="writing-chat modal-overlay"/);
-  assert.match(
-    cssSource,
-    /\.writing-chat\.modal-overlay,\s*\.writing-chat \.modal-overlay\s*\{[\s\S]{0,220}z-index:\s*1000/,
-  );
+  assert.match(shellSource, /<WorkspaceDialog[\s\S]{0,220}variant="library"/);
+  assert.match(conversationSource, /<WorkspaceDialog[\s\S]{0,220}variant="review"/);
+  assert.match(dialogSource, /createPortal/);
+  assert.match(dialogSource, /role="dialog"/);
+  assert.match(dialogSource, /document\.body/);
 });
 
 test("创作台使用单一任务入口并隐藏 Agent picker", async () => {
@@ -172,7 +168,7 @@ test("桌面工作区为右上角用户浮层预留空间", async () => {
   assert.match(source, /\.home-header[\s\S]{0,160}padding-right:\s*240px/);
 });
 
-test("创作台更多按钮不竖排且空审核栏不显示零计数", async () => {
+test("创作台更多按钮不竖排且待确认入口只在有产物时显示", async () => {
   const conversationUrl = new URL("../../writing/writing-conversation.tsx", import.meta.url);
   const cssUrl = new URL("../../writing/writing-conversation.css", import.meta.url);
   const [conversationSource, cssSource] = await Promise.all([
@@ -184,6 +180,6 @@ test("创作台更多按钮不竖排且空审核栏不显示零计数", async ()
   assert.match(cssSource, /\.writing-chat \.more-menu-button[\s\S]{0,180}white-space:\s*nowrap/);
   assert.match(
     conversationSource,
-    /reviewRailArtifacts\.length > 0 \? \([\s\S]{0,140}<small>本章待确认/,
+    /effectiveAwaitingArtifactCount > 0 \? \([\s\S]{0,220}待确认/,
   );
 });

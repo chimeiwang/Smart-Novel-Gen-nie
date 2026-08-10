@@ -1000,9 +1000,11 @@ body:has(.marketing-page) .user-info-bar {
 }
 
 .workspace-left-navigation {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
   padding: 8px;
 }
 
@@ -1044,69 +1046,161 @@ body:has(.marketing-page) .user-info-bar {
 }
 
 .workspace-collaboration-dock {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr) minmax(180px, 34vh);
-  gap: 12px;
-  min-width: 0;
-  min-height: 0;
-  overflow: auto;
-}
-
-.workspace-review-rail {
-  min-width: 0;
-  min-height: 0;
-  overflow: auto;
-}
-
-.workspace-navigation-root {
-  border-bottom: 1px solid var(--border);
-}
-
-.workspace-navigation-root:last-child {
-  border-bottom: 0;
-}
-
-.workspace-navigation-root-button {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  width: 100%;
-  min-height: 38px;
-  padding: 8px 10px;
-  border: 0;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 600;
-  text-align: left;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
 }
 
-.workspace-navigation-root-button:hover,
-.workspace-navigation-root-button.active {
-  background: var(--panel-soft);
+.workspace-collaboration-dock > .workspace-agent-pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
 }
 
-.workspace-navigation-root-content {
-  padding: 4px;
-}
-
-.workspace-chapter-mode-switcher {
+.workspace-primary-switcher {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 3px;
-  margin: 0 0 8px;
+  flex: 0 0 auto;
+  margin-bottom: 8px;
   padding: 3px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--panel-soft);
 }
 
-.workspace-chapter-mode-switcher .workspace-view-button {
+.workspace-primary-switcher .workspace-view-button {
   min-width: 0;
   padding: 4px 5px;
   font-size: 12px;
   white-space: nowrap;
+}
+
+.workspace-primary-navigation-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.workspace-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(15 23 42 / 46%);
+  backdrop-filter: blur(3px);
+}
+
+.workspace-dialog-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, calc(100vw - 48px));
+  max-height: calc(100vh - 48px);
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: 0 24px 80px rgb(15 23 42 / 24%);
+}
+
+.workspace-dialog-panel.library {
+  width: min(1180px, calc(100vw - 48px));
+  height: min(860px, calc(100vh - 48px));
+}
+
+.workspace-dialog-panel.review {
+  width: min(1080px, calc(100vw - 48px));
+  height: min(860px, calc(100vh - 48px));
+}
+
+.workspace-dialog-panel.compact {
+  width: min(760px, calc(100vw - 48px));
+}
+
+.workspace-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex: 0 0 auto;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.workspace-dialog-header h2 {
+  margin: 0;
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.workspace-dialog-header p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.workspace-dialog-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.workspace-dialog-close:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.workspace-dialog-close:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.workspace-dialog-body {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px;
+}
+
+.workspace-dialog-panel.library .workspace-dialog-body {
+  display: flex;
+  padding: 0;
+}
+
+.workspace-dialog-panel.library .library-pane {
+  flex: 1;
+  min-height: 0;
+}
+
+.workspace-dialog-panel.library .library-pane-detail {
+  min-height: 0;
+  padding: 18px;
+}
+
+.workspace-dialog-panel.review .workspace-dialog-body {
+  display: flex;
+  overflow: hidden;
+}
+
+.workspace-dialog-panel.review .review-dialog {
+  flex: 1;
+  min-height: 0;
 }
 
 @media (min-width: 1920px) {
