@@ -3122,6 +3122,8 @@ export interface components {
             decision: "approve" | "discard" | "revise";
             /** Editedcontent */
             editedContent?: string | null;
+            /** Editedreplacement */
+            editedReplacement?: string | null;
             /** Selectedupdaterefs */
             selectedUpdateRefs?: components["schemas"]["ArtifactSelectionRef"][] | null;
             /** Usermessage */

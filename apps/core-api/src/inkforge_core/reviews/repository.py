@@ -501,10 +501,15 @@ class ReviewRepository:
                         "sourceCommandId": source_command_id
                     }
                 payload_json = json.dumps(payload, ensure_ascii=False)
+                materialized_diff = _selection_diff(payload)
                 diff_json = (
-                    json.dumps(request.diff, ensure_ascii=False)
-                    if request.diff is not None
-                    else None
+                    json.dumps(materialized_diff, ensure_ascii=False)
+                    if materialized_diff is not None
+                    else (
+                        json.dumps(request.diff, ensure_ascii=False)
+                        if request.diff is not None
+                        else None
+                    )
                 )
                 if existing is None:
                     artifact = ReviewArtifact(
@@ -682,8 +687,9 @@ async def _materialize_selection_payload(
         "outline_content_selection": "outline_content",
         "outline_node_content_selection": "outline_node_content",
     }[mode]
-    identity: dict[str, Any] = dict(target) if isinstance(target, dict) else {}
-    identity.update({key: payload.get(key) for key in (
+    target_identity: dict[str, Any] = dict(target) if isinstance(target, dict) else {}
+    identity: dict[str, Any] = dict(target_identity)
+    identity_fields = (
         "resourceType",
         "resourceId",
         "baseUpdatedAt",
@@ -691,7 +697,14 @@ async def _materialize_selection_payload(
         "selectionStart",
         "selectionEnd",
         "selectedTextHash",
-    ) if key in payload})
+    )
+    for key in identity_fields:
+        if key in target_identity and key in payload and target_identity[key] != payload[key]:
+            raise _selection_artifact_conflict(
+                payload.get("resourceType"), payload.get("resourceId")
+            )
+        if key in payload:
+            identity[key] = payload[key]
     resource_type = identity.get("resourceType")
     resource_id = identity.get("resourceId")
     if resource_type != expected_type or not isinstance(resource_id, str) or not resource_id:
@@ -825,6 +838,47 @@ def _selection_artifact_conflict(resource_type: object, resource_id: object) -> 
             "resourceId": resource_id if isinstance(resource_id, str) else None,
         },
     )
+
+
+def _selection_diff(payload: dict[str, Any]) -> dict[str, Any] | None:
+    target = payload.get("target")
+    if not isinstance(target, dict) or target.get("mode") not in {
+        "replace_selection",
+        "outline_content_selection",
+        "outline_node_content_selection",
+    }:
+        return None
+    selected = payload.get("selectedText")
+    replacement = payload.get("replacement")
+    candidate = payload.get("candidate")
+    prefix = payload.get("candidatePrefix")
+    suffix = payload.get("candidateSuffix")
+    values = (selected, replacement, candidate, prefix, suffix)
+    if not all(isinstance(value, str) for value in values):
+        raise ApiError(
+            status_code=409,
+            code="ARTIFACT_SELECTION_DIFF_INVALID",
+            message="閫夊尯鑽夋 Diff 鏁版嵁涓嶅畬鏁?",
+        )
+    selected_text, replacement_text, candidate_text, prefix_text, suffix_text = cast(
+        tuple[str, str, str, str, str], values
+    )
+    before = prefix_text + selected_text + suffix_text
+    return {
+        "type": "selection",
+        "mode": target["mode"],
+        "resourceType": payload.get("resourceType"),
+        "resourceId": payload.get("resourceId"),
+        "selectionStart": payload.get("selectionStart"),
+        "selectionEnd": payload.get("selectionEnd"),
+        "selectedText": selected_text,
+        "replacement": replacement_text,
+        "before": before,
+        "after": candidate_text,
+        "candidate": candidate_text,
+        "prefix": prefix_text,
+        "suffix": suffix_text,
+    }
 
 
 async def _require_current_writing_job(

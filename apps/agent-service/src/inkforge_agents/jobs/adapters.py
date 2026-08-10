@@ -285,7 +285,7 @@ class CoreArtifactPort:
             "title": event.get("title"),
             "summary": event.get("summary"),
             "payload": payload,
-            "diff": None,
+            "diff": _selection_diff(payload, state),
             "createdByAgent": agent_id,
             "reviewerAgent": event.get("reviewerAgent"),
         }
@@ -551,6 +551,48 @@ def _base_outline_updated_at(state: Mapping[str, Any]) -> str | None:
         if isinstance(value, str) and value:
             return value
     return None
+
+
+def _selection_diff(payload: Mapping[str, Any], state: Mapping[str, Any]) -> dict[str, Any] | None:
+    target = payload.get("target")
+    snapshot = state.get("selectionSnapshot")
+    if not isinstance(target, Mapping) or target.get("mode") not in {
+        "replace_selection",
+        "outline_content_selection",
+        "outline_node_content_selection",
+    } or not isinstance(snapshot, Mapping):
+        return None
+    source_snapshot = snapshot.get("sourceSnapshot")
+    source = source_snapshot.get("content") if isinstance(source_snapshot, Mapping) else None
+    replacement = payload.get("replacement")
+    start = payload.get("selectionStart")
+    end = payload.get("selectionEnd")
+    if (
+        not isinstance(source, str)
+        or not isinstance(replacement, str)
+        or not isinstance(start, int)
+        or isinstance(start, bool)
+        or not isinstance(end, int)
+        or isinstance(end, bool)
+        or not 0 <= start < end <= len(source)
+    ):
+        return None
+    selected = source[start:end]
+    return {
+        "type": "selection",
+        "mode": target.get("mode"),
+        "resourceType": payload.get("resourceType"),
+        "resourceId": payload.get("resourceId"),
+        "selectionStart": start,
+        "selectionEnd": end,
+        "selectedText": selected,
+        "replacement": replacement,
+        "before": source,
+        "after": source[:start] + replacement + source[end:],
+        "candidate": source[:start] + replacement + source[end:],
+        "prefix": source[:start],
+        "suffix": source[end:],
+    }
 
 
 def _resource(state: dict[str, Any]) -> RunResource:

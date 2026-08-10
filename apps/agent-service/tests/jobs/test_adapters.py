@@ -4,7 +4,12 @@ from typing import Any, cast
 
 import pytest
 from inkforge_agents.clients.core import RunResource
-from inkforge_agents.jobs.adapters import CoreArtifactPort, CoreGraphAgentExecutor, CoreToolGateway
+from inkforge_agents.jobs.adapters import (
+    CoreArtifactPort,
+    CoreGraphAgentExecutor,
+    CoreToolGateway,
+    _selection_diff,
+)
 from inkforge_agents.providers.base import ModelUsage
 from inkforge_agents.runtime.agent_runner import AgentRunRequest, AgentRunResult
 from inkforge_agents.tools.registry import ToolContext
@@ -479,8 +484,8 @@ async def test_selection_executor_passes_frozen_snapshot_to_agent_request() -> N
         "resourceId": "chapter-1",
         "baseUpdatedAt": "2026-01-01T00:00:00Z",
         "baseContentHash": "a" * 64,
-        "selectionStart": 1,
-        "selectionEnd": 2,
+        "selectionStart": 0,
+        "selectionEnd": 1,
         "selectedTextHash": "b" * 64,
         "selectedText": "选",
         "contextBefore": "前",
@@ -504,6 +509,29 @@ async def test_selection_executor_passes_frozen_snapshot_to_agent_request() -> N
         operation_kind="rewrite_chapter_selection",
     )
     assert runner.requests[-1].selectionSnapshot == snapshot
+
+
+def test_selection_artifact_diff_contains_full_source_candidate() -> None:
+    payload = {
+        "target": {"mode": "replace_selection"},
+        "resourceType": "chapter_content",
+        "resourceId": "chapter-1",
+        "selectionStart": 0,
+        "selectionEnd": 1,
+        "replacement": "新",
+    }
+    diff = _selection_diff(
+        payload,
+        {
+            "selectionSnapshot": {
+                "sourceSnapshot": {"content": "旧文"},
+            }
+        },
+    )
+
+    assert diff is not None
+    assert diff["before"] == "旧文"
+    assert diff["after"] == "新文"
 
 
 @pytest.mark.asyncio

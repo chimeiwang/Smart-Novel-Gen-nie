@@ -10,6 +10,7 @@ from inkforge_core.db.models import Chapter, ChapterQualityCheck, Novel
 from inkforge_core.errors import ApiError
 from inkforge_core.reviews.apply import FormalArtifactApplier
 from inkforge_core.reviews.formal_writes import FormalWriteRepository
+from inkforge_core.reviews.repository import _materialize_selection_payload, _selection_diff
 from inkforge_core.reviews.service import ReviewService
 
 
@@ -491,3 +492,46 @@ async def test_formal_selection_write_splices_authoritative_chapter_only() -> No
     await repository.apply_selection(artifact, "user-1", "替换")  # type: ignore[arg-type]
 
     assert chapter.content == "前缀😀替换后缀"
+
+
+def test_selection_diff_contains_complete_before_after_and_replacement() -> None:
+    diff = _selection_diff(
+        {
+            "target": {"mode": "replace_selection"},
+            "resourceType": "chapter_content",
+            "resourceId": "chapter-1",
+            "selectionStart": 2,
+            "selectionEnd": 4,
+            "selectedText": "旧文",
+            "replacement": "新文",
+            "candidate": "前缀新文后缀",
+            "candidatePrefix": "前缀",
+            "candidateSuffix": "后缀",
+        }
+    )
+
+    assert diff is not None
+    assert diff["before"] == "前缀旧文后缀"
+    assert diff["after"] == "前缀新文后缀"
+    assert diff["replacement"] == "新文"
+
+
+@pytest.mark.asyncio
+async def test_selection_materializer_rejects_nested_top_level_identity_mismatch() -> None:
+    payload = {
+        "kind": "chapter_draft",
+        "target": {
+            "mode": "replace_selection",
+            "resourceType": "chapter_content",
+            "resourceId": "chapter-1",
+        },
+        "resourceType": "chapter_content",
+        "resourceId": "chapter-2",
+    }
+
+    with pytest.raises(ApiError) as error:
+        await _materialize_selection_payload(  # type: ignore[arg-type]
+            object(), payload, kind="chapter_draft", novel_id="novel-1"
+        )
+
+    assert error.value.code == "ARTIFACT_SOURCE_VERSION_CONFLICT"
