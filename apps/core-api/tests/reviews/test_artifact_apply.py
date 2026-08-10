@@ -556,3 +556,16 @@ async def test_materializer_preserves_normal_draft_target_modes(
     )
 
     assert payload["target"] == {"mode": mode}
+
+
+@pytest.mark.asyncio
+async def test_materializer_rejects_unknown_target_mode() -> None:
+    with pytest.raises(ApiError) as error:
+        await _materialize_selection_payload(  # type: ignore[arg-type]
+            object(),
+            {"kind": "chapter_draft", "target": {"mode": "future_mode"}},
+            kind="chapter_draft",
+            novel_id="novel-1",
+        )
+
+    assert error.value.code == "ARTIFACT_SELECTION_TARGET_INVALID"

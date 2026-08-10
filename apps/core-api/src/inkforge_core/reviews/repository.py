@@ -675,8 +675,15 @@ async def _materialize_selection_payload(
         "outline_content_selection",
         "outline_node_content_selection",
     }
-    if mode not in selection_modes:
+    normal_modes = {"existing_chapter", "new_next_chapter", "normal_outline"}
+    if mode is None or mode in normal_modes:
         return
+    if mode not in selection_modes:
+        raise ApiError(
+            status_code=409,
+            code="ARTIFACT_SELECTION_TARGET_INVALID",
+            message="閫夊尯鑽夋 target mode 涓庣被鍨嬩笉鍖归厤",
+        )
     if kind not in {"chapter_draft", "outline_draft"}:
         raise ApiError(
             status_code=409,
