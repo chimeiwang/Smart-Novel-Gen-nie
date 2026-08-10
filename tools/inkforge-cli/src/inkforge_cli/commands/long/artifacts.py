@@ -24,10 +24,18 @@ _ALLOWED_FIELDS = {
     "expectedRevision",
     "editedContent",
     "editedContentFile",
+    "editedReplacement",
+    "editedReplacementFile",
     "selectedUpdateRefs",
     "userMessage",
 }
-_EDIT_FIELDS = {"editedContent", "editedContentFile", "selectedUpdateRefs"}
+_EDIT_FIELDS = {
+    "editedContent",
+    "editedContentFile",
+    "editedReplacement",
+    "editedReplacementFile",
+    "selectedUpdateRefs",
+}
 
 
 def _require_string(payload: JsonObject, name: str) -> str:
@@ -91,18 +99,60 @@ def _edited_content(payload: JsonObject) -> str | None:
     return None
 
 
+def _edited_replacement(payload: JsonObject) -> str | None:
+    inline = payload.get("editedReplacement")
+    file_path = payload.get("editedReplacementFile")
+    if inline is not None and file_path is not None:
+        raise CliInputError(
+            "EDITED_REPLACEMENT_CONFLICT",
+            "editedReplacement 与 editedReplacementFile 至多提供一个",
+        )
+    if inline is not None:
+        if not isinstance(inline, str) or not inline.strip():
+            raise CliInputError(
+                "INVALID_EDITED_REPLACEMENT",
+                "editedReplacement 必须是非空字符串或 null",
+            )
+        return inline
+    if file_path is not None:
+        if not isinstance(file_path, str) or not file_path:
+            raise CliInputError(
+                "INVALID_EDITED_REPLACEMENT_FILE",
+                "editedReplacementFile 必须是非空字符串",
+            )
+        content = read_utf8_text_exact(file_path)
+        if not content.strip():
+            raise CliInputError(
+                "INVALID_EDITED_REPLACEMENT",
+                "editedReplacementFile 内容不能为空",
+            )
+        return content
+    return None
+
+
+def _is_selection_artifact(artifact: JsonObject) -> bool:
+    payload = artifact.get("payload")
+    target = payload.get("target") if isinstance(payload, dict) else None
+    mode = target.get("mode") if isinstance(target, dict) else None
+    return mode in {
+        "replace_selection",
+        "outline_content_selection",
+        "outline_node_content_selection",
+    }
+
+
 def _require_verified_source(
     runtime: CliRuntime,
     *,
     artifact_id: str,
     artifact_path: str,
-) -> None:
+) -> JsonObject:
     response = runtime.require_api().request("GET", artifact_path)
     if not isinstance(response, dict):
         raise CoreResponseContractError("Artifact 响应不是 JSON 对象")
     status = response.get("sourceBindingStatus")
     if status == "verified":
-        return
+        return response
     if status in {"legacy_missing", "not_yet_supported"}:
         raise CoreApiError(
             409,
@@ -120,6 +170,7 @@ def _decision_body(
     payload: JsonObject,
     *,
     decision: ArtifactDecision,
+    artifact: JsonObject | None = None,
 ) -> JsonObject:
     _reject_unexpected_fields(payload)
     body: JsonObject = {
@@ -137,8 +188,27 @@ def _decision_body(
             )
     else:
         edited_content = _edited_content(payload)
+        edited_replacement = _edited_replacement(payload)
+        if edited_content is not None and edited_replacement is not None:
+            raise CliInputError(
+                "EDITED_FIELDS_CONFLICT",
+                "editedContent 与 editedReplacement 不能同时提供",
+            )
+        selection = artifact is not None and _is_selection_artifact(artifact)
+        if selection and edited_content is not None:
+            raise CliInputError(
+                "SELECTION_EDITED_CONTENT_FORBIDDEN",
+                "选区草案只能提供 editedReplacement",
+            )
+        if not selection and edited_replacement is not None:
+            raise CliInputError(
+                "FULL_EDITED_REPLACEMENT_FORBIDDEN",
+                "全文草案只能提供 editedContent",
+            )
         if edited_content is not None:
             body["editedContent"] = edited_content
+        if edited_replacement is not None:
+            body["editedReplacement"] = edited_replacement
         if "selectedUpdateRefs" in payload:
             body["selectedUpdateRefs"] = payload["selectedUpdateRefs"]
 
@@ -166,15 +236,62 @@ def _decide(
     *,
     decision: ArtifactDecision,
 ) -> JsonObject:
+    _reject_unexpected_fields(payload)
+    _require_stable_client_request_id(payload)
+    _require_expected_revision(payload)
+    if decision == "discard":
+        forbidden = sorted(_EDIT_FIELDS.intersection(payload))
+        if forbidden:
+            raise CliInputError(
+                "DISCARD_EDIT_FIELDS_FORBIDDEN",
+                f"discard 不接受字段：{forbidden[0]}",
+            )
+    else:
+        # 在网络 preflight 前校验本地文件/字段冲突；具体编辑语义待 Artifact
+        # GET 后按 target 再判定。
+        if (
+            payload.get("editedContent") is not None
+            and payload.get("editedContentFile") is not None
+        ):
+            raise CliInputError(
+                "EDITED_CONTENT_CONFLICT",
+                "editedContent 与 editedContentFile 至多提供一个",
+            )
+        if (
+            payload.get("editedReplacement") is not None
+            and payload.get("editedReplacementFile") is not None
+        ):
+            raise CliInputError(
+                "EDITED_REPLACEMENT_CONFLICT",
+                "editedReplacement 与 editedReplacementFile 至多提供一个",
+            )
+        if (
+            payload.get("editedContent") is not None
+            and payload.get("editedReplacement") is not None
+        ):
+            raise CliInputError(
+                "EDITED_FIELDS_CONFLICT",
+                "editedContent 与 editedReplacement 不能同时提供",
+            )
+        user_message = payload.get("userMessage")
+        if "userMessage" in payload:
+            if user_message is not None and not isinstance(user_message, str):
+                raise CliInputError("INVALID_USER_MESSAGE", "userMessage 必须是字符串或 null")
+        if decision == "revise" and (
+            not isinstance(user_message, str)
+            or not user_message.strip()
+        ):
+            raise CliInputError("USER_MESSAGE_REQUIRED", "revise 必须提供非空 userMessage")
     artifact_id = _require_string(payload, "artifactId")
     artifact_path = f"/api/v1/review-artifacts/{quote(artifact_id, safe='')}"
-    body = _decision_body(payload, decision=decision)
+    artifact: JsonObject | None = None
     if decision != "discard":
-        _require_verified_source(
+        artifact = _require_verified_source(
             runtime,
             artifact_id=artifact_id,
             artifact_path=artifact_path,
         )
+    body = _decision_body(payload, decision=decision, artifact=artifact)
     response = runtime.require_api().request(
         "POST",
         f"{artifact_path}/decision",

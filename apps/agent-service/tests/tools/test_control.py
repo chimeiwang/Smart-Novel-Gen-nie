@@ -25,7 +25,13 @@ def test_begin_artifact_requires_complete_content_in_tool_arguments() -> None:
     )
 
     assert artifact.content == "完整章节正文"
-    assert "content" in BeginArtifactArgs.model_json_schema()["required"]
+    with pytest.raises(ValidationError, match="普通长文本产物必须提交完整 content"):
+        BeginArtifactArgs.model_validate(
+            {
+                "kind": "chapter_draft",
+                "summary": "正文草案",
+            }
+        )
 
 
 @pytest.mark.parametrize("content", ["", " \r\n\t"])

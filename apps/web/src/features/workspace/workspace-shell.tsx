@@ -2,20 +2,31 @@
 
 import type { components } from "@inkforge/api-client";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { LogoutButton } from "@/features/auth/user-menu";
 import { ChapterList } from "@/features/chapters/chapter-list";
 import { ChapterEditor } from "@/features/editor/chapter-editor";
 import { flushActiveChapterSave } from "@/features/editor/chapter-save-navigation";
-import { countUnhandledQualityChecks } from "@/features/editor/quality-presentation";
-import { ShortMediumWorkspace } from "@/features/short-medium/short-medium-workspace";
-import { LibraryPane } from "./library-pane";
-import { SmartWritingPanel } from "./smart-writing-panel";
 import {
-  commitWorkspaceViewChange,
-  formatWorkspaceViewSaveError,
-} from "./workspace-shell-state";
+  buildSelectionAttachment,
+  type SelectionBridge,
+  type SelectionCaptureInput,
+  type SelectionAttachment,
+  type TransientSelection,
+} from "@/features/editor/selection-identity";
+import { countUnhandledQualityChecks } from "@/features/editor/quality-presentation";
+import { countTextLength } from "@/shared/lib/word-count";
+import { ShortMediumWorkspace } from "@/features/short-medium/short-medium-workspace";
+import {
+  LIBRARY_GROUPS,
+  LibraryNavigation,
+  LibraryPane,
+  type LibraryItem,
+} from "./library-pane";
+import { SmartWritingPanel } from "./smart-writing-panel";
+import { formatWorkspaceViewSaveError } from "./workspace-shell-state";
+import { WorkspaceDialog } from "./workspace-dialog";
 import type { WorkspaceView } from "./workspace-view";
 
 type WorkspaceShellProps = {
@@ -24,11 +35,7 @@ type WorkspaceShellProps = {
   initialView: WorkspaceView;
 };
 
-const VIEW_OPTIONS: Array<{ value: WorkspaceView; label: string }> = [
-  { value: "studio", label: "AI 创作" },
-  { value: "reading", label: "阅读与小修" },
-  { value: "library", label: "创作资料" },
-];
+type WorkspaceSection = "chapters" | "library";
 
 export function WorkspaceShell({
   bootstrap,
@@ -36,42 +43,145 @@ export function WorkspaceShell({
   initialView,
 }: WorkspaceShellProps) {
   const { novel, chapters, currentChapter } = bootstrap;
-  const [activeView, setActiveView] = useState<WorkspaceView>(initialView);
-  const [readingSession, setReadingSession] = useState(0);
+  const [activeSection, setActiveSection] = useState<WorkspaceSection>(
+    initialView === "library" ? "library" : "chapters",
+  );
+  const [activeLibraryItem, setActiveLibraryItem] = useState<LibraryItem>("characters");
+  const [libraryDialogOpen, setLibraryDialogOpen] = useState(initialView === "library");
   const [switchingView, setSwitchingView] = useState<WorkspaceView | null>(null);
   const [viewError, setViewError] = useState<string | null>(null);
+  const [transientSelection, setTransientSelection] = useState<TransientSelection | null>(null);
+  const [attachedSelection, setAttachedSelection] = useState<SelectionAttachment | null>(null);
+  const [selectionError, setSelectionError] = useState<string | null>(null);
+  const selectionGenerationRef = useRef(0);
   const previousInitialViewRef = useRef(initialView);
   const totalCount = chapters.reduce((sum, item) => sum + item.wordCount, 0);
   const approvedBeatPlan = currentChapter?.approvedBeatPlan ?? null;
 
-  const applyActiveView = useCallback((view: WorkspaceView) => {
-    if (view === "reading") setReadingSession((current) => current + 1);
-    setActiveView(view);
+  const captureSelection = useCallback(async (input: SelectionCaptureInput) => {
+    const generation = ++selectionGenerationRef.current;
+    try {
+      const attachment = await buildSelectionAttachment(input);
+      if (selectionGenerationRef.current !== generation) return;
+      setTransientSelection({ ...attachment, content: input.content });
+      setSelectionError(null);
+    } catch (error) {
+      if (selectionGenerationRef.current !== generation) return;
+      setSelectionError(error instanceof Error ? error.message : "无法读取选区");
+    }
+  }, []);
+  const attachSelection = useCallback(() => {
+    if (!transientSelection) return;
+    if (attachedSelection) {
+      setSelectionError("已有选区附件，请先移除后重新选择");
+      return;
+    }
+    selectionGenerationRef.current += 1;
+    setAttachedSelection(transientSelection);
+    setTransientSelection(null);
+    setSelectionError(null);
+  }, [attachedSelection, transientSelection]);
+  const removeSelection = useCallback(() => {
+    selectionGenerationRef.current += 1;
+    setAttachedSelection(null);
+    setSelectionError(null);
+  }, []);
+  const reselectSelection = useCallback(() => {
+    selectionGenerationRef.current += 1;
+    setAttachedSelection(null);
+    setTransientSelection(null);
+    setSelectionError("已移除，请在来源处重新选择");
+  }, []);
+  const clearTransientSelection = useCallback(() => {
+    selectionGenerationRef.current += 1;
+    setTransientSelection(null);
+  }, []);
+  const clearAllSelection = useCallback(() => {
+    selectionGenerationRef.current += 1;
+    setTransientSelection(null);
+    setAttachedSelection(null);
+    setSelectionError(null);
+  }, []);
+  const markSelectionSourceChanged = useCallback((input: {
+    resourceType: SelectionCaptureInput["resourceType"];
+    resourceId: string;
+    updatedAt: string;
+    content: string;
+  }) => {
+    selectionGenerationRef.current += 1;
+    setTransientSelection((candidate) => (
+      candidate && candidate.resourceType === input.resourceType && candidate.resourceId === input.resourceId
+        ? null
+        : candidate
+    ));
+    setAttachedSelection((attachment) => {
+      if (!attachment || attachment.resourceType !== input.resourceType || attachment.resourceId !== input.resourceId) return attachment;
+      return { ...attachment, stale: true };
+    });
+  }, []);
+  const visibleAttachedSelection = useMemo(() => (
+    attachedSelection && attachedSelection.resourceType === "chapter_content"
+      && attachedSelection.resourceId !== currentChapter?.id
+      ? { ...attachedSelection, stale: true }
+      : attachedSelection
+  ), [attachedSelection, currentChapter?.id]);
+  const visibleTransientSelection = useMemo(() => (
+    transientSelection && transientSelection.resourceType === "chapter_content"
+      && transientSelection.resourceId !== currentChapter?.id
+      ? null
+      : transientSelection
+  ), [currentChapter?.id, transientSelection]);
+  const selectionBridge = useMemo<SelectionBridge>(() => ({
+    transientSelection: visibleTransientSelection,
+    attachedSelection: visibleAttachedSelection,
+    captureSelection,
+    attachSelection,
+    clearTransientSelection,
+    clearAllSelection,
+    removeSelection,
+    reselectSelection,
+    markSelectionSourceChanged,
+  }), [attachSelection, captureSelection, clearAllSelection, clearTransientSelection, markSelectionSourceChanged, removeSelection, reselectSelection, visibleAttachedSelection, visibleTransientSelection]);
+
+  const applyInitialView = useCallback((view: WorkspaceView) => {
+    if (view === "library") {
+      setActiveSection("library");
+      setLibraryDialogOpen(true);
+    } else {
+      setActiveSection("chapters");
+      setLibraryDialogOpen(false);
+    }
   }, []);
 
   useEffect(() => {
     if (previousInitialViewRef.current === initialView) return;
     previousInitialViewRef.current = initialView;
-    const syncTimer = window.setTimeout(() => applyActiveView(initialView), 0);
+    const syncTimer = window.setTimeout(() => applyInitialView(initialView), 0);
     return () => window.clearTimeout(syncTimer);
-  }, [applyActiveView, initialView]);
+  }, [applyInitialView, initialView]);
 
-  const selectView = async (nextView: WorkspaceView) => {
+  const selectSection = (section: WorkspaceSection) => {
+    clearTransientSelection();
+    setActiveSection(section);
+    if (section === "chapters") setLibraryDialogOpen(false);
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", section === "library" ? "library" : "studio");
+    window.history.replaceState(window.history.state, "", url);
+  };
+
+  const selectLibraryItem = async (item: LibraryItem) => {
     if (switchingView) return;
+    clearTransientSelection();
     setViewError(null);
-    setSwitchingView(nextView);
+    setSwitchingView("library");
     try {
-      await commitWorkspaceViewChange({
-        currentView: activeView,
-        nextView,
-        flush: flushActiveChapterSave,
-        commit: (view) => {
-          const url = new URL(window.location.href);
-          url.searchParams.set("view", view);
-          window.history.replaceState(window.history.state, "", url);
-          applyActiveView(view);
-        },
-      });
+      await flushActiveChapterSave();
+      setActiveSection("library");
+      setActiveLibraryItem(item);
+      setLibraryDialogOpen(true);
+      const url = new URL(window.location.href);
+      url.searchParams.set("view", "library");
+      window.history.replaceState(window.history.state, "", url);
     } catch (error) {
       setViewError(formatWorkspaceViewSaveError(error));
     } finally {
@@ -110,6 +220,22 @@ export function WorkspaceShell({
     );
   }
 
+  const chatChapter = currentChapter ? {
+    id: currentChapter.id,
+    title: currentChapter.title,
+    status: currentChapter.status,
+    wordCount: currentChapter.wordCount,
+    openConsistencyCheckCount: countUnhandledQualityChecks(
+      currentChapter.qualityChecks.filter((check) => check.type === "consistency"),
+    ),
+    approvedBeatPlan: approvedBeatPlan ? {
+      id: approvedBeatPlan.id,
+      chapterGoal: approvedBeatPlan.chapterGoal,
+      sceneCount: approvedBeatPlan.sceneBeats.length,
+      totalEstimatedWords: approvedBeatPlan.totalEstimatedWords,
+    } : null,
+  } : undefined;
+
   return (
     <main className="page stack workspace-page">
       <header className="panel workspace-shell-header">
@@ -124,67 +250,53 @@ export function WorkspaceShell({
             </div>
           </div>
         </div>
-        <nav className="workspace-view-switcher" aria-label="工作区模式">
-          {VIEW_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              className={`workspace-view-button ${activeView === option.value ? "active" : ""}`}
-              type="button"
-              aria-pressed={activeView === option.value}
-              disabled={switchingView !== null}
-              onClick={() => void selectView(option.value)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </nav>
         <LogoutButton />
       </header>
 
       {viewError ? <p className="workspace-view-error" role="alert">{viewError}</p> : null}
 
-      <div className="workspace-shell" data-view={activeView}>
-        <aside className="panel workspace-chapter-navigation" hidden={activeView === "library"}>
-          <div className="panel-body">
-            <ChapterList
-              novelId={novel.id}
-              activeChapterId={currentChapter?.id ?? ""}
-              chapters={chapters}
-              view={activeView}
-            />
+      <div className="workspace-shell" data-view="studio" data-section={activeSection}>
+        <aside className="panel workspace-left-navigation" aria-label="工作区导航">
+          <div className="workspace-primary-switcher" aria-label="工作区内容">
+            {(["chapters", "library"] as const).map((section) => (
+              <button
+                key={section}
+                className={`workspace-view-button ${activeSection === section ? "active" : ""}`}
+                type="button"
+                aria-pressed={activeSection === section}
+                disabled={switchingView !== null}
+                onClick={() => selectSection(section)}
+              >
+                {section === "chapters" ? "章节" : "创作资料"}
+              </button>
+            ))}
+          </div>
+
+          <div className="workspace-primary-navigation-content">
+            {activeSection === "chapters" ? (
+              <ChapterList
+                novelId={novel.id}
+                activeChapterId={currentChapter?.id ?? ""}
+                chapters={chapters}
+                view="studio"
+                onChapterChangeReady={clearAllSelection}
+              />
+            ) : (
+              <LibraryNavigation
+                activeItem={activeLibraryItem}
+                onSelect={(item) => void selectLibraryItem(item)}
+              />
+            )}
           </div>
         </aside>
 
-        <div className="workspace-shell-main" data-view={activeView}>
-          <section className="workspace-pane workspace-agent-pane" hidden={activeView !== "studio"}>
-            <SmartWritingPanel
-              novelId={novel.id}
-              currentChapter={currentChapter ? {
-                id: currentChapter.id,
-                title: currentChapter.title,
-                status: currentChapter.status,
-                wordCount: currentChapter.wordCount,
-                openConsistencyCheckCount: countUnhandledQualityChecks(
-                  currentChapter.qualityChecks.filter(
-                    (check) => check.type === "consistency",
-                  ),
-                ),
-                approvedBeatPlan: approvedBeatPlan ? {
-                  id: approvedBeatPlan.id,
-                  chapterGoal: approvedBeatPlan.chapterGoal,
-                  sceneCount: approvedBeatPlan.sceneBeats.length,
-                  totalEstimatedWords: approvedBeatPlan.totalEstimatedWords,
-                } : null,
-              } : undefined}
-            />
-          </section>
-
-          <section className="workspace-pane workspace-editor-pane" hidden={activeView !== "reading"}>
+        <div className="workspace-shell-main" data-view="studio">
+          <section className="workspace-pane workspace-editor-pane">
             {currentChapter ? (
               <ChapterEditor
                 key={`${currentChapter.id}:${currentChapter.updatedAt}`}
-                view={activeView}
-                readingSession={readingSession}
+                view="studio"
+                readingSession={0}
                 userId={currentUser.id}
                 novelId={novel.id}
                 chapter={{
@@ -196,31 +308,53 @@ export function WorkspaceShell({
                   updatedAt: currentChapter.updatedAt,
                 }}
                 chapterProgress={currentChapter.progress ?? null}
-                qualityChecks={currentChapter.qualityChecks.filter(
-                  (check) => check.type === "consistency",
-                )}
+                qualityChecks={currentChapter.qualityChecks.filter((check) => check.type === "consistency")}
                 styleName={novel.appliedStyle?.name}
+                selectionBridge={selectionBridge}
               />
             ) : (
               <div className="panel empty">当前小说还没有章节，请先添加章节。</div>
             )}
           </section>
-
-          <section className="workspace-pane workspace-library-pane" hidden={activeView !== "library"}>
-            <LibraryPane
-              novelId={novel.id}
-              appliedStyleId={novel.appliedStyleId}
-              active={activeView === "library"}
-            />
-          </section>
         </div>
 
-        <aside
-          id="workspace-review-rail"
-          className="panel workspace-review-rail"
-          aria-label="当前章节审核栏"
-        />
+        <aside className="workspace-collaboration-dock" aria-label="聊天协作">
+          <section className="workspace-pane workspace-agent-pane">
+            <SmartWritingPanel
+              novelId={novel.id}
+              currentChapter={chatChapter}
+              selectionBridge={selectionBridge}
+            />
+          </section>
+        </aside>
       </div>
+      <WorkspaceDialog
+        open={libraryDialogOpen}
+        title={LIBRARY_GROUPS.flatMap((group) => group.items).find((item) => item.key === activeLibraryItem)?.label ?? "创作资料"}
+        description="编辑当前作品的设定、规划与写作素材"
+        variant="library"
+        onClose={() => setLibraryDialogOpen(false)}
+      >
+        <LibraryPane
+          novelId={novel.id}
+          appliedStyleId={novel.appliedStyleId}
+          active={libraryDialogOpen}
+          activeItem={activeLibraryItem}
+          onActiveItemChange={setActiveLibraryItem}
+          showNavigation={false}
+          selectionBridge={selectionBridge}
+        />
+      </WorkspaceDialog>
+      {visibleTransientSelection ? (
+        <div className="selection-action-bar" role="status">
+          <span>已选 {countTextLength(visibleTransientSelection.selectedText)} 字 · {visibleTransientSelection.sourceLabel}</span>
+          <button className="button" type="button" onClick={attachSelection} disabled={Boolean(visibleAttachedSelection)}>
+            让 AI 修改这段
+          </button>
+          <button className="button ghost" type="button" onClick={clearTransientSelection}>取消</button>
+        </div>
+      ) : null}
+      {selectionError ? <div className="selection-error" role="alert">{selectionError}</div> : null}
     </main>
   );
 }

@@ -10,6 +10,27 @@ from inkforge_agents.operations.artifact_contract import (
 from inkforge_agents.operations.definitions import OPERATION_DEFINITIONS
 
 
+def selection_event(**overrides: object) -> dict[str, object]:
+    selected = "原文"
+    event: dict[str, object] = {
+        "type": "begin_artifact_output",
+        "kind": "chapter_draft",
+        "operation": "rewrite_chapter_selection",
+        "resourceType": "chapter_content",
+        "resourceId": "chapter-1",
+        "baseUpdatedAt": "2026-01-01T00:00:00Z",
+        "baseContentHash": "a" * 64,
+        "selectionStart": 1,
+        "selectionEnd": 3,
+        "selectedTextHash": hashlib.sha256(selected.encode()).hexdigest(),
+        "replacement": "新文",
+        "summary": "选区改写草案",
+        "artifactKey": "selection-key",
+    }
+    event.update(overrides)
+    return event
+
+
 def text_event(**overrides: object) -> dict[str, object]:
     event: dict[str, object] = {
         "type": "begin_artifact_output",
@@ -281,4 +302,81 @@ def test_text_submission_rejects_incomplete_markers_without_truncating() -> None
             authoritative_artifact=None,
             task_id="task-1",
             operation_kind="write_chapter",
+        )
+
+
+def test_selection_submission_returns_only_structured_replacement_and_identity() -> None:
+    result = validate_artifact_submission(
+        definition=OPERATION_DEFINITIONS["rewrite_chapter_selection"],
+        events=[selection_event()],
+        visible_content="新文",
+        authoritative_artifact=None,
+        task_id="task-1",
+        operation_kind="rewrite_chapter_selection",
+        selection_snapshot={
+            "resourceType": "chapter_content",
+            "resourceId": "chapter-1",
+            "baseUpdatedAt": "2026-01-01T00:00:00Z",
+            "baseContentHash": "a" * 64,
+            "selectionStart": 1,
+            "selectionEnd": 3,
+            "selectedTextHash": selection_event()["selectedTextHash"],
+        },
+    )
+
+    assert result.content == "新文"
+    assert result.event["operation"] == "rewrite_chapter_selection"
+    assert result.event["resourceType"] == "chapter_content"
+    assert result.event["resourceId"] == "chapter-1"
+    assert result.event["selectionStart"] == 1
+    assert result.event["selectionEnd"] == 3
+    assert result.event["baseContentHash"] == "a" * 64
+    assert result.event["selectedTextHash"] == selection_event()["selectedTextHash"]
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"resourceId": "other"},
+        {"selectionStart": 0},
+        {"selectionEnd": 4},
+        {"baseContentHash": "b" * 64},
+        {"selectedTextHash": "b" * 64},
+        {"content": "完整正文"},
+        {"unknown": "拒绝"},
+        {"replacement": ""},
+    ],
+)
+def test_selection_submission_rejects_identity_full_content_unknown_or_empty(
+    overrides: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError, match="ARTIFACT_CONTRACT_MISMATCH"):
+        validate_artifact_submission(
+            definition=OPERATION_DEFINITIONS["rewrite_chapter_selection"],
+            events=[selection_event(**overrides)],
+            visible_content="新文",
+            authoritative_artifact=None,
+            task_id="task-1",
+            operation_kind="rewrite_chapter_selection",
+            selection_snapshot={
+                "resourceType": "chapter_content",
+                "resourceId": "chapter-1",
+                "baseUpdatedAt": "2026-01-01T00:00:00Z",
+                "baseContentHash": "a" * 64,
+                "selectionStart": 1,
+                "selectionEnd": 3,
+                "selectedTextHash": selection_event()["selectedTextHash"],
+            },
+        )
+
+
+def test_rewrite_scene_still_requires_complete_artifact_markers() -> None:
+    with pytest.raises(ValueError, match="ARTIFACT_CONTRACT_MISMATCH"):
+        validate_artifact_submission(
+            definition=OPERATION_DEFINITIONS["rewrite_scene"],
+            events=[selection_event(operation="rewrite_chapter_selection")],
+            visible_content="新文",
+            authoritative_artifact=None,
+            task_id="task-1",
+            operation_kind="rewrite_scene",
         )

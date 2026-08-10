@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { browserApi } from "@/lib/api/browser";
 import { createClientRequestId } from "@/lib/api/client-request-id";
 import { requireApiData } from "@/lib/api/response";
+import type { SelectionBridge } from "@/features/editor/selection-identity";
 
 type OutlineNodeKind = "stage" | "plot_unit" | "chapter_group";
 type OutlineNodeStatus = "planned" | "in_progress" | "completed" | "skipped";
@@ -26,11 +27,13 @@ type OutlineNodeDto = {
 type OutlinePanelProps = {
   novelId: string;
   outline: {
+    id: string;
     content: string;
     updatedAt: string;
   } | null;
   outlineNodes?: OutlineNodeDto[];
   onChanged?: () => void;
+  selectionBridge?: SelectionBridge;
 };
 
 type NodeFormState = {
@@ -103,6 +106,7 @@ export function OutlinePanel({
   outline,
   outlineNodes = [],
   onChanged,
+  selectionBridge,
 }: OutlinePanelProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -148,6 +152,7 @@ export function OutlinePanel({
   };
 
   const handleSelectNode = (node: OutlineNodeDto) => {
+    selectionBridge?.clearTransientSelection();
     setSelectedNodeId(node.id);
     setFormDraft(null);
     setMessage(null);
@@ -155,6 +160,7 @@ export function OutlinePanel({
   };
 
   const handleNewNode = (kind: OutlineNodeKind) => {
+    selectionBridge?.clearTransientSelection();
     setSelectedNodeId(null);
     setFormDraft({ ...EMPTY_FORM, kind });
     setNodeClientRequestId(createClientRequestId());
@@ -329,6 +335,30 @@ export function OutlinePanel({
             value={content}
             onChange={(event) => {
               setContentDraft(event.target.value);
+              if (!outline) return;
+              selectionBridge?.markSelectionSourceChanged({
+                resourceType: "outline_content",
+                resourceId: outline.id,
+                updatedAt: outline.updatedAt,
+                content: event.target.value,
+              });
+            }}
+            onSelect={(event) => {
+              const target = event.currentTarget;
+              if (target.selectionStart === target.selectionEnd) return;
+              if (contentDraft !== null || !outline?.updatedAt) {
+                setError("请先保存总纲后再选择");
+                return;
+              }
+              void selectionBridge?.captureSelection({
+                resourceType: "outline_content",
+                resourceId: outline!.id,
+                sourceLabel: "总纲",
+                baseUpdatedAt: outline?.updatedAt ?? "",
+                content,
+                utf16Start: target.selectionStart,
+                utf16End: target.selectionEnd,
+              });
             }}
             placeholder="例：主角从第一卷离开故乡，逐步揭开旧时代禁术真相，最终推翻旧秩序..."
             rows={6}
@@ -444,7 +474,34 @@ export function OutlinePanel({
               <textarea
                 className="textarea"
                 value={form.content}
-                onChange={(event) => setField("content", event.target.value)}
+                onChange={(event) => {
+                  setField("content", event.target.value);
+                  if (form.id) {
+                    selectionBridge?.markSelectionSourceChanged({
+                      resourceType: "outline_node_content",
+                      resourceId: form.id,
+                      updatedAt: selectedNode?.updatedAt ?? outline?.updatedAt ?? "",
+                      content: event.target.value,
+                    });
+                  }
+                }}
+                onSelect={(event) => {
+                  const target = event.currentTarget;
+                  if (target.selectionStart === target.selectionEnd || !form.id) return;
+                  if (formDraft !== null && formDraft.content !== selectedNode?.content || !(selectedNode?.updatedAt ?? outline?.updatedAt)) {
+                    setError("请先保存大纲节点后再选择");
+                    return;
+                  }
+                  void selectionBridge?.captureSelection({
+                    resourceType: "outline_node_content",
+                    resourceId: form.id,
+                    sourceLabel: `大纲节点：${form.title || "未命名"}`,
+                    baseUpdatedAt: selectedNode?.updatedAt ?? outline?.updatedAt ?? "",
+                    content: form.content,
+                    utf16Start: target.selectionStart,
+                    utf16End: target.selectionEnd,
+                  });
+                }}
                 placeholder="写清楚这个阶段/单元/章节组的目标、冲突、高潮、结果和遗留钩子。"
                 rows={8}
               />

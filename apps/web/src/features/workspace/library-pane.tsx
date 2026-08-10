@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore, useTransition } from "react";
 
 import { LorePanel } from "@/features/lore/lore-panel";
+import type { SelectionBridge } from "@/features/editor/selection-identity";
 import { OutlinePanel } from "@/features/outline/outline-panel";
 import { ProgressPanel } from "@/features/progress/progress-panel";
 import { ReferencePanel } from "@/features/references/reference-panel";
@@ -33,7 +34,7 @@ import {
 import { subscribeWorkspaceInvalidation } from "./workspace-invalidation";
 
 type LoreItem = "characters" | "locations" | "factions" | "items" | "glossaries";
-type LibraryItem = LoreItem
+export type LibraryItem = LoreItem
   | "storyBackground"
   | "worldSetting"
   | "outline"
@@ -48,6 +49,10 @@ type LibraryPaneProps = {
   novelId: string;
   appliedStyleId: string | null;
   active: boolean;
+  activeItem?: LibraryItem;
+  onActiveItemChange?: (item: LibraryItem) => void;
+  showNavigation?: boolean;
+  selectionBridge?: SelectionBridge;
 };
 
 function creativeMaterialSaveError(error: unknown): string {
@@ -57,7 +62,7 @@ function creativeMaterialSaveError(error: unknown): string {
   return error instanceof Error ? error.message : "保存失败，请稍后重试。";
 }
 
-const LIBRARY_GROUPS: Array<{
+export const LIBRARY_GROUPS: Array<{
   label: string;
   items: Array<{ key: LibraryItem; label: string }>;
 }> = [
@@ -90,6 +95,34 @@ const LIBRARY_GROUPS: Array<{
     ],
   },
 ];
+
+type LibraryNavigationProps = {
+  activeItem: LibraryItem;
+  onSelect: (item: LibraryItem) => void;
+};
+
+export function LibraryNavigation({ activeItem, onSelect }: LibraryNavigationProps) {
+  return (
+    <div className="library-navigation-body">
+      {LIBRARY_GROUPS.map((section) => (
+        <section className="library-navigation-section" key={section.label}>
+          <h3>{section.label}</h3>
+          {section.items.map((item) => (
+            <button
+              key={item.key}
+              className={`library-navigation-item ${activeItem === item.key ? "active" : ""}`}
+              type="button"
+              aria-pressed={activeItem === item.key}
+              onClick={() => onSelect(item.key)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </section>
+      ))}
+    </div>
+  );
+}
 
 function DeferredStatusPanel({
   state,
@@ -315,8 +348,21 @@ function WritingBibleEditor({
   );
 }
 
-export function LibraryPane({ novelId, active }: LibraryPaneProps) {
-  const [activeItem, setActiveItem] = useState<LibraryItem>("characters");
+export function LibraryPane({
+  novelId,
+  appliedStyleId,
+  active,
+  activeItem: controlledActiveItem,
+  onActiveItemChange,
+  showNavigation = true,
+  selectionBridge,
+}: LibraryPaneProps) {
+  const [internalActiveItem, setInternalActiveItem] = useState<LibraryItem>("characters");
+  const activeItem = controlledActiveItem ?? internalActiveItem;
+  const setActiveItem = (item: LibraryItem) => {
+    setInternalActiveItem(item);
+    onActiveItemChange?.(item);
+  };
   const router = useRouter();
   const [loader] = useState(() => new DeferredWorkspaceLoader({
     lore: async () => requireApiData(await browserApi.GET(
@@ -426,7 +472,7 @@ export function LibraryPane({ novelId, active }: LibraryPaneProps) {
     const planning = deferred.planning.data;
     if (!planning) return null;
     if (activeItem === "outline") {
-      return <OutlinePanel novelId={novelId} outline={planning.outline} outlineNodes={planning.outlineNodes} onChanged={() => refresh("planning")} />;
+      return <OutlinePanel novelId={novelId} outline={planning.outline} outlineNodes={planning.outlineNodes} onChanged={() => refresh("planning")} selectionBridge={selectionBridge} />;
     }
     if (activeItem === "progress") {
       return <ProgressPanel novelId={novelId} progress={planning.plotProgress} onChanged={() => refresh("planning")} />;
@@ -444,32 +490,15 @@ export function LibraryPane({ novelId, active }: LibraryPaneProps) {
   };
 
   return (
-    <div className="library-pane">
-      <nav className="panel library-pane-navigation" aria-label="创作资料分类">
+    <div className={`library-pane ${showNavigation ? "" : "library-pane-detail-only"}`}>
+      <nav className="panel library-pane-navigation" aria-label="创作资料分类" hidden={!showNavigation}>
         <div className="panel-header">
           <div>
             <h2 className="title-md">创作资料</h2>
             <p className="muted">设定、规划与写作素材</p>
           </div>
         </div>
-        <div className="panel-body library-navigation-body">
-          {LIBRARY_GROUPS.map((section) => (
-            <section className="library-navigation-section" key={section.label}>
-              <h3>{section.label}</h3>
-              {section.items.map((item) => (
-                <button
-                  key={item.key}
-                  className={`library-navigation-item ${activeItem === item.key ? "active" : ""}`}
-                  type="button"
-                  aria-pressed={activeItem === item.key}
-                  onClick={() => setActiveItem(item.key)}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </section>
-          ))}
-        </div>
+        <LibraryNavigation activeItem={activeItem} onSelect={setActiveItem} />
       </nav>
       <section className="panel library-pane-detail" aria-label={`${selectedLabel ?? "创作资料"}详情`}>
         <div className="panel-body library-detail-body">{renderDetail()}</div>

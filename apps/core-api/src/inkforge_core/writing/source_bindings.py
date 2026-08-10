@@ -7,7 +7,7 @@ from inkforge_contracts.long_serial import AbsenceSentinel, SourceBinding
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..db.models import Chapter, ChapterBeatPlan, Novel, Outline, SceneBeat
+from ..db.models import Chapter, ChapterBeatPlan, Novel, Outline, OutlineNode, SceneBeat
 from ..errors import ApiError
 from .idempotency import canonical_json_bytes
 
@@ -115,8 +115,14 @@ async def verify_source_bindings(
     ):
         if binding.resourceType == "chapter":
             await _verify_chapter(session, binding)
+        elif binding.resourceType == "chapter_content":
+            await _verify_chapter_content(session, binding)
         elif binding.resourceType == "outline":
             await _verify_outline(session, binding)
+        elif binding.resourceType == "outline_content":
+            await _verify_outline_content(session, binding)
+        elif binding.resourceType == "outline_node_content":
+            await _verify_outline_node_content(session, binding)
         elif binding.resourceType == "approved_beat_plan":
             await _verify_approved_beat_plan(session, binding)
         else:
@@ -138,6 +144,22 @@ async def _verify_chapter(session: AsyncSession, binding: SourceBinding) -> None
         select(Chapter)
         .where(Chapter.id == binding.resourceId)
         .with_for_update()
+    )
+    if chapter is None or not _matches_text_binding(
+        binding,
+        updated_at=chapter.updatedAt,
+        content=chapter.content,
+    ):
+        raise _source_conflict(binding)
+
+
+async def _verify_chapter_content(
+    session: AsyncSession, binding: SourceBinding
+) -> None:
+    if not binding.exists or binding.absenceSentinel is not None:
+        raise _source_conflict(binding)
+    chapter = await session.scalar(
+        select(Chapter).where(Chapter.id == binding.resourceId).with_for_update()
     )
     if chapter is None or not _matches_text_binding(
         binding,
@@ -175,6 +197,34 @@ async def _verify_outline(session: AsyncSession, binding: SourceBinding) -> None
         .with_for_update()
     )
     if current is not None:
+        raise _source_conflict(binding)
+
+
+async def _verify_outline_content(
+    session: AsyncSession, binding: SourceBinding
+) -> None:
+    if not binding.exists or binding.absenceSentinel is not None:
+        raise _source_conflict(binding)
+    outline = await session.scalar(
+        select(Outline).where(Outline.id == binding.resourceId).with_for_update()
+    )
+    if outline is None or not _matches_text_binding(
+        binding, updated_at=outline.updatedAt, content=outline.content
+    ):
+        raise _source_conflict(binding)
+
+
+async def _verify_outline_node_content(
+    session: AsyncSession, binding: SourceBinding
+) -> None:
+    if not binding.exists or binding.absenceSentinel is not None:
+        raise _source_conflict(binding)
+    node = await session.scalar(
+        select(OutlineNode).where(OutlineNode.id == binding.resourceId).with_for_update()
+    )
+    if node is None or node.content is None or not _matches_text_binding(
+        binding, updated_at=node.updatedAt, content=node.content
+    ):
         raise _source_conflict(binding)
 
 

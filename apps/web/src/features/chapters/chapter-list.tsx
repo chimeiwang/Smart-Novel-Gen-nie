@@ -17,6 +17,7 @@ type ChapterListProps = {
   novelId: string;
   activeChapterId: string;
   view: WorkspaceView;
+  onChapterChangeReady?: () => void;
   chapters: Array<{
     id: string;
     title: string;
@@ -36,6 +37,7 @@ export function ChapterList({
   activeChapterId,
   chapters,
   view,
+  onChapterChangeReady,
 }: ChapterListProps) {
   const router = useRouter();
   const [creating, startCreatingTransition] = useTransition();
@@ -52,6 +54,7 @@ export function ChapterList({
           "/api/v1/novels/{novel_id}/chapters",
           { params: { path: { novel_id: novelId } } },
         ));
+        onChapterChangeReady?.();
         router.push(buildWorkspaceChapterHref({
           novelId,
           chapterId: chapter.chapter.id,
@@ -84,6 +87,7 @@ export function ChapterList({
       setNavigationError(null);
       try {
         await flushActiveChapterSave();
+        onChapterChangeReady?.();
         router.push(buildWorkspaceChapterHref({ novelId, chapterId, view }));
       } catch (error) {
         setNavigationError(error instanceof Error ? error.message : "章节保存失败，无法切换章节");

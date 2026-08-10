@@ -1,5 +1,11 @@
 # AI 写作与 Agent 需求
 
+## 长篇选区改写契约
+
+`rewrite_chapter_selection` 与 `rewrite_outline_selection` 必须提交 `selectionTarget`：资源类型与资源 ID、`baseUpdatedAt`、完整正文 `baseContentHash`、Unicode 码点范围 `selectionStart/selectionEnd` 以及 `selectedTextHash`。请求不得提交 `selectedText`；选区正文由 Core 根据权威来源和 hash 冻结，客户端字段只承担身份与范围绑定。章节正文选区只能指向对应 `chapterId`，大纲总纲/节点选区分别使用 `novel`/`outline_node` scope。
+
+选区 Agent 产物仍必须走 `proposal -> ReviewArtifact -> 用户确认 -> Core 应用`。Agent 只生成 replacement，Core 在应用时再次校验来源绑定、范围和 hash，并保持选区外正文不变；CLI 不得绕过 Artifact 直接写入章节或大纲。普通 `plan_chapter` Beat Plan 与全文 `write_chapter`/`rewrite_scene` 草案继续使用原有完整草案语义。
+
 ## 目标
 
 为作者提供可持续的 AI 创作协作能力。系统需要把用户的自然语言请求识别为创作操作，选择主责 Agent 执行，并通过流式事件把过程、草案和用户确认状态展示给前端。

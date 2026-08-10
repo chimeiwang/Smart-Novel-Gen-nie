@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useOptimistic, useReducer, useRef, useState, useSyncExternalStore, useTransition, useEffect } from "react";
-import { createPortal } from "react-dom";
+import { useCallback, useOptimistic, useReducer, useRef, useState, useTransition, useEffect } from "react";
 import { parseSseFrame } from "@inkforge/api-client";
 
 import {
@@ -22,6 +21,15 @@ import type { AgentUpdateSelectionRef } from "@/shared/contracts/agent-updates";
 import type { ReviewArtifactDecision } from "@/shared/contracts/review-artifact";
 import type { WritingSessionTaskSummary } from "@/shared/contracts/writing-session";
 import { countTextLength } from "@/shared/lib/word-count";
+import type { SelectionBridge, SelectionAttachment } from "@/features/editor/selection-identity";
+import { buildSelectionRunRequest, selectionPreview } from "@/features/editor/selection-identity";
+import {
+  normalizeReviewArtifactDiff,
+  type SelectionDiff,
+  type UpdateDiffItem,
+} from "./review-artifact-diff";
+import { flushActiveChapterSave } from "@/features/editor/chapter-save-navigation";
+import { WorkspaceDialog } from "@/features/workspace/workspace-dialog";
 import {
   EMPTY_AGENT_ACTIVITY_STATE,
   reduceAgentActivityState,
@@ -96,18 +104,6 @@ import {
 } from "./tool-activity";
 import "./writing-conversation.css";
 
-function subscribeToReviewRail() {
-  return () => undefined;
-}
-
-function getReviewRailHostSnapshot() {
-  return document.getElementById("workspace-review-rail");
-}
-
-function getServerReviewRailHostSnapshot(): HTMLElement | null {
-  return null;
-}
-
 type WritingConversationProps = {
   novelId: string;
   chapterId: string;
@@ -126,6 +122,7 @@ type WritingConversationProps = {
   selectedAgents: AgentId[];
   targetWordCount: number;
   onComplete?: () => void;
+  selectionBridge?: SelectionBridge;
 };
 
 async function openWritingRunEvents(
@@ -179,6 +176,7 @@ type LoadedSessionResponse = Omit<Session, "messageCount" | "lastMessage"> & {
     agentId: string | null;
     content: string;
     intent: string | null;
+    metadata?: unknown;
     createdAt: string;
   }>;
   currentTask?: WritingSessionTaskSummary | null;
@@ -204,6 +202,7 @@ type Message = {
    * undefined/false = 可能是旧 JSON 协议，走 legacy extractDisplayContent
    */
   isNewProtocol?: boolean;
+  metadata?: unknown;
 };
 
 type AddMessageInput = {
@@ -215,7 +214,54 @@ type AddMessageInput = {
   isNewProtocol?: boolean;
   sessionId?: string | null;
   persist?: boolean;
+  metadata?: unknown;
 };
+
+function selectionAttachmentMetadata(attachment: SelectionAttachment) {
+  return {
+    source: {
+      resourceType: attachment.resourceType,
+      resourceId: attachment.resourceId,
+      sourceLabel: attachment.sourceLabel,
+      baseUpdatedAt: attachment.baseUpdatedAt,
+      baseContentHash: attachment.baseContentHash,
+      selectionStart: attachment.selectionStart,
+      selectionEnd: attachment.selectionEnd,
+      selectedTextHash: attachment.selectedTextHash,
+      selectionPreview: selectionPreview(attachment.selectedText),
+    },
+  };
+}
+
+function getSelectionMessageSource(metadata: unknown): {
+  resourceType: string;
+  resourceId: string;
+  sourceLabel: string;
+  selectionStart: number;
+  selectionEnd: number;
+  selectionPreview: string;
+} | null {
+  if (!metadata || typeof metadata !== "object") return null;
+  const source = (metadata as { source?: unknown }).source;
+  if (!source || typeof source !== "object") return null;
+  const value = source as Record<string, unknown>;
+  if (
+    typeof value.resourceType !== "string"
+    || typeof value.resourceId !== "string"
+    || typeof value.sourceLabel !== "string"
+    || typeof value.selectionStart !== "number"
+    || typeof value.selectionEnd !== "number"
+    || typeof value.selectionPreview !== "string"
+  ) return null;
+  return {
+    resourceType: value.resourceType,
+    resourceId: value.resourceId,
+    sourceLabel: value.sourceLabel,
+    selectionStart: value.selectionStart,
+    selectionEnd: value.selectionEnd,
+    selectionPreview: value.selectionPreview,
+  };
+}
 
 type PendingUpdatesData = {
   characters?: Record<string, unknown>[];
@@ -242,9 +288,18 @@ type ReviewArtifactData = {
   status: string;
   summary?: string | null;
   revision: number;
-  diff?: UpdateDiffItem[] | null;
+  diff?: UpdateDiffItem[] | SelectionDiff | null;
   payload?: {
     kind?: string;
+    operation?: string;
+    replacement?: string;
+    selection?: {
+      resourceType?: string;
+      resourceId?: string;
+      selectionStart?: number;
+      selectionEnd?: number;
+      selectedTextHash?: string;
+    };
     updates?: PendingUpdatesData;
     content?: string;
     markdown?: string;
@@ -373,20 +428,6 @@ function QuickReviewActions({
   );
 }
 
-type UpdateDiffItem = {
-  section: string;
-  action: string;
-  name: string;
-  fields: UpdateDiffField[];
-};
-
-type UpdateDiffField = {
-  field: string;
-  label: string;
-  oldValue?: string;
-  newValue?: string;
-};
-
 type WritingPhase = WritingConversationPhase;
 
 type OutlinePreviewNode = {
@@ -462,6 +503,7 @@ function getReviewArtifactImpactLabel(kind: string) {
 }
 
 function getReviewArtifactContent(artifact: ReviewArtifactData): string {
+  if (artifact.payload?.replacement) return artifact.payload.replacement;
   if (artifact.payload?.kind === "beat_plan" && artifact.payload.beatPlan) {
     const plan = artifact.payload.beatPlan;
     const lines: string[] = [];
@@ -486,6 +528,12 @@ function getReviewArtifactContent(artifact: ReviewArtifactData): string {
     return lines.join("\n");
   }
   return artifact.payload?.content ?? artifact.payload?.markdown ?? "";
+}
+
+function isSelectionReviewArtifact(artifact: ReviewArtifactData): boolean {
+  return artifact.payload?.operation === "rewrite_chapter_selection"
+    || artifact.payload?.operation === "rewrite_outline_selection"
+    || Boolean(artifact.payload?.selection);
 }
 
 function getUpdateActionLabel(action: string) {
@@ -632,6 +680,7 @@ export function WritingConversation({
   selectedAgents,
   targetWordCount,
   onComplete,
+  selectionBridge,
 }: WritingConversationProps) {
   const [workspace, dispatchWorkspace] = useReducer(
     reduceSessionWorkspace<ReviewArtifactData>,
@@ -741,12 +790,6 @@ export function WritingConversation({
   const [activityState, setActivityState] = useState<AgentActivityState>(EMPTY_AGENT_ACTIVITY_STATE);
   const activityStateRef = useRef<AgentActivityState>(EMPTY_AGENT_ACTIVITY_STATE);
 
-  const reviewRailHost = useSyncExternalStore(
-    subscribeToReviewRail,
-    getReviewRailHostSnapshot,
-    getServerReviewRailHostSnapshot,
-  );
-
   const applyAgentActivityAction = useCallback((action: AgentActivityAction) => {
     const next = reduceAgentActivityState(activityStateRef.current, action);
     activityStateRef.current = next;
@@ -769,6 +812,7 @@ export function WritingConversation({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const chatRef = useRef<HTMLDivElement>(null);
   const pendingReviewArtifactRefreshRef = useRef(false);
+  const clearAllSelection = selectionBridge?.clearAllSelection;
 
   const updateReviewArtifactAction = useCallback((next: ReviewArtifactActionState | null) => {
     reviewArtifactActionRef.current = next;
@@ -776,6 +820,7 @@ export function WritingConversation({
   }, []);
 
   const resetSessionContext = useCallback((sessionId: string | null) => {
+    clearAllSelection?.();
     reviewStateEpochRef.current.invalidate();
     sessionLoadVersionRef.current += 1;
     phasePersistenceReadyRef.current = false;
@@ -796,7 +841,7 @@ export function WritingConversation({
     resetAgentActivity();
     clearAgentLiveRuns();
     setIsAssigningTask(false);
-  }, [clearAgentLiveRuns, replaceSessionWorkspace, resetAgentActivity, updateReviewArtifactAction]);
+  }, [clearAgentLiveRuns, clearAllSelection, replaceSessionWorkspace, resetAgentActivity, updateReviewArtifactAction]);
 
   const clearReviewActionCloseTimer = useCallback(() => {
     if (reviewActionCloseTimerRef.current === null) return;
@@ -982,6 +1027,7 @@ export function WritingConversation({
           agentName: m.agentId ? AGENT_REGISTRY.find(a => a.id === m.agentId)?.name : undefined,
           content: normalizeParagraphTextDisplay(m.content),
           intent: m.intent || undefined,
+          metadata: m.metadata,
           timestamp: new Date(m.createdAt).getTime(),
         }));
 
@@ -1050,7 +1096,8 @@ export function WritingConversation({
     content: string,
     agentId?: string,
     intent?: string,
-    explicitSessionId?: string | null
+    explicitSessionId?: string | null,
+    metadata?: unknown,
   ) => {
     const targetSessionId = explicitSessionId ?? currentSessionId;
     if (!targetSessionId) return;
@@ -1063,6 +1110,7 @@ export function WritingConversation({
           agentId: agentId ?? null,
           content,
           intent: intent ?? null,
+          ...(metadata === undefined ? {} : { metadata }),
         },
       }));
     } catch (err) {
@@ -1135,7 +1183,7 @@ export function WritingConversation({
     };
     setMessages((prev) => [...prev, newMsg]);
     if (shouldPersistOptimisticWritingMessage({ persist })) {
-      saveMessageToServer(msg.role, msg.content, msg.agentId, msg.intent, sessionId);
+      saveMessageToServer(msg.role, msg.content, msg.agentId, msg.intent, sessionId, msg.metadata);
     }
     setTimeout(scrollToBottom, 50);
     return newMsg.id;
@@ -1270,7 +1318,7 @@ export function WritingConversation({
     setMessages((prev) => attachReviewArtifactToConversation<Message, ReviewArtifactData>(prev, artifact, () => ({
       id: `restored-review-${artifact.id}`,
       role: "system",
-      content: "待确认变更已更新。请在下方卡片中查看、修改或应用。",
+      content: "待确认变更已更新。请从聊天顶部的待确认入口查看、修改或应用。",
       timestamp: Date.now(),
     })));
   }, [setActiveReviewArtifact, setPhase, setTaskId, taskId]);
@@ -1891,6 +1939,11 @@ export function WritingConversation({
   const startDiscussionInternal = async (messageOverride?: string, titleOverride?: string) => {
     const userMessage = (messageOverride ?? userInput).trim();
     if (!userMessage) return;
+    const attachment = selectionBridge?.attachedSelection ?? null;
+    if (attachment?.stale) {
+      setError("选区来源已变化，请重新选择后再发送");
+      return;
+    }
 
     const sessionTitle = titleOverride ?? createWritingSessionTitle(userMessage);
     const sessionIdForRequest = currentSessionId ?? await createSession(sessionTitle);
@@ -1900,7 +1953,13 @@ export function WritingConversation({
     }
 
     setUserInput("");
-    addMessage({ role: "user", content: userMessage, sessionId: sessionIdForRequest, persist: false });
+    addMessage({
+      role: "user",
+      content: userMessage,
+      metadata: attachment ? selectionAttachmentMetadata(attachment) : undefined,
+      sessionId: sessionIdForRequest,
+      persist: false,
+    });
     setIsAssigningTask(true);
     addFlowLog({ type: "user", content: `用户: ${userMessage.slice(0, 50)}${userMessage.length > 50 ? "..." : ""}` });
     phasePersistenceReadyRef.current = true;
@@ -1908,17 +1967,23 @@ export function WritingConversation({
     setIsSending(true);
 
     try {
+      if (attachment && attachment.resourceType === "chapter_content") {
+        await flushActiveChapterSave();
+      }
       const run = requireApiData(await browserApi.POST("/api/v1/writing/runs", {
-        body: {
-          clientRequestId: createClientRequestId(),
-          novelId,
-          chapterId,
-          targetWordCount,
-          selectedAgents,
-          userMessage,
-          writingSessionId: sessionIdForRequest,
-        },
+        body: attachment
+          ? { ...buildSelectionRunRequest({ attachment, novelId, chapterId, writingSessionId: sessionIdForRequest, targetWordCount, userInstruction: userMessage }), clientRequestId: createClientRequestId() }
+          : {
+              clientRequestId: createClientRequestId(),
+              novelId,
+              chapterId,
+              targetWordCount,
+              selectedAgents,
+              userMessage,
+              writingSessionId: sessionIdForRequest,
+            },
       }));
+      if (attachment) selectionBridge?.removeSelection();
       setTaskId(run.id);
       await processStream(
         run.id,
@@ -1943,6 +2008,16 @@ export function WritingConversation({
     const guarded = runSendAction(async () => {
       const message = (messageOverride ?? userInput).trim();
       if (!message) return;
+      const attachment = selectionBridge?.attachedSelection ?? null;
+      if (attachment?.stale) {
+        setError("选区来源已变化，请重新选择后再发送");
+        return;
+      }
+
+      if (attachment && taskId && phase !== "idle" && phase !== "completed" && phase !== "error") {
+        setError("当前任务仍在运行，请等待完成或先取消后再发送选区改写");
+        return;
+      }
 
       // 中断当前正在运行的 Agent
       abortCurrentAgent();
@@ -1961,29 +2036,54 @@ export function WritingConversation({
       }
 
       setUserInput("");
-      addMessage({ role: "user", content: message, persist: false });
+      addMessage({
+        role: "user",
+        content: message,
+        metadata: attachment ? selectionAttachmentMetadata(attachment) : undefined,
+        persist: false,
+      });
       setIsSending(true);
 
       const controller = new AbortController();
       abortRef.current = controller;
 
       try {
-        const accepted = requireApiData(await browserApi.POST(
-          "/api/v1/writing/runs/{task_id}/resume",
-          {
-            params: { path: { task_id: taskId } },
+        let accepted;
+        if (attachment) {
+          if (attachment.resourceType === "chapter_content") await flushActiveChapterSave();
+          accepted = requireApiData(await browserApi.POST("/api/v1/writing/runs", {
             body: {
+              ...buildSelectionRunRequest({
+                attachment,
+                novelId,
+                chapterId,
+                writingSessionId: currentSessionIdRef.current,
+                targetWordCount,
+                userInstruction: message,
+              }),
               clientRequestId: createClientRequestId(),
-              writingSessionId: currentSessionId ?? null,
-              userMessage: message,
             },
             signal: controller.signal,
-          },
-        ));
+          }));
+          selectionBridge?.removeSelection();
+        } else {
+          accepted = requireApiData(await browserApi.POST(
+            "/api/v1/writing/runs/{task_id}/resume",
+            {
+              params: { path: { task_id: taskId } },
+              body: {
+                clientRequestId: createClientRequestId(),
+                writingSessionId: currentSessionId ?? null,
+                userMessage: message,
+              },
+              signal: controller.signal,
+            },
+          ));
+        }
         const sessionIdForRequest = currentSessionIdRef.current;
         if (!sessionIdForRequest) throw new Error("当前写作会话不存在");
         await processStream(
-          accepted.taskId,
+          "taskId" in accepted ? accepted.taskId : accepted.id,
           { mode: "session", sessionId: sessionIdForRequest },
           controller.signal,
         );
@@ -2378,6 +2478,33 @@ export function WritingConversation({
     );
   };
 
+  const renderSelectionDiffPreview = (diff: SelectionDiff, compact = false) => (
+    <div className={`selection-diff-preview${compact ? " compact" : ""}`}>
+      <div className="selection-diff-preview-title">选区替换 Diff</div>
+      <div className="selection-diff-preview-meta">
+        {diff.resourceType ? `${diff.resourceType}${diff.resourceId ? ` · ${diff.resourceId}` : ""}` : "选区正文"}
+        {typeof diff.selectionStart === "number" && typeof diff.selectionEnd === "number"
+          ? ` · ${diff.selectionStart}-${diff.selectionEnd}`
+          : ""}
+      </div>
+      <div className="diff-columns selection-diff-columns">
+        <div className="diff-column diff-old">
+          <div className="diff-column-title">当前</div>
+          <ParagraphText text={normalizeParagraphTextDisplay(diff.before)} />
+        </div>
+        <div className="diff-column diff-new">
+          <div className="diff-column-title">待替换</div>
+          <ParagraphText text={normalizeParagraphTextDisplay(diff.after)} />
+        </div>
+      </div>
+      <div className="selection-diff-replacement">
+        <span className="diff-column-title">editedReplacement</span>
+        <ParagraphText text={normalizeParagraphTextDisplay(diff.replacement)} />
+      </div>
+      <div className="review-dialog-note">选区外内容未变化（Core 已校验）</div>
+    </div>
+  );
+
   const renderStructuredUpdateSelection = (artifact: ReviewArtifactData, disabled = false) => {
     const updates = artifact.payload?.updates;
     const allRefs = getStructuredUpdateRefs(updates);
@@ -2461,7 +2588,9 @@ export function WritingConversation({
   };
 
   const renderArtifactReviewCard = (artifact: ReviewArtifactData) => {
-    const diffItems = artifact.diff ?? artifact.payload?.updates?.__diff ?? [];
+    const normalizedDiff = normalizeReviewArtifactDiff(artifact.diff, artifact.payload?.updates?.__diff);
+    const diffItems = normalizedDiff.updateDiff;
+    const selectionDiff = normalizedDiff.selectionDiff;
     const hasStructuredUpdates = Boolean(artifact.payload?.updates && (
       artifact.payload.updates.outlineContent ||
       artifact.payload.updates.outline?.length ||
@@ -2519,9 +2648,14 @@ export function WritingConversation({
               </div>
             </div>
           ) : null}
-          {diffItems.length > 0 || hasStructuredUpdates ? (
-            renderUpdatesPreviewCard({ ...(artifact.payload?.updates ?? {}), __diff: diffItems.slice(0, 6) }, true)
+          {isSelectionReviewArtifact(artifact) && !selectionDiff ? (
+            <div className="review-dialog-note">选区外内容未变化（Core 已校验）</div>
           ) : null}
+          {selectionDiff ? renderSelectionDiffPreview(selectionDiff, true) : (
+            diffItems.length > 0 || hasStructuredUpdates ? (
+              renderUpdatesPreviewCard({ ...(artifact.payload?.updates ?? {}), __diff: diffItems.slice(0, 6) }, true)
+            ) : null
+          )}
           {action ? (
             <div className={`review-action-status ${action.status}`} role={action.status === "failed" ? "alert" : "status"}>
               {action.status === "pending" ? <span className="review-action-spinner" aria-hidden="true" /> : null}
@@ -2543,7 +2677,7 @@ export function WritingConversation({
                 className="button sm"
                 type="button"
                 disabled={isApplyDisabled}
-                onClick={() => handleArtifactDecision(
+                onClick={() => void handleArtifactDecision(
                   artifact,
                   "approve",
                   undefined,
@@ -2593,7 +2727,9 @@ export function WritingConversation({
 
   const renderArtifactReviewDialog = (artifact: ReviewArtifactData) => {
     const latestEvaluation = artifact.evaluations?.[0];
-    const diffItems = artifact.diff ?? artifact.payload?.updates?.__diff ?? [];
+    const normalizedDiff = normalizeReviewArtifactDiff(artifact.diff, artifact.payload?.updates?.__diff);
+    const diffItems = normalizedDiff.updateDiff;
+    const selectionDiff = normalizedDiff.selectionDiff;
     const hasStructuredUpdates = Boolean(artifact.payload?.updates && (
       artifact.payload.updates.outlineContent ||
       artifact.payload.updates.outline?.length ||
@@ -2610,6 +2746,16 @@ export function WritingConversation({
       activeReviewArtifact?.id === artifact.id &&
       Boolean(taskId) &&
       taskId === artifact.taskId;
+    const approveArtifact = () => {
+      // eslint-disable-next-line react-hooks/refs -- 仅在用户点击批准后读取任务引用，不会在渲染阶段执行。
+      void handleArtifactDecision(
+        artifact,
+        "approve",
+        undefined,
+        canEditText ? reviewDraftText : undefined,
+        canEditText ? undefined : selectedUpdateRefsForApply,
+      );
+    };
 
     return (
       <div className={`review-dialog ${actionLocked ? "is-busy" : ""}`} aria-busy={actionLocked}>
@@ -2638,7 +2784,7 @@ export function WritingConversation({
           ) : null}
 
           <section className="review-dialog-section">
-            <div className="review-dialog-section-title">{canEditText ? "可编辑正文" : "结构化变更"}</div>
+            <div className="review-dialog-section-title">{canEditText ? (isSelectionReviewArtifact(artifact) ? "可编辑选区替换" : "可编辑正文") : "结构化变更"}</div>
             {canEditText ? (
               <label className="review-editor">
                 <textarea
@@ -2658,13 +2804,18 @@ export function WritingConversation({
                 <div className="review-dialog-note">这个变更还没有进入等待确认状态，只能查看，不能直接应用。</div>
               )
             )}
+            {isSelectionReviewArtifact(artifact) && !selectionDiff ? (
+              <div className="review-dialog-note">选区外内容未变化（Core 已校验）；批准时只提交 editedReplacement。</div>
+            ) : null}
           </section>
 
-          {diffItems.length > 0 || hasStructuredUpdates ? (
-            <section className="review-dialog-section review-dialog-diffs">
-              {renderUpdatesPreviewCard({ ...(artifact.payload?.updates ?? {}), __diff: diffItems }, true)}
-            </section>
-          ) : null}
+          {selectionDiff ? renderSelectionDiffPreview(selectionDiff) : (
+            diffItems.length > 0 || hasStructuredUpdates ? (
+              <section className="review-dialog-section review-dialog-diffs">
+                {renderUpdatesPreviewCard({ ...(artifact.payload?.updates ?? {}), __diff: diffItems }, true)}
+              </section>
+            ) : null
+          )}
         </div>
 
         {action ? (
@@ -2681,13 +2832,7 @@ export function WritingConversation({
                 className="button"
                 type="button"
                 disabled={isSending || isActing || actionLocked || (canEditText && !reviewDraftText.trim()) || hasEmptyStructuredSelection}
-                onClick={() => handleArtifactDecision(
-                  artifact,
-                  "approve",
-                  undefined,
-                  canEditText ? reviewDraftText : undefined,
-                  canEditText ? undefined : selectedUpdateRefsForApply
-                )}
+                onClick={approveArtifact}
               >
                 {getReviewArtifactActionButtonLabel(action, "approve") ?? (artifact.optimisticStatus === "applying" ? "应用中..." : "应用到项目")}
               </button>
@@ -2769,6 +2914,7 @@ export function WritingConversation({
         addOptimisticReviewArtifactDecision({ artifactId: artifact.id, decision });
       });
       try {
+        const selectionArtifact = isSelectionReviewArtifact(artifact);
         const accepted = requireApiData(await browserApi.POST(
           "/api/v1/review-artifacts/{artifact_id}/decision",
           {
@@ -2777,7 +2923,8 @@ export function WritingConversation({
               clientRequestId: createClientRequestId(),
               expectedRevision: artifact.revision,
               decision,
-              editedContent: decision === "approve" ? editedContent ?? null : null,
+              editedContent: decision === "approve" && !selectionArtifact ? editedContent ?? null : null,
+              editedReplacement: decision === "approve" && selectionArtifact ? editedContent ?? null : null,
               selectedUpdateRefs: decision === "approve" ? selectedUpdateRefs ?? null : null,
               userMessage: userMessage ?? (decision === "revise" ? "继续修改待确认变更" : null),
             },
@@ -2966,6 +3113,7 @@ export function WritingConversation({
           const info = msg.agentId ? getAgentInfo(msg.agentId) : null;
           const isEditing = editingMessageId === msg.id;
           const anchoredRounds = activityRounds.filter((round) => round.anchorMessageId === msg.id);
+          const selectionSource = isUser ? getSelectionMessageSource(msg.metadata) : null;
 
           return (
             <div key={msg.id} className="message-group">
@@ -2981,6 +3129,13 @@ export function WritingConversation({
                   </div>
                   <div className="message-content">
                     <ParagraphText text={renderParagraphMessageContent(msg)} />
+                    {selectionSource ? (
+                      <div className="selection-message-source" aria-label="选区来源快照">
+                        <span className="selection-message-source-label">选区附件 · {selectionSource.sourceLabel}</span>
+                        <span>{selectionSource.selectionEnd - selectionSource.selectionStart} 字</span>
+                        <span className="selection-attachment-preview">{selectionSource.selectionPreview}</span>
+                      </div>
+                    ) : null}
                     {anchoredRounds.map(renderActivityRound)}
                   </div>
                   {msg.intent && (
@@ -3017,7 +3172,7 @@ export function WritingConversation({
                       className="review-artifact-message-hint"
                       onClick={() => openReviewArtifactModal(resolveMessageReviewArtifact(msg.reviewArtifact!))}
                     >
-                      这条回复包含待确认变更，已显示在右侧审核栏
+                      查看这条回复的待确认变更
                     </button>
                   ) : null}
                 </div>
@@ -3145,6 +3300,18 @@ export function WritingConversation({
 
       {/* 输入区域 */}
       <div className="chat-input">
+        {selectionBridge?.attachedSelection ? (
+          <div className={`selection-attachment-card ${selectionBridge.attachedSelection.stale ? "stale" : ""}`}>
+            <div className="selection-attachment-main">
+              <strong>{selectionBridge.attachedSelection.sourceLabel}</strong>
+              <span>{selectionBridge.attachedSelection.selectionEnd - selectionBridge.attachedSelection.selectionStart} 字</span>
+              <span className="selection-attachment-preview">{selectionPreview(selectionBridge.attachedSelection.selectedText)}</span>
+              {selectionBridge.attachedSelection.stale ? <span className="error-text">来源已变化，请重新选择</span> : null}
+            </div>
+            <button className="button ghost sm" type="button" onClick={selectionBridge.removeSelection}>移除</button>
+            <button className="button ghost sm" type="button" onClick={selectionBridge.reselectSelection}>重新选择</button>
+          </div>
+        ) : null}
         {generatedContent && (
           <div className="quick-actions">
             <button onClick={() => handleSendMessage("采纳")}>采纳</button>
@@ -3201,62 +3368,34 @@ export function WritingConversation({
       </div>
 
       {/* 待确认变更查看/审核弹窗 */}
-      {showReviewArtifactModal && modalReviewArtifact && typeof document !== "undefined" ? createPortal(
-        <div className="writing-chat modal-overlay" onClick={() => closeReviewArtifactModal()}>
-          <div className="modal-content review-artifact-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header">
-              <span>{modalReviewArtifact.status === "awaiting_user" ? "待你确认" : "查看变更"}</span>
-              <button
-                className="modal-close"
-                onClick={() => closeReviewArtifactModal()}
-                disabled={isReviewArtifactModalLocked}
-                aria-label={isReviewArtifactModalLocked ? "操作进行中，暂不能关闭" : "关闭"}
-              >
-                ×
-              </button>
-            </div>
-            <div className="modal-body">
-              {renderArtifactReviewDialog(modalReviewArtifact)}
-            </div>
-          </div>
-        </div>,
-        document.body,
-      ) : null}
+      <WorkspaceDialog
+        open={showReviewArtifactModal && Boolean(modalReviewArtifact)}
+        title={modalReviewArtifact?.status === "awaiting_user" ? "待你确认" : "查看变更"}
+        description="审核完整差异后再决定应用、返工或丢弃"
+        variant="review"
+        closeDisabled={isReviewArtifactModalLocked}
+        onClose={() => closeReviewArtifactModal()}
+      >
+        {modalReviewArtifact ? renderArtifactReviewDialog(modalReviewArtifact) : null}
+      </WorkspaceDialog>
 
-      {showArtifactTray && (
-        <div className="modal-overlay" onClick={() => setShowArtifactTray(false)}>
-          <div className="modal-content artifact-tray-modal" onClick={e => e.stopPropagation()}>
-           <div className="modal-header">
-              <span>待确认变更</span>
-             <button className="modal-close" onClick={() => setShowArtifactTray(false)}>×</button>
-           </div>
-           <div className="modal-body artifact-tray-body">
-             {reviewRailArtifacts.length === 0 ? (
-                <div className="artifact-empty">暂无待确认变更。</div>
-             ) : reviewRailArtifacts.map((artifact) => (
-                <button
-                  key={artifact.id}
-                  className="artifact-tray-item"
-                  type="button"
-                  onClick={() => {
-                    inspectReviewArtifactFromTray(artifact);
-                  }}
-                >
-                  <span className="artifact-tray-main">
-                   <span className="artifact-tray-title">{artifact.summary || artifact.artifactKey || artifact.id}</span>
-                   <span className="artifact-tray-meta">
-                      {getReviewArtifactKindLabel(artifact.kind)} · {getReviewArtifactImpactLabel(artifact.kind)} · v{artifact.revision}
-                   </span>
-                  </span>
-                  <span className={`action-badge ${artifact.status}`}>
-                    {getReviewArtifactStatusLabel(artifact.status)}
-                  </span>
-                </button>
-              ))}
+      <WorkspaceDialog
+        open={showArtifactTray}
+        title="审核与确认"
+        description={`当前章节共有 ${reviewRailArtifacts.length} 项待确认变更`}
+        variant="compact"
+        onClose={() => setShowArtifactTray(false)}
+      >
+        <div className="artifact-tray-body">
+          {reviewRailArtifacts.length === 0 ? (
+            <div className="artifact-empty">暂无待确认变更。</div>
+          ) : reviewRailArtifacts.map((artifact) => (
+            <div className="artifact-tray-review-card" key={artifact.id}>
+              {renderArtifactReviewCard(artifact)}
             </div>
-          </div>
+          ))}
         </div>
-      )}
+      </WorkspaceDialog>
 
       {showSessionModal && (
         <div className="modal-overlay" onClick={() => setShowSessionModal(false)}>
@@ -3302,40 +3441,6 @@ export function WritingConversation({
         </div>
       )}
 
-      {reviewRailHost ? createPortal(
-        <div className="writing-chat workspace-review-content">
-          <div className="workspace-review-heading">
-            <span>审核与确认</span>
-            {reviewRailArtifacts.length > 0 ? (
-              <small>本章待确认 {reviewRailArtifacts.length} 项</small>
-            ) : null}
-          </div>
-          {reviewRailArtifacts.length > 0 ? (
-            <div className="workspace-review-artifacts">
-              {reviewRailArtifacts.map((artifact) => (
-                <div className="workspace-review-artifact" key={artifact.id}>
-                  {renderArtifactReviewCard(artifact)}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="workspace-review-empty">
-              <div>
-                <strong>{chapterContext?.title ?? "当前章节"}</strong>
-                <span>{chapterContext?.status ?? "未选择"} · {chapterContext?.wordCount ?? 0} 字</span>
-              </div>
-              {chapterContext?.approvedBeatPlan ? (
-                <p>
-                  已批准计划：{chapterContext.approvedBeatPlan.chapterGoal} · {chapterContext.approvedBeatPlan.sceneCount} 场 · 约 {chapterContext.approvedBeatPlan.totalEstimatedWords} 字
-                </p>
-              ) : <p>尚未批准章节计划</p>}
-              <p>待处理终检：{chapterContext?.openConsistencyCheckCount ?? 0}</p>
-              <div className="workspace-review-empty-state">当前没有待确认变更</div>
-            </div>
-          )}
-        </div>,
-        reviewRailHost,
-      ) : null}
     </div>
   );
 }

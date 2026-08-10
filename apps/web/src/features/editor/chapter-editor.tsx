@@ -33,6 +33,7 @@ import {
   getQualityCheckPresentationState,
   isHandledQualityCheck,
 } from "./quality-presentation";
+import type { SelectionBridge } from "./selection-identity";
 
 type ChapterEditorProps = {
   view: WorkspaceView;
@@ -53,6 +54,7 @@ type ChapterEditorProps = {
   } | null;
   qualityChecks?: QualityCheckDto[];
   styleName?: string | null;
+  selectionBridge?: SelectionBridge;
 };
 
 export function ChapterEditor({
@@ -64,6 +66,7 @@ export function ChapterEditor({
   chapterProgress,
   qualityChecks = [],
   styleName,
+  selectionBridge,
 }: ChapterEditorProps) {
   const router = useRouter();
   const [title, setTitle] = useState(chapter.title);
@@ -500,6 +503,26 @@ export function ChapterEditor({
                 const nextContent = event.target.value;
                 setContent(nextContent);
                 saveCoordinatorRef.current?.schedule({ title, content: nextContent });
+                selectionBridge?.markSelectionSourceChanged({
+                  resourceType: "chapter_content",
+                  resourceId: chapter.id,
+                  updatedAt: chapter.updatedAt,
+                  content: nextContent,
+                });
+              }}
+              onSelect={(event) => {
+                const target = event.currentTarget;
+                if (target.selectionStart === target.selectionEnd) return;
+                if (saveState !== "saved") return;
+                void selectionBridge?.captureSelection({
+                  resourceType: "chapter_content",
+                  resourceId: chapter.id,
+                  sourceLabel: `章节：${chapter.title}`,
+                  baseUpdatedAt: saveCoordinatorRef.current?.updatedAt ?? chapter.updatedAt,
+                  content,
+                  utf16Start: target.selectionStart,
+                  utf16End: target.selectionEnd,
+                });
               }}
             />
           </>

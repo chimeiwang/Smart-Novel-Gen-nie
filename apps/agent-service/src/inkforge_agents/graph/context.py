@@ -67,6 +67,15 @@ def build_operation_context(
         "task": task,
         "novel": novel,
     }
+    selection = _selection_snapshot(source)
+    is_selection = definition.kind in {
+        "rewrite_chapter_selection",
+        "rewrite_outline_selection",
+    }
+    if is_selection:
+        if selection is None:
+            raise ValueError("选区 Operation 缺少 Core 冻结快照")
+        projection["selection"] = _selection_projection(selection)
 
     if definition.contextStrategy == "brief":
         projection["chapter"] = _select(current, _CHAPTER_SUMMARY_FIELDS)
@@ -80,10 +89,16 @@ def build_operation_context(
         ]
         return projection
     if definition.contextStrategy == "outline":
-        projection["outline"] = _outline_index(workspace, planning)
+        projection["outline"] = _outline_index(
+            workspace, planning, include_content=not is_selection
+        )
         return projection
     if definition.contextStrategy == "chapter":
-        projection["currentChapter"] = dict(current)
+        projection["currentChapter"] = (
+            _select(current, _CHAPTER_SUMMARY_FIELDS)
+            if is_selection
+            else dict(current)
+        )
         projection["adjacentChapters"] = [
             _select(item, _CHAPTER_SUMMARY_FIELDS) for item in adjacent
         ]
@@ -241,10 +256,18 @@ def _setting_index(workspace: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
 def _outline_index(
     workspace: Mapping[str, Any],
     planning: Mapping[str, Any],
+    *,
+    include_content: bool = True,
 ) -> dict[str, Any]:
+    outline_fields = ("id", "content", "updatedAt") if include_content else ("id", "updatedAt")
+    group_fields = (
+        ("id", "title", "chapterStartOrder", "chapterEndOrder", "content")
+        if include_content
+        else ("id", "title", "chapterStartOrder", "chapterEndOrder")
+    )
     return {
         "outline": _select(
-            _mapping(workspace.get("outline")), ("id", "content", "updatedAt")
+            _mapping(workspace.get("outline")), outline_fields
         ),
         "nodes": [
             _select(item, _OUTLINE_NODE_FIELDS)
@@ -254,7 +277,7 @@ def _outline_index(
         "plotProgress": workspace.get("plotProgress"),
         "chapterGroup": _select(
             _mapping(planning.get("chapterGroup")),
-            ("id", "title", "chapterStartOrder", "chapterEndOrder", "content"),
+            group_fields,
         ),
         "outlinePath": planning.get("outlinePath", []),
         "foreshadowingSummaries": [
@@ -263,3 +286,28 @@ def _outline_index(
             if isinstance(item, Mapping)
         ],
     }
+
+
+def _selection_snapshot(source: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    direct = source.get("selectionSnapshot")
+    if isinstance(direct, Mapping):
+        return direct
+    planning = _mapping(source.get("planning"))
+    nested = planning.get("selectionSnapshot")
+    return nested if isinstance(nested, Mapping) else None
+
+
+def _selection_projection(snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    fields = (
+        "resourceType",
+        "resourceId",
+        "baseUpdatedAt",
+        "baseContentHash",
+        "selectionStart",
+        "selectionEnd",
+        "selectedTextHash",
+        "selectedText",
+        "contextBefore",
+        "contextAfter",
+    )
+    return {field: snapshot[field] for field in fields if field in snapshot}

@@ -22,13 +22,19 @@ test("创作资料使用独立三组分类导航", async () => {
   assert.doesNotMatch(source, /Promise\.all\(\[\s*loader\.load\("lore"\)/);
 });
 
-test("资料详情使用主画布分区而不是完整表单弹窗", async () => {
+test("资料详情保留完整表单，并由工作区共享弹窗承载", async () => {
   const paneUrl = new URL("../library-pane.tsx", import.meta.url);
-  const source = await readFile(paneUrl, "utf8");
+  const shellUrl = new URL("../workspace-shell.tsx", import.meta.url);
+  const [source, shellSource] = await Promise.all([
+    readFile(paneUrl, "utf8"),
+    readFile(shellUrl, "utf8"),
+  ]);
 
   assert.match(source, /library-pane-navigation/);
   assert.match(source, /library-pane-detail/);
-  assert.doesNotMatch(source, /<Modal/);
+  assert.match(shellSource, /<WorkspaceDialog/);
+  assert.match(shellSource, /<LibraryPane/);
+  assert.match(shellSource, /variant="library"/);
 });
 
 test("三个规划长文本编辑器切换时使用独立实例", async () => {

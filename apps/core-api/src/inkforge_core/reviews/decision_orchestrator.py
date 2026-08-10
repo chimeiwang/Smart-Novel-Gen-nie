@@ -64,6 +64,7 @@ class ReviewDecisionServicePort(Protocol):
         *,
         expected_revision: int,
         edited_content: str | None = None,
+        edited_replacement: str | None = None,
         selected_update_refs: list[dict[str, object]] | None = None,
     ) -> ArtifactDecisionResponse: ...
 
@@ -134,9 +135,11 @@ class ReviewDecisionOrchestrator:
         artifact_id: str,
         request: ReviewArtifactDecisionRequest,
     ) -> ArtifactDecisionAcceptedResponse:
-        normalized_body = normalize_json_value(
-            request.model_dump(mode="json", exclude={"clientRequestId"})
-        )
+        request_body = request.model_dump(mode="json", exclude={"clientRequestId"})
+        # 新增字段保持旧请求的幂等指纹兼容：未提供时不改变历史规范化正文。
+        if request.editedReplacement is None:
+            request_body.pop("editedReplacement", None)
+        normalized_body = normalize_json_value(request_body)
         if not isinstance(normalized_body, dict):
             raise RuntimeError("草案决定请求无法规范化")
         fingerprint = request_fingerprint(
@@ -198,6 +201,7 @@ class ReviewDecisionOrchestrator:
                     request.decision,
                     expected_revision=request.expectedRevision,
                     edited_content=request.editedContent,
+                    edited_replacement=request.editedReplacement,
                     selected_update_refs=refs,
                 )
                 command_id = generate_id()

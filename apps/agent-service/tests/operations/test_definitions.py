@@ -123,6 +123,20 @@ EXPECTED_CONTRACTS: dict[str, dict[str, Any]] = {
         "text_kind": "chapter_draft",
         "key_policy": "generated_stable",
     },
+    "rewrite_chapter_selection": {
+        "allowed": BASE_READ | STYLE_READ | {"begin_artifact_output"},
+        "terminal": frozenset({"begin_artifact_output"}),
+        "events": frozenset({"begin_artifact_output"}),
+        "text_kind": "chapter_draft",
+        "key_policy": "generated_stable",
+    },
+    "rewrite_outline_selection": {
+        "allowed": BASE_READ | {"begin_artifact_output"},
+        "terminal": frozenset({"begin_artifact_output"}),
+        "events": frozenset({"begin_artifact_output"}),
+        "text_kind": "outline_draft",
+        "key_policy": "generated_stable",
+    },
     "review_chapter": {
         "allowed": EDITOR_READ,
         "terminal": frozenset(),

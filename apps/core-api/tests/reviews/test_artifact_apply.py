@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import dataclass
@@ -8,8 +9,9 @@ from datetime import UTC, datetime
 import pytest
 from inkforge_core.db.models import Chapter, ChapterQualityCheck, Novel
 from inkforge_core.errors import ApiError
-from inkforge_core.reviews.apply import FormalArtifactApplier
+from inkforge_core.reviews.apply import FormalArtifactApplier, resolve_apply_target
 from inkforge_core.reviews.formal_writes import FormalWriteRepository
+from inkforge_core.reviews.repository import _materialize_selection_payload, _selection_diff
 from inkforge_core.reviews.service import ReviewService
 
 
@@ -167,6 +169,13 @@ class FakeFormalWrites:
         self.calls += 1
         self.beat_plan = beat_plan
         self.content = str(beat_plan["chapterGoal"])
+        return 1
+
+    async def apply_selection(
+        self, artifact: object, user_id: str, replacement: str
+    ) -> int:
+        del artifact, user_id
+        self.content = replacement
         return 1
 
 
@@ -622,6 +631,49 @@ async def test_formal_applier_forwards_lore_text_cas_from_artifact() -> None:
     }
 
 
+@pytest.mark.asyncio
+async def test_selection_applier_uses_replacement_and_rejects_full_content() -> None:
+    writes = FakeFormalWrites()
+    applier = FormalArtifactApplier(writes, FakeUpdatesExecutor())
+    artifact = Artifact(
+        kind="chapter_draft",
+        payload={
+            "kind": "chapter_draft",
+            "operation": "rewrite_chapter_selection",
+            "target": {"mode": "replace_selection"},
+            "resourceType": "chapter_content",
+            "resourceId": "chapter-1",
+            "baseUpdatedAt": "2026-07-30T00:00:00Z",
+            "baseContentHash": "a" * 64,
+            "selectionStart": 1,
+            "selectionEnd": 2,
+            "selectedTextHash": "b" * 64,
+            "selectedText": "x",
+            "replacement": "y",
+        },
+    )
+    artifact.novel_id = "novel-1"
+    artifact.chapter_id = "chapter-1"
+
+    await applier.apply(
+        artifact,
+        user_id="user-1",
+        edited_content=None,
+        edited_replacement="z",
+        selected_update_refs=None,
+    )
+    assert writes.content == "z"
+
+    with pytest.raises(ValueError, match="editedContent"):
+        await applier.apply(
+            artifact,
+            user_id="user-1",
+            edited_content="full document",
+            edited_replacement=None,
+            selected_update_refs=None,
+        )
+
+
 class FormalWriteSession:
     def __init__(self, chapter: Chapter, check: ChapterQualityCheck) -> None:
         self.chapter = chapter
@@ -756,3 +808,177 @@ async def test_formal_same_content_still_reopens_without_invalidating_check() ->
     assert check.status == "completed"
     assert check.result == "当前正文报告"
     assert session.executed == []
+
+
+@pytest.mark.asyncio
+async def test_formal_selection_write_splices_authoritative_chapter_only() -> None:
+    now = datetime(2026, 7, 11, tzinfo=UTC)
+    source = "前缀😀选区后缀"
+    selected = "选区"
+    chapter = Chapter(
+        id="chapter-1",
+        novelId="novel-1",
+        order=1,
+        status="completed",
+        title="第一章",
+        content=source,
+        completedAt=now,
+        createdAt=now,
+        updatedAt=now,
+    )
+    check = ChapterQualityCheck(
+        id="check-1",
+        chapterId=chapter.id,
+        type="consistency",
+        status="completed",
+        title="一致性终检",
+        result="旧报告",
+        createdAt=now,
+        updatedAt=now,
+    )
+    session = FormalWriteSession(chapter, check)
+    repository = FormalWriteRepository(lambda: session)  # type: ignore[arg-type]
+    artifact = Artifact(
+        kind="chapter_draft",
+        payload={
+            "kind": "chapter_draft",
+            "target": {"mode": "replace_selection"},
+            "resourceType": "chapter_content",
+            "resourceId": chapter.id,
+            "baseUpdatedAt": now.isoformat(),
+            "baseContentHash": hashlib.sha256(source.encode()).hexdigest(),
+            "selectionStart": 3,
+            "selectionEnd": 5,
+            "selectedTextHash": hashlib.sha256(selected.encode()).hexdigest(),
+            "replacement": "替换",
+        },
+    )
+    artifact.novel_id = "novel-1"
+    artifact.chapter_id = chapter.id
+
+    await repository.apply_selection(artifact, "user-1", "替换")  # type: ignore[arg-type]
+
+    assert chapter.content == "前缀😀替换后缀"
+
+
+def test_selection_diff_contains_complete_before_after_and_replacement() -> None:
+    diff = _selection_diff(
+        {
+            "target": {"mode": "replace_selection"},
+            "resourceType": "chapter_content",
+            "resourceId": "chapter-1",
+            "selectionStart": 2,
+            "selectionEnd": 4,
+            "selectedText": "旧文",
+            "replacement": "新文",
+            "candidate": "前缀新文后缀",
+            "candidatePrefix": "前缀",
+            "candidateSuffix": "后缀",
+        }
+    )
+
+    assert diff is not None
+    assert diff["before"] == "前缀旧文后缀"
+    assert diff["after"] == "前缀新文后缀"
+    assert diff["replacement"] == "新文"
+
+
+@pytest.mark.parametrize(
+    ("kind", "mode", "expected"),
+    [
+        ("chapter_draft", None, "chapter_content"),
+        ("chapter_draft", "existing_chapter", "chapter_content"),
+        ("chapter_draft", "new_next_chapter", "chapter_content"),
+        ("outline_draft", "normal_outline", "outline_content"),
+        ("chapter_draft", "future_mode", None),
+        ("outline_draft", "future_mode", None),
+    ],
+)
+def test_resolve_apply_target_rejects_unknown_modes(
+    kind: str, mode: str | None, expected: str | None
+) -> None:
+    payload: dict[str, object] = {"kind": kind}
+    if mode is not None:
+        payload["target"] = {"mode": mode}
+
+    assert resolve_apply_target(payload) == expected
+
+
+@pytest.mark.asyncio
+async def test_formal_applier_rejects_unknown_target_mode_before_full_write() -> None:
+    writes = FakeFormalWrites()
+    applier = FormalArtifactApplier(writes, FakeUpdatesExecutor())
+    artifact = Artifact(
+        kind="chapter_draft",
+        payload={
+            "kind": "chapter_draft",
+            "target": {"mode": "future_mode"},
+            "content": "不应写入",
+        },
+    )
+    artifact.novel_id = "novel-1"
+    artifact.chapter_id = "chapter-1"
+
+    with pytest.raises(ValueError):
+        await applier.apply(
+            artifact,
+            user_id="user-1",
+            edited_content=None,
+            selected_update_refs=None,
+        )
+    assert writes.content is None
+
+
+@pytest.mark.asyncio
+async def test_selection_materializer_rejects_nested_top_level_identity_mismatch() -> None:
+    payload = {
+        "kind": "chapter_draft",
+        "target": {
+            "mode": "replace_selection",
+            "resourceType": "chapter_content",
+            "resourceId": "chapter-1",
+        },
+        "resourceType": "chapter_content",
+        "resourceId": "chapter-2",
+    }
+
+    with pytest.raises(ApiError) as error:
+        await _materialize_selection_payload(  # type: ignore[arg-type]
+            object(), payload, kind="chapter_draft", novel_id="novel-1"
+        )
+
+    assert error.value.code == "ARTIFACT_SOURCE_VERSION_CONFLICT"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kind", "mode"),
+    [
+        ("chapter_draft", "existing_chapter"),
+        ("chapter_draft", "new_next_chapter"),
+        ("outline_draft", "normal_outline"),
+    ],
+)
+async def test_materializer_preserves_normal_draft_target_modes(
+    kind: str, mode: str
+) -> None:
+    payload = {"kind": kind, "target": {"mode": mode}}
+
+    await _materialize_selection_payload(  # type: ignore[arg-type]
+        object(), payload, kind=kind, novel_id="novel-1"
+    )
+
+    assert payload["target"] == {"mode": mode}
+
+
+@pytest.mark.asyncio
+async def test_materializer_rejects_unknown_target_mode() -> None:
+    with pytest.raises(ApiError) as error:
+        await _materialize_selection_payload(  # type: ignore[arg-type]
+            object(),
+            {"kind": "chapter_draft", "target": {"mode": "future_mode"}},
+            kind="chapter_draft",
+            novel_id="novel-1",
+        )
+
+    assert error.value.code == "ARTIFACT_SELECTION_TARGET_INVALID"

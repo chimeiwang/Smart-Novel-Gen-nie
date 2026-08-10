@@ -119,6 +119,92 @@ def test_edited_content_file_is_read_as_exact_utf8_without_newline_changes(
     assert "profile" not in body
 
 
+def test_selection_artifact_uses_structured_edited_replacement_file(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "replacement.txt"
+    replacement = "鏂版枃\r\n尾部"
+    source.write_bytes(replacement.encode("utf-8"))
+    api = RecordingApi(
+        responses=[
+            {
+                "sourceBindingStatus": "verified",
+                "kind": "chapter_draft",
+                "payload": {"target": {"mode": "replace_selection"}},
+                "diff": {"before": "旧文", "after": replacement},
+            },
+            {"artifactId": "artifact-1", "decision": "approve"},
+        ]
+    )
+
+    artifacts.approve(
+        runtime(api),
+        payload(
+            artifactId="artifact-1",
+            clientRequestId="decision-request-0001",
+            expectedRevision=1,
+            editedReplacementFile=str(source),
+        ),
+    )
+
+    body = api.calls[1][2]["json"]
+    assert body["editedReplacement"] == replacement
+    assert "editedReplacementFile" not in body
+    assert "editedContent" not in body
+
+
+def test_selection_artifact_rejects_full_edited_content() -> None:
+    api = RecordingApi(
+        responses=[
+            {
+                "sourceBindingStatus": "verified",
+                "kind": "chapter_draft",
+                "payload": {"target": {"mode": "replace_selection"}},
+                "diff": {"before": "旧文", "after": "新文"},
+            }
+        ]
+    )
+
+    with pytest.raises(CliInputError):
+        artifacts.approve(
+            runtime(api),
+            payload(
+                artifactId="artifact-1",
+                clientRequestId="decision-request-0001",
+                expectedRevision=1,
+                editedContent="全文",
+            ),
+        )
+
+    assert [call[0] for call in api.calls] == ["GET"]
+
+
+def test_full_artifact_rejects_structured_edited_replacement() -> None:
+    api = RecordingApi(
+        responses=[
+            {
+                "sourceBindingStatus": "verified",
+                "kind": "chapter_draft",
+                "payload": {"target": {"mode": "existing_chapter"}},
+                "diff": {"before": "旧文", "after": "新文"},
+            }
+        ]
+    )
+
+    with pytest.raises(CliInputError):
+        artifacts.approve(
+            runtime(api),
+            payload(
+                artifactId="artifact-1",
+                clientRequestId="decision-request-0001",
+                expectedRevision=1,
+                editedReplacement="选区替换",
+            ),
+        )
+
+    assert [call[0] for call in api.calls] == ["GET"]
+
+
 @pytest.mark.parametrize("expected_revision", [None, 0, -1, True, "1"])
 def test_decision_requires_a_positive_integer_expected_revision(
     expected_revision: object,

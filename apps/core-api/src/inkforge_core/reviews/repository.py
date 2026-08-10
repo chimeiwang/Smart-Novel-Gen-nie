@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, cast
 
 from inkforge_contracts.long_serial import SourceBinding
@@ -13,7 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..db.base import utc_now
 from ..db.models import (
+    Chapter,
     Novel,
+    Outline,
+    OutlineNode,
     ReviewArtifact,
     ReviewArtifactEvaluation,
     ReviewArtifactRevision,
@@ -192,7 +196,9 @@ class ReviewRepository:
                         code="ARTIFACT_NOT_AWAITING_USER",
                         message="当前草案状态不能接受用户决定",
                     )
-                if decision != "discard" and artifact.kind in _SOURCE_BOUND_KINDS:
+                if decision != "discard" and await _artifact_requires_source_bindings(
+                    session, artifact
+                ):
                     bindings = await _decision_source_bindings(session, artifact)
                     await verify_source_bindings(
                         session,
@@ -458,7 +464,12 @@ class ReviewRepository:
                         .with_for_update()
                     )
                 payload = dict(request.payload)
-                if request.kind in _SOURCE_BOUND_KINDS:
+                await _materialize_selection_payload(
+                    session, payload, kind=request.kind, novel_id=request.novelId
+                )
+                if await _artifact_kind_requires_source_bindings(
+                    session, request.kind, task.id
+                ):
                     source_command_id: str
                     if existing is None:
                         source_command_id, _bindings = await _source_bindings_for_task(
@@ -490,10 +501,15 @@ class ReviewRepository:
                         "sourceCommandId": source_command_id
                     }
                 payload_json = json.dumps(payload, ensure_ascii=False)
+                materialized_diff = _selection_diff(payload)
                 diff_json = (
-                    json.dumps(request.diff, ensure_ascii=False)
-                    if request.diff is not None
-                    else None
+                    json.dumps(materialized_diff, ensure_ascii=False)
+                    if materialized_diff is not None
+                    else (
+                        json.dumps(request.diff, ensure_ascii=False)
+                        if request.diff is not None
+                        else None
+                    )
                 )
                 if existing is None:
                     artifact = ReviewArtifact(
@@ -645,6 +661,234 @@ async def _owned_artifact(
     ).scalar_one_or_none()
 
 
+async def _materialize_selection_payload(
+    session: AsyncSession,
+    payload: dict[str, Any],
+    *,
+    kind: str,
+    novel_id: str,
+) -> None:
+    target = payload.get("target")
+    mode = target.get("mode") if isinstance(target, dict) else None
+    selection_modes = {
+        "replace_selection",
+        "outline_content_selection",
+        "outline_node_content_selection",
+    }
+    normal_modes = {"existing_chapter", "new_next_chapter", "normal_outline"}
+    if mode is None or mode in normal_modes:
+        return
+    if mode not in selection_modes:
+        raise ApiError(
+            status_code=409,
+            code="ARTIFACT_SELECTION_TARGET_INVALID",
+            message="閫夊尯鑽夋 target mode 涓庣被鍨嬩笉鍖归厤",
+        )
+    if kind not in {"chapter_draft", "outline_draft"}:
+        raise ApiError(
+            status_code=409,
+            code="ARTIFACT_SELECTION_TARGET_INVALID",
+            message="閫夊尯鑽夋 target mode 涓庣被鍨嬩笉鍖归厤",
+        )
+    expected_type = {
+        "replace_selection": "chapter_content",
+        "outline_content_selection": "outline_content",
+        "outline_node_content_selection": "outline_node_content",
+    }[mode]
+    target_identity: dict[str, Any] = dict(target) if isinstance(target, dict) else {}
+    identity: dict[str, Any] = dict(target_identity)
+    identity_fields = (
+        "resourceType",
+        "resourceId",
+        "baseUpdatedAt",
+        "baseContentHash",
+        "selectionStart",
+        "selectionEnd",
+        "selectedTextHash",
+    )
+    for key in identity_fields:
+        if key in target_identity and key in payload and target_identity[key] != payload[key]:
+            raise _selection_artifact_conflict(
+                payload.get("resourceType"), payload.get("resourceId")
+            )
+        if key in payload:
+            identity[key] = payload[key]
+    resource_type = identity.get("resourceType")
+    resource_id = identity.get("resourceId")
+    if resource_type != expected_type or not isinstance(resource_id, str) or not resource_id:
+        raise _selection_artifact_conflict(resource_type, resource_id)
+    start = identity.get("selectionStart")
+    end = identity.get("selectionEnd")
+    if (
+        isinstance(start, bool)
+        or not isinstance(start, int)
+        or isinstance(end, bool)
+        or not isinstance(end, int)
+        or start < 0
+        or end <= start
+    ):
+        raise _selection_artifact_conflict(resource_type, resource_id)
+    base_hash = identity.get("baseContentHash")
+    selected_hash = identity.get("selectedTextHash")
+    base_updated_raw = identity.get("baseUpdatedAt")
+    if not (
+        isinstance(base_hash, str)
+        and len(base_hash) == 64
+        and all(char in "0123456789abcdef" for char in base_hash)
+        and isinstance(selected_hash, str)
+        and len(selected_hash) == 64
+        and all(char in "0123456789abcdef" for char in selected_hash)
+        and isinstance(base_updated_raw, str)
+    ):
+        raise _selection_artifact_conflict(resource_type, resource_id)
+    try:
+        base_updated = datetime.fromisoformat(base_updated_raw.replace("Z", "+00:00"))
+    except ValueError:
+        raise _selection_artifact_conflict(resource_type, resource_id) from None
+    if base_updated.tzinfo is None:
+        base_updated = base_updated.replace(tzinfo=UTC)
+
+    if mode == "replace_selection":
+        source_entity = await session.scalar(
+            select(Chapter)
+            .where(Chapter.id == resource_id, Chapter.novelId == novel_id)
+            .with_for_update()
+        )
+        source = source_entity.content if source_entity is not None else None
+        updated_at = source_entity.updatedAt if source_entity is not None else None
+    elif mode == "outline_content_selection":
+        source_entity = await session.scalar(
+            select(Outline)
+            .where(Outline.id == resource_id, Outline.novelId == novel_id)
+            .with_for_update()
+        )
+        source = source_entity.content if source_entity is not None else None
+        updated_at = source_entity.updatedAt if source_entity is not None else None
+    else:
+        source_entity = await session.scalar(
+            select(OutlineNode)
+            .where(OutlineNode.id == resource_id, OutlineNode.novelId == novel_id)
+            .with_for_update()
+        )
+        source = source_entity.content if source_entity is not None else None
+        updated_at = source_entity.updatedAt if source_entity is not None else None
+    if source is None or updated_at is None:
+        raise _selection_artifact_conflict(resource_type, resource_id)
+    normalized_updated = (
+        updated_at.replace(tzinfo=UTC)
+        if updated_at.tzinfo is None
+        else updated_at.astimezone(UTC)
+    )
+    if (
+        normalized_updated != base_updated.astimezone(UTC)
+        or hashlib.sha256(source.encode("utf-8")).hexdigest() != base_hash
+        or end > len(source)
+    ):
+        raise _selection_artifact_conflict(resource_type, resource_id)
+    selected = source[start:end]
+    if hashlib.sha256(selected.encode("utf-8")).hexdigest() != selected_hash:
+        raise _selection_artifact_conflict(resource_type, resource_id)
+    provided_selected = payload.get("selectedText")
+    if provided_selected is not None and provided_selected != selected:
+        raise _selection_artifact_conflict(resource_type, resource_id)
+    replacement = payload.get("replacement")
+    if not isinstance(replacement, str) or not replacement.strip():
+        raise ApiError(
+            status_code=409,
+            code="ARTIFACT_SELECTION_REPLACEMENT_INVALID",
+            message="閫夊尯鑽夋缂哄皯闈炵┖ replacement",
+        )
+    prefix = source[:start]
+    suffix = source[end:]
+    candidate = prefix + replacement + suffix
+    payload.update(
+        {
+            "resourceType": resource_type,
+            "resourceId": resource_id,
+            "baseUpdatedAt": base_updated_raw,
+            "baseContentHash": base_hash,
+            "selectionStart": start,
+            "selectionEnd": end,
+            "selectedTextHash": selected_hash,
+            "selectedText": selected,
+            "contextBefore": source[max(0, start - 1000) : start],
+            "contextAfter": source[end : min(len(source), end + 1000)],
+            "target": {
+                "mode": mode,
+                "resourceType": resource_type,
+                "resourceId": resource_id,
+                "baseUpdatedAt": base_updated_raw,
+                "baseContentHash": base_hash,
+                "selectionStart": start,
+                "selectionEnd": end,
+                "selectedTextHash": selected_hash,
+            },
+            "selection": {
+                "start": start,
+                "end": end,
+                "selectedText": selected,
+                "selectedTextHash": selected_hash,
+            },
+            "candidate": candidate,
+            "candidatePrefix": prefix,
+            "candidateSuffix": suffix,
+        }
+    )
+
+
+def _selection_artifact_conflict(resource_type: object, resource_id: object) -> ApiError:
+    return ApiError(
+        status_code=409,
+        code="ARTIFACT_SOURCE_VERSION_CONFLICT",
+        message="閫夊尯鑽夋鐨勬潵婧愮増鏈凡鍙樻洿",
+        details={
+            "resourceType": resource_type if isinstance(resource_type, str) else None,
+            "resourceId": resource_id if isinstance(resource_id, str) else None,
+        },
+    )
+
+
+def _selection_diff(payload: dict[str, Any]) -> dict[str, Any] | None:
+    target = payload.get("target")
+    if not isinstance(target, dict) or target.get("mode") not in {
+        "replace_selection",
+        "outline_content_selection",
+        "outline_node_content_selection",
+    }:
+        return None
+    selected = payload.get("selectedText")
+    replacement = payload.get("replacement")
+    candidate = payload.get("candidate")
+    prefix = payload.get("candidatePrefix")
+    suffix = payload.get("candidateSuffix")
+    values = (selected, replacement, candidate, prefix, suffix)
+    if not all(isinstance(value, str) for value in values):
+        raise ApiError(
+            status_code=409,
+            code="ARTIFACT_SELECTION_DIFF_INVALID",
+            message="閫夊尯鑽夋 Diff 鏁版嵁涓嶅畬鏁?",
+        )
+    selected_text, replacement_text, candidate_text, prefix_text, suffix_text = cast(
+        tuple[str, str, str, str, str], values
+    )
+    before = prefix_text + selected_text + suffix_text
+    return {
+        "type": "selection",
+        "mode": target["mode"],
+        "resourceType": payload.get("resourceType"),
+        "resourceId": payload.get("resourceId"),
+        "selectionStart": payload.get("selectionStart"),
+        "selectionEnd": payload.get("selectionEnd"),
+        "selectedText": selected_text,
+        "replacement": replacement_text,
+        "before": before,
+        "after": candidate_text,
+        "candidate": candidate_text,
+        "prefix": prefix_text,
+        "suffix": suffix_text,
+    }
+
+
 async def _require_current_writing_job(
     session: AsyncSession, task_id: str, job_id: str
 ) -> None:
@@ -757,6 +1001,40 @@ async def _decision_source_bindings(
     return bindings
 
 
+async def _artifact_requires_source_bindings(
+    session: AsyncSession, artifact: ReviewArtifact
+) -> bool:
+    return await _artifact_kind_requires_source_bindings(session, artifact.kind, artifact.taskId)
+
+
+async def _artifact_kind_requires_source_bindings(
+    session: AsyncSession, kind: str, task_id: str | None
+) -> bool:
+    if kind in _SOURCE_BOUND_KINDS:
+        return True
+    if kind != "outline_draft" or task_id is None:
+        return False
+    payload_json = await session.scalar(
+        select(WritingRunCommand.payloadJson)
+        .where(
+            WritingRunCommand.taskId == task_id,
+            WritingRunCommand.kind == "start",
+        )
+        .order_by(WritingRunCommand.createdAt.asc(), WritingRunCommand.id.asc())
+        .limit(1)
+    )
+    if not isinstance(payload_json, str):
+        return False
+    payload = _parse_json(payload_json, {})
+    job = payload.get("job") if isinstance(payload, dict) else None
+    source = job if isinstance(job, dict) else payload
+    return (
+        isinstance(source, dict)
+        and source.get("workflow") == "long_serial"
+        and source.get("operation") == "rewrite_outline_selection"
+    )
+
+
 def _source_bindings_from_command(
     command: WritingRunCommand,
 ) -> list[dict[str, Any]] | None:
@@ -783,7 +1061,7 @@ def _source_bindings_from_command(
 async def _source_binding_view(
     session: AsyncSession, artifact: ReviewArtifact
 ) -> tuple[list[dict[str, Any]] | None, SourceBindingStatus]:
-    if artifact.kind not in _SOURCE_BOUND_KINDS:
+    if not await _artifact_requires_source_bindings(session, artifact):
         return None, "not_yet_supported"
     payload = _parse_json(artifact.payloadJson, {})
     control = payload.get("_inkforgeControl") if isinstance(payload, dict) else None
@@ -809,7 +1087,7 @@ async def _source_binding_views(
     source_ids: dict[str, str] = {}
     views: dict[str, tuple[list[dict[str, Any]] | None, SourceBindingStatus]] = {}
     for artifact in artifacts:
-        if artifact.kind not in _SOURCE_BOUND_KINDS:
+        if not await _artifact_requires_source_bindings(session, artifact):
             views[artifact.id] = (None, "not_yet_supported")
             continue
         payload = _parse_json(artifact.payloadJson, {})

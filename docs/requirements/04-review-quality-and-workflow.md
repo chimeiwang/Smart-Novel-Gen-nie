@@ -1,5 +1,11 @@
 # 草案审核、质量检查与工作流需求
 
+## 长篇选区 ReviewArtifact 应用
+
+选区改写（章节正文或大纲正文/节点）必须保持 `proposal -> ReviewArtifact -> 用户确认 -> Core 应用` 闭环，禁止 CLI、Agent 或前端直接写入正式内容。选区草案的 `payload.target.mode` 为选区模式时，approve 只能提交结构化 `editedReplacement`（或 `editedReplacementFile`）；不得用 `editedContent` 伪装全文替换。全文章节/大纲草案继续使用 `editedContent`，Beat Plan 继续按结构化 Beat Plan 应用，语义不变。
+
+操作者在 approve 前必须先 GET Artifact，读取完整 diff（包括选区前后正文、replacement 和来源绑定），对该 diff 做一次独立确认，再使用稳定 `clientRequestId`、当前 `expectedRevision` 提交决定；Core 仍执行 sourceBinding preflight、幂等 fingerprint 与 CAS 校验。approve/revise/discard 返回受理后，操作者再次 GET Artifact/任务状态核对最终 applied 或冲突结果，不以受理响应代替回读。
+
 ## 目标
 
 保证 AI/Agent 产物不会绕过作者确认直接写入正式小说数据，同时给章节完成提供最小必要质量门槛。

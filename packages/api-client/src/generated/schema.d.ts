@@ -2941,10 +2941,12 @@ export interface components {
              * Operation
              * @enum {string}
              */
-            operation: "answer_question" | "create_lore" | "revise_lore" | "create_outline" | "revise_outline" | "plan_chapter" | "write_chapter" | "rewrite_scene" | "review_chapter" | "manage_foreshadowing";
+            operation: "answer_question" | "create_lore" | "revise_lore" | "create_outline" | "revise_outline" | "plan_chapter" | "write_chapter" | "rewrite_scene" | "rewrite_chapter_selection" | "rewrite_outline_selection" | "review_chapter" | "manage_foreshadowing";
             target: components["schemas"]["ChapterTarget"];
             /** Scope */
             scope: components["schemas"]["ChapterScope"] | components["schemas"]["ChapterRangeScope"] | components["schemas"]["OutlineNodeScope"] | components["schemas"]["NovelScope"];
+            selectionTarget?: components["schemas"]["SelectionTarget"] | null;
+            selectionAttachmentMetadata?: components["schemas"]["SelectionAttachmentMetadata"] | null;
             /**
              * Targetwordcount
              * @default 4000
@@ -3560,6 +3562,8 @@ export interface components {
             decision: "approve" | "discard" | "revise";
             /** Editedcontent */
             editedContent?: string | null;
+            /** Editedreplacement */
+            editedReplacement?: string | null;
             /** Selectedupdaterefs */
             selectedUpdateRefs?: components["schemas"]["ArtifactSelectionRef"][] | null;
             /** Usermessage */
@@ -3669,6 +3673,62 @@ export interface components {
             estimatedWords: number;
             /** Acceptancecriteria */
             acceptanceCriteria: string;
+        };
+        /**
+         * SelectionAttachmentMetadata
+         * @description 选区来源快照的 UI 元数据；不包含也不承载权威正文。
+         */
+        SelectionAttachmentMetadata: {
+            /**
+             * Resourcetype
+             * @enum {string}
+             */
+            resourceType: "chapter_content" | "outline_content" | "outline_node_content";
+            /** Resourceid */
+            resourceId: string;
+            /** Sourcelabel */
+            sourceLabel: string;
+            /**
+             * Baseupdatedat
+             * Format: date-time
+             */
+            baseUpdatedAt: string;
+            /** Basecontenthash */
+            baseContentHash: string;
+            /** Selectionstart */
+            selectionStart: number;
+            /** Selectionend */
+            selectionEnd: number;
+            /** Selectedtexthash */
+            selectedTextHash: string;
+            /** Selectionpreview */
+            selectionPreview: string;
+        };
+        /**
+         * SelectionTarget
+         * @description 客户端提交的不可变选区身份；正文由 Core 从权威源派生。
+         */
+        SelectionTarget: {
+            /**
+             * Resourcetype
+             * @enum {string}
+             */
+            resourceType: "chapter_content" | "outline_content" | "outline_node_content";
+            /** Resourceid */
+            resourceId: string;
+            /**
+             * Baseupdatedat
+             * Format: date-time
+             */
+            baseUpdatedAt: string;
+            /** Basecontenthash */
+            baseContentHash: string;
+            /** Selectionstart */
+            selectionStart: number;
+            /** Selectionend */
+            selectionEnd: number;
+            /** Selectedtexthash */
+            selectedTextHash: string;
         };
         /** @enum {string} */
         ShortMediumSourceKind: "idea" | "opening" | "ending" | "outline" | "mixed";

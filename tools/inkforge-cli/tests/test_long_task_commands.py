@@ -109,6 +109,64 @@ def test_agent_start_sends_exact_explicit_long_serial_contract(
     assert "selectedAgents" not in sent
 
 
+def test_agent_start_sends_selection_identity_without_selected_text() -> None:
+    module = _module()
+    spec = _spec(module, "long.agent.start")
+    api = RecordingApi()
+    payload = _start_payload("rewrite_chapter_selection")
+    payload["selectionTarget"] = {
+        "resourceType": "chapter_content",
+        "resourceId": "chapter-1",
+        "baseUpdatedAt": "2026-08-10T00:00:00Z",
+        "baseContentHash": "a" * 64,
+        "selectionStart": 2,
+        "selectionEnd": 8,
+        "selectedTextHash": "b" * 64,
+    }
+
+    spec.handler(_runtime(spec, api), payload)
+
+    sent = api.calls[0][2]["json"]
+    assert sent["selectionTarget"] == payload["selectionTarget"]
+    assert "selectedText" not in sent
+
+
+def test_outline_selection_uses_outline_scope_and_identity() -> None:
+    module = _module()
+    spec = _spec(module, "long.agent.start")
+    api = RecordingApi()
+    payload = _start_payload("rewrite_outline_selection")
+    payload["scope"] = {"kind": "novel"}
+    payload["selectionTarget"] = {
+        "resourceType": "outline_content",
+        "resourceId": "outline-1",
+        "baseUpdatedAt": "2026-08-10T00:00:00Z",
+        "baseContentHash": "a" * 64,
+        "selectionStart": 2,
+        "selectionEnd": 8,
+        "selectedTextHash": "b" * 64,
+    }
+
+    spec.handler(_runtime(spec, api), payload)
+
+    sent = api.calls[0][2]["json"]
+    assert sent["scope"] == {"kind": "novel"}
+    assert sent["selectionTarget"]["resourceType"] == "outline_content"
+
+
+@pytest.mark.parametrize("operation", ["rewrite_chapter_selection", "rewrite_outline_selection"])
+def test_agent_start_requires_selection_target_for_selection_operations(operation: str) -> None:
+    module = _module()
+    spec = _spec(module, "long.agent.start")
+    api = RecordingApi()
+    payload = _start_payload(operation)
+
+    with pytest.raises(CliInputError):
+        spec.handler(_runtime(spec, api), payload)
+
+    assert api.calls == []
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

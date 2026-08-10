@@ -52,6 +52,7 @@ class ArtifactApplierPort(Protocol):
         *,
         user_id: str,
         edited_content: str | None,
+        edited_replacement: str | None = None,
         selected_update_refs: list[dict[str, object]] | None,
     ) -> int: ...
 
@@ -69,6 +70,7 @@ class ReviewService:
         *,
         expected_revision: int,
         edited_content: str | None = None,
+        edited_replacement: str | None = None,
         selected_update_refs: list[dict[str, object]] | None = None,
     ) -> ArtifactDecisionResponse:
         artifact = await self._repository.prepare_decision(
@@ -113,6 +115,11 @@ class ReviewService:
                 user_id=user_id,
                 edited_content=edited_content,
                 selected_update_refs=selected_update_refs,
+                **(
+                    {"edited_replacement": edited_replacement}
+                    if edited_replacement is not None
+                    else {}
+                ),
             )
         except ApiError:
             await self._transition(artifact_id, "applying", "awaiting_user")

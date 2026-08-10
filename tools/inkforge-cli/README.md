@@ -48,6 +48,10 @@ Codex 的完整操作规程位于用户 Skill：
 
 ## 长篇写作边界
 
+`long.agent.start` 的 `rewrite_chapter_selection`/`rewrite_outline_selection` 必须携带 `selectionTarget`（资源身份、`baseUpdatedAt`、正文 hash、Unicode 码点范围和选区 hash）。CLI 不接受 `selectedText`，也不把选区正文作为权威输入；正文由 Core 按来源绑定冻结。选区操作仍走 proposal → ReviewArtifact → 用户确认 → Core 应用。
+
+`long.artifact.approve` 对选区 Artifact 使用 `editedReplacement` 或 `editedReplacementFile`，对全文草案继续使用 `editedContent`。每次决定前先 GET Artifact 并查看完整 Diff，独立确认后提交稳定幂等请求，完成后再次 GET 回读；CLI 会执行 sourceBinding preflight 并拒绝错误的全文/选区编辑字段。
+
 - 长篇命令只通过 `/api/v1/**` 访问 Core，不连接数据库、Agent Service 或内部接口。
 - 小说、章节、任务、草案和质量状态始终以 Core 为权威；CLI 不创建 manifest、dirty 标志、本地章节
   镜像或任务账本。

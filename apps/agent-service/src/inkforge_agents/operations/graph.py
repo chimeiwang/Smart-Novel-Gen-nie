@@ -4,7 +4,13 @@ import json
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol, cast
 
-from inkforge_contracts.long_serial import ChapterTarget, LongSerialScope, SourceBinding
+from inkforge_contracts.long_serial import (
+    ChapterTarget,
+    LongSerialScope,
+    SelectionSnapshot,
+    SelectionTarget,
+    SourceBinding,
+)
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, Send, interrupt
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
@@ -149,7 +155,12 @@ def build_operation_graph(
         source = runtime_context.get("coreContext")
         if not isinstance(source, dict):
             raise ValueError("仅运行时上下文缺少 Core 聚合上下文")
-        projection = build_operation_context(definition, source)
+        context_source = {
+            **source,
+            "selectionTarget": state.get("selectionTarget"),
+            "selectionSnapshot": state.get("selectionSnapshot"),
+        }
+        projection = build_operation_context(definition, context_source)
         return {
             "contextMessages": [
                 json.dumps(projection, ensure_ascii=False, separators=(",", ":"))
@@ -244,6 +255,11 @@ def build_operation_graph(
             authoritative_artifact=authoritative_artifact,
             task_id=_required_state_text(state, "taskId"),
             operation_kind=operation.kind,
+            selection_snapshot=(
+                state.get("selectionSnapshot")
+                if isinstance(state.get("selectionSnapshot"), dict)
+                else None
+            ),
         )
         artifact_id = (
             await dependencies.artifacts.revise(
@@ -589,6 +605,48 @@ def _validate_explicit_long_serial_state(
         or operation.requiresUserApproval != definition.requiresUserApproval
     ):
         raise ValueError("显式长篇产物策略与 Operation 定义不一致")
+    selection_operations = {
+        "rewrite_chapter_selection",
+        "rewrite_outline_selection",
+    }
+    raw_selection_target = state.get("selectionTarget")
+    raw_selection_snapshot = state.get("selectionSnapshot")
+    if operation.kind in selection_operations:
+        try:
+            selection_target = SelectionTarget.model_validate(raw_selection_target)
+            selection_snapshot = SelectionSnapshot.model_validate(raw_selection_snapshot)
+        except ValidationError as exc:
+            raise ValueError("显式长篇选区冻结快照无效") from exc
+        if (
+            selection_snapshot.resourceType != selection_target.resourceType
+            or selection_snapshot.resourceId != selection_target.resourceId
+            or selection_snapshot.baseUpdatedAt != selection_target.baseUpdatedAt
+            or selection_snapshot.baseContentHash != selection_target.baseContentHash
+            or selection_snapshot.selectionStart != selection_target.selectionStart
+            or selection_snapshot.selectionEnd != selection_target.selectionEnd
+            or selection_snapshot.selectedTextHash != selection_target.selectedTextHash
+        ):
+            raise ValueError("显式长篇选区快照与 selectionTarget 身份不一致")
+        expected_types = (
+            {"chapter_content"}
+            if operation.kind == "rewrite_chapter_selection"
+            else {"outline_content", "outline_node_content"}
+        )
+        if selection_target.resourceType not in expected_types:
+            raise ValueError("显式长篇选区资源类型与 Operation 不一致")
+        if operation.kind == "rewrite_chapter_selection":
+            if scope.kind != "chapter" or scope.chapterId != target.id:
+                raise ValueError("选区 scope 与章节 selectionTarget 身份不一致")
+        elif selection_target.resourceType == "outline_content":
+            if scope.kind != "novel":
+                raise ValueError("选区 scope 与总纲 selectionTarget 身份不一致")
+        elif (
+            scope.kind != "outline_node"
+            or scope.outlineNodeId != selection_target.resourceId
+        ):
+            raise ValueError("选区 scope 与大纲节点 selectionTarget 身份不一致")
+    elif raw_selection_target is not None or raw_selection_snapshot is not None:
+        raise ValueError("普通长篇操作不得携带选区冻结快照")
 
 
 def _operation_definition(operation: CreativeOperation) -> OperationDefinition:
@@ -636,7 +694,13 @@ def _has_builder_events(events: list[dict[str, Any]]) -> bool:
 
 
 def _artifact_retry_instruction(definition: OperationDefinition) -> str:
-    if definition.kind == "plan_chapter":
+    if definition.kind in {"rewrite_chapter_selection", "rewrite_outline_selection"}:
+        tool_requirement = (
+            "调用 begin_artifact_output，提交结构化 replacement 及冻结选区身份（包括"
+            "baseUpdatedAt，必须与 Core 快照完全一致）；"
+            "禁止 content 或完整章节/大纲"
+        )
+    elif definition.kind == "plan_chapter":
         tool_requirement = "调用 submit_beat_plan"
     elif definition.artifactPolicy == "agent_updates":
         tool_requirement = (

@@ -41,6 +41,10 @@ def test_openapi_exposes_strict_long_serial_start_contract() -> None:
         "userInstruction",
     }
     assert request_schema["properties"]["workflow"]["const"] == "long_serial"
+    metadata_schema = schemas["SelectionAttachmentMetadata"]
+    assert metadata_schema["additionalProperties"] is False
+    assert "selectedText" not in metadata_schema["properties"]
+    assert request_schema["properties"]["selectionAttachmentMetadata"]["anyOf"]
     assert "selectedAgents" not in request_schema["properties"]
     body_schema = document["paths"]["/api/v1/writing/runs"]["post"][
         "requestBody"

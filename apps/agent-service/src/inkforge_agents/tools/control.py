@@ -5,7 +5,15 @@ from __future__ import annotations
 from typing import Annotated, Any, Literal, Self
 
 from inkforge_contracts import ConsistencyQualityReport
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    NonNegativeInt,
+    field_validator,
+    model_validator,
+)
 
 from .permissions import control_permission
 from .registry import ToolDefinition
@@ -97,15 +105,58 @@ class BeginArtifactArgs(StrictArgs):
         "freeform_markdown",
     ]
     summary: str = Field(min_length=1, max_length=1000)
-    content: str = Field(min_length=1)
+    content: str | None = Field(default=None, min_length=1)
     artifactKey: str | None = Field(default=None, min_length=1, max_length=200)
     reviewerAgent: AgentId | None = None
     submitForReview: bool | None = None
+    # 选区改写沿用 begin_artifact_output，但只允许提交 replacement 和冻结身份。
+    operation: Literal["rewrite_chapter_selection", "rewrite_outline_selection"] | None = None
+    resourceType: Literal[
+        "chapter_content", "outline_content", "outline_node_content"
+    ] | None = None
+    resourceId: str | None = Field(default=None, min_length=1, max_length=200)
+    baseUpdatedAt: str | None = Field(default=None, min_length=1, max_length=100)
+    baseContentHash: str | None = Field(default=None, min_length=64, max_length=64)
+    selectionStart: NonNegativeInt | None = None
+    selectionEnd: NonNegativeInt | None = None
+    selectedTextHash: str | None = Field(default=None, min_length=64, max_length=64)
+    replacement: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def validate_selection_shape(self) -> Self:
+        selection_fields = (
+            self.operation,
+            self.resourceType,
+            self.resourceId,
+            self.baseUpdatedAt,
+            self.baseContentHash,
+            self.selectionStart,
+            self.selectionEnd,
+            self.selectedTextHash,
+            self.replacement,
+        )
+        if any(value is not None for value in selection_fields) and not all(
+            value is not None for value in selection_fields
+        ):
+            raise ValueError("选区产物必须完整提交 replacement 与冻结身份")
+        is_selection = all(value is not None for value in selection_fields)
+        if is_selection and self.content is not None:
+            raise ValueError("选区产物不得提交完整 content")
+        if not is_selection and self.content is None:
+            raise ValueError("普通长文本产物必须提交完整 content")
+        if self.selectionStart is not None and self.selectionEnd is not None:
+            if self.selectionStart >= self.selectionEnd:
+                raise ValueError("选区结束位置必须大于开始位置")
+        for field_name in ("baseContentHash", "selectedTextHash"):
+            value = getattr(self, field_name)
+            if value is not None and any(char not in "0123456789abcdef" for char in value):
+                raise ValueError(f"{field_name} 必须是小写 SHA-256")
+        return self
 
     @field_validator("content")
     @classmethod
-    def require_non_whitespace_content(cls, value: str) -> str:
-        if not value.strip():
+    def require_non_whitespace_content(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
             raise ValueError("content 必须包含完整的非空草案正文")
         return value
 

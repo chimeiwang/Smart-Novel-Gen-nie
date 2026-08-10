@@ -103,3 +103,8 @@ export async function sha256Text(
   }
   return sha256Bytes(bytes);
 }
+
+/** 同步计算正文 hash，供已在 UI 线程完成的过期快照比较使用。 */
+export function sha256TextSync(value: string): string {
+  return sha256Bytes(new TextEncoder().encode(value));
+}

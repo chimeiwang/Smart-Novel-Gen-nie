@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import re
+
 from pydantic import JsonValue
 
 from .base import (
@@ -44,6 +47,18 @@ def _build_response(request: ModelTurnRequest) -> tuple[str, list[ModelToolCall]
     if name is None:
         name = request.tools[0].name
         arguments = {}
+    if name == "begin_artifact_output":
+        if arguments.get("operation") in {
+            "rewrite_chapter_selection",
+            "rewrite_outline_selection",
+        }:
+            content = "模拟选区替换文本"
+        else:
+            content = (
+                "ARTIFACT_OUTPUT_START\n"
+                "这是模拟模型生成的完整章节正文，用于验证待审核草案流程。\n"
+                "ARTIFACT_OUTPUT_END"
+            )
     return content, [
         ModelToolCall(
             id="fake-tool-call-1",
@@ -84,8 +99,35 @@ def _select_tool(
             },
         )
     if "begin_artifact_output" in tool_names and any(
-        keyword in message_text for keyword in ("正文", "写一章", "续写", "改写", "重写")
+        keyword in message_text
+        for keyword in (
+            "正文",
+            "写一章",
+            "续写",
+            "改写",
+            "重写",
+            "rewrite_chapter_selection",
+            "rewrite_outline_selection",
+        )
     ):
+        selection = _selection_context(message_text)
+        if selection is not None:
+            operation = selection.get("operation")
+            if operation in {
+                "rewrite_chapter_selection",
+                "rewrite_outline_selection",
+            }:
+                args: dict[str, JsonValue] = {
+                    **selection,
+                    "kind": "chapter_draft"
+                    if operation == "rewrite_chapter_selection"
+                    else "outline_draft",
+                    "summary": "模拟选区改写草案",
+                    "artifactKey": "fake-selection-draft",
+                    "submitForReview": True,
+                    "replacement": "模拟选区替换文本",
+                }
+                return "begin_artifact_output", args
         return (
             "begin_artifact_output",
             {
@@ -130,3 +172,28 @@ def _select_tool(
             {"hasConflicts": False, "conflicts": []},
         )
     return None, {}
+
+
+def _selection_context(message_text: str) -> dict[str, JsonValue] | None:
+    operation_match = re.search(
+        r"rewrite_(?:chapter|outline)_selection", message_text
+    )
+    if operation_match is None:
+        return None
+    operation = operation_match.group(0)
+    context: dict[str, JsonValue] = {"operation": operation}
+    for field in (
+        "resourceType",
+        "resourceId",
+        "baseUpdatedAt",
+        "baseContentHash",
+        "selectionStart",
+        "selectionEnd",
+        "selectedTextHash",
+    ):
+        match = re.search(rf'"{field}"\s*:\s*("[^"]*"|-?\d+)', message_text)
+        if match is None:
+            return None
+        raw = match.group(1)
+        context[field] = json.loads(raw) if raw.startswith('"') else int(raw)
+    return context
