@@ -16,6 +16,7 @@ import {
   type TransientSelection,
 } from "@/features/editor/selection-identity";
 import { countUnhandledQualityChecks } from "@/features/editor/quality-presentation";
+import { countTextLength } from "@/shared/lib/word-count";
 import { ShortMediumWorkspace } from "@/features/short-medium/short-medium-workspace";
 import { LibraryNavigation, LibraryPane, type LibraryItem } from "./library-pane";
 import { SmartWritingPanel } from "./smart-writing-panel";
@@ -394,7 +395,7 @@ export function WorkspaceShell({
       </div>
       {visibleTransientSelection ? (
         <div className="selection-action-bar" role="status">
-          <span>已选 {visibleTransientSelection.selectedText.length} 字 · {visibleTransientSelection.sourceLabel}</span>
+          <span>已选 {countTextLength(visibleTransientSelection.selectedText)} 字 · {visibleTransientSelection.sourceLabel}</span>
           <button className="button" type="button" onClick={attachSelection} disabled={Boolean(visibleAttachedSelection)}>
             让 AI 修改这段
           </button>

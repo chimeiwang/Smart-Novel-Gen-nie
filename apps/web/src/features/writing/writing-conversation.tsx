@@ -24,6 +24,11 @@ import type { WritingSessionTaskSummary } from "@/shared/contracts/writing-sessi
 import { countTextLength } from "@/shared/lib/word-count";
 import type { SelectionBridge, SelectionAttachment } from "@/features/editor/selection-identity";
 import { buildSelectionRunRequest, selectionPreview } from "@/features/editor/selection-identity";
+import {
+  normalizeReviewArtifactDiff,
+  type SelectionDiff,
+  type UpdateDiffItem,
+} from "./review-artifact-diff";
 import { flushActiveChapterSave } from "@/features/editor/chapter-save-navigation";
 import {
   EMPTY_AGENT_ACTIVITY_STATE,
@@ -295,7 +300,7 @@ type ReviewArtifactData = {
   status: string;
   summary?: string | null;
   revision: number;
-  diff?: UpdateDiffItem[] | null;
+  diff?: UpdateDiffItem[] | SelectionDiff | null;
   payload?: {
     kind?: string;
     operation?: string;
@@ -434,20 +439,6 @@ function QuickReviewActions({
     </>
   );
 }
-
-type UpdateDiffItem = {
-  section: string;
-  action: string;
-  name: string;
-  fields: UpdateDiffField[];
-};
-
-type UpdateDiffField = {
-  field: string;
-  label: string;
-  oldValue?: string;
-  newValue?: string;
-};
 
 type WritingPhase = WritingConversationPhase;
 
@@ -2505,6 +2496,33 @@ export function WritingConversation({
     );
   };
 
+  const renderSelectionDiffPreview = (diff: SelectionDiff, compact = false) => (
+    <div className={`selection-diff-preview${compact ? " compact" : ""}`}>
+      <div className="selection-diff-preview-title">选区替换 Diff</div>
+      <div className="selection-diff-preview-meta">
+        {diff.resourceType ? `${diff.resourceType}${diff.resourceId ? ` · ${diff.resourceId}` : ""}` : "选区正文"}
+        {typeof diff.selectionStart === "number" && typeof diff.selectionEnd === "number"
+          ? ` · ${diff.selectionStart}-${diff.selectionEnd}`
+          : ""}
+      </div>
+      <div className="diff-columns selection-diff-columns">
+        <div className="diff-column diff-old">
+          <div className="diff-column-title">当前</div>
+          <ParagraphText text={normalizeParagraphTextDisplay(diff.before)} />
+        </div>
+        <div className="diff-column diff-new">
+          <div className="diff-column-title">待替换</div>
+          <ParagraphText text={normalizeParagraphTextDisplay(diff.after)} />
+        </div>
+      </div>
+      <div className="selection-diff-replacement">
+        <span className="diff-column-title">editedReplacement</span>
+        <ParagraphText text={normalizeParagraphTextDisplay(diff.replacement)} />
+      </div>
+      <div className="review-dialog-note">选区外内容未变化（Core 已校验）</div>
+    </div>
+  );
+
   const renderStructuredUpdateSelection = (artifact: ReviewArtifactData, disabled = false) => {
     const updates = artifact.payload?.updates;
     const allRefs = getStructuredUpdateRefs(updates);
@@ -2588,7 +2606,9 @@ export function WritingConversation({
   };
 
   const renderArtifactReviewCard = (artifact: ReviewArtifactData) => {
-    const diffItems = artifact.diff ?? artifact.payload?.updates?.__diff ?? [];
+    const normalizedDiff = normalizeReviewArtifactDiff(artifact.diff, artifact.payload?.updates?.__diff);
+    const diffItems = normalizedDiff.updateDiff;
+    const selectionDiff = normalizedDiff.selectionDiff;
     const hasStructuredUpdates = Boolean(artifact.payload?.updates && (
       artifact.payload.updates.outlineContent ||
       artifact.payload.updates.outline?.length ||
@@ -2646,12 +2666,14 @@ export function WritingConversation({
               </div>
             </div>
           ) : null}
-          {isSelectionReviewArtifact(artifact) ? (
+          {isSelectionReviewArtifact(artifact) && !selectionDiff ? (
             <div className="review-dialog-note">选区外内容未变化（Core 已校验）</div>
           ) : null}
-          {diffItems.length > 0 || hasStructuredUpdates ? (
-            renderUpdatesPreviewCard({ ...(artifact.payload?.updates ?? {}), __diff: diffItems.slice(0, 6) }, true)
-          ) : null}
+          {selectionDiff ? renderSelectionDiffPreview(selectionDiff, true) : (
+            diffItems.length > 0 || hasStructuredUpdates ? (
+              renderUpdatesPreviewCard({ ...(artifact.payload?.updates ?? {}), __diff: diffItems.slice(0, 6) }, true)
+            ) : null
+          )}
           {action ? (
             <div className={`review-action-status ${action.status}`} role={action.status === "failed" ? "alert" : "status"}>
               {action.status === "pending" ? <span className="review-action-spinner" aria-hidden="true" /> : null}
@@ -2723,7 +2745,9 @@ export function WritingConversation({
 
   const renderArtifactReviewDialog = (artifact: ReviewArtifactData) => {
     const latestEvaluation = artifact.evaluations?.[0];
-    const diffItems = artifact.diff ?? artifact.payload?.updates?.__diff ?? [];
+    const normalizedDiff = normalizeReviewArtifactDiff(artifact.diff, artifact.payload?.updates?.__diff);
+    const diffItems = normalizedDiff.updateDiff;
+    const selectionDiff = normalizedDiff.selectionDiff;
     const hasStructuredUpdates = Boolean(artifact.payload?.updates && (
       artifact.payload.updates.outlineContent ||
       artifact.payload.updates.outline?.length ||
@@ -2788,16 +2812,18 @@ export function WritingConversation({
                 <div className="review-dialog-note">这个变更还没有进入等待确认状态，只能查看，不能直接应用。</div>
               )
             )}
-            {isSelectionReviewArtifact(artifact) ? (
+            {isSelectionReviewArtifact(artifact) && !selectionDiff ? (
               <div className="review-dialog-note">选区外内容未变化（Core 已校验）；批准时只提交 editedReplacement。</div>
             ) : null}
           </section>
 
-          {diffItems.length > 0 || hasStructuredUpdates ? (
-            <section className="review-dialog-section review-dialog-diffs">
-              {renderUpdatesPreviewCard({ ...(artifact.payload?.updates ?? {}), __diff: diffItems }, true)}
-            </section>
-          ) : null}
+          {selectionDiff ? renderSelectionDiffPreview(selectionDiff) : (
+            diffItems.length > 0 || hasStructuredUpdates ? (
+              <section className="review-dialog-section review-dialog-diffs">
+                {renderUpdatesPreviewCard({ ...(artifact.payload?.updates ?? {}), __diff: diffItems }, true)}
+              </section>
+            ) : null
+          )}
         </div>
 
         {action ? (
