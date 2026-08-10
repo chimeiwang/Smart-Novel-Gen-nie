@@ -137,13 +137,15 @@ class OutlineUpdatesPort(Protocol):
         content: str,
         expected_updated_at: datetime | None = None,
     ) -> dict[str, Any]: ...
-    async def create_node(
+    async def create_review_node(
         self, novel_id: str, user_id: str, fields: dict[str, Any]
     ) -> dict[str, Any]: ...
-    async def update_node(
+    async def update_review_node(
         self, novel_id: str, user_id: str, node_id: str, fields: dict[str, Any]
     ) -> dict[str, Any]: ...
-    async def delete_node(self, novel_id: str, user_id: str, node_id: str) -> None: ...
+    async def delete_review_node(
+        self, novel_id: str, user_id: str, node_id: str
+    ) -> None: ...
     async def replace_nodes(
         self, novel_id: str, user_id: str, adjustments: list[dict[str, Any]]
     ) -> None: ...
@@ -425,7 +427,9 @@ class AgentUpdatesExecutor:
                 if not isinstance(item, dict) or not isinstance(item.get("nodeId"), str):
                     raise ValueError("outline 更新缺少 nodeId")
                 fields = _strict_fields(item, {"status", "actualWordCount"}, "outline")
-                await self._outlines.update_node(novel_id, user_id, item["nodeId"], fields)
+                await self._outlines.update_review_node(
+                    novel_id, user_id, item["nodeId"], fields
+                )
                 count += 1
         adjustments = updates.get("outlineAdjustments")
         if not isinstance(adjustments, list):
@@ -462,14 +466,18 @@ class AgentUpdatesExecutor:
                     raise ValueError("outlineAdjustments parentKey 无法解析")
                 fields["parentId"] = client_ids[parent_key]
             if action == "create":
-                created = await self._outlines.create_node(novel_id, user_id, fields)
+                created = await self._outlines.create_review_node(
+                    novel_id, user_id, fields
+                )
                 client_key = item.get("clientKey")
                 if isinstance(client_key, str) and isinstance(created.get("id"), str):
                     client_ids[client_key] = created["id"]
             elif action == "update" and node_id is not None:
-                await self._outlines.update_node(novel_id, user_id, node_id, fields)
+                await self._outlines.update_review_node(
+                    novel_id, user_id, node_id, fields
+                )
             elif action == "delete" and node_id is not None:
-                await self._outlines.delete_node(novel_id, user_id, node_id)
+                await self._outlines.delete_review_node(novel_id, user_id, node_id)
             else:
                 raise ValueError("outlineAdjustments 缺少有效标识")
             count += 1

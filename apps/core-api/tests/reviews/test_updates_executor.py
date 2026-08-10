@@ -43,6 +43,25 @@ class FakeOutlines:
     def __init__(self) -> None:
         self.replaced: list[dict] | None = None
         self.outline_write: tuple[str, str, str, datetime | None] | None = None
+        self.review_calls: list[tuple[object, ...]] = []
+
+    async def list_nodes(self, novel_id: str, user_id: str):
+        del novel_id, user_id
+        return [
+            {"id": "node-1", "title": "旧节点一"},
+            {"id": "node-2", "title": "旧节点二"},
+        ]
+
+    async def create_review_node(self, novel_id, user_id, fields):
+        self.review_calls.append(("create", novel_id, user_id, fields))
+        return {"id": "node-created"}
+
+    async def update_review_node(self, novel_id, user_id, node_id, fields):
+        self.review_calls.append(("update", novel_id, user_id, node_id, fields))
+        return {"id": node_id}
+
+    async def delete_review_node(self, novel_id, user_id, node_id):
+        self.review_calls.append(("delete", novel_id, user_id, node_id))
 
     async def replace_nodes(self, novel_id: str, user_id: str, adjustments: list[dict]):
         del novel_id, user_id
@@ -1234,6 +1253,43 @@ async def test_replace_outline_tree_uses_single_repository_operation() -> None:
 
     assert count == 1
     assert outlines.replaced == adjustments
+
+
+@pytest.mark.asyncio
+async def test_patch_outline_uses_review_transaction_repository_boundary() -> None:
+    outlines = FakeOutlines()
+    executor = AgentUpdatesExecutor(FakeLore(), outlines, FakeReferences())
+
+    count = await executor.apply(
+        "novel-1",
+        "user-1",
+        {
+            "outline": [{"nodeId": "node-1", "status": "completed"}],
+            "outlineAdjustments": [
+                {
+                    "action": "create",
+                    "clientKey": "stage-new",
+                    "kind": "stage",
+                    "title": "新节点",
+                },
+                {"action": "update", "nodeId": "node-1", "title": "更新节点"},
+                {"action": "delete", "nodeId": "node-2"},
+            ],
+        },
+    )
+
+    assert count == 4
+    assert outlines.review_calls == [
+        ("update", "novel-1", "user-1", "node-1", {"status": "completed"}),
+        (
+            "create",
+            "novel-1",
+            "user-1",
+            {"title": "新节点", "kind": "stage"},
+        ),
+        ("update", "novel-1", "user-1", "node-1", {"title": "更新节点"}),
+        ("delete", "novel-1", "user-1", "node-2"),
+    ]
 
 
 @pytest.mark.asyncio

@@ -9,7 +9,7 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..concurrency import command_resource_id, next_utc_timestamp, require_expected_updated_at
-from ..db.base import utc_now
+from ..db.base import generate_id, utc_now
 from ..db.models import Chapter, Foreshadowing, Novel, Outline, OutlineNode, PlotProgress
 from ..errors import ApiError
 from .validation import OutlineNodeSnapshot, validate_outline_node
@@ -343,6 +343,49 @@ class OutlineRepository:
                     raise self._not_found()
                 return {"deletedId": node_id, "effective": True}
 
+    async def create_review_node(
+        self, novel_id: str, user_id: str, fields: dict[str, Any]
+    ) -> dict[str, Any]:
+        """在 ReviewArtifact 外层事务内创建节点。"""
+
+        return await self.create_node(
+            novel_id,
+            user_id,
+            generate_id(),
+            fields,
+        )
+
+    async def update_review_node(
+        self,
+        novel_id: str,
+        user_id: str,
+        node_id: str,
+        fields: dict[str, Any],
+    ) -> dict[str, Any]:
+        """在 ReviewArtifact 外层事务内按即时版本更新节点。"""
+
+        current = await self._review_node_snapshot(novel_id, user_id, node_id)
+        return await self.update_node(
+            novel_id,
+            user_id,
+            node_id,
+            fields,
+            _required_updated_at(current.get("updatedAt")),
+        )
+
+    async def delete_review_node(
+        self, novel_id: str, user_id: str, node_id: str
+    ) -> None:
+        """在 ReviewArtifact 外层事务内按即时版本删除节点。"""
+
+        current = await self._review_node_snapshot(novel_id, user_id, node_id)
+        await self.delete_node(
+            novel_id,
+            user_id,
+            node_id,
+            _required_updated_at(current.get("updatedAt")),
+        )
+
     async def replace_nodes(
         self, novel_id: str, user_id: str, adjustments: list[dict[str, Any]]
     ) -> None:
@@ -427,6 +470,15 @@ class OutlineRepository:
                                 message="大纲节点临时标识重复",
                             )
                         client_ids[client_key] = value.id
+
+    async def _review_node_snapshot(
+        self, novel_id: str, user_id: str, node_id: str
+    ) -> dict[str, Any]:
+        nodes = await self.list_nodes(novel_id, user_id)
+        current = next((item for item in nodes if item.get("id") == node_id), None)
+        if current is None:
+            raise self._not_found()
+        return current
 
     @staticmethod
     async def _require_owner(session: AsyncSession, novel_id: str, user_id: str) -> None:
