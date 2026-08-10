@@ -1,4 +1,4 @@
-import { sha256Text } from "./sha256";
+import { sha256Text, sha256TextSync } from "./sha256";
 
 export type CodePointRange = {
   start: number;
@@ -56,7 +56,7 @@ export function toCodePointRange(
   };
 }
 
-export { sha256Text };
+export { sha256Text, sha256TextSync };
 
 export async function buildSelectionIdentity(
   content: string,

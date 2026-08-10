@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useSyncExternalStore, useTransition } from "react";
 
 import { LorePanel } from "@/features/lore/lore-panel";
+import type { SelectionBridge } from "@/features/editor/selection-identity";
 import { OutlinePanel } from "@/features/outline/outline-panel";
 import { ProgressPanel } from "@/features/progress/progress-panel";
 import { ReferencePanel } from "@/features/references/reference-panel";
@@ -44,6 +45,7 @@ type LibraryPaneProps = {
   activeItem?: LibraryItem;
   onActiveItemChange?: (item: LibraryItem) => void;
   showNavigation?: boolean;
+  selectionBridge?: SelectionBridge;
 };
 
 export const LIBRARY_GROUPS: Array<{
@@ -287,6 +289,7 @@ export function LibraryPane({
   activeItem: controlledActiveItem,
   onActiveItemChange,
   showNavigation = true,
+  selectionBridge,
 }: LibraryPaneProps) {
   const [internalActiveItem, setInternalActiveItem] = useState<LibraryItem>("characters");
   const activeItem = controlledActiveItem ?? internalActiveItem;
@@ -400,7 +403,7 @@ export function LibraryPane({
     const planning = deferred.planning.data;
     if (!planning) return null;
     if (activeItem === "outline") {
-      return <OutlinePanel novelId={novelId} outline={planning.outline} outlineNodes={planning.outlineNodes} onChanged={() => refresh("planning")} />;
+      return <OutlinePanel novelId={novelId} outline={planning.outline} outlineNodes={planning.outlineNodes} onChanged={() => refresh("planning")} selectionBridge={selectionBridge} />;
     }
     if (activeItem === "progress") {
       return <ProgressPanel novelId={novelId} progress={planning.plotProgress} onChanged={() => refresh("planning")} />;

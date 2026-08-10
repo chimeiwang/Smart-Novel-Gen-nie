@@ -22,6 +22,9 @@ import type { AgentUpdateSelectionRef } from "@/shared/contracts/agent-updates";
 import type { ReviewArtifactDecision } from "@/shared/contracts/review-artifact";
 import type { WritingSessionTaskSummary } from "@/shared/contracts/writing-session";
 import { countTextLength } from "@/shared/lib/word-count";
+import type { SelectionBridge, SelectionAttachment } from "@/features/editor/selection-identity";
+import { buildSelectionRunRequest, selectionPreview } from "@/features/editor/selection-identity";
+import { flushActiveChapterSave } from "@/features/editor/chapter-save-navigation";
 import {
   EMPTY_AGENT_ACTIVITY_STATE,
   reduceAgentActivityState,
@@ -126,6 +129,7 @@ type WritingConversationProps = {
   selectedAgents: AgentId[];
   targetWordCount: number;
   onComplete?: () => void;
+  selectionBridge?: SelectionBridge;
 };
 
 async function openWritingRunEvents(
@@ -179,6 +183,7 @@ type LoadedSessionResponse = Omit<Session, "messageCount" | "lastMessage"> & {
     agentId: string | null;
     content: string;
     intent: string | null;
+    metadata?: unknown;
     createdAt: string;
   }>;
   currentTask?: WritingSessionTaskSummary | null;
@@ -204,6 +209,7 @@ type Message = {
    * undefined/false = 可能是旧 JSON 协议，走 legacy extractDisplayContent
    */
   isNewProtocol?: boolean;
+  metadata?: unknown;
 };
 
 type AddMessageInput = {
@@ -215,7 +221,54 @@ type AddMessageInput = {
   isNewProtocol?: boolean;
   sessionId?: string | null;
   persist?: boolean;
+  metadata?: unknown;
 };
+
+function selectionAttachmentMetadata(attachment: SelectionAttachment) {
+  return {
+    source: {
+      resourceType: attachment.resourceType,
+      resourceId: attachment.resourceId,
+      sourceLabel: attachment.sourceLabel,
+      baseUpdatedAt: attachment.baseUpdatedAt,
+      baseContentHash: attachment.baseContentHash,
+      selectionStart: attachment.selectionStart,
+      selectionEnd: attachment.selectionEnd,
+      selectedTextHash: attachment.selectedTextHash,
+      selectionPreview: selectionPreview(attachment.selectedText),
+    },
+  };
+}
+
+function getSelectionMessageSource(metadata: unknown): {
+  resourceType: string;
+  resourceId: string;
+  sourceLabel: string;
+  selectionStart: number;
+  selectionEnd: number;
+  selectionPreview: string;
+} | null {
+  if (!metadata || typeof metadata !== "object") return null;
+  const source = (metadata as { source?: unknown }).source;
+  if (!source || typeof source !== "object") return null;
+  const value = source as Record<string, unknown>;
+  if (
+    typeof value.resourceType !== "string"
+    || typeof value.resourceId !== "string"
+    || typeof value.sourceLabel !== "string"
+    || typeof value.selectionStart !== "number"
+    || typeof value.selectionEnd !== "number"
+    || typeof value.selectionPreview !== "string"
+  ) return null;
+  return {
+    resourceType: value.resourceType,
+    resourceId: value.resourceId,
+    sourceLabel: value.sourceLabel,
+    selectionStart: value.selectionStart,
+    selectionEnd: value.selectionEnd,
+    selectionPreview: value.selectionPreview,
+  };
+}
 
 type PendingUpdatesData = {
   characters?: Record<string, unknown>[];
@@ -245,6 +298,15 @@ type ReviewArtifactData = {
   diff?: UpdateDiffItem[] | null;
   payload?: {
     kind?: string;
+    operation?: string;
+    replacement?: string;
+    selection?: {
+      resourceType?: string;
+      resourceId?: string;
+      selectionStart?: number;
+      selectionEnd?: number;
+      selectedTextHash?: string;
+    };
     updates?: PendingUpdatesData;
     content?: string;
     markdown?: string;
@@ -462,6 +524,7 @@ function getReviewArtifactImpactLabel(kind: string) {
 }
 
 function getReviewArtifactContent(artifact: ReviewArtifactData): string {
+  if (artifact.payload?.replacement) return artifact.payload.replacement;
   if (artifact.payload?.kind === "beat_plan" && artifact.payload.beatPlan) {
     const plan = artifact.payload.beatPlan;
     const lines: string[] = [];
@@ -486,6 +549,12 @@ function getReviewArtifactContent(artifact: ReviewArtifactData): string {
     return lines.join("\n");
   }
   return artifact.payload?.content ?? artifact.payload?.markdown ?? "";
+}
+
+function isSelectionReviewArtifact(artifact: ReviewArtifactData): boolean {
+  return artifact.payload?.operation === "rewrite_chapter_selection"
+    || artifact.payload?.operation === "rewrite_outline_selection"
+    || Boolean(artifact.payload?.selection);
 }
 
 function getUpdateActionLabel(action: string) {
@@ -632,6 +701,7 @@ export function WritingConversation({
   selectedAgents,
   targetWordCount,
   onComplete,
+  selectionBridge,
 }: WritingConversationProps) {
   const [workspace, dispatchWorkspace] = useReducer(
     reduceSessionWorkspace<ReviewArtifactData>,
@@ -769,6 +839,7 @@ export function WritingConversation({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const chatRef = useRef<HTMLDivElement>(null);
   const pendingReviewArtifactRefreshRef = useRef(false);
+  const clearAllSelection = selectionBridge?.clearAllSelection;
 
   const updateReviewArtifactAction = useCallback((next: ReviewArtifactActionState | null) => {
     reviewArtifactActionRef.current = next;
@@ -776,6 +847,7 @@ export function WritingConversation({
   }, []);
 
   const resetSessionContext = useCallback((sessionId: string | null) => {
+    clearAllSelection?.();
     reviewStateEpochRef.current.invalidate();
     sessionLoadVersionRef.current += 1;
     phasePersistenceReadyRef.current = false;
@@ -796,7 +868,7 @@ export function WritingConversation({
     resetAgentActivity();
     clearAgentLiveRuns();
     setIsAssigningTask(false);
-  }, [clearAgentLiveRuns, replaceSessionWorkspace, resetAgentActivity, updateReviewArtifactAction]);
+  }, [clearAgentLiveRuns, clearAllSelection, replaceSessionWorkspace, resetAgentActivity, updateReviewArtifactAction]);
 
   const clearReviewActionCloseTimer = useCallback(() => {
     if (reviewActionCloseTimerRef.current === null) return;
@@ -982,6 +1054,7 @@ export function WritingConversation({
           agentName: m.agentId ? AGENT_REGISTRY.find(a => a.id === m.agentId)?.name : undefined,
           content: normalizeParagraphTextDisplay(m.content),
           intent: m.intent || undefined,
+          metadata: m.metadata,
           timestamp: new Date(m.createdAt).getTime(),
         }));
 
@@ -1050,7 +1123,8 @@ export function WritingConversation({
     content: string,
     agentId?: string,
     intent?: string,
-    explicitSessionId?: string | null
+    explicitSessionId?: string | null,
+    metadata?: unknown,
   ) => {
     const targetSessionId = explicitSessionId ?? currentSessionId;
     if (!targetSessionId) return;
@@ -1063,6 +1137,7 @@ export function WritingConversation({
           agentId: agentId ?? null,
           content,
           intent: intent ?? null,
+          ...(metadata === undefined ? {} : { metadata }),
         },
       }));
     } catch (err) {
@@ -1135,7 +1210,7 @@ export function WritingConversation({
     };
     setMessages((prev) => [...prev, newMsg]);
     if (shouldPersistOptimisticWritingMessage({ persist })) {
-      saveMessageToServer(msg.role, msg.content, msg.agentId, msg.intent, sessionId);
+      saveMessageToServer(msg.role, msg.content, msg.agentId, msg.intent, sessionId, msg.metadata);
     }
     setTimeout(scrollToBottom, 50);
     return newMsg.id;
@@ -1891,6 +1966,11 @@ export function WritingConversation({
   const startDiscussionInternal = async (messageOverride?: string, titleOverride?: string) => {
     const userMessage = (messageOverride ?? userInput).trim();
     if (!userMessage) return;
+    const attachment = selectionBridge?.attachedSelection ?? null;
+    if (attachment?.stale) {
+      setError("选区来源已变化，请重新选择后再发送");
+      return;
+    }
 
     const sessionTitle = titleOverride ?? createWritingSessionTitle(userMessage);
     const sessionIdForRequest = currentSessionId ?? await createSession(sessionTitle);
@@ -1900,7 +1980,13 @@ export function WritingConversation({
     }
 
     setUserInput("");
-    addMessage({ role: "user", content: userMessage, sessionId: sessionIdForRequest, persist: false });
+    addMessage({
+      role: "user",
+      content: userMessage,
+      metadata: attachment ? selectionAttachmentMetadata(attachment) : undefined,
+      sessionId: sessionIdForRequest,
+      persist: false,
+    });
     setIsAssigningTask(true);
     addFlowLog({ type: "user", content: `用户: ${userMessage.slice(0, 50)}${userMessage.length > 50 ? "..." : ""}` });
     phasePersistenceReadyRef.current = true;
@@ -1908,17 +1994,23 @@ export function WritingConversation({
     setIsSending(true);
 
     try {
+      if (attachment && attachment.resourceType === "chapter_content") {
+        await flushActiveChapterSave();
+      }
       const run = requireApiData(await browserApi.POST("/api/v1/writing/runs", {
-        body: {
-          clientRequestId: createClientRequestId(),
-          novelId,
-          chapterId,
-          targetWordCount,
-          selectedAgents,
-          userMessage,
-          writingSessionId: sessionIdForRequest,
-        },
+        body: attachment
+          ? { ...buildSelectionRunRequest({ attachment, novelId, chapterId, writingSessionId: sessionIdForRequest, targetWordCount, userInstruction: userMessage }), clientRequestId: createClientRequestId() }
+          : {
+              clientRequestId: createClientRequestId(),
+              novelId,
+              chapterId,
+              targetWordCount,
+              selectedAgents,
+              userMessage,
+              writingSessionId: sessionIdForRequest,
+            },
       }));
+      if (attachment) selectionBridge?.removeSelection();
       setTaskId(run.id);
       await processStream(
         run.id,
@@ -1943,6 +2035,11 @@ export function WritingConversation({
     const guarded = runSendAction(async () => {
       const message = (messageOverride ?? userInput).trim();
       if (!message) return;
+      const attachment = selectionBridge?.attachedSelection ?? null;
+      if (attachment?.stale) {
+        setError("选区来源已变化，请重新选择后再发送");
+        return;
+      }
 
       // 中断当前正在运行的 Agent
       abortCurrentAgent();
@@ -1961,29 +2058,54 @@ export function WritingConversation({
       }
 
       setUserInput("");
-      addMessage({ role: "user", content: message, persist: false });
+      addMessage({
+        role: "user",
+        content: message,
+        metadata: attachment ? selectionAttachmentMetadata(attachment) : undefined,
+        persist: false,
+      });
       setIsSending(true);
 
       const controller = new AbortController();
       abortRef.current = controller;
 
       try {
-        const accepted = requireApiData(await browserApi.POST(
-          "/api/v1/writing/runs/{task_id}/resume",
-          {
-            params: { path: { task_id: taskId } },
+        let accepted;
+        if (attachment) {
+          if (attachment.resourceType === "chapter_content") await flushActiveChapterSave();
+          accepted = requireApiData(await browserApi.POST("/api/v1/writing/runs", {
             body: {
+              ...buildSelectionRunRequest({
+                attachment,
+                novelId,
+                chapterId,
+                writingSessionId: currentSessionIdRef.current,
+                targetWordCount,
+                userInstruction: message,
+              }),
               clientRequestId: createClientRequestId(),
-              writingSessionId: currentSessionId ?? null,
-              userMessage: message,
             },
             signal: controller.signal,
-          },
-        ));
+          }));
+          selectionBridge?.removeSelection();
+        } else {
+          accepted = requireApiData(await browserApi.POST(
+            "/api/v1/writing/runs/{task_id}/resume",
+            {
+              params: { path: { task_id: taskId } },
+              body: {
+                clientRequestId: createClientRequestId(),
+                writingSessionId: currentSessionId ?? null,
+                userMessage: message,
+              },
+              signal: controller.signal,
+            },
+          ));
+        }
         const sessionIdForRequest = currentSessionIdRef.current;
         if (!sessionIdForRequest) throw new Error("当前写作会话不存在");
         await processStream(
-          accepted.taskId,
+          "taskId" in accepted ? accepted.taskId : accepted.id,
           { mode: "session", sessionId: sessionIdForRequest },
           controller.signal,
         );
@@ -2519,6 +2641,9 @@ export function WritingConversation({
               </div>
             </div>
           ) : null}
+          {isSelectionReviewArtifact(artifact) ? (
+            <div className="review-dialog-note">选区外内容未变化（Core 已校验）</div>
+          ) : null}
           {diffItems.length > 0 || hasStructuredUpdates ? (
             renderUpdatesPreviewCard({ ...(artifact.payload?.updates ?? {}), __diff: diffItems.slice(0, 6) }, true)
           ) : null}
@@ -2638,7 +2763,7 @@ export function WritingConversation({
           ) : null}
 
           <section className="review-dialog-section">
-            <div className="review-dialog-section-title">{canEditText ? "可编辑正文" : "结构化变更"}</div>
+            <div className="review-dialog-section-title">{canEditText ? (isSelectionReviewArtifact(artifact) ? "可编辑选区替换" : "可编辑正文") : "结构化变更"}</div>
             {canEditText ? (
               <label className="review-editor">
                 <textarea
@@ -2658,6 +2783,9 @@ export function WritingConversation({
                 <div className="review-dialog-note">这个变更还没有进入等待确认状态，只能查看，不能直接应用。</div>
               )
             )}
+            {isSelectionReviewArtifact(artifact) ? (
+              <div className="review-dialog-note">选区外内容未变化（Core 已校验）；批准时只提交 editedReplacement。</div>
+            ) : null}
           </section>
 
           {diffItems.length > 0 || hasStructuredUpdates ? (
@@ -2769,6 +2897,7 @@ export function WritingConversation({
         addOptimisticReviewArtifactDecision({ artifactId: artifact.id, decision });
       });
       try {
+        const selectionArtifact = isSelectionReviewArtifact(artifact);
         const accepted = requireApiData(await browserApi.POST(
           "/api/v1/review-artifacts/{artifact_id}/decision",
           {
@@ -2777,7 +2906,8 @@ export function WritingConversation({
               clientRequestId: createClientRequestId(),
               expectedRevision: artifact.revision,
               decision,
-              editedContent: decision === "approve" ? editedContent ?? null : null,
+              editedContent: decision === "approve" && !selectionArtifact ? editedContent ?? null : null,
+              editedReplacement: decision === "approve" && selectionArtifact ? editedContent ?? null : null,
               selectedUpdateRefs: decision === "approve" ? selectedUpdateRefs ?? null : null,
               userMessage: userMessage ?? (decision === "revise" ? "继续修改待确认变更" : null),
             },
@@ -2966,6 +3096,7 @@ export function WritingConversation({
           const info = msg.agentId ? getAgentInfo(msg.agentId) : null;
           const isEditing = editingMessageId === msg.id;
           const anchoredRounds = activityRounds.filter((round) => round.anchorMessageId === msg.id);
+          const selectionSource = isUser ? getSelectionMessageSource(msg.metadata) : null;
 
           return (
             <div key={msg.id} className="message-group">
@@ -2981,6 +3112,13 @@ export function WritingConversation({
                   </div>
                   <div className="message-content">
                     <ParagraphText text={renderParagraphMessageContent(msg)} />
+                    {selectionSource ? (
+                      <div className="selection-message-source" aria-label="选区来源快照">
+                        <span className="selection-message-source-label">选区附件 · {selectionSource.sourceLabel}</span>
+                        <span>{selectionSource.selectionEnd - selectionSource.selectionStart} 字</span>
+                        <span className="selection-attachment-preview">{selectionSource.selectionPreview}</span>
+                      </div>
+                    ) : null}
                     {anchoredRounds.map(renderActivityRound)}
                   </div>
                   {msg.intent && (
@@ -3145,6 +3283,18 @@ export function WritingConversation({
 
       {/* 输入区域 */}
       <div className="chat-input">
+        {selectionBridge?.attachedSelection ? (
+          <div className={`selection-attachment-card ${selectionBridge.attachedSelection.stale ? "stale" : ""}`}>
+            <div className="selection-attachment-main">
+              <strong>{selectionBridge.attachedSelection.sourceLabel}</strong>
+              <span>{selectionBridge.attachedSelection.selectionEnd - selectionBridge.attachedSelection.selectionStart} 字</span>
+              <span className="selection-attachment-preview">{selectionPreview(selectionBridge.attachedSelection.selectedText)}</span>
+              {selectionBridge.attachedSelection.stale ? <span className="error-text">来源已变化，请重新选择</span> : null}
+            </div>
+            <button className="button ghost sm" type="button" onClick={selectionBridge.removeSelection}>移除</button>
+            <button className="button ghost sm" type="button" onClick={selectionBridge.removeSelection}>重新选择</button>
+          </div>
+        ) : null}
         {generatedContent && (
           <div className="quick-actions">
             <button onClick={() => handleSendMessage("采纳")}>采纳</button>

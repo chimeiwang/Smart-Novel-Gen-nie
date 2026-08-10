@@ -1281,6 +1281,55 @@
   position: relative;
 }
 
+.selection-attachment-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-subtle, #d9dee8);
+  border-radius: 8px;
+  background: var(--surface-muted, #f7f8fa);
+}
+
+.selection-attachment-card.stale {
+  border-color: #d97706;
+  background: #fff7ed;
+}
+
+.selection-attachment-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.selection-attachment-preview {
+  color: var(--text-muted, #667085);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 220px;
+}
+
+.selection-message-source {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 7px;
+  padding: 6px 8px;
+  border-left: 3px solid #98a2b3;
+  background: #f8fafc;
+  color: #667085;
+  font-size: 12px;
+}
+
+.selection-message-source-label {
+  color: #344054;
+  font-weight: 600;
+}
+
 .writing-chat .quick-actions {
   display: flex;
   gap: 8px;
