@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from copy import deepcopy
 from datetime import UTC, datetime
 
@@ -120,6 +121,64 @@ def test_selection_operations_require_target_and_preserve_rewrite_scene_semantic
     full_scene = {**payload, "operation": "rewrite_scene", "selectionTarget": None}
     scene = LONG_SERIAL_RUN_PAYLOAD_ADAPTER.validate_python(full_scene)
     assert scene.operation == "rewrite_scene"
+
+
+def test_selection_snapshot_must_match_target_and_authoritative_text() -> None:
+    content = "甲😀乙"
+    full_hash = hashlib.sha256(content.encode()).hexdigest()
+    selected_hash = hashlib.sha256("😀".encode()).hexdigest()
+    payload = valid_start_payload()
+    payload.update(
+        {
+            "operation": "rewrite_chapter_selection",
+            "selectionTarget": {
+                "resourceType": "chapter_content",
+                "resourceId": "chapter-1",
+                "baseUpdatedAt": "2026-08-05T10:00:00Z",
+                "baseContentHash": full_hash,
+                "selectionStart": 1,
+                "selectionEnd": 2,
+                "selectedTextHash": selected_hash,
+            },
+            "selectionSnapshot": {
+                "resourceType": "chapter_content",
+                "resourceId": "chapter-1",
+                "baseUpdatedAt": "2026-08-05T10:00:00Z",
+                "baseContentHash": full_hash,
+                "selectionStart": 1,
+                "selectionEnd": 2,
+                "selectedTextHash": selected_hash,
+                "selectedText": "😀",
+                "contextBefore": "甲",
+                "contextAfter": "乙",
+                "sourceSnapshot": {
+                    "resourceType": "chapter_content",
+                    "resourceId": "chapter-1",
+                    "content": content,
+                    "updatedAt": "2026-08-05T10:00:00Z",
+                    "contentSha256": full_hash,
+                },
+            },
+        }
+    )
+    parsed = LONG_SERIAL_RUN_PAYLOAD_ADAPTER.validate_python(payload)
+    assert parsed.selectionSnapshot is not None
+
+    for field, value in (
+        ("resourceId", "chapter-2"),
+        ("baseContentHash", "c" * 64),
+        ("selectionStart", 0),
+        ("selectedTextHash", "d" * 64),
+    ):
+        changed = deepcopy(payload)
+        changed["selectionSnapshot"][field] = value  # type: ignore[index]
+        with pytest.raises(ValidationError):
+            LONG_SERIAL_RUN_PAYLOAD_ADAPTER.validate_python(changed)
+
+    changed_source = deepcopy(payload)
+    changed_source["selectionSnapshot"]["sourceSnapshot"]["content"] = "甲😀丙"  # type: ignore[index]
+    with pytest.raises(ValidationError):
+        LONG_SERIAL_RUN_PAYLOAD_ADAPTER.validate_python(changed_source)
 
     with pytest.raises(ValidationError):
         LONG_SERIAL_RUN_PAYLOAD_ADAPTER.validate_python(

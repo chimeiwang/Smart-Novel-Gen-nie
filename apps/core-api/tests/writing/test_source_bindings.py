@@ -284,6 +284,29 @@ async def test_verify_rejects_changed_outline_node_content() -> None:
 
 
 @pytest.mark.asyncio
+async def test_verify_rejects_changed_outline_content() -> None:
+    current = outline(content="原总纲内容")
+    binding = SourceBinding(
+        resourceType="outline_content",
+        resourceId="outline-1",
+        exists=True,
+        updatedAt=NOW,
+        contentSha256=hashlib.sha256("原总纲内容".encode()).hexdigest(),
+        revision=None,
+        absenceSentinel=None,
+    )
+    await verify_source_bindings(  # type: ignore[arg-type]
+        SourceSession(scalar_values=[current]), (binding,)
+    )
+    current.content = "总纲已变化"
+    with pytest.raises(ApiError) as error:
+        await verify_source_bindings(  # type: ignore[arg-type]
+            SourceSession(scalar_values=[current]), (binding,)
+        )
+    assert error.value.code == "ARTIFACT_SOURCE_VERSION_CONFLICT"
+
+
+@pytest.mark.asyncio
 async def test_verify_absent_outline_detects_later_creation() -> None:
     binding = SourceBinding(
         resourceType="outline",

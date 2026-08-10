@@ -36,7 +36,7 @@ from .schemas import (
     assert_status_transition,
 )
 
-_SOURCE_BOUND_KINDS = frozenset({"beat_plan", "chapter_draft"})
+_SOURCE_BOUND_KINDS = frozenset({"beat_plan", "chapter_draft", "outline_draft"})
 
 
 @dataclass(frozen=True, slots=True)

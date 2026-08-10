@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from typing import Annotated, Literal, Self
 
 from pydantic import (
@@ -56,7 +57,9 @@ class SelectionTarget(StrictModel):
 
 
 class SelectionSourceSnapshot(StrictModel):
-    resourceType: Identifier
+    resourceType: Literal[
+        "chapter_content", "outline_content", "outline_node_content"
+    ]
     resourceId: Identifier
     content: str
     updatedAt: AwareDatetime
@@ -77,6 +80,38 @@ class SelectionSnapshot(StrictModel):
     contextBefore: str
     contextAfter: str
     sourceSnapshot: SelectionSourceSnapshot
+
+    @model_validator(mode="after")
+    def validate_snapshot_integrity(self) -> Self:
+        if self.selectionStart >= self.selectionEnd:
+            raise ValueError("选区快照范围必须为非空开区间")
+        source = self.sourceSnapshot
+        if (
+            source.resourceType != self.resourceType
+            or source.resourceId != self.resourceId
+            or source.updatedAt != self.baseUpdatedAt
+            or source.contentSha256 != self.baseContentHash
+        ):
+            raise ValueError("选区快照与来源快照身份或版本不一致")
+        if hashlib.sha256(source.content.encode("utf-8")).hexdigest() != self.baseContentHash:
+            raise ValueError("来源快照全文 hash 不一致")
+        if hashlib.sha256(self.selectedText.encode("utf-8")).hexdigest() != self.selectedTextHash:
+            raise ValueError("选区快照 selectedText hash 不一致")
+        if self.selectionEnd > len(source.content):
+            raise ValueError("选区快照范围超出来源正文")
+        if source.content[self.selectionStart : self.selectionEnd] != self.selectedText:
+            raise ValueError("选区快照正文与来源正文不一致")
+        expected_before = source.content[
+            max(0, self.selectionStart - 1000) : self.selectionStart
+        ]
+        if self.contextBefore != expected_before:
+            raise ValueError("选区快照前文上下文不一致")
+        expected_after = source.content[
+            self.selectionEnd : min(len(source.content), self.selectionEnd + 1000)
+        ]
+        if self.contextAfter != expected_after:
+            raise ValueError("选区快照后文上下文不一致")
+        return self
 
 
 class ChapterScope(StrictModel):
@@ -188,6 +223,11 @@ class LongSerialRunBase(StrictModel):
             if self.selectionTarget is None or (
                 self.selectionSnapshot.resourceType != self.selectionTarget.resourceType
                 or self.selectionSnapshot.resourceId != self.selectionTarget.resourceId
+                or self.selectionSnapshot.baseUpdatedAt != self.selectionTarget.baseUpdatedAt
+                or self.selectionSnapshot.baseContentHash != self.selectionTarget.baseContentHash
+                or self.selectionSnapshot.selectionStart != self.selectionTarget.selectionStart
+                or self.selectionSnapshot.selectionEnd != self.selectionTarget.selectionEnd
+                or self.selectionSnapshot.selectedTextHash != self.selectionTarget.selectedTextHash
             ):
                 raise ValueError("选区快照必须继承 selectionTarget 身份")
         if self.operation in selection_operations and self.selectionSnapshot is None:
