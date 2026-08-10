@@ -125,6 +125,27 @@ class CoreArtifactPort:
         )
         if expected_kind is None or kind != expected_kind:
             raise _artifact_identity_mismatch("草案类型与当前 Operation 不一致")
+        operation_kind = _operation_kind(dict(state))
+        if operation_kind in {
+            "rewrite_chapter_selection",
+            "rewrite_outline_selection",
+        }:
+            snapshot = state.get("selectionSnapshot")
+            if not isinstance(snapshot, Mapping):
+                raise _artifact_identity_mismatch("选区冻结快照缺失")
+            if payload.get("operation") != operation_kind:
+                raise _artifact_identity_mismatch("选区 Artifact Operation 身份不一致")
+            for field in (
+                "resourceType",
+                "resourceId",
+                "baseUpdatedAt",
+                "baseContentHash",
+                "selectionStart",
+                "selectionEnd",
+                "selectedTextHash",
+            ):
+                if payload.get(field) != snapshot.get(field):
+                    raise _artifact_identity_mismatch(f"选区 Artifact 身份字段不一致：{field}")
         request = {
             "runId": resource.runId,
             "taskId": task_id,
@@ -320,6 +341,7 @@ class CoreGraphAgentExecutor:
         context_messages: list[str]
         execution_instructions: list[str]
         conversation_messages: list[dict[str, object]]
+        selection_snapshot = _selection_snapshot_for_state(state, operation_kind)
         artifact_id = state.get("activeArtifactId")
         if execution_mode == "primary":
             context_messages = [str(item) for item in state.get("contextMessages", [])]
@@ -337,7 +359,7 @@ class CoreGraphAgentExecutor:
             artifact_context = self._artifacts.review_context(artifact_id)
             conversation_messages = []
             if execution_mode == "reviewer":
-                context_messages = [_reviewer_context(artifact_context)]
+                context_messages = [_reviewer_context(artifact_context, state)]
                 execution_instructions = []
             elif execution_mode == "reviser":
                 context_messages = [_reviser_context(state, artifact_context)]
@@ -355,6 +377,7 @@ class CoreGraphAgentExecutor:
                 contextMessages=context_messages,
                 executionInstructions=execution_instructions,
                 conversationMessages=conversation_messages,
+                selectionSnapshot=selection_snapshot,
                 toolContext=context,
             )
         )
@@ -374,7 +397,9 @@ def _operation_kind(state: dict[str, Any]) -> CreativeOperationKind:
     return kind
 
 
-def _reviewer_context(artifact: dict[str, Any]) -> str:
+def _reviewer_context(
+    artifact: dict[str, Any], state: Mapping[str, Any] | None = None
+) -> str:
     readonly = {
         "artifactId": artifact.get("id"),
         "artifactKey": artifact.get("artifactKey"),
@@ -384,6 +409,8 @@ def _reviewer_context(artifact: dict[str, Any]) -> str:
         "summary": artifact.get("summary"),
         "payload": artifact.get("payload"),
     }
+    if isinstance(state, Mapping) and isinstance(state.get("selectionSnapshot"), dict):
+        readonly["selectionSnapshot"] = _selection_identity(state["selectionSnapshot"])
     return "当前待审核草案权威内容：" + json.dumps(
         readonly,
         ensure_ascii=False,
@@ -409,11 +436,47 @@ def _reviser_context(state: dict[str, Any], artifact: dict[str, Any]) -> str:
         "title": artifact.get("title"),
         "summary": artifact.get("summary"),
     }
+    snapshot = state.get("selectionSnapshot")
+    if isinstance(snapshot, dict):
+        readonly["selectionSnapshot"] = _selection_identity(snapshot)
     return "当前返工草案权威内容：" + json.dumps(
         readonly,
         ensure_ascii=False,
         separators=(",", ":"),
     )
+
+
+def _selection_snapshot_for_state(
+    state: Mapping[str, Any], operation_kind: CreativeOperationKind
+) -> dict[str, object] | None:
+    if operation_kind not in {
+        "rewrite_chapter_selection",
+        "rewrite_outline_selection",
+    }:
+        return None
+    snapshot = state.get("selectionSnapshot")
+    if not isinstance(snapshot, dict):
+        raise ValueError("选区 Operation 缺少 Core 冻结快照")
+    return dict(snapshot)
+
+
+def _selection_identity(snapshot: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        field: snapshot.get(field)
+        for field in (
+            "resourceType",
+            "resourceId",
+            "baseUpdatedAt",
+            "baseContentHash",
+            "selectionStart",
+            "selectionEnd",
+            "selectedTextHash",
+            "selectedText",
+            "contextBefore",
+            "contextAfter",
+        )
+        if field in snapshot
+    }
 
 
 def _artifact_payload(
@@ -434,6 +497,24 @@ def _artifact_payload(
     kind = event.get("kind")
     if not isinstance(kind, str) or not kind:
         raise ValueError("待审核草案控制事件缺少 kind")
+    operation = state.get("currentOperation")
+    operation_kind = operation.get("kind") if isinstance(operation, Mapping) else None
+    if operation_kind in {
+        "rewrite_chapter_selection",
+        "rewrite_outline_selection",
+    }:
+        snapshot = state.get("selectionSnapshot")
+        if not isinstance(snapshot, Mapping):
+            raise ValueError("选区 Artifact 缺少 Core 冻结快照")
+        if event.get("operation") != operation_kind:
+            raise ValueError("ARTIFACT_CONTRACT_MISMATCH：选区 Operation 身份不一致")
+        payload = {
+            "kind": kind,
+            "operation": operation_kind,
+            "replacement": content,
+            **_selection_identity(snapshot),
+        }
+        return kind, payload
     return kind, {"kind": kind, "content": content}
 
 

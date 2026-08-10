@@ -29,6 +29,7 @@ class AgentRunRequest(BaseModel):
     contextMessages: list[str] = Field(default_factory=list)
     executionInstructions: list[str] = Field(default_factory=list)
     conversationMessages: list[dict[str, object]] = Field(default_factory=list)
+    selectionSnapshot: dict[str, object] | None = None
     toolContext: ToolContext
 
     @model_validator(mode="after")
@@ -39,6 +40,16 @@ class AgentRunRequest(BaseModel):
             raise ValueError("质量模式不能绑定 CreativeOperation")
         if self.executionMode != "quality" and self.operationKind is None:
             raise ValueError("创作执行模式缺少 Operation")
+        if self.operationKind in {
+            "rewrite_chapter_selection",
+            "rewrite_outline_selection",
+        } and self.selectionSnapshot is None:
+            raise ValueError("选区 Operation 缺少 Core 冻结快照")
+        if self.operationKind not in {
+            "rewrite_chapter_selection",
+            "rewrite_outline_selection",
+        } and self.selectionSnapshot is not None:
+            raise ValueError("普通 Operation 不得携带选区冻结快照")
         return self
 
 

@@ -471,6 +471,42 @@ async def test_executor_marks_primary_and_reviser_modes_explicitly() -> None:
 
 
 @pytest.mark.asyncio
+async def test_selection_executor_passes_frozen_snapshot_to_agent_request() -> None:
+    runner = RecordingRunner()
+    executor = CoreGraphAgentExecutor(runner, CoreArtifactPort(CoreClient()))  # type: ignore[arg-type]
+    snapshot = {
+        "resourceType": "chapter_content",
+        "resourceId": "chapter-1",
+        "baseUpdatedAt": "2026-01-01T00:00:00Z",
+        "baseContentHash": "a" * 64,
+        "selectionStart": 1,
+        "selectionEnd": 2,
+        "selectedTextHash": "b" * 64,
+        "selectedText": "选",
+        "contextBefore": "前",
+        "contextAfter": "后",
+    }
+    await executor.run(
+        "写作",
+        {
+            "userId": "user-1",
+            "novelId": "novel-1",
+            "taskId": "task-1",
+            "userMessage": "修改选区",
+            "currentOperation": {
+                "kind": "rewrite_chapter_selection",
+                "primaryAgent": "写作",
+            },
+            "selectionSnapshot": snapshot,
+            "runtimeContext": _runtime_context(),
+        },
+        execution_mode="primary",
+        operation_kind="rewrite_chapter_selection",
+    )
+    assert runner.requests[-1].selectionSnapshot == snapshot
+
+
+@pytest.mark.asyncio
 async def test_executor_rejects_missing_operation_kind() -> None:
     runner = RecordingRunner()
     executor = CoreGraphAgentExecutor(runner, CoreArtifactPort(CoreClient()))  # type: ignore[arg-type]

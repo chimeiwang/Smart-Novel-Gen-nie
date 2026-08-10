@@ -29,6 +29,31 @@ _ARTIFACT_TERMINAL_TYPES = frozenset(
         "submit_beat_plan",
     }
 )
+_SELECTION_OPERATIONS = frozenset(
+    {"rewrite_chapter_selection", "rewrite_outline_selection"}
+)
+_SELECTION_IDENTITY_FIELDS = (
+    "operation",
+    "resourceType",
+    "resourceId",
+    "baseUpdatedAt",
+    "selectionStart",
+    "selectionEnd",
+    "baseContentHash",
+    "selectedTextHash",
+)
+_SELECTION_EVENT_FIELDS = frozenset(
+    {
+        "type",
+        "kind",
+        "summary",
+        "artifactKey",
+        "reviewerAgent",
+        "submitForReview",
+        *_SELECTION_IDENTITY_FIELDS,
+        "replacement",
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +78,11 @@ def validate_artifact_submission(
     authoritative_artifact: Mapping[str, Any] | None,
     task_id: str,
     operation_kind: CreativeOperationKind,
+    selection_snapshot: Mapping[str, Any] | None = None,
 ) -> ValidatedArtifactSubmission:
+    is_selection = operation_kind in _SELECTION_OPERATIONS
+    if is_selection and selection_snapshot is None:
+        raise ValueError("ARTIFACT_CONTRACT_MISMATCH：选区操作缺少 Core 冻结快照")
     try:
         resolved_builder = resolve_builder_artifact(events, visible_content)
     except ValueError as exc:
@@ -114,12 +143,27 @@ def validate_artifact_submission(
     event_type = event.get("type")
     if event_type == "begin_artifact_output":
         actual_kind = event.get("kind")
-        try:
-            content = extract_artifact_content(visible_content)
-        except ValueError as exc:
-            raise ValueError(
-                f"ARTIFACT_CONTRACT_MISMATCH：长文本草案边界无效：{exc}"
-            ) from exc
+        if is_selection:
+            content = _validate_selection_submission(
+                event,
+                visible_content,
+                selection_snapshot,
+                operation_kind,
+            )
+        else:
+            if any(
+                field in event
+                for field in (*_SELECTION_IDENTITY_FIELDS, "replacement")
+            ):
+                raise ValueError(
+                    "ARTIFACT_CONTRACT_MISMATCH：普通正文 Operation 不得提交选区 replacement 字段"
+                )
+            try:
+                content = extract_artifact_content(visible_content)
+            except ValueError as exc:
+                raise ValueError(
+                    f"ARTIFACT_CONTRACT_MISMATCH：长文本草案边界无效：{exc}"
+                ) from exc
     elif event_type == "submit_beat_plan":
         actual_kind = "beat_plan"
         event["kind"] = actual_kind
@@ -174,6 +218,43 @@ def validate_artifact_submission(
         artifact_key = model_key or stable_artifact_key(task_id, operation_kind)
     event["artifactKey"] = artifact_key
     return ValidatedArtifactSubmission(event, content, artifact_key)
+
+
+def _validate_selection_submission(
+    event: Mapping[str, Any],
+    visible_content: str,
+    snapshot: Mapping[str, Any] | None,
+    operation_kind: CreativeOperationKind,
+) -> str:
+    if snapshot is None:
+        raise ValueError("ARTIFACT_CONTRACT_MISMATCH：选区快照缺失")
+    if set(event) - _SELECTION_EVENT_FIELDS:
+        raise ValueError("ARTIFACT_CONTRACT_MISMATCH：选区产物包含未知字段")
+    if event.get("operation") != operation_kind:
+        raise ValueError("ARTIFACT_CONTRACT_MISMATCH：选区 Operation 身份不一致")
+    expected_resources = {
+        "rewrite_chapter_selection": {"chapter_content"},
+        "rewrite_outline_selection": {"outline_content", "outline_node_content"},
+    }[operation_kind]
+    if event.get("resourceType") not in expected_resources:
+        raise ValueError("ARTIFACT_CONTRACT_MISMATCH：选区资源类型与 Operation 不一致")
+    for field in ("selectionStart", "selectionEnd"):
+        value = event.get(field)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ValueError(f"ARTIFACT_CONTRACT_MISMATCH：{field} 无效")
+    for field in _SELECTION_IDENTITY_FIELDS[1:]:
+        if event.get(field) != snapshot.get(field):
+            raise ValueError(
+                f"ARTIFACT_CONTRACT_MISMATCH：选区身份字段不一致：{field}"
+            )
+    replacement = event.get("replacement")
+    if not isinstance(replacement, str) or not replacement.strip():
+        raise ValueError("ARTIFACT_CONTRACT_MISMATCH：replacement 不能为空")
+    if "content" in event or replacement != visible_content:
+        raise ValueError(
+            "ARTIFACT_CONTRACT_MISMATCH：选区产物只能返回 replacement，且不得提交完整正文"
+        )
+    return replacement
 
 
 def has_artifact_terminal_event(events: list[dict[str, Any]]) -> bool:

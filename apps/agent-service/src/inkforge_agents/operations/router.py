@@ -117,6 +117,7 @@ def normalize_operation(
 
 def classify_by_explicit_keywords(message: str) -> CreativeOperation:
     rules = [
+        (r"选区|選區|所选段落|所选文字", "rewrite_outline_selection"),
         (r"改写|重写|润色", "rewrite_scene"),
         (r"续写|写正文|生成.{0,4}正文|写一章", "write_chapter"),
         (r"章节计划|规划.{0,6}章节|Beat Plan", "plan_chapter"),
@@ -128,6 +129,18 @@ def classify_by_explicit_keywords(message: str) -> CreativeOperation:
         (r"创建.{0,6}设定|新建.{0,6}设定", "create_lore"),
         (r"修改.{0,6}设定|调整.{0,6}设定", "revise_lore"),
     ]
+    if re.search(r"选区|選區|所选段落|所选文字", message) and re.search(
+        r"大纲|大綱|总纲|總綱|节点|節點", message
+    ):
+        rules[0] = (
+            r"选区|選區|所选段落|所选文字",
+            "rewrite_outline_selection",
+        )
+    elif re.search(r"选区|選區|所选段落|所选文字", message):
+        rules[0] = (
+            r"选区|選區|所选段落|所选文字",
+            "rewrite_chapter_selection",
+        )
     for pattern, kind in rules:
         if re.search(pattern, message, re.IGNORECASE):
             definition = OPERATION_DEFINITIONS[kind]  # type: ignore[index]

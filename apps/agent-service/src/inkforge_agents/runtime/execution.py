@@ -121,7 +121,15 @@ def _operation_protocol(
         return ["本次没有产物终止工具，请用普通正文直接完成回答。"]
     tools = "、".join(sorted(operation.terminalControlTools))
     lines = [f"完成任务时必须且只能从以下终止工具中调用一个：{tools}。"]
-    if operation.kind in {"write_chapter", "rewrite_scene"}:
+    if operation.kind in {"rewrite_chapter_selection", "rewrite_outline_selection"}:
+        lines.append(
+            "调用 begin_artifact_output 提交结构化选区产物：operation、resourceType、resourceId、"
+            "baseUpdatedAt、baseContentHash、selectionStart、selectionEnd、selectedTextHash "
+            "和非空 replacement；baseUpdatedAt 必须原样继承 Core 冻结快照。"
+            "只返回 replacement，不得提交 content、完整章节或完整大纲；"
+            "来源与范围必须逐字段继承只读冻结快照。"
+        )
+    elif operation.kind in {"write_chapter", "rewrite_scene"}:
         lines.append(
             "调用 begin_artifact_output，并把完整正文放在 "
             "ARTIFACT_OUTPUT_START 与 ARTIFACT_OUTPUT_END 之间；标记内只放正文。"
@@ -152,8 +160,17 @@ def _operation_protocol(
             "构建链必须沿用同一 artifactKey；Runtime 与产物校验器会拒绝身份变化。"
         )
     if mode == "reviser":
-        lines.append(
-            "根据只读资料中的 Core 权威草案完成完整重写，使用当前 Operation 的产物"
-            "提交工具，保持原产物类型和权威 artifactKey。"
-        )
+        if operation.kind in {
+            "rewrite_chapter_selection",
+            "rewrite_outline_selection",
+        }:
+            lines.append(
+                "根据同一份 Core 冻结选区和权威草案返工，只修改 replacement；"
+                "保持原来源、范围、产物类型和权威 artifactKey。"
+            )
+        else:
+            lines.append(
+                "根据只读资料中的 Core 权威草案完成完整重写，使用当前 Operation 的产物"
+                "提交工具，保持原产物类型和权威 artifactKey。"
+            )
     return lines

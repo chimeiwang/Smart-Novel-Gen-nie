@@ -105,6 +105,17 @@ def test_chapter_brief_contains_complete_text_artifact_protocol() -> None:
         assert "完整正文" in brief
 
 
+def test_selection_brief_requires_frozen_version_and_replacement_only() -> None:
+    for operation in ("rewrite_chapter_selection", "rewrite_outline_selection"):
+        brief = build_execution_brief("primary", operation)  # type: ignore[arg-type]
+
+        assert "baseUpdatedAt" in brief
+        assert "Core 冻结快照" in brief
+        assert "replacement" in brief
+        assert "content" in brief
+        assert "完整章节" in brief
+
+
 def test_beat_plan_brief_contains_structured_plan_protocol() -> None:
     brief = build_execution_brief("primary", "plan_chapter")
 
