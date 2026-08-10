@@ -355,7 +355,7 @@ class WritingRunCommandRepository:
                     if request.selectionAttachmentMetadata is not None:
                         selection_attachment_metadata = _validate_selection_attachment_metadata(
                             request.selectionAttachmentMetadata,
-                            cast(SelectionTarget, request.selectionTarget),
+                            request.selectionTarget,
                             selection_snapshot,
                         )
                     target_word_count = max(
