@@ -670,13 +670,14 @@ async def _materialize_selection_payload(
 ) -> None:
     target = payload.get("target")
     mode = target.get("mode") if isinstance(target, dict) else None
-    if mode is None:
-        return
-    if kind not in {"chapter_draft", "outline_draft"} or mode not in {
+    selection_modes = {
         "replace_selection",
         "outline_content_selection",
         "outline_node_content_selection",
-    }:
+    }
+    if mode not in selection_modes:
+        return
+    if kind not in {"chapter_draft", "outline_draft"}:
         raise ApiError(
             status_code=409,
             code="ARTIFACT_SELECTION_TARGET_INVALID",

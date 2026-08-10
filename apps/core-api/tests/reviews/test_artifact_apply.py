@@ -535,3 +535,24 @@ async def test_selection_materializer_rejects_nested_top_level_identity_mismatch
         )
 
     assert error.value.code == "ARTIFACT_SOURCE_VERSION_CONFLICT"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("kind", "mode"),
+    [
+        ("chapter_draft", "existing_chapter"),
+        ("chapter_draft", "new_next_chapter"),
+        ("outline_draft", "normal_outline"),
+    ],
+)
+async def test_materializer_preserves_normal_draft_target_modes(
+    kind: str, mode: str
+) -> None:
+    payload = {"kind": kind, "target": {"mode": mode}}
+
+    await _materialize_selection_payload(  # type: ignore[arg-type]
+        object(), payload, kind=kind, novel_id="novel-1"
+    )
+
+    assert payload["target"] == {"mode": mode}
