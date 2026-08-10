@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime
 from typing import Any
 
@@ -280,6 +281,62 @@ async def test_explicit_long_serial_job_bypasses_parent_with_trusted_operation()
         "confidence": 1.0,
         "reasoning": "显式长篇任务按服务端 Operation 定义执行。",
     }
+
+
+@pytest.mark.asyncio
+async def test_explicit_selection_snapshot_is_preserved_in_agent_state() -> None:
+    content = "甲😀乙"
+    full_hash = hashlib.sha256(content.encode()).hexdigest()
+    selected_hash = hashlib.sha256("😀".encode()).hexdigest()
+    context = {
+        "workspace": {},
+        "planning": {"graphState": None},
+    }
+    operation = Graph({"phase": "completed", "finalResponse": "ok"})
+    handler = WritingJobHandler(
+        CoreClient(context),
+        parent_graph=Graph({"phase": "error"}),
+        operation_graph=operation,
+        artifacts=ArtifactHydration(),
+    )
+    await handler(
+        _explicit_job(
+            payload_updates={
+                "operation": "rewrite_chapter_selection",
+                "selectionTarget": {
+                    "resourceType": "chapter_content",
+                    "resourceId": "chapter-1",
+                    "baseUpdatedAt": "2026-08-06T08:00:00Z",
+                    "baseContentHash": full_hash,
+                    "selectionStart": 1,
+                    "selectionEnd": 2,
+                    "selectedTextHash": selected_hash,
+                },
+                "selectionSnapshot": {
+                    "resourceType": "chapter_content",
+                    "resourceId": "chapter-1",
+                    "baseUpdatedAt": "2026-08-06T08:00:00Z",
+                    "baseContentHash": full_hash,
+                    "selectionStart": 1,
+                    "selectionEnd": 2,
+                    "selectedTextHash": selected_hash,
+                    "selectedText": "😀",
+                    "contextBefore": "甲",
+                    "contextAfter": "乙",
+                    "sourceSnapshot": {
+                        "resourceType": "chapter_content",
+                        "resourceId": "chapter-1",
+                        "content": content,
+                        "updatedAt": "2026-08-06T08:00:00Z",
+                        "contentSha256": full_hash,
+                    },
+                },
+            }
+        )
+    )
+    state = operation.inputs[0]
+    assert state["selectionTarget"]["resourceType"] == "chapter_content"
+    assert state["selectionSnapshot"]["selectedText"] == "😀"
 
 
 @pytest.mark.asyncio

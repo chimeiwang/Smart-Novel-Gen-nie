@@ -455,6 +455,11 @@ def _explicit_long_serial_payload(job: QueueJob) -> LongSerialRunPayload | None:
         and payload.scope.chapterId != payload.target.id
     ):
         raise ValueError("显式长篇任务的章节范围与目标不一致")
+    if payload.operation in {
+        "rewrite_chapter_selection",
+        "rewrite_outline_selection",
+    } and (payload.selectionTarget is None or payload.selectionSnapshot is None):
+        raise ValueError("选区长篇任务缺少冻结的选区快照")
     return payload
 
 
@@ -487,6 +492,10 @@ def _create_explicit_long_serial_state(
     state["sourceBindings"] = [
         binding.model_dump(mode="json") for binding in payload.sourceBindings
     ]
+    if payload.selectionTarget is not None:
+        state["selectionTarget"] = payload.selectionTarget.model_dump(mode="json")
+    if payload.selectionSnapshot is not None:
+        state["selectionSnapshot"] = payload.selectionSnapshot.model_dump(mode="json")
     state["currentOperation"] = CreativeOperation(
         kind=definition.kind,
         targetType=definition.targetType,
@@ -516,6 +525,10 @@ def _require_snapshot_matches_explicit_payload(
             binding.model_dump(mode="json") for binding in payload.sourceBindings
         ],
     }
+    if payload.selectionTarget is not None:
+        expected["selectionTarget"] = payload.selectionTarget.model_dump(mode="json")
+    if payload.selectionSnapshot is not None:
+        expected["selectionSnapshot"] = payload.selectionSnapshot.model_dump(mode="json")
     for field, value in expected.items():
         if state.get(field) != value:
             raise ValueError(f"显式长篇恢复快照的 {field} 与任务载荷不一致")

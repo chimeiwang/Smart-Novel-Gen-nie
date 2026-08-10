@@ -18,6 +18,8 @@ class GraphState(TypedDict, total=False):
     target: dict[str, Any]
     scope: dict[str, Any]
     sourceBindings: list[dict[str, Any]]
+    selectionTarget: dict[str, Any]
+    selectionSnapshot: dict[str, Any]
     targetWordCount: int
     phase: Literal["idle", "active", "waiting_user", "completed", "error"]
     userMessage: str

@@ -12,6 +12,7 @@ from inkforge_contracts.long_serial import (
     PUBLIC_LONG_SERIAL_OPERATIONS,
     ChapterScope,
     SelectionTarget,
+    SourceBinding,
 )
 from inkforge_contracts.operations import PublicOperationDefinition
 from pydantic import ValidationError
@@ -351,6 +352,18 @@ class WritingRunCommandRepository:
                         1,
                         request.selectionTarget.selectionEnd
                         - request.selectionTarget.selectionStart,
+                    )
+                    bindings = (
+                        *bindings,
+                        SourceBinding(
+                            resourceType=request.selectionTarget.resourceType,
+                            resourceId=request.selectionTarget.resourceId,
+                            exists=True,
+                            updatedAt=request.selectionTarget.baseUpdatedAt,
+                            contentSha256=request.selectionTarget.baseContentHash,
+                            revision=None,
+                            absenceSentinel=None,
+                        ),
                     )
                 raw_job = {
                     "version": 1,

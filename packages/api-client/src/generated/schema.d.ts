@@ -2535,10 +2535,11 @@ export interface components {
              * Operation
              * @enum {string}
              */
-            operation: "answer_question" | "create_lore" | "revise_lore" | "create_outline" | "revise_outline" | "plan_chapter" | "write_chapter" | "rewrite_scene" | "review_chapter" | "manage_foreshadowing";
+            operation: "answer_question" | "create_lore" | "revise_lore" | "create_outline" | "revise_outline" | "plan_chapter" | "write_chapter" | "rewrite_scene" | "rewrite_chapter_selection" | "rewrite_outline_selection" | "review_chapter" | "manage_foreshadowing";
             target: components["schemas"]["ChapterTarget"];
             /** Scope */
             scope: components["schemas"]["ChapterScope"] | components["schemas"]["ChapterRangeScope"] | components["schemas"]["OutlineNodeScope"] | components["schemas"]["NovelScope"];
+            selectionTarget?: components["schemas"]["SelectionTarget"] | null;
             /**
              * Targetwordcount
              * @default 4000
@@ -3230,6 +3231,32 @@ export interface components {
             estimatedWords: number;
             /** Acceptancecriteria */
             acceptanceCriteria: string;
+        };
+        /**
+         * SelectionTarget
+         * @description 客户端提交的不可变选区身份；正文由 Core 从权威源派生。
+         */
+        SelectionTarget: {
+            /**
+             * Resourcetype
+             * @enum {string}
+             */
+            resourceType: "chapter_content" | "outline_content" | "outline_node_content";
+            /** Resourceid */
+            resourceId: string;
+            /**
+             * Baseupdatedat
+             * Format: date-time
+             */
+            baseUpdatedAt: string;
+            /** Basecontenthash */
+            baseContentHash: string;
+            /** Selectionstart */
+            selectionStart: number;
+            /** Selectionend */
+            selectionEnd: number;
+            /** Selectedtexthash */
+            selectedTextHash: string;
         };
         /** @enum {string} */
         ShortMediumSourceKind: "idea" | "opening" | "ending" | "outline" | "mixed";
