@@ -36,7 +36,7 @@ from .schemas import (
     assert_status_transition,
 )
 
-_SOURCE_BOUND_KINDS = frozenset({"beat_plan", "chapter_draft", "outline_draft"})
+_SOURCE_BOUND_KINDS = frozenset({"beat_plan", "chapter_draft"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,7 +192,9 @@ class ReviewRepository:
                         code="ARTIFACT_NOT_AWAITING_USER",
                         message="当前草案状态不能接受用户决定",
                     )
-                if decision != "discard" and artifact.kind in _SOURCE_BOUND_KINDS:
+                if decision != "discard" and await _artifact_requires_source_bindings(
+                    session, artifact
+                ):
                     bindings = await _decision_source_bindings(session, artifact)
                     await verify_source_bindings(
                         session,
@@ -458,7 +460,9 @@ class ReviewRepository:
                         .with_for_update()
                     )
                 payload = dict(request.payload)
-                if request.kind in _SOURCE_BOUND_KINDS:
+                if await _artifact_kind_requires_source_bindings(
+                    session, request.kind, task.id
+                ):
                     source_command_id: str
                     if existing is None:
                         source_command_id, _bindings = await _source_bindings_for_task(
@@ -757,6 +761,40 @@ async def _decision_source_bindings(
     return bindings
 
 
+async def _artifact_requires_source_bindings(
+    session: AsyncSession, artifact: ReviewArtifact
+) -> bool:
+    return await _artifact_kind_requires_source_bindings(session, artifact.kind, artifact.taskId)
+
+
+async def _artifact_kind_requires_source_bindings(
+    session: AsyncSession, kind: str, task_id: str | None
+) -> bool:
+    if kind in _SOURCE_BOUND_KINDS:
+        return True
+    if kind != "outline_draft" or task_id is None:
+        return False
+    payload_json = await session.scalar(
+        select(WritingRunCommand.payloadJson)
+        .where(
+            WritingRunCommand.taskId == task_id,
+            WritingRunCommand.kind == "start",
+        )
+        .order_by(WritingRunCommand.createdAt.asc(), WritingRunCommand.id.asc())
+        .limit(1)
+    )
+    if not isinstance(payload_json, str):
+        return False
+    payload = _parse_json(payload_json, {})
+    job = payload.get("job") if isinstance(payload, dict) else None
+    source = job if isinstance(job, dict) else payload
+    return (
+        isinstance(source, dict)
+        and source.get("workflow") == "long_serial"
+        and source.get("operation") == "rewrite_outline_selection"
+    )
+
+
 def _source_bindings_from_command(
     command: WritingRunCommand,
 ) -> list[dict[str, Any]] | None:
@@ -783,7 +821,7 @@ def _source_bindings_from_command(
 async def _source_binding_view(
     session: AsyncSession, artifact: ReviewArtifact
 ) -> tuple[list[dict[str, Any]] | None, SourceBindingStatus]:
-    if artifact.kind not in _SOURCE_BOUND_KINDS:
+    if not await _artifact_requires_source_bindings(session, artifact):
         return None, "not_yet_supported"
     payload = _parse_json(artifact.payloadJson, {})
     control = payload.get("_inkforgeControl") if isinstance(payload, dict) else None
@@ -809,7 +847,7 @@ async def _source_binding_views(
     source_ids: dict[str, str] = {}
     views: dict[str, tuple[list[dict[str, Any]] | None, SourceBindingStatus]] = {}
     for artifact in artifacts:
-        if artifact.kind not in _SOURCE_BOUND_KINDS:
+        if not await _artifact_requires_source_bindings(session, artifact):
             views[artifact.id] = (None, "not_yet_supported")
             continue
         payload = _parse_json(artifact.payloadJson, {})
