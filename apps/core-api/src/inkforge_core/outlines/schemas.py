@@ -27,7 +27,7 @@ class OutlineContentRequest(StrictModel):
     expectedUpdatedAt: JsonDatetime
 
 
-class CreateOutlineNodeRequest(StrictModel):
+class OutlineNodeFields(StrictModel):
     title: str
     content: str | None = None
     kind: OutlineKind
@@ -39,6 +39,10 @@ class CreateOutlineNodeRequest(StrictModel):
     actualWordCount: int | None = Field(default=None, ge=0)
     chapterStartOrder: int | None = None
     chapterEndOrder: int | None = None
+
+
+class CreateOutlineNodeRequest(OutlineNodeFields):
+    clientRequestId: str = Field(min_length=16, max_length=256)
 
 
 class UpdateOutlineNodeRequest(StrictModel):
@@ -53,6 +57,11 @@ class UpdateOutlineNodeRequest(StrictModel):
     actualWordCount: int | None = Field(default=None, ge=0)
     chapterStartOrder: int | None = None
     chapterEndOrder: int | None = None
+    expectedUpdatedAt: JsonDatetime
+
+
+class DeleteOutlineNodeRequest(StrictModel):
+    expectedUpdatedAt: JsonDatetime
 
 
 class PlotProgressFields(StrictModel):
@@ -92,10 +101,19 @@ class OutlineContentResponse(StrictModel):
     updatedAt: datetime
 
 
-class OutlineNodeResponse(CreateOutlineNodeRequest):
+class OutlineNodeResponse(OutlineNodeFields):
     id: str
     createdAt: datetime
     updatedAt: datetime
+
+
+class OutlineNodeMutationResponse(OutlineNodeResponse):
+    effective: bool
+
+
+class DeleteOutlineNodeResponse(StrictModel):
+    deletedId: str
+    effective: bool
 
 
 class PlotProgressResponse(PlotProgressFields):

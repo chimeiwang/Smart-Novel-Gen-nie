@@ -2301,6 +2301,8 @@ export interface components {
             chapterStartOrder?: number | null;
             /** Chapterendorder */
             chapterEndOrder?: number | null;
+            /** Clientrequestid */
+            clientRequestId: string;
         };
         /** CreateReferenceRequest */
         CreateReferenceRequest: {
@@ -2468,6 +2470,21 @@ export interface components {
             affected: {
                 [key: string]: number;
             };
+        };
+        /** DeleteOutlineNodeRequest */
+        DeleteOutlineNodeRequest: {
+            /**
+             * Expectedupdatedat
+             * Format: date-time
+             */
+            expectedUpdatedAt: string;
+        };
+        /** DeleteOutlineNodeResponse */
+        DeleteOutlineNodeResponse: {
+            /** Deletedid */
+            deletedId: string;
+            /** Effective */
+            effective: boolean;
         };
         /** DeleteReferenceAffected */
         DeleteReferenceAffected: {
@@ -3080,6 +3097,55 @@ export interface components {
         };
         /** @enum {string} */
         OutlineNodeKind: "stage" | "plot_unit" | "chapter_group";
+        /** OutlineNodeMutationResponse */
+        OutlineNodeMutationResponse: {
+            /** Title */
+            title: string;
+            /** Content */
+            content?: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "stage" | "plot_unit" | "chapter_group";
+            /**
+             * Status
+             * @default planned
+             * @enum {string}
+             */
+            status: "planned" | "in_progress" | "completed" | "skipped";
+            /**
+             * Order
+             * @default 0
+             */
+            order: number;
+            /** Parentid */
+            parentId?: string | null;
+            /** Linkedchapterid */
+            linkedChapterId?: string | null;
+            /** Estimatedwordcount */
+            estimatedWordCount?: number | null;
+            /** Actualwordcount */
+            actualWordCount?: number | null;
+            /** Chapterstartorder */
+            chapterStartOrder?: number | null;
+            /** Chapterendorder */
+            chapterEndOrder?: number | null;
+            /** Id */
+            id: string;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+            /** Effective */
+            effective: boolean;
+        };
         /** OutlineNodeResponse */
         OutlineNodeResponse: {
             /** Title */
@@ -3971,6 +4037,11 @@ export interface components {
             chapterStartOrder?: number | null;
             /** Chapterendorder */
             chapterEndOrder?: number | null;
+            /**
+             * Expectedupdatedat
+             * Format: date-time
+             */
+            expectedUpdatedAt: string;
         };
         /** UpdatePortraitSectionRequest */
         UpdatePortraitSectionRequest: {
@@ -11562,7 +11633,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OutlineNodeResponse"];
+                    "application/json": components["schemas"]["OutlineNodeMutationResponse"];
                 };
             };
             /** @description 统一错误响应 */
@@ -11669,14 +11740,20 @@ export interface operations {
                 "inkforge-token"?: string | null;
             };
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeleteOutlineNodeRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
-            204: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["DeleteOutlineNodeResponse"];
+                };
             };
             /** @description 统一错误响应 */
             400: {
@@ -11794,7 +11871,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OutlineNodeResponse"];
+                    "application/json": components["schemas"]["OutlineNodeMutationResponse"];
                 };
             };
             /** @description 统一错误响应 */

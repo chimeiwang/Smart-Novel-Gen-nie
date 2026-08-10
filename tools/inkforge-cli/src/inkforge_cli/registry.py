@@ -88,6 +88,7 @@ def _default_specs() -> list[CommandSpec]:
     from .commands.long.lore_entities import LORE_ENTITY_COMMAND_SPECS
     from .commands.long.lore_relationships import LORE_RELATIONSHIP_COMMAND_SPECS
     from .commands.long.novels import create_novel, save_summary
+    from .commands.long.outline_nodes import OUTLINE_NODE_COMMAND_SPECS
     from .commands.long.planning_mutations import PLANNING_COMMAND_SPECS
     from .commands.long.quality import QUALITY_COMMAND_SPECS
     from .commands.long.read import (
@@ -365,6 +366,7 @@ def _default_specs() -> list[CommandSpec]:
         *ARTIFACT_COMMAND_SPECS,
         *QUALITY_COMMAND_SPECS,
         *PLANNING_COMMAND_SPECS,
+        *OUTLINE_NODE_COMMAND_SPECS,
         *LORE_ENTITY_COMMAND_SPECS,
         *LORE_RELATIONSHIP_COMMAND_SPECS,
         *REFERENCE_COMMAND_SPECS,

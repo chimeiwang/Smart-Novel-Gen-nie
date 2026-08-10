@@ -70,6 +70,9 @@ EXPECTED_COMMANDS = {
     "long.lore.story-progress.save",
     "long.plot-progress.save",
     "long.outline.save",
+    "long.outline-node.create",
+    "long.outline-node.update",
+    "long.outline-node.delete",
     "long.lore.character.create",
     "long.lore.character.update",
     "long.lore.character.delete",
@@ -121,6 +124,9 @@ EXPECTED_LONG_MUTATIONS = {
     "long.lore.story-progress.save",
     "long.plot-progress.save",
     "long.outline.save",
+    "long.outline-node.create",
+    "long.outline-node.update",
+    "long.outline-node.delete",
     "long.lore.character.create",
     "long.lore.character.update",
     "long.lore.character.delete",
@@ -169,6 +175,7 @@ EXPECTED_STRUCTURED_WRITES = EXPECTED_LONG_MUTATIONS - {
 }
 
 EXPECTED_STRUCTURED_CREATES = {
+    "long.outline-node.create",
     "long.lore.character.create",
     "long.lore.location.create",
     "long.lore.faction.create",
@@ -235,12 +242,12 @@ def test_long_mutation_and_watcher_capabilities_are_exact() -> None:
 def test_structured_mutation_capabilities_are_exact() -> None:
     registry = get_command_registry()
 
-    assert len(registry) == 81
+    assert len(registry) == 84
     assert sum(
         name.startswith("long.") and spec.mutation
         for name, spec in registry.items()
-    ) == 48
-    assert len(EXPECTED_STRUCTURED_WRITES) == 33
+    ) == 51
+    assert len(EXPECTED_STRUCTURED_WRITES) == 36
     assert "long.novel.create" not in EXPECTED_STRUCTURED_WRITES
     assert "long.novel.summary.save" not in EXPECTED_STRUCTURED_WRITES
     assert {
@@ -258,9 +265,6 @@ def test_excluded_stage_c_families_remain_unregistered() -> None:
     command_names = set(get_command_registry())
 
     assert not {
-        "long.outline-node.create",
-        "long.outline-node.update",
-        "long.outline-node.delete",
         "long.foreshadowing.create",
         "long.foreshadowing.update",
         "long.foreshadowing.delete",

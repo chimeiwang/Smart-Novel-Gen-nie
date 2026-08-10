@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from inkforge_core.errors import ApiError
 from inkforge_core.outlines.schemas import (
@@ -8,6 +10,8 @@ from inkforge_core.outlines.schemas import (
     UpdateOutlineNodeRequest,
 )
 from inkforge_core.outlines.service import OutlineService
+
+EXPECTED_UPDATED_AT = datetime(2026, 8, 10, tzinfo=UTC)
 
 
 class Repository:
@@ -72,7 +76,10 @@ async def test_foreshadowing_delete_is_resource_scoped() -> None:
 @pytest.mark.parametrize(
     ("kind", "body"),
     [
-        ("node", UpdateOutlineNodeRequest()),
+        (
+            "node",
+            UpdateOutlineNodeRequest(expectedUpdatedAt=EXPECTED_UPDATED_AT),
+        ),
         ("foreshadowing", UpdateForeshadowingRequest()),
     ],
 )
@@ -90,10 +97,10 @@ async def test_empty_outline_domain_update_is_rejected(kind, body) -> None:
 @pytest.mark.parametrize(
     "body",
     [
-        UpdateOutlineNodeRequest(title=None),
-        UpdateOutlineNodeRequest(kind=None),
-        UpdateOutlineNodeRequest(status=None),
-        UpdateOutlineNodeRequest(order=None),
+        UpdateOutlineNodeRequest(title=None, expectedUpdatedAt=EXPECTED_UPDATED_AT),
+        UpdateOutlineNodeRequest(kind=None, expectedUpdatedAt=EXPECTED_UPDATED_AT),
+        UpdateOutlineNodeRequest(status=None, expectedUpdatedAt=EXPECTED_UPDATED_AT),
+        UpdateOutlineNodeRequest(order=None, expectedUpdatedAt=EXPECTED_UPDATED_AT),
     ],
 )
 async def test_outline_patch_rejects_null_for_required_fields(body) -> None:

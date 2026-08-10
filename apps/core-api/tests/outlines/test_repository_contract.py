@@ -61,7 +61,11 @@ def test_node_update_and_delete_are_scoped_by_id_and_novel() -> None:
         source = inspect.getsource(getattr(OutlineRepository, name))
         assert "OutlineNode.id == node_id" in source
         assert "OutlineNode.novelId == novel_id" in source
-        assert "rowcount != 1" in source
+        assert ".with_for_update()" in source
+        assert "OUTLINE_NODE_VERSION_CONFLICT" in source
+
+    delete_source = inspect.getsource(OutlineRepository.delete_node)
+    assert "rowcount != 1" in delete_source
 
 
 class ScalarSession:

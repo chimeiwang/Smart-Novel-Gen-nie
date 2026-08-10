@@ -4,6 +4,7 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 import { browserApi } from "@/lib/api/browser";
+import { createClientRequestId } from "@/lib/api/client-request-id";
 import { requireApiData } from "@/lib/api/response";
 
 type OutlineNodeKind = "stage" | "plot_unit" | "chapter_group";
@@ -19,6 +20,7 @@ type OutlineNodeDto = {
   parentId: string | null;
   estimatedWordCount: number | null;
   actualWordCount: number | null;
+  updatedAt: string;
 };
 
 type OutlinePanelProps = {
@@ -107,6 +109,7 @@ export function OutlinePanel({
   const [contentDraft, setContentDraft] = useState<string | null>(null);
   const [formDraft, setFormDraft] = useState<NodeFormState | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [nodeClientRequestId, setNodeClientRequestId] = useState(() => createClientRequestId());
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const content = contentDraft ?? outline?.content ?? "";
@@ -154,6 +157,7 @@ export function OutlinePanel({
   const handleNewNode = (kind: OutlineNodeKind) => {
     setSelectedNodeId(null);
     setFormDraft({ ...EMPTY_FORM, kind });
+    setNodeClientRequestId(createClientRequestId());
     setMessage(null);
     setError(null);
   };
@@ -207,7 +211,6 @@ export function OutlinePanel({
       -1,
     ) + 1;
     const payload = {
-      novelId,
       title,
       content: form.content,
       kind: form.kind,
@@ -220,13 +223,20 @@ export function OutlinePanel({
 
     const nodeId = form.id;
     if (nodeId) {
+      if (!selectedNode) {
+        setError("节点已变化，请重新选择后再保存");
+        return;
+      }
       runAction(
         async () => {
           requireApiData(await browserApi.PATCH(
             "/api/v1/novels/{novel_id}/outline-nodes/{node_id}",
             {
               params: { path: { novel_id: novelId, node_id: nodeId } },
-              body: payload,
+              body: {
+                ...payload,
+                expectedUpdatedAt: selectedNode.updatedAt,
+              },
             },
           ));
         },
@@ -237,8 +247,12 @@ export function OutlinePanel({
         async () => {
           requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/outline-nodes", {
             params: { path: { novel_id: novelId } },
-            body: payload,
+            body: {
+              ...payload,
+              clientRequestId: nodeClientRequestId,
+            },
           }));
+          setNodeClientRequestId(createClientRequestId());
         },
         "大纲节点已创建",
       );
@@ -246,14 +260,17 @@ export function OutlinePanel({
   };
 
   const handleDeleteNode = () => {
-    if (!form.id) return;
+    if (!form.id || !selectedNode) return;
     const title = form.title || "当前节点";
     if (!window.confirm(`确认删除「${title}」？有子节点时系统会拒绝删除。`)) return;
     runAction(
       async () => {
         requireApiData(await browserApi.DELETE(
           "/api/v1/novels/{novel_id}/outline-nodes/{node_id}",
-          { params: { path: { novel_id: novelId, node_id: form.id as string } } },
+          {
+            params: { path: { novel_id: novelId, node_id: form.id as string } },
+            body: { expectedUpdatedAt: selectedNode.updatedAt },
+          },
         ));
         setSelectedNodeId(null);
         setFormDraft(null);

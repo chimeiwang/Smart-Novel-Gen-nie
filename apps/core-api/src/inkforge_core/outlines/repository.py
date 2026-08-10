@@ -8,7 +8,7 @@ from sqlalchemy import delete, select, text, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from ..concurrency import next_utc_timestamp, require_expected_updated_at
+from ..concurrency import command_resource_id, next_utc_timestamp, require_expected_updated_at
 from ..db.base import utc_now
 from ..db.models import Chapter, Foreshadowing, Novel, Outline, OutlineNode, PlotProgress
 from ..errors import ApiError
@@ -199,61 +199,129 @@ class OutlineRepository:
                 return _dict(value)
 
     async def create_node(
-        self, novel_id: str, user_id: str, fields: dict[str, Any]
+        self,
+        novel_id: str,
+        user_id: str,
+        client_request_id: str,
+        fields: dict[str, Any],
     ) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
                 await self._lock_novel(session, novel_id, user_id)
+                node_id = command_resource_id(
+                    "outline_nodes", user_id, novel_id, client_request_id
+                )
+                existing = await session.scalar(
+                    select(OutlineNode)
+                    .where(OutlineNode.id == node_id)
+                    .with_for_update()
+                )
+                if existing is not None:
+                    if (
+                        existing.novelId == novel_id
+                        and existing.createdAt == existing.updatedAt
+                        and all(
+                            getattr(existing, name) == requested
+                            for name, requested in fields.items()
+                        )
+                    ):
+                        result = _dict(existing)
+                        result["effective"] = False
+                        return result
+                    raise ApiError(
+                        status_code=409,
+                        code="RESOURCE_CREATE_CONFLICT",
+                        message="同一创建请求标识已用于其他大纲节点内容",
+                    )
                 await self._validate_links(session, novel_id, fields)
                 snapshots = await self._snapshots(session, novel_id)
-                candidate = self._snapshot("待创建", fields)
+                candidate = self._snapshot(node_id, fields)
                 validate_outline_node(candidate, snapshots, title=cast(str, fields["title"]))
-                value = OutlineNode(novelId=novel_id, **fields)
+                created_at = _database_utc(next_utc_timestamp(None))
+                value = OutlineNode(
+                    id=node_id,
+                    novelId=novel_id,
+                    createdAt=created_at,
+                    updatedAt=created_at,
+                    **fields,
+                )
                 session.add(value)
                 await session.flush()
                 result = _dict(value)
+                result["effective"] = True
         return result
 
     async def update_node(
-        self, novel_id: str, user_id: str, node_id: str, fields: dict[str, Any]
+        self,
+        novel_id: str,
+        user_id: str,
+        node_id: str,
+        fields: dict[str, Any],
+        expected_updated_at: datetime,
     ) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
                 await self._lock_novel(session, novel_id, user_id)
                 current = await session.scalar(
-                    select(OutlineNode).where(
-                        OutlineNode.id == node_id, OutlineNode.novelId == novel_id
-                    )
+                    select(OutlineNode)
+                    .where(OutlineNode.id == node_id, OutlineNode.novelId == novel_id)
+                    .with_for_update()
                 )
                 if current is None:
                     raise self._not_found()
+                require_expected_updated_at(
+                    current.updatedAt,
+                    expected_updated_at,
+                    code="OUTLINE_NODE_VERSION_CONFLICT",
+                )
+                if all(
+                    getattr(current, name) == requested
+                    for name, requested in fields.items()
+                ):
+                    result = _dict(current)
+                    result["effective"] = False
+                    return result
                 merged = {**_dict(current), **fields}
                 await self._validate_links(session, novel_id, merged)
                 snapshots = await self._snapshots(session, novel_id)
                 validate_outline_node(
                     self._snapshot(node_id, merged), snapshots, title=cast(str, merged["title"])
                 )
-                outcome = cast(
-                    CursorResult[Any],
-                    await session.execute(
-                        update(OutlineNode)
-                        .where(OutlineNode.id == node_id, OutlineNode.novelId == novel_id)
-                        .values(**fields)
-                    ),
+                for name, requested in fields.items():
+                    setattr(current, name, requested)
+                current.updatedAt = _database_utc(
+                    next_utc_timestamp(current.updatedAt)
                 )
-                if outcome.rowcount != 1:
-                    raise self._not_found()
-                updated = await session.scalar(select(OutlineNode).where(OutlineNode.id == node_id))
-                result = _dict(updated)
+                await session.flush()
+                result = _dict(current)
+                result["effective"] = True
         return result
 
-    async def delete_node(self, novel_id: str, user_id: str, node_id: str) -> None:
+    async def delete_node(
+        self,
+        novel_id: str,
+        user_id: str,
+        node_id: str,
+        expected_updated_at: datetime,
+    ) -> dict[str, Any]:
         async with self._session_factory() as session:
             async with session.begin():
                 await self._require_owner(session, novel_id, user_id)
                 await self._lock_novel(session, novel_id, user_id)
+                current = await session.scalar(
+                    select(OutlineNode)
+                    .where(OutlineNode.id == node_id, OutlineNode.novelId == novel_id)
+                    .with_for_update()
+                )
+                if current is None:
+                    raise self._not_found()
+                require_expected_updated_at(
+                    current.updatedAt,
+                    expected_updated_at,
+                    code="OUTLINE_NODE_VERSION_CONFLICT",
+                )
                 child = await session.scalar(
                     select(OutlineNode.id).where(OutlineNode.parentId == node_id).limit(1)
                 )
@@ -273,6 +341,7 @@ class OutlineRepository:
                 )
                 if outcome.rowcount != 1:
                     raise self._not_found()
+                return {"deletedId": node_id, "effective": True}
 
     async def replace_nodes(
         self, novel_id: str, user_id: str, adjustments: list[dict[str, Any]]

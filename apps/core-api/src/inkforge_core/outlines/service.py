@@ -7,6 +7,7 @@ from ..errors import ApiError
 from .schemas import (
     CreateForeshadowingRequest,
     CreateOutlineNodeRequest,
+    DeleteOutlineNodeRequest,
     OutlineContentRequest,
     PlotProgressRequest,
     UpdateForeshadowingRequest,
@@ -31,12 +32,27 @@ class OutlineRepositoryPort(Protocol):
         expected_updated_at: datetime | None,
     ) -> dict[str, Any]: ...
     async def create_node(
-        self, novel_id: str, user_id: str, fields: dict[str, Any]
+        self,
+        novel_id: str,
+        user_id: str,
+        client_request_id: str,
+        fields: dict[str, Any],
     ) -> dict[str, Any]: ...
     async def update_node(
-        self, novel_id: str, user_id: str, node_id: str, fields: dict[str, Any]
+        self,
+        novel_id: str,
+        user_id: str,
+        node_id: str,
+        fields: dict[str, Any],
+        expected_updated_at: datetime,
     ) -> dict[str, Any]: ...
-    async def delete_node(self, novel_id: str, user_id: str, node_id: str) -> None: ...
+    async def delete_node(
+        self,
+        novel_id: str,
+        user_id: str,
+        node_id: str,
+        expected_updated_at: datetime,
+    ) -> dict[str, Any]: ...
     async def list_foreshadowings(self, novel_id: str, user_id: str) -> list[dict[str, Any]]: ...
     async def create_foreshadowing(
         self, novel_id: str, user_id: str, fields: dict[str, Any]
@@ -83,12 +99,17 @@ class OutlineService:
     async def create_node(
         self, user_id: str, novel_id: str, body: CreateOutlineNodeRequest
     ) -> dict[str, Any]:
-        return await self._repository.create_node(novel_id, user_id, body.model_dump())
+        return await self._repository.create_node(
+            novel_id,
+            user_id,
+            body.clientRequestId,
+            body.model_dump(exclude={"clientRequestId"}),
+        )
 
     async def update_node(
         self, user_id: str, novel_id: str, node_id: str, body: UpdateOutlineNodeRequest
     ) -> dict[str, Any]:
-        fields = body.model_dump(exclude_unset=True)
+        fields = body.model_dump(exclude_unset=True, exclude={"expectedUpdatedAt"})
         self._require_update_fields(fields)
         if any(
             fields.get(field) is None
@@ -100,10 +121,27 @@ class OutlineService:
                 code="OUTLINE_FIELD_REQUIRED",
                 message="标题、类型、状态和顺序不能为 null",
             )
-        return await self._repository.update_node(novel_id, user_id, node_id, fields)
+        return await self._repository.update_node(
+            novel_id,
+            user_id,
+            node_id,
+            fields,
+            body.expectedUpdatedAt,
+        )
 
-    async def delete_node(self, user_id: str, novel_id: str, node_id: str) -> None:
-        await self._repository.delete_node(novel_id, user_id, node_id)
+    async def delete_node(
+        self,
+        user_id: str,
+        novel_id: str,
+        node_id: str,
+        body: DeleteOutlineNodeRequest,
+    ) -> dict[str, Any]:
+        return await self._repository.delete_node(
+            novel_id,
+            user_id,
+            node_id,
+            body.expectedUpdatedAt,
+        )
 
     async def list_foreshadowings(self, user_id: str, novel_id: str) -> list[dict[str, Any]]:
         return await self._repository.list_foreshadowings(novel_id, user_id)

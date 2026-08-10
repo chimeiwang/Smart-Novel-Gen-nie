@@ -11,9 +11,12 @@ from ..errors import ApiError
 from .schemas import (
     CreateForeshadowingRequest,
     CreateOutlineNodeRequest,
+    DeleteOutlineNodeRequest,
+    DeleteOutlineNodeResponse,
     ForeshadowingResponse,
     OutlineContentRequest,
     OutlineContentResponse,
+    OutlineNodeMutationResponse,
     OutlineNodeResponse,
     PlotProgressRequest,
     PlotProgressResponse,
@@ -54,23 +57,36 @@ async def list_nodes(novel_id: str, user: User, service: Service):
 
 
 @router.post(
-    "/novels/{novel_id}/outline-nodes", response_model=OutlineNodeResponse, status_code=201
+    "/novels/{novel_id}/outline-nodes",
+    response_model=OutlineNodeMutationResponse,
+    status_code=201,
 )
 async def create_node(novel_id: str, body: CreateOutlineNodeRequest, user: User, service: Service):
     return await service.create_node(user.id, novel_id, body)
 
 
-@router.patch("/novels/{novel_id}/outline-nodes/{node_id}", response_model=OutlineNodeResponse)
+@router.patch(
+    "/novels/{novel_id}/outline-nodes/{node_id}",
+    response_model=OutlineNodeMutationResponse,
+)
 async def update_node(
     novel_id: str, node_id: str, body: UpdateOutlineNodeRequest, user: User, service: Service
 ):
     return await service.update_node(user.id, novel_id, node_id, body)
 
 
-@router.delete("/novels/{novel_id}/outline-nodes/{node_id}", status_code=204)
-async def delete_node(novel_id: str, node_id: str, user: User, service: Service):
-    await service.delete_node(user.id, novel_id, node_id)
-    return Response(status_code=204)
+@router.delete(
+    "/novels/{novel_id}/outline-nodes/{node_id}",
+    response_model=DeleteOutlineNodeResponse,
+)
+async def delete_node(
+    novel_id: str,
+    node_id: str,
+    body: DeleteOutlineNodeRequest,
+    user: User,
+    service: Service,
+):
+    return await service.delete_node(user.id, novel_id, node_id, body)
 
 
 @router.get("/novels/{novel_id}/foreshadowings", response_model=list[ForeshadowingResponse])
