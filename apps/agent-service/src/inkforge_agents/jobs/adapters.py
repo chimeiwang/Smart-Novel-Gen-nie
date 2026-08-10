@@ -512,6 +512,16 @@ def _artifact_payload(
             "kind": kind,
             "operation": operation_kind,
             "replacement": content,
+            "target": {
+                "mode": {
+                    "rewrite_chapter_selection": "replace_selection",
+                    "rewrite_outline_selection": (
+                        "outline_content_selection"
+                        if snapshot.get("resourceType") == "outline_content"
+                        else "outline_node_content_selection"
+                    ),
+                }[operation_kind],
+            },
             **_selection_identity(snapshot),
         }
         return kind, payload

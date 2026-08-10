@@ -5,10 +5,20 @@ from typing import Any, Literal, Protocol
 
 from .updates import filter_agent_updates_by_selection
 
-ApplyTarget = Literal["agent_updates", "outline_content", "chapter_content", "beat_plan"]
+ApplyTarget = Literal[
+    "agent_updates", "outline_content", "chapter_content", "beat_plan", "selection"
+]
 
 
 def resolve_apply_target(payload: dict[str, Any]) -> ApplyTarget | None:
+    target = payload.get("target")
+    if isinstance(target, dict) and target.get("mode") in {
+        "replace_selection",
+        "outline_content_selection",
+        "outline_node_content_selection",
+    }:
+        if payload.get("kind") in {"chapter_draft", "outline_draft"}:
+            return "selection"
     kind = payload.get("kind")
     if kind == "agent_updates":
         return "agent_updates"
@@ -33,6 +43,10 @@ class ApplicableArtifactPort(Protocol):
 
 
 class FormalWritePort(Protocol):
+    async def apply_selection(
+        self, artifact: ApplicableArtifactPort, user_id: str, replacement: str
+    ) -> int: ...
+
     async def apply_outline(
         self, artifact: ApplicableArtifactPort, user_id: str, content: str
     ) -> int: ...
@@ -73,6 +87,7 @@ class FormalArtifactApplier:
         *,
         user_id: str,
         edited_content: str | None,
+        edited_replacement: str | None = None,
         selected_update_refs: list[dict[str, object]] | None,
     ) -> int:
         payload = artifact.payload
@@ -98,6 +113,20 @@ class FormalArtifactApplier:
                 user_id,
                 updates,
                 expected_outline_updated_at=expected_outline_updated_at,
+            )
+
+        if target == "selection":
+            if edited_content is not None:
+                raise ValueError("閫夊尯鑽夋涓嶅厑璁稿啀鎻愪緵 editedContent 鍏ㄦ枃鍐呭")
+            replacement = (
+                edited_replacement
+                if edited_replacement is not None
+                else payload.get("replacement")
+            )
+            if not isinstance(replacement, str) or not replacement.strip():
+                raise ValueError("閫夊尯鑽夋缂哄皯闈炵┖ replacement")
+            return await self._formal_writes.apply_selection(
+                artifact, user_id, replacement
             )
 
         content = edited_content if edited_content is not None else payload.get("content")

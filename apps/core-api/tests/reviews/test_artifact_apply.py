@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -161,6 +162,13 @@ class FakeFormalWrites:
         self.content = str(beat_plan["chapterGoal"])
         return 1
 
+    async def apply_selection(
+        self, artifact: object, user_id: str, replacement: str
+    ) -> int:
+        del artifact, user_id
+        self.content = replacement
+        return 1
+
 
 class FakeUpdatesExecutor:
     def __init__(self) -> None:
@@ -253,6 +261,49 @@ async def test_formal_applier_forwards_outline_cas_from_artifact() -> None:
     assert executor.expected_outline_updated_at == datetime(
         2026, 7, 30, tzinfo=UTC
     )
+
+
+@pytest.mark.asyncio
+async def test_selection_applier_uses_replacement_and_rejects_full_content() -> None:
+    writes = FakeFormalWrites()
+    applier = FormalArtifactApplier(writes, FakeUpdatesExecutor())
+    artifact = Artifact(
+        kind="chapter_draft",
+        payload={
+            "kind": "chapter_draft",
+            "operation": "rewrite_chapter_selection",
+            "target": {"mode": "replace_selection"},
+            "resourceType": "chapter_content",
+            "resourceId": "chapter-1",
+            "baseUpdatedAt": "2026-07-30T00:00:00Z",
+            "baseContentHash": "a" * 64,
+            "selectionStart": 1,
+            "selectionEnd": 2,
+            "selectedTextHash": "b" * 64,
+            "selectedText": "x",
+            "replacement": "y",
+        },
+    )
+    artifact.novel_id = "novel-1"
+    artifact.chapter_id = "chapter-1"
+
+    await applier.apply(
+        artifact,
+        user_id="user-1",
+        edited_content=None,
+        edited_replacement="z",
+        selected_update_refs=None,
+    )
+    assert writes.content == "z"
+
+    with pytest.raises(ValueError, match="editedContent"):
+        await applier.apply(
+            artifact,
+            user_id="user-1",
+            edited_content="full document",
+            edited_replacement=None,
+            selected_update_refs=None,
+        )
 
 
 class FormalWriteSession:
@@ -389,3 +440,54 @@ async def test_formal_same_content_still_reopens_without_invalidating_check() ->
     assert check.status == "completed"
     assert check.result == "当前正文报告"
     assert session.executed == []
+
+
+@pytest.mark.asyncio
+async def test_formal_selection_write_splices_authoritative_chapter_only() -> None:
+    now = datetime(2026, 7, 11, tzinfo=UTC)
+    source = "前缀😀选区后缀"
+    selected = "选区"
+    chapter = Chapter(
+        id="chapter-1",
+        novelId="novel-1",
+        order=1,
+        status="completed",
+        title="第一章",
+        content=source,
+        completedAt=now,
+        createdAt=now,
+        updatedAt=now,
+    )
+    check = ChapterQualityCheck(
+        id="check-1",
+        chapterId=chapter.id,
+        type="consistency",
+        status="completed",
+        title="一致性终检",
+        result="旧报告",
+        createdAt=now,
+        updatedAt=now,
+    )
+    session = FormalWriteSession(chapter, check)
+    repository = FormalWriteRepository(lambda: session)  # type: ignore[arg-type]
+    artifact = Artifact(
+        kind="chapter_draft",
+        payload={
+            "kind": "chapter_draft",
+            "target": {"mode": "replace_selection"},
+            "resourceType": "chapter_content",
+            "resourceId": chapter.id,
+            "baseUpdatedAt": now.isoformat(),
+            "baseContentHash": hashlib.sha256(source.encode()).hexdigest(),
+            "selectionStart": 3,
+            "selectionEnd": 5,
+            "selectedTextHash": hashlib.sha256(selected.encode()).hexdigest(),
+            "replacement": "替换",
+        },
+    )
+    artifact.novel_id = "novel-1"
+    artifact.chapter_id = chapter.id
+
+    await repository.apply_selection(artifact, "user-1", "替换")  # type: ignore[arg-type]
+
+    assert chapter.content == "前缀😀替换后缀"
