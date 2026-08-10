@@ -37,7 +37,7 @@ export function SmartWritingPanel({
   const [targetWordCount] = useState(defaultWordCount);
 
   return (
-    <div className="panel panel-flex">
+    <div className="panel panel-flex workspace-chat-panel">
       {currentChapter ? (
         <WritingConversation
           key={currentChapter.id}

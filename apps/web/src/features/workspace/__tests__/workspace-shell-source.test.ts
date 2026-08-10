@@ -6,19 +6,34 @@ test("工作区外壳常驻挂载三类主要面板", async () => {
   const shellUrl = new URL("../workspace-shell.tsx", import.meta.url);
   const source = await readFile(shellUrl, "utf8");
 
-  assert.match(source, /"AI 创作"/);
-  assert.match(source, /"阅读与小修"/);
-  assert.match(source, /"创作资料"/);
+  assert.match(source, />章节</);
+  assert.match(source, />创作资料</);
   assert.match(source, /history\.replaceState/);
   assert.match(source, /<SmartWritingPanel/);
   assert.match(source, /<ChapterEditor/);
   assert.match(source, /<LibraryPane/);
-  assert.doesNotMatch(source, /SidebarTabs|showChapters/);
-  assert.match(source, /hidden=\{activeView !== "library"\}/);
-  assert.match(source, /workspace-editor-pane" hidden=\{activeView !== "reading"\}/);
+  assert.match(source, /<LibraryNavigation/);
+  assert.match(source, /workspace-left-navigation/);
+  assert.match(source, /workspace-navigation-root/);
+  assert.match(source, /workspace-chapter-mode-switcher/);
+  assert.match(source, /AI 创作/);
+  assert.match(source, /阅读与小修/);
+  assert.match(source, /selectSection\("chapters", view\)/);
+  assert.match(source, /workspace-collaboration-dock/);
+  assert.match(source, /showNavigation=\{false\}/);
+  assert.doesNotMatch(source, /workspace-view-switcher/);
   assert.doesNotMatch(source, /key=\{activeView\}/);
-  assert.match(source, /<aside[^>]+id="workspace-review-rail"/);
+  assert.match(source, /workspace-collaboration-dock[\s\S]{0,1200}id="workspace-review-rail"/);
   assert.doesNotMatch(source, /workspace-review-rail[^>]+hidden=/);
+  assert.match(source, /flushActiveChapterSave/);
+  assert.match(source, /activeSection/);
+  assert.match(source, /const switched = await selectSection\("library"\)/);
+  assert.match(source, /if \(!switched\) return;/);
+  assert.match(source, /catch \(error\) \{[\s\S]{0,180}setViewError\(formatWorkspaceViewSaveError\(error\)\);[\s\S]{0,80}return false;/);
+  const librarySelectionBody = source.match(/const selectLibraryItem = async[\s\S]*?\n  \};/)?.[0] ?? "";
+  assert.match(librarySelectionBody, /if \(!switched\) return;/);
+  assert.match(librarySelectionBody, /setActiveLibraryItem\(item\)/);
+  assert.doesNotMatch(librarySelectionBody, /else[\s\S]*flushActiveChapterSave/);
   assert.match(source, /countUnhandledQualityChecks\([\s\S]{0,100}currentChapter\.qualityChecks\.filter/);
   assert.doesNotMatch(source, /check\.status === "pending" \|\| check\.status === "failed"/);
 });
@@ -142,7 +157,7 @@ test("完整桌面在 1440 与 1920 宽度保留三栏并限制阅读宽度", as
   assert.match(source, /min-width:\s*1440px/);
   assert.match(
     source,
-    /grid-template-columns:\s*minmax\(240px,\s*280px\)\s+minmax\(0,\s*1fr\)\s+minmax\(340px,\s*400px\)/,
+    /grid-template-columns:\s*minmax\(220px,\s*280px\)\s+minmax\(640px,\s*1fr\)\s+minmax\(380px,\s*440px\)/,
   );
   assert.match(source, /@media \(min-width: 1920px\)/);
   assert.match(source, /chapter-reading-content[\s\S]{0,140}max-width:/);
