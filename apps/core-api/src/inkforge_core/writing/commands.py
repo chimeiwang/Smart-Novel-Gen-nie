@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, cast
 
 from inkforge_contracts.jobs import AgentJobStatus
@@ -10,6 +11,7 @@ from inkforge_contracts.long_serial import (
     LONG_SERIAL_RUN_PAYLOAD_ADAPTER,
     PUBLIC_LONG_SERIAL_OPERATIONS,
     ChapterScope,
+    SelectionTarget,
 )
 from inkforge_contracts.operations import PublicOperationDefinition
 from pydantic import ValidationError
@@ -21,6 +23,8 @@ from ..db.base import utc_now
 from ..db.models import (
     Chapter,
     Novel,
+    Outline,
+    OutlineNode,
     ReviewArtifact,
     WritingBible,
     WritingMessage,
@@ -333,6 +337,21 @@ class WritingRunCommandRepository:
                     novel_id=request.novelId,
                     chapter_id=request.chapterId,
                 )
+                selection_snapshot: dict[str, Any] | None = None
+                target_word_count = request.targetWordCount
+                if request.selectionTarget is not None:
+                    selection_snapshot = await _capture_selection_snapshot(
+                        session,
+                        novel_id=request.novelId,
+                        chapter_id=request.chapterId,
+                        operation=request.operation,
+                        target=request.selectionTarget,
+                    )
+                    target_word_count = max(
+                        1,
+                        request.selectionTarget.selectionEnd
+                        - request.selectionTarget.selectionStart,
+                    )
                 raw_job = {
                     "version": 1,
                     "workflow": "long_serial",
@@ -344,15 +363,24 @@ class WritingRunCommandRepository:
                     "sourceBindings": [
                         binding.model_dump(mode="json") for binding in bindings
                     ],
-                    "targetWordCount": request.targetWordCount,
+                    "targetWordCount": target_word_count,
                     "userInstruction": request.userInstruction,
                     "resume": False,
                     "resumeInput": None,
                 }
+                if selection_snapshot is not None:
+                    selection_target = cast(SelectionTarget, request.selectionTarget)
+                    raw_job["selectionTarget"] = selection_target.model_dump(
+                        mode="json"
+                    )
+                    raw_job["selectionSnapshot"] = selection_snapshot
                 validated_job = LONG_SERIAL_RUN_PAYLOAD_ADAPTER.validate_python(
                     raw_job
                 )
                 job = validated_job.model_dump(mode="json")
+                if request.selectionTarget is None:
+                    job.pop("selectionTarget", None)
+                    job.pop("selectionSnapshot", None)
                 conversation_history = [
                     {
                         "role": "user",
@@ -364,7 +392,7 @@ class WritingRunCommandRepository:
                     chapterId=request.chapterId,
                     writingSessionId=request.writingSessionId,
                     phase="idle",
-                    targetWordCount=request.targetWordCount,
+                    targetWordCount=target_word_count,
                     selectedAgents=",".join(
                         (definition.principalAgent, *definition.reviewers)
                     ),
@@ -379,7 +407,7 @@ class WritingRunCommandRepository:
                         "userId": user_id,
                         "novelId": request.novelId,
                         "chapterId": request.chapterId,
-                        "targetWordCount": request.targetWordCount,
+                        "targetWordCount": target_word_count,
                         "conversationHistory": conversation_history,
                         "eventSequence": 0,
                         "phase": "active",
@@ -1224,6 +1252,117 @@ def _long_serial_operation_definition(
     return definition
 
 
+async def _capture_selection_snapshot(
+    session: AsyncSession,
+    *,
+    novel_id: str,
+    chapter_id: str,
+    operation: str,
+    target: SelectionTarget,
+) -> dict[str, Any]:
+    """锁定并从权威文本生成一次性选区快照。"""
+
+    resource_type = target.resourceType
+    resource_id = target.resourceId
+    content: str | None
+    updated_at: datetime | None
+    owner_novel_id: str | None
+    if resource_type == "chapter_content":
+        chapter = await session.scalar(
+            select(Chapter)
+            .where(Chapter.id == resource_id)
+            .with_for_update()
+        )
+        content = chapter.content if chapter is not None else None
+        updated_at = chapter.updatedAt if chapter is not None else None
+        owner_novel_id = chapter.novelId if chapter is not None else None
+    elif resource_type == "outline_content":
+        outline = await session.scalar(
+            select(Outline)
+            .where(Outline.id == resource_id)
+            .with_for_update()
+        )
+        content = outline.content if outline is not None else None
+        updated_at = outline.updatedAt if outline is not None else None
+        owner_novel_id = outline.novelId if outline is not None else None
+    else:
+        node = await session.scalar(
+            select(OutlineNode)
+            .where(OutlineNode.id == resource_id)
+            .with_for_update()
+        )
+        content = node.content if node is not None else None
+        updated_at = node.updatedAt if node is not None else None
+        owner_novel_id = node.novelId if node is not None else None
+
+    if (
+        owner_novel_id != novel_id
+        or content is None
+        or updated_at is None
+        or (
+            resource_type == "chapter_content"
+            and resource_id != chapter_id
+        )
+    ):
+        raise _selection_conflict(target)
+    if operation == "rewrite_chapter_selection" and resource_type != "chapter_content":
+        raise _selection_conflict(target)
+    if operation == "rewrite_outline_selection" and resource_type == "chapter_content":
+        raise _selection_conflict(target)
+
+    normalized_updated_at = _aware_utc(updated_at)
+    full_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    start = target.selectionStart
+    end = target.selectionEnd
+    if start < 0 or end > len(content) or start >= end:
+        raise _selection_conflict(target)
+    selected = content[start:end]
+    selected_hash = hashlib.sha256(selected.encode("utf-8")).hexdigest()
+    if (
+        normalized_updated_at != target.baseUpdatedAt.astimezone(UTC)
+        or full_hash != target.baseContentHash
+        or selected_hash != target.selectedTextHash
+    ):
+        raise _selection_conflict(target)
+
+    context_size = 1000
+    return {
+        "resourceType": resource_type,
+        "resourceId": resource_id,
+        "baseUpdatedAt": normalized_updated_at.isoformat(),
+        "baseContentHash": full_hash,
+        "selectionStart": start,
+        "selectionEnd": end,
+        "selectedTextHash": selected_hash,
+        "selectedText": selected,
+        "contextBefore": content[max(0, start - context_size) : start],
+        "contextAfter": content[end : min(len(content), end + context_size)],
+        "sourceSnapshot": {
+            "resourceType": resource_type,
+            "resourceId": resource_id,
+            "content": content,
+            "updatedAt": normalized_updated_at.isoformat(),
+            "contentSha256": full_hash,
+        },
+    }
+
+
+def _aware_utc(value: datetime) -> datetime:
+    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+def _selection_conflict(target: SelectionTarget) -> ApiError:
+    return ApiError(
+        status_code=409,
+        code="LONG_SELECTION_SOURCE_CONFLICT",
+        message="选区来源版本、范围或哈希已变化，请重新选择",
+        details={
+            "resourceType": target.resourceType,
+            "resourceId": target.resourceId,
+        },
+    )
+
+
 async def _require_long_serial_profile(
     session: AsyncSession,
     novel_id: str,
@@ -1365,6 +1504,9 @@ async def _load_long_serial_resume_job(
     except ValidationError as exc:
         raise RuntimeError("显式长篇恢复 job 无效") from exc
     serialized = resume.model_dump(mode="json")
+    if resume.selectionTarget is None:
+        serialized.pop("selectionTarget", None)
+        serialized.pop("selectionSnapshot", None)
     if resume.resumeInput is not None:
         serialized["resumeInput"] = resume.resumeInput.model_dump(
             mode="json",

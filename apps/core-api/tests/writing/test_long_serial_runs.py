@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 import pytest
 from inkforge_contracts.long_serial import (
     AbsenceSentinel,
+    SelectionTarget,
     SourceBinding,
 )
 from inkforge_core.db.models import (
@@ -21,6 +24,7 @@ from inkforge_core.errors import ApiError
 from inkforge_core.writing import commands as commands_module
 from inkforge_core.writing.commands import (
     WritingRunCommandRepository,
+    _capture_selection_snapshot,
     _long_serial_operation_definition,
     _require_long_serial_profile,
     _require_no_active_long_serial_mutation,
@@ -38,6 +42,74 @@ from inkforge_core.writing.transaction_locks import (
 from pydantic import ValidationError
 
 NOW = datetime(2026, 8, 5, 10, 0, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_selection_snapshot_uses_unicode_codepoints_and_authoritative_hashes() -> None:
+    content = "甲😀乙"
+    target = SelectionTarget(
+        resourceType="chapter_content",
+        resourceId="chapter-1",
+        baseUpdatedAt=NOW,
+        baseContentHash=hashlib.sha256(content.encode()).hexdigest(),
+        selectionStart=1,
+        selectionEnd=2,
+        selectedTextHash=hashlib.sha256("😀".encode()).hexdigest(),
+    )
+
+    class Session:
+        async def scalar(self, statement: object) -> object:
+            del statement
+            return SimpleNamespace(
+                id="chapter-1",
+                novelId="novel-1",
+                content=content,
+                updatedAt=NOW,
+            )
+
+    snapshot = await _capture_selection_snapshot(
+        Session(),
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        operation="rewrite_chapter_selection",
+        target=target,
+    )
+    assert snapshot["selectedText"] == "😀"
+    assert snapshot["selectionStart"] == 1
+    assert snapshot["selectionEnd"] == 2
+
+
+@pytest.mark.asyncio
+async def test_selection_snapshot_conflict_is_raised_before_task_creation() -> None:
+    target = SelectionTarget(
+        resourceType="chapter_content",
+        resourceId="chapter-1",
+        baseUpdatedAt=NOW,
+        baseContentHash="a" * 64,
+        selectionStart=0,
+        selectionEnd=1,
+        selectedTextHash="b" * 64,
+    )
+
+    class Session:
+        async def scalar(self, statement: object) -> object:
+            del statement
+            return SimpleNamespace(
+                id="chapter-1",
+                novelId="novel-1",
+                content="changed",
+                updatedAt=NOW,
+            )
+
+    with pytest.raises(ApiError) as error:
+        await _capture_selection_snapshot(
+            Session(),
+            novel_id="novel-1",
+            chapter_id="chapter-1",
+            operation="rewrite_chapter_selection",
+            target=target,
+        )
+    assert error.value.status_code == 409
 
 
 def valid_request_values() -> dict[str, object]:
@@ -93,6 +165,39 @@ def test_long_serial_start_body_is_strict_and_preserves_instruction() -> None:
     with pytest.raises(ValidationError):
         LongSerialStartWritingRunRequest.model_validate(
             {**valid_request_values(), "userInstruction": "   "}
+        )
+
+
+def test_long_serial_selection_request_requires_target_and_derives_unicode_length() -> None:
+    values = {
+        **valid_request_values(),
+        "operation": "rewrite_chapter_selection",
+        "selectionTarget": {
+            "resourceType": "chapter_content",
+            "resourceId": "chapter-1",
+            "baseUpdatedAt": "2026-08-05T10:00:00Z",
+            "baseContentHash": "a" * 64,
+            "selectionStart": 0,
+            "selectionEnd": 3,
+            "selectedTextHash": "b" * 64,
+        },
+    }
+    request = LongSerialStartWritingRunRequest.model_validate(values)
+    assert request.selectionTarget is not None
+    assert request.targetWordCount == 4_000
+
+    with pytest.raises(ValidationError):
+        LongSerialStartWritingRunRequest.model_validate(
+            {**values, "selectionTarget": None}
+        )
+
+    with pytest.raises(ValidationError):
+        LongSerialStartWritingRunRequest.model_validate(
+            {
+                **values,
+                "operation": "rewrite_outline_selection",
+                "selectionTarget": {**values["selectionTarget"], "resourceType": "chapter_content"},
+            }
         )
 
 

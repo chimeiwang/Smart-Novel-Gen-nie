@@ -13,6 +13,8 @@ HistoricalCreativeOperationKind = Literal[
     "plan_chapter",
     "write_chapter",
     "rewrite_scene",
+    "rewrite_chapter_selection",
+    "rewrite_outline_selection",
     "review_chapter",
     "sync_lore",
     "manage_foreshadowing",
@@ -27,6 +29,8 @@ ExecutableCreativeOperationKind = Literal[
     "plan_chapter",
     "write_chapter",
     "rewrite_scene",
+    "rewrite_chapter_selection",
+    "rewrite_outline_selection",
     "review_chapter",
     "manage_foreshadowing",
 ]
@@ -52,4 +56,4 @@ class PublicOperationDefinition(BaseModel):
     mutating: bool
     principalAgent: CoreAgentId
     reviewers: tuple[CoreAgentId, ...]
-    artifactKind: Literal["beat_plan", "chapter_draft"] | None
+    artifactKind: Literal["beat_plan", "chapter_draft", "outline_draft"] | None

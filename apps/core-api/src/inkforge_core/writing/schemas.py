@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal, Self
 
-from inkforge_contracts.long_serial import ChapterTarget, LongSerialScope
+from inkforge_contracts.long_serial import ChapterTarget, LongSerialScope, SelectionTarget
 from inkforge_contracts.operations import ExecutableCreativeOperationKind
 from pydantic import (
     BaseModel,
@@ -198,6 +198,7 @@ class LongSerialStartWritingRunRequest(WritingSchema):
     operation: ExecutableCreativeOperationKind
     target: ChapterTarget
     scope: LongSerialScope
+    selectionTarget: SelectionTarget | None = None
     targetWordCount: int = Field(default=4000, ge=1, le=10_000_000)
     userInstruction: str = Field(min_length=1)
 
@@ -207,6 +208,29 @@ class LongSerialStartWritingRunRequest(WritingSchema):
         if not value.strip():
             raise ValueError("用户要求不能为空白")
         return value
+
+    @model_validator(mode="after")
+    def validate_selection_target(self) -> Self:
+        selection_operations = {
+            "rewrite_chapter_selection",
+            "rewrite_outline_selection",
+        }
+        if self.operation in selection_operations and self.selectionTarget is None:
+            raise ValueError("选区操作必须携带 selectionTarget")
+        if self.operation not in selection_operations and self.selectionTarget is not None:
+            raise ValueError("普通长篇操作不能携带 selectionTarget")
+        if self.operation == "rewrite_chapter_selection" and (
+            self.selectionTarget is not None
+            and self.selectionTarget.resourceType != "chapter_content"
+        ):
+            raise ValueError("章节选区操作只能指向章节正文")
+        if self.operation == "rewrite_outline_selection" and (
+            self.selectionTarget is not None
+            and self.selectionTarget.resourceType
+            not in {"outline_content", "outline_node_content"}
+        ):
+            raise ValueError("大纲选区操作只能指向总纲或大纲节点正文")
+        return self
 
 
 type WritingRunStartRequest = (

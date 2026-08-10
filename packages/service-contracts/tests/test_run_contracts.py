@@ -40,6 +40,8 @@ def test_protocol_version_and_literal_sets_are_exact() -> None:
         "plan_chapter",
         "write_chapter",
         "rewrite_scene",
+        "rewrite_chapter_selection",
+        "rewrite_outline_selection",
         "review_chapter",
         "sync_lore",
         "manage_foreshadowing",
@@ -54,6 +56,8 @@ def test_protocol_version_and_literal_sets_are_exact() -> None:
         "plan_chapter",
         "write_chapter",
         "rewrite_scene",
+        "rewrite_chapter_selection",
+        "rewrite_outline_selection",
         "review_chapter",
         "manage_foreshadowing",
     }

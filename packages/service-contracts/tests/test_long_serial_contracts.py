@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 import pytest
 from inkforge_contracts.long_serial import (
     LONG_SERIAL_RUN_PAYLOAD_ADAPTER,
+    SelectionTarget,
     SourceBinding,
 )
 from pydantic import ValidationError
@@ -50,6 +51,75 @@ def test_long_serial_start_payload_is_strict_and_discriminated() -> None:
         LONG_SERIAL_RUN_PAYLOAD_ADAPTER.validate_python(
             {**payload, "selectedAgents": ["写作"]}
         )
+
+
+@pytest.mark.parametrize("resource_type", [
+    "chapter_content",
+    "outline_content",
+    "outline_node_content",
+])
+def test_selection_target_accepts_unicode_codepoint_identity(resource_type: str) -> None:
+    target = SelectionTarget.model_validate(
+        {
+            "resourceType": resource_type,
+            "resourceId": "resource-1",
+            "baseUpdatedAt": "2026-08-05T10:00:00Z",
+            "baseContentHash": "a" * 64,
+            "selectionStart": 1,
+            "selectionEnd": 3,
+            "selectedTextHash": "b" * 64,
+        }
+    )
+    assert target.selectionEnd == 3
+
+
+def test_selection_target_rejects_empty_reverse_unknown_and_uppercase_hash() -> None:
+    values = {
+        "resourceType": "chapter_content",
+        "resourceId": "resource-1",
+        "baseUpdatedAt": "2026-08-05T10:00:00Z",
+        "baseContentHash": "a" * 64,
+        "selectionStart": 3,
+        "selectionEnd": 3,
+        "selectedTextHash": "b" * 64,
+    }
+    with pytest.raises(ValidationError):
+        SelectionTarget.model_validate(values)
+    with pytest.raises(ValidationError):
+        SelectionTarget.model_validate({**values, "selectionEnd": 2})
+    with pytest.raises(ValidationError):
+        SelectionTarget.model_validate({**values, "selectionEnd": 4, "unknown": 1})
+    with pytest.raises(ValidationError):
+        SelectionTarget.model_validate({**values, "selectionEnd": 4, "baseContentHash": "A" * 64})
+
+
+def test_selection_operations_require_target_and_preserve_rewrite_scene_semantics() -> None:
+    payload = valid_start_payload()
+    payload.update(
+        {
+            "operation": "rewrite_chapter_selection",
+            "selectionTarget": {
+                "resourceType": "chapter_content",
+                "resourceId": "chapter-1",
+                "baseUpdatedAt": "2026-08-05T10:00:00Z",
+                "baseContentHash": "a" * 64,
+                "selectionStart": 0,
+                "selectionEnd": 1,
+                "selectedTextHash": "b" * 64,
+            },
+        }
+    )
+    parsed = LONG_SERIAL_RUN_PAYLOAD_ADAPTER.validate_python(payload)
+    assert parsed.selectionTarget is not None
+
+    with pytest.raises(ValidationError):
+        LONG_SERIAL_RUN_PAYLOAD_ADAPTER.validate_python(
+            {**payload, "selectionTarget": None}
+        )
+
+    full_scene = {**payload, "operation": "rewrite_scene", "selectionTarget": None}
+    scene = LONG_SERIAL_RUN_PAYLOAD_ADAPTER.validate_python(full_scene)
+    assert scene.operation == "rewrite_scene"
 
     with pytest.raises(ValidationError):
         LONG_SERIAL_RUN_PAYLOAD_ADAPTER.validate_python(
