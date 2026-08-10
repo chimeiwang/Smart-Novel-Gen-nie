@@ -35,6 +35,7 @@ export type SelectionBridge = {
   clearTransientSelection: () => void;
   clearAllSelection: () => void;
   removeSelection: () => void;
+  reselectSelection: () => void;
   markSelectionSourceChanged: (input: {
     resourceType: SelectionResourceType;
     resourceId: string;
@@ -129,6 +130,17 @@ export function buildSelectionRunRequest({
       selectionStart: attachment.selectionStart,
       selectionEnd: attachment.selectionEnd,
       selectedTextHash: attachment.selectedTextHash,
+    },
+    selectionAttachmentMetadata: {
+      resourceType: attachment.resourceType,
+      resourceId: attachment.resourceId,
+      sourceLabel: attachment.sourceLabel,
+      baseUpdatedAt: attachment.baseUpdatedAt,
+      baseContentHash: attachment.baseContentHash,
+      selectionStart: attachment.selectionStart,
+      selectionEnd: attachment.selectionEnd,
+      selectedTextHash: attachment.selectedTextHash,
+      selectionPreview: selectionPreview(attachment.selectedText),
     },
     targetWordCount,
     userInstruction: userInstruction.trim(),

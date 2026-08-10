@@ -2041,6 +2041,11 @@ export function WritingConversation({
         return;
       }
 
+      if (attachment && taskId && phase !== "idle" && phase !== "completed" && phase !== "error") {
+        setError("当前任务仍在运行，请等待完成或先取消后再发送选区改写");
+        return;
+      }
+
       // 中断当前正在运行的 Agent
       abortCurrentAgent();
 
@@ -3292,7 +3297,7 @@ export function WritingConversation({
               {selectionBridge.attachedSelection.stale ? <span className="error-text">来源已变化，请重新选择</span> : null}
             </div>
             <button className="button ghost sm" type="button" onClick={selectionBridge.removeSelection}>移除</button>
-            <button className="button ghost sm" type="button" onClick={selectionBridge.removeSelection}>重新选择</button>
+            <button className="button ghost sm" type="button" onClick={selectionBridge.reselectSelection}>重新选择</button>
           </div>
         ) : null}
         {generatedContent && (

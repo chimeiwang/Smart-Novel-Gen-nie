@@ -2540,6 +2540,7 @@ export interface components {
             /** Scope */
             scope: components["schemas"]["ChapterScope"] | components["schemas"]["ChapterRangeScope"] | components["schemas"]["OutlineNodeScope"] | components["schemas"]["NovelScope"];
             selectionTarget?: components["schemas"]["SelectionTarget"] | null;
+            selectionAttachmentMetadata?: components["schemas"]["SelectionAttachmentMetadata"] | null;
             /**
              * Targetwordcount
              * @default 4000
@@ -3233,6 +3234,36 @@ export interface components {
             estimatedWords: number;
             /** Acceptancecriteria */
             acceptanceCriteria: string;
+        };
+        /**
+         * SelectionAttachmentMetadata
+         * @description 选区来源快照的 UI 元数据；不包含也不承载权威正文。
+         */
+        SelectionAttachmentMetadata: {
+            /**
+             * Resourcetype
+             * @enum {string}
+             */
+            resourceType: "chapter_content" | "outline_content" | "outline_node_content";
+            /** Resourceid */
+            resourceId: string;
+            /** Sourcelabel */
+            sourceLabel: string;
+            /**
+             * Baseupdatedat
+             * Format: date-time
+             */
+            baseUpdatedAt: string;
+            /** Basecontenthash */
+            baseContentHash: string;
+            /** Selectionstart */
+            selectionStart: number;
+            /** Selectionend */
+            selectionEnd: number;
+            /** Selectedtexthash */
+            selectedTextHash: string;
+            /** Selectionpreview */
+            selectionPreview: string;
         };
         /**
          * SelectionTarget

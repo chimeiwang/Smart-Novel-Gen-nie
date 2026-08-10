@@ -10,6 +10,7 @@ from types import SimpleNamespace
 import pytest
 from inkforge_contracts.long_serial import (
     AbsenceSentinel,
+    SelectionAttachmentMetadata,
     SelectionTarget,
     SourceBinding,
 )
@@ -28,6 +29,7 @@ from inkforge_core.writing.commands import (
     _long_serial_operation_definition,
     _require_long_serial_profile,
     _require_no_active_long_serial_mutation,
+    _validate_selection_attachment_metadata,
 )
 from inkforge_core.writing.idempotency import request_fingerprint
 from inkforge_core.writing.recovery import deserialize_graph_snapshot
@@ -200,6 +202,64 @@ def test_long_serial_selection_request_requires_target_and_derives_unicode_lengt
             }
         )
 
+
+def test_selection_attachment_metadata_is_strict_and_keeps_ui_preview_only() -> None:
+    metadata = SelectionAttachmentMetadata.model_validate(
+        {
+            "resourceType": "chapter_content",
+            "resourceId": "chapter-1",
+            "sourceLabel": "第 1 章",
+            "baseUpdatedAt": "2026-08-05T10:00:00Z",
+            "baseContentHash": "a" * 64,
+            "selectionStart": 1,
+            "selectionEnd": 2,
+            "selectedTextHash": "b" * 64,
+            "selectionPreview": "😀",
+        }
+    )
+    assert metadata.selectionPreview == "😀"
+    with pytest.raises(ValidationError):
+        SelectionAttachmentMetadata.model_validate(
+            {**metadata.model_dump(mode="json"), "selectedText": "权威正文"}
+        )
+
+
+def test_selection_attachment_metadata_rejects_preview_not_derived_from_snapshot() -> None:
+    target = SelectionTarget(
+        resourceType="chapter_content",
+        resourceId="chapter-1",
+        baseUpdatedAt=NOW,
+        baseContentHash="a" * 64,
+        selectionStart=0,
+        selectionEnd=2,
+        selectedTextHash="b" * 64,
+    )
+    metadata = SelectionAttachmentMetadata(
+        resourceType="chapter_content",
+        resourceId="chapter-1",
+        sourceLabel="第 1 章",
+        baseUpdatedAt=NOW,
+        baseContentHash="a" * 64,
+        selectionStart=0,
+        selectionEnd=2,
+        selectedTextHash="b" * 64,
+        selectionPreview="篡改",
+    )
+    with pytest.raises(ApiError):
+        _validate_selection_attachment_metadata(
+            metadata,
+            target,
+            {
+                "resourceType": "chapter_content",
+                "resourceId": "chapter-1",
+                "baseUpdatedAt": NOW.isoformat(),
+                "baseContentHash": "a" * 64,
+                "selectionStart": 0,
+                "selectionEnd": 2,
+                "selectedTextHash": "b" * 64,
+                "selectedText": "正文",
+            },
+        )
 
 @pytest.mark.parametrize(
     "changes",
@@ -447,6 +507,98 @@ async def test_long_serial_start_persists_authoritative_envelope_and_job(
         "kind": "chapter",
         "chapterId": "chapter-1",
     }
+
+
+@pytest.mark.asyncio
+async def test_long_serial_selection_metadata_is_persisted_on_user_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content = "hello😀world"
+    selected = "ell"
+    full_hash = hashlib.sha256(content.encode()).hexdigest()
+    selected_hash = hashlib.sha256(selected.encode()).hexdigest()
+    request_values = {
+        **valid_request_values(),
+        "writingSessionId": "session-1",
+        "operation": "rewrite_chapter_selection",
+        "selectionTarget": {
+            "resourceType": "chapter_content",
+            "resourceId": "chapter-1",
+            "baseUpdatedAt": NOW.isoformat(),
+            "baseContentHash": full_hash,
+            "selectionStart": 1,
+            "selectionEnd": 4,
+            "selectedTextHash": selected_hash,
+        },
+        "selectionAttachmentMetadata": {
+            "resourceType": "chapter_content",
+            "resourceId": "chapter-1",
+            "sourceLabel": "第 1 章",
+            "baseUpdatedAt": NOW.isoformat(),
+            "baseContentHash": full_hash,
+            "selectionStart": 1,
+            "selectionEnd": 4,
+            "selectedTextHash": selected_hash,
+            "selectionPreview": selected,
+        },
+    }
+    session = TransactionSession()
+    repository = WritingRunCommandRepository(SessionFactory(session))
+
+    async def no_op(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+
+    async def locked(*args: object, **kwargs: object) -> LockedWritingRows:
+        del args, kwargs
+        return LockedWritingRows(
+            novel=Novel(id="novel-1", userId="user-1"),
+            chapters=(Chapter(id="chapter-1", novelId="novel-1"),),
+            task=None,
+            artifact=None,
+            command=None,
+        )
+
+    async def captured(*args: object, **kwargs: object) -> tuple[SourceBinding, ...]:
+        del args, kwargs
+        return source_bindings()
+
+    async def snapshot(*args: object, **kwargs: object) -> dict[str, object]:
+        del args, kwargs
+        return {
+            "resourceType": "chapter_content",
+            "resourceId": "chapter-1",
+            "baseUpdatedAt": NOW.isoformat(),
+            "baseContentHash": full_hash,
+            "selectionStart": 1,
+            "selectionEnd": 4,
+            "selectedTextHash": selected_hash,
+            "selectedText": selected,
+            "contextBefore": "h",
+            "contextAfter": "o😀world",
+            "sourceSnapshot": {
+                "resourceType": "chapter_content",
+                "resourceId": "chapter-1",
+                "content": content,
+                "updatedAt": NOW.isoformat(),
+                "contentSha256": full_hash,
+            },
+        }
+
+    monkeypatch.setattr(commands_module, "acquire_idempotency_lock", no_op)
+    monkeypatch.setattr(commands_module, "_resolve_long_serial_start_response", no_op)
+    monkeypatch.setattr(commands_module, "lock_writing_rows", locked)
+    monkeypatch.setattr(commands_module, "_require_long_serial_profile", no_op)
+    monkeypatch.setattr(commands_module, "_require_session_binding", no_op)
+    monkeypatch.setattr(commands_module, "_require_no_active_long_serial_mutation", no_op)
+    monkeypatch.setattr(commands_module, "capture_chapter_source_bindings", captured)
+    monkeypatch.setattr(commands_module, "_capture_selection_snapshot", snapshot)
+    monkeypatch.setattr(commands_module, "_touch_writing_session", no_op)
+
+    await repository.create_start_with_task(
+        "user-1", LongSerialStartWritingRunRequest.model_validate(request_values)
+    )
+    message = next(value for value in session.added if isinstance(value, WritingMessage))
+    assert json.loads(message.metadata_ or "{}")["source"]["selectionPreview"] == selected
 
 
 def _long_serial_start_envelope() -> str:

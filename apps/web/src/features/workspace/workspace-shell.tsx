@@ -10,7 +10,6 @@ import { ChapterEditor } from "@/features/editor/chapter-editor";
 import { flushActiveChapterSave } from "@/features/editor/chapter-save-navigation";
 import {
   buildSelectionAttachment,
-  isSelectionAttachmentStale,
   type SelectionBridge,
   type SelectionCaptureInput,
   type SelectionAttachment,
@@ -56,16 +55,20 @@ export function WorkspaceShell({
   const [transientSelection, setTransientSelection] = useState<TransientSelection | null>(null);
   const [attachedSelection, setAttachedSelection] = useState<SelectionAttachment | null>(null);
   const [selectionError, setSelectionError] = useState<string | null>(null);
+  const selectionGenerationRef = useRef(0);
   const previousInitialViewRef = useRef(initialView);
   const totalCount = chapters.reduce((sum, item) => sum + item.wordCount, 0);
   const approvedBeatPlan = currentChapter?.approvedBeatPlan ?? null;
 
   const captureSelection = useCallback(async (input: SelectionCaptureInput) => {
+    const generation = ++selectionGenerationRef.current;
     try {
       const attachment = await buildSelectionAttachment(input);
+      if (selectionGenerationRef.current !== generation) return;
       setTransientSelection({ ...attachment, content: input.content });
       setSelectionError(null);
     } catch (error) {
+      if (selectionGenerationRef.current !== generation) return;
       setSelectionError(error instanceof Error ? error.message : "无法读取选区");
     }
   }, []);
@@ -75,16 +78,28 @@ export function WorkspaceShell({
       setSelectionError("已有选区附件，请先移除后重新选择");
       return;
     }
+    selectionGenerationRef.current += 1;
     setAttachedSelection(transientSelection);
     setTransientSelection(null);
     setSelectionError(null);
   }, [attachedSelection, transientSelection]);
   const removeSelection = useCallback(() => {
+    selectionGenerationRef.current += 1;
     setAttachedSelection(null);
     setSelectionError(null);
   }, []);
-  const clearTransientSelection = useCallback(() => setTransientSelection(null), []);
+  const reselectSelection = useCallback(() => {
+    selectionGenerationRef.current += 1;
+    setAttachedSelection(null);
+    setTransientSelection(null);
+    setSelectionError("已移除，请在来源处重新选择");
+  }, []);
+  const clearTransientSelection = useCallback(() => {
+    selectionGenerationRef.current += 1;
+    setTransientSelection(null);
+  }, []);
   const clearAllSelection = useCallback(() => {
+    selectionGenerationRef.current += 1;
     setTransientSelection(null);
     setAttachedSelection(null);
     setSelectionError(null);
@@ -95,6 +110,7 @@ export function WorkspaceShell({
     updatedAt: string;
     content: string;
   }) => {
+    selectionGenerationRef.current += 1;
     setTransientSelection((candidate) => (
       candidate && candidate.resourceType === input.resourceType && candidate.resourceId === input.resourceId
         ? null
@@ -102,7 +118,7 @@ export function WorkspaceShell({
     ));
     setAttachedSelection((attachment) => {
       if (!attachment || attachment.resourceType !== input.resourceType || attachment.resourceId !== input.resourceId) return attachment;
-      return { ...attachment, stale: isSelectionAttachmentStale(attachment, input) };
+      return { ...attachment, stale: true };
     });
   }, []);
   const visibleAttachedSelection = useMemo(() => (
@@ -125,8 +141,9 @@ export function WorkspaceShell({
     clearTransientSelection,
     clearAllSelection,
     removeSelection,
+    reselectSelection,
     markSelectionSourceChanged,
-  }), [attachSelection, captureSelection, clearAllSelection, clearTransientSelection, markSelectionSourceChanged, removeSelection, visibleAttachedSelection, visibleTransientSelection]);
+  }), [attachSelection, captureSelection, clearAllSelection, clearTransientSelection, markSelectionSourceChanged, removeSelection, reselectSelection, visibleAttachedSelection, visibleTransientSelection]);
 
   const applyActiveView = useCallback((view: WorkspaceView) => {
     if (view === "reading") setReadingSession((current) => current + 1);
@@ -381,7 +398,7 @@ export function WorkspaceShell({
           <button className="button" type="button" onClick={attachSelection} disabled={Boolean(visibleAttachedSelection)}>
             让 AI 修改这段
           </button>
-          <button className="button ghost" type="button" onClick={() => setTransientSelection(null)}>取消</button>
+          <button className="button ghost" type="button" onClick={clearTransientSelection}>取消</button>
         </div>
       ) : null}
       {selectionError ? <div className="selection-error" role="alert">{selectionError}</div> : null}

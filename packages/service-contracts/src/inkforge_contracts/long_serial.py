@@ -56,6 +56,28 @@ class SelectionTarget(StrictModel):
         return self
 
 
+class SelectionAttachmentMetadata(StrictModel):
+    """选区来源快照的 UI 元数据；不包含也不承载权威正文。"""
+
+    resourceType: Literal[
+        "chapter_content", "outline_content", "outline_node_content"
+    ]
+    resourceId: Identifier
+    sourceLabel: str = Field(min_length=1, max_length=256)
+    baseUpdatedAt: AwareDatetime
+    baseContentHash: ContentSha256
+    selectionStart: NonNegativeInt
+    selectionEnd: NonNegativeInt
+    selectedTextHash: ContentSha256
+    selectionPreview: str = Field(min_length=1, max_length=256)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> Self:
+        if self.selectionStart >= self.selectionEnd:
+            raise ValueError("选区结束位置必须大于开始位置")
+        return self
+
+
 class SelectionSourceSnapshot(StrictModel):
     resourceType: Literal[
         "chapter_content", "outline_content", "outline_node_content"

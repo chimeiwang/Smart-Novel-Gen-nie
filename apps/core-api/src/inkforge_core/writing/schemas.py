@@ -3,7 +3,12 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal, Self
 
-from inkforge_contracts.long_serial import ChapterTarget, LongSerialScope, SelectionTarget
+from inkforge_contracts.long_serial import (
+    ChapterTarget,
+    LongSerialScope,
+    SelectionAttachmentMetadata,
+    SelectionTarget,
+)
 from inkforge_contracts.operations import ExecutableCreativeOperationKind
 from pydantic import (
     BaseModel,
@@ -199,6 +204,7 @@ class LongSerialStartWritingRunRequest(WritingSchema):
     target: ChapterTarget
     scope: LongSerialScope
     selectionTarget: SelectionTarget | None = None
+    selectionAttachmentMetadata: SelectionAttachmentMetadata | None = None
     targetWordCount: int = Field(default=4000, ge=1, le=10_000_000)
     userInstruction: str = Field(min_length=1)
 
@@ -219,6 +225,13 @@ class LongSerialStartWritingRunRequest(WritingSchema):
             raise ValueError("选区操作必须携带 selectionTarget")
         if self.operation not in selection_operations and self.selectionTarget is not None:
             raise ValueError("普通长篇操作不能携带 selectionTarget")
+        if (
+            self.operation not in selection_operations
+            and self.selectionAttachmentMetadata is not None
+        ):
+            raise ValueError("普通长篇操作不能携带 selectionAttachmentMetadata")
+        if self.selectionAttachmentMetadata is not None and self.selectionTarget is None:
+            raise ValueError("selectionAttachmentMetadata 必须绑定 selectionTarget")
         if self.operation == "rewrite_chapter_selection" and (
             self.selectionTarget is not None
             and self.selectionTarget.resourceType != "chapter_content"

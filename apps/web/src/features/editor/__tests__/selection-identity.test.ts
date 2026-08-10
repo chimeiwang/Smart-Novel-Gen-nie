@@ -52,6 +52,9 @@ describe("显式选区附件身份", () => {
     assert.equal(body.scope.kind, "outline_node");
     assert.equal("selectedText" in body, false);
     assert.equal("selectedText" in body.selectionTarget!, false);
+    assert.equal(body.selectionAttachmentMetadata?.resourceId, "node-7");
+    assert.equal(body.selectionAttachmentMetadata?.selectionPreview, node.selectedText);
+    assert.equal("selectedText" in (body.selectionAttachmentMetadata ?? {}), false);
   });
 
   it("来源内容或版本改变时附件必须重新选择", async () => {

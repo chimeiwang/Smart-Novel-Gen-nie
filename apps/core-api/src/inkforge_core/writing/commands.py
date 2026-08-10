@@ -11,6 +11,7 @@ from inkforge_contracts.long_serial import (
     LONG_SERIAL_RUN_PAYLOAD_ADAPTER,
     PUBLIC_LONG_SERIAL_OPERATIONS,
     ChapterScope,
+    SelectionAttachmentMetadata,
     SelectionTarget,
     SourceBinding,
 )
@@ -339,6 +340,7 @@ class WritingRunCommandRepository:
                     chapter_id=request.chapterId,
                 )
                 selection_snapshot: dict[str, Any] | None = None
+                selection_attachment_metadata: dict[str, Any] | None = None
                 target_word_count = request.targetWordCount
                 if request.selectionTarget is not None:
                     selection_snapshot = await _capture_selection_snapshot(
@@ -348,6 +350,12 @@ class WritingRunCommandRepository:
                         operation=request.operation,
                         target=request.selectionTarget,
                     )
+                    if request.selectionAttachmentMetadata is not None:
+                        selection_attachment_metadata = _validate_selection_attachment_metadata(
+                            request.selectionAttachmentMetadata,
+                            cast(SelectionTarget, request.selectionTarget),
+                            selection_snapshot,
+                        )
                     target_word_count = max(
                         1,
                         request.selectionTarget.selectionEnd
@@ -427,16 +435,25 @@ class WritingRunCommandRepository:
                     }
                 )
                 if request.writingSessionId is not None:
+                    message_metadata = workflow_message_metadata(
+                        task.id,
+                        event_type="user",
+                        content=request.userInstruction,
+                    )
+                    if selection_attachment_metadata is not None:
+                        message_metadata_dict = json.loads(message_metadata)
+                        message_metadata_dict["source"] = selection_attachment_metadata
+                        message_metadata = json.dumps(
+                            message_metadata_dict,
+                            ensure_ascii=False,
+                            sort_keys=True,
+                        )
                     session.add(
                         WritingMessage(
                             sessionId=request.writingSessionId,
                             role="user",
                             content=request.userInstruction,
-                            metadata_=workflow_message_metadata(
-                                task.id,
-                                event_type="user",
-                                content=request.userInstruction,
-                            ),
+                            metadata_=message_metadata,
                         )
                     )
                     await _touch_writing_session(
@@ -1263,6 +1280,44 @@ def _long_serial_operation_definition(
             message="当前长篇操作、目标或范围尚不受支持",
         )
     return definition
+
+
+def _selection_preview(text: str, limit: int = 48) -> str:
+    points = list(text)
+    if len(points) <= limit:
+        return text
+    head = (limit + 1) // 2
+    tail = limit // 2
+    return "".join(points[:head]) + "…" + "".join(points[-tail:])
+
+
+def _validate_selection_attachment_metadata(
+    metadata: SelectionAttachmentMetadata,
+    target: SelectionTarget,
+    snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    """验证客户端来源卡只引用 Core 已锁定的选区快照。"""
+
+    expected = {
+        "resourceType": snapshot["resourceType"],
+        "resourceId": snapshot["resourceId"],
+        "baseUpdatedAt": _canonical_iso_datetime(str(snapshot["baseUpdatedAt"])),
+        "baseContentHash": snapshot["baseContentHash"],
+        "selectionStart": snapshot["selectionStart"],
+        "selectionEnd": snapshot["selectionEnd"],
+        "selectedTextHash": snapshot["selectedTextHash"],
+        "selectionPreview": _selection_preview(str(snapshot["selectedText"])),
+    }
+    actual = metadata.model_dump(mode="json")
+    for field, expected_value in expected.items():
+        if actual[field] != expected_value:
+            raise _selection_conflict(target)
+    return actual
+
+
+def _canonical_iso_datetime(value: str) -> str:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return parsed.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
 
 async def _capture_selection_snapshot(
