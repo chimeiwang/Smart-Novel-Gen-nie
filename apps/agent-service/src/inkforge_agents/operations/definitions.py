@@ -338,7 +338,7 @@ OPERATION_DEFINITIONS: dict[CreativeOperationKind, OperationDefinition] = {
         terminal_tools=frozenset({"begin_artifact_output"}),
         artifact_events=frozenset({"begin_artifact_output"}),
         artifact_key_policy="generated_stable",
-        allowed_scope_kinds=("chapter",),
+        allowed_scope_kinds=("novel", "outline_node"),
         mutating=True,
     ),
     "review_chapter": _definition(

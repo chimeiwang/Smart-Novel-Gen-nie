@@ -114,6 +114,74 @@ async def test_selection_snapshot_conflict_is_raised_before_task_creation() -> N
     assert error.value.status_code == 409
 
 
+@pytest.mark.asyncio
+async def test_outline_selection_snapshot_uses_outline_identity_not_novel_id() -> None:
+    content = "总纲正文"
+    target = SelectionTarget(
+        resourceType="outline_content",
+        resourceId="outline-1",
+        baseUpdatedAt=NOW,
+        baseContentHash=hashlib.sha256(content.encode()).hexdigest(),
+        selectionStart=0,
+        selectionEnd=2,
+        selectedTextHash=hashlib.sha256(content[:2].encode()).hexdigest(),
+    )
+
+    class Session:
+        async def scalar(self, statement: object) -> object:
+            del statement
+            return SimpleNamespace(
+                id="outline-1",
+                novelId="novel-1",
+                content=content,
+                updatedAt=NOW,
+            )
+
+    snapshot = await _capture_selection_snapshot(
+        Session(),
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        operation="rewrite_outline_selection",
+        target=target,
+    )
+
+    assert snapshot["resourceId"] == "outline-1"
+
+
+@pytest.mark.asyncio
+async def test_outline_selection_snapshot_rejects_outline_from_another_novel() -> None:
+    target = SelectionTarget(
+        resourceType="outline_content",
+        resourceId="outline-foreign",
+        baseUpdatedAt=NOW,
+        baseContentHash="a" * 64,
+        selectionStart=0,
+        selectionEnd=1,
+        selectedTextHash="b" * 64,
+    )
+
+    class Session:
+        async def scalar(self, statement: object) -> object:
+            del statement
+            return SimpleNamespace(
+                id="outline-foreign",
+                novelId="novel-other",
+                content="正文",
+                updatedAt=NOW,
+            )
+
+    with pytest.raises(ApiError) as error:
+        await _capture_selection_snapshot(
+            Session(),
+            novel_id="novel-1",
+            chapter_id="chapter-1",
+            operation="rewrite_outline_selection",
+            target=target,
+        )
+
+    assert error.value.status_code == 409
+
+
 def valid_request_values() -> dict[str, object]:
     return {
         "clientRequestId": "long-start-00000001",
@@ -292,6 +360,73 @@ def test_long_serial_start_derives_agents_from_public_definition() -> None:
     assert definition.principalAgent == "写作"
     assert definition.reviewers == ("校验", "编辑")
     assert definition.artifactKind == "chapter_draft"
+
+
+@pytest.mark.parametrize(
+    ("resource_type", "resource_id", "scope"),
+    [
+        ("outline_content", "outline-1", {"kind": "novel"}),
+        ("outline_node_content", "node-1", {"kind": "outline_node", "outlineNodeId": "node-1"}),
+    ],
+)
+def test_outline_selection_operation_accepts_matching_scope(
+    resource_type: str,
+    resource_id: str,
+    scope: dict[str, object],
+) -> None:
+    request = LongSerialStartWritingRunRequest.model_validate(
+        {
+            **valid_request_values(),
+            "operation": "rewrite_outline_selection",
+            "scope": scope,
+            "selectionTarget": {
+                "resourceType": resource_type,
+                "resourceId": resource_id,
+                "baseUpdatedAt": "2026-08-05T10:00:00Z",
+                "baseContentHash": "a" * 64,
+                "selectionStart": 0,
+                "selectionEnd": 3,
+                "selectedTextHash": "b" * 64,
+            },
+        }
+    )
+
+    definition = _long_serial_operation_definition(request)
+
+    assert definition.operation == "rewrite_outline_selection"
+
+
+@pytest.mark.parametrize(
+    ("resource_type", "resource_id", "scope"),
+    [
+        ("outline_content", "novel-1", {"kind": "outline_node", "outlineNodeId": "node-1"}),
+        ("outline_node_content", "node-1", {"kind": "novel"}),
+    ],
+)
+def test_outline_selection_operation_rejects_scope_identity_mismatch(
+    resource_type: str,
+    resource_id: str,
+    scope: dict[str, object],
+) -> None:
+    request = LongSerialStartWritingRunRequest.model_validate(
+        {
+            **valid_request_values(),
+            "operation": "rewrite_outline_selection",
+            "scope": scope,
+            "selectionTarget": {
+                "resourceType": resource_type,
+                "resourceId": resource_id,
+                "baseUpdatedAt": "2026-08-05T10:00:00Z",
+                "baseContentHash": "a" * 64,
+                "selectionStart": 0,
+                "selectionEnd": 3,
+                "selectedTextHash": "b" * 64,
+            },
+        }
+    )
+
+    with pytest.raises(ApiError, match="范围"):
+        _long_serial_operation_definition(request)
 
 
 class ScalarSession:

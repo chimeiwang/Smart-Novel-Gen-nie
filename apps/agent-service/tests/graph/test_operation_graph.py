@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+from datetime import UTC, datetime
 from typing import Any
 
 import pytest
@@ -9,7 +11,11 @@ from inkforge_agents.operations.contracts import (
     CreativeOperationKind,
     create_default_operation_for_agent,
 )
-from inkforge_agents.operations.graph import OperationDependencies, build_operation_graph
+from inkforge_agents.operations.graph import (
+    OperationDependencies,
+    _validate_explicit_long_serial_state,
+    build_operation_graph,
+)
 from inkforge_agents.queue.cancellation import JobCancelledError
 from inkforge_agents.runtime.execution import AgentExecutionMode
 from langgraph.checkpoint.memory import InMemorySaver
@@ -757,6 +763,70 @@ async def test_operation_graph_rejects_explicit_control_scope_tampering(
 
     with pytest.raises(ValueError, match=error):
         await graph.ainvoke(state)
+
+
+def _explicit_outline_selection_state() -> dict[str, Any]:
+    state = _explicit_write_state()
+    content = "abcdef"
+    selected = content[1:3]
+    updated_at = datetime(2026, 8, 6, 8, 0, tzinfo=UTC).isoformat()
+    state.update(
+        {
+            "scope": {"kind": "outline_node", "outlineNodeId": "node-1"},
+            "selectionTarget": {
+                "resourceType": "outline_node_content",
+                "resourceId": "node-1",
+                "baseUpdatedAt": updated_at,
+                "baseContentHash": hashlib.sha256(content.encode()).hexdigest(),
+                "selectionStart": 1,
+                "selectionEnd": 3,
+                "selectedTextHash": hashlib.sha256(selected.encode()).hexdigest(),
+            },
+            "selectionSnapshot": {
+                "resourceType": "outline_node_content",
+                "resourceId": "node-1",
+                "baseUpdatedAt": updated_at,
+                "baseContentHash": hashlib.sha256(content.encode()).hexdigest(),
+                "selectionStart": 1,
+                "selectionEnd": 3,
+                "selectedTextHash": hashlib.sha256(selected.encode()).hexdigest(),
+                "selectedText": selected,
+                "contextBefore": "a",
+                "contextAfter": "def",
+                "sourceSnapshot": {
+                    "resourceType": "outline_node_content",
+                    "resourceId": "node-1",
+                    "content": content,
+                    "updatedAt": updated_at,
+                    "contentSha256": hashlib.sha256(content.encode()).hexdigest(),
+                },
+            },
+            "currentOperation": {
+                **state["currentOperation"],
+                "kind": "rewrite_outline_selection",
+                "primaryAgent": "剧情",
+                "reviewers": ["编辑"],
+            },
+        }
+    )
+    return state
+
+
+@pytest.mark.asyncio
+async def test_operation_graph_accepts_outline_node_selection_identity() -> None:
+    state = _explicit_outline_selection_state()
+    operation = CreativeOperation.model_validate(state["currentOperation"])
+    _validate_explicit_long_serial_state(state, operation)
+
+
+@pytest.mark.asyncio
+async def test_operation_graph_rejects_outline_node_scope_identity_tampering() -> None:
+    state = _explicit_outline_selection_state()
+    state["scope"] = {"kind": "outline_node", "outlineNodeId": "other-node"}
+
+    with pytest.raises(ValueError, match="选区.*scope"):
+        operation = CreativeOperation.model_validate(state["currentOperation"])
+        _validate_explicit_long_serial_state(state, operation)
 
 
 @pytest.mark.asyncio

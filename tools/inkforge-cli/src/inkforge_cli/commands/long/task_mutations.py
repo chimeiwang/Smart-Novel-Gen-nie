@@ -1,12 +1,19 @@
 from __future__ import annotations
 
+import re
 from urllib.parse import quote
 
 from ...json_types import JsonObject, JsonValue
 from ...registry import CommandSpec, FileOutputSpec
 from ...runtime import CliInputError, CliRuntime, ensure_command_json_result
 
-_OPERATIONS = {"plan_chapter", "write_chapter", "review_chapter"}
+_OPERATIONS = {
+    "plan_chapter",
+    "write_chapter",
+    "review_chapter",
+    "rewrite_chapter_selection",
+    "rewrite_outline_selection",
+}
 _START_FIELDS = {
     "profile",
     "clientRequestId",
@@ -16,6 +23,7 @@ _START_FIELDS = {
     "operation",
     "target",
     "scope",
+    "selectionTarget",
     "targetWordCount",
     "userInstruction",
 }
@@ -67,6 +75,67 @@ def _optional_string(
     return value
 
 
+_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+_SELECTION_TARGET_FIELDS = {
+    "resourceType",
+    "resourceId",
+    "baseUpdatedAt",
+    "baseContentHash",
+    "selectionStart",
+    "selectionEnd",
+    "selectedTextHash",
+}
+
+
+def _require_selection_target(
+    payload: JsonObject,
+    *,
+    operation: str,
+    chapter_id: str,
+) -> JsonObject | None:
+    raw = payload.get("selectionTarget")
+    selection_operations = {
+        "rewrite_chapter_selection",
+        "rewrite_outline_selection",
+    }
+    if operation not in selection_operations:
+        if raw is not None:
+            raise CliInputError(
+                "SELECTION_TARGET_FORBIDDEN",
+                "普通长篇操作不能携带 selectionTarget",
+            )
+        return None
+    if not isinstance(raw, dict):
+        raise CliInputError("SELECTION_TARGET_REQUIRED", "选区操作必须携带 selectionTarget")
+    unexpected = sorted(set(raw) - _SELECTION_TARGET_FIELDS)
+    if unexpected:
+        raise CliInputError("UNEXPECTED_FIELD", f"selectionTarget 不接受字段：{unexpected[0]}")
+    for name in ("resourceType", "resourceId", "baseUpdatedAt"):
+        if not isinstance(raw.get(name), str) or not raw[name]:
+            raise CliInputError("INVALID_SELECTION_TARGET", f"{name} 必须是非空字符串")
+    resource_type = raw["resourceType"]
+    if resource_type not in {"chapter_content", "outline_content", "outline_node_content"}:
+        raise CliInputError("INVALID_SELECTION_TARGET", "resourceType 无效")
+    if operation == "rewrite_chapter_selection" and resource_type != "chapter_content":
+        raise CliInputError("INVALID_SELECTION_TARGET", "章节选区只能指向 chapter_content")
+    if operation == "rewrite_outline_selection" and resource_type not in {
+        "outline_content",
+        "outline_node_content",
+    }:
+        raise CliInputError("INVALID_SELECTION_TARGET", "大纲选区只能指向大纲正文")
+    if resource_type == "chapter_content" and raw["resourceId"] != chapter_id:
+        raise CliInputError("INVALID_SELECTION_TARGET", "章节选区 resourceId 必须等于 chapterId")
+    for name in ("baseContentHash", "selectedTextHash"):
+        value = raw.get(name)
+        if not isinstance(value, str) or not _SHA256_PATTERN.fullmatch(value):
+            raise CliInputError("INVALID_SELECTION_TARGET", f"{name} 必须是 64 位小写 SHA-256")
+    start = raw.get("selectionStart")
+    end = raw.get("selectionEnd")
+    if type(start) is not int or type(end) is not int or start < 0 or end <= start:
+        raise CliInputError("INVALID_SELECTION_TARGET", "选区必须是非空的正向码点范围")
+    return raw
+
+
 def _task_path(payload: JsonObject) -> str:
     return quote(_require_string(payload, "taskId"), safe="")
 
@@ -80,7 +149,8 @@ def start_agent(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
     if operation not in _OPERATIONS:
         raise CliInputError(
             "INVALID_OPERATION",
-            "operation 只能是 plan_chapter、write_chapter 或 review_chapter",
+            "operation 只能是 plan_chapter、write_chapter、review_chapter、"
+            "rewrite_chapter_selection 或 rewrite_outline_selection",
         )
 
     target = payload.get("target")
@@ -93,8 +163,13 @@ def start_agent(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
             "INVALID_TARGET",
             "target 必须指向 chapterId 对应章节",
         )
+    selection_target = _require_selection_target(
+        payload,
+        operation=operation,
+        chapter_id=chapter_id,
+    )
     scope = payload.get("scope")
-    if (
+    if operation != "rewrite_outline_selection" and (
         not isinstance(scope, dict)
         or scope.get("kind") != "chapter"
         or scope.get("chapterId") != chapter_id
@@ -103,6 +178,25 @@ def start_agent(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
             "INVALID_SCOPE",
             "scope 必须是 chapterId 对应章节范围",
         )
+
+    if operation == "rewrite_outline_selection":
+        if not isinstance(scope, dict) or selection_target is None:
+            raise CliInputError("INVALID_SCOPE", "大纲选区 scope 无效")
+        expected_kind = (
+            "novel"
+            if selection_target["resourceType"] == "outline_content"
+            else "outline_node"
+        )
+        if scope.get("kind") != expected_kind:
+            raise CliInputError("INVALID_SCOPE", "大纲选区 scope 必须匹配资源身份")
+        if (
+            expected_kind == "outline_node"
+            and scope.get("outlineNodeId") != selection_target["resourceId"]
+        ):
+            raise CliInputError(
+                "INVALID_SCOPE",
+                "outlineNodeId 必须匹配 selectionTarget.resourceId",
+            )
 
     user_instruction = _require_string(payload, "userInstruction")
     if not user_instruction.strip():
@@ -118,6 +212,8 @@ def start_agent(runtime: CliRuntime, payload: JsonObject) -> JsonObject:
         "scope": scope,
         "userInstruction": user_instruction,
     }
+    if selection_target is not None:
+        body["selectionTarget"] = selection_target
     for name in ("writingSessionId", "targetWordCount"):
         if name in payload:
             body[name] = payload[name]

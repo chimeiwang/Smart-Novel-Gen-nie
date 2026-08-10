@@ -634,6 +634,17 @@ def _validate_explicit_long_serial_state(
         )
         if selection_target.resourceType not in expected_types:
             raise ValueError("显式长篇选区资源类型与 Operation 不一致")
+        if operation.kind == "rewrite_chapter_selection":
+            if scope.kind != "chapter" or scope.chapterId != target.id:
+                raise ValueError("选区 scope 与章节 selectionTarget 身份不一致")
+        elif selection_target.resourceType == "outline_content":
+            if scope.kind != "novel":
+                raise ValueError("选区 scope 与总纲 selectionTarget 身份不一致")
+        elif (
+            scope.kind != "outline_node"
+            or scope.outlineNodeId != selection_target.resourceId
+        ):
+            raise ValueError("选区 scope 与大纲节点 selectionTarget 身份不一致")
     elif raw_selection_target is not None or raw_selection_snapshot is not None:
         raise ValueError("普通长篇操作不得携带选区冻结快照")
 

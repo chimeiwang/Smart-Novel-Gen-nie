@@ -11,6 +11,8 @@ from inkforge_contracts.long_serial import (
     LONG_SERIAL_RUN_PAYLOAD_ADAPTER,
     PUBLIC_LONG_SERIAL_OPERATIONS,
     ChapterScope,
+    NovelScope,
+    OutlineNodeScope,
     SelectionAttachmentMetadata,
     SelectionTarget,
     SourceBinding,
@@ -1262,17 +1264,33 @@ def _long_serial_operation_definition(
     request: LongSerialStartWritingRunRequest,
 ) -> PublicOperationDefinition:
     definition = PUBLIC_LONG_SERIAL_OPERATIONS.get(request.operation)
-    if definition is None or not isinstance(request.scope, ChapterScope):
+    if definition is None:
         raise ApiError(
             status_code=409,
             code="LONG_SCOPE_NOT_SUPPORTED",
             message="当前长篇操作、目标或范围尚不受支持",
         )
+    scope_supported = request.scope.kind in definition.allowedScopeKinds
+    identity_supported = False
+    if request.operation == "rewrite_outline_selection":
+        selection = request.selectionTarget
+        if selection is not None and selection.resourceType == "outline_content":
+            identity_supported = isinstance(request.scope, NovelScope)
+        elif selection is not None and selection.resourceType == "outline_node_content":
+            identity_supported = (
+                isinstance(request.scope, OutlineNodeScope)
+                and request.scope.outlineNodeId == selection.resourceId
+            )
+    else:
+        identity_supported = (
+            isinstance(request.scope, ChapterScope)
+            and request.scope.chapterId == request.chapterId
+        )
     if (
         request.target.type != definition.targetKind
         or request.target.id != request.chapterId
-        or request.scope.kind not in definition.allowedScopeKinds
-        or request.scope.chapterId != request.chapterId
+        or not scope_supported
+        or not identity_supported
     ):
         raise ApiError(
             status_code=409,

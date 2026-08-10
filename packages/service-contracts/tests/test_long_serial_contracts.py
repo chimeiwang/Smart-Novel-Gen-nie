@@ -270,6 +270,38 @@ def test_long_serial_scope_union_accepts_declared_namespaces(
 
 
 @pytest.mark.parametrize(
+    ("resource_type", "resource_id", "scope"),
+    [
+        ("outline_content", "outline-1", {"kind": "novel"}),
+        ("outline_node_content", "node-1", {"kind": "outline_node", "outlineNodeId": "node-1"}),
+    ],
+)
+def test_outline_selection_declares_matching_scope(
+    resource_type: str,
+    resource_id: str,
+    scope: dict[str, object],
+) -> None:
+    values = {
+        **valid_start_payload(),
+        "operation": "rewrite_outline_selection",
+        "scope": scope,
+        "selectionTarget": {
+            "resourceType": resource_type,
+            "resourceId": resource_id,
+            "baseUpdatedAt": "2026-08-05T10:00:00Z",
+            "baseContentHash": "a" * 64,
+            "selectionStart": 0,
+            "selectionEnd": 3,
+            "selectedTextHash": "b" * 64,
+        },
+    }
+
+    parsed = LONG_SERIAL_RUN_PAYLOAD_ADAPTER.validate_python(values)
+
+    assert parsed.scope.kind == scope["kind"]
+
+
+@pytest.mark.parametrize(
     "scope",
     [
         {"kind": "chapter_range", "chapterStartOrder": 3, "chapterEndOrder": 1},

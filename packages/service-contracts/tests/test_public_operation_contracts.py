@@ -51,11 +51,11 @@ def test_public_long_serial_operations_are_exact() -> None:
             "reviewers": ("校验", "编辑"),
             "artifactKind": "chapter_draft",
         },
-        "rewrite_outline_selection": {
-            "operation": "rewrite_outline_selection",
-            "workflow": "long_serial",
-            "targetKind": "chapter",
-            "allowedScopeKinds": ("chapter",),
+            "rewrite_outline_selection": {
+                "operation": "rewrite_outline_selection",
+                "workflow": "long_serial",
+                "targetKind": "chapter",
+                "allowedScopeKinds": ("novel", "outline_node"),
             "mutating": True,
             "principalAgent": "剧情",
             "reviewers": ("编辑",),
