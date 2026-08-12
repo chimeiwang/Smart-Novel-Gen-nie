@@ -370,11 +370,18 @@ class CoreGraphAgentExecutor:
                 raise RuntimeError("当前执行模式缺少权威待审核草案标识")
             artifact_context = self._artifacts.review_context(artifact_id)
             conversation_messages = []
+            frozen_source_context = _frozen_review_source_context(state, operation_kind)
             if execution_mode == "reviewer":
-                context_messages = [_reviewer_context(artifact_context, state)]
+                context_messages = [
+                    *frozen_source_context,
+                    _reviewer_context(artifact_context, state),
+                ]
                 execution_instructions = []
             elif execution_mode == "reviser":
-                context_messages = [_reviser_context(state, artifact_context)]
+                context_messages = [
+                    *frozen_source_context,
+                    _reviser_context(state, artifact_context),
+                ]
                 execution_instructions = [
                     str(item) for item in state.get("executionInstructions", [])
                 ]
@@ -428,6 +435,19 @@ def _reviewer_context(
         ensure_ascii=False,
         separators=(",", ":"),
     )
+
+
+def _frozen_review_source_context(
+    state: dict[str, Any],
+    operation_kind: CreativeOperationKind,
+) -> list[str]:
+    if operation_kind != "plan_chapter":
+        return []
+    return [
+        item
+        for item in state.get("contextMessages", [])
+        if isinstance(item, str) and item
+    ]
 
 
 def _reviser_context(state: dict[str, Any], artifact: dict[str, Any]) -> str:

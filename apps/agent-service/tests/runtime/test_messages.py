@@ -120,20 +120,21 @@ def test_beat_plan_brief_contains_structured_plan_protocol() -> None:
     brief = build_execution_brief("primary", "plan_chapter")
 
     assert "submit_beat_plan" in brief
-    for field in (
-        "场景目标",
-        "冲突",
-        "角色",
-        "伏笔引用",
-        "预估字数",
-        "验收标准",
-        "转折",
-        "代价",
-        "结果",
-        "余波",
-    ):
+    for field in ("剧情骨架", "目标", "阻力或变化", "角色", "伏笔引用", "预估字数"):
         assert field in brief
+    assert "一句可观察结果" in brief
+    assert "不得复制全局规则" in brief
+    assert "最多三条" in brief
+    assert "权威事实中的名称、时间和数值必须原样使用" in brief
+    assert "整体还要明确转折、代价、结果与余波" not in brief
     assert "begin_artifact_output" not in brief
+
+
+def test_beat_plan_reviewer_brief_allows_frozen_source_facts() -> None:
+    brief = build_execution_brief("reviewer", "plan_chapter")
+
+    assert "冻结作品事实" in brief
+    assert "不得调用读取工具" in brief
 
 
 def test_structured_update_brief_is_scoped_to_operation_builder_tools() -> None:

@@ -371,6 +371,83 @@ async def test_reviewer_receives_submitted_artifact_without_read_tools() -> None
 
 
 @pytest.mark.asyncio
+async def test_plan_chapter_reviewer_receives_frozen_source_facts_and_artifact() -> None:
+    artifacts = CoreArtifactPort(CoreClient())  # type: ignore[arg-type]
+    state = _hydration_state()
+    state["currentOperation"] = {"kind": "plan_chapter", "primaryAgent": "剧情"}
+    state["contextMessages"] = ["冻结作品事实：任务固定奖励为生命点三十"]
+    artifacts.hydrate(
+        _resource(),
+        state,
+        _active_artifact(
+            kind="beat_plan",
+            payload={
+                "kind": "beat_plan",
+                "beatPlan": {
+                    "title": "第四章计划",
+                    "beatCount": 1,
+                    "summary": "结算任务奖励",
+                    "sceneBeats": [{"order": 1, "goal": "结算奖励"}],
+                },
+            },
+            createdByAgent="剧情",
+            reviewerAgent="编辑",
+        ),
+    )
+    runner = RecordingRunner()
+    executor = CoreGraphAgentExecutor(runner, artifacts)  # type: ignore[arg-type]
+
+    await executor.run(
+        "编辑",
+        state,
+        execution_mode="reviewer",
+        operation_kind="plan_chapter",
+    )
+
+    assert runner.requests[0].contextMessages[0] == state["contextMessages"][0]
+    assert "第四章计划" in runner.requests[0].contextMessages[-1]
+
+
+@pytest.mark.asyncio
+async def test_plan_chapter_reviser_receives_frozen_source_facts_and_revision() -> None:
+    artifacts = CoreArtifactPort(CoreClient())  # type: ignore[arg-type]
+    state = _hydration_state()
+    state["currentOperation"] = {"kind": "plan_chapter", "primaryAgent": "剧情"}
+    state["contextMessages"] = ["冻结作品事实：任务固定奖励为生命点三十"]
+    state["pendingRevision"] = {"requiredChanges": "准确写出固定奖励"}
+    artifacts.hydrate(
+        _resource(),
+        state,
+        _active_artifact(
+            kind="beat_plan",
+            payload={
+                "kind": "beat_plan",
+                "beatPlan": {
+                    "title": "第四章计划",
+                    "beatCount": 1,
+                    "summary": "结算任务奖励",
+                    "sceneBeats": [{"order": 1, "goal": "结算奖励"}],
+                },
+            },
+            createdByAgent="剧情",
+            reviewerAgent="编辑",
+        ),
+    )
+    runner = RecordingRunner()
+    executor = CoreGraphAgentExecutor(runner, artifacts)  # type: ignore[arg-type]
+
+    await executor.run(
+        "剧情",
+        state,
+        execution_mode="reviser",
+        operation_kind="plan_chapter",
+    )
+
+    assert runner.requests[0].contextMessages[0] == state["contextMessages"][0]
+    assert "准确写出固定奖励" in runner.requests[0].contextMessages[-1]
+
+
+@pytest.mark.asyncio
 async def test_agent_updates_artifact_carries_outline_cas_identity() -> None:
     core = CoreClient()
     port = CoreArtifactPort(core)
