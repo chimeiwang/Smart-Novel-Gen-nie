@@ -236,6 +236,8 @@ sequenceDiagram
 
 Beat Plan 是章节写前规划的一等数据。
 
+Beat Plan 只承担正文前的剧情骨架职责。每个节拍说明目标、阻力或变化、参与角色、伏笔引用、预估字数和落点；验收标准如填写，只写一句可观察结果。全局设定、禁令、文风要求和专业规程不得复制进每个节拍，转折、代价、结果与余波应融入实际发生的节拍。
+
 相关模型：
 
 - ChapterWritingGoal：章节写作目标。
@@ -255,6 +257,7 @@ SceneBeat 字段：
 应用规则：
 
 - Agent 生成 Beat Plan 后先进入 ReviewArtifact。
+- `plan_chapter` 的 reviewer 与 reviser 除权威 Artifact 外，还接收 primary 使用的冻结最小作品投影，以核对名称、时间、数值和剧情边界；两者仍无读取工具，不得重新查询。
 - 用户确认后写入 ChapterBeatPlan 和 SceneBeat。
 - 正文写作可读取已批准 Beat Plan。
 
@@ -301,7 +304,7 @@ WorkflowStep 记录运行步骤：
 - 草案决定由 Core 事务编排器统一受理；正式数据、草案和持久命令任一写入失败时必须整体回滚。
 - Agent 从稳定决定恢复时只推进 LangGraph 状态，不能第二次应用或删除已经由 Core 事务处理的草案。
 - Agent 创建或修订草案、提交复审结论必须使用签名内部接口，并绑定同一用户、小说、任务和运行。
-- 草案执行显式区分 primary、reviewer 和 reviser：reviewer 无读取工具，只读取注入的 Core 权威草案并提交一次 evaluation；reviser 获得原 payload、revision、artifactKey 和合并后的 requiredChanges，按原 Operation 产物契约生成同类新 revision。
+- 草案执行显式区分 primary、reviewer 和 reviser：reviewer 无读取工具，只读取注入的 Core 权威草案并提交一次 evaluation；reviser 获得原 payload、revision、artifactKey 和合并后的 requiredChanges，按原 Operation 产物契约生成同类新 revision。`plan_chapter` 的两种模式额外读取 primary 生成时的冻结最小作品投影，避免复审证据少于生成证据。
 - 草案完成复审并进入 `awaiting_user` 后，Agent Service 必须发送草案等待确认事件，前端再通过 Core 查询权威草案内容，不能依赖进程内状态猜测。
 - 服务重启或新命令恢复自动复审/返工前，Agent Service 必须从 Core `planning.activeArtifact` 水合权威草案；approve/discard 已由 Core 事务完成，不依赖草案继续存在。等待态、完成态和错误态都只有在对应 checkpoint/回调返回合法 `applied/already_applied` 凭证后，才能按当前 QueueJob 的 `runId/jobId` 释放进程内记录；等待态不再依赖先发 Redis 事件。
 - 首版跨服务复审不实现局部草案 patch；所有修改结论归一为完整 rewrite，同时保留原 requiredChanges 和 patch 意图。不能把完整返工描述为局部修订，也不能因此直接写正式小说数据。

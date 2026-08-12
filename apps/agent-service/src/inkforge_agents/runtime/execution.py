@@ -88,12 +88,21 @@ def build_execution_brief(
         f"执行目标：{goal}",
     ]
     if mode == "reviewer":
-        lines.extend(
-            (
-                "只评审只读资料中的 Core 权威草案，不得重新读取、猜测或替换审核对象。",
-                "完成后只调用一次 submit_evaluation；需要修改时统一提出完整 rewrite 意见。",
+        if operation is not None and operation.kind == "plan_chapter":
+            lines.extend(
+                (
+                    "只评审只读资料中的 Core 权威草案，并使用随附的冻结作品事实核对"
+                    "名称、时间、数值和剧情边界；不得调用读取工具、猜测或替换审核对象。",
+                    "完成后只调用一次 submit_evaluation；需要修改时统一提出完整 rewrite 意见。",
+                )
             )
-        )
+        else:
+            lines.extend(
+                (
+                    "只评审只读资料中的 Core 权威草案，不得重新读取、猜测或替换审核对象。",
+                    "完成后只调用一次 submit_evaluation；需要修改时统一提出完整 rewrite 意见。",
+                )
+            )
     elif mode == "quality":
         lines.extend(
             (
@@ -128,9 +137,12 @@ def _operation_protocol(
         )
     elif operation.kind == "plan_chapter":
         lines.append(
-            "调用 submit_beat_plan 提交结构化章节计划；每个场景必须包含场景目标、"
-            "冲突、角色、伏笔引用、预估字数和验收标准，整体还要明确转折、代价、"
-            "结果与余波。"
+            "调用 submit_beat_plan 提交简洁的剧情骨架。每个场景只写目标、阻力或变化、"
+            "角色、伏笔引用、预估字数和落点；acceptanceCriteria 如填写，只写一句可观察"
+            "结果，不得复制全局规则、设定、禁令、文风要求或专业规程。"
+            "chapterAcceptanceCriteria 可省略，需要时最多三条章节级结果。转折、代价、"
+            "结果与余波融入对应节拍，不再逐项重复。权威事实中的名称、时间和数值必须"
+            "原样使用，不得降格为模糊表述。"
         )
     elif operation.artifactPolicy == "agent_updates":
         middle_tools = sorted(
@@ -156,4 +168,9 @@ def _operation_protocol(
             "根据只读资料中的 Core 权威草案完成完整重写，使用当前 Operation 的产物"
             "提交工具，保持原产物类型和权威 artifactKey。"
         )
+        if operation.kind == "plan_chapter":
+            lines.append(
+                "返工时同时依据随附的冻结作品事实，准确保留其中的名称、时间、数值和"
+                "剧情边界。"
+            )
     return lines

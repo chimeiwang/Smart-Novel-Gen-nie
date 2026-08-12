@@ -262,7 +262,7 @@ Agent Runtime 是唯一多轮 tool-call loop。
 - 更新构建器只允许在单次运行中启动一次；启动后隐藏开始工具，后续追加和完成必须沿用同一 `artifactKey`。跨一次纠正重试合并事件时，重复开始不得覆盖已经追加的更新。
 - 新建/修改设定只使用通用更新构建器，不暴露 `append_outline_tree`；只有创建/修改大纲和管理伏笔可以追加结构化大纲树。
 - 设定 Agent 调用 `propose_updates` 或 `finish_update_builder` 成功后立即结束本轮工具循环。
-- reviewer 不暴露读取工具，只能接收 Core 权威草案并调用一次 `submit_evaluation`；reviser 使用原 Operation 工具契约，接收原草案、revision、artifactKey 和合并后的修改要求后生成同类新 revision。
+- reviewer 不暴露读取工具，只能接收 Core 权威草案并调用一次 `submit_evaluation`；reviser 使用原 Operation 工具契约，接收原草案、revision、artifactKey 和合并后的修改要求后生成同类新 revision。`plan_chapter` 是事实核对特例：reviewer 与 reviser 同时接收主 Agent 生成草案时使用的冻结 `outline` 最小投影，但不得重新查询作品资料。
 - consistency 质量任务由“校验”Agent 的 `quality` 模式执行，只暴露 `submit_quality_report`。
 
 控制工具示例：
@@ -282,6 +282,7 @@ Agent Runtime 是唯一多轮 tool-call loop。
 - 不再从 Agent 可见正文解析 JSON 信封、路由字段或评分字段。
 - 设定/大纲/伏笔/正文/Beat Plan 等正式变更必须进入 ReviewArtifact。
 - `plan_chapter` 只能提交 Beat Plan，`write_chapter/rewrite_scene` 只能提交 `chapter_draft`，设定/大纲/伏笔 Operation 只能提交 `agent_updates`。
+- Beat Plan 是简洁剧情骨架；节拍验收只表达一句可观察结果，不得重复作品设定、全局禁令、文风要求或专业规程。章节级验收可省略，需要时最多三条结果；权威上下文中的名称、时间和数值必须原样使用。
 - reviewer 的任何修改请求统一进入完整 rewrite；保留具体修改意见，但不执行跨服务局部 patch。
 - 职责外任务只能在正文说明边界，不得通过越权工具硬写草案。
 
