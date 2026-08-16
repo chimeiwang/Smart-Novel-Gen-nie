@@ -183,3 +183,34 @@ test("创作台更多按钮不竖排且待确认入口只在有产物时显示",
     /effectiveAwaitingArtifactCount > 0 \? \([\s\S]{0,220}待确认/,
   );
 });
+
+test("窄右栏中的创作任务保持标题在上和两列等宽布局", async () => {
+  const conversationUrl = new URL("../../writing/writing-conversation.tsx", import.meta.url);
+  const cssUrl = new URL("../../writing/writing-conversation.css", import.meta.url);
+  const [conversationSource, cssSource] = await Promise.all([
+    readFile(conversationUrl, "utf8"),
+    readFile(cssUrl, "utf8"),
+  ]);
+  const taskPanelRule = cssSource.match(/\.writing-chat \.writing-task-panel\s*\{([^}]*)\}/)?.[1] ?? "";
+  const kickerRule = cssSource.match(
+    /\.writing-chat \.writing-task-panel \.next-action-kicker\s*\{([^}]*)\}/,
+  )?.[1] ?? "";
+  const buttonsRule = cssSource.match(
+    /\.writing-chat \.writing-task-panel \.next-action-buttons\s*\{([^}]*)\}/,
+  )?.[1] ?? "";
+  const buttonRule = cssSource.match(
+    /\.writing-chat \.writing-task-panel \.next-action-button\s*\{([^}]*)\}/,
+  )?.[1] ?? "";
+
+  assert.match(
+    conversationSource,
+    /className="next-action-panel writing-task-panel"[\s\S]*className="next-action-kicker"[\s\S]*className="next-action-buttons"/,
+  );
+  assert.match(taskPanelRule, /flex-direction:\s*column/);
+  assert.match(taskPanelRule, /align-items:\s*stretch/);
+  assert.match(kickerRule, /white-space:\s*nowrap/);
+  assert.match(buttonsRule, /display:\s*grid/);
+  assert.match(buttonsRule, /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+  assert.match(buttonRule, /min-width:\s*0/);
+  assert.match(buttonRule, /width:\s*100%/);
+});

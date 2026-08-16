@@ -2243,6 +2243,26 @@
   text-align: left;
 }
 
+.writing-chat .writing-task-panel {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.writing-chat .writing-task-panel .next-action-kicker {
+  white-space: nowrap;
+}
+
+.writing-chat .writing-task-panel .next-action-buttons {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+}
+
+.writing-chat .writing-task-panel .next-action-button {
+  min-width: 0;
+  width: 100%;
+}
+
 .writing-chat .next-action-button:hover:not(:disabled) {
   border-color: var(--border-strong);
   background: var(--panel-soft);
