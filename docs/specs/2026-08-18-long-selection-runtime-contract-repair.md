@@ -58,4 +58,3 @@ Core 的历史 Operation 集合保留旧 Operation，并并入 `PUBLIC_LONG_SERI
 - 两个选区 Operation 的稳定快照均能通过 Core 恢复校验。
 - 选区任务查询返回真实 Operation，并按正确 Artifact kind 投影等待态结果。
 - 相关 Agent/Core 测试、Ruff 和 Mypy 通过。
-
