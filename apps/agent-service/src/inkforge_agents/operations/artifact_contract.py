@@ -258,9 +258,12 @@ def _validate_selection_submission(
     replacement = event.get("replacement")
     if not isinstance(replacement, str) or not replacement.strip():
         raise ValueError("ARTIFACT_CONTRACT_MISMATCH：replacement 不能为空")
-    if "content" in event or replacement != visible_content:
+    if "content" in event or (
+        visible_content != "" and replacement != visible_content
+    ):
         raise ValueError(
-            "ARTIFACT_CONTRACT_MISMATCH：选区产物只能返回 replacement，且不得提交完整正文"
+            "ARTIFACT_CONTRACT_MISMATCH：选区产物只能返回 replacement，"
+            "且非空可见正文必须与 replacement 完全一致"
         )
     return replacement
 

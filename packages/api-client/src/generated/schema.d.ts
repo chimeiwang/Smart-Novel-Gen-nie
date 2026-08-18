@@ -4794,7 +4794,7 @@ export interface components {
             /** Commandstatus */
             commandStatus: ("pending" | "submitted" | "processing" | "succeeded" | "failed") | null;
             /** Operation */
-            operation: ("generate_outline" | "generate_manuscript" | "replace_selection" | "full_check" | "plan_chapter" | "write_chapter" | "review_chapter") | null;
+            operation: ("generate_outline" | "generate_manuscript" | "replace_selection" | "full_check" | "plan_chapter" | "rewrite_scene" | "rewrite_chapter_selection" | "rewrite_outline_selection" | "write_chapter" | "review_chapter") | null;
             /** Candidateversionid */
             candidateVersionId: string | null;
             /** Checkreport */

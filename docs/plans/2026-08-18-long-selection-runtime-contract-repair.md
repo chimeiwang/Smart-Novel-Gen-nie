@@ -77,6 +77,7 @@ Expected: 全部通过。
 - Modify: `apps/core-api/src/inkforge_core/writing/recovery.py`
 - Modify: `apps/core-api/src/inkforge_core/writing/run_queries.py`
 - Modify: `apps/core-api/src/inkforge_core/writing/schemas.py`
+- Regenerate: `packages/api-client/src/generated/schema.d.ts`
 
 - [ ] **Step 1: 写入两个选区 Operation 的快照恢复测试**
 
@@ -151,6 +152,12 @@ Run: `uv run pytest apps/core-api/tests/writing/test_recovery.py apps/core-api/t
 
 Expected: 全部通过。
 
+- [ ] **Step 6: 重新生成并核对公共 API 客户端**
+
+Run: `npm run api:generate && npm run api:check`
+
+Expected: 生成客户端包含三个补齐的长篇 Operation，检查通过。
+
 ### Task 3: 验证与提交
 
 **Files:**
@@ -189,7 +196,7 @@ git add docs/specs/2026-08-18-long-selection-runtime-contract-repair.md \
   apps/core-api/src/inkforge_core/writing/run_queries.py \
   apps/core-api/src/inkforge_core/writing/schemas.py \
   apps/core-api/tests/writing/test_recovery.py \
-  apps/core-api/tests/writing/test_run_queries.py
+  apps/core-api/tests/writing/test_run_queries.py \
+  packages/api-client/src/generated/schema.d.ts
 git commit -m "修复：长篇选区改写运行契约"
 ```
-

@@ -5,6 +5,7 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
+from inkforge_contracts.long_serial import PUBLIC_LONG_SERIAL_OPERATIONS
 from pydantic import JsonValue
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -30,14 +31,12 @@ _PUBLIC_OPERATIONS = frozenset(
         "generate_manuscript",
         "replace_selection",
         "full_check",
-        "plan_chapter",
-        "write_chapter",
-        "review_chapter",
     }
-)
-_LONG_ARTIFACT_KINDS = {
-    "plan_chapter": "beat_plan",
-    "write_chapter": "chapter_draft",
+) | frozenset(PUBLIC_LONG_SERIAL_OPERATIONS)
+_LONG_ARTIFACT_KINDS: dict[str, str] = {
+    operation: cast(str, definition.artifactKind)
+    for operation, definition in PUBLIC_LONG_SERIAL_OPERATIONS.items()
+    if definition.artifactKind is not None
 }
 _ACTIVE_OUTCOMES = frozenset({"queued", "running", "waiting_user"})
 _SCAN_BATCH_SIZE = 200
@@ -374,11 +373,9 @@ def project_run_status(
             cancel_chain_valid=chain_valid,
         )
     )
-    explicit_long = workflow == "long_serial" and operation in {
-        "plan_chapter",
-        "write_chapter",
-        "review_chapter",
-    }
+    explicit_long = (
+        workflow == "long_serial" and operation in PUBLIC_LONG_SERIAL_OPERATIONS
+    )
     if (
         explicit_long
         and task.phase == "completed"

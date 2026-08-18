@@ -334,6 +334,49 @@ def test_selection_submission_returns_only_structured_replacement_and_identity()
     assert result.event["selectedTextHash"] == selection_event()["selectedTextHash"]
 
 
+def test_selection_submission_accepts_empty_visible_content() -> None:
+    result = validate_artifact_submission(
+        definition=OPERATION_DEFINITIONS["rewrite_chapter_selection"],
+        events=[selection_event()],
+        visible_content="",
+        authoritative_artifact=None,
+        task_id="task-1",
+        operation_kind="rewrite_chapter_selection",
+        selection_snapshot={
+            "resourceType": "chapter_content",
+            "resourceId": "chapter-1",
+            "baseUpdatedAt": "2026-01-01T00:00:00Z",
+            "baseContentHash": "a" * 64,
+            "selectionStart": 1,
+            "selectionEnd": 3,
+            "selectedTextHash": selection_event()["selectedTextHash"],
+        },
+    )
+
+    assert result.content == "新文"
+
+
+def test_selection_submission_rejects_nonempty_visible_content_mismatch() -> None:
+    with pytest.raises(ValueError, match="ARTIFACT_CONTRACT_MISMATCH"):
+        validate_artifact_submission(
+            definition=OPERATION_DEFINITIONS["rewrite_chapter_selection"],
+            events=[selection_event()],
+            visible_content="另一份正文",
+            authoritative_artifact=None,
+            task_id="task-1",
+            operation_kind="rewrite_chapter_selection",
+            selection_snapshot={
+                "resourceType": "chapter_content",
+                "resourceId": "chapter-1",
+                "baseUpdatedAt": "2026-01-01T00:00:00Z",
+                "baseContentHash": "a" * 64,
+                "selectionStart": 1,
+                "selectionEnd": 3,
+                "selectedTextHash": selection_event()["selectedTextHash"],
+            },
+        )
+
+
 @pytest.mark.parametrize(
     "overrides",
     [

@@ -384,6 +384,9 @@ class WritingRunStatusResponse(WritingSchema):
         "replace_selection",
         "full_check",
         "plan_chapter",
+        "rewrite_scene",
+        "rewrite_chapter_selection",
+        "rewrite_outline_selection",
         "write_chapter",
         "review_chapter",
     ] | None

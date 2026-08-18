@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from inkforge_contracts.long_serial import PUBLIC_LONG_SERIAL_OPERATIONS
+
 from .schemas import SessionRecoveryState, WritingTaskSummary
 
 RESUMABLE_PHASES = ("awaiting_user_review", "active", "waiting_call")
@@ -26,7 +28,7 @@ OPERATION_KINDS = frozenset(
         "sync_lore",
         "manage_foreshadowing",
     }
-)
+) | frozenset(PUBLIC_LONG_SERIAL_OPERATIONS)
 
 
 class InvalidGraphSnapshotError(ValueError):

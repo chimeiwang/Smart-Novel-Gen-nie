@@ -354,6 +354,31 @@ def test_plan_projection_waits_only_on_an_authoritative_awaiting_artifact() -> N
 
 
 @pytest.mark.parametrize(
+    ("operation", "artifact_kind"),
+    [
+        ("rewrite_chapter_selection", "chapter_draft"),
+        ("rewrite_outline_selection", "outline_draft"),
+    ],
+)
+def test_selection_projection_exposes_operation_and_waiting_artifact(
+    operation: str,
+    artifact_kind: str,
+) -> None:
+    status = project_run_status(
+        _task(
+            phase="awaiting_user_review",
+            graph={"activeArtifactId": "artifact-1"},
+        ),
+        commands=[_command("start-1", operation=operation)],
+        artifacts=[_artifact(kind=artifact_kind)],
+    )
+
+    assert status.operation == operation
+    assert status.outcome.state == "waiting_user"
+    assert status.activeArtifactId == "artifact-1"
+
+
+@pytest.mark.parametrize(
     ("artifact_status", "task_phase"),
     [
         ("awaiting_user", "completed"),
