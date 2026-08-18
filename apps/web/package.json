@@ -3,12 +3,12 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "dev": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev -p 43119",
+    "dev": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev",
     "build": "next build",
     "start": "next start -p 43119",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/lib/api/__tests__/*.test.ts src/features/editor/__tests__/*.test.ts src/features/short-medium/__tests__/*.test.ts src/features/writing/__tests__/*.test.ts src/features/workspace/__tests__/*.test.ts src/shared/contracts/__tests__/*.test.ts"
+    "test": "tsx --test src/lib/api/__tests__/*.test.ts src/features/editor/__tests__/*.test.ts src/features/short-medium/__tests__/*.test.ts src/features/video/__tests__/*.test.ts src/features/writing/__tests__/*.test.ts src/features/workspace/__tests__/*.test.ts src/shared/contracts/__tests__/*.test.ts"
   },
   "dependencies": {
     "@inkforge/api-client": "*",

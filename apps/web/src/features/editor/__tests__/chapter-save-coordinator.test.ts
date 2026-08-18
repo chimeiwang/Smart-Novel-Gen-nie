@@ -134,6 +134,24 @@ describe("ChapterSaveCoordinator", () => {
     assert.equal(coordinator.state, "saved");
   });
 
+  it("保存成功后回传服务端版本和实际保存快照", async () => {
+    const saved: Array<{ snapshot: ChapterDraftSnapshot; updatedAt: string }> = [];
+    const coordinator = new ChapterSaveCoordinator({
+      initialSnapshot: INITIAL,
+      initialUpdatedAt: "v1",
+      delayMs: 60_000,
+      save: async () => ({ updatedAt: "v2" }),
+      onSaved: (snapshot, updatedAt) => saved.push({ snapshot, updatedAt }),
+    });
+
+    coordinator.schedule({ title: "新标题", content: "新正文" });
+    await coordinator.flush();
+
+    assert.deepEqual(saved, [
+      { snapshot: { title: "新标题", content: "新正文" }, updatedAt: "v2" },
+    ]);
+  });
+
   it("失败会保留最新草稿，retry 成功后才清除", async () => {
     const storage = new MemoryDraftStorage();
     let calls = 0;

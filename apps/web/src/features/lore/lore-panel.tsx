@@ -452,33 +452,48 @@ export function LorePanel({
           }
         }
       } else if (activeTab === "items") {
+        // 空下拉值不是实体 ID；发送 null 才表示“没有所属角色”。
+        const itemPayload = {
+          ...itemForm,
+          ownerId: itemForm.ownerId || null,
+        };
         if (editingId) {
           requireApiData(await browserApi.PATCH("/api/v1/novels/{novel_id}/items/{entity_id}", {
-            params: { path: { novel_id: novelId, entity_id: editingId } }, body: itemForm,
+            params: { path: { novel_id: novelId, entity_id: editingId } }, body: itemPayload,
           }));
         } else {
           requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/items", {
-            params: { path: { novel_id: novelId } }, body: itemForm,
+            params: { path: { novel_id: novelId } }, body: itemPayload,
           }));
         }
       } else if (activeTab === "locations") {
+        // 顶级地点的 parentId 必须显式归一为 null，不能把空字符串当成待查地点。
+        const locationPayload = {
+          ...locationForm,
+          parentId: locationForm.parentId || null,
+        };
         if (editingId) {
           requireApiData(await browserApi.PATCH("/api/v1/novels/{novel_id}/locations/{entity_id}", {
-            params: { path: { novel_id: novelId, entity_id: editingId } }, body: locationForm,
+            params: { path: { novel_id: novelId, entity_id: editingId } }, body: locationPayload,
           }));
         } else {
           requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/locations", {
-            params: { path: { novel_id: novelId } }, body: locationForm,
+            params: { path: { novel_id: novelId } }, body: locationPayload,
           }));
         }
       } else if (activeTab === "factions") {
+        // 未选择据点时发送 null，避免 Core 把空字符串解释成不存在的地点 ID。
+        const factionPayload = {
+          ...factionForm,
+          baseId: factionForm.baseId || null,
+        };
         if (editingId) {
           requireApiData(await browserApi.PATCH("/api/v1/novels/{novel_id}/factions/{entity_id}", {
-            params: { path: { novel_id: novelId, entity_id: editingId } }, body: factionForm,
+            params: { path: { novel_id: novelId, entity_id: editingId } }, body: factionPayload,
           }));
         } else {
           requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/factions", {
-            params: { path: { novel_id: novelId } }, body: factionForm,
+            params: { path: { novel_id: novelId } }, body: factionPayload,
           }));
         }
       } else if (activeTab === "glossaries") {

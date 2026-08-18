@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -10,9 +10,13 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const target = path.join(root, "packages", "api-client", "src", "generated", "schema.d.ts");
 const temporary = mkdtempSync(path.join(tmpdir(), "inkforge-openapi-"));
 const openapiPath = path.join(temporary, "openapi.json");
-const uvCommand = process.platform === "win32" ? "py" : "uv";
-const uvArgs =
-  process.platform === "win32"
+const localPython = path.join(root, ".venv", "bin", "python");
+// Codex 桌面环境可能没有 uv 命令，但项目已存在受控 .venv；生成结果仍走同一导出脚本。
+const useLocalPython = process.platform !== "win32" && existsSync(localPython);
+const uvCommand = useLocalPython ? localPython : process.platform === "win32" ? "py" : "uv";
+const uvArgs = useLocalPython
+  ? ["scripts/export_openapi.py", "--output", openapiPath]
+  : process.platform === "win32"
     ? ["-m", "uv", "run", "python", "scripts/export_openapi.py", "--output", openapiPath]
     : ["run", "python", "scripts/export_openapi.py", "--output", openapiPath];
 

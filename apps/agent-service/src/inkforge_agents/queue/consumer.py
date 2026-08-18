@@ -160,8 +160,7 @@ class QueueConsumer:
                     self._mark_cycle_failed(cycle_stop)
                     raise
                 delay = min(
-                    self._infrastructure_retry_base
-                    * (2 ** min(infrastructure_failures - 1, 10)),
+                    self._infrastructure_retry_base * (2 ** min(infrastructure_failures - 1, 10)),
                     self._infrastructure_retry_max,
                 )
                 logger.warning(
@@ -202,20 +201,14 @@ class QueueConsumer:
 
     async def run_once(self, *, cycle_stop: asyncio.Event | None = None) -> bool:
         async with self._claim_lock:
-            if self._stop.is_set() or (
-                cycle_stop is not None and cycle_stop.is_set()
-            ):
+            if self._stop.is_set() or (cycle_stop is not None and cycle_stop.is_set()):
                 return False
             await self._backfill_legacy_terminal_if_pending()
             await self._purge_terminal_if_due()
             await self._queue.recover_expired()
-            if self._stop.is_set() or (
-                cycle_stop is not None and cycle_stop.is_set()
-            ):
+            if self._stop.is_set() or (cycle_stop is not None and cycle_stop.is_set()):
                 return False
-            claim = await self._queue.claim(
-                visibility_timeout=self._visibility_timeout
-            )
+            claim = await self._queue.claim(visibility_timeout=self._visibility_timeout)
             if claim is None:
                 return False
             handler = self._handlers.get(claim.job.kind)
@@ -233,9 +226,7 @@ class QueueConsumer:
                                 "errorCode": "QUEUE_PROJECT_DEFERRED",
                                 "jobId": claim.job.jobId,
                                 "projectId": project_id,
-                                "delaySeconds": (
-                                    self._project_deferral_delay.total_seconds()
-                                ),
+                                "delaySeconds": (self._project_deferral_delay.total_seconds()),
                             },
                         )
                     else:

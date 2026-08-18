@@ -14,6 +14,15 @@ from inkforge_contracts.events import (
     RunFailureCallback,
 )
 from inkforge_contracts.jwt_claims import ServiceScope
+from inkforge_contracts.video import (
+    VideoPlanCallReservationRequest,
+    VideoPlanCallReservationResponse,
+    VideoPlanCompletionCallback,
+    VideoPlanFailureCallback,
+    VideoPlanProgressQuery,
+    VideoPlanProgressResponse,
+    VideoStoryPlanCheckpointCallback,
+)
 from inkforge_service_auth import SignedServiceRequest, canonical_json_body
 from pydantic import BaseModel, ConfigDict, JsonValue
 
@@ -227,6 +236,160 @@ class CoreServiceClient:
             scope=ServiceScope.TOOL_WRITE,
             resource=resource,
             idempotency_key=idempotency_key,
+        )
+
+    async def complete_video_plan(
+        self,
+        resource: RunResource,
+        callback: VideoPlanCompletionCallback,
+    ) -> None:
+        """把严格场景方案和编译包作为一个幂等事实回传 Core。"""
+
+        await self._request(
+            "POST",
+            f"/internal/v1/video/scenes/{callback.sceneId}/complete",
+            callback.model_dump(mode="json"),
+            scope=ServiceScope.VIDEO_WRITE,
+            resource=resource,
+            idempotency_key=callback.eventId,
+        )
+
+    async def get_video_plan_progress(
+        self,
+        resource: RunResource,
+        query: VideoPlanProgressQuery,
+    ) -> VideoPlanProgressResponse:
+        """在 at-least-once 消费前读取 Core 的视频任务与故事检查点事实。"""
+
+        value = await self._request(
+            "POST",
+            f"/internal/v1/video/scenes/{query.sceneId}/progress",
+            query.model_dump(mode="json"),
+            scope=ServiceScope.VIDEO_WRITE,
+            resource=resource,
+            idempotency_key=_idempotency(
+                resource.runId,
+                "video-plan-progress",
+                query.model_dump(mode="json"),
+            ),
+        )
+        try:
+            progress = VideoPlanProgressResponse.model_validate(value)
+        except ValueError as exc:
+            raise CoreServiceError(
+                "核心服务返回的视频规划进度不符合契约",
+                recoverable=False,
+                code="VIDEO_PLAN_PROGRESS_INVALID",
+            ) from exc
+        expected_identity = (
+            query.jobId,
+            query.runId,
+            query.taskId,
+            query.novelId,
+            query.projectId,
+            query.sceneId,
+        )
+        actual_identity = (
+            progress.jobId,
+            progress.runId,
+            progress.taskId,
+            progress.novelId,
+            progress.projectId,
+            progress.sceneId,
+        )
+        if actual_identity != expected_identity:
+            raise CoreServiceError(
+                "核心服务返回的视频规划进度资源身份不匹配",
+                recoverable=False,
+                code="VIDEO_PLAN_PROGRESS_RESOURCE_MISMATCH",
+            )
+        return progress
+
+    async def reserve_video_plan_call(
+        self,
+        resource: RunResource,
+        request: VideoPlanCallReservationRequest,
+    ) -> VideoPlanCallReservationResponse:
+        """在供应商调用前由 Core 原子预留一次全局 attempt。"""
+
+        value = await self._request(
+            "POST",
+            f"/internal/v1/video/scenes/{request.sceneId}/call-reservations",
+            request.model_dump(mode="json"),
+            scope=ServiceScope.VIDEO_WRITE,
+            resource=resource,
+            idempotency_key=request.eventId,
+        )
+        try:
+            response = VideoPlanCallReservationResponse.model_validate(value)
+        except ValueError as exc:
+            raise CoreServiceError(
+                "核心服务返回的模型调用预留回执不符合契约",
+                recoverable=False,
+                code="VIDEO_PLAN_RESERVATION_INVALID",
+            ) from exc
+        expected_binding = (
+            request.eventId,
+            request.jobId,
+            request.runId,
+            request.taskId,
+            request.novelId,
+            request.projectId,
+            request.sceneId,
+            request.checkpointStage,
+            request.stage,
+            request.expectedReservedCalls,
+        )
+        actual_binding = (
+            response.eventId,
+            response.jobId,
+            response.runId,
+            response.taskId,
+            response.novelId,
+            response.projectId,
+            response.sceneId,
+            response.checkpointStage,
+            response.stage,
+            response.reservedCallsBefore,
+        )
+        if actual_binding != expected_binding:
+            raise CoreServiceError(
+                "核心服务返回的模型调用预留资源绑定不匹配",
+                recoverable=False,
+                code="VIDEO_PLAN_RESERVATION_RESOURCE_MISMATCH",
+            )
+        return response
+
+    async def save_story_plan_checkpoint(
+        self,
+        resource: RunResource,
+        callback: VideoStoryPlanCheckpointCallback,
+    ) -> None:
+        """保存已通过语义门禁的阶段规范与全局 attempt 账本。"""
+
+        await self._request(
+            "POST",
+            f"/internal/v1/video/scenes/{callback.sceneId}/story-checkpoint",
+            callback.model_dump(mode="json"),
+            scope=ServiceScope.VIDEO_WRITE,
+            resource=resource,
+            idempotency_key=callback.eventId,
+        )
+
+    async def fail_video_plan(
+        self,
+        resource: RunResource,
+        callback: VideoPlanFailureCallback,
+    ) -> None:
+        """把视频规划失败写回耐久任务，供前端恢复和重试。"""
+
+        await self._request(
+            "POST",
+            f"/internal/v1/video/scenes/{callback.sceneId}/fail",
+            callback.model_dump(mode="json"),
+            scope=ServiceScope.VIDEO_WRITE,
+            resource=resource,
+            idempotency_key=callback.eventId,
         )
 
     async def submit_evaluation(
@@ -504,9 +667,17 @@ class CoreServiceClient:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             recoverable = exc.response.status_code >= 500
+            error_code, public_message = _read_safe_core_error(exc.response)
+            summary = f"核心服务拒绝智能体回调（HTTP {exc.response.status_code}"
+            if error_code is not None:
+                summary += f"，{error_code}"
+            summary += "）"
+            if public_message is not None:
+                summary += f"：{public_message}"
             raise CoreServiceError(
-                "核心服务拒绝智能体回调",
+                summary,
                 recoverable=recoverable,
+                code=error_code,
             ) from exc
         except httpx.HTTPError as exc:
             raise CoreServiceError("核心服务暂时不可用", recoverable=True) from exc
@@ -547,6 +718,23 @@ class CoreServiceClient:
         if not isinstance(value, dict):
             raise CoreServiceError("核心服务响应格式无效", recoverable=False)
         return value
+
+
+def _read_safe_core_error(response: httpx.Response) -> tuple[str | None, str | None]:
+    """只读取 Core 公开错误码与消息，禁止把 details 或原请求写入任务错误。"""
+
+    try:
+        payload = response.json()
+    except ValueError:
+        return None, None
+    if not isinstance(payload, dict):
+        return None, None
+    code = payload.get("code")
+    message = payload.get("message")
+    return (
+        code if isinstance(code, str) and code else None,
+        message if isinstance(message, str) and message else None,
+    )
 
 
 class CoreBillingGateway:
@@ -596,9 +784,7 @@ def _writing_job_id(resource: RunResource) -> str:
 
 
 def _event_id(run_id: str, job_id: str, sequence: int, event: str) -> str:
-    digest = hashlib.sha256(
-        f"{run_id}:{job_id}:{sequence}:{event}".encode()
-    ).hexdigest()[:32]
+    digest = hashlib.sha256(f"{run_id}:{job_id}:{sequence}:{event}".encode()).hexdigest()[:32]
     return f"event-{digest}"
 
 

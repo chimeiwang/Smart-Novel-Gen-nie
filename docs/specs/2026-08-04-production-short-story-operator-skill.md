@@ -4,20 +4,23 @@
 
 - 初始日期：2026-08-04
 - 直连变更确认日期：2026-08-05
-- 状态：服务器HTTPS已实现，个人Skill待迁移
+- macOS Skill 迁移完成日期：2026-08-06
+- 状态：服务器 HTTPS 与 macOS 个人 Skill 均已实现
 - 当前生产入口：`https://inkforge.cn`
 
 服务器端已于 2026-08-05 启用可信 HTTPS，并恢复生产 `Secure` Cookie。个人
-`inkforge-production-short-story-operator` Skill 尚未迁移；下文保留的是此前已确认的临时公网 HTTP
-直连设计，只用于历史追溯和迁移核对，其中的 IP/HTTP origin、明文风险确认和放行变量都不再是当前
-生产操作指引。个人 Skill 完成 HTTPS 迁移前，不得沿用下文方案发起生产业务请求。
+`inkforge-production-short-story-operator` Skill 已按
+`2026-08-06-macos-short-story-operator-skills.md` 安装并迁移到 macOS Keychain、固定 HTTPS wrapper 和
+远端 main CLI 运行副本。下文保留的是此前已确认的临时公网 HTTP 直连设计，只用于历史追溯和迁移
+核对，其中的 IP/HTTP origin、明文风险确认、Windows 路径和放行变量都不再是当前生产操作指引。
 
-## 待迁移边界
+## 已完成迁移边界
 
 - 把生产 origin 固定为 `https://inkforge.cn`，继续使用隔离的 `production` profile。
 - 删除 Skill 中的 `INKFORGE_CLI_ALLOW_INSECURE_HTTP_ORIGIN` 注入、`acceptedInsecureHttp` 配置和明文风险说明。
 - 迁移不得保留到 IP/HTTP 的静默降级路径；身份核验、命令白名单、Diff、确认哈希和恢复边界保持不变。
-- 本次仓库文档同步不修改个人 Skill；迁移完成后再更新本规格状态。
+- macOS 安装副本使用 `scripts/run.py` 与 Security.framework Keychain 适配，并把 45 条命令白名单固定到
+  `origin/main@e9cbf576` 的真实 registry。
 
 ## 历史背景与决策
 

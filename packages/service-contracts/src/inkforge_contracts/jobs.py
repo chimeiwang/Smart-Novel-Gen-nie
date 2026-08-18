@@ -6,8 +6,9 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 
 from .identity import Identifier
 from .short_medium import ShortMediumRunPayload
+from .video import VideoPlanJobPayload
 
-AgentJobKind = Literal["writing", "portrait", "rag", "quality"]
+AgentJobKind = Literal["writing", "portrait", "rag", "quality", "video"]
 AgentJobStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
 
 
@@ -27,11 +28,15 @@ class AgentJobRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_short_medium_payload(self) -> AgentJobRequest:
+        """按任务类型校验队列载荷，避免处理器收到无结构 JSON。"""
+
         if (
             self.kind == "writing"
             and self.payload.get("workflow") == "short_medium"
         ):
             ShortMediumRunPayload.model_validate(self.payload)
+        elif self.kind == "video":
+            VideoPlanJobPayload.model_validate(self.payload)
         return self
 
 

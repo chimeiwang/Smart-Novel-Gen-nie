@@ -10,13 +10,17 @@ import { ChapterEditor } from "@/features/editor/chapter-editor";
 import { flushActiveChapterSave } from "@/features/editor/chapter-save-navigation";
 import { countUnhandledQualityChecks } from "@/features/editor/quality-presentation";
 import { ShortMediumWorkspace } from "@/features/short-medium/short-medium-workspace";
+import { VideoWorkspace } from "@/features/video/video-workspace";
 import { LibraryPane } from "./library-pane";
 import { SmartWritingPanel } from "./smart-writing-panel";
 import {
   commitWorkspaceViewChange,
   formatWorkspaceViewSaveError,
 } from "./workspace-shell-state";
-import type { WorkspaceView } from "./workspace-view";
+import {
+  resolveWorkspaceViewForProfile,
+  type WorkspaceView,
+} from "./workspace-view";
 
 type WorkspaceShellProps = {
   bootstrap: components["schemas"]["WorkspaceBootstrapResponse"];
@@ -24,10 +28,22 @@ type WorkspaceShellProps = {
   initialView: WorkspaceView;
 };
 
-const VIEW_OPTIONS: Array<{ value: WorkspaceView; label: string }> = [
+type LiveChapterDraft = {
+  title: string;
+  content: string;
+  wordCount: number;
+  updatedAt?: string;
+};
+
+const STANDARD_VIEW_OPTIONS: Array<{ value: WorkspaceView; label: string }> = [
   { value: "studio", label: "AI 创作" },
   { value: "reading", label: "阅读与小修" },
   { value: "library", label: "创作资料" },
+];
+
+const LONG_SERIAL_VIEW_OPTIONS: Array<{ value: WorkspaceView; label: string }> = [
+  ...STANDARD_VIEW_OPTIONS,
+  { value: "video", label: "视频制作" },
 ];
 
 export function WorkspaceShell({
@@ -36,13 +52,56 @@ export function WorkspaceShell({
   initialView,
 }: WorkspaceShellProps) {
   const { novel, chapters, currentChapter } = bootstrap;
-  const [activeView, setActiveView] = useState<WorkspaceView>(initialView);
+  const resolvedInitialView = resolveWorkspaceViewForProfile(
+    initialView,
+    novel.storyLengthProfile,
+  );
+  const [activeView, setActiveView] = useState<WorkspaceView>(resolvedInitialView);
   const [readingSession, setReadingSession] = useState(0);
   const [switchingView, setSwitchingView] = useState<WorkspaceView | null>(null);
   const [viewError, setViewError] = useState<string | null>(null);
-  const previousInitialViewRef = useRef(initialView);
-  const totalCount = chapters.reduce((sum, item) => sum + item.wordCount, 0);
+  const [liveDrafts, setLiveDrafts] = useState<Record<string, LiveChapterDraft>>({});
+  const previousInitialViewRef = useRef(resolvedInitialView);
+  const visibleChapters = chapters.map((chapter) => {
+    const draft = liveDrafts[chapter.id];
+    return draft
+      ? { ...chapter, title: draft.title, wordCount: draft.wordCount }
+      : chapter;
+  });
+  const currentDraft = currentChapter ? liveDrafts[currentChapter.id] : undefined;
+  const visibleCurrentChapter = currentChapter
+    ? {
+        ...currentChapter,
+        title: currentDraft?.title ?? currentChapter.title,
+        content: currentDraft?.content ?? currentChapter.content,
+        wordCount: currentDraft?.wordCount ?? currentChapter.wordCount,
+        updatedAt: currentDraft?.updatedAt ?? currentChapter.updatedAt,
+      }
+    : undefined;
+  const totalCount = visibleChapters.reduce((sum, item) => sum + item.wordCount, 0);
   const approvedBeatPlan = currentChapter?.approvedBeatPlan ?? null;
+  const viewOptions = novel.storyLengthProfile === "long_serial"
+    ? LONG_SERIAL_VIEW_OPTIONS
+    : STANDARD_VIEW_OPTIONS;
+
+  const updateLiveDraft = useCallback((draft: {
+    chapterId: string;
+    title: string;
+    content: string;
+    wordCount: number;
+    updatedAt?: string;
+  }) => {
+    setLiveDrafts((current) => ({
+      ...current,
+      [draft.chapterId]: {
+        ...current[draft.chapterId],
+        title: draft.title,
+        content: draft.content,
+        wordCount: draft.wordCount,
+        ...(draft.updatedAt ? { updatedAt: draft.updatedAt } : {}),
+      },
+    }));
+  }, []);
 
   const applyActiveView = useCallback((view: WorkspaceView) => {
     if (view === "reading") setReadingSession((current) => current + 1);
@@ -50,11 +109,17 @@ export function WorkspaceShell({
   }, []);
 
   useEffect(() => {
-    if (previousInitialViewRef.current === initialView) return;
-    previousInitialViewRef.current = initialView;
-    const syncTimer = window.setTimeout(() => applyActiveView(initialView), 0);
+    // 修正非长篇的非法视频深链，保证地址栏与实际工作区一致。
+    if (initialView !== resolvedInitialView) {
+      const url = new URL(window.location.href);
+      url.searchParams.set("view", resolvedInitialView);
+      window.history.replaceState(window.history.state, "", url);
+    }
+    if (previousInitialViewRef.current === resolvedInitialView) return;
+    previousInitialViewRef.current = resolvedInitialView;
+    const syncTimer = window.setTimeout(() => applyActiveView(resolvedInitialView), 0);
     return () => window.clearTimeout(syncTimer);
-  }, [applyActiveView, initialView]);
+  }, [applyActiveView, initialView, resolvedInitialView]);
 
   const selectView = async (nextView: WorkspaceView) => {
     if (switchingView) return;
@@ -79,7 +144,7 @@ export function WorkspaceShell({
     }
   };
 
-  if (novel.storyLengthProfile === "short_medium" && currentChapter) {
+  if (novel.storyLengthProfile === "short_medium") {
     return (
       <main className="page stack workspace-page">
         <header className="panel workspace-shell-header">
@@ -95,17 +160,21 @@ export function WorkspaceShell({
           </div>
           <LogoutButton />
         </header>
-        <ShortMediumWorkspace
-          userId={currentUser.id}
-          novelId={novel.id}
-          targetTotalWordCount={novel.targetTotalWordCount ?? 20_000}
-          chapter={{
-            id: currentChapter.id,
-            title: currentChapter.title,
-            content: currentChapter.content,
-            updatedAt: currentChapter.updatedAt,
-          }}
-        />
+        {currentChapter ? (
+          <ShortMediumWorkspace
+            userId={currentUser.id}
+            novelId={novel.id}
+            targetTotalWordCount={novel.targetTotalWordCount ?? 20_000}
+            chapter={{
+              id: currentChapter.id,
+              title: currentChapter.title,
+              content: currentChapter.content,
+              updatedAt: currentChapter.updatedAt,
+            }}
+          />
+        ) : (
+          <div className="panel empty">当前小说还没有正文，请先创建内容。</div>
+        )}
       </main>
     );
   }
@@ -125,7 +194,7 @@ export function WorkspaceShell({
           </div>
         </div>
         <nav className="workspace-view-switcher" aria-label="工作区模式">
-          {VIEW_OPTIONS.map((option) => (
+          {viewOptions.map((option) => (
             <button
               key={option.value}
               className={`workspace-view-button ${activeView === option.value ? "active" : ""}`}
@@ -144,12 +213,15 @@ export function WorkspaceShell({
       {viewError ? <p className="workspace-view-error" role="alert">{viewError}</p> : null}
 
       <div className="workspace-shell" data-view={activeView}>
-        <aside className="panel workspace-chapter-navigation" hidden={activeView === "library"}>
+        <aside
+          className="panel workspace-chapter-navigation"
+          hidden={activeView === "library" || activeView === "video"}
+        >
           <div className="panel-body">
             <ChapterList
               novelId={novel.id}
               activeChapterId={currentChapter?.id ?? ""}
-              chapters={chapters}
+              chapters={visibleChapters}
               view={activeView}
             />
           </div>
@@ -159,13 +231,13 @@ export function WorkspaceShell({
           <section className="workspace-pane workspace-agent-pane" hidden={activeView !== "studio"}>
             <SmartWritingPanel
               novelId={novel.id}
-              currentChapter={currentChapter ? {
-                id: currentChapter.id,
-                title: currentChapter.title,
-                status: currentChapter.status,
-                wordCount: currentChapter.wordCount,
+              currentChapter={visibleCurrentChapter ? {
+                id: visibleCurrentChapter.id,
+                title: visibleCurrentChapter.title,
+                status: visibleCurrentChapter.status,
+                wordCount: visibleCurrentChapter.wordCount,
                 openConsistencyCheckCount: countUnhandledQualityChecks(
-                  currentChapter.qualityChecks.filter(
+                  visibleCurrentChapter.qualityChecks.filter(
                     (check) => check.type === "consistency",
                   ),
                 ),
@@ -200,6 +272,8 @@ export function WorkspaceShell({
                   (check) => check.type === "consistency",
                 )}
                 styleName={novel.appliedStyle?.name}
+                onDraftChange={updateLiveDraft}
+                onSaved={updateLiveDraft}
               />
             ) : (
               <div className="panel empty">当前小说还没有章节，请先添加章节。</div>
@@ -213,12 +287,28 @@ export function WorkspaceShell({
               active={activeView === "library"}
             />
           </section>
+
+          {activeView === "video" ? (
+            <section className="workspace-pane workspace-video-pane">
+              <VideoWorkspace
+                novelId={novel.id}
+                novelName={novel.name}
+                currentChapter={visibleCurrentChapter ? {
+                  id: visibleCurrentChapter.id,
+                  title: visibleCurrentChapter.title,
+                  content: visibleCurrentChapter.content,
+                  updatedAt: visibleCurrentChapter.updatedAt,
+                } : undefined}
+              />
+            </section>
+          ) : null}
         </div>
 
         <aside
           id="workspace-review-rail"
           className="panel workspace-review-rail"
           aria-label="当前章节审核栏"
+          hidden={activeView === "video"}
         />
       </div>
     </main>

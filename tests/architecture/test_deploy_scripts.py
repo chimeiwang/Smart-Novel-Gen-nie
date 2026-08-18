@@ -10,6 +10,7 @@ import pytest
 ROOT = Path(__file__).parents[2]
 UPLOAD = ROOT / "scripts" / "upload-docker-images.sh"
 DEPLOY = ROOT / "scripts" / "deploy-production.sh"
+ROLLBACK_DRILL = ROOT / "scripts" / "rollback_drill.sh"
 FAKE_DOCKER = ROOT / "tests" / "architecture" / "fixtures" / "fake_docker.sh"
 POSIX_SHELL = shutil.which("sh") or str(
     Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git" / "bin" / "sh.exe"
@@ -52,6 +53,7 @@ def test_upload_preflights_and_processes_each_image_with_bounded_stages() -> Non
         'image="${images_to_upload[$index]}"',
         'docker save "$1" | gzip -1 > "$2"',
         'stat -c %s "$archive"',
+        'stat -f %z "$archive"',
         'timeout --kill-after=30s "$IMAGE_UPLOAD_TIMEOUT_SECONDS"',
         "bash -o pipefail -c 'gunzip | docker load'",
         "服务器镜像查询失败",
@@ -61,6 +63,7 @@ def test_upload_preflights_and_processes_each_image_with_bounded_stages() -> Non
         "开始传输并导入镜像",
         "镜像传输并导入完成",
         "镜像传输或导入失败",
+        '服务器镜像查询失败：${service}，退出码 ${current_status}',
     ):
         assert contract in source
 
@@ -80,6 +83,22 @@ def test_deploy_scripts_contain_no_destructive_or_dynamic_trust_commands() -> No
         "docker volume rm",
     ):
         assert forbidden not in source
+
+    assert "退出码：${original_status}）" in DEPLOY.read_text(encoding="utf-8")
+    assert "schema_profile_for_settings" in DEPLOY.read_text(encoding="utf-8")
+    assert "profile=schema_profile_for_settings(settings)" in DEPLOY.read_text(
+        encoding="utf-8"
+    )
+
+
+def test_rollback_drill_normalizes_schema_fingerprints_across_contract_versions() -> None:
+    source = ROLLBACK_DRILL.read_text(encoding="utf-8")
+
+    assert 'getattr(db_session, "schema_profile_for_settings"' in source
+    assert 'inspect.signature(guard.verify_live_schema).parameters' in source
+    assert 'actual["contractVersion"] = 1' in source
+    assert 'table.pop("checkConstraints", None)' in source
+    assert "guard.canonical_fingerprint(actual)" in source
 
 
 def _write_executable(path: Path, content: str) -> None:
