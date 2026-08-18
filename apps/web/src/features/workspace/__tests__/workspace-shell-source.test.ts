@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("工作区外壳使用章节与创作资料平级分段导航", async () => {
+test("工作区保留统一三栏并按需挂载视频制作台", async () => {
   const shellUrl = new URL("../workspace-shell.tsx", import.meta.url);
   const source = await readFile(shellUrl, "utf8");
 
@@ -17,6 +17,7 @@ test("工作区外壳使用章节与创作资料平级分段导航", async () =>
   assert.match(source, /workspace-primary-switcher/);
   assert.match(source, /"章节"/);
   assert.match(source, /"创作资料"/);
+  assert.match(source, /"视频制作"/);
   assert.doesNotMatch(source, /workspace-navigation-root/);
   assert.doesNotMatch(source, /workspace-chapter-mode-switcher/);
   assert.doesNotMatch(source, />AI 创作</);
@@ -28,22 +29,52 @@ test("工作区外壳使用章节与创作资料平级分段导航", async () =>
   assert.doesNotMatch(source, /workspace-review-rail/);
   assert.match(source, /flushActiveChapterSave/);
   assert.match(source, /activeSection/);
+  assert.match(
+    source,
+    /activeSection === "video" \? \([\s\S]{0,160}<section className="workspace-pane workspace-video-pane">/,
+  );
+  assert.equal(source.match(/<VideoWorkspace/g)?.length, 1);
+  assert.doesNotMatch(source, /SidebarTabs|showChapters|activeView/);
   const librarySelectionBody = source.match(/const selectLibraryItem = async[\s\S]*?\n  \};/)?.[0] ?? "";
   assert.match(librarySelectionBody, /await flushActiveChapterSave\(\)/);
   assert.match(librarySelectionBody, /setActiveLibraryItem\(item\)/);
   assert.match(librarySelectionBody, /setLibraryDialogOpen\(true\)/);
   assert.match(librarySelectionBody, /catch \(error\)[\s\S]*setViewError\(formatWorkspaceViewSaveError\(error\)\)/);
-  assert.match(source, /countUnhandledQualityChecks\([\s\S]{0,100}currentChapter\.qualityChecks\.filter/);
+  assert.match(
+    source,
+    /countUnhandledQualityChecks\([\s\S]{0,100}visibleCurrentChapter\.qualityChecks\.filter/,
+  );
   assert.doesNotMatch(source, /check\.status === "pending" \|\| check\.status === "failed"/);
 });
 
-test("中短篇作品进入简化双文档工作台而不是长篇三栏流程", async () => {
+test("中短篇作品只进入简化写作台且没有视频入口", async () => {
   const shellUrl = new URL("../workspace-shell.tsx", import.meta.url);
   const source = await readFile(shellUrl, "utf8");
 
   assert.match(source, /novel\.storyLengthProfile === "short_medium"/);
   assert.match(source, /<ShortMediumWorkspace/);
   assert.match(source, /targetTotalWordCount/);
+  const shortBranchStart = source.indexOf('if (novel.storyLengthProfile === "short_medium")');
+  const shortBranchEnd = source.indexOf("\n\n  return (", shortBranchStart);
+  const shortBranch = source.slice(shortBranchStart, shortBranchEnd);
+  assert.doesNotMatch(shortBranch, /VideoWorkspace|视频制作/);
+  assert.match(source, /resolveWorkspaceViewForProfile/);
+  assert.match(source, /\["chapters", "library", "video"\]/);
+});
+
+test("视频视图保留章节上下文并隐藏聊天栏", async () => {
+  const cssUrl = new URL("../../../app/globals.css", import.meta.url);
+  const source = await readFile(cssUrl, "utf8");
+
+  assert.match(
+    source,
+    /\.workspace-shell\[data-section="video"\]\s*\{\s*grid-template-columns:\s*minmax\(220px,\s*280px\)\s+minmax\(0,\s*1fr\)/,
+  );
+  assert.match(
+    source,
+    /\.workspace-shell\[data-section="video"\] \.workspace-collaboration-dock\s*\{\s*display:\s*none/,
+  );
+  assert.doesNotMatch(source, /short-medium-view-switcher/);
 });
 
 test("长篇章节编辑器接收完整的章节进展版本来源", async () => {
@@ -146,11 +177,11 @@ test("studio 使用单一宽主画布，窄桌面可滚动降级", async () => {
   assert.match(source, /workspace-page[\s\S]{0,100}overflow: auto/);
 });
 
-test("完整桌面在 1440 与 1920 宽度保留三栏并限制阅读宽度", async () => {
+test("完整桌面在 1280 与 1920 宽度保留三栏并限制阅读宽度", async () => {
   const cssUrl = new URL("../../../app/globals.css", import.meta.url);
   const source = await readFile(cssUrl, "utf8");
 
-  assert.match(source, /min-width:\s*1440px/);
+  assert.doesNotMatch(source, /\.workspace-page\s*\{[^}]*min-width:\s*1440px/);
   assert.match(
     source,
     /grid-template-columns:\s*minmax\(220px,\s*280px\)\s+minmax\(640px,\s*1fr\)\s+minmax\(380px,\s*440px\)/,
@@ -160,12 +191,32 @@ test("完整桌面在 1440 与 1920 宽度保留三栏并限制阅读宽度", as
   assert.match(source, /@media \(max-width: 1439px\)/);
 });
 
-test("桌面工作区为右上角用户浮层预留空间", async () => {
+test("工作区导航与用户浮层使用不同垂直区域", async () => {
   const cssUrl = new URL("../../../app/globals.css", import.meta.url);
-  const source = await readFile(cssUrl, "utf8");
+  const menuUrl = new URL("../../auth/user-menu.tsx", import.meta.url);
+  const [source, menuSource] = await Promise.all([
+    readFile(cssUrl, "utf8"),
+    readFile(menuUrl, "utf8"),
+  ]);
 
-  assert.match(source, /\.workspace-shell-header[\s\S]{0,220}padding-right:\s*240px/);
+  assert.doesNotMatch(source, /\.workspace-shell-header[\s\S]{0,220}padding-right:\s*240px/);
+  assert.match(menuSource, /top:\s*72/);
+  assert.match(menuSource, /Math\.max\(72,/);
   assert.match(source, /\.home-header[\s\S]{0,160}padding-right:\s*240px/);
+});
+
+test("编辑器草稿字数同步到章节列表、总字数和智能写作上下文", async () => {
+  const shellUrl = new URL("../workspace-shell.tsx", import.meta.url);
+  const editorUrl = new URL("../../editor/chapter-editor.tsx", import.meta.url);
+  const [shellSource, editorSource] = await Promise.all([
+    readFile(shellUrl, "utf8"),
+    readFile(editorUrl, "utf8"),
+  ]);
+
+  assert.match(shellSource, /visibleChapters/);
+  assert.match(shellSource, /onDraftChange=\{updateLiveDraft\}/);
+  assert.match(shellSource, /onSaved=\{updateLiveDraft\}/);
+  assert.match(editorSource, /wordCount:\s*chapterWordCount/);
 });
 
 test("创作台更多按钮不竖排且待确认入口只在有产物时显示", async () => {

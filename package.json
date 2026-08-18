@@ -20,6 +20,9 @@
   "author": "",
   "license": "ISC",
   "private": true,
+  "engines": {
+    "node": ">=20.12.0"
+  },
   "workspaces": [
     "apps/web",
     "packages/api-client"

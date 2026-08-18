@@ -8,6 +8,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     PrimaryKeyConstraint,
@@ -135,6 +136,7 @@ class Chapter(Base):
             "id",
             name="Chapter_pkey",
         ),
+        Index("Chapter_id_novelId_key", "id", "novelId", unique=True),
         Index("Chapter_novelId_order_idx", "novelId", "order"),
         Index("Chapter_status_idx", "status"),
         {"schema": "public"},
@@ -1179,6 +1181,7 @@ class Novel(Base):
             name="Novel_pkey",
         ),
         Index("Novel_userId_idx", "userId"),
+        Index("Novel_id_userId_key", "id", "userId", unique=True),
         {"schema": "public"},
     )
 
@@ -1546,6 +1549,7 @@ class ReviewArtifact(Base):
             "chapter_content",
             "beat_plan",
             "freeform_markdown",
+            "video_scene_plan",
             name="ReviewArtifactKind",
             create_type=False,
         ),
@@ -1593,6 +1597,17 @@ class ReviewArtifact(Base):
         TIMESTAMP(precision=3, timezone=False), nullable=False, default=utc_now, onupdate=utc_now
     )
     updatedByAgent: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 视频方案草案直接绑定场景；写作草案继续使用 taskId。
+    videoSceneId: Mapped[str | None] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.VideoScene.id",
+            name="ReviewArtifact_videoSceneId_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        nullable=True,
+    )
     workflowRunId: Mapped[str | None] = mapped_column(
         Text,
         ForeignKey(
@@ -1638,10 +1653,24 @@ class ReviewArtifact(Base):
             "id",
             name="ReviewArtifact_pkey",
         ),
+        ForeignKeyConstraint(
+            ("videoSceneId", "novelId"),
+            ("public.VideoScene.id", "public.VideoScene.novelId"),
+            name="ReviewArtifact_video_scene_novel_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
         Index("ReviewArtifact_artifactKey_idx", "artifactKey"),
         Index("ReviewArtifact_chapterId_status_idx", "chapterId", "status"),
         Index("ReviewArtifact_novelId_status_idx", "novelId", "status"),
         Index("ReviewArtifact_taskId_idx", "taskId"),
+        Index("ReviewArtifact_videoSceneId_status_idx", "videoSceneId", "status"),
+        Index(
+            "ReviewArtifact_id_videoSceneId_key",
+            "id",
+            "videoSceneId",
+            unique=True,
+        ),
         Index("ReviewArtifact_workflowRunId_idx", "workflowRunId"),
         {"schema": "public"},
     )
@@ -2634,9 +2663,7 @@ class WritingRunCommand(Base):
 
 class WritingEventOutbox(Base):
     __tablename__ = "WritingEventOutbox"
-    attemptCount: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("0")
-    )
+    attemptCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     commandId: Mapped[str | None] = mapped_column(
         Text,
         ForeignKey(
@@ -2723,9 +2750,7 @@ class WritingEventOutbox(Base):
             "deliveryState",
             "nextAttemptAt",
             "createdAt",
-            postgresql_where=text(
-                '"deliveryState" IN (\'pending\', \'delivering\')'
-            ),
+            postgresql_where=text("\"deliveryState\" IN ('pending', 'delivering')"),
         ),
         Index(
             "WritingEventOutbox_task_sequence_idx",
@@ -2736,6 +2761,472 @@ class WritingEventOutbox(Base):
             "WritingEventOutbox_publishedAt_idx",
             "publishedAt",
             postgresql_where=text('"publishedAt" IS NOT NULL'),
+        ),
+        {"schema": "public"},
+    )
+
+
+class VideoProject(Base):
+    """小说级视频制作项目，保存正式控制面的项目级状态。"""
+
+    __tablename__ = "VideoProject"
+    createdAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    deletedAt: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=True
+    )
+    id: Mapped[str] = mapped_column(Text, nullable=False, default=generate_id)
+    mode: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'highlight'::text")
+    )
+    novelId: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.Novel.id",
+            name="VideoProject_novelId_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        nullable=False,
+    )
+    provider: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'seedance_2_5'::text")
+    )
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'draft'::text"))
+    targetAspectRatio: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'16:9'::text")
+    )
+    targetLanguage: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'zh-CN'::text")
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    updatedAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="VideoProject_pkey"),
+        Index("VideoProject_id_novelId_key", "id", "novelId", unique=True),
+        Index(
+            "VideoProject_novelId_updatedAt_idx",
+            "novelId",
+            "updatedAt",
+            postgresql_where=text('"deletedAt" IS NULL'),
+        ),
+        {"schema": "public"},
+    )
+
+
+class VideoScene(Base):
+    """绑定不可变原文快照、正式方案和提示词的单个视频场景。"""
+
+    __tablename__ = "VideoScene"
+    chapterId: Mapped[str | None] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.Chapter.id",
+            name="VideoScene_chapterId_fkey",
+            ondelete="SET NULL",
+            onupdate="CASCADE",
+        ),
+        nullable=True,
+    )
+    createdAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    durationSeconds: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("15"))
+    id: Mapped[str] = mapped_column(Text, nullable=False, default=generate_id)
+    lastErrorCode: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lastErrorMessage: Mapped[str | None] = mapped_column(Text, nullable=True)
+    novelId: Mapped[str] = mapped_column(Text, nullable=False)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    planJson: Mapped[str | None] = mapped_column(Text, nullable=True)
+    projectId: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.VideoProject.id",
+            name="VideoScene_projectId_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        nullable=False,
+    )
+    promptCharacterCount: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    promptText: Mapped[str | None] = mapped_column(Text, nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    sourceHash: Mapped[str] = mapped_column(Text, nullable=False)
+    sourceText: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'draft'::text"))
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    updatedAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="VideoScene_pkey"),
+        ForeignKeyConstraint(
+            ("projectId", "novelId"),
+            ("public.VideoProject.id", "public.VideoProject.novelId"),
+            name="VideoScene_project_novel_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("chapterId", "novelId"),
+            ("public.Chapter.id", "public.Chapter.novelId"),
+            name="VideoScene_chapter_novel_fkey",
+            ondelete="NO ACTION",
+            onupdate="CASCADE",
+        ),
+        Index("VideoScene_id_novelId_key", "id", "novelId", unique=True),
+        Index("VideoScene_id_projectId_key", "id", "projectId", unique=True),
+        Index("VideoScene_chapterId_idx", "chapterId"),
+        Index("VideoScene_projectId_status_idx", "projectId", "status", "ordinal"),
+        Index("VideoScene_project_ordinal_key", "projectId", "ordinal", unique=True),
+        {"schema": "public"},
+    )
+
+
+class VideoAsset(Base):
+    """具有内容哈希、权利状态和锁定时间的真实多媒体素材。"""
+
+    __tablename__ = "VideoAsset"
+    byteSize: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    createdAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    durationMs: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    duty: Mapped[str] = mapped_column(Text, nullable=False)
+    id: Mapped[str] = mapped_column(Text, nullable=False, default=generate_id)
+    lockedAt: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=True
+    )
+    mimeType: Mapped[str] = mapped_column(Text, nullable=False)
+    modality: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    projectId: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.VideoProject.id",
+            name="VideoAsset_projectId_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        nullable=False,
+    )
+    rightsStatus: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'unconfirmed'::text")
+    )
+    sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    sourceKind: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'user_upload'::text")
+    )
+    storageKey: Mapped[str] = mapped_column(Text, nullable=False)
+    updatedAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="VideoAsset_pkey"),
+        Index("VideoAsset_id_projectId_key", "id", "projectId", unique=True),
+        Index("VideoAsset_projectId_modality_idx", "projectId", "modality", "createdAt"),
+        Index("VideoAsset_project_storage_key", "projectId", "storageKey", unique=True),
+        {"schema": "public"},
+    )
+
+
+class VideoAssetBinding(Base):
+    """记录一个场景如何使用某个已上传素材，避免仅靠自然语言猜测职责。"""
+
+    __tablename__ = "VideoAssetBinding"
+    assetId: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.VideoAsset.id",
+            name="VideoAssetBinding_assetId_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        nullable=False,
+    )
+    createdAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    excludeFeaturesJson: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'[]'::text")
+    )
+    id: Mapped[str] = mapped_column(Text, nullable=False, default=generate_id)
+    includeFeaturesJson: Mapped[str] = mapped_column(Text, nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("50"))
+    projectId: Mapped[str] = mapped_column(Text, nullable=False)
+    sceneId: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.VideoScene.id",
+            name="VideoAssetBinding_sceneId_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        nullable=False,
+    )
+    targetEntity: Mapped[str] = mapped_column(Text, nullable=False)
+    updatedAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="VideoAssetBinding_pkey"),
+        ForeignKeyConstraint(
+            ("sceneId", "projectId"),
+            ("public.VideoScene.id", "public.VideoScene.projectId"),
+            name="VideoAssetBinding_scene_project_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("assetId", "projectId"),
+            ("public.VideoAsset.id", "public.VideoAsset.projectId"),
+            name="VideoAssetBinding_asset_project_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        Index("VideoAssetBinding_sceneId_priority_idx", "sceneId", "priority", "createdAt"),
+        Index("VideoAssetBinding_scene_asset_key", "sceneId", "assetId", unique=True),
+        {"schema": "public"},
+    )
+
+
+class VideoGenerationTask(Base):
+    """持久化视频规划和供应商任务，Redis 只保存可重建的执行索引。"""
+
+    __tablename__ = "VideoGenerationTask"
+    attemptCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    completedAt: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=True
+    )
+    createdAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    id: Mapped[str] = mapped_column(Text, nullable=False, default=generate_id)
+    idempotencyKey: Mapped[str] = mapped_column(Text, nullable=False)
+    jobId: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    lastErrorCode: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lastErrorMessage: Mapped[str | None] = mapped_column(Text, nullable=True)
+    nextAttemptAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    projectId: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.VideoProject.id",
+            name="VideoGenerationTask_projectId_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        nullable=False,
+    )
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    providerTaskId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    requestJson: Mapped[str] = mapped_column(Text, nullable=False)
+    resultJson: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sceneId: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.VideoScene.id",
+            name="VideoGenerationTask_sceneId_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'pending'::text")
+    )
+    submittedAt: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=True
+    )
+    updatedAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="VideoGenerationTask_pkey"),
+        ForeignKeyConstraint(
+            ("sceneId", "projectId"),
+            ("public.VideoScene.id", "public.VideoScene.projectId"),
+            name="VideoGenerationTask_scene_project_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        Index(
+            "VideoGenerationTask_due_idx",
+            "status",
+            "nextAttemptAt",
+            "createdAt",
+            postgresql_where=text("\"status\" IN ('pending', 'submitted', 'processing')"),
+        ),
+        Index("VideoGenerationTask_idempotencyKey_key", "idempotencyKey", unique=True),
+        Index("VideoGenerationTask_jobId_key", "jobId", unique=True),
+        Index(
+            "VideoGenerationTask_id_sceneId_projectId_key",
+            "id",
+            "sceneId",
+            "projectId",
+            unique=True,
+        ),
+        Index("VideoGenerationTask_sceneId_createdAt_idx", "sceneId", "createdAt"),
+        {"schema": "public"},
+    )
+
+
+class VideoReviewDecisionCommand(Base):
+    """服务器 dev 库中同步批准视频候选的开发预览耐久幂等记录。"""
+
+    __tablename__ = "VideoReviewDecisionCommand"
+    artifactId: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.ReviewArtifact.id",
+            name="VideoReviewDecisionCommand_artifactId_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        nullable=False,
+    )
+    clientRequestId: Mapped[str] = mapped_column(Text, nullable=False)
+    completedAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=False
+    )
+    createdAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    decision: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'approve'::text")
+    )
+    expectedArtifactRevision: Mapped[int] = mapped_column(Integer, nullable=False)
+    id: Mapped[str] = mapped_column(Text, nullable=False, default=generate_id)
+    novelId: Mapped[str] = mapped_column(Text, nullable=False)
+    projectId: Mapped[str] = mapped_column(Text, nullable=False)
+    requestHash: Mapped[str] = mapped_column(Text, nullable=False)
+    requestedByUserId: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.User.id",
+            name="VideoReviewDecisionCommand_requestedByUserId_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        nullable=False,
+    )
+    resultJson: Mapped[str] = mapped_column(Text, nullable=False)
+    sceneId: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.VideoScene.id",
+            name="VideoReviewDecisionCommand_sceneId_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        nullable=False,
+    )
+    sourceTaskId: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.VideoGenerationTask.id",
+            name="VideoReviewDecisionCommand_sourceTaskId_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'succeeded'::text")
+    )
+    updatedAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="VideoReviewDecisionCommand_pkey"),
+        ForeignKeyConstraint(
+            ("novelId", "requestedByUserId"),
+            ("public.Novel.id", "public.Novel.userId"),
+            name="VideoReviewDecisionCommand_novel_owner_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("projectId", "novelId"),
+            ("public.VideoProject.id", "public.VideoProject.novelId"),
+            name="VideoReviewDecisionCommand_project_novel_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("sceneId", "projectId"),
+            ("public.VideoScene.id", "public.VideoScene.projectId"),
+            name="VideoReviewDecisionCommand_scene_project_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("artifactId", "sceneId"),
+            ("public.ReviewArtifact.id", "public.ReviewArtifact.videoSceneId"),
+            name="VideoReviewDecisionCommand_artifact_scene_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("sourceTaskId", "sceneId", "projectId"),
+            (
+                "public.VideoGenerationTask.id",
+                "public.VideoGenerationTask.sceneId",
+                "public.VideoGenerationTask.projectId",
+            ),
+            name="VideoReviewDecisionCommand_task_scene_project_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        Index(
+            "VideoReviewDecisionCommand_user_request_key",
+            "requestedByUserId",
+            "clientRequestId",
+            unique=True,
+        ),
+        Index(
+            "VideoReviewDecisionCommand_artifact_revision_idx",
+            "artifactId",
+            "expectedArtifactRevision",
+            "decision",
+        ),
+        Index(
+            "VideoReviewDecisionCommand_scene_created_idx",
+            "sceneId",
+            "createdAt",
         ),
         {"schema": "public"},
     )

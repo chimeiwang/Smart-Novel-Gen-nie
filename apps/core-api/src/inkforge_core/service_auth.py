@@ -47,6 +47,7 @@ _AGENT_TO_CORE_SCOPES = frozenset(
         ServiceScope.RAG_INDEX_WRITE,
         ServiceScope.PORTRAIT_WRITE,
         ServiceScope.QUALITY_WRITE,
+        ServiceScope.VIDEO_WRITE,
         ServiceScope.BILLING_AUTHORIZE,
         ServiceScope.BILLING_USAGE_WRITE,
     }

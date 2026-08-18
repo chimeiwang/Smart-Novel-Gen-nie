@@ -12,9 +12,12 @@ dependencies = [
     "httpx>=0.28,<1",
     "inkforge-service-contracts",
     "inkforge-service-auth",
+    "jsonschema-rs>=0.44,<1",
     "langchain-core>=0.3,<2",
     "langchain-openai>=0.3,<2",
     "langgraph>=0.2,<2",
+    # Responses 结构化输出直接使用官方 SDK，不能依赖 langchain-openai 的传递依赖。
+    "openai>=2.45,<3",
     "orjson>=3.10,<4",
     "pydantic>=2.10,<3",
     "pydantic-settings>=2.7,<3",

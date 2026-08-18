@@ -14,6 +14,7 @@ from .agent_client import (
     PortraitAgentSubmitter,
     QualityAgentSubmitter,
     RagAgentSubmitter,
+    VideoAgentSubmitter,
     WritingTaskAgentSubmitter,
 )
 from .auth import router as auth_router
@@ -81,6 +82,12 @@ from .styles.repository import StyleRepository
 from .styles.router import router as styles_router
 from .styles.service import StyleService
 from .styles.storage import StyleStorage
+from .video.dispatcher import VideoTaskDispatcher
+from .video.internal_router import router as video_internal_router
+from .video.repository import VideoRepository
+from .video.router import router as video_router
+from .video.service import VideoService
+from .video.storage import VideoAssetStorage
 from .writing.callbacks import router as writing_callback_router
 from .writing.cancellation import WritingRunCancellationRepository, WritingRunCancellationService
 from .writing.command_dispatcher import WritingRunCommandDispatcher
@@ -271,6 +278,30 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
     app.state.writing_task_repository = writing_task_repository
     app.state.writing_command_repository = writing_command_repository
     writing_submitter = WritingTaskAgentSubmitter(agent_client) if agent_client else None
+    if settings.video_preview_enabled:
+        video_repository = VideoRepository(
+            session_factory,
+            dispatch_namespace=cast(str, settings.video_dispatch_namespace),
+        )
+        video_submitter = VideoAgentSubmitter(agent_client) if agent_client else None
+        if (
+            settings.video_dispatch_enabled
+            and video_submitter is not None
+            and getattr(app.state, "video_dispatcher", None) is None
+        ):
+            app.state.video_dispatcher = VideoTaskDispatcher(
+                video_repository,
+                video_submitter,
+                batch_size=20,
+                interval_seconds=5,
+            )
+        app.state.video_service = VideoService(
+            video_repository,
+            VideoAssetStorage(settings.uploads_root),
+            video_preview_enabled=True,
+            seedance_configured=settings.seedance_configured,
+            seedance_enabled=settings.seedance_enabled,
+        )
     if (
         writing_submitter is not None
         and getattr(app.state, "writing_command_dispatcher", None) is None
@@ -361,6 +392,7 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             ("portrait_dispatcher", getattr(app.state, "portrait_dispatcher", None)),
             ("quality_dispatcher", getattr(app.state, "quality_dispatcher", None)),
             ("rag_dispatcher", getattr(app.state, "rag_dispatcher", None)),
+            ("video_dispatcher", getattr(app.state, "video_dispatcher", None)),
         )
         if worker is not None
     ]
@@ -414,6 +446,7 @@ def create_app(
     writing_command_dispatcher: object | None = None,
     writing_outbox_publisher: object | None = None,
     writing_outbox_readiness: object | None = None,
+    video_dispatcher: object | None = None,
 ) -> FastAPI:
     loaded_settings = settings
     if loaded_settings is None:
@@ -434,6 +467,7 @@ def create_app(
     app.state.writing_command_dispatcher = writing_command_dispatcher
     app.state.writing_outbox_publisher = writing_outbox_publisher
     app.state.writing_outbox_readiness = writing_outbox_readiness
+    app.state.video_dispatcher = video_dispatcher
     app.state.readiness_checks = {}
     app.state.readiness_error_details = {}
     register_readiness_check(app, "configuration", lambda: True)
@@ -470,6 +504,7 @@ def create_app(
     app.include_router(writing_router, prefix="/api/v1")
     app.include_router(reviews_router, prefix="/api/v1")
     app.include_router(short_medium_router, prefix="/api/v1")
+    app.include_router(video_router, prefix="/api/v1")
     app.include_router(debug_router, prefix="/api/v1")
     app.include_router(references_internal_router, include_in_schema=False)
     app.include_router(styles_internal_router, include_in_schema=False)
@@ -477,5 +512,6 @@ def create_app(
     app.include_router(tool_internal_router, include_in_schema=False)
     app.include_router(writing_callback_router, include_in_schema=False)
     app.include_router(reviews_internal_router, include_in_schema=False)
+    app.include_router(video_internal_router, include_in_schema=False)
     app.include_router(operations_router, prefix="/api/v1")
     return app
