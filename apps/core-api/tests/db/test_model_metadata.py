@@ -63,13 +63,6 @@ EXPECTED_MODEL_TABLES = {
     "ChapterWritingGoal",
     "ChapterBeatPlan",
     "SceneBeat",
-    # 视频制作域必须完整映射到 ORM，不能只在数据库里形成隐形表。
-    "VideoProject",
-    "VideoScene",
-    "VideoAsset",
-    "VideoAssetBinding",
-    "VideoGenerationTask",
-    "VideoReviewDecisionCommand",
 }
 EXPECTED_TABLES = EXPECTED_MODEL_TABLES | {"_FactionTerritories"}
 
@@ -201,14 +194,13 @@ def test_timestamp_text_bigint_and_vector_types_preserve_existing_storage() -> N
     ]
     bigint_columns = [column for column in columns if isinstance(column.type, BigInteger)]
 
-    assert len(timestamp_columns) == 98
+    assert len(timestamp_columns) == 80
     assert all(column.type.precision == 3 for column in timestamp_columns)
     assert all(column.type.timezone is False for column in timestamp_columns)
     assert {(column.table.name, column.name) for column in bigint_columns} == {
         ("User", "creditBalanceMicros"),
         ("CreditLedger", "amountMicros"),
         ("CreditLedger", "balanceAfterMicros"),
-        ("VideoAsset", "byteSize"),
     }
     assert all(
         isinstance(column.type, Text)
@@ -297,16 +289,6 @@ def test_primary_keys_foreign_keys_and_indexes_match_the_frozen_contract() -> No
                     "WritingEventOutbox_publishedAt_idx": (
                         '"publishedAt"',
                         "IS NOT NULL",
-                    ),
-                    "VideoProject_novelId_updatedAt_idx": (
-                        '"deletedAt"',
-                        "IS NULL",
-                    ),
-                    "VideoGenerationTask_due_idx": (
-                        '"status"',
-                        "pending",
-                        "submitted",
-                        "processing",
                     ),
                 }
                 assert name in expected_predicate_tokens
@@ -524,11 +506,6 @@ def test_configured_database_registers_connection_and_schema_readiness(
     monkeypatch.setattr(session, "create_database_engine", lambda _url: engine)
     monkeypatch.setattr(session, "create_session_factory", lambda _engine: object())
 
-    def reject_video_repository(_session_factory: object) -> None:
-        raise AssertionError("视频预览关闭时不应创建 VideoRepository")
-
-    monkeypatch.setattr(app_module, "VideoRepository", reject_video_repository)
-
     app = app_module.create_app(
         settings=Settings.model_validate(
             {"environment": "dev", "database_url": "postgresql://user:secret@db/inkforge"}
@@ -536,8 +513,6 @@ def test_configured_database_registers_connection_and_schema_readiness(
     )
 
     assert app.state.database_engine is engine
-    assert getattr(app.state, "video_service", None) is None
-    assert app.state.video_dispatcher is None
     assert set(app.state.readiness_checks) == {
         "configuration",
         "database",
@@ -1035,51 +1010,6 @@ async def test_failed_schema_readiness_recovers_after_short_cache_period() -> No
     clock[0] = 6.0
     assert await readiness.check_schema() is True
     assert calls == 2
-
-
-async def test_schema_readiness_passes_the_selected_runtime_profile(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from inkforge_core.db import session
-    from inkforge_core.db.schema_guard import SchemaVerificationResult
-
-    engine = cast(AsyncEngine, object())
-    captured_profiles: list[str] = []
-
-    async def verifier(
-        _engine: AsyncEngine,
-        _contract_path: Path,
-        *,
-        profile: str,
-    ) -> SchemaVerificationResult:
-        captured_profiles.append(profile)
-        return SchemaVerificationResult(ready=True, fingerprint="projected", diffs=[])
-
-    monkeypatch.setattr(session, "verify_live_schema_with_engine", verifier)
-    readiness = session.DatabaseReadiness(
-        engine,
-        CONTRACT_PATH,
-        schema_profile="without_video_preview",
-    )
-
-    assert await readiness.check_schema() is True
-    assert captured_profiles == ["without_video_preview"]
-
-
-def test_schema_profile_tracks_the_video_preview_capability() -> None:
-    from inkforge_core.config import Settings
-    from inkforge_core.db.session import schema_profile_for_settings
-
-    assert (
-        schema_profile_for_settings(Settings(environment="dev"))
-        == "without_video_preview"
-    )
-    assert (
-        schema_profile_for_settings(
-            Settings(environment="dev", video_preview_enabled=True)
-        )
-        == "full"
-    )
 
 
 def test_models_do_not_parse_the_schema_contract_dynamically() -> None:

@@ -1054,11 +1054,6 @@ short.agent.watch
 
 #### 17.6 Skill 部署
 
-2026-08-06 起，macOS 当前实现以
-`2026-08-06-macos-short-story-operator-skills.md` 为准；下述 Windows PowerShell 布局只保留为初始实现
-背景。当前安装副本使用 `scripts/run.py`、`scripts/configure.py`、macOS Keychain 和独立的远端 main
-CLI 运行 worktree。
-
 本地开发继续使用现有同名 Skill `inkforge-short-story-operator`。生产环境操作按
 `2026-08-04-production-short-story-operator-skill.md` 使用独立
 `inkforge-production-short-story-operator`；两者必须通过触发描述、wrapper、profile 和状态目录
@@ -1068,14 +1063,13 @@ CLI 运行 worktree。
 inkforge-short-story-operator/
 ├── SKILL.md
 ├── agents/openai.yaml
-├── scripts/run.py
-├── scripts/configure.py
+├── scripts/operator.ps1
 └── references/
     ├── cli-contract.md
     └── recovery.md
 ```
 
-- `run.py` 只负责定位已固定的 CLI 运行仓库、保证 UTF-8/TTY、执行身份预检并启动
+- `operator.ps1` 只负责定位仓库、解析固定本地 `.env`、保证 UTF-8/TTY、执行身份预检并启动
   CLI，不包含小说业务判断。
 - Skill 禁止 Codex 打开、读取、打印、复制或修改 `.env`；缺少凭据时只能给出用户本机一次性
   配置命令，等待用户完成后再继续。
@@ -1128,7 +1122,7 @@ inkforge-short-story-operator/
 
 ### 本机 Codex Skill
 
-- 原位重写 `~/.codex/skills/inkforge-short-story-operator` 的操作语义和 wrapper。
+- 原位重写 `%CODEX_HOME%/skills/inkforge-short-story-operator` 的操作语义和 wrapper。
 - 删除旧 Skill 的 `/short-story/**`、立即成为 current、lore 写入和 quality skip/complete 等失效或越界说明。
 - 使用场景测试验证人工确认、选区限制、冲突恢复和凭据边界。
 

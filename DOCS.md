@@ -22,10 +22,7 @@
 - Core 与 Agent 使用版本化 Pydantic 契约和 Ed25519 服务身份通信。
 - 生产由 `infra/compose.yaml` 编排，Nginx 是唯一公网入口。
 - 生产 SSH 只信任管理员离线核验的主机公钥；部署串行排队，新版本失败时由 `scripts/deploy-production.sh` 尝试恢复经验证的上一镜像。
-- PostgreSQL schema 默认冻结并由只读 `schema-contract.json` 守卫。当前具名例外只有
-  `scripts/migrations/20260807_video_production_control_plane.sql` 与
-  `scripts/migrations/20260817_video_review_decision_command.sql` 对本地服务所连接的服务器端
-  `novelwriterdev` 开发库执行视频预览控制面及批准命令迁移；生产和视频 v2 schema 仍未获授权。
+- PostgreSQL schema 不允许在本重构中修改；当前结构由只读 `schema-contract.json` 守卫。
 
 ## 文档类型
 
@@ -45,8 +42,7 @@
 - 修改 Agent、SSE、ReviewArtifact 或服务契约后，同步检查 Agent 架构文档和 03、04 号需求文档。
 - 修改日志、Studio 或部署入口后，同步检查日志文档、Studio 文档和 05 号需求文档。
 - 修改接口后重新生成 TypeScript 客户端并执行 `npm run api:check`。
-- 修改数据库访问代码时只能核对现有结构契约。除根级权威明确列出的具名迁移外，禁止新增迁移；
-  所有环境均禁止由应用启动自动执行数据定义语句。
+- 修改数据库访问代码时，只能核对现有结构契约；禁止新增迁移或自动数据定义语句。
 - 历史归档只在被触及时修正受影响部分，不要求一次性翻译全部历史内容。
 
 ## 当前入口

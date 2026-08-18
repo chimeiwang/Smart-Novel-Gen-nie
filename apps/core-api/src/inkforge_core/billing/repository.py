@@ -4,7 +4,6 @@ import asyncio
 import hashlib
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal
 
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -17,8 +16,6 @@ from ..db.models import (
     StylePortraitTask,
     TokenUsage,
     User,
-    VideoGenerationTask,
-    VideoProject,
     WritingTask,
 )
 from .pricing import calculate_usage_cost_micros
@@ -35,7 +32,6 @@ class UsageConflictError(Exception):
 @dataclass(frozen=True, slots=True)
 class AuthorizationContext:
     balance_micros: int
-    resource_kind: Literal["default", "video"] = "default"
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,34 +125,7 @@ class BillingRepository:
                         )
                     )
                 ).scalar_one_or_none()
-            resource_kind: Literal["default", "video"] = "default"
-            if balance is None:
-                # 视频规划任务使用独立任务表，但仍按小说归属授权模型费用。
-                balance = (
-                    await session.execute(
-                        select(User.creditBalanceMicros)
-                        .join(Novel, Novel.userId == User.id)
-                        .join(VideoProject, VideoProject.novelId == Novel.id)
-                        .join(
-                            VideoGenerationTask,
-                            VideoGenerationTask.projectId == VideoProject.id,
-                        )
-                        .where(
-                            User.id == user_id,
-                            Novel.id == novel_id,
-                            VideoGenerationTask.id == task_id,
-                            # 旧 Redis job 可能被 at-least-once 恢复；终态任务不得再次取 grant。
-                            VideoGenerationTask.status.in_(("pending", "submitted", "processing")),
-                        )
-                    )
-                ).scalar_one_or_none()
-                if balance is not None:
-                    resource_kind = "video"
-        return (
-            None
-            if balance is None
-            else AuthorizationContext(int(balance), resource_kind=resource_kind)
-        )
+        return None if balance is None else AuthorizationContext(int(balance))
 
     async def get_balance(self, user_id: str) -> int | None:
         async with self._session_factory() as session:

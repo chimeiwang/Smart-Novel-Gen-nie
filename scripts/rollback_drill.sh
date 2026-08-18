@@ -36,7 +36,7 @@ compose() {
 
 schema_fingerprint() {
   compose exec -T core-api python -c \
-    'import asyncio, inspect, os; from inkforge_core.config import Settings; import inkforge_core.db.schema_guard as guard; from inkforge_core.db import session as db_session; database_url = os.environ["DATABASE_URL"]; profile_factory = getattr(db_session, "schema_profile_for_settings", lambda _settings: "full"); profile = profile_factory(Settings()); verify_options = {"profile": profile} if "profile" in inspect.signature(guard.verify_live_schema).parameters else {}; result = asyncio.run(guard.verify_live_schema(database_url, db_session.SCHEMA_CONTRACT_PATH, **verify_options)); contract = guard.load_schema_contract(db_session.SCHEMA_CONTRACT_PATH); actual = asyncio.run(guard._inspect_live(database_url, str(contract.get("schema", "public")))); projector = getattr(guard, "project_schema_contract", None); actual = projector(actual, profile) if projector is not None else actual; actual["contractVersion"] = 1; [table.pop("checkConstraints", None) for table in actual["tables"]]; print(guard.canonical_fingerprint(actual)); raise SystemExit(0 if result.ready else 1)'
+    'import asyncio, os; from inkforge_core.db.schema_guard import verify_live_schema; from inkforge_core.db.session import SCHEMA_CONTRACT_PATH; result = asyncio.run(verify_live_schema(os.environ["DATABASE_URL"], SCHEMA_CONTRACT_PATH)); print(result.fingerprint); raise SystemExit(0 if result.ready else 1)'
 }
 
 restore_current() {

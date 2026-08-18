@@ -28,13 +28,3 @@ def test_real_provider_without_credentials_does_not_fall_back_to_fake() -> None:
 
     with pytest.raises(ValueError, match="真实模型提供方缺少"):
         create_model_provider(settings)
-
-
-def test_optional_strict_base_url_normalizes_empty_environment_value() -> None:
-    assert Settings.model_validate({"openai_strict_base_url": "  "}).openai_strict_base_url is None
-    assert (
-        Settings.model_validate(
-            {"openai_strict_base_url": " https://gateway.example/deepseek-beta "}
-        ).openai_strict_base_url
-        == "https://gateway.example/deepseek-beta"
-    )

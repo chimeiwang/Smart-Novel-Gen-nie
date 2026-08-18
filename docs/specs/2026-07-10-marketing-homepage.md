@@ -40,8 +40,7 @@
    - `/login?mode=register` 打开注册模式。
    - 中间件公开放行 `/`，其他工作台路由继续要求登录。
 2. 登录跳转：
-   - `/login` 始终交给登录页向 Core 查询当前用户；只有 Core 确认会话对应用户仍然有效时才跳转 `/dashboard`。
-   - 页面代理不能只凭 JWT 签名有效就把 `/login` 重定向到 `/dashboard`，否则用户被删除、数据源切换或旧会话残留时会与 Core 的 `401` 重定向形成死循环。
+   - `/login` 已登录时跳转 `/dashboard`。
    - 登录或注册成功后进入 `/dashboard`。
 3. 官网首页内容：
    - 首屏：品牌、定位、主要 CTA、产品工作流预览。
@@ -73,7 +72,6 @@
 - 首页存在注册入口，链接到 `/login?mode=register`。
 - 访问 `/dashboard` 时显示原有小说列表和新建小说入口。
 - 已登录用户访问 `/login` 会跳转 `/dashboard`。
-- 签名仍有效但 Core 已不承认的旧会话访问 `/login` 时显示登录表单，不在 `/login` 与 `/dashboard` 之间循环。
 - 登录或注册成功后进入 `/dashboard`。
 - 文案只描述当前项目已存在能力。
 - `npm run typecheck` 和 `npm run lint` 通过。

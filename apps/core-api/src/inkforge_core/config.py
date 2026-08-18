@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from ipaddress import ip_network
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Annotated, Literal, Self
@@ -49,12 +48,6 @@ class Settings(BaseSettings):
     uploads_root: str = "/data/uploads"
     workflow_event_debug_enabled: bool = False
     rag_index_enabled: bool = False
-    # Core 只保存能力门禁，不读取或保存火山供应商密钥。
-    video_preview_enabled: bool = False
-    video_dispatch_enabled: bool = False
-    video_dispatch_namespace: str | None = None
-    seedance_configured: bool = False
-    seedance_enabled: bool = False
 
     @property
     def session_cookie_secure(self) -> bool:
@@ -93,35 +86,10 @@ class Settings(BaseSettings):
             raise ValueError("上传根目录必须是绝对路径")
         return normalized
 
-    @field_validator("video_dispatch_namespace", mode="before")
-    @classmethod
-    def validate_video_dispatch_namespace(cls, value: object) -> str | None:
-        """命名空间会进入 jobId 和 SQL 前缀，必须保持短小且无通配符。"""
-
-        if value is None:
-            return None
-        if not isinstance(value, str):
-            raise ValueError("视频调度命名空间必须是字符串")
-        normalized = value.strip()
-        if not normalized:
-            return None
-        if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?", normalized):
-            raise ValueError("视频调度命名空间只能包含小写字母、数字和短横线，且最长 32 位")
-        return normalized
-
     @model_validator(mode="after")
     def validate_production_configuration(self) -> Self:
-        if self.video_dispatch_enabled and not self.video_preview_enabled:
-            raise ValueError("开启视频后台调度前必须先开启视频预览")
-        if self.video_dispatch_enabled and self.video_dispatch_namespace is None:
-            raise ValueError("开启视频后台调度必须配置稳定的视频调度命名空间")
         if self.environment != "production":
             return self
-
-        if self.video_preview_enabled:
-            raise ValueError("生产环境禁止开启仅获开发库授权的视频预览")
-        if self.video_dispatch_enabled:
-            raise ValueError("生产环境禁止开启开发视频后台调度")
 
         missing_fields = [
             field_name
@@ -173,9 +141,6 @@ def create_testing_settings() -> Settings:
             "agent_service_public_key_path": None,
             "agent_service_url": None,
             "uploads_root": "/data/uploads",
-            "video_preview_enabled": False,
-            "video_dispatch_enabled": False,
-            "video_dispatch_namespace": None,
         }
     )
 

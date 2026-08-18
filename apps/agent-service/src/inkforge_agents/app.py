@@ -22,14 +22,12 @@ from .jobs.short_medium import (
     ShortMediumWritingJobHandler,
     WritingJobDispatcher,
 )
-from .jobs.video import ModelVideoScenePlanner, VideoPromptJobHandler
 from .jobs.writing import WritingJobHandler
 from .observability import HumanWorkflowLog, WorkflowModelObserver
 from .observability.router import router as debug_router
 from .operations.definitions import validate_public_operation_definitions
 from .operations.graph import OperationDependencies, build_operation_graph
 from .providers.base import ModelProvider
-from .providers.seedance import SeedanceProvider
 from .providers.selector import create_model_provider
 from .queue.cancellation import RedisRunCancellation
 from .queue.consumer import JobHandler, QueueConsumer
@@ -120,11 +118,6 @@ def create_app(
     app.state.settings = loaded_settings
     app.state.workflow_log = workflow_log
     app.state.model_provider = provider
-    app.state.seedance_provider = SeedanceProvider(
-        api_key=loaded_settings.seedance_api_key,
-        base_url=loaded_settings.seedance_base_url,
-        enabled=loaded_settings.seedance_enabled,
-    )
     app.state.model_runtime = (
         ModelRuntime(
             provider,
@@ -340,15 +333,6 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                 handlers["quality"] = QualityJobHandler(
                     core,
                     runner,
-                    workflow_log=workflow_log,
-                )
-                # 视频规划与写作共用模型并发门和计费授权，但使用独立任务语义。
-                handlers["video"] = VideoPromptJobHandler(
-                    core,
-                    ModelVideoScenePlanner(
-                        model_runtime,
-                        max_output_tokens=settings.model_max_output_tokens,
-                    ),
                     workflow_log=workflow_log,
                 )
                 if settings.rag_index_enabled and embedding_provider is not None:

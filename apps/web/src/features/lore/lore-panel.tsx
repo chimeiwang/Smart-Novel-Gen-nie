@@ -586,51 +586,36 @@ export function LorePanel({
           await saveCharacterChildren(characterId, [], []);
         }
       } else if (activeTab === "items") {
-        // 空下拉值不是实体 ID；发送 null 才表示“没有所属角色”。
-        const itemPayload = {
-          ...itemForm,
-          ownerId: itemForm.ownerId || null,
-        };
         if (editingId !== null) {
           if (!baseline) throw new Error("编辑基线缺失，不能保存");
           requireApiData(await browserApi.PATCH("/api/v1/novels/{novel_id}/items/{entity_id}", {
-            params: { path: { novel_id: novelId, entity_id: editingId } }, body: { ...itemPayload, expectedUpdatedAt: baseline.updatedAt },
+            params: { path: { novel_id: novelId, entity_id: editingId } }, body: { ...itemForm, expectedUpdatedAt: baseline.updatedAt },
           }));
         } else {
           requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/items", {
-            params: { path: { novel_id: novelId } }, body: { ...itemPayload, clientRequestId: entityClientRequestId },
+            params: { path: { novel_id: novelId } }, body: { ...itemForm, clientRequestId: entityClientRequestId },
           }));
         }
       } else if (activeTab === "locations") {
-        // 顶级地点的 parentId 必须显式归一为 null，不能把空字符串当成待查地点。
-        const locationPayload = {
-          ...locationForm,
-          parentId: locationForm.parentId || null,
-        };
         if (editingId !== null) {
           if (!baseline) throw new Error("编辑基线缺失，不能保存");
           requireApiData(await browserApi.PATCH("/api/v1/novels/{novel_id}/locations/{entity_id}", {
-            params: { path: { novel_id: novelId, entity_id: editingId } }, body: { ...locationPayload, expectedUpdatedAt: baseline.updatedAt },
+            params: { path: { novel_id: novelId, entity_id: editingId } }, body: { ...locationForm, expectedUpdatedAt: baseline.updatedAt },
           }));
         } else {
           requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/locations", {
-            params: { path: { novel_id: novelId } }, body: { ...locationPayload, clientRequestId: entityClientRequestId },
+            params: { path: { novel_id: novelId } }, body: { ...locationForm, clientRequestId: entityClientRequestId },
           }));
         }
       } else if (activeTab === "factions") {
-        // 未选择据点时发送 null，避免 Core 把空字符串解释成不存在的地点 ID。
-        const factionPayload = {
-          ...factionForm,
-          baseId: factionForm.baseId || null,
-        };
         if (editingId !== null) {
           if (!baseline) throw new Error("编辑基线缺失，不能保存");
           requireApiData(await browserApi.PATCH("/api/v1/novels/{novel_id}/factions/{entity_id}", {
-            params: { path: { novel_id: novelId, entity_id: editingId } }, body: { ...factionPayload, expectedUpdatedAt: baseline.updatedAt },
+            params: { path: { novel_id: novelId, entity_id: editingId } }, body: { ...factionForm, expectedUpdatedAt: baseline.updatedAt },
           }));
         } else {
           requireApiData(await browserApi.POST("/api/v1/novels/{novel_id}/factions", {
-            params: { path: { novel_id: novelId } }, body: { ...factionPayload, clientRequestId: entityClientRequestId },
+            params: { path: { novel_id: novelId } }, body: { ...factionForm, clientRequestId: entityClientRequestId },
           }));
         }
       } else if (activeTab === "glossaries") {

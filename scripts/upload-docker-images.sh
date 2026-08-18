@@ -130,10 +130,10 @@ server_require_capacity() {
     available_kb="$(df -Pk "$docker_root" | awk "NR == 2 { print \$4 }")"
     available_bytes=$((available_kb * 1024))
     if [ "$available_bytes" -lt "$required_bytes" ]; then
-      echo "服务器 Docker 容量不足：${image}，需要至少 ${required_bytes} 字节，当前可用 ${available_bytes} 字节" >&2
+      echo "服务器 Docker 容量不足：$image，需要至少 ${required_bytes} 字节，当前可用 ${available_bytes} 字节" >&2
       exit 22
     fi
-    echo "服务器 Docker 容量满足要求：${image}，需要 ${required_bytes} 字节，当前可用 ${available_bytes} 字节"
+    echo "服务器 Docker 容量满足要求：$image，需要 ${required_bytes} 字节，当前可用 ${available_bytes} 字节"
   '
 }
 
@@ -204,7 +204,7 @@ reuse_deployed_image() {
     if [ "$current_status" -eq 20 ]; then
       return 1
     fi
-    echo "服务器镜像查询失败：${service}，退出码 ${current_status}" >&2
+    echo "服务器镜像查询失败：$service，退出码 $current_status" >&2
     return 2
   fi
   base_sha="${current_image##*:}"
@@ -239,7 +239,7 @@ for index in "${!images[@]}"; do
     if [ "$image_query_status" -eq 20 ]; then
       images_to_upload+=("$image")
     else
-      echo "服务器镜像内容查询失败：${service}，退出码 ${image_query_status}" >&2
+      echo "服务器镜像内容查询失败：$service，退出码 $image_query_status" >&2
       exit 1
     fi
   fi
@@ -260,25 +260,6 @@ cleanup_upload_archives() {
 }
 trap cleanup_upload_archives EXIT
 
-read_archive_size() {
-  local archive="$1"
-  local size
-
-  if size="$(stat -c %s "$archive" 2>/dev/null)"; then
-    :
-  elif size="$(stat -f %z "$archive" 2>/dev/null)"; then
-    :
-  else
-    echo "无法读取镜像归档大小：$archive" >&2
-    return 1
-  fi
-  if [[ ! "$size" =~ ^[0-9]+$ ]]; then
-    echo "镜像归档大小不是有效整数：$archive" >&2
-    return 1
-  fi
-  printf '%s\n' "$size"
-}
-
 for index in "${!images_to_upload[@]}"; do
   image="${images_to_upload[$index]}"
   archive="$upload_temp_dir/image-$index.tar.gz"
@@ -292,30 +273,30 @@ for index in "${!images_to_upload[@]}"; do
   else
     archive_status=$?
     if [ "$archive_status" -eq 124 ]; then
-      echo "镜像归档超时：${image}，限制 ${IMAGE_ARCHIVE_TIMEOUT_SECONDS} 秒" >&2
+      echo "镜像归档超时：$image，限制 ${IMAGE_ARCHIVE_TIMEOUT_SECONDS} 秒" >&2
     else
-      echo "镜像归档失败：${image}，退出码 ${archive_status}" >&2
+      echo "镜像归档失败：$image，退出码 $archive_status" >&2
     fi
     exit "$archive_status"
   fi
-  archive_size="$(read_archive_size "$archive")"
-  echo "镜像归档完成：${image}，压缩后 ${archive_size} 字节，耗时 $((SECONDS - archive_started)) 秒"
+  archive_size="$(stat -c %s "$archive")"
+  echo "镜像归档完成：$image，压缩后 ${archive_size} 字节，耗时 $((SECONDS - archive_started)) 秒"
 
   image_size="$(docker image inspect --format='{{.Size}}' "$image")"
   server_require_capacity "$image" "$image_size"
 
   upload_started=$SECONDS
-  echo "开始传输并导入镜像：${image}，超时 ${IMAGE_UPLOAD_TIMEOUT_SECONDS} 秒"
+  echo "开始传输并导入镜像：$image，超时 ${IMAGE_UPLOAD_TIMEOUT_SECONDS} 秒"
   if timeout --kill-after=30s "$IMAGE_UPLOAD_TIMEOUT_SECONDS" \
     ssh "${ssh_options[@]}" "$remote" \
     "bash -o pipefail -c 'gunzip | docker load'" < "$archive"; then
-    echo "镜像传输并导入完成：${image}，耗时 $((SECONDS - upload_started)) 秒"
+    echo "镜像传输并导入完成：$image，耗时 $((SECONDS - upload_started)) 秒"
   else
     upload_status=$?
     if [ "$upload_status" -eq 124 ]; then
-      echo "镜像传输或导入超时：${image}，限制 ${IMAGE_UPLOAD_TIMEOUT_SECONDS} 秒" >&2
+      echo "镜像传输或导入超时：$image，限制 ${IMAGE_UPLOAD_TIMEOUT_SECONDS} 秒" >&2
     else
-      echo "镜像传输或导入失败：${image}，退出码 ${upload_status}" >&2
+      echo "镜像传输或导入失败：$image，退出码 $upload_status" >&2
     fi
     exit "$upload_status"
   fi

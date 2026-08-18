@@ -23,7 +23,6 @@ logs/
 
 # 本地测试与开发输出
 output/
-.data/
 
 # LangGraph API
 .langgraph_api

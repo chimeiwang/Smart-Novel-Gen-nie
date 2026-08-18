@@ -72,17 +72,6 @@ def test_core_lifespan_starts_and_stops_command_dispatcher() -> None:
     assert dispatcher.stopped is True
 
 
-def test_core_lifespan_starts_and_stops_video_dispatcher() -> None:
-    dispatcher = Reconciler()
-    app = create_app(testing=True, video_dispatcher=dispatcher)
-
-    with TestClient(app) as client:
-        assert client.get("/api/v1/health/live").status_code == 200
-        assert dispatcher.started is True
-
-    assert dispatcher.stopped is True
-
-
 def test_core_lifespan_starts_and_stops_writing_outbox_publisher() -> None:
     publisher = Reconciler()
     app = create_app(testing=True, writing_outbox_publisher=publisher)

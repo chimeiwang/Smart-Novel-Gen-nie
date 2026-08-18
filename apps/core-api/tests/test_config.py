@@ -56,42 +56,6 @@ def test_production_accepts_complete_explicit_configuration() -> None:
     assert settings.trusted_agent_cidrs == ("10.20.0.0/16",)
 
 
-def test_production_rejects_dev_only_video_preview() -> None:
-    with pytest.raises(ValidationError, match="禁止开启仅获开发库授权的视频预览"):
-        production_settings(
-            video_preview_enabled=True,
-            video_dispatch_namespace="production-preview",
-        )
-
-
-def test_video_preview_without_dispatch_does_not_require_namespace() -> None:
-    settings = Settings(environment="dev", video_preview_enabled=True)
-
-    assert settings.video_dispatch_enabled is False
-    assert settings.video_dispatch_namespace is None
-
-
-def test_video_dispatch_requires_preview_and_safe_namespace() -> None:
-    with pytest.raises(ValidationError, match="必须先开启视频预览"):
-        Settings(
-            environment="dev",
-            video_dispatch_enabled=True,
-            video_dispatch_namespace="developer-a",
-        )
-    with pytest.raises(ValidationError, match="必须配置稳定的视频调度命名空间"):
-        Settings(
-            environment="dev",
-            video_preview_enabled=True,
-            video_dispatch_enabled=True,
-        )
-    with pytest.raises(ValidationError, match="只能包含小写字母"):
-        Settings(
-            environment="dev",
-            video_preview_enabled=True,
-            video_dispatch_namespace="开发者_A",
-        )
-
-
 def test_session_cookie_secure_requires_explicit_insecure_http_override() -> None:
     assert production_settings().session_cookie_secure is True
     assert production_settings(allow_insecure_http_auth=False).session_cookie_secure is True

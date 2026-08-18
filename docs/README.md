@@ -16,9 +16,6 @@
 | `LANGGRAPH_STUDIO.md` | Python LangGraph Studio 调试边界 |
 | `WORKFLOW_EVENT_LOG_FORMAT.md` | 人工工作流日志格式 |
 | `BACKLOG.md` | 后续能力备忘，不代表当前承诺 |
-| `specs/2026-08-08-novel-to-video-product-architecture.md` | 长篇小说视频制作系统的产品与架构基线 |
-| `specs/2026-08-08-novel-to-video-detailed-design.md` | 长篇小说视频制作系统的数据、接口、工作台与迁移详细设计 |
-| `specs/2026-08-17-video-preview-hardening.md` | 视频开发预览的数据库约束、结构守卫、生产关闭与真实并发验收 |
 | `specs/` | 后续需求 spec；先写 spec，再执行修改 |
 | `plans/2026-07-13-python-backend-rewrite-handoff.md` | Python 后端重构当前剩余任务与接手入口 |
 

@@ -161,7 +161,8 @@ class QueueConsumer:
                     self._mark_cycle_failed(cycle_stop)
                     raise
                 delay = min(
-                    self._infrastructure_retry_base * (2 ** min(infrastructure_failures - 1, 10)),
+                    self._infrastructure_retry_base
+                    * (2 ** min(infrastructure_failures - 1, 10)),
                     self._infrastructure_retry_max,
                 )
                 logger.warning(

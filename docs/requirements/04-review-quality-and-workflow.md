@@ -67,14 +67,6 @@ stateDiagram-v2
 | chapter_content | 章节正文 |
 | beat_plan | 结构化 Beat Plan |
 | freeform_markdown | 自由 Markdown 文本 |
-| video_scene_plan | 仅限服务器 dev 库长篇视频开发预览的结构化场景方案 |
-
-`video_scene_plan` 不构成生产视频 schema 授权。开发预览批准入口必须携带稳定 `clientRequestId` 和
-`expectedArtifactRevision`；Core 锁定场景与 Artifact 后执行版本 CAS，相同已应用 revision 可幂等返回，旧 revision
-必须冲突。Core 还必须在同一事务保存 `VideoReviewDecisionCommand`：同一用户重放相同 `clientRequestId` 和请求哈希
-返回首次完整结果，同键异载荷必须冲突；不同请求键重放同一已应用 revision 时可以各自保存结果相同的成功命令，
-但正式方案只能应用一次。候选批准前不得写入 `VideoScene.planJson`，批准、Artifact `applied` 与命令成功结果必须位于同一事务。该命令表只属于服务器 dev 库的开发预览，
-不构成生产视频 v2 schema 授权。
 
 ## 草案审核主流程
 

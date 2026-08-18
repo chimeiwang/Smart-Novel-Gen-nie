@@ -9,13 +9,7 @@
 - 接到新需求后，先在 `docs/specs/` 新增或更新 spec，再修改实现。
 - 修改前端 UI 前先读 `DESIGN.md`。
 - 修改 Agent、写作流程或草案审核前先读 `apps/agent-service/AGENTS.md`、`docs/requirements/03-ai-writing-and-agents.md` 和 `docs/requirements/04-review-quality-and-workflow.md`。
-- PostgreSQL schema 默认冻结。已批准例外只有
-  `scripts/migrations/20260807_video_production_control_plane.sql` 与
-  `scripts/migrations/20260817_video_review_decision_command.sql`、
-  `scripts/migrations/20260817_video_domain_ownership_chain.sql` 对服务器端
-  `novelwriterdev` 开发库执行控制面及批准命令的具名迁移；它们不构成生产迁移或视频 v2 schema 授权。
-  任何其他持久化改动必须先更新 spec 和本文件、核对
-  `apps/core-api/src/inkforge_core/db/schema-contract.json`，应用启动仍不得自动建表、删表或执行迁移。
+- 禁止修改现有 PostgreSQL schema。任何持久化改动必须先核对 `apps/core-api/src/inkforge_core/db/schema-contract.json`，不得执行自动建表、删表或迁移。
 
 ## 当前架构
 
@@ -80,4 +74,4 @@ docker compose -f infra/compose.yaml up --build -d
 - 前端修改至少运行相关测试、`npm run typecheck` 和 `npm run lint`。
 - Python 修改至少运行相关 pytest、Ruff；共享协议、鉴权或工作流修改还要运行 Mypy。
 - 部署修改运行 `tests/architecture/test_compose_security.py`，有 Docker 的环境再运行 Compose 健康检查。
-- 除上述具名服务器 dev 库迁移外，数据库结构只能做只读指纹校验，不能为了让测试通过修改数据库。
+- 数据库结构只能做只读指纹校验，不能为了让测试通过修改数据库。

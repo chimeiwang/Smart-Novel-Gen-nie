@@ -28,22 +28,8 @@ export function UserInfoBar({ username, creditBalance }: UserInfoBarProps) {
     try {
       const saved = localStorage.getItem("user-menu-position");
       if (saved) {
-        const parsed: unknown = JSON.parse(saved);
-        if (
-          typeof parsed !== "object"
-          || parsed === null
-          || !("x" in parsed)
-          || !("y" in parsed)
-          || typeof parsed.x !== "number"
-          || typeof parsed.y !== "number"
-        ) return;
-        const savedX = parsed.x;
-        const savedY = parsed.y;
         frameId = window.requestAnimationFrame(() => {
-          setPosition({
-            x: Math.max(0, Math.min(window.innerWidth - 220, savedX)),
-            y: Math.max(72, Math.min(window.innerHeight - 40, savedY)),
-          });
+          setPosition(JSON.parse(saved));
         });
       }
     } catch { /* ignore */ }
@@ -67,7 +53,7 @@ export function UserInfoBar({ username, creditBalance }: UserInfoBarProps) {
     const dy = e.clientY - dragRef.current.startY;
     setPosition({
       x: Math.max(0, Math.min(window.innerWidth - 220, dragRef.current.left + dx)),
-      y: Math.max(72, Math.min(window.innerHeight - 40, dragRef.current.top + dy)),
+      y: Math.max(0, Math.min(window.innerHeight - 40, dragRef.current.top + dy)),
     });
   }, []);
 
@@ -79,7 +65,7 @@ export function UserInfoBar({ username, creditBalance }: UserInfoBarProps) {
 
   const style: React.CSSProperties = position
     ? { position: "fixed", left: position.x, top: position.y, zIndex: 49 }
-    : { position: "fixed", top: 72, right: 16, zIndex: 49 };
+    : { position: "fixed", top: 16, right: 16, zIndex: 49 };
 
   return (
     <div

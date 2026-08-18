@@ -22,7 +22,6 @@ from .repository import (
     UsageConflictError,
     UsageSnapshot,
 )
-from .request_ids import video_task_billing_request_prefix
 from .schemas import (
     MODEL_GRANT_LIFETIME_SECONDS,
     AuthorizeModelCallRequest,
@@ -87,11 +86,7 @@ class BillingService:
 
         issued_at = (now or datetime.now(UTC)).astimezone(UTC).replace(microsecond=0)
         issued_at_seconds = int(issued_at.timestamp())
-        request_id = (
-            f"{video_task_billing_request_prefix(request.taskId)}{uuid4()}"
-            if context.resource_kind == "video"
-            else str(uuid4())
-        )
+        request_id = str(uuid4())
         claims = ModelGrantClaims(
             requestId=request_id,
             taskId=request.taskId,

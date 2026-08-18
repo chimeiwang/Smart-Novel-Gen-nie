@@ -24,30 +24,6 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 - 选区操作只能返回 replacement；Agent Service 不负责拼接全文。文档运行只回传一个最终候选
   结果，全文检查只回传报告。
 
-### 长篇视频导演规划
-
-- 视频生成只服务 `long_serial`；Agent 只消费 Core 冻结的原文、设定快照、时长、画幅、
-  规划路由和模型身份，不得回读 PostgreSQL 或当前可变资料。
-- 默认使用 DeepSeek Responses 的 `text.format=json_schema` 分三阶段生成轻量创意草案：
-  场景素材、故事节拍、摄影灯光。草案不得携带数据库 ID、正式素材 ID、节拍时间、调用账本
-  或 ReviewArtifact 状态。
-- 故事 Responses v4 由服务器从冻结原文生成连续 `E01..ENN` 事件短别名，并在调用前把它们
-  固定到闭合 `beatsByAlias` 的主/次动作槽；模型不得提交或移动 E 归属，只填写槽内动作、拍级
-  表演、调度与声音。服务器把唯一归属写入 story canonical checkpoint，并复核动作是否真实落地；
-  不得再用整段自然语言关键词首次位置推断事件顺序。E 归属不进入摄影草案或最终 Provider 提示词。
-- 摄影阶段的焦距、T 值、数值机位、构图规则、运镜、景深和拉焦时长可以从返工基线继承；
-  `focus.startTarget/endTarget`、构图前后景、摄影动机和灯光文字属于故事语义。焦点起止目标必须
-  同时属于当前 B 拍的 E 事件对象或当前拍人物表演，不能沿用上一拍对象；旧故事不兼容或焦点
-  错拍时只省略不可信语义，保留机械设计供模型重填，审计快照本身不得改写。
-- 模型草案不是正式事实。短别名映射、连续 ID、时间轴、素材引用和兼容字段必须由共享契约的
-  纯函数确定性物化，再经过完整导演语义门禁与提示词编译，最后才能回调 Core 形成待审候选。
-- 每次模型调用前必须先取得 Core 原子 reservation；正常三次、全任务最多五次。阶段 canonical
-  checkpoint 是唯一恢复事实，原始模型草案不持久化，也不得进入人工日志或用户界面。
-- Redis 视频 job 只是可重建执行索引；Core 必须从 `VideoGenerationTask` 的到期状态使用稳定 jobId 补投。
-  Agent 不得把重复投递解释成新的模型任务，必须先读取 Core 耐久进度再决定是否继续。
-- `responses_json_schema_v1`、`chat_json_output_v1` 和历史 `legacy_strict_tool_v1` 不能在同一
-  taskId 中切换。历史 legacy 活动任务应零模型稳定失败，由用户显式创建新的 retry/revise 任务。
-
 ## 关键入口
 
 - 应用工厂：`src/inkforge_agents/app.py`

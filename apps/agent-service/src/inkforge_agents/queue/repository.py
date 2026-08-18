@@ -7,7 +7,7 @@ from typing import Any, Literal, Protocol
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, JsonValue
 
-JobKind = Literal["writing", "portrait", "rag", "quality", "video"]
+JobKind = Literal["writing", "portrait", "rag", "quality"]
 JobStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
 _PRIORITY_FACTOR = 10_000_000_000_000
 _DEFAULT_TERMINAL_RETENTION = timedelta(days=7)

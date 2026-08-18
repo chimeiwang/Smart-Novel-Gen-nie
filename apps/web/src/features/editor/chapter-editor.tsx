@@ -55,19 +55,6 @@ type ChapterEditorProps = {
   qualityChecks?: QualityCheckDto[];
   styleName?: string | null;
   selectionBridge?: SelectionBridge;
-  onDraftChange?: (draft: {
-    chapterId: string;
-    title: string;
-    content: string;
-    wordCount: number;
-  }) => void;
-  onSaved?: (saved: {
-    chapterId: string;
-    title: string;
-    content: string;
-    wordCount: number;
-    updatedAt: string;
-  }) => void;
 };
 
 export function ChapterEditor({
@@ -80,8 +67,6 @@ export function ChapterEditor({
   qualityChecks = [],
   styleName,
   selectionBridge,
-  onDraftChange,
-  onSaved,
 }: ChapterEditorProps) {
   const router = useRouter();
   const [title, setTitle] = useState(chapter.title);
@@ -132,16 +117,6 @@ export function ChapterEditor({
       onStateChange: (state) => {
         if (active) setSaveState(state);
       },
-      onSaved: (snapshot, updatedAt) => {
-        if (!active) return;
-        onSaved?.({
-          chapterId: chapter.id,
-          title: snapshot.title,
-          content: snapshot.content,
-          wordCount: countTextLength(snapshot.content),
-          updatedAt,
-        });
-      },
     });
     saveCoordinatorRef.current = coordinator;
     const restoredSnapshot = coordinator.snapshot;
@@ -174,15 +149,7 @@ export function ChapterEditor({
       }
       void coordinator.dispose();
     };
-  }, [
-    chapter.content,
-    chapter.id,
-    chapter.title,
-    chapter.updatedAt,
-    novelId,
-    onSaved,
-    userId,
-  ]);
+  }, [chapter.content, chapter.id, chapter.title, chapter.updatedAt, novelId, userId]);
 
   useEffect(() => () => {
     qualityPollingGenerationRef.current += 1;
@@ -191,14 +158,6 @@ export function ChapterEditor({
   }, [chapter.id]);
 
   const chapterWordCount = useMemo(() => countTextLength(content), [content]);
-  useEffect(() => {
-    onDraftChange?.({
-      chapterId: chapter.id,
-      title,
-      content,
-      wordCount: chapterWordCount,
-    });
-  }, [chapter.id, chapterWordCount, content, onDraftChange, title]);
   const saveStatus = getChapterSaveStatusLabel(saveState);
   const checks = useMemo(
     () => qualityChecks.map((check) => selectLatestQualityCheck(check, localChecks[check.id])),
