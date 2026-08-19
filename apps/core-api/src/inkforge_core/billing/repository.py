@@ -17,6 +17,7 @@ from ..db.models import (
     StylePortraitTask,
     TokenUsage,
     User,
+    VideoAdaptationTask,
     VideoGenerationTask,
     VideoProject,
     WritingTask,
@@ -147,6 +148,28 @@ class BillingRepository:
                             VideoGenerationTask.id == task_id,
                             # 旧 Redis job 可能被 at-least-once 恢复；终态任务不得再次取 grant。
                             VideoGenerationTask.status.in_(("pending", "submitted", "processing")),
+                        )
+                    )
+                ).scalar_one_or_none()
+                if balance is not None:
+                    resource_kind = "video"
+            if balance is None:
+                # 章节影视化任务独立于旧 Scene 任务表，但沿用视频计费请求命名空间。
+                balance = (
+                    await session.execute(
+                        select(User.creditBalanceMicros)
+                        .join(Novel, Novel.userId == User.id)
+                        .join(
+                            VideoAdaptationTask,
+                            VideoAdaptationTask.novelId == Novel.id,
+                        )
+                        .where(
+                            User.id == user_id,
+                            Novel.id == novel_id,
+                            VideoAdaptationTask.id == task_id,
+                            VideoAdaptationTask.status.in_(
+                                ("pending", "submitted", "processing")
+                            ),
                         )
                     )
                 ).scalar_one_or_none()

@@ -24,8 +24,10 @@
 - 生产 SSH 只信任管理员离线核验的主机公钥；部署串行排队，新版本失败时由 `scripts/deploy-production.sh` 尝试恢复经验证的上一镜像。
 - PostgreSQL schema 默认冻结并由只读 `schema-contract.json` 守卫。当前具名例外只有
   `scripts/migrations/20260807_video_production_control_plane.sql` 与
-  `scripts/migrations/20260817_video_review_decision_command.sql` 对本地服务所连接的服务器端
-  `novelwriterdev` 开发库执行视频预览控制面及批准命令迁移；生产和视频 v2 schema 仍未获授权。
+  `scripts/migrations/20260817_video_review_decision_command.sql`、
+  `scripts/migrations/20260817_video_domain_ownership_chain.sql` 与
+  `scripts/migrations/20260818_video_chapter_adaptation_domain.sql` 对本地服务所连接的服务器端
+  `novelwriterdev` 开发库执行视频预览控制面、批准命令及章节改编域迁移；生产和完整视频 production_v2 schema 仍未获授权。
 
 ## 文档类型
 

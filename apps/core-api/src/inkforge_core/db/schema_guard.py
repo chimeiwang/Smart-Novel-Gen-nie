@@ -28,6 +28,20 @@ _VIDEO_PREVIEW_TABLES = frozenset(
         "VideoAssetBinding",
         "VideoGenerationTask",
         "VideoReviewDecisionCommand",
+        "VideoChapterAdaptation",
+        "VideoChapterAdaptationHead",
+        "VideoAdaptationTask",
+        "VideoShotPlanVersion",
+        "VideoCinematicScene",
+        "VideoDramaticBeat",
+        "VideoDramaticBeatSourceAnchor",
+        "VideoShot",
+        "VideoShotSourceAnchor",
+        "VideoEpisodePlanVersion",
+        "VideoEpisodeBoundary",
+        "VideoShotPromptVersion",
+        "VideoShotPromptHead",
+        "VideoAdaptationDecisionCommand",
     }
 )
 _VIDEO_PREVIEW_NOVEL_OBJECTS = frozenset({"Novel_id_userId_key"})
@@ -387,7 +401,11 @@ def project_schema_contract(
                 continue
             values = item.get("values")
             if isinstance(values, list):
-                item["values"] = [value for value in values if value != "video_scene_plan"]
+                item["values"] = [
+                    value
+                    for value in values
+                    if value not in {"video_scene_plan", "video_adaptation_plan"}
+                ]
 
     return add_contract_fingerprint(projected)
 
@@ -404,12 +422,17 @@ def _remove_named_objects(table: Contract, collection_name: str, names: frozense
 
 
 def _project_review_artifact_without_video(table: Contract) -> None:
+    video_columns = {
+        "videoSceneId",
+        "videoAdaptationId",
+        "videoAdaptationTaskId",
+    }
     columns = table.get("columns")
     if isinstance(columns, list):
         table["columns"] = [
             item
             for item in columns
-            if not isinstance(item, dict) or item.get("name") != "videoSceneId"
+            if not isinstance(item, dict) or item.get("name") not in video_columns
         ]
 
     for collection_name in ("foreignKeys", "uniqueConstraints"):
@@ -418,7 +441,8 @@ def _project_review_artifact_without_video(table: Contract) -> None:
             table[collection_name] = [
                 item
                 for item in collection
-                if not isinstance(item, dict) or "videoSceneId" not in item.get("columns", [])
+                if not isinstance(item, dict)
+                or video_columns.isdisjoint(item.get("columns", []))
             ]
 
     indexes = table.get("indexes")
@@ -426,17 +450,22 @@ def _project_review_artifact_without_video(table: Contract) -> None:
         table["indexes"] = [
             item
             for item in indexes
-            if not isinstance(item, dict) or not _index_references_column(item, "videoSceneId")
+            if not isinstance(item, dict)
+            or not any(_index_references_column(item, column) for column in video_columns)
         ]
 
-    checks = table.get("checkConstraints")
-    if isinstance(checks, list):
+    check_constraints = table.get("checkConstraints")
+    if isinstance(check_constraints, list):
         table["checkConstraints"] = [
             item
-            for item in checks
-            if not isinstance(item, dict) or '"videoSceneId"' not in str(item.get("definition", ""))
+            for item in check_constraints
+            if not isinstance(item, dict)
+            or not any(
+                column
+                in f"{item.get('expression', '')}{item.get('definition', '')}"
+                for column in video_columns
+            )
         ]
-
 
 def _index_references_column(index: Mapping[str, object], column_name: str) -> bool:
     include_columns = index.get("includeColumns")

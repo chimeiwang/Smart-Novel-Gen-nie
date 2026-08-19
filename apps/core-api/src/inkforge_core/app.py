@@ -82,6 +82,11 @@ from .styles.repository import StyleRepository
 from .styles.router import router as styles_router
 from .styles.service import StyleService
 from .styles.storage import StyleStorage
+from .video.adaptation.dispatcher import VideoAdaptationTaskDispatcher
+from .video.adaptation.internal_router import router as video_adaptation_internal_router
+from .video.adaptation.repository import VideoAdaptationRepository
+from .video.adaptation.router import router as video_adaptation_router
+from .video.adaptation.service import VideoAdaptationService
 from .video.dispatcher import VideoTaskDispatcher
 from .video.internal_router import router as video_internal_router
 from .video.repository import VideoRepository
@@ -283,6 +288,10 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
             session_factory,
             dispatch_namespace=cast(str, settings.video_dispatch_namespace),
         )
+        video_adaptation_repository = VideoAdaptationRepository(
+            session_factory,
+            dispatch_namespace=cast(str, settings.video_dispatch_namespace),
+        )
         video_submitter = VideoAgentSubmitter(agent_client) if agent_client else None
         if (
             settings.video_dispatch_enabled
@@ -295,12 +304,27 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
                 batch_size=20,
                 interval_seconds=5,
             )
+        if (
+            settings.video_dispatch_enabled
+            and video_submitter is not None
+            and getattr(app.state, "video_adaptation_dispatcher", None) is None
+        ):
+            app.state.video_adaptation_dispatcher = VideoAdaptationTaskDispatcher(
+                video_adaptation_repository,
+                video_submitter,
+                batch_size=20,
+                interval_seconds=5,
+            )
         app.state.video_service = VideoService(
             video_repository,
             VideoAssetStorage(settings.uploads_root),
             video_preview_enabled=True,
             seedance_configured=settings.seedance_configured,
             seedance_enabled=settings.seedance_enabled,
+        )
+        app.state.video_adaptation_service = VideoAdaptationService(
+            video_adaptation_repository,
+            video_preview_enabled=True,
         )
     if (
         writing_submitter is not None
@@ -393,6 +417,10 @@ async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
             ("quality_dispatcher", getattr(app.state, "quality_dispatcher", None)),
             ("rag_dispatcher", getattr(app.state, "rag_dispatcher", None)),
             ("video_dispatcher", getattr(app.state, "video_dispatcher", None)),
+            (
+                "video_adaptation_dispatcher",
+                getattr(app.state, "video_adaptation_dispatcher", None),
+            ),
         )
         if worker is not None
     ]
@@ -468,6 +496,7 @@ def create_app(
     app.state.writing_outbox_publisher = writing_outbox_publisher
     app.state.writing_outbox_readiness = writing_outbox_readiness
     app.state.video_dispatcher = video_dispatcher
+    app.state.video_adaptation_dispatcher = None
     app.state.readiness_checks = {}
     app.state.readiness_error_details = {}
     register_readiness_check(app, "configuration", lambda: True)
@@ -505,6 +534,7 @@ def create_app(
     app.include_router(reviews_router, prefix="/api/v1")
     app.include_router(short_medium_router, prefix="/api/v1")
     app.include_router(video_router, prefix="/api/v1")
+    app.include_router(video_adaptation_router, prefix="/api/v1")
     app.include_router(debug_router, prefix="/api/v1")
     app.include_router(references_internal_router, include_in_schema=False)
     app.include_router(styles_internal_router, include_in_schema=False)
@@ -513,5 +543,6 @@ def create_app(
     app.include_router(writing_callback_router, include_in_schema=False)
     app.include_router(reviews_internal_router, include_in_schema=False)
     app.include_router(video_internal_router, include_in_schema=False)
+    app.include_router(video_adaptation_internal_router, include_in_schema=False)
     app.include_router(operations_router, prefix="/api/v1")
     return app

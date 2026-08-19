@@ -70,6 +70,20 @@ EXPECTED_MODEL_TABLES = {
     "VideoAssetBinding",
     "VideoGenerationTask",
     "VideoReviewDecisionCommand",
+    "VideoChapterAdaptation",
+    "VideoChapterAdaptationHead",
+    "VideoAdaptationTask",
+    "VideoShotPlanVersion",
+    "VideoCinematicScene",
+    "VideoDramaticBeat",
+    "VideoDramaticBeatSourceAnchor",
+    "VideoShot",
+    "VideoShotSourceAnchor",
+    "VideoEpisodePlanVersion",
+    "VideoEpisodeBoundary",
+    "VideoShotPromptVersion",
+    "VideoShotPromptHead",
+    "VideoAdaptationDecisionCommand",
 }
 EXPECTED_TABLES = EXPECTED_MODEL_TABLES | {"_FactionTerritories"}
 
@@ -201,7 +215,7 @@ def test_timestamp_text_bigint_and_vector_types_preserve_existing_storage() -> N
     ]
     bigint_columns = [column for column in columns if isinstance(column.type, BigInteger)]
 
-    assert len(timestamp_columns) == 98
+    assert len(timestamp_columns) == 113
     assert all(column.type.precision == 3 for column in timestamp_columns)
     assert all(column.type.timezone is False for column in timestamp_columns)
     assert {(column.table.name, column.name) for column in bigint_columns} == {
@@ -302,12 +316,24 @@ def test_primary_keys_foreign_keys_and_indexes_match_the_frozen_contract() -> No
                         '"deletedAt"',
                         "IS NULL",
                     ),
-                    "VideoGenerationTask_due_idx": (
+                        "VideoGenerationTask_due_idx": (
                         '"status"',
                         "pending",
                         "submitted",
-                        "processing",
-                    ),
+                            "processing",
+                        ),
+                        "VideoAdaptationTask_due_idx": (
+                            '"status"',
+                            "pending",
+                            "submitted",
+                            "processing",
+                        ),
+                        "VideoChapterAdaptation_project_chapter_source_key": (
+                            '"chapterId"',
+                            "IS NOT NULL",
+                            '"lifecycleStatus"',
+                            "active",
+                        ),
                 }
                 assert name in expected_predicate_tokens
                 assert all(
@@ -381,8 +407,17 @@ def test_application_defaults_generate_compatible_ids_and_utc_naive_milliseconds
 
     for table_name in EXPECTED_MODEL_TABLES:
         table = _mapped_tables()[table_name]
-        assert table.c.id.default is not None
-        assert table.c.id.default.arg.__wrapped__ is generate_id
+        if "id" in table.c:
+            assert table.c.id.default is not None
+            assert table.c.id.default.arg.__wrapped__ is generate_id
+        else:
+            assert table_name in {
+                "VideoChapterAdaptationHead",
+                "VideoDramaticBeatSourceAnchor",
+                "VideoShotSourceAnchor",
+                "VideoEpisodeBoundary",
+                "VideoShotPromptHead",
+            }
         if "updatedAt" in table.c:
             assert table.c.updatedAt.default is not None
             assert table.c.updatedAt.default.arg.__wrapped__ is utc_now

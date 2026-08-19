@@ -4227,3 +4227,759 @@ body:has(.marketing-page) .user-info-bar {
 .short-version-diff > .button {
   margin: 0 12px;
 }
+
+/* 章节影视化 v2：来源、Scene/Beat/Shot 时间线与镜头检查器三栏工作台。 */
+.chapter-adaptation-workspace {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.chapter-adaptation-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 58px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--divider);
+  background: var(--panel);
+}
+
+.chapter-adaptation-header > div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.chapter-adaptation-header h2 {
+  margin: 0;
+  overflow: hidden;
+  font-size: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chapter-adaptation-header > div:first-child > span,
+.chapter-adaptation-controls label {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.chapter-adaptation-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.chapter-adaptation-controls label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.chapter-adaptation-controls .select {
+  min-width: 104px;
+  height: 32px;
+}
+
+.chapter-adaptation-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-bottom: 1px solid var(--divider);
+  background: var(--bg-subtle);
+}
+
+.chapter-adaptation-steps button {
+  min-height: 40px;
+  border: 0;
+  border-right: 1px solid var(--divider);
+  background: transparent;
+  color: var(--subtle);
+  font-size: 12px;
+}
+
+.chapter-adaptation-steps button:last-child {
+  border-right: 0;
+}
+
+.chapter-adaptation-steps button.active {
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.chapter-adaptation-steps button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.chapter-adaptation-workspace > .notice {
+  margin: 8px 10px 0;
+}
+
+.chapter-adaptation-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  min-height: 38px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--divider);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.chapter-adaptation-review-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(430px, 1.25fr) minmax(310px, 0.85fr);
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.adaptation-source-panel,
+.adaptation-timeline-panel,
+.adaptation-inspector {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.adaptation-source-panel,
+.adaptation-timeline-panel {
+  border-right: 1px solid var(--divider);
+}
+
+.adaptation-source-panel > header,
+.adaptation-timeline-panel > header,
+.adaptation-prompt-shots > header,
+.adaptation-episode-timeline > header,
+.adaptation-episode-summary > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 43px;
+  padding: 8px 11px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.adaptation-source-panel > header > div {
+  display: grid;
+  gap: 1px;
+}
+
+.adaptation-source-panel header strong,
+.adaptation-timeline-panel header strong,
+.adaptation-prompt-shots header strong,
+.adaptation-episode-layout header strong {
+  font-size: 12px;
+}
+
+.adaptation-source-panel header span,
+.adaptation-timeline-panel header span,
+.adaptation-prompt-shots header span,
+.adaptation-episode-layout header span {
+  color: var(--subtle);
+  font-size: 10px;
+}
+
+.adaptation-source-copy {
+  flex: 1;
+  padding: 22px 24px 52px;
+  overflow: auto;
+  background: var(--bg-subtle);
+  color: var(--text);
+  font-size: 15px;
+  line-height: 2;
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.adaptation-source-segment {
+  border-radius: 3px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.adaptation-source-segment.covered {
+  padding: 1px 2px;
+  background: var(--info-soft);
+}
+
+.adaptation-source-segment.omitted {
+  color: var(--subtle);
+  text-decoration: underline dotted var(--border-strong);
+  text-underline-offset: 4px;
+}
+
+.adaptation-source-segment.selected {
+  background: var(--warning-soft);
+  box-shadow: inset 0 -2px 0 var(--warning);
+}
+
+.adaptation-source-segment[data-shot-label]:not([data-shot-label=""])::after {
+  content: attr(data-shot-label);
+  display: inline-flex;
+  margin: 0 3px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--info);
+  font-size: 9px;
+  line-height: 17px;
+  vertical-align: 2px;
+  white-space: nowrap;
+}
+
+.adaptation-source-selection {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 9px;
+  border-top: 1px solid var(--border-strong);
+  background: var(--panel);
+  font-size: 10px;
+}
+
+.adaptation-timeline-scroll {
+  flex: 1;
+  padding: 9px;
+  overflow: auto;
+  background: var(--bg-subtle);
+}
+
+.adaptation-scene {
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.adaptation-scene > header,
+.adaptation-beat-heading {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.adaptation-scene > header {
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  padding: 9px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.adaptation-scene > header > span,
+.adaptation-beat-heading > span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.adaptation-scene header div,
+.adaptation-beat-heading div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.adaptation-scene header strong,
+.adaptation-beat-heading strong {
+  font-size: 12px;
+}
+
+.adaptation-scene header small,
+.adaptation-beat-heading small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.adaptation-beat {
+  padding: 8px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.adaptation-beat:last-child {
+  border-bottom: 0;
+}
+
+.adaptation-beat-heading {
+  padding: 2px 2px 7px;
+}
+
+.adaptation-shot-list {
+  display: grid;
+  gap: 4px;
+}
+
+.adaptation-shot-row {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  min-height: 52px;
+  padding: 7px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+  color: var(--text);
+  text-align: left;
+}
+
+.adaptation-shot-row:hover {
+  border-color: var(--border);
+  background: var(--panel);
+}
+
+.adaptation-shot-row.selected {
+  border-color: var(--border-strong);
+  background: var(--panel);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.adaptation-shot-key {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.adaptation-shot-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.adaptation-shot-copy strong {
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.adaptation-shot-copy small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.adaptation-shot-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 3px;
+  max-width: 150px;
+}
+
+.adaptation-shot-meta i,
+.adaptation-inspector-summary span {
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--panel-soft);
+  color: var(--muted);
+  font-size: 9px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.adaptation-inspector > header {
+  display: grid;
+  gap: 3px;
+  min-height: 53px;
+  padding: 8px 11px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.adaptation-inspector > header > div {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+
+.adaptation-inspector > header span,
+.adaptation-inspector > header small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.adaptation-inspector > header strong {
+  font-size: 13px;
+}
+
+.adaptation-inspector-scroll {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  flex: 1;
+  padding: 10px;
+  overflow: auto;
+}
+
+.adaptation-inspector-summary,
+.adaptation-inspector-actions,
+.adaptation-add-shot > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+
+.adaptation-inspector .textarea {
+  min-height: 70px;
+}
+
+.adaptation-inspector-source,
+.adaptation-add-shot {
+  display: grid;
+  gap: 5px;
+  padding: 8px;
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-sm);
+  background: var(--bg-subtle);
+}
+
+.adaptation-inspector-source strong,
+.adaptation-add-shot strong {
+  font-size: 10px;
+}
+
+.adaptation-inspector-source p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.chapter-adaptation-empty {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 9px;
+  flex: 1;
+  min-height: 430px;
+  padding: 32px;
+  background: var(--bg-subtle);
+  color: var(--muted);
+  text-align: center;
+}
+
+.chapter-adaptation-empty strong {
+  color: var(--text);
+  font-size: 15px;
+}
+
+.chapter-adaptation-empty p {
+  max-width: 560px;
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.adaptation-episode-layout {
+  display: grid;
+  grid-template-columns: minmax(480px, 1.25fr) minmax(320px, 0.75fr);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.adaptation-episode-timeline,
+.adaptation-episode-summary {
+  min-height: 0;
+  overflow: auto;
+}
+
+.adaptation-episode-timeline {
+  border-right: 1px solid var(--divider);
+}
+
+.adaptation-episode-timeline > div,
+.adaptation-episode-summary {
+  padding: 10px;
+}
+
+.adaptation-episode-shot {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 39px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  font-size: 11px;
+}
+
+.adaptation-episode-shot span,
+.adaptation-episode-shot small {
+  color: var(--muted);
+}
+
+.adaptation-episode-boundary {
+  display: block;
+  width: calc(100% - 28px);
+  height: 24px;
+  margin: 1px 14px;
+  border: 0;
+  border-top: 1px dashed var(--border-strong);
+  background: transparent;
+  color: var(--subtle);
+  font-size: 9px;
+}
+
+.adaptation-episode-boundary.active {
+  border-top-color: var(--warning);
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.adaptation-episode-summary {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  background: var(--bg-subtle);
+}
+
+.adaptation-episode-summary > header {
+  margin: -10px -10px 0;
+  background: var(--panel);
+}
+
+.adaptation-episode-summary article {
+  display: grid;
+  gap: 4px;
+  padding: 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+
+.adaptation-episode-summary article.warning {
+  border-color: var(--warning);
+}
+
+.adaptation-episode-summary article span,
+.adaptation-episode-summary article small,
+.adaptation-episode-summary article em {
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.adaptation-duration-distribution {
+  display: flex;
+  gap: 2px;
+  height: 4px;
+}
+
+.adaptation-duration-distribution i {
+  min-width: 2px;
+  border-radius: 2px;
+  background: var(--success);
+}
+
+.adaptation-duration-distribution i:nth-child(2) {
+  background: var(--info);
+}
+
+.adaptation-duration-distribution i:nth-child(3) {
+  background: var(--warning);
+}
+
+.adaptation-prompt-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.38fr) minmax(560px, 0.62fr);
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.adaptation-prompt-shots {
+  min-height: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--divider);
+}
+
+.adaptation-prompt-shots > div {
+  height: calc(100% - 43px);
+  padding: 8px;
+  overflow: auto;
+}
+
+.adaptation-prompt-episode,
+.adaptation-prompt-scene,
+.adaptation-prompt-beat {
+  display: grid;
+}
+
+.adaptation-prompt-episode {
+  gap: 6px;
+  padding-bottom: 10px;
+}
+
+.adaptation-prompt-episode h4,
+.adaptation-prompt-scene h5 {
+  margin: 0;
+}
+
+.adaptation-prompt-episode h4 {
+  display: flex;
+  justify-content: space-between;
+  padding: 5px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.adaptation-prompt-episode h4 span,
+.adaptation-prompt-scene h5,
+.adaptation-prompt-beat > small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.adaptation-prompt-scene {
+  gap: 3px;
+}
+
+.adaptation-prompt-scene h5,
+.adaptation-prompt-beat > small {
+  padding: 3px 7px;
+}
+
+.adaptation-prompt-shots button {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 7px;
+  width: 100%;
+  padding: 7px;
+  border: 0;
+  border-bottom: 1px solid var(--divider);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.adaptation-prompt-shots button.selected {
+  background: var(--panel-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.adaptation-prompt-shots button > span:first-child,
+.adaptation-prompt-shots button small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.adaptation-prompt-shots button > span:last-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.adaptation-prompt-shots button strong {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.adaptation-prompt-main {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 12px;
+  overflow: auto;
+  background: var(--bg-subtle);
+}
+
+.adaptation-prompt-main > header,
+.adaptation-prompt-main > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.adaptation-prompt-main h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.adaptation-prompt-main header span,
+.adaptation-prompt-main footer span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.adaptation-prompt-context {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.adaptation-prompt-context > div,
+.adaptation-prompt-spec {
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+
+.adaptation-prompt-context strong,
+.adaptation-prompt-context p,
+.adaptation-prompt-spec {
+  font-size: 10px;
+}
+
+.adaptation-prompt-context p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.adaptation-prompt-spec summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.adaptation-prompt-spec dl {
+  display: grid;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 5px 8px;
+  margin: 8px 0 0;
+}
+
+.adaptation-prompt-spec dt {
+  color: var(--muted);
+}
+
+.adaptation-prompt-spec dd {
+  margin: 0;
+}
+
+.adaptation-prompt-textarea {
+  min-height: 240px;
+  line-height: 1.7;
+}
+
+.adaptation-prompt-main > footer {
+  justify-content: flex-start;
+}

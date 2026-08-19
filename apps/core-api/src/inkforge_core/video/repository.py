@@ -15,15 +15,9 @@ from inkforge_contracts.video import (
     AspectRatio,
     AssetDuty,
     AssetModality,
-    CharacterSettingSnapshot,
-    ItemSettingSnapshot,
-    LocationSettingSnapshot,
-    LongSerialSettingSnapshot,
-    RelationshipSettingSnapshot,
     SceneAssetsStageArguments,
     ScenePromptSpec,
     SeedancePromptPackage,
-    SettingSnapshotEntry,
     StoryPlanStageArguments,
     VideoPlanAttemptState,
     VideoPlanCallReservationRequest,
@@ -34,7 +28,6 @@ from inkforge_contracts.video import (
     VideoPlanProgressQuery,
     VideoPlanProgressResponse,
     VideoStoryPlanCheckpointCallback,
-    WorldSettingSnapshot,
     calculate_video_plan_business_input_fingerprint,
     calculate_video_plan_input_fingerprint,
 )
@@ -46,11 +39,7 @@ from ..billing.request_ids import video_task_billing_request_prefix
 from ..db.base import generate_id, utc_now
 from ..db.models import (
     Chapter,
-    Character,
-    CharacterRelation,
     CreditLedger,
-    Item,
-    Location,
     Novel,
     ReviewArtifact,
     ReviewArtifactRevision,
@@ -61,7 +50,6 @@ from ..db.models import (
     VideoProject,
     VideoReviewDecisionCommand,
     VideoScene,
-    WorldSetting,
     WritingBible,
 )
 from ..errors import ApiError
@@ -88,6 +76,7 @@ from .schemas import (
     VideoReviewArtifactSummary,
     VideoSceneResponse,
 )
+from .setting_snapshot import build_long_serial_setting_snapshot
 from .storage import StoredVideoAsset
 
 _PREVIEW_PROJECT_MODES = {"concept", "trailer", "highlight"}
@@ -465,7 +454,7 @@ class VideoRepository:
                 task_id = generate_id()
                 job_id = self._plan_job_id(task_id)
                 try:
-                    setting_snapshot = await _build_long_serial_setting_snapshot(
+                    setting_snapshot = await build_long_serial_setting_snapshot(
                         session,
                         project.novelId,
                     )
@@ -1459,174 +1448,6 @@ class VideoRepository:
             )
 
 
-async def _build_long_serial_setting_snapshot(
-    session: AsyncSession,
-    novel_id: str,
-) -> LongSerialSettingSnapshot:
-    """按类型和主键冻结长篇资料，并让关系与所有者引用保持闭合。"""
-
-    # 任务事务在读取期间锁定设定行，避免指纹由不同时刻的混合状态组成。
-    characters = list(
-        (
-            await session.scalars(
-                select(Character)
-                .where(Character.novelId == novel_id)
-                .order_by(Character.id)
-                .with_for_update()
-            )
-        ).all()
-    )
-    character_ids = {character.id for character in characters}
-    character_names = {character.id: character.name for character in characters}
-
-    relations: list[CharacterRelation] = []
-    if character_ids:
-        relations = list(
-            (
-                await session.scalars(
-                    select(CharacterRelation)
-                    .where(
-                        CharacterRelation.characterId.in_(character_ids),
-                        CharacterRelation.targetId.in_(character_ids),
-                    )
-                    .order_by(CharacterRelation.id)
-                    .with_for_update()
-                )
-            ).all()
-        )
-    locations = list(
-        (
-            await session.scalars(
-                select(Location)
-                .where(Location.novelId == novel_id)
-                .order_by(Location.id)
-                .with_for_update()
-            )
-        ).all()
-    )
-    location_ids = {location.id for location in locations}
-    items = list(
-        (
-            await session.scalars(
-                select(Item).where(Item.novelId == novel_id).order_by(Item.id).with_for_update()
-            )
-        ).all()
-    )
-    world_setting = await session.scalar(
-        select(WorldSetting).where(WorldSetting.novelId == novel_id).with_for_update()
-    )
-
-    entries: list[SettingSnapshotEntry] = []
-    for character in characters:
-        content: dict[str, object] = {
-            "kind": "character",
-            "id": character.id,
-            "name": character.name,
-            "aliases": _parse_aliases(character.aliases),
-            "appearance": character.appearance,
-            "identity": character.identity,
-        }
-        entries.append(
-            CharacterSettingSnapshot.model_validate(
-                {**content, "contentHash": _setting_entry_content_hash(content)}
-            )
-        )
-
-    for relation in relations:
-        content = {
-            "kind": "relationship",
-            "id": relation.id,
-            "name": (
-                f"{character_names[relation.characterId]} → {character_names[relation.targetId]}"
-            ),
-            "sourceCharacterId": relation.characterId,
-            "targetCharacterId": relation.targetId,
-            "relationType": relation.relationType,
-            "description": relation.description,
-        }
-        entries.append(
-            RelationshipSettingSnapshot.model_validate(
-                {**content, "contentHash": _setting_entry_content_hash(content)}
-            )
-        )
-
-    for location in locations:
-        content = {
-            "kind": "location",
-            "id": location.id,
-            "name": location.name,
-            "aliases": _parse_aliases(location.aliases),
-            "locationType": location.type,
-            # 跨小说父地点不是安全的长篇设定引用，因此不进入冻结图。
-            "parentLocationId": (location.parentId if location.parentId in location_ids else None),
-            "climate": location.climate,
-            "culture": location.culture,
-            "description": location.description,
-        }
-        entries.append(
-            LocationSettingSnapshot.model_validate(
-                {**content, "contentHash": _setting_entry_content_hash(content)}
-            )
-        )
-
-    for item in items:
-        content = {
-            "kind": "item",
-            "id": item.id,
-            "name": item.name,
-            "aliases": _parse_aliases(item.aliases),
-            "itemType": item.type,
-            # 只冻结同一长篇快照中能够解析的持有者。
-            "ownerCharacterId": item.ownerId if item.ownerId in character_ids else None,
-            "description": item.description,
-        }
-        entries.append(
-            ItemSettingSnapshot.model_validate(
-                {**content, "contentHash": _setting_entry_content_hash(content)}
-            )
-        )
-
-    if world_setting is not None and world_setting.content:
-        content = {
-            "kind": "world_setting",
-            "id": world_setting.id,
-            "name": "世界设定",
-            "content": world_setting.content,
-        }
-        entries.append(
-            WorldSettingSnapshot.model_validate(
-                {**content, "contentHash": _setting_entry_content_hash(content)}
-            )
-        )
-
-    return LongSerialSettingSnapshot.from_entries(entries)
-
-
-def _setting_entry_content_hash(content: dict[str, object]) -> str:
-    """对不含 contentHash 的完整类型化投影计算稳定内容哈希。"""
-
-    canonical = json.dumps(
-        content,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def _parse_aliases(value: str | None) -> list[str]:
-    """把旧表的自由文本别名解析为有序数组，不做长度截断。"""
-
-    if value is None:
-        return []
-    aliases: list[str] = []
-    for candidate in re.split(r"[,，、;；\n]+", value):
-        normalized = candidate.strip()
-        if normalized and normalized not in aliases:
-            aliases.append(normalized)
-    return aliases
-
-
 def _preview_duty_matches(planned_duty: str, stored_duty: str) -> bool:
     """关系交互是规划职责；旧表无此枚举，预览期用图片 keyframe 显式兼容。"""
 
@@ -1685,13 +1506,13 @@ async def _require_long_serial_project_by_id(
 
 
 def _require_preview_project_mode(project: VideoProject) -> None:
-    """结构冻结期不允许旧的长片、分集或系列项目继续写入。"""
+    """旧 Scene 预览只服务试制项目；series 必须进入独立章节改编域。"""
 
     if project.mode not in _PREVIEW_PROJECT_MODES:
         raise ApiError(
             status_code=409,
             code="VIDEO_PREVIEW_MODE_REQUIRED",
-            message="开发预览仅支持概念片、预告片和高光片段项目",
+            message="旧场景预览仅支持概念片、预告片和高光片段项目",
         )
 
 

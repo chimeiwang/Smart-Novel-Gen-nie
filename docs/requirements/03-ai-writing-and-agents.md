@@ -1,5 +1,21 @@
 # AI 写作与 Agent 需求
 
+## 长篇章节影视化任务
+
+长篇视频工作台的新入口使用独立 `VideoChapterAdaptation`，不再把完整章节或镜头方案写入旧
+`VideoScene.planJson`。`JobKind=video` 新增两个判别 workflow：
+
+- `chapter_cinematic_adaptation_v2`：先识别真实 Scene 和 DramaticBeat，保存 Core 耐久 checkpoint，再设计
+  有剪辑动机的 Shot，并经过电影语法/连续性 Reviewer；最多一次完整返工。
+- `chapter_shot_prompt_v2`：固定到一个已批准 `VideoShotPlanVersion`，只为请求镜头生成结构化即梦提示词规格。
+
+来源句末编号只用于 Unicode code point 锚定。说话人改变、句子结束、段落或换行不得直接产生镜头；一个对白
+可跨多个画面，多句对白也可保留在一个主镜头或双人镜头。每个镜头必须提交目的、景别、机位、运镜、可见动作、
+声音任务、成片时长和具体切镜理由。Agent 候选不得直接写正式关系表或 PromptHead。
+
+场景/节拍 checkpoint 成功后，at-least-once 重试必须从该阶段继续，不能重复消费第一阶段模型调用。所有模型调用
+继续经过 `ModelRuntime` 的计费授权、全局并发门和结构化输出日志脱敏。
+
 ## 长篇选区改写契约
 
 `rewrite_chapter_selection` 与 `rewrite_outline_selection` 必须提交 `selectionTarget`：资源类型与资源 ID、`baseUpdatedAt`、完整正文 `baseContentHash`、Unicode 码点范围 `selectionStart/selectionEnd` 以及 `selectedTextHash`。请求不得提交 `selectedText`；选区正文由 Core 根据权威来源和 hash 冻结，客户端字段只承担身份与范围绑定。章节正文选区只能指向对应 `chapterId`，大纲总纲/节点选区分别使用 `novel`/`outline_node` scope。

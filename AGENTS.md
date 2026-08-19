@@ -12,8 +12,9 @@
 - PostgreSQL schema 默认冻结。已批准例外只有
   `scripts/migrations/20260807_video_production_control_plane.sql` 与
   `scripts/migrations/20260817_video_review_decision_command.sql`、
-  `scripts/migrations/20260817_video_domain_ownership_chain.sql` 对服务器端
-  `novelwriterdev` 开发库执行控制面及批准命令的具名迁移；它们不构成生产迁移或视频 v2 schema 授权。
+  `scripts/migrations/20260817_video_domain_ownership_chain.sql` 与
+  `scripts/migrations/20260818_video_chapter_adaptation_domain.sql` 对服务器端
+  `novelwriterdev` 开发库执行视频预览控制面、批准命令及章节改编域的具名迁移；它们不构成生产迁移或完整视频 production_v2 schema 授权。
   任何其他持久化改动必须先更新 spec 和本文件、核对
   `apps/core-api/src/inkforge_core/db/schema-contract.json`，应用启动仍不得自动建表、删表或执行迁移。
 
