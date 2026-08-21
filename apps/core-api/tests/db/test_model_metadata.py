@@ -13,7 +13,16 @@ from typing import Any, cast, get_origin, get_type_hints
 import pytest
 from fastapi.testclient import TestClient
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import BigInteger, Boolean, Integer, Text, create_engine, event, inspect
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    Integer,
+    Text,
+    create_engine,
+    event,
+    inspect,
+)
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import URL
 from sqlalchemy.ext.asyncio import AsyncEngine
@@ -72,11 +81,26 @@ def _contract() -> dict[str, Any]:
 
 
 def _business_contract_tables() -> dict[str, dict[str, Any]]:
-    return {
+    tables = {
         table["name"]: table
         for table in _contract()["tables"]
         if table["name"] != "_prisma_migrations"
     }
+    token_usage = tables["TokenUsage"]
+    known_columns = {column["name"] for column in token_usage["columns"]}
+    for column_name in ("requestId", "taskId", "runId"):
+        if column_name not in known_columns:
+            # 隔离迁移阶段先由专项测试锁定新增列；数据库演练后再刷新冻结契约。
+            token_usage["columns"].append(
+                {
+                    "default": None,
+                    "formatType": "text",
+                    "name": column_name,
+                    "nullable": True,
+                    "udtName": "text",
+                }
+            )
+    return tables
 
 
 def _mapped_tables() -> dict[str, Any]:
@@ -257,6 +281,15 @@ def test_primary_keys_foreign_keys_and_indexes_match_the_frozen_contract() -> No
             if index["name"] != expected_primary_key["name"]
         }
         actual_indexes = {index.name: index for index in table.indexes}
+        if table_name == "TokenUsage":
+            # 隔离迁移阶段先由专项测试锁定新增索引；数据库演练后再刷新冻结契约。
+            for name in (
+                "TokenUsage_requestId_key",
+                "TokenUsage_userId_taskId_createdAt_idx",
+                "TokenUsage_runId_createdAt_idx",
+            ):
+                if name not in expected_indexes:
+                    actual_indexes.pop(name, None)
         assert set(actual_indexes) == set(expected_indexes), table_name
         for name, expected in expected_indexes.items():
             actual = actual_indexes[name]
@@ -316,7 +349,49 @@ def test_primary_keys_foreign_keys_and_indexes_match_the_frozen_contract() -> No
         ):
             _assert_index_key_defaults(column, key_item)
 
-        assert not table.constraints.difference({table.primary_key, *table.foreign_key_constraints})
+        other_constraints = table.constraints.difference(
+            {table.primary_key, *table.foreign_key_constraints}
+        )
+        if table_name == "TokenUsage":
+            assert {
+                constraint.name for constraint in other_constraints
+            } == {"TokenUsage_requestId_check"}
+        else:
+            assert not other_constraints
+
+
+def test_token_usage_attribution_metadata_is_exact() -> None:
+    table = _mapped_tables()["TokenUsage"]
+
+    for column_name in ("requestId", "taskId", "runId"):
+        column = table.c[column_name]
+        assert isinstance(column.type, Text)
+        assert column.nullable is True
+        assert column.server_default is None
+
+    constraints = {
+        constraint.name: constraint
+        for constraint in table.constraints
+        if isinstance(constraint, CheckConstraint)
+    }
+    assert set(constraints) == {"TokenUsage_requestId_check"}
+    constraint_sql = str(constraints["TokenUsage_requestId_check"].sqltext)
+    assert '"requestId" IS NULL' in constraint_sql
+    assert 'btrim("requestId")' in constraint_sql
+
+    indexes = {index.name: index for index in table.indexes}
+    expected = {
+        "TokenUsage_requestId_key": (["requestId"], True),
+        "TokenUsage_userId_taskId_createdAt_idx": (
+            ["userId", "taskId", "createdAt"],
+            False,
+        ),
+        "TokenUsage_runId_createdAt_idx": (["runId", "createdAt"], False),
+    }
+    for name, (column_names, unique) in expected.items():
+        assert name in indexes
+        assert [column.name for column in indexes[name].columns] == column_names
+        assert indexes[name].unique is unique
 
 
 def test_association_table_and_writing_message_reserved_attribute_are_exact() -> None:

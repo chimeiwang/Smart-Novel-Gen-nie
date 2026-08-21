@@ -6,6 +6,7 @@ from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Column,
     ForeignKey,
     Index,
@@ -1909,6 +1910,9 @@ class TokenUsage(Base):
     model: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''::text"))
     novelId: Mapped[str | None] = mapped_column(Text, nullable=True)
     promptTokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    requestId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    taskId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    runId: Mapped[str | None] = mapped_column(Text, nullable=True)
     totalTokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     userId: Mapped[str] = mapped_column(
         Text,
@@ -1928,8 +1932,20 @@ class TokenUsage(Base):
             "id",
             name="TokenUsage_pkey",
         ),
+        CheckConstraint(
+            '"requestId" IS NULL OR btrim("requestId") <> \'\'',
+            name="TokenUsage_requestId_check",
+        ),
         Index("TokenUsage_agentId_idx", "agentId"),
         Index("TokenUsage_novelId_idx", "novelId"),
+        Index("TokenUsage_requestId_key", "requestId", unique=True),
+        Index("TokenUsage_runId_createdAt_idx", "runId", "createdAt"),
+        Index(
+            "TokenUsage_userId_taskId_createdAt_idx",
+            "userId",
+            "taskId",
+            "createdAt",
+        ),
         Index("TokenUsage_userId_createdAt_idx", "userId", "createdAt"),
         Index("TokenUsage_userId_idx", "userId"),
         {"schema": "public"},
