@@ -280,7 +280,7 @@ async def test_billable_runtime_classifies_provider_failure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_billable_runtime_classifies_usage_report_failure() -> None:
+async def test_billable_runtime_classifies_usage_report_failure_without_logging() -> None:
     class FailingBilling(Billing):
         async def report(
             self,
@@ -288,10 +288,17 @@ async def test_billable_runtime_classifies_usage_report_failure() -> None:
             payload: dict[str, Any],
             request_id: str,
         ) -> None:
-            del context, payload, request_id
+            await super().report(context, payload, request_id)
             raise RuntimeError("用量服务不可用")
 
-    runtime = ModelRuntime(Provider(), billing=FailingBilling())  # type: ignore[arg-type]
+    provider = Provider()
+    billing = FailingBilling()
+    observer = ModelObserver()
+    runtime = ModelRuntime(  # type: ignore[arg-type]
+        provider,
+        billing=billing,
+        observer=observer,
+    )
 
     with pytest.raises(RuntimeError, match="^MODEL_USAGE_REPORT_FAILED："):
         await runtime.run_turn(
@@ -309,6 +316,9 @@ async def test_billable_runtime_classifies_usage_report_failure() -> None:
             ),
         )
 
+    assert len(provider.requests) == 1
+    assert len(billing.usages) == 1
+    assert observer.calls == []
 
 @pytest.mark.asyncio
 async def test_计费运行时使用较小授权且不修改原请求() -> None:
