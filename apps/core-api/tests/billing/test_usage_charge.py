@@ -179,7 +179,10 @@ async def test_concurrent_retry_charges_once(tmp_path: Path) -> None:
         ("run_id", "run-2"),
         ("model", "other-model"),
         ("agent_id", "质检"),
+        ("prompt_tokens", 101),
+        ("cached_tokens", 41),
         ("completion_tokens", 21),
+        ("total_tokens", 121),
     ],
 )
 async def test_same_request_with_different_identity_or_usage_conflicts(
@@ -202,6 +205,45 @@ async def test_same_request_with_different_identity_or_usage_conflicts(
 
         with pytest.raises(UsageConflictError):
             await repository.charge_usage(replace(original, **{field: different_value}))
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_integrity_recovery_distinguishes_retry_and_conflict(tmp_path: Path) -> None:
+    engine, factory = await _create_database(tmp_path / "唯一冲突恢复.db")
+    try:
+        async with factory() as session, session.begin():
+            session.add(
+                User(
+                    id="user-1",
+                    username="alice",
+                    passwordHash="固定哈希",
+                    creditBalanceMicros=1_000_000,
+                )
+            )
+        repository = BillingRepository(factory)
+        original = _usage()
+        first = await repository.charge_usage(original)
+
+        retry = await repository._resolve_integrity_race(original, first.charged_micros)
+        with pytest.raises(UsageConflictError):
+            await repository._resolve_integrity_race(
+                replace(original, run_id="run-conflict"), first.charged_micros
+            )
+
+        async with factory() as session:
+            ledger_count = (
+                await session.execute(select(func.count()).select_from(CreditLedger))
+            ).scalar_one()
+            usage_count = (
+                await session.execute(select(func.count()).select_from(TokenUsage))
+            ).scalar_one()
+        assert retry is not None
+        assert retry.idempotent is True
+        assert retry.balance_after_micros == first.balance_after_micros
+        assert ledger_count == 1
+        assert usage_count == 1
     finally:
         await engine.dispose()
 
@@ -254,6 +296,10 @@ async def test_zero_usage_writes_one_token_usage_and_retries_idempotently(
             )
         repository = BillingRepository(factory)
         first = await repository.charge_usage(_empty_usage())
+        async with factory() as session, session.begin():
+            user = await session.get(User, "user-1")
+            assert user is not None
+            user.creditBalanceMicros = 900_000
         second = await repository.charge_usage(_empty_usage())
 
         async with factory() as session:
@@ -269,10 +315,10 @@ async def test_zero_usage_writes_one_token_usage_and_retries_idempotently(
         assert first.balance_after_micros == 1_000_000
         assert first.idempotent is False
         assert second.charged_micros == 0
-        assert second.balance_after_micros == 1_000_000
+        assert second.balance_after_micros == 900_000
         assert second.idempotent is True
         assert user is not None
-        assert user.creditBalanceMicros == 1_000_000
+        assert user.creditBalanceMicros == 900_000
         assert ledger_count == 0
         assert usage_count == 1
         assert usage.requestId == "request-empty"
