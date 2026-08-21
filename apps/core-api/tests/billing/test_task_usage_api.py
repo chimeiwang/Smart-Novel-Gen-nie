@@ -9,10 +9,11 @@ import pytest
 from inkforge_core.app import create_app
 from inkforge_core.auth.dependencies import get_current_user
 from inkforge_core.auth.repository import AuthUser
-from inkforge_core.billing.repository import BillingRepository
+from inkforge_core.billing.repository import BillingRepository, UsageDataIntegrityError
 from inkforge_core.billing.service import BillingService
+from inkforge_core.db.models import TokenUsage
 from inkforge_core.errors import ApiError
-from sqlalchemy import text
+from sqlalchemy import text, update
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
 
@@ -142,7 +143,7 @@ async def test_owned_task_returns_exact_usage_summary_and_stable_calls(tmp_path:
                 "cachedTokens": 10,
                 "completionTokens": 30,
                 "totalTokens": 80,
-                "createdAt": "2026-08-21T01:00:00",
+                "createdAt": "2026-08-21T01:00:00Z",
             },
             {
                 "requestId": "request-b",
@@ -153,7 +154,7 @@ async def test_owned_task_returns_exact_usage_summary_and_stable_calls(tmp_path:
                 "cachedTokens": 40,
                 "completionTokens": 20,
                 "totalTokens": 120,
-                "createdAt": "2026-08-21T01:00:00",
+                "createdAt": "2026-08-21T01:00:00Z",
             },
             {
                 "requestId": "request-later",
@@ -164,7 +165,7 @@ async def test_owned_task_returns_exact_usage_summary_and_stable_calls(tmp_path:
                 "cachedTokens": 5,
                 "completionTokens": 5,
                 "totalTokens": 30,
-                "createdAt": "2026-08-21T02:00:00",
+                "createdAt": "2026-08-21T02:00:00Z",
             },
         ],
     }
@@ -227,6 +228,29 @@ async def test_repository_checks_writing_task_ownership_before_reading_usage(
         "request-b",
         "request-later",
     ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing_field", ["requestId", "runId"])
+async def test_repository_rejects_attributed_usage_missing_required_identity(
+    tmp_path: Path, missing_field: str
+) -> None:
+    engine, factory = await _create_database(tmp_path / f"缺少{missing_field}.db")
+    try:
+        async with factory() as session, session.begin():
+            await session.execute(
+                update(TokenUsage)
+                .where(TokenUsage.id == "usage-a")
+                .values({missing_field: None})
+            )
+        repository = BillingRepository(factory)
+
+        with pytest.raises(
+            UsageDataIntegrityError, match="模型用量记录缺少请求或运行标识"
+        ):
+            await repository.get_task_usage("user-owner", "task-owned")
+    finally:
+        await engine.dispose()
 
 
 class _RejectingAuthService:

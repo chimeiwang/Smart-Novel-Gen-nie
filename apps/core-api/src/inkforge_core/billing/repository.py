@@ -3,8 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from dataclasses import dataclass
-from datetime import datetime
-from typing import cast
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError
@@ -29,6 +28,10 @@ class InsufficientCreditsError(Exception):
 
 class UsageConflictError(Exception):
     """表示相同请求标识被用于不同的用量载荷。"""
+
+
+class UsageDataIntegrityError(RuntimeError):
+    """表示已归集的模型用量缺少查询所需的权威身份。"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -325,25 +328,40 @@ class BillingRepository:
                     .order_by(TokenUsage.createdAt.asc(), TokenUsage.id.asc())
                 )
             ).scalars()
-            return tuple(
-                TaskUsageCallSnapshot(
-                    request_id=cast(str, item.requestId),
-                    run_id=cast(str, item.runId),
-                    agent_id=item.agentId,
-                    model=item.model,
-                    prompt_tokens=item.promptTokens,
-                    cached_tokens=item.cachedTokens,
-                    completion_tokens=item.completionTokens,
-                    total_tokens=item.totalTokens,
-                    created_at=item.createdAt,
-                )
-                for item in usages
-            )
+            return tuple(_task_usage_call_snapshot(item) for item in usages)
 
 
 def _advisory_lock_key(request_id: str) -> int:
     raw = int.from_bytes(hashlib.sha256(request_id.encode()).digest()[:8], "big")
     return raw if raw < 2**63 else raw - 2**64
+
+
+def _task_usage_call_snapshot(item: TokenUsage) -> TaskUsageCallSnapshot:
+    if (
+        item.requestId is None
+        or not item.requestId.strip()
+        or item.runId is None
+        or not item.runId.strip()
+    ):
+        raise UsageDataIntegrityError(
+            f"模型用量记录缺少请求或运行标识：{item.id}"
+        )
+    created_at = (
+        item.createdAt.replace(tzinfo=UTC)
+        if item.createdAt.tzinfo is None
+        else item.createdAt.astimezone(UTC)
+    )
+    return TaskUsageCallSnapshot(
+        request_id=item.requestId,
+        run_id=item.runId,
+        agent_id=item.agentId,
+        model=item.model,
+        prompt_tokens=item.promptTokens,
+        cached_tokens=item.cachedTokens,
+        completion_tokens=item.completionTokens,
+        total_tokens=item.totalTokens,
+        created_at=created_at,
+    )
 
 
 async def _idempotent_result(
