@@ -9,7 +9,11 @@ from inkforge_agents.providers.base import (
     ModelTurnResult,
     ModelUsage,
 )
-from inkforge_agents.runtime.model_runtime import ModelCallContext, ModelRuntime
+from inkforge_agents.runtime.model_runtime import (
+    ModelCallContext,
+    ModelCallLogRecord,
+    ModelRuntime,
+)
 
 
 class Provider:
@@ -68,21 +72,10 @@ class Billing:
 
 class ModelObserver:
     def __init__(self) -> None:
-        self.calls: list[
-            tuple[ModelCallContext, list[dict[str, str]], str, str, str | None]
-        ] = []
+        self.calls: list[ModelCallLogRecord] = []
 
-    def record_model_call(
-        self,
-        context: ModelCallContext,
-        messages: list[dict[str, str]],
-        output: str,
-        finish_reason: str,
-        raw_finish_reason: str | None,
-    ) -> None:
-        self.calls.append(
-            (context, messages, output, finish_reason, raw_finish_reason)
-        )
+    def record_model_call(self, record: ModelCallLogRecord) -> None:
+        self.calls.append(record)
 
 
 @pytest.mark.asyncio
@@ -451,12 +444,19 @@ async def test_runtime_records_complete_messages_without_tool_schema(billable: b
 
     await runtime.run_turn(request, context=context)
 
-    assert observer.calls == [
-        (
-            context,
-            [{"role": "user", "content": "完整请求" * 5000}],
-            "完成",
-            "stop",
-            "stop",
-        )
-    ]
+    assert len(observer.calls) == 1
+    record = observer.calls[0]
+    assert record.context == context
+    assert record.provider == "openai_compatible"
+    assert record.model == "deepseek-v4-flash"
+    assert record.billingRequestId == ("grant-request-1" if billable else None)
+    assert record.messages == [{"role": "user", "content": "完整请求" * 5000}]
+    assert record.output == "完成"
+    assert record.usage == ModelUsage(
+        promptTokens=100,
+        cachedTokens=20,
+        completionTokens=30,
+        totalTokens=130,
+    )
+    assert record.finishReason == "stop"
+    assert record.rawFinishReason == "stop"

@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from ..runtime.model_runtime import ModelCallLogRecord
+
 
 @dataclass(frozen=True, slots=True)
 class WorkflowRunSummary:
@@ -77,33 +79,39 @@ class HumanWorkflowLog:
                 f"\nS{sequence:03d} 状态切换\n节点：{node}\n字段：{_json(changes)}\n",
             )
 
-    def record_model_call(
-        self,
-        run_id: str,
-        agent_id: str,
-        messages: list[dict[str, Any]],
-        output: str,
-        finish_reason: str,
-        raw_finish_reason: str | None,
-    ) -> None:
+    def record_model_call(self, record: ModelCallLogRecord) -> None:
         with self._lock:
-            path = self._require_path(run_id)
+            path = self._require_path(record.context.runId)
             content = path.read_text(encoding="utf-8")
             sequence = len(re.findall(r"(?m)^A\d{2} 智能体：", content)) + 1
-            sections = [f"\nA{sequence:02d} 智能体：{agent_id}", "请求消息："]
-            for message in messages:
+            billing_request_id = record.billingRequestId or "无"
+            usage = record.usage
+            sections = [
+                f"\nA{sequence:02d} 智能体：{record.context.agentId}",
+                f"任务标识：{record.context.taskId}",
+                f"运行标识：{record.context.runId}",
+                f"计费请求标识：{billing_request_id}",
+                f"模型：{record.provider}/{record.model}",
+                "Token 消耗："
+                f"输入 {usage.promptTokens} | "
+                f"缓存 {usage.cachedTokens} | "
+                f"输出 {usage.completionTokens} | "
+                f"合计 {usage.totalTokens}",
+                "请求消息：",
+            ]
+            for message in record.messages:
                 role = _role_label(message.get("role"))
                 value = message.get("content")
                 sections.extend((f"[{role}]", value if isinstance(value, str) else _json(value)))
             sections.extend(
                 (
                     "模型响应：",
-                    output,
-                    f"完成原因：{finish_reason}",
+                    record.output,
+                    f"完成原因：{record.finishReason}",
                     "供应商原始原因："
                     + (
-                        raw_finish_reason
-                        if raw_finish_reason is not None
+                        record.rawFinishReason
+                        if record.rawFinishReason is not None
                         else "未提供"
                     ),
                     "",
