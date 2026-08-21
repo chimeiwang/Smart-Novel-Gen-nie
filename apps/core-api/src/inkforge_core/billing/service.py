@@ -150,6 +150,8 @@ class BillingService:
                     request_id=claims.requestId,
                     user_id=claims.userId,
                     novel_id=claims.novelId,
+                    task_id=claims.taskId,
+                    run_id=claims.runId,
                     model=claims.model,
                     agent_id=claims.agentId,
                     prompt_tokens=request.promptTokens,
