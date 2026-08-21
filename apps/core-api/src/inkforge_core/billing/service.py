@@ -19,6 +19,7 @@ from .repository import (
     ChargeUsage,
     InsufficientCreditsError,
     SummarySnapshot,
+    TaskUsageCallSnapshot,
     UsageConflictError,
     UsageSnapshot,
 )
@@ -31,6 +32,8 @@ from .schemas import (
     LedgerEntryResponse,
     ModelGrantClaims,
     ReportModelUsageRequest,
+    TaskModelUsageCall,
+    TaskModelUsageResponse,
     TokenUsageBreakdown,
     UsageChargeResponse,
 )
@@ -46,6 +49,9 @@ class BillingRepositoryPort(Protocol):
     async def get_usage(
         self, user_id: str, month_start: datetime
     ) -> tuple[UsageSnapshot, UsageSnapshot]: ...
+    async def get_task_usage(
+        self, user_id: str, task_id: str
+    ) -> tuple[TaskUsageCallSnapshot, ...] | None: ...
 
 
 class BillingService:
@@ -208,6 +214,24 @@ class BillingService:
             monthlyUsage=_usage_response(monthly),
         )
 
+    async def task_usage(self, user_id: str, task_id: str) -> TaskModelUsageResponse:
+        calls = await self._repository.get_task_usage(user_id, task_id)
+        if calls is None:
+            raise ApiError(
+                status_code=404,
+                code="WRITING_TASK_NOT_FOUND",
+                message="写作任务不存在或无权访问",
+            )
+        return TaskModelUsageResponse(
+            taskId=task_id,
+            requestCount=len(calls),
+            promptTokens=sum(item.prompt_tokens for item in calls),
+            cachedTokens=sum(item.cached_tokens for item in calls),
+            completionTokens=sum(item.completion_tokens for item in calls),
+            totalTokens=sum(item.total_tokens for item in calls),
+            calls=[_task_usage_call_response(item) for item in calls],
+        )
+
     def _require_codec(self) -> ModelGrantCodec:
         if self._grant_codec is None:
             raise ApiError(
@@ -230,4 +254,18 @@ def _usage_response(snapshot: UsageSnapshot) -> TokenUsageBreakdown:
         cachedTokens=snapshot.cached_tokens,
         completionTokens=snapshot.completion_tokens,
         totalTokens=snapshot.total_tokens,
+    )
+
+
+def _task_usage_call_response(snapshot: TaskUsageCallSnapshot) -> TaskModelUsageCall:
+    return TaskModelUsageCall(
+        requestId=snapshot.request_id,
+        runId=snapshot.run_id,
+        agentId=snapshot.agent_id,
+        model=snapshot.model,
+        promptTokens=snapshot.prompt_tokens,
+        cachedTokens=snapshot.cached_tokens,
+        completionTokens=snapshot.completion_tokens,
+        totalTokens=snapshot.total_tokens,
+        createdAt=snapshot.created_at,
     )

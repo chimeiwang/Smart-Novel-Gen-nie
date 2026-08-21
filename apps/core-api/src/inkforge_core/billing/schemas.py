@@ -113,3 +113,25 @@ class TokenUsageBreakdown(BillingSchema):
 class BillingUsageResponse(BillingSchema):
     totalUsage: TokenUsageBreakdown
     monthlyUsage: TokenUsageBreakdown
+
+
+class TaskModelUsageCall(BillingSchema):
+    requestId: str
+    runId: str
+    agentId: str | None
+    model: str
+    promptTokens: int
+    cachedTokens: int
+    completionTokens: int
+    totalTokens: int
+    createdAt: datetime
+
+
+class TaskModelUsageResponse(BillingSchema):
+    taskId: str
+    requestCount: int
+    promptTokens: int
+    cachedTokens: int
+    completionTokens: int
+    totalTokens: int
+    calls: list[TaskModelUsageCall]

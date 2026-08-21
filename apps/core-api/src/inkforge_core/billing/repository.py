@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 from dataclasses import dataclass
 from datetime import datetime
+from typing import cast
 
 from sqlalchemy import func, select, text, update
 from sqlalchemy.exc import IntegrityError
@@ -81,6 +82,19 @@ class UsageSnapshot:
     cached_tokens: int
     completion_tokens: int
     total_tokens: int
+
+
+@dataclass(frozen=True, slots=True)
+class TaskUsageCallSnapshot:
+    request_id: str
+    run_id: str
+    agent_id: str | None
+    model: str
+    prompt_tokens: int
+    cached_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    created_at: datetime
 
 
 class BillingRepository:
@@ -292,6 +306,39 @@ class BillingRepository:
                 )
             ).one()
         return UsageSnapshot(*map(int, total)), UsageSnapshot(*map(int, monthly))
+
+    async def get_task_usage(
+        self, user_id: str, task_id: str
+    ) -> tuple[TaskUsageCallSnapshot, ...] | None:
+        async with self._session_factory() as session:
+            owned_task_id = await session.scalar(
+                select(WritingTask.id)
+                .join(Novel, Novel.id == WritingTask.novelId)
+                .where(WritingTask.id == task_id, Novel.userId == user_id)
+            )
+            if owned_task_id is None:
+                return None
+            usages = (
+                await session.execute(
+                    select(TokenUsage)
+                    .where(TokenUsage.userId == user_id, TokenUsage.taskId == task_id)
+                    .order_by(TokenUsage.createdAt.asc(), TokenUsage.id.asc())
+                )
+            ).scalars()
+            return tuple(
+                TaskUsageCallSnapshot(
+                    request_id=cast(str, item.requestId),
+                    run_id=cast(str, item.runId),
+                    agent_id=item.agentId,
+                    model=item.model,
+                    prompt_tokens=item.promptTokens,
+                    cached_tokens=item.cachedTokens,
+                    completion_tokens=item.completionTokens,
+                    total_tokens=item.totalTokens,
+                    created_at=item.createdAt,
+                )
+                for item in usages
+            )
 
 
 def _advisory_lock_key(request_id: str) -> int:
