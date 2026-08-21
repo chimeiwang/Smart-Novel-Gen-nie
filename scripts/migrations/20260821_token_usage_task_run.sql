@@ -1,6 +1,6 @@
 BEGIN;
 
-SET LOCAL search_path = public, pg_catalog;
+SET LOCAL search_path = pg_catalog, public;
 
 -- 同一数据库内只允许一个执行者扩展并核验模型用量归集结构。
 SELECT pg_advisory_xact_lock(hashtext('inkforge:20260821:TokenUsage:task-run'));
@@ -55,6 +55,9 @@ BEGIN
       AND attribute.attname IN ('requestId', 'taskId', 'runId')
       AND format_type(attribute.atttypid, attribute.atttypmod) = 'text'
       AND NOT attribute.attnotnull
+      AND NOT attribute.atthasdef
+      AND attribute.attidentity = ''
+      AND attribute.attgenerated = ''
       AND attribute.attnum > 0
       AND NOT attribute.attisdropped
   ) <> 3 THEN
@@ -83,14 +86,28 @@ BEGIN
     SELECT *
     FROM (
       VALUES
-        ('TokenUsage_requestId_key', TRUE, 'requestId'),
+        (
+          'TokenUsage_requestId_key',
+          TRUE,
+          'requestId',
+          'pg_catalog.text_ops',
+          'pg_catalog.default'
+        ),
         (
           'TokenUsage_userId_taskId_createdAt_idx',
           FALSE,
-          'userId,taskId,createdAt'
+          'userId,taskId,createdAt',
+          'pg_catalog.text_ops,pg_catalog.text_ops,pg_catalog.timestamp_ops',
+          'pg_catalog.default,pg_catalog.default,none'
         ),
-        ('TokenUsage_runId_createdAt_idx', FALSE, 'runId,createdAt')
-    ) AS definitions(name, is_unique, columns)
+        (
+          'TokenUsage_runId_createdAt_idx',
+          FALSE,
+          'runId,createdAt',
+          'pg_catalog.text_ops,pg_catalog.timestamp_ops',
+          'pg_catalog.default,none'
+        )
+    ) AS definitions(name, is_unique, columns, opclasses, collations)
   LOOP
     SELECT EXISTS (
       SELECT 1
@@ -108,6 +125,8 @@ BEGIN
         AND index_definition.indpred IS NULL
         AND index_definition.indexprs IS NULL
         AND index_definition.indnatts = index_definition.indnkeyatts
+        AND index_relation.reloptions IS NULL
+        AND index_relation.reltablespace = 0
         AND NOT EXISTS (
           SELECT 1
           FROM unnest(index_definition.indoption) AS index_option(option_value)
@@ -124,6 +143,37 @@ BEGIN
             AND attribute.attnum = index_key.attribute_number
           WHERE index_key.ordinality <= index_definition.indnkeyatts
         ) = expected_index.columns
+        AND (
+          SELECT string_agg(
+            operator_namespace.nspname || '.' || operator_class.opcname,
+            ',' ORDER BY operator_key.ordinality
+          )
+          FROM unnest(index_definition.indclass) WITH ORDINALITY
+            AS operator_key(operator_class_oid, ordinality)
+          JOIN pg_opclass AS operator_class
+            ON operator_class.oid = operator_key.operator_class_oid
+          JOIN pg_namespace AS operator_namespace
+            ON operator_namespace.oid = operator_class.opcnamespace
+          WHERE operator_key.ordinality <= index_definition.indnkeyatts
+            AND operator_class.opcdefault
+            AND operator_class.opcmethod = index_relation.relam
+        ) = expected_index.opclasses
+        AND (
+          SELECT string_agg(
+            CASE
+              WHEN collation_key.collation_oid = 0 THEN 'none'
+              ELSE collation_namespace.nspname || '.' || collation.collname
+            END,
+            ',' ORDER BY collation_key.ordinality
+          )
+          FROM unnest(index_definition.indcollation) WITH ORDINALITY
+            AS collation_key(collation_oid, ordinality)
+          LEFT JOIN pg_collation AS collation
+            ON collation.oid = collation_key.collation_oid
+          LEFT JOIN pg_namespace AS collation_namespace
+            ON collation_namespace.oid = collation.collnamespace
+          WHERE collation_key.ordinality <= index_definition.indnkeyatts
+        ) = expected_index.collations
     ) INTO index_matches;
 
     IF NOT index_matches THEN

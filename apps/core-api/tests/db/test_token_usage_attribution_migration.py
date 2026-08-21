@@ -23,7 +23,7 @@ def test_token_usage_migration_is_transactional_additive_and_rerun_safe() -> Non
 
     assert compact.startswith("begin;")
     assert compact.endswith("commit;")
-    assert "set local search_path = public, pg_catalog" in compact
+    assert "set local search_path = pg_catalog, public" in compact
     assert "pg_advisory_xact_lock" in compact
     assert (
         'alter table "tokenusage" add column if not exists "requestid" text'
@@ -69,6 +69,9 @@ def test_token_usage_migration_self_verifies_columns_constraint_and_indexes() ->
     assert "pg_attribute" in compact
     assert "format_type" in compact
     assert "not attribute.attnotnull" in compact
+    assert "not attribute.atthasdef" in compact
+    assert "attribute.attidentity = ''" in compact
+    assert "attribute.attgenerated = ''" in compact
     assert all(name in compact for name in ("requestid", "taskid", "runid"))
     assert "pg_get_constraintdef" in compact
     assert "constraint_definition.convalidated" in compact
@@ -86,6 +89,14 @@ def test_token_usage_migration_self_verifies_columns_constraint_and_indexes() ->
     assert "index_definition.indisunique" in compact
     assert "index_definition.indnatts = index_definition.indnkeyatts" in compact
     assert "unnest(index_definition.indoption)" in compact
+    assert "pg_opclass" in compact
+    assert "operator_class.opcdefault" in compact
+    assert "pg_catalog.text_ops" in compact
+    assert "pg_catalog.timestamp_ops" in compact
+    assert "pg_collation" in compact
+    assert "pg_catalog.default" in compact
+    assert "index_relation.reloptions is null" in compact
+    assert "index_relation.reltablespace = 0" in compact
     assert all(
         name in compact
         for name in (
