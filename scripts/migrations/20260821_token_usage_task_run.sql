@@ -61,7 +61,12 @@ BEGIN
     RAISE EXCEPTION 'TokenUsage 归集列类型或可空性不符合迁移契约';
   END IF;
 
-  SELECT pg_get_constraintdef(constraint_definition.oid)
+  SELECT regexp_replace(
+    pg_get_constraintdef(constraint_definition.oid),
+    '\s+',
+    '',
+    'g'
+  )
   INTO request_constraint
   FROM pg_constraint AS constraint_definition
   WHERE constraint_definition.conrelid = relation_id
@@ -69,11 +74,8 @@ BEGIN
     AND constraint_definition.contype = 'c'
     AND constraint_definition.convalidated;
 
-  IF request_constraint IS NULL
-     OR position('btrim' IN request_constraint) = 0
-     OR position('requestId' IN request_constraint) = 0
-     OR position('IS NULL' IN request_constraint) = 0
-     OR position('<> ' IN request_constraint) = 0 THEN
+  IF request_constraint IS DISTINCT FROM
+    'CHECK((("requestId"ISNULL)OR(btrim("requestId")<>''''::text)))' THEN
     RAISE EXCEPTION 'TokenUsage requestId 检查约束不符合迁移契约';
   END IF;
 

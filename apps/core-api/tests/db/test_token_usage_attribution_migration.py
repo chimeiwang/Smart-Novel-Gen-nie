@@ -72,7 +72,14 @@ def test_token_usage_migration_self_verifies_columns_constraint_and_indexes() ->
     assert all(name in compact for name in ("requestid", "taskid", "runid"))
     assert "pg_get_constraintdef" in compact
     assert "constraint_definition.convalidated" in compact
-    assert "btrim" in compact
+    assert "regexp_replace" in compact
+    assert (
+        "request_constraint is distinct from "
+        "'check(((\"requestid\"isnull)or(btrim(\"requestid\")<>''''::text)))'"
+        in compact
+    )
+    assert "position('btrim' in request_constraint)" not in compact
+    assert "position('requestid' in request_constraint)" not in compact
     assert "pg_index" in compact
     assert "index_definition.indisvalid" in compact
     assert "index_definition.indisready" in compact
