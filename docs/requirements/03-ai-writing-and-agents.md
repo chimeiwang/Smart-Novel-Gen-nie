@@ -310,9 +310,15 @@ Agent Service 使用 `MODEL_MAX_OUTPUT_TOKENS` 表达当前部署模型的单次
 
 计费模型调用仍先向 Core 申请有限正整数 grant；模型授权生命周期为 1200 秒，供单次模型调用完成后上报实际用量，不改变内部服务请求令牌的短期约束。Core 可以按可用余额缩小额度，`ModelRuntime` 校验授权后把实际 `maxOutputTokens` 精确传给 Provider，任何调用都不得绕过授权上限。
 
+每个 Provider 成功响应形成 `ModelTurnResult` 后，Agent 使用同一调用的 `taskId`、`runId` 和 Core
+计费 `requestId` 上报 `promptTokens`、`cachedTokens`、`completionTokens`、`totalTokens`。人工模型日志
+同时记录这些身份、provider/model 和四项 usage，并保留完整 messages 与 output；非计费调用明确显示
+没有计费请求标识，任何日志都不得记录 `grantToken`。Provider 在返回可靠 usage 前失败时不伪造 token。
+
 Provider 必须提供规范化完成原因并保留供应商原始值。`length`、`content_filter`、`stop`/`tool_calls` 与实际工具状态矛盾、以及没有合法工具调用的 `unknown` 都在接受正文或执行工具副作用前失败，当前不把 `length` 作为自动续写信号；文风画像只接受 `stop`、无工具调用且正文非空的纯文本响应，半截画像不能成功。人工模型日志记录规范化值和完整原始值。
 
-上述输出与上下文能力不修改 PostgreSQL schema、公共 OpenAPI 或 ReviewArtifact 状态机。
+上述输出与上下文能力不修改 ReviewArtifact 状态机。模型用量归集只使用用户于 2026-08-21 明确批准的
+`TokenUsage` 有界版本化迁移，并新增按写作任务查询的公共 OpenAPI；不授权其他 PostgreSQL 结构调整。
 
 ## 验收标准
 
@@ -338,6 +344,8 @@ Provider 必须提供规范化完成原因并保留供应商原始值。`length`
 - Python LangGraph 已迁移 CreativeOperation 路由、复审 `Send` 扇出、四种显式执行模式、确定性复审优先级、rewrite-only 返工、最大修订次数、用户中断和 `Command` 恢复；图状态快照使用版本信封并排除 `runtimeContext` 等运行时字段。
 - OperationDefinition 已成为工具、终止事件、产物 kind 和 artifactKey 的运行契约；reviewer 无读取工具，reviser 只基于 Core 权威草案返工，错误产物不会静默兜底。
 - OpenAI-compatible Provider 已把规范化和原始完成原因传入 Runtime 与人工日志；长度截断、内容过滤、矛盾完成原因和非法 unknown 响应不会被当成成功。
+- 人工模型日志按 v2 长度分帧保存，每个模型调用区块可用 Core 计费 `requestId` 与 `TokenUsage` 对账；
+  日志正文不参与结构解析，旧版原文处于未验证边界，残缺尾部隔离后才恢复追加，完整输入输出不截断。
 - Core API 已把写作启动、恢复和草案决定先保存为 PostgreSQL 持久命令，再由 dispatcher 提交到 Redis 队列。文风画像以 `StylePortraitTask`、质量检查以 `WorkflowRun(kind=quality_check)`、资料索引以 `RagDocument` 的待重建状态作为持久事实；各自 dispatcher 使用稳定任务标识补投，Redis 只承载可重建的投递状态。Agent Service 消费任务并通过签名回调保存检查点、事件、草案和终态。
 - 草案进入等待用户确认时，Agent Service 使用下一个连续序号直接保存稳定快照，不再先直发等待事件；Core 在保存快照的同一事务中创建 `artifact_awaiting_user_approval` Outbox。后续 resume/artifact_decision 命令会在自身事务内作废尚未发布的旧 waiting，Publisher 遇到 waiting 序号竞争时也会再次核对并转为 superseded。长篇 completed/error 稳定 checkpoint 只保存图内终态，数据库任务和命令保持非终态，直到 complete/fail 与 terminal Outbox 在同一事务收敛。SSE 只重放 published 边界事件，跳过 superseded，并在 pending/delivering/blocked 边界前保留原游标等待；同时发送不带游标的 PostgreSQL `run_outcome` 控制帧。客户端在建连或断流后重新读取 outcome，只按 `streamShouldClose` 收敛生命周期，legacy 事件只承担展示兼容且不能直接恢复可操作草案；非 waiting_user 终态按任务清理临时草案入口并使较早的在途读取失效，相同 succeeded outcome 的完成副作用按任务、命令和结果只执行一次。
 - Core 对账器可以强制修复 Redis 中缺失的 queued 索引或完全丢失的运行键，但不得重新打开 Redis 已记录为 completed、failed 或 cancelled 的运行。

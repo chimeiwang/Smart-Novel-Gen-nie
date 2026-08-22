@@ -61,12 +61,13 @@ PostgreSQL Schema”规则的一次有界例外，仅允许修改 `TokenUsage` �
 3. Core 校验 usage 与授权 claims 完全一致，把 claims 中的 `requestId/taskId/runId` 传入
    `ChargeUsage`。
 4. 计费仓储在同一短事务中完成余额扣减、`CreditLedger.ai_charge` 和 `TokenUsage` 写入。
-5. `TokenUsage.requestId` 与 `CreditLedger.requestId` 使用同一值。重复回调返回原结果，不新增
-   `TokenUsage`，载荷或任务身份不一致则返回冲突。
+5. `TokenUsage.requestId` 与 `CreditLedger.requestId` 使用同一值。重复回调不新增 `TokenUsage`、不重复
+   扣费；载荷或任务身份不一致则返回冲突。金额大于零的重放返回原计费流水余额，金额为零的重放
+   查询并返回重放时的当前余额。
 
 对于四项 token 全为零、因而金额为零的真实 billable usage，仍写入一条 `TokenUsage`，以免“没有记录”
-与“Provider 返回零 usage”无法区分；不产生负数扣费。重复零 usage 通过 `requestId` 幂等返回。非 billable
-Fake Provider 不写正式 `TokenUsage`。
+与“Provider 返回零 usage”无法区分；不写 `CreditLedger`、不扣余额。重复零 usage 通过 `requestId`
+幂等返回且不产生任何写副作用。非 billable Fake Provider 不写正式 `TokenUsage`。
 
 `cachedTokens` 是 `promptTokens` 的子集；`totalTokens` 始终等于 `promptTokens + completionTokens`，查询
 和日志不能把缓存 token 再次加到合计。
