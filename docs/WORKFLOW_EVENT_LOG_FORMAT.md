@@ -19,8 +19,11 @@
 3. 中文 LangGraph 状态切换、阶段和结束状态。
 
 四项 token 是 `promptTokens`、`cachedTokens`、`completionTokens`、`totalTokens`；其中缓存 token 是输入
-token 子集，合计等于输入加输出。非计费调用显示“计费请求标识：无”。Provider 成功形成规范化
-`ModelTurnResult` 后才记录其 usage；Provider 在返回可靠 usage 前失败时不得伪造 token。
+token 子集，合计等于输入加输出。billable Provider 成功形成规范化 `ModelTurnResult` 后，Agent 先向
+Core 上报 usage；只有 Core 成功接受 report 且配置了 observer，才写入该次人工模型区块。report 失败
+时异常向上传播，不留下该次模型区块。非 billable Provider 成功后直接调用 observer，但只有 observer
+与运行 context 都存在时才写入，且显示“计费请求标识：无”。Provider 在返回可靠 usage 前失败时不得
+伪造 token。
 
 人工日志不记录 `grantToken`、tools schema、供应商 reasoning、模型 tool_calls、工具参数、工具返回、
 完整运行时对象或底层 checkpoint metadata。禁止对已记录的正文、消息、模型输出或状态进行静默截断。

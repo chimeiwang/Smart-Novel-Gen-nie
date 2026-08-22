@@ -19,7 +19,8 @@ PostgreSQL Schema”规则的一次有界例外，仅允许修改 `TokenUsage` �
 
 - 每个成功返回规范化 usage、并被 Core 接受的真实计费模型调用，都形成一条可按任务查询的
   `TokenUsage`。
-- 使用 `requestId` 将数据库用量、`CreditLedger` 计费流水和人工模型调用日志一一关联。
+- 使用 `requestId` 将 `TokenUsage` 与人工模型调用日志一一关联；金额大于零时，再与同一
+  `requestId` 的 `CreditLedger` 计费流水关联。
 - 支持按 `taskId` 查询调用明细和汇总，回答某一章节任务实际调用次数及四项 token 消耗。
 - 保持余额扣减、计费幂等、服务身份和正式写作流程不变。
 
@@ -37,7 +38,7 @@ PostgreSQL Schema”规则的一次有界例外，仅允许修改 `TokenUsage` �
 
 | 字段 | 语义 | 新记录要求 |
 | --- | --- | --- |
-| `requestId` | Core 模型授权返回、用于计费回调和 `CreditLedger` 对账的请求标识 | 真实计费调用必填 |
+| `requestId` | Core 模型授权返回、用于计费回调以及金额大于零时与 `CreditLedger` 对账的请求标识 | 真实计费调用必填 |
 | `taskId` | 模型调用所属业务任务标识 | 真实计费调用必填 |
 | `runId` | 同一任务的一次启动、恢复或继续运行标识 | 真实计费调用必填 |
 
@@ -60,10 +61,11 @@ PostgreSQL Schema”规则的一次有界例外，仅允许修改 `TokenUsage` �
    `taskId`、`runId`、`novelId`。
 3. Core 校验 usage 与授权 claims 完全一致，把 claims 中的 `requestId/taskId/runId` 传入
    `ChargeUsage`。
-4. 计费仓储在同一短事务中完成余额扣减、`CreditLedger.ai_charge` 和 `TokenUsage` 写入。
-5. `TokenUsage.requestId` 与 `CreditLedger.requestId` 使用同一值。重复回调不新增 `TokenUsage`、不重复
-   扣费；载荷或任务身份不一致则返回冲突。金额大于零的重放返回原计费流水余额，金额为零的重放
-   查询并返回重放时的当前余额。
+4. 计费仓储在同一短事务中写入 `TokenUsage`；金额大于零时才扣减余额并写入
+   `CreditLedger.ai_charge`。
+5. 金额大于零时，`TokenUsage.requestId` 与 `CreditLedger.requestId` 使用同一值。重复回调不新增
+   `TokenUsage`、不重复扣费；载荷或任务身份不一致则返回冲突。金额大于零的重放返回原计费流水
+   余额，金额为零的重放查询并返回重放时的当前余额。
 
 对于四项 token 全为零、因而金额为零的真实 billable usage，仍写入一条 `TokenUsage`，以免“没有记录”
 与“Provider 返回零 usage”无法区分；不写 `CreditLedger`、不扣余额。重复零 usage 通过 `requestId`
@@ -84,12 +86,16 @@ PostgreSQL Schema”规则的一次有界例外，仅允许修改 `TokenUsage` �
 Token 消耗：输入 <promptTokens> | 缓存 <cachedTokens> | 输出 <completionTokens> | 合计 <totalTokens>
 ```
 
-继续记录规范化完成原因和供应商原始完成原因。绝不记录 `grantToken`。真实调用的数据库行和日志区块
-必须能通过同一 `requestId` 关联；非计费调用显示“无计费请求标识”。
+继续记录规范化完成原因和供应商原始完成原因。绝不记录 `grantToken`。Core 已接受 usage report 的
+billable 调用，其 `TokenUsage` 和日志区块必须能通过同一 `requestId` 关联；金额大于零时还关联
+`CreditLedger`。非计费调用显示“无计费请求标识”。
 
-人工日志只在 Provider 成功形成 `ModelTurnResult` 且 observer 被调用时记录精确 usage。Provider 在返回
-usage 前失败时只能记录错误事实，不能伪造 token。工具参数校验发生在 Provider 返回和 usage 上报之后，
-因此 `MODEL_TOOL_ARGUMENTS_INVALID` 等后置失败仍应存在可归集的 `TokenUsage`。
+billable Provider 成功形成 `ModelTurnResult` 后，Agent 先向 Core 上报 usage；只有 Core 成功接受 report
+且配置了 observer 时，才记录该次人工模型区块。report 失败时异常向上传播，不留下该次模型区块。
+非 billable Provider 成功后直接调用 observer，但只有 observer 与运行 context 都存在时才写区块，计费
+请求标识为“无”。Provider 在返回 usage 前失败时不能伪造 token。工具参数校验发生在 Provider 返回、
+usage 上报和日志记录之后，因此 `MODEL_TOOL_ARGUMENTS_INVALID` 等后置失败仍应存在可归集的
+`TokenUsage` 和模型区块。
 
 ## 按任务查询接口
 
@@ -153,12 +159,13 @@ scripts/migrations/20260821_token_usage_task_run.sql
 
 - 数据库模型与新 schema contract 精确一致。
 - 迁移在隔离 PostgreSQL 上首次执行和重复执行均成功，且历史行三个新字段为 `NULL`。
-- 一次真实计费 usage 同时写入同 requestId 的 `CreditLedger` 和 `TokenUsage`。
+- 一次金额大于零的真实计费 usage 同时写入同 `requestId` 的 `CreditLedger` 和 `TokenUsage`；金额为零
+  时只写 `TokenUsage`。
 - 相同 requestId、相同身份和 usage 重放不重复扣费、不重复写入；不同 task/run 或 usage 返回冲突。
 - 零金额真实 usage 写一条 `TokenUsage`，重复回调保持幂等。
 - 按任务接口只能读取当前用户的任务，并准确返回逐调用和汇总四项 token。
-- 人工日志每个模型调用区块包含相同 taskId、runId、计费 requestId 和四项实际 token，完整输入输出不被
-  截断。
+- Core 成功接受 report 的 billable 调用，其人工日志区块包含相同 taskId、runId、计费 requestId 和四项
+  实际 token，完整输入输出不被截断；report 失败不留下该次模型区块。
 - 现有用户总计、月度 usage、余额扣减和 ReviewArtifact 流程回归通过。
 - Core 相关 pytest、Agent 相关 pytest、Ruff、Mypy、schema guard、迁移测试、API 生成与
   `npm run api:check` 全部通过。
