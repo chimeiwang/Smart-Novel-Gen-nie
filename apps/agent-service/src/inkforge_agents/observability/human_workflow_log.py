@@ -8,14 +8,16 @@ import tempfile
 import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from io import BytesIO
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import IO, Any, BinaryIO
 
 from ..runtime.model_runtime import ModelCallLogRecord
 
 _LOG_MAGIC = b"INKFORGE-HUMAN-LOG/2\n"
 _FRAME_PREFIX_PATTERN = re.compile(rb"INKFORGE-FRAME ([0-9]+) ([0-9]+)\n")
+_MAX_FRAME_MARKER_BYTES = 128
+_MAX_FRAME_HEADER_BYTES = 64 * 1024
+_COPY_CHUNK_BYTES = 1024 * 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,10 +48,19 @@ class _LogFrame:
 @dataclass(frozen=True, slots=True)
 class _FrameScan:
     frames: list[_LogFrame]
-    source: bytes
     last_good_offset: int
-    tail: bytes
+    file_size: int
     error: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class _ExpectedRunIdentity:
+    run_id: str
+    task_id: str | None = None
+    user_id: str | None = None
+    novel_id: str | None = None
+    chapter_id: str | None = None
+    validate_chapter: bool = False
 
 
 class HumanWorkflowLog:
@@ -87,7 +98,17 @@ class HumanWorkflowLog:
                         content="运行信息：" + _json(metadata) + "\n",
                     ),
                 )
-            frames = _ensure_v2_log(path, expected_run_id=run_id)
+            frames = _ensure_v2_log(
+                path,
+                expected_identity=_ExpectedRunIdentity(
+                    run_id=run_id,
+                    task_id=task_id,
+                    user_id=user_id,
+                    novel_id=novel_id,
+                    chapter_id=chapter_id,
+                    validate_chapter=True,
+                ),
+            )
             run_number = _next_sequence(frames, "run")
             _append_frame(
                 path,
@@ -107,7 +128,10 @@ class HumanWorkflowLog:
     def record_state(self, run_id: str, node: str, changes: dict[str, Any]) -> None:
         with self._lock:
             path = self._require_path(run_id)
-            frames = _ensure_v2_log(path, expected_run_id=run_id)
+            frames = _ensure_v2_log(
+                path,
+                expected_identity=_ExpectedRunIdentity(run_id=run_id),
+            )
             sequence = _next_sequence(frames, "state")
             _append_frame(
                 path,
@@ -123,7 +147,15 @@ class HumanWorkflowLog:
     def record_model_call(self, record: ModelCallLogRecord) -> None:
         with self._lock:
             path = self._require_path(record.context.runId)
-            frames = _ensure_v2_log(path, expected_run_id=record.context.runId)
+            frames = _ensure_v2_log(
+                path,
+                expected_identity=_ExpectedRunIdentity(
+                    run_id=record.context.runId,
+                    task_id=record.context.taskId,
+                    user_id=record.context.userId,
+                    novel_id=record.context.novelId,
+                ),
+            )
             sequence = _next_sequence(frames, "model")
             billing_request_id = record.billingRequestId or "无"
             usage = record.usage
@@ -169,7 +201,10 @@ class HumanWorkflowLog:
     def finish_run(self, run_id: str, status: str) -> Path:
         with self._lock:
             path = self._require_path(run_id)
-            _ensure_v2_log(path, expected_run_id=run_id)
+            _ensure_v2_log(
+                path,
+                expected_identity=_ExpectedRunIdentity(run_id=run_id),
+            )
             ended_at = _now()
             _append_frame(
                 path,
@@ -232,7 +267,7 @@ class HumanWorkflowLog:
                 scan = _scan_v2_frames(path, include_content=False)
                 return _v2_summary(scan.frames, tail_damaged=scan.error is not None)
             return _legacy_summary(_read_utf8_exact(path))
-        except (OSError, UnicodeError, ValueError):
+        except (OSError, OverflowError, UnicodeError, ValueError):
             return None
 
 
@@ -338,26 +373,29 @@ def _required_metadata_text(metadata: dict[str, Any], field: str) -> str | None:
     return value if isinstance(value, str) and value.strip() else None
 
 
-def _ensure_v2_log(path: Path, *, expected_run_id: str) -> list[_LogFrame]:
+def _ensure_v2_log(
+    path: Path,
+    *,
+    expected_identity: _ExpectedRunIdentity,
+) -> list[_LogFrame]:
     if _is_v2_log(path):
         scan = _scan_v2_frames(path, include_content=False)
         validated_frames = _validated_v2_frames(
             scan.frames,
-            expected_run_id=expected_run_id,
+            expected_identity=expected_identity,
         )
         if scan.error is None:
             return validated_frames
         recovered_frames = _recover_v2_tail(path, scan)
         return _validated_v2_frames(
             recovered_frames,
-            expected_run_id=expected_run_id,
+            expected_identity=expected_identity,
         )
     legacy_content = _read_utf8_exact(path)
     summary = _legacy_summary(legacy_content)
     if summary is None:
         raise ValueError("旧版人工日志缺少有效运行信息")
-    if summary.runId != expected_run_id:
-        raise ValueError("人工日志运行元数据与当前运行不一致")
+    _validate_summary_identity(summary, expected_identity)
     frames = [
         _LogFrame(
             header={
@@ -386,14 +424,29 @@ def _ensure_v2_log(path: Path, *, expected_run_id: str) -> list[_LogFrame]:
 def _validated_v2_frames(
     frames: list[_LogFrame],
     *,
-    expected_run_id: str,
+    expected_identity: _ExpectedRunIdentity,
 ) -> list[_LogFrame]:
     summary = _v2_summary(frames)
     if summary is None:
         raise ValueError("人工日志缺少完整有效的运行元数据")
-    if summary.runId != expected_run_id:
-        raise ValueError("人工日志运行元数据与当前运行不一致")
+    _validate_summary_identity(summary, expected_identity)
     return frames
+
+
+def _validate_summary_identity(
+    summary: WorkflowRunSummary,
+    expected: _ExpectedRunIdentity,
+) -> None:
+    if summary.runId != expected.run_id:
+        raise ValueError("人工日志运行元数据与当前运行不一致")
+    mismatched = (
+        (expected.task_id is not None and summary.taskId != expected.task_id)
+        or (expected.user_id is not None and summary.userId != expected.user_id)
+        or (expected.novel_id is not None and summary.novelId != expected.novel_id)
+        or (expected.validate_chapter and summary.chapterId != expected.chapter_id)
+    )
+    if mismatched:
+        raise ValueError("人工日志运行元数据与当前调用身份不一致")
 
 
 def _next_sequence(frames: list[_LogFrame], frame_type: str) -> int:
@@ -415,57 +468,71 @@ def _read_v2_frames(path: Path, *, include_content: bool) -> list[_LogFrame]:
 
 def _scan_v2_frames(path: Path, *, include_content: bool) -> _FrameScan:
     frames: list[_LogFrame] = []
-    source = path.read_bytes()
-    handle = BytesIO(source)
-    if handle.read(len(_LOG_MAGIC)) != _LOG_MAGIC:
-        return _damaged_scan(frames, source, 0, "人工日志版本标识无效")
-    last_good_offset = len(_LOG_MAGIC)
-    while marker := handle.readline():
-        frame_offset = last_good_offset
-        try:
-            match = _FRAME_PREFIX_PATTERN.fullmatch(marker)
-            if match is None:
-                raise ValueError("人工日志帧头无效")
-            header_length = int(match.group(1))
-            content_length = int(match.group(2))
-            header_bytes = _read_exact(handle, header_length)
-            if handle.read(1) != b"\n":
-                raise ValueError("人工日志结构头边界无效")
-            content_bytes = _read_exact(handle, content_length)
-            decoded_content = content_bytes.decode("utf-8")
-            content = decoded_content if include_content else None
-            if handle.read(1) != b"\n":
-                raise ValueError("人工日志正文边界无效")
+    with path.open("rb") as handle:
+        file_size = os.fstat(handle.fileno()).st_size
+        if handle.read(len(_LOG_MAGIC)) != _LOG_MAGIC:
+            return _damaged_scan(frames, file_size, 0, "人工日志版本标识无效")
+        last_good_offset = len(_LOG_MAGIC)
+        while handle.tell() < file_size:
+            frame_offset = last_good_offset
             try:
-                header = json.loads(header_bytes.decode("utf-8"))
-            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                raise ValueError("人工日志结构头不是有效 JSON") from exc
-            if not isinstance(header, dict) or not isinstance(header.get("type"), str):
-                raise ValueError("人工日志结构头字段无效")
-            frames.append(_LogFrame(header=header, content=content))
-            last_good_offset = handle.tell()
-        except (UnicodeDecodeError, ValueError) as exc:
-            return _damaged_scan(frames, source, frame_offset, str(exc))
+                marker = handle.readline(_MAX_FRAME_MARKER_BYTES + 1)
+                if not marker.endswith(b"\n") or len(marker) > _MAX_FRAME_MARKER_BYTES:
+                    raise ValueError("人工日志帧头超过安全长度或不完整")
+                match = _FRAME_PREFIX_PATTERN.fullmatch(marker)
+                if match is None:
+                    raise ValueError("人工日志帧头无效")
+                header_length = int(match.group(1))
+                content_length = int(match.group(2))
+                if header_length > _MAX_FRAME_HEADER_BYTES:
+                    raise ValueError("人工日志结构头超过安全长度")
+                if header_length > file_size - handle.tell():
+                    raise ValueError("人工日志结构头不完整")
+                header_bytes = _read_exact(handle, header_length)
+                if handle.read(1) != b"\n":
+                    raise ValueError("人工日志结构头边界无效")
+                try:
+                    header = json.loads(header_bytes.decode("utf-8"))
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    raise ValueError("人工日志结构头不是有效 JSON") from exc
+                if not isinstance(header, dict) or not isinstance(
+                    header.get("type"), str
+                ):
+                    raise ValueError("人工日志结构头字段无效")
+
+                content_offset = handle.tell()
+                remaining = file_size - content_offset
+                if remaining < 1 or content_length > remaining - 1:
+                    raise ValueError("人工日志正文不完整")
+                if include_content:
+                    content = _read_exact(handle, content_length).decode("utf-8")
+                else:
+                    handle.seek(content_offset + content_length, os.SEEK_SET)
+                    content = None
+                if handle.read(1) != b"\n":
+                    raise ValueError("人工日志正文边界无效")
+                frames.append(_LogFrame(header=header, content=content))
+                last_good_offset = handle.tell()
+            except (OverflowError, UnicodeDecodeError, ValueError) as exc:
+                return _damaged_scan(frames, file_size, frame_offset, str(exc))
     return _FrameScan(
         frames=frames,
-        source=source,
         last_good_offset=last_good_offset,
-        tail=b"",
+        file_size=file_size,
         error=None,
     )
 
 
 def _damaged_scan(
     frames: list[_LogFrame],
-    source: bytes,
+    file_size: int,
     last_good_offset: int,
     error: str,
 ) -> _FrameScan:
     return _FrameScan(
         frames=frames,
-        source=source,
         last_good_offset=last_good_offset,
-        tail=source[last_good_offset:],
+        file_size=file_size,
         error=error,
     )
 
@@ -506,8 +573,20 @@ def _create_v2_log(path: Path, first_frame: _LogFrame) -> None:
 
 
 def _replace_with_v2_log(path: Path, frames: list[_LogFrame]) -> None:
-    content = _LOG_MAGIC + b"".join(_encode_frame(frame) for frame in frames)
-    _atomic_replace_bytes(path, content)
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile("wb", dir=path.parent, delete=False) as handle:
+            temporary_path = Path(handle.name)
+            handle.write(_LOG_MAGIC)
+            for frame in frames:
+                handle.write(_encode_frame(frame))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 def _append_frame(path: Path, frame: _LogFrame) -> None:
@@ -518,54 +597,130 @@ def _append_frame(path: Path, frame: _LogFrame) -> None:
 
 
 def _recover_v2_tail(path: Path, scan: _FrameScan) -> list[_LogFrame]:
-    if not scan.tail or scan.error is None:
+    tail_length = scan.file_size - scan.last_good_offset
+    if tail_length <= 0 or scan.error is None:
         return scan.frames
     if _v2_summary(scan.frames) is None:
         raise ValueError("人工日志缺少可识别的完整运行信息，不能自动恢复")
 
-    digest = hashlib.sha256(scan.tail).hexdigest()
-    recovery_path = path.with_name(
-        f"{path.stem}.recovery-{digest}-{len(scan.tail)}.bin"
+    recovery_path, digest = _quarantine_tail(
+        path,
+        start_offset=scan.last_good_offset,
+        expected_length=tail_length,
     )
-    if recovery_path.exists():
-        if recovery_path.read_bytes() != scan.tail:
-            raise ValueError("人工日志残缺尾部隔离文件冲突")
-    else:
-        _atomic_replace_bytes(recovery_path, scan.tail)
-
     recovery_frame = _LogFrame(
         header={
             "type": "recovery",
             "fileName": recovery_path.name,
             "sha256": digest,
-            "byteLength": len(scan.tail),
+            "byteLength": tail_length,
             "reason": scan.error,
         },
         content=(
             "\n人工日志尾部损坏已隔离恢复\n"
             f"隔离文件：{recovery_path.name}\n"
             f"SHA-256：{digest}\n"
-            f"字节长度：{len(scan.tail)}\n"
+            f"字节长度：{tail_length}\n"
         ),
     )
-    restored = scan.source[: scan.last_good_offset] + _encode_frame(recovery_frame)
-    _atomic_replace_bytes(path, restored)
+    _replace_prefix_with_frame(
+        path,
+        prefix_length=scan.last_good_offset,
+        frame=recovery_frame,
+    )
     return [*scan.frames, recovery_frame]
 
 
-def _atomic_replace_bytes(path: Path, content: bytes) -> None:
+def _quarantine_tail(
+    path: Path,
+    *,
+    start_offset: int,
+    expected_length: int,
+) -> tuple[Path, str]:
     temporary_path: Path | None = None
     try:
-        with tempfile.NamedTemporaryFile("wb", dir=path.parent, delete=False) as handle:
-            temporary_path = Path(handle.name)
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
+        digest = hashlib.sha256()
+        with (
+            path.open("rb") as source,
+            tempfile.NamedTemporaryFile("wb", dir=path.parent, delete=False) as target,
+        ):
+            temporary_path = Path(target.name)
+            source.seek(start_offset, os.SEEK_SET)
+            copied = _copy_exact(source, target.file, expected_length, digest=digest)
+            if copied != expected_length:
+                raise ValueError("人工日志残缺尾部长度在恢复期间发生变化")
+            target.flush()
+            os.fsync(target.fileno())
+        digest_value = digest.hexdigest()
+        recovery_path = path.with_name(
+            f"{path.stem}.recovery-{digest_value}-{expected_length}.bin"
+        )
+        if recovery_path.exists():
+            if not _files_equal(temporary_path, recovery_path):
+                raise ValueError("人工日志残缺尾部隔离文件冲突")
+            temporary_path.unlink()
+        else:
+            os.replace(temporary_path, recovery_path)
+        temporary_path = None
+        return recovery_path, digest_value
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
+def _replace_prefix_with_frame(
+    path: Path,
+    *,
+    prefix_length: int,
+    frame: _LogFrame,
+) -> None:
+    temporary_path: Path | None = None
+    try:
+        with (
+            path.open("rb") as source,
+            tempfile.NamedTemporaryFile("wb", dir=path.parent, delete=False) as target,
+        ):
+            temporary_path = Path(target.name)
+            copied = _copy_exact(source, target.file, prefix_length)
+            if copied != prefix_length:
+                raise ValueError("人工日志可信前缀在恢复期间发生变化")
+            target.write(_encode_frame(frame))
+            target.flush()
+            os.fsync(target.fileno())
         os.replace(temporary_path, path)
         temporary_path = None
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
+
+
+def _copy_exact(
+    source: BinaryIO,
+    target: IO[bytes],
+    length: int,
+    *,
+    digest: Any | None = None,
+) -> int:
+    copied = 0
+    while copied < length:
+        chunk = source.read(min(_COPY_CHUNK_BYTES, length - copied))
+        if not chunk:
+            break
+        target.write(chunk)
+        if digest is not None:
+            digest.update(chunk)
+        copied += len(chunk)
+    return copied
+
+
+def _files_equal(first: Path, second: Path) -> bool:
+    if first.stat().st_size != second.stat().st_size:
+        return False
+    with first.open("rb") as first_handle, second.open("rb") as second_handle:
+        while first_chunk := first_handle.read(_COPY_CHUNK_BYTES):
+            if first_chunk != second_handle.read(len(first_chunk)):
+                return False
+        return second_handle.read(1) == b""
 
 
 def _encode_frame(frame: _LogFrame) -> bytes:

@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 import pytest
+from inkforge_agents.observability import human_workflow_log as human_log_module
 from inkforge_agents.observability.human_workflow_log import HumanWorkflowLog
 from inkforge_agents.providers.base import ModelUsage
 from inkforge_agents.runtime.model_runtime import ModelCallContext, ModelCallLogRecord
@@ -580,6 +581,169 @@ def test_human_log_validates_cached_run_identity_before_quarantining_tail(
         log.record_state("run-cached", "不应写入", {})
 
     assert path.read_bytes() == mismatched_damaged_log
+    assert list(path.parent.glob(f"{path.stem}.recovery-*.bin")) == []
+
+
+def test_human_log_summary_and_append_skip_large_payload_without_reading_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    log = HumanWorkflowLog(tmp_path)
+    path = log.start_run(
+        run_id="run-large-payload",
+        task_id="task-large-payload",
+        run_kind="初次运行",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id=None,
+    )
+    large_payload = b"x" * (2 * 1024 * 1024)
+    with path.open("ab") as handle:
+        handle.write(
+            _complete_frame(
+                header={"type": "model", "sequence": 1},
+                content=large_payload,
+            )
+        )
+
+    original_read_exact = human_log_module._read_exact
+
+    def guarded_read_exact(handle: object, length: int) -> bytes:
+        if length > 64 * 1024:
+            raise AssertionError("摘要或追加不应读取完整正文")
+        return original_read_exact(handle, length)  # type: ignore[arg-type]
+
+    original_read_bytes = Path.read_bytes
+
+    def guarded_read_bytes(self: Path) -> bytes:
+        if self == path:
+            raise AssertionError("摘要或追加不应整文件读入内存")
+        return original_read_bytes(self)
+
+    monkeypatch.setattr(human_log_module, "_read_exact", guarded_read_exact)
+    monkeypatch.setattr(Path, "read_bytes", guarded_read_bytes)
+
+    assert [item.runId for item in log.list_runs("user-1")] == ["run-large-payload"]
+    log.record_state("run-large-payload", "继续运行", {})
+
+
+def test_human_log_huge_frame_lengths_do_not_break_other_run_summaries(
+    tmp_path: Path,
+) -> None:
+    log = HumanWorkflowLog(tmp_path)
+    log.start_run(
+        run_id="run-healthy-lengths",
+        task_id="task-healthy-lengths",
+        run_kind="正常运行",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id=None,
+    )
+    invalid_root = tmp_path / "invalid-lengths"
+    invalid_root.mkdir()
+    huge_digits = b"9" * 256
+    (invalid_root / "marker.log").write_bytes(
+        b"INKFORGE-HUMAN-LOG/2\nINKFORGE-FRAME " + huge_digits + b" 0\n"
+    )
+    (invalid_root / "header.log").write_bytes(
+        b"INKFORGE-HUMAN-LOG/2\nINKFORGE-FRAME " + huge_digits + b" 0\n{}"
+    )
+    header = b'{"type":"metadata"}'
+    (invalid_root / "content.log").write_bytes(
+        b"INKFORGE-HUMAN-LOG/2\nINKFORGE-FRAME "
+        + str(len(header)).encode()
+        + b" "
+        + huge_digits
+        + b"\n"
+        + header
+        + b"\n"
+    )
+
+    assert [item.runId for item in log.list_runs("user-1")] == [
+        "run-healthy-lengths"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("field", "different_value"),
+    [
+        ("task_id", "task-other"),
+        ("user_id", "user-other"),
+        ("novel_id", "novel-other"),
+        ("chapter_id", "chapter-other"),
+    ],
+)
+def test_human_log_start_rejects_mismatched_existing_identity_before_recovery(
+    tmp_path: Path,
+    field: str,
+    different_value: str,
+) -> None:
+    log = HumanWorkflowLog(tmp_path)
+    path = log.start_run(
+        run_id="run-start-identity",
+        task_id="task-start-identity",
+        run_kind="初次运行",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id=None,
+    )
+    with path.open("ab") as handle:
+        handle.write(b"INKFORGE-FRA")
+    damaged_bytes = path.read_bytes()
+    arguments: dict[str, object] = {
+        "run_id": "run-start-identity",
+        "task_id": "task-start-identity",
+        "run_kind": "恢复运行",
+        "user_id": "user-1",
+        "novel_id": "novel-1",
+        "chapter_id": None,
+    }
+    arguments[field] = different_value
+
+    with pytest.raises(ValueError, match="当前调用身份不一致"):
+        log.start_run(**arguments)  # type: ignore[arg-type]
+
+    assert path.read_bytes() == damaged_bytes
+    assert list(path.parent.glob(f"{path.stem}.recovery-*.bin")) == []
+
+
+@pytest.mark.parametrize(
+    ("field", "different_value"),
+    [
+        ("taskId", "task-other"),
+        ("userId", "user-other"),
+        ("novelId", "novel-other"),
+    ],
+)
+def test_human_log_model_rejects_mismatched_identity_before_recovery(
+    tmp_path: Path,
+    field: str,
+    different_value: str,
+) -> None:
+    log = HumanWorkflowLog(tmp_path)
+    path = log.start_run(
+        run_id="run-model-identity",
+        task_id="task-model-identity",
+        run_kind="初次运行",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id=None,
+    )
+    with path.open("ab") as handle:
+        handle.write(b"INKFORGE-FRA")
+    damaged_bytes = path.read_bytes()
+    record = _model_record(
+        run_id="run-model-identity",
+        task_id="task-model-identity",
+        prompt_tokens=1,
+        completion_tokens=1,
+    )
+    context = record.context.model_copy(update={field: different_value})
+
+    with pytest.raises(ValueError, match="当前调用身份不一致"):
+        log.record_model_call(record.model_copy(update={"context": context}))
+
+    assert path.read_bytes() == damaged_bytes
     assert list(path.parent.glob(f"{path.stem}.recovery-*.bin")) == []
 
 
