@@ -71,6 +71,12 @@ PostgreSQL Schema”规则的一次有界例外，仅允许修改 `TokenUsage` �
 与“Provider 返回零 usage”无法区分；不写 `CreditLedger`、不扣余额。重复零 usage 通过 `requestId`
 幂等返回且不产生任何写副作用。非 billable Fake Provider 不写正式 `TokenUsage`。
 
+部署切换期间，迁移前已经成功扣费的正金额请求可能只有 `CreditLedger.ai_charge`，而对应历史
+`TokenUsage.requestId` 仍为 `NULL` 或不存在。此时 Core 只使用流水中能够证明的用户、小说、Agent、
+模型、四项 token 和金额判断重放：同一 `requestId` 恰好存在一条且全部一致时返回该流水保存的金额和
+扣费后余额，不再次扣费，也不新增或回填 `TokenUsage`；字段不一致或存在多条同请求扣费流水时返回
+冲突。历史流水没有 task/run，不能声称比较或恢复这两个身份。
+
 `cachedTokens` 是 `promptTokens` 的子集；`totalTokens` 始终等于 `promptTokens + completionTokens`，查询
 和日志不能把缓存 token 再次加到合计。
 

@@ -77,6 +77,30 @@ def _empty_usage() -> ChargeUsage:
     )
 
 
+def _legacy_charge_ledger(
+    *,
+    ledger_id: str = "ledger-legacy-1",
+    amount_micros: int = -100_800,
+    balance_after_micros: int = 899_200,
+) -> CreditLedger:
+    return CreditLedger(
+        id=ledger_id,
+        userId="user-1",
+        type="ai_charge",
+        amountMicros=amount_micros,
+        balanceAfterMicros=balance_after_micros,
+        model="deepseek-v4-flash",
+        promptTokens=100,
+        cachedTokens=40,
+        completionTokens=20,
+        totalTokens=120,
+        agentId="写作",
+        novelId="novel-1",
+        requestId="request-1",
+        note="人工智能模型调用",
+    )
+
+
 @pytest.mark.asyncio
 async def test_service_persists_identity_from_verified_grant(tmp_path: Path) -> None:
     engine, factory = await _create_database(tmp_path / "授权身份.db")
@@ -244,6 +268,176 @@ async def test_integrity_recovery_distinguishes_retry_and_conflict(tmp_path: Pat
         assert retry.balance_after_micros == first.balance_after_micros
         assert ledger_count == 1
         assert usage_count == 1
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_legacy_ledger_retry_is_idempotent_without_backfilling_usage(
+    tmp_path: Path,
+) -> None:
+    engine, factory = await _create_database(tmp_path / "旧流水幂等.db")
+    try:
+        async with factory() as session, session.begin():
+            session.add(
+                User(
+                    id="user-1",
+                    username="alice",
+                    passwordHash="固定哈希",
+                    creditBalanceMicros=899_200,
+                )
+            )
+            session.add(_legacy_charge_ledger())
+
+        result = await BillingRepository(factory).charge_usage(_usage())
+
+        async with factory() as session:
+            user = await session.get(User, "user-1")
+            ledger_count = await session.scalar(
+                select(func.count()).select_from(CreditLedger)
+            )
+            usage_count = await session.scalar(
+                select(func.count()).select_from(TokenUsage)
+            )
+        assert result.request_id == "request-1"
+        assert result.charged_micros == 100_800
+        assert result.balance_after_micros == 899_200
+        assert result.idempotent is True
+        assert user is not None
+        assert user.creditBalanceMicros == 899_200
+        assert ledger_count == 1
+        assert usage_count == 0
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("field", "different_value"),
+    [
+        ("user_id", "user-2"),
+        ("novel_id", "novel-2"),
+        ("model", "other-model"),
+        ("agent_id", "质检"),
+        ("prompt_tokens", 101),
+        ("cached_tokens", 41),
+        ("completion_tokens", 21),
+        ("total_tokens", 121),
+    ],
+)
+async def test_legacy_ledger_retry_with_different_persisted_payload_conflicts(
+    tmp_path: Path, field: str, different_value: str | int
+) -> None:
+    engine, factory = await _create_database(tmp_path / f"旧流水载荷冲突-{field}.db")
+    try:
+        async with factory() as session, session.begin():
+            session.add(
+                User(
+                    id="user-1",
+                    username="alice",
+                    passwordHash="固定哈希",
+                    creditBalanceMicros=899_200,
+                )
+            )
+            session.add(_legacy_charge_ledger())
+
+        with pytest.raises(UsageConflictError):
+            await BillingRepository(factory).charge_usage(
+                replace(_usage(), **{field: different_value})
+            )
+
+        async with factory() as session:
+            user = await session.get(User, "user-1")
+            ledger_count = await session.scalar(
+                select(func.count()).select_from(CreditLedger)
+            )
+            usage_count = await session.scalar(
+                select(func.count()).select_from(TokenUsage)
+            )
+        assert user is not None
+        assert user.creditBalanceMicros == 899_200
+        assert ledger_count == 1
+        assert usage_count == 0
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_legacy_ledger_retry_with_different_amount_conflicts(tmp_path: Path) -> None:
+    engine, factory = await _create_database(tmp_path / "旧流水金额冲突.db")
+    try:
+        async with factory() as session, session.begin():
+            session.add(
+                User(
+                    id="user-1",
+                    username="alice",
+                    passwordHash="固定哈希",
+                    creditBalanceMicros=899_199,
+                )
+            )
+            session.add(
+                _legacy_charge_ledger(
+                    amount_micros=-100_801,
+                    balance_after_micros=899_199,
+                )
+            )
+
+        with pytest.raises(UsageConflictError):
+            await BillingRepository(factory).charge_usage(_usage())
+
+        async with factory() as session:
+            user = await session.get(User, "user-1")
+            ledger_count = await session.scalar(
+                select(func.count()).select_from(CreditLedger)
+            )
+            usage_count = await session.scalar(
+                select(func.count()).select_from(TokenUsage)
+            )
+        assert user is not None
+        assert user.creditBalanceMicros == 899_199
+        assert ledger_count == 1
+        assert usage_count == 0
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_duplicate_legacy_ledgers_conflict_without_database_changes(
+    tmp_path: Path,
+) -> None:
+    engine, factory = await _create_database(tmp_path / "旧流水重复冲突.db")
+    try:
+        async with factory() as session, session.begin():
+            session.add(
+                User(
+                    id="user-1",
+                    username="alice",
+                    passwordHash="固定哈希",
+                    creditBalanceMicros=899_200,
+                )
+            )
+            session.add_all(
+                [
+                    _legacy_charge_ledger(),
+                    _legacy_charge_ledger(ledger_id="ledger-legacy-2"),
+                ]
+            )
+
+        with pytest.raises(UsageConflictError):
+            await BillingRepository(factory).charge_usage(_usage())
+
+        async with factory() as session:
+            user = await session.get(User, "user-1")
+            ledger_count = await session.scalar(
+                select(func.count()).select_from(CreditLedger)
+            )
+            usage_count = await session.scalar(
+                select(func.count()).select_from(TokenUsage)
+            )
+        assert user is not None
+        assert user.creditBalanceMicros == 899_200
+        assert ledger_count == 2
+        assert usage_count == 0
     finally:
         await engine.dispose()
 

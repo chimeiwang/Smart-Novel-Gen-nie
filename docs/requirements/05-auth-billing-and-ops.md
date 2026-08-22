@@ -55,6 +55,11 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 全部一致时才作为安全重放；任何身份或 usage 差异都返回冲突。`cachedTokens` 是 `promptTokens` 的子集，
 `totalTokens = promptTokens + completionTokens`，汇总时不得再次把缓存 token 加入合计。
 
+迁移前已经扣费的正金额请求可能只有 `CreditLedger.ai_charge`，没有带 `requestId` 的 `TokenUsage`。
+这类重放只比较流水能够证明的用户、小说、Agent、模型、四项 token 和金额；同一 `requestId` 恰好一条
+且全部一致时返回历史金额和扣费后余额，不再次扣费，也不新增或回填 `TokenUsage`。字段不一致或同一
+请求存在多条扣费流水时返回冲突。历史流水没有 task/run，不能比较或恢复这两个身份。
+
 浏览器可通过 `GET /api/v1/billing/usage/tasks/{task_id}` 查询当前用户拥有的 `WritingTask`。不存在或
 不属于当前用户的任务统一返回 404；响应包含 `taskId`、调用数、四项 token 汇总，以及按
 `createdAt, id` 升序排列的完整逐调用 `requestId`、`runId`、`agentId`、`model`、四项 token 和 UTC

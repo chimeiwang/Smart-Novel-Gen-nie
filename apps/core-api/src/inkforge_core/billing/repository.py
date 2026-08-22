@@ -184,6 +184,13 @@ class BillingRepository:
                     if existing is not None:
                         return await _idempotent_result(session, existing, usage, amount)
 
+                    if amount > 0:
+                        legacy_result = await _legacy_idempotent_result(
+                            session, usage, amount
+                        )
+                        if legacy_result is not None:
+                            return legacy_result
+
                     if amount == 0:
                         balance_after = await session.scalar(
                             select(User.creditBalanceMicros).where(User.id == usage.user_id)
@@ -409,4 +416,50 @@ def _same_usage(existing: TokenUsage, usage: ChargeUsage) -> bool:
         and existing.cachedTokens == usage.cached_tokens
         and existing.completionTokens == usage.completion_tokens
         and existing.totalTokens == usage.total_tokens
+    )
+
+
+async def _legacy_idempotent_result(
+    session: AsyncSession,
+    usage: ChargeUsage,
+    amount: int,
+) -> ChargeResult | None:
+    ledgers = (
+        await session.execute(
+            select(CreditLedger)
+            .where(
+                CreditLedger.requestId == usage.request_id,
+                CreditLedger.type == "ai_charge",
+            )
+            .order_by(CreditLedger.createdAt, CreditLedger.id)
+            .limit(2)
+        )
+    ).scalars().all()
+    if not ledgers:
+        return None
+    if len(ledgers) != 1 or not _same_legacy_charge(ledgers[0], usage, amount):
+        raise UsageConflictError
+    return ChargeResult(
+        request_id=usage.request_id,
+        charged_micros=amount,
+        balance_after_micros=int(ledgers[0].balanceAfterMicros),
+        idempotent=True,
+    )
+
+
+def _same_legacy_charge(
+    existing: CreditLedger,
+    usage: ChargeUsage,
+    amount: int,
+) -> bool:
+    return (
+        existing.userId == usage.user_id
+        and existing.novelId == usage.novel_id
+        and existing.model == usage.model
+        and existing.agentId == usage.agent_id
+        and existing.promptTokens == usage.prompt_tokens
+        and existing.cachedTokens == usage.cached_tokens
+        and existing.completionTokens == usage.completion_tokens
+        and existing.totalTokens == usage.total_tokens
+        and existing.amountMicros == -amount
     )
