@@ -341,8 +341,12 @@ def _required_metadata_text(metadata: dict[str, Any], field: str) -> str | None:
 def _ensure_v2_log(path: Path, *, expected_run_id: str) -> list[_LogFrame]:
     if _is_v2_log(path):
         scan = _scan_v2_frames(path, include_content=False)
+        validated_frames = _validated_v2_frames(
+            scan.frames,
+            expected_run_id=expected_run_id,
+        )
         if scan.error is None:
-            return _validated_v2_frames(scan.frames, expected_run_id=expected_run_id)
+            return validated_frames
         recovered_frames = _recover_v2_tail(path, scan)
         return _validated_v2_frames(
             recovered_frames,

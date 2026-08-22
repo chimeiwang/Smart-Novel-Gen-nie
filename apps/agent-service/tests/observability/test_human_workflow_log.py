@@ -538,6 +538,51 @@ def test_human_log_rejects_incomplete_metadata_before_append(
     assert log.list_runs("user-1") == []
 
 
+def test_human_log_validates_cached_run_identity_before_quarantining_tail(
+    tmp_path: Path,
+) -> None:
+    log = HumanWorkflowLog(tmp_path)
+    path = log.start_run(
+        run_id="run-cached",
+        task_id="task-cached",
+        run_kind="初次运行",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id=None,
+    )
+    mismatched_damaged_log = (
+        b"INKFORGE-HUMAN-LOG/2\n"
+        + _complete_frame(
+            header={
+                "type": "metadata",
+                "runId": "run-other",
+                "taskId": "task-other",
+                "userId": "user-other",
+                "novelId": "novel-other",
+                "chapterId": None,
+                "startedAt": "2026-08-22T00:00:00+00:00",
+            }
+        )
+        + _complete_frame(
+            header={
+                "type": "run",
+                "sequence": 1,
+                "runKind": "其他运行",
+                "startedAt": "2026-08-22T00:00:00+00:00",
+            },
+            content="R01 其他运行\n".encode(),
+        )
+        + b"INKFORGE-FRA"
+    )
+    path.write_bytes(mismatched_damaged_log)
+
+    with pytest.raises(ValueError, match="运行元数据与当前运行不一致"):
+        log.record_state("run-cached", "不应写入", {})
+
+    assert path.read_bytes() == mismatched_damaged_log
+    assert list(path.parent.glob(f"{path.stem}.recovery-*.bin")) == []
+
+
 def test_human_log_reads_legacy_file_and_upgrades_it_before_resume(
     tmp_path: Path,
 ) -> None:
