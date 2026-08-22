@@ -96,7 +96,7 @@ usage 前失败时只能记录错误事实，不能伪造 token。工具参数�
 新增公共接口：
 
 ```text
-GET /api/v1/billing/usage/tasks/{taskId}
+GET /api/v1/billing/usage/tasks/{task_id}
 ```
 
 首版只允许查询属于当前用户的 `WritingTask`。不存在或不属于当前用户统一返回无权访问/不存在，不得
