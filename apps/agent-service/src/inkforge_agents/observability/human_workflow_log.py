@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import tempfile
 import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from io import BytesIO
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -39,6 +41,15 @@ class WorkflowLogDetail:
 class _LogFrame:
     header: dict[str, Any]
     content: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class _FrameScan:
+    frames: list[_LogFrame]
+    source: bytes
+    last_good_offset: int
+    tail: bytes
+    error: str | None
 
 
 class HumanWorkflowLog:
@@ -187,7 +198,7 @@ class HumanWorkflowLog:
             content = (
                 _render_v2_log(path)
                 if _is_v2_log(path)
-                else _legacy_display(path.read_text(encoding="utf-8"))
+                else _legacy_display(_read_utf8_exact(path))
             )
             return WorkflowLogDetail(summary=summary, content=content)
 
@@ -216,9 +227,13 @@ class HumanWorkflowLog:
     def _summary(self, path: Path | None) -> WorkflowRunSummary | None:
         if path is None or not path.is_file():
             return None
-        if _is_v2_log(path):
-            return _v2_summary(_read_v2_frames(path, include_content=False))
-        return _legacy_summary(path.read_text(encoding="utf-8"))
+        try:
+            if _is_v2_log(path):
+                scan = _scan_v2_frames(path, include_content=False)
+                return _v2_summary(scan.frames, tail_damaged=scan.error is not None)
+            return _legacy_summary(_read_utf8_exact(path))
+        except (OSError, UnicodeError, ValueError):
+            return None
 
 
 def _legacy_summary(content: str) -> WorkflowRunSummary | None:
@@ -234,13 +249,10 @@ def _legacy_summary(content: str) -> WorkflowRunSummary | None:
         started_at = str(metadata["startedAt"])
     except (json.JSONDecodeError, KeyError, TypeError):
         return None
-    run_kinds = re.findall(r"(?m)^R\d+ (.+)$", content)
-    ended = re.findall(r"(?m)^结束时间：(.+)$", content)
-    statuses = re.findall(r"(?m)^结束状态：(.+)$", content)
     return WorkflowRunSummary(
         runId=run_id,
         taskId=task_id,
-        runKind=run_kinds[-1] if run_kinds else "未知运行",
+        runKind="旧版未验证",
         userId=user_id,
         novelId=novel_id,
         chapterId=(
@@ -249,12 +261,16 @@ def _legacy_summary(content: str) -> WorkflowRunSummary | None:
             else None
         ),
         startedAt=started_at,
-        endedAt=ended[-1] if ended else started_at,
-        status=statuses[-1] if statuses else "执行中",
+        endedAt=started_at,
+        status="旧版未验证",
     )
 
 
-def _v2_summary(frames: list[_LogFrame]) -> WorkflowRunSummary | None:
+def _v2_summary(
+    frames: list[_LogFrame],
+    *,
+    tail_damaged: bool = False,
+) -> WorkflowRunSummary | None:
     metadata = next(
         (frame.header for frame in frames if frame.header.get("type") == "metadata"),
         None,
@@ -277,20 +293,18 @@ def _v2_summary(frames: list[_LogFrame]) -> WorkflowRunSummary | None:
         (frame.header for frame in frames if frame.header.get("type") == "legacy"),
         {},
     )
-    run_kind = (
-        str(run_headers[-1].get("runKind", "未知运行"))
-        if run_headers
-        else str(legacy_header.get("runKind", "未知运行"))
+    run_kind = str(run_headers[-1].get("runKind", "未知运行")) if run_headers else (
+        "旧版未验证" if legacy_header else "未知运行"
     )
     ended_at = (
         str(finish_headers[-1].get("endedAt", started_at))
         if finish_headers
-        else str(legacy_header.get("endedAt", started_at))
+        else started_at
     )
-    status = (
+    trusted_status = (
         str(finish_headers[-1].get("status", "执行中"))
         if finish_headers
-        else str(legacy_header.get("status", "执行中"))
+        else ("旧版未验证" if legacy_header and not run_headers else "执行中")
     )
     chapter_id = metadata.get("chapterId")
     return WorkflowRunSummary(
@@ -302,22 +316,20 @@ def _v2_summary(frames: list[_LogFrame]) -> WorkflowRunSummary | None:
         chapterId=str(chapter_id) if chapter_id is not None else None,
         startedAt=started_at,
         endedAt=ended_at,
-        status=status,
+        status="日志尾部损坏" if tail_damaged else trusted_status,
     )
 
 
 def _ensure_v2_log(path: Path) -> list[_LogFrame]:
     if _is_v2_log(path):
-        return _read_v2_frames(path, include_content=False)
-    legacy_content = path.read_text(encoding="utf-8")
+        scan = _scan_v2_frames(path, include_content=False)
+        if scan.error is None:
+            return scan.frames
+        return _recover_v2_tail(path, scan)
+    legacy_content = _read_utf8_exact(path)
     summary = _legacy_summary(legacy_content)
     if summary is None:
         raise ValueError("旧版人工日志缺少有效运行信息")
-    counts = {
-        "run": len(re.findall(r"(?m)^R\d+ .+$", legacy_content)),
-        "state": len(re.findall(r"(?m)^S\d+ 状态切换$", legacy_content)),
-        "model": len(re.findall(r"(?m)^A\d+ 智能体：", legacy_content)),
-    }
     frames = [
         _LogFrame(
             header={
@@ -334,12 +346,9 @@ def _ensure_v2_log(path: Path) -> list[_LogFrame]:
         _LogFrame(
             header={
                 "type": "legacy",
-                "counts": counts,
-                "runKind": summary.runKind,
-                "endedAt": summary.endedAt,
-                "status": summary.status,
+                "trust": "unverified",
             },
-            content=_legacy_display(legacy_content),
+            content=legacy_content,
         ),
     ]
     _replace_with_v2_log(path, frames)
@@ -348,16 +357,6 @@ def _ensure_v2_log(path: Path) -> list[_LogFrame]:
 
 def _next_sequence(frames: list[_LogFrame], frame_type: str) -> int:
     sequence = sum(1 for frame in frames if frame.header.get("type") == frame_type)
-    for frame in frames:
-        if frame.header.get("type") != "legacy":
-            continue
-        counts = frame.header.get("counts")
-        if not isinstance(counts, dict):
-            raise ValueError("旧版人工日志计数信息无效")
-        legacy_count = counts.get(frame_type, 0)
-        if type(legacy_count) is not int or legacy_count < 0:
-            raise ValueError("旧版人工日志计数信息无效")
-        sequence += legacy_count
     return sequence + 1
 
 
@@ -367,11 +366,22 @@ def _is_v2_log(path: Path) -> bool:
 
 
 def _read_v2_frames(path: Path, *, include_content: bool) -> list[_LogFrame]:
+    scan = _scan_v2_frames(path, include_content=include_content)
+    if scan.error is not None:
+        raise ValueError(scan.error)
+    return scan.frames
+
+
+def _scan_v2_frames(path: Path, *, include_content: bool) -> _FrameScan:
     frames: list[_LogFrame] = []
-    with path.open("rb") as handle:
-        if handle.read(len(_LOG_MAGIC)) != _LOG_MAGIC:
-            raise ValueError("人工日志版本标识无效")
-        while marker := handle.readline():
+    source = path.read_bytes()
+    handle = BytesIO(source)
+    if handle.read(len(_LOG_MAGIC)) != _LOG_MAGIC:
+        return _damaged_scan(frames, source, 0, "人工日志版本标识无效")
+    last_good_offset = len(_LOG_MAGIC)
+    while marker := handle.readline():
+        frame_offset = last_good_offset
+        try:
             match = _FRAME_PREFIX_PATTERN.fullmatch(marker)
             if match is None:
                 raise ValueError("人工日志帧头无效")
@@ -380,11 +390,9 @@ def _read_v2_frames(path: Path, *, include_content: bool) -> list[_LogFrame]:
             header_bytes = _read_exact(handle, header_length)
             if handle.read(1) != b"\n":
                 raise ValueError("人工日志结构头边界无效")
-            if include_content:
-                content = _read_exact(handle, content_length).decode("utf-8")
-            else:
-                handle.seek(content_length, 1)
-                content = None
+            content_bytes = _read_exact(handle, content_length)
+            decoded_content = content_bytes.decode("utf-8")
+            content = decoded_content if include_content else None
             if handle.read(1) != b"\n":
                 raise ValueError("人工日志正文边界无效")
             try:
@@ -394,7 +402,31 @@ def _read_v2_frames(path: Path, *, include_content: bool) -> list[_LogFrame]:
             if not isinstance(header, dict) or not isinstance(header.get("type"), str):
                 raise ValueError("人工日志结构头字段无效")
             frames.append(_LogFrame(header=header, content=content))
-    return frames
+            last_good_offset = handle.tell()
+        except (UnicodeDecodeError, ValueError) as exc:
+            return _damaged_scan(frames, source, frame_offset, str(exc))
+    return _FrameScan(
+        frames=frames,
+        source=source,
+        last_good_offset=last_good_offset,
+        tail=b"",
+        error=None,
+    )
+
+
+def _damaged_scan(
+    frames: list[_LogFrame],
+    source: bytes,
+    last_good_offset: int,
+    error: str,
+) -> _FrameScan:
+    return _FrameScan(
+        frames=frames,
+        source=source,
+        last_good_offset=last_good_offset,
+        tail=source[last_good_offset:],
+        error=error,
+    )
 
 
 def _read_exact(handle: BinaryIO, length: int) -> bytes:
@@ -404,28 +436,95 @@ def _read_exact(handle: BinaryIO, length: int) -> bytes:
     return value
 
 
+def _read_utf8_exact(path: Path) -> str:
+    return path.read_bytes().decode("utf-8")
+
+
 def _render_v2_log(path: Path) -> str:
-    frames = _read_v2_frames(path, include_content=True)
-    return "".join(frame.content or "" for frame in frames)
+    scan = _scan_v2_frames(path, include_content=True)
+    sections = [
+        _legacy_display(frame.content or "")
+        if frame.header.get("type") == "legacy"
+        else (frame.content or "")
+        for frame in scan.frames
+    ]
+    if scan.error is not None:
+        sections.append(
+            "\n人工日志尾部损坏：只展示最后一个完整可信帧之前的内容；"
+            "下一次写入会先隔离原始残缺字节再恢复。\n"
+        )
+    return "".join(sections)
 
 
 def _create_v2_log(path: Path, first_frame: _LogFrame) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("xb") as handle:
         handle.write(_LOG_MAGIC + _encode_frame(first_frame))
+        handle.flush()
+        os.fsync(handle.fileno())
 
 
 def _replace_with_v2_log(path: Path, frames: list[_LogFrame]) -> None:
     content = _LOG_MAGIC + b"".join(_encode_frame(frame) for frame in frames)
-    with tempfile.NamedTemporaryFile("wb", dir=path.parent, delete=False) as handle:
-        temporary_path = Path(handle.name)
-        handle.write(content)
-    temporary_path.replace(path)
+    _atomic_replace_bytes(path, content)
 
 
 def _append_frame(path: Path, frame: _LogFrame) -> None:
     with path.open("ab") as handle:
         handle.write(_encode_frame(frame))
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _recover_v2_tail(path: Path, scan: _FrameScan) -> list[_LogFrame]:
+    if not scan.tail or scan.error is None:
+        return scan.frames
+    if _v2_summary(scan.frames) is None:
+        raise ValueError("人工日志缺少可识别的完整运行信息，不能自动恢复")
+
+    digest = hashlib.sha256(scan.tail).hexdigest()
+    recovery_path = path.with_name(
+        f"{path.stem}.recovery-{digest}-{len(scan.tail)}.bin"
+    )
+    if recovery_path.exists():
+        if recovery_path.read_bytes() != scan.tail:
+            raise ValueError("人工日志残缺尾部隔离文件冲突")
+    else:
+        _atomic_replace_bytes(recovery_path, scan.tail)
+
+    recovery_frame = _LogFrame(
+        header={
+            "type": "recovery",
+            "fileName": recovery_path.name,
+            "sha256": digest,
+            "byteLength": len(scan.tail),
+            "reason": scan.error,
+        },
+        content=(
+            "\n人工日志尾部损坏已隔离恢复\n"
+            f"隔离文件：{recovery_path.name}\n"
+            f"SHA-256：{digest}\n"
+            f"字节长度：{len(scan.tail)}\n"
+        ),
+    )
+    restored = scan.source[: scan.last_good_offset] + _encode_frame(recovery_frame)
+    _atomic_replace_bytes(path, restored)
+    return [*scan.frames, recovery_frame]
+
+
+def _atomic_replace_bytes(path: Path, content: bytes) -> None:
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile("wb", dir=path.parent, delete=False) as handle:
+            temporary_path = Path(handle.name)
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_path, path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 def _encode_frame(frame: _LogFrame) -> bytes:
