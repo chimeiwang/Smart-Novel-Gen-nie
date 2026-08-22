@@ -44,9 +44,26 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 调用结束后：
 
 - Agent 上报实际 token usage；
-- Core 在短事务中幂等扣减余额；
-- 同步写入 `CreditLedger.ai_charge` 和 `TokenUsage`；
+- Core 在同一短事务中以 `requestId` 幂等处理余额和用量，把授权校验后的 `requestId/taskId/runId`
+  与四项 token 一起写入 `TokenUsage`；
+- 金额大于零时同步扣减余额并写入 `CreditLedger.ai_charge`，其 `requestId` 与 `TokenUsage` 相同；
+- 四项 token 全为零的真实计费调用仍写入一条 `TokenUsage`，但不写 `CreditLedger`、不扣余额；重复零
+  usage 不产生任何写副作用，`balanceAfterMicros` 返回重放时查询到的当前余额；
 - 重复回调不能重复扣费。
+
+`TokenUsage.requestId` 唯一。相同 `requestId` 只有在用户、小说、任务、运行、Agent、模型和四项 token
+全部一致时才作为安全重放；任何身份或 usage 差异都返回冲突。`cachedTokens` 是 `promptTokens` 的子集，
+`totalTokens = promptTokens + completionTokens`，汇总时不得再次把缓存 token 加入合计。
+
+迁移前已经扣费的正金额请求可能只有 `CreditLedger.ai_charge`，没有带 `requestId` 的 `TokenUsage`。
+这类重放只比较流水能够证明的用户、小说、Agent、模型、四项 token 和金额；同一 `requestId` 恰好一条
+且全部一致时返回历史金额和扣费后余额，不再次扣费，也不新增或回填 `TokenUsage`。字段不一致或同一
+请求存在多条扣费流水时返回冲突。历史流水没有 task/run，不能比较或恢复这两个身份。
+
+浏览器可通过 `GET /api/v1/billing/usage/tasks/{task_id}` 查询当前用户拥有的 `WritingTask`。不存在或
+不属于当前用户的任务统一返回 404；响应包含 `taskId`、调用数、四项 token 汇总，以及按
+`createdAt, id` 升序排列的完整逐调用 `requestId`、`runId`、`agentId`、`model`、四项 token 和 UTC
+`createdAt`。接口不截断或分页调用明细，也不返回 prompt 正文、模型输出、余额或 `grantToken`。
 
 计费和草案应用属于关键写入，禁止放入可丢弃队列。
 
@@ -71,12 +88,27 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 
 2026-07-14 的 PostgreSQL schema 变更是用户明确批准的单次例外：新增 `WritingRunCommand`，为 `WritingStyle` 增加强制 `userId`，并为 `StylePortraitTask` 增加可空 `section`。迁移执行前必须完成可恢复备份；按已批准方案清空旧文风、文风参考和画像任务数据，同时保留用户、小说、章节、会话及其他正式数据。应用启动不得自动修改 schema。
 
+用户于 2026-08-21 另行明确批准唯一版本化迁移
+`scripts/migrations/20260821_token_usage_task_run.sql`：只允许为 `TokenUsage` 增加可空 `TEXT`
+`requestId/taskId/runId`，增加非空白 `requestId` 检查、`requestId` 唯一索引、
+`(userId, taskId, createdAt)` 和 `(runId, createdAt)` 复合索引。三个字段可空只为兼容历史行；历史值
+保持 `NULL`，禁止猜测回填。该批准不构成以后任意迁移的授权。执行前必须完成可恢复备份和隔离
+PostgreSQL 重复执行验证；应用启动仍不得自动修改 schema。当前仓库已提供迁移脚本和配套实现，但
+本需求文档不表示生产数据库已经迁移或新版本已经部署；实际执行后还必须从隔离库导出新的
+`schema-contract.json` 并验证生产实际结构与 contract 精确一致。
+
 ## 人工日志
 
 - Agent 日志写入 `/data/agent-logs` 命名卷。
 - 生产部署在版本切换前通过无网络、只挂载日志卷且仅保留 `CHOWN` capability 的一次性初始化容器，把卷根目录所有权设为 `10001:10001`；初始化失败时不得执行 `compose up`。
 - 同一任务恢复运行追加到同一文件。
-- 保存完整模型 messages、模型正文和中文状态切换。
+- 使用 `INKFORGE-HUMAN-LOG/2` 长度分帧格式保存完整模型 messages、模型正文和中文状态切换；正文
+  中出现日志标记或 JSON 不得污染结构解析。
+- 每个模型调用区块记录 `taskId`、`runId`、Core 计费 `requestId`、provider/model 和四项实际 token；
+  非计费调用显示无计费请求标识，Provider 无可靠 usage 的失败不伪造 token，任何区块都不记录
+  `grantToken`。
+- 旧版日志原文进入 `trust=unverified` 的只读 legacy 边界；残缺尾部只在可信运行元数据完整时隔离为
+  带 SHA-256 和字节数的恢复文件，并从最后完整帧恢复追加。
 - 不记录 tools schema、tool_calls、工具参数或工具结果。
 - 调试读取默认关闭；开启后仍需浏览器认证、用户归属和 `agent:debug:read` 服务权限。
 
@@ -127,7 +159,8 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 - 生产 Compose 不创建 PostgreSQL 容器或数据卷，测试 Compose 使用独立测试数据库；
 - Core 通过 `host.docker.internal` 连接现有宿主机 PostgreSQL 14；
 - 不提供初始化 SQL；
-- 不执行迁移、建表或删表；
+- 应用启动不执行迁移、建表或删表；唯一获批的 2026-08-21 `TokenUsage` 版本化迁移只能由受控运维
+  流程单独执行；
 - Core 启动就绪检查对现有 schema 做只读指纹校验。
 
 2 核 2 GB 默认限制：
@@ -178,6 +211,7 @@ Core 与 Agent readiness 在后台任务不健康时保留 `checks` 兼容字段
 - 宿主机 Nginx 是唯一公网入口，80 与 `www` 永久跳转到 `https://inkforge.cn`，公网 `/internal/**` 返回 404。
 - 生产 TLS 只接受 1.2 和 1.3；公开证书覆盖 `inkforge.cn` 与 `www.inkforge.cn`，并由 Certbot timer 与校验后 reload 的 deploy hook 续期。
 - Compose Nginx 只绑定宿主机 `127.0.0.1:43120`，不得允许公网绕过宿主机 HTTPS 边界。
-- 数据库结构指纹在迁移前后保持不变。
+- 除用户明确批准的版本化迁移外，数据库结构必须与当前 contract 精确一致；批准的迁移完成并导出新
+  contract 后，实际结构也必须与新 contract 精确一致。
 - 生产 SSH 只信任离线核验的主机公钥，运行中的部署不会被后续提交取消。
 - 新版本失败时可恢复到经验证的上一镜像；回滚成功仍保留发布失败状态。

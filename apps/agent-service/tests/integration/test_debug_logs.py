@@ -6,6 +6,8 @@ from typing import Any
 from fastapi.testclient import TestClient
 from inkforge_agents.app import create_app
 from inkforge_agents.observability import HumanWorkflowLog
+from inkforge_agents.providers.base import ModelUsage
+from inkforge_agents.runtime.model_runtime import ModelCallContext, ModelCallLogRecord
 from inkforge_contracts.jwt_claims import ServiceScope
 
 
@@ -38,12 +40,28 @@ def test_signed_debug_api_filters_user_and_returns_complete_content(tmp_path: Pa
         chapter_id="chapter-1",
     )
     workflow_log.record_model_call(
-        "run-1",
-        "写作",
-        [{"role": "user", "content": "完整请求"}],
-        "完整响应",
-        "stop",
-        "stop",
+        ModelCallLogRecord(
+            context=ModelCallContext(
+                userId="user-1",
+                novelId="novel-1",
+                taskId="task-1",
+                runId="run-1",
+                agentId="写作",
+            ),
+            provider="openai_compatible",
+            model="deepseek-v4-flash",
+            billingRequestId="billing-request-1",
+            messages=[{"role": "user", "content": "完整请求"}],
+            output="完整响应",
+            usage=ModelUsage(
+                promptTokens=10,
+                cachedTokens=2,
+                completionTokens=20,
+                totalTokens=30,
+            ),
+            finishReason="stop",
+            rawFinishReason="stop",
+        )
     )
     workflow_log.finish_run("run-1", "完成")
     verifier = Verifier()
@@ -72,6 +90,12 @@ def test_signed_debug_api_filters_user_and_returns_complete_content(tmp_path: Pa
     assert detail.status_code == 200
     assert "完整请求" in detail.json()["content"]
     assert "完整响应" in detail.json()["content"]
+    assert "任务标识：task-1" in detail.json()["content"]
+    assert "运行标识：run-1" in detail.json()["content"]
+    assert "计费请求标识：billing-request-1" in detail.json()["content"]
+    assert "模型：openai_compatible/deepseek-v4-flash" in detail.json()["content"]
+    assert "Token 消耗：输入 10 | 缓存 2 | 输出 20 | 合计 30" in detail.json()["content"]
+    assert "grantToken" not in detail.json()["content"]
     assert verifier.calls[0]["required_scope"] is ServiceScope.AGENT_DEBUG_READ
     assert verifier.calls[0]["query_string"] == b"userId=user-1"
 

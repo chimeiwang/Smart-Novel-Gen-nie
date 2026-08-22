@@ -15,6 +15,7 @@ from .schemas import (
     BillingSummaryResponse,
     BillingUsageResponse,
     ReportModelUsageRequest,
+    TaskModelUsageResponse,
     UsageChargeResponse,
 )
 from .service import BillingService
@@ -50,6 +51,15 @@ async def get_usage(
     user: Annotated[AuthUser, Depends(get_current_user)], service: Service
 ) -> BillingUsageResponse:
     return await service.usage(user.id)
+
+
+@router.get("/usage/tasks/{task_id}", response_model=TaskModelUsageResponse)
+async def get_task_usage(
+    task_id: str,
+    user: Annotated[AuthUser, Depends(get_current_user)],
+    service: Service,
+) -> TaskModelUsageResponse:
+    return await service.task_usage(user.id, task_id)
 
 
 async def _verify_internal_request(

@@ -6,7 +6,13 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
-from ..providers.base import ModelProvider, ModelTurnRequest, ModelTurnResult
+from ..providers.base import (
+    ModelFinishReason,
+    ModelProvider,
+    ModelTurnRequest,
+    ModelTurnResult,
+    ModelUsage,
+)
 
 
 class ModelCallContext(BaseModel):
@@ -17,6 +23,20 @@ class ModelCallContext(BaseModel):
     taskId: str
     runId: str
     agentId: str
+
+
+class ModelCallLogRecord(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    context: ModelCallContext
+    provider: str
+    model: str
+    billingRequestId: str | None
+    messages: list[dict[str, str]]
+    output: str
+    usage: ModelUsage
+    finishReason: ModelFinishReason
+    rawFinishReason: str | None
 
 
 class BillingPort(Protocol):
@@ -36,14 +56,7 @@ class BillingPort(Protocol):
 
 
 class ModelCallObserver(Protocol):
-    def record_model_call(
-        self,
-        context: ModelCallContext,
-        messages: list[dict[str, str]],
-        output: str,
-        finish_reason: str,
-        raw_finish_reason: str | None,
-    ) -> None: ...
+    def record_model_call(self, record: ModelCallLogRecord) -> None: ...
 
 
 class ModelRuntime:
@@ -84,7 +97,7 @@ class ModelRuntime:
     ) -> ModelTurnResult:
         if not self._provider.billable or self._billing is None:
             result = await _complete_provider(self._provider, request)
-            self._record(context, request, result)
+            self._record(context, request, result, billing_request_id=None)
             return result
         if context is None:
             raise ValueError("真实模型调用缺少运行资源上下文")
@@ -149,7 +162,12 @@ class ModelRuntime:
             )
         except Exception as exc:
             raise RuntimeError("MODEL_USAGE_REPORT_FAILED：模型用量回报失败") from exc
-        self._record(context, request, result)
+        self._record(
+            context,
+            request,
+            result,
+            billing_request_id=grant_request_id,
+        )
         return result
 
     def _record(
@@ -157,18 +175,26 @@ class ModelRuntime:
         context: ModelCallContext | None,
         request: ModelTurnRequest,
         result: ModelTurnResult,
+        *,
+        billing_request_id: str | None,
     ) -> None:
         if self._observer is None or context is None:
             return
         self._observer.record_model_call(
-            context,
-            [
-                {"role": message.role, "content": message.content}
-                for message in request.messages
-            ],
-            result.content,
-            result.finishReason,
-            result.rawFinishReason,
+            ModelCallLogRecord(
+                context=context,
+                provider=self._provider.provider_name,
+                model=self._provider.model_name,
+                billingRequestId=billing_request_id,
+                messages=[
+                    {"role": message.role, "content": message.content}
+                    for message in request.messages
+                ],
+                output=result.content,
+                usage=result.usage,
+                finishReason=result.finishReason,
+                rawFinishReason=result.rawFinishReason,
+            )
         )
 
 

@@ -77,5 +77,11 @@ async def test_model_runtime_records_complete_provider_result_in_human_log(
     )
     assert request_text in written
     assert output_text in written
+    assert "任务标识：task-bridge" in written
+    assert "运行标识：run-bridge" in written
+    assert "计费请求标识：无" in written
+    assert "模型：bridge-test/bridge-test-model" in written
+    assert "Token 消耗：输入 10 | 缓存 0 | 输出 20 | 合计 30" in written
     assert "完成原因：length" in written
     assert "供应商原始原因：max_tokens" in written
+    assert "grantToken" not in written
