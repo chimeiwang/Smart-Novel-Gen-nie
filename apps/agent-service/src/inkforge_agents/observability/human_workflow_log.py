@@ -87,7 +87,7 @@ class HumanWorkflowLog:
                         content="运行信息：" + _json(metadata) + "\n",
                     ),
                 )
-            frames = _ensure_v2_log(path)
+            frames = _ensure_v2_log(path, expected_run_id=run_id)
             run_number = _next_sequence(frames, "run")
             _append_frame(
                 path,
@@ -107,7 +107,7 @@ class HumanWorkflowLog:
     def record_state(self, run_id: str, node: str, changes: dict[str, Any]) -> None:
         with self._lock:
             path = self._require_path(run_id)
-            frames = _ensure_v2_log(path)
+            frames = _ensure_v2_log(path, expected_run_id=run_id)
             sequence = _next_sequence(frames, "state")
             _append_frame(
                 path,
@@ -123,7 +123,7 @@ class HumanWorkflowLog:
     def record_model_call(self, record: ModelCallLogRecord) -> None:
         with self._lock:
             path = self._require_path(record.context.runId)
-            frames = _ensure_v2_log(path)
+            frames = _ensure_v2_log(path, expected_run_id=record.context.runId)
             sequence = _next_sequence(frames, "model")
             billing_request_id = record.billingRequestId or "无"
             usage = record.usage
@@ -169,7 +169,7 @@ class HumanWorkflowLog:
     def finish_run(self, run_id: str, status: str) -> Path:
         with self._lock:
             path = self._require_path(run_id)
-            _ensure_v2_log(path)
+            _ensure_v2_log(path, expected_run_id=run_id)
             ended_at = _now()
             _append_frame(
                 path,
@@ -271,19 +271,28 @@ def _v2_summary(
     *,
     tail_damaged: bool = False,
 ) -> WorkflowRunSummary | None:
-    metadata = next(
-        (frame.header for frame in frames if frame.header.get("type") == "metadata"),
-        None,
-    )
-    if metadata is None:
+    metadata_frames = [
+        frame.header for frame in frames if frame.header.get("type") == "metadata"
+    ]
+    if (
+        len(metadata_frames) != 1
+        or not frames
+        or frames[0].header.get("type") != "metadata"
+    ):
         return None
-    try:
-        run_id = str(metadata["runId"])
-        task_id = str(metadata["taskId"])
-        user_id = str(metadata["userId"])
-        novel_id = str(metadata["novelId"])
-        started_at = str(metadata["startedAt"])
-    except (KeyError, TypeError):
+    metadata = metadata_frames[0]
+    run_id = _required_metadata_text(metadata, "runId")
+    task_id = _required_metadata_text(metadata, "taskId")
+    user_id = _required_metadata_text(metadata, "userId")
+    novel_id = _required_metadata_text(metadata, "novelId")
+    started_at = _required_metadata_text(metadata, "startedAt")
+    if (
+        run_id is None
+        or task_id is None
+        or user_id is None
+        or novel_id is None
+        or started_at is None
+    ):
         return None
     run_headers = [frame.header for frame in frames if frame.header.get("type") == "run"]
     finish_headers = [
@@ -307,6 +316,10 @@ def _v2_summary(
         else ("旧版未验证" if legacy_header and not run_headers else "执行中")
     )
     chapter_id = metadata.get("chapterId")
+    if chapter_id is not None and (
+        not isinstance(chapter_id, str) or not chapter_id.strip()
+    ):
+        return None
     return WorkflowRunSummary(
         runId=run_id,
         taskId=task_id,
@@ -320,16 +333,27 @@ def _v2_summary(
     )
 
 
-def _ensure_v2_log(path: Path) -> list[_LogFrame]:
+def _required_metadata_text(metadata: dict[str, Any], field: str) -> str | None:
+    value = metadata.get(field)
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _ensure_v2_log(path: Path, *, expected_run_id: str) -> list[_LogFrame]:
     if _is_v2_log(path):
         scan = _scan_v2_frames(path, include_content=False)
         if scan.error is None:
-            return scan.frames
-        return _recover_v2_tail(path, scan)
+            return _validated_v2_frames(scan.frames, expected_run_id=expected_run_id)
+        recovered_frames = _recover_v2_tail(path, scan)
+        return _validated_v2_frames(
+            recovered_frames,
+            expected_run_id=expected_run_id,
+        )
     legacy_content = _read_utf8_exact(path)
     summary = _legacy_summary(legacy_content)
     if summary is None:
         raise ValueError("旧版人工日志缺少有效运行信息")
+    if summary.runId != expected_run_id:
+        raise ValueError("人工日志运行元数据与当前运行不一致")
     frames = [
         _LogFrame(
             header={
@@ -352,6 +376,19 @@ def _ensure_v2_log(path: Path) -> list[_LogFrame]:
         ),
     ]
     _replace_with_v2_log(path, frames)
+    return frames
+
+
+def _validated_v2_frames(
+    frames: list[_LogFrame],
+    *,
+    expected_run_id: str,
+) -> list[_LogFrame]:
+    summary = _v2_summary(frames)
+    if summary is None:
+        raise ValueError("人工日志缺少完整有效的运行元数据")
+    if summary.runId != expected_run_id:
+        raise ValueError("人工日志运行元数据与当前运行不一致")
     return frames
 
 

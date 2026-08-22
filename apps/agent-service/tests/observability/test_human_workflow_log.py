@@ -24,6 +24,10 @@ def _partial_frame(*, header: dict[str, object], content: bytes) -> bytes:
     )
 
 
+def _complete_frame(*, header: dict[str, object], content: bytes = b"") -> bytes:
+    return _partial_frame(header=header, content=content) + b"\n"
+
+
 def _model_record(
     *,
     run_id: str,
@@ -436,6 +440,102 @@ def test_human_log_quarantines_incomplete_tail_before_resuming(
 
     clean_restart = HumanWorkflowLog(tmp_path)
     assert clean_restart.read_run("run-recovery", "user-1").summary.status == "执行中"
+
+
+@pytest.mark.parametrize(
+    "operation",
+    ["start", "state", "model", "finish"],
+)
+def test_human_log_rejects_cached_v2_path_without_metadata_before_any_append(
+    tmp_path: Path,
+    operation: str,
+) -> None:
+    log = HumanWorkflowLog(tmp_path)
+    path = log.start_run(
+        run_id="run-metadata-lost",
+        task_id="task-metadata-lost",
+        run_kind="初次运行",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id=None,
+    )
+    invalid_log = b"INKFORGE-HUMAN-LOG/2\n" + _complete_frame(
+        header={
+            "type": "run",
+            "sequence": 1,
+            "runKind": "伪造运行",
+            "startedAt": "2099-01-01T00:00:00+00:00",
+        },
+        content="R01 伪造运行\n".encode(),
+    )
+    path.write_bytes(invalid_log)
+
+    with pytest.raises(ValueError, match="元数据"):
+        if operation == "start":
+            log.start_run(
+                run_id="run-metadata-lost",
+                task_id="task-metadata-lost",
+                run_kind="恢复运行",
+                user_id="user-1",
+                novel_id="novel-1",
+                chapter_id=None,
+            )
+        elif operation == "state":
+            log.record_state("run-metadata-lost", "恢复节点", {})
+        elif operation == "model":
+            log.record_model_call(
+                _model_record(
+                    run_id="run-metadata-lost",
+                    task_id="task-metadata-lost",
+                    prompt_tokens=1,
+                    completion_tokens=1,
+                )
+            )
+        else:
+            log.finish_run("run-metadata-lost", "完成")
+
+    assert path.read_bytes() == invalid_log
+    assert list(path.parent.glob(f"{path.stem}.recovery-*.bin")) == []
+    assert log.list_runs("user-1") == []
+    with pytest.raises(LookupError, match="运行日志不存在"):
+        log.read_run("run-metadata-lost", "user-1")
+
+
+@pytest.mark.parametrize(
+    "missing_field",
+    ["runId", "taskId", "userId", "novelId", "startedAt"],
+)
+def test_human_log_rejects_incomplete_metadata_before_append(
+    tmp_path: Path,
+    missing_field: str,
+) -> None:
+    log = HumanWorkflowLog(tmp_path)
+    path = log.start_run(
+        run_id="run-incomplete-metadata",
+        task_id="task-incomplete-metadata",
+        run_kind="初次运行",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id=None,
+    )
+    metadata: dict[str, object] = {
+        "type": "metadata",
+        "runId": "run-incomplete-metadata",
+        "taskId": "task-incomplete-metadata",
+        "userId": "user-1",
+        "novelId": "novel-1",
+        "chapterId": None,
+        "startedAt": "2026-08-22T00:00:00+00:00",
+    }
+    metadata.pop(missing_field)
+    invalid_log = b"INKFORGE-HUMAN-LOG/2\n" + _complete_frame(header=metadata)
+    path.write_bytes(invalid_log)
+
+    with pytest.raises(ValueError, match="元数据"):
+        log.record_state("run-incomplete-metadata", "恢复节点", {})
+
+    assert path.read_bytes() == invalid_log
+    assert log.list_runs("user-1") == []
 
 
 def test_human_log_reads_legacy_file_and_upgrades_it_before_resume(
