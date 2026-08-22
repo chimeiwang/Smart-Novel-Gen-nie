@@ -162,16 +162,16 @@ BEGIN
           SELECT string_agg(
             CASE
               WHEN collation_key.collation_oid = 0 THEN 'none'
-              ELSE collation_namespace.nspname || '.' || collation.collname
+              ELSE collation_namespace.nspname || '.' || collation_definition.collname
             END,
             ',' ORDER BY collation_key.ordinality
           )
           FROM unnest(index_definition.indcollation) WITH ORDINALITY
             AS collation_key(collation_oid, ordinality)
-          LEFT JOIN pg_collation AS collation
-            ON collation.oid = collation_key.collation_oid
+          LEFT JOIN pg_collation AS collation_definition
+            ON collation_definition.oid = collation_key.collation_oid
           LEFT JOIN pg_namespace AS collation_namespace
-            ON collation_namespace.oid = collation.collnamespace
+            ON collation_namespace.oid = collation_definition.collnamespace
           WHERE collation_key.ordinality <= index_definition.indnkeyatts
         ) = expected_index.collations
     ) INTO index_matches;

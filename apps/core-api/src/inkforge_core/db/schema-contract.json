@@ -222,7 +222,7 @@
       "version": "0.8.0"
     }
   ],
-  "fingerprint": "634329734e8a14d8c64e9dcb8f843deb252fc9d1a9f8a3a4677847d211a486aa",
+  "fingerprint": "b665aebefae5a5a1ef9d960586a0c4d70419d5b1e3bcfd97d718e98483966c48",
   "schema": "public",
   "source": {
     "product": "PostgreSQL",
@@ -6086,6 +6086,27 @@
           "udtName": "int4"
         },
         {
+          "default": null,
+          "formatType": "text",
+          "name": "requestId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "runId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "taskId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
           "default": "0",
           "formatType": "integer",
           "name": "totalTokens",
@@ -6204,6 +6225,70 @@
             {
               "collation": "default",
               "collationSchema": "pg_catalog",
+              "column": "requestId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
+          ],
+          "method": "btree",
+          "name": "TokenUsage_requestId_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "runId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "createdAt",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "timestamp_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "TokenUsage_runId_createdAt_idx",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": false,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
               "column": "userId",
               "expression": null,
               "kind": "column",
@@ -6254,6 +6339,56 @@
           ],
           "method": "btree",
           "name": "TokenUsage_userId_idx",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": false,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "userId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "taskId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "createdAt",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "timestamp_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 3
+            }
+          ],
+          "method": "btree",
+          "name": "TokenUsage_userId_taskId_createdAt_idx",
           "nullsNotDistinct": false,
           "options": [],
           "predicate": null,

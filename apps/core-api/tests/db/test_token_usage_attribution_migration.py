@@ -95,6 +95,9 @@ def test_token_usage_migration_self_verifies_columns_constraint_and_indexes() ->
     assert "pg_catalog.timestamp_ops" in compact
     assert "pg_collation" in compact
     assert "pg_catalog.default" in compact
+    assert "as collation_definition" in compact
+    assert "collation_definition.collname" in compact
+    assert "as collation " not in compact
     assert "index_relation.reloptions is null" in compact
     assert "index_relation.reltablespace = 0" in compact
     assert all(
