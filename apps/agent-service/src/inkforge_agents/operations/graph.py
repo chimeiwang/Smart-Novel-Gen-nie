@@ -514,19 +514,20 @@ def build_operation_graph(
         if failure_code is not None:
             return {
                 "patchFailureCode": failure_code,
-                "errorMessage": _patch_failure_message(failure_code),
+                "patchFailureMessage": _patch_failure_message(failure_code),
                 "artifactStatus": "blocked",
                 "pendingRevision": None,
                 "skipArtifactPersistence": (
                     failure_code == "ARTIFACT_REVISION_CONFLICT"
                 ),
                 "operationStep": "apply_artifact_patch",
-                "operationStage": "局部修订失败",
+                "operationStage": "局部修订无法安全应用",
             }
         return {
             "artifactIteration": state.get("artifactIteration", 0) + 1,
             "pendingRevision": None,
             "patchFailureCode": None,
+            "patchFailureMessage": None,
             "skipArtifactPersistence": False,
             "artifactStatus": "patched",
             "operationStep": "apply_artifact_patch",
@@ -574,7 +575,11 @@ def build_operation_graph(
             ),
             "phase": "waiting_user" if artifact_id else state.get("phase", "active"),
             "operationStep": "mark_awaiting_user",
-            "operationStage": "等待用户决策",
+            "operationStage": (
+                "局部修订无法安全应用"
+                if state.get("patchFailureCode")
+                else "等待用户决策"
+            ),
         }
 
     async def await_user(
@@ -596,13 +601,25 @@ def build_operation_graph(
         if selected == "approve":
             await dependencies.artifacts.apply(artifact_id)
             return Command(
-                update={"userDecision": "approve", "artifactStatus": "applied"},
+                update={
+                    "userDecision": "approve",
+                    "artifactStatus": "applied",
+                    "patchFailureCode": None,
+                    "patchFailureMessage": None,
+                    "skipArtifactPersistence": False,
+                },
                 goto="suggestNextAction",
             )
         if selected == "discard":
             await dependencies.artifacts.discard(artifact_id)
             return Command(
-                update={"userDecision": "discard", "artifactStatus": "discarded"},
+                update={
+                    "userDecision": "discard",
+                    "artifactStatus": "discarded",
+                    "patchFailureCode": None,
+                    "patchFailureMessage": None,
+                    "skipArtifactPersistence": False,
+                },
                 goto="suggestNextAction",
             )
         if selected == "revise":
@@ -615,6 +632,7 @@ def build_operation_graph(
                 update={
                     "userDecision": "revise",
                     "patchFailureCode": None,
+                    "patchFailureMessage": None,
                     "skipArtifactPersistence": False,
                     "pendingRevision": {
                         "verdict": "revise",
@@ -641,6 +659,9 @@ def build_operation_graph(
                     "resumeDecision": None,
                     "userDecision": "approve",
                     "artifactStatus": "applied",
+                    "patchFailureCode": None,
+                    "patchFailureMessage": None,
+                    "skipArtifactPersistence": False,
                 },
                 goto="suggestNextAction",
             )
@@ -650,6 +671,9 @@ def build_operation_graph(
                     "resumeDecision": None,
                     "userDecision": "discard",
                     "artifactStatus": "discarded",
+                    "patchFailureCode": None,
+                    "patchFailureMessage": None,
+                    "skipArtifactPersistence": False,
                 },
                 goto="suggestNextAction",
             )
@@ -659,6 +683,7 @@ def build_operation_graph(
                     "resumeDecision": None,
                     "userDecision": "revise",
                     "patchFailureCode": None,
+                    "patchFailureMessage": None,
                     "skipArtifactPersistence": False,
                     "pendingRevision": {
                         "verdict": "revise",

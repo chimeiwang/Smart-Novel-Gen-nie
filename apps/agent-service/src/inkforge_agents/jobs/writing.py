@@ -200,7 +200,11 @@ class WritingJobHandler:
                 stable["artifactStatus"] = "awaiting_user"
             stable["phase"] = "waiting_user"
             stable["operationStep"] = "await_user_decision"
-            stable["operationStage"] = "等待用户决策"
+            stable["operationStage"] = (
+                "局部修订无法安全应用"
+                if stable.get("patchFailureCode")
+                else "等待用户决策"
+            )
         stable_artifact_id = stable.get("activeArtifactId")
         if (
             owned_artifact_id is None

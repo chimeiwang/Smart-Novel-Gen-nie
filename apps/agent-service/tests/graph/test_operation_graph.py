@@ -729,6 +729,7 @@ class PatchReviewExecutor:
         self.reviewer_calls = 0
         self.primary_calls = 0
         self.patch_find = patch_find
+        self.calls: list[tuple[str, AgentExecutionMode, CreativeOperationKind]] = []
 
     async def run(
         self,
@@ -738,7 +739,8 @@ class PatchReviewExecutor:
         execution_mode: AgentExecutionMode,
         operation_kind: CreativeOperationKind,
     ) -> dict[str, Any]:
-        del state, operation_kind
+        del state
+        self.calls.append((agent_id, execution_mode, operation_kind))
         if execution_mode == "primary":
             self.primary_calls += 1
             return {
@@ -821,6 +823,13 @@ async def test_patch_path_does_not_call_reviser_and_rechecks_review() -> None:
     assert result["phase"] == "waiting_user"
 
 
+def test_initial_state_has_independent_patch_failure_message() -> None:
+    state = _patch_state()
+
+    assert state["patchFailureCode"] is None
+    assert state["patchFailureMessage"] is None
+
+
 @pytest.mark.asyncio
 async def test_ambiguous_patch_waits_for_user_without_rewrite() -> None:
     executor = PatchReviewExecutor(patch_find="重复")
@@ -835,6 +844,8 @@ async def test_ambiguous_patch_waits_for_user_without_rewrite() -> None:
     assert executor.reviewer_calls == 1
     assert artifacts.actions == ["submit", "await"]
     assert result["patchFailureCode"] == "PATCH_TARGET_AMBIGUOUS"
+    assert result["patchFailureMessage"] == "局部修订目标不唯一，请确认草案内容后重试。"
+    assert result.get("errorMessage") is None
     assert result["artifactStatus"] == "blocked"
     assert result["phase"] == "waiting_user"
 
@@ -860,6 +871,36 @@ class ConflictArtifactPort(ArtifactPort):
     async def mark_awaiting_user(self, artifact_id: str) -> None:
         self.mark_calls += 1
         await super().mark_awaiting_user(artifact_id)
+
+
+class PatchFailureThenRewriteExecutor(PatchReviewExecutor):
+    async def run(
+        self,
+        agent_id: str,
+        state: dict[str, Any],
+        *,
+        execution_mode: AgentExecutionMode,
+        operation_kind: CreativeOperationKind,
+    ) -> dict[str, Any]:
+        if execution_mode == "reviser":
+            self.calls.append((agent_id, execution_mode, operation_kind))
+            self.reviser_calls += 1
+            return {
+                "visibleContent": "ARTIFACT_OUTPUT_START\n完整返工稿\nARTIFACT_OUTPUT_END",
+                "controlEvents": [
+                    {
+                        "type": "begin_artifact_output",
+                        "kind": "chapter_draft",
+                        "summary": "完整返工稿",
+                    }
+                ],
+            }
+        return await super().run(
+            agent_id,
+            state,
+            execution_mode=execution_mode,
+            operation_kind=operation_kind,
+        )
 
 
 @pytest.mark.asyncio
@@ -888,6 +929,45 @@ async def test_cas_conflict_waits_without_second_core_write_or_model_retry() -> 
     restored = deserialize_snapshot(serialize_snapshot(stable))
     assert restored["artifactStatus"] == "blocked"
     assert restored["patchFailureCode"] == "ARTIFACT_REVISION_CONFLICT"
+    assert restored["patchFailureMessage"] == (
+        "草案已被其他操作修改，请重新审核当前草案。"
+    )
+
+
+@pytest.mark.asyncio
+async def test_patch_failure_user_revise_clears_failure_state_and_reenters_review() -> None:
+    executor = PatchFailureThenRewriteExecutor(patch_find="重复")
+    artifacts = ArtifactPort(initial_content="重复。重复。")
+    graph = build_operation_graph(
+        OperationDependencies(agentExecutor=executor, artifacts=artifacts),
+        checkpointer=InMemorySaver(),
+    )
+    config = {"configurable": {"thread_id": "patch-failure-revise"}}
+
+    first = await graph.ainvoke(_patch_state(), config)
+    assert first["__interrupt__"]
+    assert first["patchFailureCode"] == "PATCH_TARGET_AMBIGUOUS"
+    assert first["patchFailureMessage"]
+    assert first.get("errorMessage") is None
+
+    resumed = await graph.ainvoke(
+        Command(resume={"decision": "revise", "feedback": "完整返工"}),
+        config,
+    )
+
+    assert resumed["__interrupt__"]
+    assert resumed["patchFailureCode"] is None
+    assert resumed["patchFailureMessage"] is None
+    assert resumed.get("errorMessage") is None
+    assert resumed["artifactStatus"] == "awaiting_user"
+    assert executor.reviser_calls == 1
+    assert [mode for _, mode, _ in executor.calls] == [
+        "primary",
+        "reviewer",
+        "reviser",
+        "reviewer",
+    ]
+    assert artifacts.actions == ["submit", "await", "revise", "await"]
 
 
 @pytest.mark.asyncio

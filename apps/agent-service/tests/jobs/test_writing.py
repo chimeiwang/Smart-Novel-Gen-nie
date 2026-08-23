@@ -787,8 +787,11 @@ async def test_writing_job_preserves_blocked_cas_failure_at_waiting_boundary() -
                 "phase": "waiting_user",
                 "artifactStatus": "blocked",
                 "patchFailureCode": "ARTIFACT_REVISION_CONFLICT",
+                "patchFailureMessage": "草案已被其他操作修改，请重新审核当前草案。",
                 "activeArtifactId": "artifact-1",
-                "__interrupt__": [{"type": "artifact_review"}],
+                "__interrupt__": [
+                    {"type": "artifact_review", "artifactId": "artifact-1"}
+                ],
             }
         ),
         operation_graph=Graph({}),
@@ -801,6 +804,9 @@ async def test_writing_job_preserves_blocked_cas_failure_at_waiting_boundary() -
     assert checkpoint["phase"] == "awaiting_user_review"
     assert checkpoint["artifactStatus"] == "blocked"
     assert checkpoint["patchFailureCode"] == "ARTIFACT_REVISION_CONFLICT"
+    assert checkpoint["patchFailureMessage"] == "草案已被其他操作修改，请重新审核当前草案。"
+    assert checkpoint.get("errorMessage") is None
+    assert checkpoint["operationStage"] == "局部修订无法安全应用"
     assert core.failures == []
     assert core.completions == []
 
