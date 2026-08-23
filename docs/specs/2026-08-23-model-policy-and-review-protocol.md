@@ -1,8 +1,12 @@
 # 模型执行策略与复审协议优化规格
 
 **日期：** 2026-08-23
-**状态：** 待用户审阅
+**状态：** 已废弃，不得继续实施
 **范围：** Agent Service 模型策略、DeepSeek 适配、复审错误边界、Reviewer 结构化协议
+
+> 2026-08-23 用户决定暂停跨进程 Reviewer 恢复、Redis fencing、加密恢复文件和
+> `outcome_unknown` 方案。本规格仅保留历史分析价值，不再作为实现依据。当前实施范围见
+> [模型策略、DeepSeek V4 与局部返工规格](./2026-08-23-model-policy-deepseek-patch.md)。
 
 ## 背景
 

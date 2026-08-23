@@ -1,5 +1,10 @@
 # 模型执行策略与复审协议优化 Implementation Plan
 
+> **状态：已废弃，不得执行。** 用户已暂停跨进程 Reviewer 恢复方案，原 Task 1 的实现也已由
+> `d82e19c` 完整回退。后续只能依据
+> [模型策略、DeepSeek V4 与局部返工规格](../../specs/2026-08-23-model-policy-deepseek-patch.md)
+> 重新编写短实施计划。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 在不全局压低模型输出上限、不修改 PostgreSQL schema 的前提下，接入分场景模型策略和 DeepSeek V4 思考协议，把 Reviewer 改成严格结构化结论，并保证 reservation 后的 Reviewer 调用在 Agent Service 重启时只复用结果或明确进入 outcome unknown，绝不自动重复调用 Provider。
