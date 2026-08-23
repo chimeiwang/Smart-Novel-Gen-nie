@@ -72,10 +72,19 @@ def test_patch_errors_do_not_leak_content_or_patch_values() -> None:
     with pytest.raises(PatchApplicationError) as exc_info:
         apply_text_patches(
             source_text,
-            [patch(target_text, replacement_text), patch("没有", replacement_text)],
+            [
+                {
+                    "kind": "unsupported",
+                    "find": target_text,
+                    "replace": replacement_text,
+                }
+            ],
         )
 
-    message = str(exc_info.value)
-    assert "私密" not in message
-    assert replacement_text not in message
-    assert "没有" not in message
+    error = exc_info.value
+    assert target_text not in str(error)
+    assert target_text not in repr(error)
+    assert replacement_text not in str(error)
+    assert replacement_text not in repr(error)
+    assert error.__cause__ is None
+    assert error.__context__ is None

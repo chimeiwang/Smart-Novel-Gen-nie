@@ -1,6 +1,11 @@
 # ruff: noqa: E501
 
-from inkforge_agents.operations.graph import ReviewResult, decide_review_outcome
+import pytest
+from inkforge_agents.operations.graph import (
+    ReviewResult,
+    decide_review_outcome,
+    validate_review_results,
+)
 
 
 def test_review_outcome_priority_is_block_then_revise_then_pass() -> None:
@@ -69,6 +74,23 @@ def test_reviewer_order_is_deterministic_when_parallel_results_are_returned_out_
     assert outcome.revisionMode == "patch"
     assert outcome.summary == "校验：校验意见\n编辑：编辑意见"
     assert [item.find for item in outcome.patches] == ["甲", "丙"]
+
+
+def test_review_results_require_exact_declared_reviewer_set_and_count() -> None:
+    declared = ("校验", "编辑")
+
+    def review(reviewer: str) -> ReviewResult:
+        return ReviewResult(reviewer=reviewer, verdict="pass", summary="通过")
+
+    with pytest.raises(ValueError, match="重复"):
+        validate_review_results([review("校验"), review("校验")], declared)
+    with pytest.raises(ValueError, match="数量"):
+        validate_review_results([review("校验")], declared)
+    with pytest.raises(ValueError, match="未声明"):
+        validate_review_results([review("校验"), review("剧情")], declared)
+
+    ordered = validate_review_results([review("编辑"), review("校验")], declared)
+    assert [item.reviewer for item in ordered] == ["校验", "编辑"]
 
     rewrite = decide_review_outcome(
         [

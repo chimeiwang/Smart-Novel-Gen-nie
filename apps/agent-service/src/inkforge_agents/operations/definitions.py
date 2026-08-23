@@ -95,6 +95,8 @@ class OperationDefinition:
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "allowedScopeKinds", tuple(self.allowedScopeKinds))
+        if len(set(self.reviewers)) != len(self.reviewers):
+            raise ValueError("Operation reviewer 配置不得重复")
         for field_name in (
             "allowedToolNames",
             "terminalControlTools",

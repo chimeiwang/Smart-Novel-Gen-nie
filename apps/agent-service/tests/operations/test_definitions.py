@@ -272,6 +272,11 @@ def test_operation_definition_defensively_freezes_public_sets() -> None:
     assert isinstance(definition.artifactEventTypes, frozenset)
 
 
+def test_operation_definition_rejects_duplicate_reviewers() -> None:
+    with pytest.raises(ValueError, match="reviewer.*重复"):
+        operation_definition(reviewers=("校验", "校验"))
+
+
 @pytest.mark.parametrize(
     "overrides",
     [

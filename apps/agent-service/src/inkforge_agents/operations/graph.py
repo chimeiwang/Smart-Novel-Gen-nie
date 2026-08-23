@@ -148,6 +148,29 @@ def decide_review_outcome(
     return _outcome_from("pass", passed)
 
 
+def validate_review_results(
+    results: list[ReviewResult], reviewer_order: tuple[AgentId, ...] | list[AgentId]
+) -> list[ReviewResult]:
+    """在复审聚合入口校验结果身份和数量，并按 Operation 顺序返回。"""
+
+    if len(set(reviewer_order)) != len(reviewer_order):
+        raise ValueError("Operation reviewer 配置不得重复")
+    reviewers = [result.reviewer for result in results]
+    if len(set(reviewers)) != len(reviewers):
+        raise ValueError("Reviewer 结果包含重复 reviewer")
+    declared = set(reviewer_order)
+    undeclared = sorted(set(reviewers) - declared)
+    if undeclared:
+        raise ValueError("Reviewer 结果包含未声明 reviewer")
+    if len(results) != len(reviewer_order):
+        raise ValueError("Reviewer 结果数量与 Operation 声明不一致")
+    missing = [reviewer for reviewer in reviewer_order if reviewer not in set(reviewers)]
+    if missing:
+        raise ValueError("Reviewer 结果缺少声明 reviewer")
+    order = {reviewer: index for index, reviewer in enumerate(reviewer_order)}
+    return sorted(results, key=lambda result: order[result.reviewer])
+
+
 def _ordered_review_results(
     results: list[ReviewResult], reviewer_order: tuple[AgentId, ...] | list[AgentId] | None
 ) -> list[ReviewResult]:
@@ -427,9 +450,11 @@ def build_operation_graph(
             for result in state.get("reviewResults", [])
             if result.get("iteration") == iteration
         ]
+        reviewer_order = list(_operation(state).reviewers)
+        current = validate_review_results(current, reviewer_order)
         outcome = decide_review_outcome(
             current,
-            reviewer_order=list(_operation(state).reviewers),
+            reviewer_order=reviewer_order,
         )
         pending = outcome.model_dump() if outcome.verdict == "revise" else None
         return {

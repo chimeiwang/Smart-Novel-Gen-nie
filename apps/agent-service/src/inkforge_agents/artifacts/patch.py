@@ -14,23 +14,35 @@ class TextReplacePatch(BaseModel):
     replace: str
 
 
+PatchFailureCode = Literal[
+    "PATCH_TARGET_NOT_FOUND",
+    "PATCH_TARGET_AMBIGUOUS",
+    "PATCH_OVERLAP",
+    "PATCH_ARTIFACT_UNSUPPORTED",
+]
+
+
 class PatchApplicationError(ValueError):
     """局部 patch 无法安全应用时返回的脱敏错误。"""
 
-    def __init__(self, code: str) -> None:
+    def __init__(self, code: PatchFailureCode) -> None:
         self.code = code
         super().__init__(code)
 
 
 def _validate_patch(raw_patch: TextReplacePatch | Mapping[str, object]) -> TextReplacePatch:
     try:
-        return (
+        validated = (
             raw_patch
             if isinstance(raw_patch, TextReplacePatch)
             else TextReplacePatch.model_validate(raw_patch)
         )
-    except (ValidationError, TypeError, ValueError) as exc:
-        raise PatchApplicationError("PATCH_ARTIFACT_UNSUPPORTED") from exc
+    except (ValidationError, TypeError, ValueError):
+        # 离开 except 后再抛出，避免 Pydantic 输入值进入异常上下文。
+        validated = None
+    if validated is None:
+        raise PatchApplicationError("PATCH_ARTIFACT_UNSUPPORTED") from None
+    return validated
 
 
 def _find_all(content: str, target: str) -> list[int]:
