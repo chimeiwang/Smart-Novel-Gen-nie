@@ -106,6 +106,7 @@ def _default_specs() -> list[CommandSpec]:
     from .commands.long.task_mutations import TASK_MUTATION_COMMAND_SPECS
     from .commands.long.tasks import get_task, list_tasks
     from .commands.long.tasks import watch as watch_task
+    from .commands.long.video import VIDEO_COMMAND_SPECS
     from .commands.short.agents import (
         start as agent_start,
     )
@@ -371,6 +372,7 @@ def _default_specs() -> list[CommandSpec]:
         *LORE_RELATIONSHIP_COMMAND_SPECS,
         *REFERENCE_COMMAND_SPECS,
         *STYLE_COMMAND_SPECS,
+        *VIDEO_COMMAND_SPECS,
     ]
 
 

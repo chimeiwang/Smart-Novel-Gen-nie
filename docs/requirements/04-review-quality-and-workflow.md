@@ -25,6 +25,12 @@ Scene/Beat/Goal/Shot 父子关系、连续 Key、镜头职责和切镜理由，�
 保存提示词，PromptVersion 必须复制来源任务冻结的视觉版本；没有候选时复制保存时的当前镜头集合，后续换图不得
 静默改变旧提示词依据。
 
+长篇 CLI 通过具名 `long.video.*` 命令复用同一组 `/api/v1/video/**` 公共接口，覆盖项目、章节改编、
+候选确认、分集、素材、视觉设定、逐镜参考和提示词保存。CLI 确认镜头方案前必须回读完整候选并核对
+Artifact 与 Adaptation 双 revision；候选可从完整 JSON 文件提交，提示词可从完整 UTF-8 文本文件提交，
+不得截断。CLI watcher 只轮询公共改编聚合，停止观察不取消任务。Core 已删除旧 `VideoScene` 选区规划
+公共接口，CLI 不连接数据库或内部接口，也不能绕过视频功能开关、人工确认、素材权利或 CAS。
+
 前端同时存在待审镜头候选与当前正式方案时，审镜步骤只展示候选指标，分集、视觉设定和提示词步骤只操作并标明
 正式版本；不得用候选镜头数量或 Key 冒充正式上下文。提示词候选/正式版本继续展示自身冻结参考，若当前镜头参考
 已经变化，页面必须说明历史快照不会自动更新，并由用户显式重新生成候选。高成本视觉效果没有正式依据时先进入
@@ -97,15 +103,12 @@ stateDiagram-v2
 | chapter_content | 章节正文 |
 | beat_plan | 结构化 Beat Plan |
 | freeform_markdown | 自由 Markdown 文本 |
-| video_scene_plan | 仅限服务器 dev 库长篇视频开发预览的结构化场景方案 |
+| video_scene_plan | 仅用于历史 VideoScene 任务与数据库快照兼容的场景方案 |
 | video_adaptation_plan | 仅限服务器 dev 库章节影视化 v2 的 Scene/Beat/Shot 关系化方案候选 |
 
-`video_scene_plan` 不构成生产视频 schema 授权。开发预览批准入口必须携带稳定 `clientRequestId` 和
-`expectedArtifactRevision`；Core 锁定场景与 Artifact 后执行版本 CAS，相同已应用 revision 可幂等返回，旧 revision
-必须冲突。Core 还必须在同一事务保存 `VideoReviewDecisionCommand`：同一用户重放相同 `clientRequestId` 和请求哈希
-返回首次完整结果，同键异载荷必须冲突；不同请求键重放同一已应用 revision 时可以各自保存结果相同的成功命令，
-但正式方案只能应用一次。候选批准前不得写入 `VideoScene.planJson`，批准、Artifact `applied` 与命令成功结果必须位于同一事务。该命令表只属于服务器 dev 库的开发预览，
-不构成生产视频 v2 schema 授权。
+`video_scene_plan` 不构成生产视频 schema 授权。旧 `VideoScene` 公共创建、查询、重试、返工、批准和
+提示词预览入口已经删除；历史表、Artifact、`VideoReviewDecisionCommand`、内部回调和 Agent handler 仅用于
+已有任务与结构契约兼容，不得重新形成公开准入或批准路径。完整删除这些历史结构必须另行获得版本化数据库迁移授权。
 
 `video_adaptation_plan` 同样只属于具名 `novelwriterdev` 章节改编域，不授权生产迁移或真实视频渲染。
 其批准入口使用独立 `VideoAdaptationDecisionCommand`，不得借用 `VideoReviewDecisionCommand.sceneId` 或

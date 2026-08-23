@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote
 
@@ -50,6 +51,14 @@ class CoreResponseContractError(CoreApiError):
             code="CORE_RESPONSE_CONTRACT_ERROR",
             message=message,
         )
+
+
+@dataclass(frozen=True, slots=True)
+class BinaryResponse:
+    """公共文件接口返回的完整原始字节和媒体类型。"""
+
+    content: bytes
+    media_type: str
 
 
 class CoreApiClient:
@@ -133,6 +142,29 @@ class CoreApiClient:
         path: str,
         **kwargs: Any,
     ) -> Any:
+        response = self._request_response(method, path, **kwargs)
+        if response.status_code == 204 or not response.content:
+            return {}
+        return self._parse_success_json(response)
+
+    def request_bytes(
+        self,
+        method: str,
+        path: str,
+        **kwargs: Any,
+    ) -> BinaryResponse:
+        """读取公共文件接口，不尝试把二进制解释为 JSON。"""
+
+        response = self._request_response(method, path, **kwargs)
+        media_type = response.headers.get("content-type", "application/octet-stream")
+        return BinaryResponse(content=response.content, media_type=media_type)
+
+    def _request_response(
+        self,
+        method: str,
+        path: str,
+        **kwargs: Any,
+    ) -> httpx.Response:
         self._validate_path(path)
         supplied_headers = kwargs.pop("headers", None)
         try:
@@ -145,9 +177,7 @@ class CoreApiClient:
         except httpx.TransportError as exc:
             raise CoreTransportError() from exc
         self._raise_for_status(response)
-        if response.status_code == 204 or not response.content:
-            return {}
-        return self._parse_success_json(response)
+        return response
 
     def login(self, username: str, password: str) -> tuple[dict[str, Any], str]:
         try:

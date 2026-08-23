@@ -15,6 +15,57 @@ README_PATH = Path(__file__).resolve().parents[1] / "README.md"
 COMMAND_LIST_START = "<!-- command-list:start -->"
 COMMAND_LIST_END = "<!-- command-list:end -->"
 
+VIDEO_COMMANDS = {
+    "long.video.project.list",
+    "long.video.project.get",
+    "long.video.project.create",
+    "long.video.asset.upload",
+    "long.video.asset.rights",
+    "long.video.asset.download",
+    "long.video.asset.preview",
+    "long.video.adaptation.list",
+    "long.video.adaptation.get",
+    "long.video.adaptation.create",
+    "long.video.adaptation.watch",
+    "long.video.plan.start",
+    "long.video.plan.confirm",
+    "long.video.plan.discard",
+    "long.video.episode.save",
+    "long.video.prompt.start",
+    "long.video.prompt.save",
+    "long.video.canon.list",
+    "long.video.canon.candidate.set",
+    "long.video.canon.approve",
+    "long.video.reference.save",
+}
+
+VIDEO_MUTATIONS = {
+    "long.video.project.create",
+    "long.video.asset.upload",
+    "long.video.asset.rights",
+    "long.video.adaptation.create",
+    "long.video.plan.start",
+    "long.video.plan.confirm",
+    "long.video.plan.discard",
+    "long.video.episode.save",
+    "long.video.prompt.start",
+    "long.video.prompt.save",
+    "long.video.canon.candidate.set",
+    "long.video.canon.approve",
+    "long.video.reference.save",
+}
+
+VIDEO_REQUEST_ID_MUTATIONS = {
+    "long.video.adaptation.create",
+    "long.video.plan.start",
+    "long.video.plan.confirm",
+    "long.video.plan.discard",
+    "long.video.episode.save",
+    "long.video.prompt.start",
+    "long.video.canon.candidate.set",
+    "long.video.canon.approve",
+}
+
 EXPECTED_COMMANDS = {
     "auth.login",
     "auth.logout",
@@ -100,7 +151,7 @@ EXPECTED_COMMANDS = {
     "long.reference.reindex",
     "long.style.apply",
     "long.style.clear",
-}
+} | VIDEO_COMMANDS
 
 EXPECTED_LONG_MUTATIONS = {
     "long.novel.create",
@@ -154,7 +205,7 @@ EXPECTED_LONG_MUTATIONS = {
     "long.reference.reindex",
     "long.style.apply",
     "long.style.clear",
-}
+} | VIDEO_MUTATIONS
 
 EXPECTED_STRUCTURED_WRITES = EXPECTED_LONG_MUTATIONS - {
     "long.novel.create",
@@ -172,7 +223,7 @@ EXPECTED_STRUCTURED_WRITES = EXPECTED_LONG_MUTATIONS - {
     "long.quality.run",
     "long.quality.skip",
     "long.quality.reset",
-}
+} - VIDEO_MUTATIONS
 
 EXPECTED_STRUCTURED_CREATES = {
     "long.outline-node.create",
@@ -237,16 +288,20 @@ def test_long_mutation_and_watcher_capabilities_are_exact() -> None:
     assert registry["long.task.watch"].fileOutput.kind == "none"
     assert registry["long.task.watch"].requiresIdentity is True
     assert registry["long.task.watch"].requiresClientRequestId is False
+    assert registry["long.video.adaptation.watch"].mutation is False
+    assert registry["long.video.adaptation.watch"].outputMode == "jsonl"
+    assert registry["long.video.adaptation.watch"].fileOutput.kind == "none"
+    assert registry["long.video.adaptation.watch"].requiresIdentity is True
 
 
 def test_structured_mutation_capabilities_are_exact() -> None:
     registry = get_command_registry()
 
-    assert len(registry) == 84
+    assert len(registry) == 105
     assert sum(
         name.startswith("long.") and spec.mutation
         for name, spec in registry.items()
-    ) == 51
+    ) == 64
     assert len(EXPECTED_STRUCTURED_WRITES) == 36
     assert "long.novel.create" not in EXPECTED_STRUCTURED_WRITES
     assert "long.novel.summary.save" not in EXPECTED_STRUCTURED_WRITES
@@ -259,6 +314,11 @@ def test_structured_mutation_capabilities_are_exact() -> None:
         if name in EXPECTED_STRUCTURED_WRITES and spec.requiresClientRequestId
     } == EXPECTED_STRUCTURED_CREATES
     assert registry["long.reference.reindex"].requiresClientRequestId is False
+    assert {
+        name
+        for name in VIDEO_MUTATIONS
+        if registry[name].requiresClientRequestId
+    } == VIDEO_REQUEST_ID_MUTATIONS
 
 
 def test_excluded_stage_c_families_remain_unregistered() -> None:

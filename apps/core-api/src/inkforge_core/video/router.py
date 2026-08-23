@@ -12,20 +12,12 @@ from ..auth.dependencies import get_current_user
 from ..auth.repository import AuthUser
 from ..errors import ApiError
 from .schemas import (
-    ApproveVideoSceneRequest,
-    ApproveVideoSceneResponse,
     ConfirmVideoAssetRequest,
     CreateVideoProjectRequest,
-    CreateVideoSceneRequest,
-    CreateVideoSceneResponse,
-    PromptPreviewRequest,
-    PromptPreviewResponse,
-    ReviseVideoSceneRequest,
     VideoAssetResponse,
     VideoProjectDetailResponse,
     VideoProjectListResponse,
     VideoProjectResponse,
-    VideoSceneResponse,
 )
 from .service import VideoService
 
@@ -85,91 +77,6 @@ async def get_project(
     """加载视频制作台。"""
 
     return await service.get_project(user.id, project_id)
-
-
-@router.post(
-    "/projects/{project_id}/scenes",
-    response_model=CreateVideoSceneResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-async def create_scene(
-    project_id: str,
-    body: CreateVideoSceneRequest,
-    user: User,
-    service: Service,
-) -> CreateVideoSceneResponse:
-    """冻结原文并提交一个真实的视频规划任务。"""
-
-    return await service.create_scene(user.id, project_id, body)
-
-
-@router.get("/scenes/{scene_id}", response_model=VideoSceneResponse)
-async def get_scene(
-    scene_id: str,
-    user: User,
-    service: Service,
-) -> VideoSceneResponse:
-    """轮询场景、任务和审核状态。"""
-
-    return await service.get_scene(user.id, scene_id)
-
-
-@router.post(
-    "/scenes/{scene_id}/retry",
-    response_model=CreateVideoSceneResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-async def retry_scene(
-    scene_id: str,
-    user: User,
-    service: Service,
-) -> CreateVideoSceneResponse:
-    """复用冻结输入重新生成失败场景，不创建新的场景记录。"""
-
-    return await service.retry_scene(user.id, scene_id)
-
-
-@router.post(
-    "/scenes/{scene_id}/revise",
-    response_model=CreateVideoSceneResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-)
-async def revise_scene(
-    scene_id: str,
-    body: ReviseVideoSceneRequest,
-    user: User,
-    service: Service,
-) -> CreateVideoSceneResponse:
-    """保存当前候选快照，并按作者意见重新规划同一个场景。"""
-
-    return await service.revise_scene(user.id, scene_id, body)
-
-
-@router.post("/scenes/{scene_id}/approve", response_model=ApproveVideoSceneResponse)
-async def approve_scene(
-    scene_id: str,
-    body: ApproveVideoSceneRequest,
-    user: User,
-    service: Service,
-) -> ApproveVideoSceneResponse:
-    """用户显式批准候选，正式写入场景方案。"""
-
-    return await service.approve_scene(user.id, scene_id, body)
-
-
-@router.post(
-    "/scenes/{scene_id}/prompt-preview",
-    response_model=PromptPreviewResponse,
-)
-async def preview_prompt(
-    scene_id: str,
-    body: PromptPreviewRequest,
-    user: User,
-    service: Service,
-) -> PromptPreviewResponse:
-    """基于正式场景方案和已锁定素材生成一次性开发预览包。"""
-
-    return await service.preview_prompt(user.id, scene_id, body)
 
 
 @router.post(
