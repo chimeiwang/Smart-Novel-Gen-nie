@@ -24,6 +24,9 @@ class Provider:
     def __init__(self) -> None:
         self.requests: list[ModelTurnRequest] = []
 
+    def supports_structured_output(self, route: str) -> bool:
+        return route == "responses_json_schema_v1"
+
     async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
         self.requests.append(request)
         return ModelTurnResult(
@@ -132,6 +135,15 @@ def test_model_runtime_rejects_non_positive_parallel_limit() -> None:
         ModelRuntime(Provider(), max_concurrency=0)  # type: ignore[arg-type]
 
 
+def test_model_runtime_exposes_provider_identity_for_frozen_task_preflight() -> None:
+    runtime = ModelRuntime(Provider())  # type: ignore[arg-type]
+
+    assert runtime.provider_name == "openai_compatible"
+    assert runtime.model_name == "deepseek-v4-flash"
+    assert runtime.supports_structured_output("responses_json_schema_v1") is True
+    assert runtime.supports_structured_output("chat_json_output_v1") is False
+
+
 @pytest.mark.asyncio
 async def test_model_runtime_limits_billable_authorizations() -> None:
     class BlockingBilling(Billing):
@@ -176,10 +188,7 @@ async def test_model_runtime_limits_billable_authorizations() -> None:
         runId="run-1",
         agentId="写作",
     )
-    tasks = [
-        asyncio.create_task(runtime.run_turn(request, context=context))
-        for _ in range(4)
-    ]
+    tasks = [asyncio.create_task(runtime.run_turn(request, context=context)) for _ in range(4)]
     try:
         await asyncio.wait_for(billing.capacity_reached.wait(), timeout=1)
         await asyncio.sleep(0.01)
@@ -191,7 +200,6 @@ async def test_model_runtime_limits_billable_authorizations() -> None:
 
     assert len(billing.authorizations) == 4
     assert billing.maximum == 3
-
 
 @pytest.mark.asyncio
 async def test_billable_runtime_authorizes_then_reports_exact_usage() -> None:
@@ -319,6 +327,45 @@ async def test_billable_runtime_classifies_usage_report_failure_without_logging(
     assert len(provider.requests) == 1
     assert len(billing.usages) == 1
     assert observer.calls == []
+
+@pytest.mark.asyncio
+async def test_结构化输出模式把响应_schema_纳入预授权估算() -> None:
+    """Responses 的 JSON Schema 不是免费元数据，必须计入本轮输入预算。"""
+
+    billing = Billing()
+    runtime = ModelRuntime(Provider(), billing=billing)  # type: ignore[arg-type]
+    request = ModelTurnRequest(
+        messages=[{"role": "user", "content": "生成导演草案"}],
+        tools=[],
+        maxOutputTokens=2_048,
+        structuredOutput={
+            "route": "responses_json_schema_v1",
+            "name": "director_draft",
+            "jsonSchema": {
+                "type": "object",
+                "properties": {"title": {"type": "string"}},
+                "required": ["title"],
+                "additionalProperties": False,
+            },
+        },
+    )
+
+    await runtime.run_turn(
+        request,
+        context=ModelCallContext(
+            userId="user-1",
+            novelId="novel-1",
+            taskId="task-1",
+            runId="run-1",
+            agentId="视频导演",
+        ),
+    )
+
+    assert request.structuredOutput is not None
+    assert billing.authorizations[0]["estimatedPromptTokens"] == (
+        len("生成导演草案") + len(request.structuredOutput.model_dump_json())
+    )
+
 
 @pytest.mark.asyncio
 async def test_计费运行时使用较小授权且不修改原请求() -> None:
@@ -470,3 +517,124 @@ async def test_runtime_records_complete_messages_without_tool_schema(billable: b
     )
     assert record.finishReason == "stop"
     assert record.rawFinishReason == "stop"
+
+
+@pytest.mark.asyncio
+async def test_结构化输出人工日志不记录正文_schema_或草案() -> None:
+    class StructuredProvider(Provider):
+        billable = False
+
+        async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+            self.requests.append(request)
+            return ModelTurnResult(
+                content="",
+                toolCalls=[],
+                structuredOutput={"title": "不能进入日志的草案秘密"},
+                finishReason="stop",
+                rawFinishReason="response.completed",
+                usage=ModelUsage(
+                    promptTokens=10,
+                    completionTokens=5,
+                    totalTokens=15,
+                ),
+            )
+
+    observer = ModelObserver()
+    runtime = ModelRuntime(
+        StructuredProvider(),  # type: ignore[arg-type]
+        observer=observer,
+    )
+    context = ModelCallContext(
+        userId="user-1",
+        novelId="novel-1",
+        taskId="task-1",
+        runId="run-1",
+        agentId="视频导演",
+    )
+    request = ModelTurnRequest(
+        messages=[{"role": "user", "content": "章节正文秘密"}],
+        tools=[],
+        maxOutputTokens=1_024,
+        structuredOutput={
+            "route": "responses_json_schema_v1",
+            "name": "director_draft",
+            "jsonSchema": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Schema秘密",
+                    }
+                },
+                "required": ["title"],
+                "additionalProperties": False,
+            },
+        },
+    )
+
+    await runtime.run_turn(request, context=context)
+
+    serialized = repr(observer.calls)
+    assert "章节正文秘密" not in serialized
+    assert "Schema秘密" not in serialized
+    assert "不能进入日志的草案秘密" not in serialized
+    assert "responses_json_schema_v1" in serialized
+    assert "director_draft" in serialized
+
+
+@pytest.mark.asyncio
+async def test_结构化输出人工日志只记录安全诊断() -> None:
+    """失败草案不进日志，但稳定路径与关键字必须可供现场法证。"""
+
+    class InvalidStructuredProvider(Provider):
+        billable = False
+
+        async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+            del request
+            return ModelTurnResult(
+                content="",
+                toolCalls=[],
+                structuredOutputDiagnostic={
+                    "code": "schema_violation",
+                    "jsonPointer": "/assets/0/duty",
+                    "keyword": "enum",
+                },
+                finishReason="stop",
+                rawFinishReason="response.completed",
+                usage=ModelUsage(promptTokens=10, completionTokens=5, totalTokens=15),
+            )
+
+    observer = ModelObserver()
+    runtime = ModelRuntime(InvalidStructuredProvider(), observer=observer)
+    request = ModelTurnRequest(
+        messages=[{"role": "user", "content": "不能进入日志的失败草案秘密"}],
+        tools=[],
+        maxOutputTokens=1_024,
+        structuredOutput={
+            "route": "responses_json_schema_v1",
+            "name": "director_draft",
+            "jsonSchema": {
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+                "additionalProperties": False,
+            },
+        },
+    )
+
+    await runtime.run_turn(
+        request,
+        context=ModelCallContext(
+            userId="user-1",
+            novelId="novel-1",
+            taskId="task-1",
+            runId="run-1",
+            agentId="视频导演",
+        ),
+    )
+
+    serialized = repr(observer.calls)
+    assert "不能进入日志的失败草案秘密" not in serialized
+    assert "code=schema_violation" in serialized
+    assert "pointer=/assets/0/duty" in serialized
+    assert "keyword=enum" in serialized

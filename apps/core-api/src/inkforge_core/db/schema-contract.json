@@ -1,5 +1,5 @@
 {
-  "contractVersion": 1,
+  "contractVersion": 2,
   "enums": [
     {
       "name": "BeatPlanStatus",
@@ -131,7 +131,8 @@
         "beat_plan_draft",
         "chapter_content",
         "beat_plan",
-        "freeform_markdown"
+        "freeform_markdown",
+        "video_scene_plan"
       ]
     },
     {
@@ -222,16 +223,17 @@
       "version": "0.8.0"
     }
   ],
-  "fingerprint": "b665aebefae5a5a1ef9d960586a0c4d70419d5b1e3bcfd97d718e98483966c48",
+  "fingerprint": "d66eb4cbdc70dabfaf0849454d7bf5af79a8de56802a8ffeff9f8a4c33a90111",
   "schema": "public",
   "source": {
     "product": "PostgreSQL",
     "serverVersion": "14.23 (Ubuntu 14.23-0ubuntu0.22.04.1)",
     "serverVersionNum": 140023,
-    "sourceId": "d33459248991cfb51af4d8800bb9b9dfaa61d5f8d084ce7afab22ac81a3a36ab"
+    "sourceId": "6946abf71f0bd5fa08828f59f34df7358816082fbe3787c451c2a0b2d95c338e"
   },
   "tables": [
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -317,6 +319,44 @@
         }
       ],
       "indexes": [
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "Chapter_id_novelId_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
         {
           "includeColumns": [],
           "keyItems": [
@@ -418,9 +458,21 @@
         "name": "Chapter_pkey",
         "validated": true
       },
-      "uniqueConstraints": []
+      "uniqueConstraints": [
+        {
+          "columns": [
+            "id",
+            "novelId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "name": "Chapter_id_novelId_key",
+          "validated": true
+        }
+      ]
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -629,6 +681,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -752,6 +805,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -1030,6 +1084,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -1257,6 +1312,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -1575,6 +1631,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -1738,6 +1795,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -1965,6 +2023,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -2135,6 +2194,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -2418,6 +2478,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -2612,6 +2673,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": "CURRENT_TIMESTAMP",
@@ -2796,6 +2858,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -2933,6 +2996,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -3148,6 +3212,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -3356,6 +3421,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -3465,6 +3531,44 @@
               "opclassSchema": "pg_catalog",
               "order": "ASC",
               "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "userId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "Novel_id_userId_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
             }
           ],
           "method": "btree",
@@ -3514,9 +3618,21 @@
         "name": "Novel_pkey",
         "validated": true
       },
-      "uniqueConstraints": []
+      "uniqueConstraints": [
+        {
+          "columns": [
+            "id",
+            "userId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "name": "Novel_id_userId_key",
+          "validated": true
+        }
+      ]
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": "''::text",
@@ -3640,6 +3756,14 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [
+        {
+          "definition": "CHECK (\"chapterStartOrder\" IS NULL AND \"chapterEndOrder\" IS NULL OR \"chapterStartOrder\" IS NOT NULL AND \"chapterEndOrder\" IS NOT NULL AND \"chapterStartOrder\" > 0 AND \"chapterEndOrder\" >= \"chapterStartOrder\")",
+          "name": "OutlineNode_chapter_range_check",
+          "noInherit": false,
+          "validated": true
+        }
+      ],
       "columns": [
         {
           "default": null,
@@ -4002,6 +4126,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -4139,6 +4264,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -4345,6 +4471,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -4553,6 +4680,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -4709,6 +4837,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -4839,6 +4968,13 @@
         {
           "default": null,
           "formatType": "text",
+          "name": "videoSceneId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
           "name": "workflowRunId",
           "nullable": true,
           "udtName": "text"
@@ -4894,6 +5030,42 @@
           ],
           "targetSchema": "public",
           "targetTable": "WritingTask",
+          "validated": true
+        },
+        {
+          "columns": [
+            "videoSceneId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "ReviewArtifact_videoSceneId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoScene",
+          "validated": true
+        },
+        {
+          "columns": [
+            "videoSceneId",
+            "novelId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "ReviewArtifact_video_scene_novel_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "novelId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoScene",
           "validated": true
         },
         {
@@ -4977,6 +5149,44 @@
           "ready": true,
           "tablespace": null,
           "unique": false,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "videoSceneId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "ReviewArtifact_id_videoSceneId_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
           "valid": true
         },
         {
@@ -5075,6 +5285,44 @@
             {
               "collation": "default",
               "collationSchema": "pg_catalog",
+              "column": "videoSceneId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "status",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "enum_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "ReviewArtifact_videoSceneId_status_idx",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": false,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
               "column": "workflowRunId",
               "expression": null,
               "kind": "column",
@@ -5106,9 +5354,21 @@
         "name": "ReviewArtifact_pkey",
         "validated": true
       },
-      "uniqueConstraints": []
+      "uniqueConstraints": [
+        {
+          "columns": [
+            "id",
+            "videoSceneId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "name": "ReviewArtifact_id_videoSceneId_key",
+          "validated": true
+        }
+      ]
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -5291,6 +5551,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -5473,6 +5734,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -5624,6 +5886,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": "''::text",
@@ -5747,6 +6010,14 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [
+        {
+          "definition": "CHECK (section IS NULL OR (section = ANY (ARRAY['creativeMethodology'::text, 'uniqueMarkers'::text, 'generationStyle'::text, 'expressionFeatures'::text, 'styleTraits'::text])))",
+          "name": "StylePortraitTask_section_check",
+          "noInherit": false,
+          "validated": true
+        }
+      ],
       "columns": [
         {
           "default": "CURRENT_TIMESTAMP",
@@ -5884,6 +6155,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": "0",
@@ -6028,6 +6300,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -6411,6 +6684,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": "CURRENT_TIMESTAMP",
@@ -6523,6 +6797,2413 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [
+        {
+          "definition": "CHECK (\"byteSize\" > 0)",
+          "name": "VideoAsset_byte_size_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (\"durationMs\" IS NULL OR \"durationMs\" > 0)",
+          "name": "VideoAsset_duration_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (duty = ANY (ARRAY['identity'::text, 'costume'::text, 'scene'::text, 'prop'::text, 'style'::text, 'storyboard'::text, 'keyframe'::text, 'motion'::text, 'camera'::text, 'voice'::text, 'ambience'::text, 'music'::text]))",
+          "name": "VideoAsset_duty_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (modality = ANY (ARRAY['image'::text, 'video'::text, 'audio'::text]))",
+          "name": "VideoAsset_modality_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (\"rightsStatus\" = ANY (ARRAY['unconfirmed'::text, 'confirmed'::text, 'restricted'::text, 'rejected'::text]))",
+          "name": "VideoAsset_rights_status_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (sha256 ~ '^[0-9a-f]{64}$'::text)",
+          "name": "VideoAsset_sha256_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (\"sourceKind\" = ANY (ARRAY['user_upload'::text, 'authorized_real'::text, 'virtual'::text, 'model_generated'::text]))",
+          "name": "VideoAsset_source_kind_check",
+          "noInherit": false,
+          "validated": true
+        }
+      ],
+      "columns": [
+        {
+          "default": null,
+          "formatType": "bigint",
+          "name": "byteSize",
+          "nullable": false,
+          "udtName": "int8"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "durationMs",
+          "nullable": true,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "duty",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "lockedAt",
+          "nullable": true,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "mimeType",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "modality",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "name",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "projectId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "'unconfirmed'::text",
+          "formatType": "text",
+          "name": "rightsStatus",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "sha256",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "'user_upload'::text",
+          "formatType": "text",
+          "name": "sourceKind",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "storageKey",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "projectId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoAsset_projectId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoProject",
+          "validated": true
+        }
+      ],
+      "indexes": [
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "projectId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "VideoAsset_id_projectId_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
+          ],
+          "method": "btree",
+          "name": "VideoAsset_pkey",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "projectId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "modality",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "createdAt",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "timestamp_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 3
+            }
+          ],
+          "method": "btree",
+          "name": "VideoAsset_projectId_modality_idx",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": false,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "projectId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "storageKey",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "VideoAsset_project_storage_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        }
+      ],
+      "name": "VideoAsset",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "VideoAsset_pkey",
+        "validated": true
+      },
+      "uniqueConstraints": [
+        {
+          "columns": [
+            "id",
+            "projectId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "name": "VideoAsset_id_projectId_key",
+          "validated": true
+        },
+        {
+          "columns": [
+            "projectId",
+            "storageKey"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "name": "VideoAsset_project_storage_key",
+          "validated": true
+        }
+      ]
+    },
+    {
+      "checkConstraints": [
+        {
+          "definition": "CHECK (COALESCE(jsonb_typeof(\"excludeFeaturesJson\"::jsonb) = 'array'::text, false))",
+          "name": "VideoAssetBinding_exclude_json_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (COALESCE(jsonb_typeof(\"includeFeaturesJson\"::jsonb) = 'array'::text, false))",
+          "name": "VideoAssetBinding_include_json_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (priority >= 0 AND priority <= 100)",
+          "name": "VideoAssetBinding_priority_check",
+          "noInherit": false,
+          "validated": true
+        }
+      ],
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "assetId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": "'[]'::text",
+          "formatType": "text",
+          "name": "excludeFeaturesJson",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "includeFeaturesJson",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "50",
+          "formatType": "integer",
+          "name": "priority",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "projectId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "sceneId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "targetEntity",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "assetId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoAssetBinding_assetId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoAsset",
+          "validated": true
+        },
+        {
+          "columns": [
+            "assetId",
+            "projectId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoAssetBinding_asset_project_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "projectId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoAsset",
+          "validated": true
+        },
+        {
+          "columns": [
+            "sceneId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoAssetBinding_sceneId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoScene",
+          "validated": true
+        },
+        {
+          "columns": [
+            "sceneId",
+            "projectId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoAssetBinding_scene_project_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "projectId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoScene",
+          "validated": true
+        }
+      ],
+      "indexes": [
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
+          ],
+          "method": "btree",
+          "name": "VideoAssetBinding_pkey",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "sceneId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "priority",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "int4_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "createdAt",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "timestamp_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 3
+            }
+          ],
+          "method": "btree",
+          "name": "VideoAssetBinding_sceneId_priority_idx",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": false,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "sceneId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "assetId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "VideoAssetBinding_scene_asset_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        }
+      ],
+      "name": "VideoAssetBinding",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "VideoAssetBinding_pkey",
+        "validated": true
+      },
+      "uniqueConstraints": [
+        {
+          "columns": [
+            "sceneId",
+            "assetId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "name": "VideoAssetBinding_scene_asset_key",
+          "validated": true
+        }
+      ]
+    },
+    {
+      "checkConstraints": [
+        {
+          "definition": "CHECK (\"attemptCount\" >= 0)",
+          "name": "VideoGenerationTask_attempt_count_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (kind = ANY (ARRAY['plan'::text, 'render'::text, 'poll'::text, 'archive'::text]))",
+          "name": "VideoGenerationTask_kind_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (COALESCE(jsonb_typeof(\"requestJson\"::jsonb) = 'object'::text, false))",
+          "name": "VideoGenerationTask_request_json_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (\"resultJson\" IS NULL OR COALESCE(jsonb_typeof(\"resultJson\"::jsonb) = 'object'::text, false))",
+          "name": "VideoGenerationTask_result_json_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (status = ANY (ARRAY['pending'::text, 'submitted'::text, 'processing'::text, 'awaiting_review'::text, 'completed'::text, 'failed'::text, 'cancelled'::text]))",
+          "name": "VideoGenerationTask_status_check",
+          "noInherit": false,
+          "validated": true
+        }
+      ],
+      "columns": [
+        {
+          "default": "0",
+          "formatType": "integer",
+          "name": "attemptCount",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "completedAt",
+          "nullable": true,
+          "udtName": "timestamp"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "idempotencyKey",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "jobId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "kind",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "lastErrorCode",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "lastErrorMessage",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "nextAttemptAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "projectId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "provider",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "providerTaskId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "requestJson",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "resultJson",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "sceneId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "'pending'::text",
+          "formatType": "text",
+          "name": "status",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "submittedAt",
+          "nullable": true,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "projectId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoGenerationTask_projectId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoProject",
+          "validated": true
+        },
+        {
+          "columns": [
+            "sceneId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoGenerationTask_sceneId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoScene",
+          "validated": true
+        },
+        {
+          "columns": [
+            "sceneId",
+            "projectId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoGenerationTask_scene_project_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "projectId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoScene",
+          "validated": true
+        }
+      ],
+      "indexes": [
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "status",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "nextAttemptAt",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "timestamp_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "createdAt",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "timestamp_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 3
+            }
+          ],
+          "method": "btree",
+          "name": "VideoGenerationTask_due_idx",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": "(status = ANY (ARRAY['pending'::text, 'submitted'::text, 'processing'::text]))",
+          "ready": true,
+          "tablespace": null,
+          "unique": false,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "sceneId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "projectId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 3
+            }
+          ],
+          "method": "btree",
+          "name": "VideoGenerationTask_id_sceneId_projectId_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "idempotencyKey",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
+          ],
+          "method": "btree",
+          "name": "VideoGenerationTask_idempotencyKey_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "jobId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
+          ],
+          "method": "btree",
+          "name": "VideoGenerationTask_jobId_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
+          ],
+          "method": "btree",
+          "name": "VideoGenerationTask_pkey",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "sceneId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "createdAt",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "timestamp_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "VideoGenerationTask_sceneId_createdAt_idx",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": false,
+          "valid": true
+        }
+      ],
+      "name": "VideoGenerationTask",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "VideoGenerationTask_pkey",
+        "validated": true
+      },
+      "uniqueConstraints": [
+        {
+          "columns": [
+            "id",
+            "sceneId",
+            "projectId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "name": "VideoGenerationTask_id_sceneId_projectId_key",
+          "validated": true
+        },
+        {
+          "columns": [
+            "idempotencyKey"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "name": "VideoGenerationTask_idempotencyKey_key",
+          "validated": true
+        },
+        {
+          "columns": [
+            "jobId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "name": "VideoGenerationTask_jobId_key",
+          "validated": true
+        }
+      ]
+    },
+    {
+      "checkConstraints": [
+        {
+          "definition": "CHECK (\"targetAspectRatio\" = ANY (ARRAY['16:9'::text, '4:3'::text, '1:1'::text, '3:4'::text, '9:16'::text, '21:9'::text, 'adaptive'::text]))",
+          "name": "VideoProject_aspect_ratio_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (mode = ANY (ARRAY['concept'::text, 'trailer'::text, 'highlight'::text, 'short_film'::text, 'episode'::text, 'series'::text]))",
+          "name": "VideoProject_mode_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (revision > 0)",
+          "name": "VideoProject_revision_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (status = ANY (ARRAY['draft'::text, 'active'::text, 'archived'::text]))",
+          "name": "VideoProject_status_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (btrim(title) <> ''::text)",
+          "name": "VideoProject_title_check",
+          "noInherit": false,
+          "validated": true
+        }
+      ],
+      "columns": [
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "deletedAt",
+          "nullable": true,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "'highlight'::text",
+          "formatType": "text",
+          "name": "mode",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "'seedance_2_5'::text",
+          "formatType": "text",
+          "name": "provider",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "1",
+          "formatType": "integer",
+          "name": "revision",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": "'draft'::text",
+          "formatType": "text",
+          "name": "status",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "'16:9'::text",
+          "formatType": "text",
+          "name": "targetAspectRatio",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "'zh-CN'::text",
+          "formatType": "text",
+          "name": "targetLanguage",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "title",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "novelId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoProject_novelId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel",
+          "validated": true
+        }
+      ],
+      "indexes": [
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "VideoProject_id_novelId_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "updatedAt",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "timestamp_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "VideoProject_novelId_updatedAt_idx",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": "(\"deletedAt\" IS NULL)",
+          "ready": true,
+          "tablespace": null,
+          "unique": false,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
+          ],
+          "method": "btree",
+          "name": "VideoProject_pkey",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        }
+      ],
+      "name": "VideoProject",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "VideoProject_pkey",
+        "validated": true
+      },
+      "uniqueConstraints": [
+        {
+          "columns": [
+            "id",
+            "novelId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "name": "VideoProject_id_novelId_key",
+          "validated": true
+        }
+      ]
+    },
+    {
+      "checkConstraints": [
+        {
+          "definition": "CHECK (char_length(\"clientRequestId\") >= 16 AND char_length(\"clientRequestId\") <= 128 AND btrim(\"clientRequestId\") = \"clientRequestId\")",
+          "name": "VideoReviewDecisionCommand_client_request_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (decision = 'approve'::text)",
+          "name": "VideoReviewDecisionCommand_decision_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (\"requestHash\" ~ '^[0-9a-f]{64}$'::text)",
+          "name": "VideoReviewDecisionCommand_request_hash_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (COALESCE(jsonb_typeof(\"resultJson\"::jsonb) = 'object'::text, false))",
+          "name": "VideoReviewDecisionCommand_result_json_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (\"expectedArtifactRevision\" > 0)",
+          "name": "VideoReviewDecisionCommand_revision_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (status = 'succeeded'::text)",
+          "name": "VideoReviewDecisionCommand_status_check",
+          "noInherit": false,
+          "validated": true
+        }
+      ],
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "artifactId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "clientRequestId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "completedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": "'approve'::text",
+          "formatType": "text",
+          "name": "decision",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "expectedArtifactRevision",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "projectId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "requestHash",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "requestedByUserId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "resultJson",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "sceneId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "sourceTaskId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "'succeeded'::text",
+          "formatType": "text",
+          "name": "status",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "artifactId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoReviewDecisionCommand_artifactId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "ReviewArtifact",
+          "validated": true
+        },
+        {
+          "columns": [
+            "artifactId",
+            "sceneId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoReviewDecisionCommand_artifact_scene_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "videoSceneId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "ReviewArtifact",
+          "validated": true
+        },
+        {
+          "columns": [
+            "novelId",
+            "requestedByUserId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoReviewDecisionCommand_novel_owner_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "userId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Novel",
+          "validated": true
+        },
+        {
+          "columns": [
+            "projectId",
+            "novelId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoReviewDecisionCommand_project_novel_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "novelId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoProject",
+          "validated": true
+        },
+        {
+          "columns": [
+            "requestedByUserId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoReviewDecisionCommand_requestedByUserId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "User",
+          "validated": true
+        },
+        {
+          "columns": [
+            "sceneId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoReviewDecisionCommand_sceneId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoScene",
+          "validated": true
+        },
+        {
+          "columns": [
+            "sceneId",
+            "projectId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoReviewDecisionCommand_scene_project_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "projectId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoScene",
+          "validated": true
+        },
+        {
+          "columns": [
+            "sourceTaskId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoReviewDecisionCommand_sourceTaskId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoGenerationTask",
+          "validated": true
+        },
+        {
+          "columns": [
+            "sourceTaskId",
+            "sceneId",
+            "projectId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoReviewDecisionCommand_task_scene_project_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "sceneId",
+            "projectId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoGenerationTask",
+          "validated": true
+        }
+      ],
+      "indexes": [
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "artifactId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "expectedArtifactRevision",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "int4_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "decision",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 3
+            }
+          ],
+          "method": "btree",
+          "name": "VideoReviewDecisionCommand_artifact_revision_idx",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": false,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
+          ],
+          "method": "btree",
+          "name": "VideoReviewDecisionCommand_pkey",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "sceneId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "createdAt",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "timestamp_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "VideoReviewDecisionCommand_scene_created_idx",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": false,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "requestedByUserId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "clientRequestId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "VideoReviewDecisionCommand_user_request_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        }
+      ],
+      "name": "VideoReviewDecisionCommand",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "VideoReviewDecisionCommand_pkey",
+        "validated": true
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "checkConstraints": [
+        {
+          "definition": "CHECK (\"durationSeconds\" >= 4 AND \"durationSeconds\" <= 30)",
+          "name": "VideoScene_duration_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (\"planJson\" IS NULL OR COALESCE(jsonb_typeof(\"planJson\"::jsonb) = 'object'::text, false))",
+          "name": "VideoScene_plan_json_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (\"promptCharacterCount\" IS NULL OR \"promptCharacterCount\" >= 1 AND \"promptCharacterCount\" <= 2000)",
+          "name": "VideoScene_prompt_count_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (revision > 0)",
+          "name": "VideoScene_revision_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (\"sourceHash\" ~ '^[0-9a-f]{64}$'::text)",
+          "name": "VideoScene_source_hash_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (btrim(\"sourceText\") <> ''::text)",
+          "name": "VideoScene_source_text_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (status = ANY (ARRAY['draft'::text, 'generating'::text, 'awaiting_review'::text, 'approved'::text, 'rendering'::text, 'completed'::text, 'failed'::text]))",
+          "name": "VideoScene_status_check",
+          "noInherit": false,
+          "validated": true
+        }
+      ],
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "chapterId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": "15",
+          "formatType": "integer",
+          "name": "durationSeconds",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "lastErrorCode",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "lastErrorMessage",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "ordinal",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "planJson",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "projectId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "promptCharacterCount",
+          "nullable": true,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "promptText",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "1",
+          "formatType": "integer",
+          "name": "revision",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "sourceHash",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "sourceText",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "'draft'::text",
+          "formatType": "text",
+          "name": "status",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "title",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "chapterId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoScene_chapterId_fkey",
+          "onDelete": "SET NULL",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Chapter",
+          "validated": true
+        },
+        {
+          "columns": [
+            "chapterId",
+            "novelId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoScene_chapter_novel_fkey",
+          "onDelete": "NO ACTION",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "novelId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "Chapter",
+          "validated": true
+        },
+        {
+          "columns": [
+            "projectId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoScene_projectId_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoProject",
+          "validated": true
+        },
+        {
+          "columns": [
+            "projectId",
+            "novelId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoScene_project_novel_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "novelId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoProject",
+          "validated": true
+        }
+      ],
+      "indexes": [
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "chapterId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
+          ],
+          "method": "btree",
+          "name": "VideoScene_chapterId_idx",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": false,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "VideoScene_id_novelId_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "projectId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "VideoScene_id_projectId_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
+          ],
+          "method": "btree",
+          "name": "VideoScene_pkey",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "projectId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "status",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "ordinal",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "int4_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 3
+            }
+          ],
+          "method": "btree",
+          "name": "VideoScene_projectId_status_idx",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": false,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "projectId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "ordinal",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "int4_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "VideoScene_project_ordinal_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        }
+      ],
+      "name": "VideoScene",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "VideoScene_pkey",
+        "validated": true
+      },
+      "uniqueConstraints": [
+        {
+          "columns": [
+            "id",
+            "novelId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "name": "VideoScene_id_novelId_key",
+          "validated": true
+        },
+        {
+          "columns": [
+            "id",
+            "projectId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "name": "VideoScene_id_projectId_key",
+          "validated": true
+        },
+        {
+          "columns": [
+            "projectId",
+            "ordinal"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "name": "VideoScene_project_ordinal_key",
+          "validated": true
+        }
+      ]
+    },
+    {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -6813,6 +9494,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -6964,6 +9646,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": "''::text",
@@ -7087,6 +9770,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -7273,6 +9957,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": "CURRENT_TIMESTAMP",
@@ -7403,6 +10088,68 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [
+        {
+          "definition": "CHECK (\"attemptCount\" >= 0)",
+          "name": "WritingEventOutbox_attemptCount_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (btrim(\"dedupeKey\") <> ''::text)",
+          "name": "WritingEventOutbox_dedupeKey_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (\"deliveryState\" = ANY (ARRAY['pending'::text, 'delivering'::text, 'published'::text, 'blocked'::text, 'superseded'::text]))",
+          "name": "WritingEventOutbox_deliveryState_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (\"durableBaseline\" >= 0 AND \"durableBaseline\" < \"sourceSequence\")",
+          "name": "WritingEventOutbox_durableBaseline_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (\"eventType\" = ANY (ARRAY['completed'::text, 'error'::text, 'artifact_awaiting_user_approval'::text]))",
+          "name": "WritingEventOutbox_eventType_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (\"deliveryState\" = 'delivering'::text AND \"leaseToken\" IS NOT NULL AND \"leaseExpiresAt\" IS NOT NULL OR \"deliveryState\" <> 'delivering'::text AND \"leaseToken\" IS NULL AND \"leaseExpiresAt\" IS NULL)",
+          "name": "WritingEventOutbox_lease_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (COALESCE(jsonb_typeof(\"payloadJson\"::jsonb) = 'object'::text, false))",
+          "name": "WritingEventOutbox_payloadJson_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (\"deliveryState\" = 'published'::text AND \"redisEventId\" IS NOT NULL AND \"publishedAt\" IS NOT NULL OR \"deliveryState\" <> 'published'::text AND \"redisEventId\" IS NULL AND \"publishedAt\" IS NULL)",
+          "name": "WritingEventOutbox_published_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (btrim(\"sourceEventId\") <> ''::text)",
+          "name": "WritingEventOutbox_sourceEventId_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (\"sourceSequence\" > 0)",
+          "name": "WritingEventOutbox_sourceSequence_check",
+          "noInherit": false,
+          "validated": true
+        }
+      ],
       "columns": [
         {
           "default": "0",
@@ -7819,6 +10566,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -7982,6 +10730,26 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [
+        {
+          "definition": "CHECK (decision IS NULL OR (decision = ANY (ARRAY['approve'::text, 'discard'::text, 'revise'::text])))",
+          "name": "WritingRunCommand_decision_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (kind = ANY (ARRAY['start'::text, 'resume'::text, 'artifact_decision'::text]))",
+          "name": "WritingRunCommand_kind_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (status = ANY (ARRAY['pending'::text, 'submitted'::text, 'processing'::text, 'succeeded'::text, 'failed'::text]))",
+          "name": "WritingRunCommand_status_check",
+          "noInherit": false,
+          "validated": true
+        }
+      ],
       "columns": [
         {
           "default": null,
@@ -8246,6 +11014,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -8426,6 +11195,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": "CURRENT_TIMESTAMP",
@@ -8638,6 +11408,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -8931,6 +11702,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": null,
@@ -9063,6 +11835,7 @@
       "uniqueConstraints": []
     },
     {
+      "checkConstraints": [],
       "columns": [
         {
           "default": "0",

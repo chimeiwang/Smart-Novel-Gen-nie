@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
 import process from "node:process";
-import { parseEnv } from "node:util";
 
 const DATA_KEYS = ["DATABASE_URL", "REDIS_URL"];
 
@@ -18,9 +17,11 @@ export function mergeDevelopmentEnv(fileEnv, parentEnv) {
   };
 }
 
-export function loadDevelopmentEnv(
+export async function loadDevelopmentEnv(
   envFile,
   { parentEnv = process.env, readFile = readFileSync } = {},
 ) {
+  // parseEnv 从 Node 20.12 起可用；dev.mjs 会先给出明确版本错误再动态调用这里。
+  const { parseEnv } = await import("node:util");
   return mergeDevelopmentEnv(parseEnv(readFile(envFile, "utf8")), parentEnv);
 }

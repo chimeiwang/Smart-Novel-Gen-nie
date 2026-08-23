@@ -21,15 +21,9 @@ export async function proxy(request: NextRequest) {
   }
 
   if (pathname.startsWith("/login")) {
-    const token = request.cookies.get(COOKIE_NAME)?.value;
-    if (token) {
-      try {
-        await jwtVerify(token, jwtSecret, { algorithms: ["HS256"] });
-        return NextResponse.redirect(new URL("/dashboard", request.url));
-      } catch {
-        // 无效令牌按未登录处理。
-      }
-    }
+    // 登录页会通过 Core 的 /auth/me 核对会话对应的用户是否仍然存在。
+    // 代理只验证签名会把“签名有效但 Core 已不承认”的旧令牌困在
+    // /login 与 /dashboard 的重定向循环里，因此这里必须放行。
     return NextResponse.next();
   }
 

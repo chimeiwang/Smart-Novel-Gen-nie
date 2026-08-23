@@ -22,9 +22,11 @@
 - Core 与 Agent 使用版本化 Pydantic 契约和 Ed25519 服务身份通信。
 - 生产由 `infra/compose.yaml` 编排，Nginx 是唯一公网入口。
 - 生产 SSH 只信任管理员离线核验的主机公钥；部署串行排队，新版本失败时由 `scripts/deploy-production.sh` 尝试恢复经验证的上一镜像。
-- PostgreSQL schema 默认禁止修改，并由只读 `schema-contract.json` 守卫。唯一当前例外是用户于
-  2026-08-21 明确批准的 `scripts/migrations/20260821_token_usage_task_run.sql`：它只能为
-  `TokenUsage` 增加模型调用归集字段、约束和必要索引，不构成以后任意迁移的授权。
+- PostgreSQL schema 默认冻结并由只读 `schema-contract.json` 守卫。当前具名例外包括视频控制面与章节
+  改编域迁移 `20260807_video_production_control_plane.sql`、`20260817_video_review_decision_command.sql`、
+  `20260817_video_domain_ownership_chain.sql`、`20260818_video_chapter_adaptation_domain.sql`，它们只允许对
+  服务器端 `novelwriterdev` 开发库执行，不授权生产或完整 production_v2 schema；另有
+  `20260821_token_usage_task_run.sql`，只允许增加 `TokenUsage` 模型调用归集字段、约束和必要索引。
 
 ## 文档类型
 

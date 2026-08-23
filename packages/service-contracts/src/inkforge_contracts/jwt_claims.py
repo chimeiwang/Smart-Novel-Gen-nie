@@ -27,6 +27,7 @@ class ServiceScope(StrEnum):
     RAG_INDEX_WRITE = "rag:index:write"
     PORTRAIT_WRITE = "portrait:write"
     QUALITY_WRITE = "quality:write"
+    VIDEO_WRITE = "video:write"
     BILLING_AUTHORIZE = "billing:authorize"
     BILLING_USAGE_WRITE = "billing:usage:write"
 
@@ -43,6 +44,7 @@ WRITE_SERVICE_SCOPES = frozenset(
         ServiceScope.RAG_INDEX_WRITE,
         ServiceScope.PORTRAIT_WRITE,
         ServiceScope.QUALITY_WRITE,
+        ServiceScope.VIDEO_WRITE,
         ServiceScope.BILLING_USAGE_WRITE,
     }
 )

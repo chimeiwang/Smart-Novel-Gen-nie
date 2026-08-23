@@ -329,7 +329,6 @@ class RagAgentSubmitter:
         )
         return accepted.status
 
-
 def command_job_payload(payload: dict[str, object]) -> dict[str, JsonValue]:
     if "_inkforgeCommand" not in payload:
         return cast(dict[str, JsonValue], payload)
@@ -340,3 +339,36 @@ def command_job_payload(payload: dict[str, object]) -> dict[str, JsonValue]:
     if not isinstance(job, dict) or any(not isinstance(key, str) for key in job):
         raise ValueError("新写作命令 envelope 的 job 必须是 JSON 对象")
     return cast(dict[str, JsonValue], job)
+
+
+class VideoAgentSubmitter:
+    """把数据库中的视频规划任务投递到共享 Agent 队列。"""
+
+    def __init__(self, client: AgentJobClient) -> None:
+        self._client = client
+
+    async def submit(
+        self,
+        *,
+        user_id: str,
+        novel_id: str,
+        task_id: str,
+        job_id: str,
+        payload: dict[str, JsonValue],
+    ) -> AgentJobStatus:
+        """使用任务 ID 作为运行 ID，保证计费、回调和重试资源一致。"""
+
+        accepted = await self._client.submit(
+            AgentJobRequest(
+                protocolVersion="1.0",
+                jobId=job_id,
+                kind="video",
+                runId=task_id,
+                taskId=task_id,
+                novelId=novel_id,
+                userId=user_id,
+                priority=15,
+                payload=payload,
+            )
+        )
+        return accepted.status

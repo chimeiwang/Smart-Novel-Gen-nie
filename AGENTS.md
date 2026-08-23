@@ -9,11 +9,16 @@
 - 接到新需求后，先在 `docs/specs/` 新增或更新 spec，再修改实现。
 - 修改前端 UI 前先读 `DESIGN.md`。
 - 修改 Agent、写作流程或草案审核前先读 `apps/agent-service/AGENTS.md`、`docs/requirements/03-ai-writing-and-agents.md` 和 `docs/requirements/04-review-quality-and-workflow.md`。
-- 默认禁止修改现有 PostgreSQL schema。任何持久化改动必须先核对
-  `apps/core-api/src/inkforge_core/db/schema-contract.json`，应用不得自动建表、删表或迁移。唯一当前
-  例外是用户于 2026-08-21 明确批准的版本化迁移
-  `scripts/migrations/20260821_token_usage_task_run.sql`，且仅限 `TokenUsage` 模型调用归集字段、约束和
-  必要索引；它不授权其他结构调整或后续迁移。
+- PostgreSQL schema 默认冻结。已批准例外只有
+  `scripts/migrations/20260807_video_production_control_plane.sql`、
+  `scripts/migrations/20260817_video_review_decision_command.sql`、
+  `scripts/migrations/20260817_video_domain_ownership_chain.sql` 与
+  `scripts/migrations/20260818_video_chapter_adaptation_domain.sql` 对服务器端
+  `novelwriterdev` 开发库执行视频控制面和章节改编域的具名迁移，以及
+  `scripts/migrations/20260821_token_usage_task_run.sql` 对 `TokenUsage` 模型调用归集字段、约束和必要索引的
+  版本化迁移。视频迁移不构成生产迁移或完整 production_v2 schema 授权；TokenUsage 迁移不授权其他结构调整。
+  任何其他持久化改动必须先更新 spec 和本文件、核对
+  `apps/core-api/src/inkforge_core/db/schema-contract.json`，应用启动仍不得自动建表、删表或执行迁移。
 
 ## 当前架构
 
