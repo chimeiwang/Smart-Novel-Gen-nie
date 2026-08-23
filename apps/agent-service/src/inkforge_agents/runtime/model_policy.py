@@ -8,8 +8,9 @@ from ..providers.base import ModelExecutionPolicy
 AgentExecutionMode = Literal["primary", "reviewer", "reviser", "quality"]
 
 REPORT_OPERATIONS = frozenset({"answer_question", "review_chapter"})
-CREATIVE_OPERATIONS = frozenset(
+EXPECTED_OPERATION_KINDS = frozenset(
     {
+        "answer_question",
         "create_lore",
         "revise_lore",
         "create_outline",
@@ -20,8 +21,25 @@ CREATIVE_OPERATIONS = frozenset(
         "rewrite_chapter_selection",
         "rewrite_outline_selection",
         "manage_foreshadowing",
+        "review_chapter",
     }
 )
+
+
+def validate_operation_policy_coverage() -> None:
+    operation_kinds = set(OPERATION_DEFINITIONS)
+    if not REPORT_OPERATIONS <= operation_kinds:
+        missing = "、".join(sorted(REPORT_OPERATIONS - operation_kinds))
+        raise RuntimeError(f"报告 Operation 定义缺失：{missing}")
+    if operation_kinds != EXPECTED_OPERATION_KINDS:
+        raise RuntimeError(
+            "Operation 定义与模型策略完整性门禁不一致；"
+            "新增 Operation 必须先明确加入 EXPECTED_OPERATION_KINDS"
+        )
+
+
+validate_operation_policy_coverage()
+CREATIVE_OPERATIONS = frozenset(OPERATION_DEFINITIONS) - REPORT_OPERATIONS
 
 CREATIVE_HIGH = ModelExecutionPolicy(
     policyId="v1:creative-high",
@@ -53,10 +71,12 @@ _SHORT_MEDIUM_POLICIES = {
     "replace_selection": CREATIVE_HIGH,
     "full_check": REPORT_NO_THINKING,
 }
-_OPERATION_POLICIES = {
-    **{operation: REPORT_NO_THINKING for operation in REPORT_OPERATIONS},
-    **{operation: CREATIVE_HIGH for operation in CREATIVE_OPERATIONS},
+_OPERATION_POLICIES: dict[str, ModelExecutionPolicy] = {
+    operation: REPORT_NO_THINKING for operation in REPORT_OPERATIONS
 }
+_OPERATION_POLICIES.update(
+    {operation: CREATIVE_HIGH for operation in CREATIVE_OPERATIONS}
+)
 
 
 def resolve_agent_model_policy(
@@ -92,6 +112,7 @@ def resolve_portrait_model_policy() -> ModelExecutionPolicy:
 __all__ = [
     "CREATIVE_HIGH",
     "CREATIVE_OPERATIONS",
+    "EXPECTED_OPERATION_KINDS",
     "LEGACY_PROVIDER_DEFAULT",
     "QUALITY_NO_THINKING",
     "REPORT_NO_THINKING",
@@ -100,4 +121,5 @@ __all__ = [
     "resolve_agent_model_policy",
     "resolve_portrait_model_policy",
     "resolve_short_medium_model_policy",
+    "validate_operation_policy_coverage",
 ]

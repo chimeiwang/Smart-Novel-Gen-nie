@@ -5,6 +5,7 @@ from inkforge_agents.operations.definitions import OPERATION_DEFINITIONS
 from inkforge_agents.providers.base import ModelTurnRequest
 from inkforge_agents.runtime.model_policy import (
     CREATIVE_OPERATIONS,
+    EXPECTED_OPERATION_KINDS,
     LEGACY_PROVIDER_DEFAULT,
     REPORT_OPERATIONS,
     resolve_agent_model_policy,
@@ -24,7 +25,10 @@ def test_reviewer_and_quality_disable_thinking() -> None:
 
 
 def test_all_operations_have_exactly_one_policy() -> None:
+    assert REPORT_OPERATIONS <= set(OPERATION_DEFINITIONS)
+    assert REPORT_OPERATIONS.isdisjoint(CREATIVE_OPERATIONS)
     assert set(OPERATION_DEFINITIONS) == CREATIVE_OPERATIONS | REPORT_OPERATIONS
+    assert set(OPERATION_DEFINITIONS) == EXPECTED_OPERATION_KINDS
 
 
 def test_model_turn_request_requires_policy() -> None:

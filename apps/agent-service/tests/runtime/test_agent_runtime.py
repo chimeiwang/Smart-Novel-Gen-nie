@@ -12,7 +12,7 @@ from inkforge_agents.providers.base import (
 from inkforge_agents.providers.fake import FakeModelProvider
 from inkforge_agents.queue.cancellation import JobCancelledError
 from inkforge_agents.runtime.agent_runtime import AgentRuntime
-from inkforge_agents.runtime.model_policy import LEGACY_PROVIDER_DEFAULT
+from inkforge_agents.runtime.model_policy import CREATIVE_HIGH, LEGACY_PROVIDER_DEFAULT
 from inkforge_agents.runtime.model_runtime import ModelRuntime
 from inkforge_agents.tools.registry import (
     ToolContext,
@@ -169,7 +169,7 @@ async def test_runtime_accumulates_full_text_and_parallelizes_safe_reads() -> No
     runtime = make_agent_runtime(ModelRuntime(provider), registry)
 
     result = await runtime.run(
-        policy=LEGACY_PROVIDER_DEFAULT,
+        policy=CREATIVE_HIGH,
         messages=[{"role": "user", "content": "分析设定"}],
         exposed_tools=registry.for_agent(
             agent_id="设定",
@@ -183,8 +183,8 @@ async def test_runtime_accumulates_full_text_and_parallelizes_safe_reads() -> No
     assert len(provider.requests) == 2
     assert result.usage.totalTokens == 30
     assert [request.policy for request in provider.requests] == [
-        LEGACY_PROVIDER_DEFAULT,
-        LEGACY_PROVIDER_DEFAULT,
+        CREATIVE_HIGH,
+        CREATIVE_HIGH,
     ]
 
 
