@@ -9,6 +9,7 @@ from inkforge_agents.providers.base import (
     ModelTurnResult,
     ModelUsage,
 )
+from inkforge_agents.runtime.model_policy import LEGACY_PROVIDER_DEFAULT
 from inkforge_agents.runtime.model_runtime import (
     ModelCallContext,
     ModelCallLogRecord,
@@ -112,6 +113,7 @@ async def test_model_runtime_limits_process_wide_parallel_calls() -> None:
         messages=[{"role": "user", "content": "并发测试"}],
         tools=[],
         maxOutputTokens=128,
+        policy=LEGACY_PROVIDER_DEFAULT,
     )
     tasks = [asyncio.create_task(runtime.run_turn(request)) for _ in range(4)]
     try:
@@ -168,6 +170,7 @@ async def test_model_runtime_limits_billable_authorizations() -> None:
         messages=[{"role": "user", "content": "计费并发测试"}],
         tools=[],
         maxOutputTokens=128,
+        policy=LEGACY_PROVIDER_DEFAULT,
     )
     context = ModelCallContext(
         userId="user-1",
@@ -208,6 +211,7 @@ async def test_billable_runtime_authorizes_then_reports_exact_usage() -> None:
         messages=[{"role": "user", "content": "正文" * 10_000}],
         tools=[],
         maxOutputTokens=4096,
+        policy=LEGACY_PROVIDER_DEFAULT,
     )
 
     result = await runtime.run_turn(request, context=context)
@@ -242,6 +246,7 @@ async def test_billable_runtime_classifies_authorization_failure() -> None:
                 messages=[{"role": "user", "content": "正文"}],
                 tools=[],
                 maxOutputTokens=128,
+                policy=LEGACY_PROVIDER_DEFAULT,
             ),
             context=ModelCallContext(
                 userId="user-1",
@@ -268,6 +273,7 @@ async def test_billable_runtime_classifies_provider_failure() -> None:
                 messages=[{"role": "user", "content": "正文"}],
                 tools=[],
                 maxOutputTokens=128,
+                policy=LEGACY_PROVIDER_DEFAULT,
             ),
             context=ModelCallContext(
                 userId="user-1",
@@ -306,6 +312,7 @@ async def test_billable_runtime_classifies_usage_report_failure_without_logging(
                 messages=[{"role": "user", "content": "正文"}],
                 tools=[],
                 maxOutputTokens=128,
+                policy=LEGACY_PROVIDER_DEFAULT,
             ),
             context=ModelCallContext(
                 userId="user-1",
@@ -347,6 +354,7 @@ async def test_计费运行时使用较小授权且不修改原请求() -> None:
         messages=[{"role": "user", "content": "正文"}],
         tools=[],
         maxOutputTokens=4_096,
+        policy=LEGACY_PROVIDER_DEFAULT,
     )
 
     await runtime.run_turn(request, context=context)
@@ -380,6 +388,7 @@ async def test_计费运行时在调用供应商前拒绝非法授权(
         messages=[{"role": "user", "content": "正文"}],
         tools=[],
         maxOutputTokens=4_096,
+        policy=LEGACY_PROVIDER_DEFAULT,
     )
 
     with pytest.raises(RuntimeError, match="模型授权输出上限无效"):
@@ -411,6 +420,7 @@ async def test_fake_runtime_never_calls_billing() -> None:
             messages=[{"role": "user", "content": "测试"}],
             tools=[],
             maxOutputTokens=128,
+            policy=LEGACY_PROVIDER_DEFAULT,
         ),
         context=ModelCallContext(
             userId="user-1",
@@ -450,6 +460,7 @@ async def test_runtime_records_complete_messages_without_tool_schema(billable: b
         messages=[{"role": "user", "content": "完整请求" * 5000}],
         tools=[{"name": "secret_tool", "description": "不应记录", "parameters": {}}],
         maxOutputTokens=128,
+        policy=LEGACY_PROVIDER_DEFAULT,
     )
 
     await runtime.run_turn(request, context=context)

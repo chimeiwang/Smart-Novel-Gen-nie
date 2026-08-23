@@ -24,6 +24,7 @@ from inkforge_agents.providers.base import (
 from inkforge_agents.providers.fake import FakeModelProvider
 from inkforge_agents.queue.consumer import NonRetryableJobError
 from inkforge_agents.queue.repository import QueueJob
+from inkforge_agents.runtime.model_policy import LEGACY_PROVIDER_DEFAULT
 from inkforge_agents.runtime.model_runtime import ModelRuntime
 
 
@@ -782,6 +783,7 @@ async def test_model_generator_uses_configured_output_limit() -> None:
             messages=[ModelMessage(role="user", content="请求")],
             tools=[],
             maxOutputTokens=384_000,
+            policy=LEGACY_PROVIDER_DEFAULT,
         ),
     )
 

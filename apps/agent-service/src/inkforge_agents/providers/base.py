@@ -1,8 +1,15 @@
 from __future__ import annotations
 
-from typing import Literal, Protocol
+from typing import Literal, Protocol, Self
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, NonNegativeInt
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    NonNegativeInt,
+    model_validator,
+)
 
 ModelFinishReason = Literal[
     "stop",
@@ -39,12 +46,30 @@ class ModelTool(BaseModel):
     parameters: dict[str, JsonValue]
 
 
+class ModelExecutionPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    policyId: str = Field(min_length=1)
+    thinkingMode: Literal["provider_default", "enabled", "disabled"]
+    reasoningEffort: Literal["high", "max"] | None = None
+    requiredToolName: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def validate_thinking(self) -> Self:
+        if self.thinkingMode == "disabled" and self.reasoningEffort is not None:
+            raise ValueError("关闭思考时不能设置推理强度")
+        if self.thinkingMode == "enabled" and self.reasoningEffort is None:
+            raise ValueError("启用思考时必须设置推理强度")
+        return self
+
+
 class ModelTurnRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     messages: list[ModelMessage]
     tools: list[ModelTool]
     maxOutputTokens: int = Field(gt=0)
+    policy: ModelExecutionPolicy
 
 
 class ModelUsage(BaseModel):

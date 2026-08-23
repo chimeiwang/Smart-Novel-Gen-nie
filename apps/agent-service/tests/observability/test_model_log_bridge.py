@@ -10,6 +10,7 @@ from inkforge_agents.providers.base import (
     ModelTurnResult,
     ModelUsage,
 )
+from inkforge_agents.runtime.model_policy import LEGACY_PROVIDER_DEFAULT
 from inkforge_agents.runtime.model_runtime import ModelCallContext, ModelRuntime
 
 
@@ -62,6 +63,7 @@ async def test_model_runtime_records_complete_provider_result_in_human_log(
             messages=[{"role": "user", "content": request_text}],
             tools=[],
             maxOutputTokens=8192,
+            policy=LEGACY_PROVIDER_DEFAULT,
         ),
         context=ModelCallContext(
             userId="user-1",

@@ -189,6 +189,21 @@ async def test_runner_exposes_exact_execution_mode_tools(
 
 
 @pytest.mark.asyncio
+async def test_runner_rejects_required_policy_tool_before_provider() -> None:
+    provider = CapturingProvider()
+    registry = build_default_registry()
+    registry.for_execution = lambda **kwargs: []  # type: ignore[method-assign]
+    runner = AgentRunner(make_agent_runtime(ModelRuntime(provider), registry), registry)
+
+    with pytest.raises(ValueError, match="模型策略要求的终止工具未暴露"):
+        await runner.run(
+            request(agent_id="校验", mode="reviewer", operation_kind="write_chapter")
+        )
+
+    assert provider.requests == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("operation_kind", "expected", "unexpected"),
     [

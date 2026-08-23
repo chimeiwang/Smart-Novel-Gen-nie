@@ -5,6 +5,7 @@ from typing import Any
 import pytest
 from inkforge_agents.providers.base import ModelTurnRequest
 from inkforge_agents.providers.openai_compatible import OpenAICompatibleProvider
+from inkforge_agents.runtime.model_policy import LEGACY_PROVIDER_DEFAULT
 from langchain_core.messages import AIMessage
 
 
@@ -55,6 +56,7 @@ async def test_complete_turn_normalizes_provider_finish_reason(
             messages=[{"role": "user", "content": "测试"}],
             tools=[],
             maxOutputTokens=128,
+            policy=LEGACY_PROVIDER_DEFAULT,
         )
     )
 
@@ -69,6 +71,7 @@ async def test_complete_turn_treats_missing_finish_reason_as_unknown() -> None:
             messages=[{"role": "user", "content": "测试"}],
             tools=[],
             maxOutputTokens=128,
+            policy=LEGACY_PROVIDER_DEFAULT,
         )
     )
 

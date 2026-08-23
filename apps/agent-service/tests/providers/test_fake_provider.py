@@ -1,6 +1,7 @@
 import pytest
 from inkforge_agents.providers.base import ModelTurnRequest
 from inkforge_agents.providers.fake import FakeModelProvider
+from inkforge_agents.runtime.model_policy import LEGACY_PROVIDER_DEFAULT
 
 
 @pytest.mark.asyncio
@@ -16,6 +17,7 @@ async def test_fake_provider_returns_deterministic_text_tool_call_and_usage() ->
             }
         ],
         maxOutputTokens=256,
+        policy=LEGACY_PROVIDER_DEFAULT,
     )
 
     first = await provider.complete_turn(request)
@@ -37,6 +39,7 @@ async def test_fake_provider_without_tools_returns_full_visible_text() -> None:
             messages=[{"role": "user", "content": "正文" * 10_000}],
             tools=[],
             maxOutputTokens=256,
+            policy=LEGACY_PROVIDER_DEFAULT,
         )
     )
 
@@ -67,6 +70,7 @@ async def test_fake_provider_finishes_after_tool_result() -> None:
                 }
             ],
             maxOutputTokens=256,
+            policy=LEGACY_PROVIDER_DEFAULT,
         )
     )
 
@@ -87,6 +91,7 @@ async def test_fake_provider_creates_valid_chapter_artifact_call() -> None:
                 }
             ],
             maxOutputTokens=256,
+            policy=LEGACY_PROVIDER_DEFAULT,
         )
     )
 
@@ -116,6 +121,7 @@ async def test_fake_provider_returns_complete_quality_report_from_tool_scope() -
                 }
             ],
             maxOutputTokens=256,
+            policy=LEGACY_PROVIDER_DEFAULT,
         )
     )
 

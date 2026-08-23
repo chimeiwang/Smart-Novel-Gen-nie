@@ -7,7 +7,13 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from ..providers.base import ModelMessage, ModelToolCall, ModelTurnRequest, ModelTurnResult
+from ..providers.base import (
+    ModelExecutionPolicy,
+    ModelMessage,
+    ModelToolCall,
+    ModelTurnRequest,
+    ModelTurnResult,
+)
 from ..queue.cancellation import JobCancelledError, RunCancellationPort
 from ..tools.registry import ToolContext, ToolDefinition, ToolRegistry
 from .model_runtime import ModelCallContext, ModelRuntime
@@ -52,6 +58,7 @@ class AgentRuntime:
         context: ToolContext,
         max_iterations: int = 10,
         terminal_control_tools: set[str] | frozenset[str] = frozenset(),
+        policy: ModelExecutionPolicy,
         model_context: ModelCallContext | None = None,
     ) -> AgentTurnResult:
         conversation = [
@@ -77,6 +84,7 @@ class AgentRuntime:
                     messages=conversation,
                     tools=[tool.as_model_tool() for tool in available_tools],
                     maxOutputTokens=self._max_output_tokens,
+                    policy=policy,
                 ),
                 context=model_context,
             )
