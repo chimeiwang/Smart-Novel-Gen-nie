@@ -42,6 +42,11 @@ _VIDEO_PREVIEW_TABLES = frozenset(
         "VideoShotPromptVersion",
         "VideoShotPromptHead",
         "VideoAdaptationDecisionCommand",
+        "VideoVisualCanon",
+        "VideoVisualCanonVersion",
+        "VideoShotVisualReferenceSet",
+        "VideoShotVisualReferenceBinding",
+        "VideoShotPromptVisualReference",
     }
 )
 _VIDEO_PREVIEW_NOVEL_OBJECTS = frozenset({"Novel_id_userId_key"})

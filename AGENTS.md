@@ -15,7 +15,9 @@
   `scripts/migrations/20260817_video_domain_ownership_chain.sql` 与
   `scripts/migrations/20260818_video_chapter_adaptation_domain.sql` 对服务器端
   `novelwriterdev` 开发库执行视频预览控制面、批准命令、章节改编域以及该改编域内视觉设定版本、逐镜参考绑定的具名迁移；
-  这些视频迁移不构成生产迁移或完整 production_v2 schema 授权。另有
+  这些视频迁移不构成生产迁移或完整 production_v2 schema 授权。用户于 2026-08-23 另行批准
+  `scripts/migrations/20260823_production_video_adaptation_domain.sql` 只对服务器端 `novelwriter`
+  正式库执行上述已验证结构的具名晋升；该脚本不迁移开发数据、不启用视频功能，也不授权其他生产 DDL。另有
   `scripts/migrations/20260821_token_usage_task_run.sql` 对 `TokenUsage` 模型调用归集字段、约束和必要索引的
   版本化迁移；它不授权其他结构调整。
   任何其他持久化改动必须先更新 spec 和本文件、核对

@@ -424,6 +424,26 @@ def test_without_video_preview_projection_only_removes_named_preview_structure()
     assert any(table["name"] == "VideoScene" for table in contract["tables"])
 
 
+def test_without_video_preview_projection_removes_every_checked_in_video_table() -> None:
+    root = Path(__file__).resolve().parents[4]
+    contract = load_schema_contract(
+        root
+        / "apps"
+        / "core-api"
+        / "src"
+        / "inkforge_core"
+        / "db"
+        / "schema-contract.json"
+    )
+
+    projected = project_schema_contract(contract, "without_video_preview")
+    projected_table_names = {table["name"] for table in projected["tables"]}
+
+    assert len(contract["tables"]) == 69
+    assert len(projected_table_names) == 44
+    assert not any(name.startswith("Video") for name in projected_table_names)
+
+
 def test_checked_in_contract_preserves_all_live_public_tables_without_secrets() -> None:
     root = Path(__file__).resolve().parents[4]
     contract_path = (
