@@ -186,8 +186,12 @@ jobs:
                   )
               except DatabaseUrlRejected:
                   raise
-              except (OSError, UnicodeError, ValueError):
-                  raise DatabaseUrlRejected("parse_or_temp_file") from None
+              except OSError:
+                  raise DatabaseUrlRejected("filesystem") from None
+              except UnicodeError:
+                  raise DatabaseUrlRejected("encoding") from None
+              except ValueError:
+                  raise DatabaseUrlRejected("url_value") from None
 
           try:
               parsed = derive_dev_database_url(sys.argv[1], sys.argv[2])
@@ -480,8 +484,12 @@ jobs:
                   return urlunsplit(dev_parts._replace(netloc=safe_netloc))
               except DatabaseUrlRejected:
                   raise
-              except (OSError, UnicodeError, ValueError):
-                  raise DatabaseUrlRejected("parse_or_temp_file") from None
+              except OSError:
+                  raise DatabaseUrlRejected("filesystem") from None
+              except UnicodeError:
+                  raise DatabaseUrlRejected("encoding") from None
+              except ValueError:
+                  raise DatabaseUrlRejected("url_value") from None
 
           try:
               parsed = derive_dev_database_url(sys.argv[1], sys.argv[2], sys.argv[3])
