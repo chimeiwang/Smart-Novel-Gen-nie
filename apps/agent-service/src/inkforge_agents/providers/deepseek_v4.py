@@ -225,9 +225,15 @@ def _parse_usage(raw: object) -> tuple[ModelUsage, ModelUsageDiagnostics]:
     if not isinstance(raw, Mapping):
         raise ValueError("DeepSeek 用量缺失或不是对象")
     usage = raw
-    required = ("prompt_tokens", "completion_tokens", "total_tokens")
+    required = (
+        "prompt_tokens",
+        "prompt_cache_hit_tokens",
+        "completion_tokens",
+        "total_tokens",
+    )
     if any(field not in usage for field in required):
-        raise ValueError("DeepSeek 用量缺少必填字段")
+        missing = next(field for field in required if field not in usage)
+        raise ValueError(f"DeepSeek 用量缺少必填字段：{missing}")
     prompt = _nonnegative_int(usage["prompt_tokens"], "prompt_tokens")
     completion = _nonnegative_int(usage["completion_tokens"], "completion_tokens")
     total = _nonnegative_int(usage["total_tokens"], "total_tokens")
@@ -235,12 +241,8 @@ def _parse_usage(raw: object) -> tuple[ModelUsage, ModelUsageDiagnostics]:
         raise ValueError(
             "DeepSeek 用量矛盾：total_tokens 不等于 prompt_tokens 与 completion_tokens 之和"
         )
-    cached = (
-        _nonnegative_int(
-            usage["prompt_cache_hit_tokens"], "prompt_cache_hit_tokens"
-        )
-        if "prompt_cache_hit_tokens" in usage
-        else None
+    cached = _nonnegative_int(
+        usage["prompt_cache_hit_tokens"], "prompt_cache_hit_tokens"
     )
     miss = (
         _nonnegative_int(
@@ -249,7 +251,7 @@ def _parse_usage(raw: object) -> tuple[ModelUsage, ModelUsageDiagnostics]:
         if "prompt_cache_miss_tokens" in usage
         else None
     )
-    if cached is not None and miss is not None and cached + miss != prompt:
+    if miss is not None and cached + miss != prompt:
         raise ValueError("DeepSeek 用量矛盾：缓存命中与未命中不等于 prompt_tokens")
     details = usage.get("completion_tokens_details")
     if details is not None and not isinstance(details, Mapping):
@@ -285,7 +287,7 @@ def _parse_usage(raw: object) -> tuple[ModelUsage, ModelUsageDiagnostics]:
     )
     return ModelUsage(
         promptTokens=prompt,
-        cachedTokens=cached if cached is not None else 0,
+        cachedTokens=cached,
         completionTokens=completion,
         totalTokens=total,
     ), diagnostics

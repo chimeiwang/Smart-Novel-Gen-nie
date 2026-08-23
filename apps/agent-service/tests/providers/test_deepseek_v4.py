@@ -84,7 +84,12 @@ def _provider(
                     "finish_reason": "stop",
                 }
             ],
-            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            "usage": {
+                "prompt_tokens": 1,
+                "prompt_cache_hit_tokens": 0,
+                "completion_tokens": 1,
+                "total_tokens": 2,
+            },
         }
         return httpx.Response(status_code, json=body, request=request)
 
@@ -208,6 +213,25 @@ async def test_deepseek_requires_exactly_one_choice(choices: list[dict[str, Any]
             "prompt_cache_miss_tokens": True,
         },
         {
+            "prompt_tokens": 1,
+            "prompt_cache_hit_tokens": True,
+            "completion_tokens": 1,
+            "total_tokens": 2,
+        },
+        {
+            "prompt_tokens": 1,
+            "prompt_cache_hit_tokens": -1,
+            "completion_tokens": 1,
+            "total_tokens": 2,
+        },
+        {
+            "prompt_tokens": 2,
+            "prompt_cache_hit_tokens": 1,
+            "prompt_cache_miss_tokens": 0,
+            "completion_tokens": 1,
+            "total_tokens": 3,
+        },
+        {
             "prompt_tokens": 2,
             "completion_tokens": 1,
             "total_tokens": 3,
@@ -246,6 +270,20 @@ async def test_deepseek_rejects_missing_invalid_or_inconsistent_usage(usage: obj
     provider, _, client = _provider(response=_response_with_usage(usage))
     try:
         with pytest.raises(ValueError, match="用量"):
+            await provider.complete_turn(_request())
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_deepseek_requires_prompt_cache_hit_tokens() -> None:
+    provider, _, client = _provider(
+        response=_response_with_usage(
+            {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+        )
+    )
+    try:
+        with pytest.raises(ValueError, match="prompt_cache_hit_tokens"):
             await provider.complete_turn(_request())
     finally:
         await client.aclose()
@@ -374,14 +412,24 @@ async def test_assistant_reasoning_content_is_replayed_in_second_request() -> No
                     "finish_reason": "tool_calls",
                 }
             ],
-            "usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
+            "usage": {
+                "prompt_tokens": 1,
+                "prompt_cache_hit_tokens": 0,
+                "completion_tokens": 2,
+                "total_tokens": 3,
+            },
         },
         {
             "id": "resp-2",
             "choices": [
                 {"message": {"role": "assistant", "content": "完成"}, "finish_reason": "stop"}
             ],
-            "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4},
+            "usage": {
+                "prompt_tokens": 3,
+                "prompt_cache_hit_tokens": 0,
+                "completion_tokens": 1,
+                "total_tokens": 4,
+            },
         },
     ]
     requests: list[httpx.Request] = []
