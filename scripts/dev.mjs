@@ -1,21 +1,43 @@
 import { spawn, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
+import { userInfo } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { loadDevelopmentEnv } from "./dev-env.mjs";
+import {
+  findOccupiedPorts,
+  isSupportedNodeVersion,
+  LOCAL_DEVELOPMENT_PORTS,
+  MINIMUM_NODE_VERSION,
+} from "./dev-preflight.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const envFile = path.join(root, ".env.local");
 
+if (!isSupportedNodeVersion()) {
+  console.error(
+    `当前 Node.js 为 ${process.versions.node}，InkForge 至少需要 ${MINIMUM_NODE_VERSION}。`
+  );
+  console.error("建议运行 nvm use；项目 .nvmrc 已固定推荐版本。");
+  process.exit(1);
+}
+
+const { loadDevelopmentEnv } = await import("./dev-env.mjs");
+
 if (!existsSync(envFile)) {
-  console.error("缺少 .env.local，请先复制 .env.local.example 并填写本地数据库配置。");
+  console.error("缺少 .env.local，请先复制 .env.local.example 并填写服务器 dev 数据库连接配置。");
   process.exit(1);
 }
 
 process.chdir(root);
-Object.assign(process.env, loadDevelopmentEnv(envFile));
+Object.assign(process.env, await loadDevelopmentEnv(envFile));
+
+const localDispatchNamespace = `local-${createHash("sha256")
+  .update(`${userInfo().username}\0${root}`)
+  .digest("hex")
+  .slice(0, 12)}`;
 
 const defaults = {
   ENVIRONMENT: "dev",
@@ -28,6 +50,8 @@ const defaults = {
   TRUSTED_CORE_CIDRS: "127.0.0.1/32,::1/128",
   UPLOADS_ROOT: path.join(root, "uploads"),
   WORKFLOW_HUMAN_LOG_DIR: path.join(root, "logs", "workflow-events"),
+  VIDEO_DISPATCH_NAMESPACE: localDispatchNamespace,
+  VIDEO_DISPATCH_ENABLED: "true",
 };
 for (const [key, value] of Object.entries(defaults)) {
   if (!process.env[key]) process.env[key] = value;
@@ -73,11 +97,27 @@ if (!existsSync(uvicornExecutable)) {
   process.exit(1);
 }
 
+const occupiedPorts = await findOccupiedPorts(Object.values(LOCAL_DEVELOPMENT_PORTS));
+if (occupiedPorts.length > 0) {
+  console.error(`本地服务端口已被占用：${occupiedPorts.join("、")}`);
+  console.error("请先停止旧进程；macOS/Linux 可用 lsof -nP -iTCP:<端口> -sTCP:LISTEN 定位。");
+  process.exit(1);
+}
+
 const services = [
   {
     name: "Next.js",
     command: process.execPath,
-    args: [npmExecPath, "run", "dev", "--workspace", "@inkforge/web"],
+    args: [
+      npmExecPath,
+      "run",
+      "dev",
+      "--workspace",
+      "@inkforge/web",
+      "--",
+      "--port",
+      String(LOCAL_DEVELOPMENT_PORTS.web),
+    ],
   },
   {
     name: "Core API",
@@ -88,8 +128,14 @@ const services = [
       "--host",
       "127.0.0.1",
       "--port",
-      "8000",
+      String(LOCAL_DEVELOPMENT_PORTS.coreApi),
       "--reload",
+      "--reload-dir",
+      path.join(root, "apps", "core-api", "src"),
+      "--reload-dir",
+      path.join(root, "packages", "service-contracts", "src"),
+      "--reload-dir",
+      path.join(root, "packages", "service-auth", "src"),
     ],
   },
   {
@@ -101,8 +147,14 @@ const services = [
       "--host",
       "127.0.0.1",
       "--port",
-      "8001",
+      String(LOCAL_DEVELOPMENT_PORTS.agentService),
       "--reload",
+      "--reload-dir",
+      path.join(root, "apps", "agent-service", "src"),
+      "--reload-dir",
+      path.join(root, "packages", "service-contracts", "src"),
+      "--reload-dir",
+      path.join(root, "packages", "service-auth", "src"),
     ],
   },
 ];

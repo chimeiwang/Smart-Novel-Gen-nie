@@ -22,6 +22,7 @@ from inkforge_core.db.schema_guard import (
     export_schema_contract,
     inspect_schema,
     load_schema_contract,
+    project_schema_contract,
     verify_live_schema,
     verify_live_schema_with_engine,
 )
@@ -29,7 +30,7 @@ from inkforge_core.db.schema_guard import (
 
 def sample_contract() -> dict[str, Any]:
     return {
-        "contractVersion": 1,
+        "contractVersion": 2,
         "schema": "public",
         "tables": [
             {
@@ -81,6 +82,14 @@ def sample_contract() -> dict[str, Any]:
                         "validated": True,
                     }
                 ],
+                "checkConstraints": [
+                    {
+                        "name": "Novel_name_check",
+                        "definition": "CHECK (btrim(name) <> ''::text)",
+                        "validated": True,
+                        "noInherit": False,
+                    }
+                ],
                 "indexes": [
                     {
                         "name": "Novel_userId_idx",
@@ -124,6 +133,7 @@ def sample_contract() -> dict[str, Any]:
                 "primaryKey": None,
                 "foreignKeys": [],
                 "uniqueConstraints": [],
+                "checkConstraints": [],
                 "indexes": [],
             },
         ],
@@ -217,6 +227,7 @@ def test_compare_returns_stably_sorted_field_level_differences() -> None:
             "primaryKey": None,
             "foreignKeys": [],
             "uniqueConstraints": [],
+            "checkConstraints": [],
             "indexes": [],
         }
     )
@@ -274,18 +285,163 @@ def test_compare_reports_constraint_and_index_metadata_as_field_level_drift() ->
     actual["tables"][0]["primaryKey"]["deferrable"] = True
     actual["tables"][0]["foreignKeys"][0]["matchType"] = "FULL"
     actual["tables"][0]["uniqueConstraints"][0]["validated"] = False
+    actual["tables"][0]["checkConstraints"][0]["noInherit"] = True
     actual["tables"][0]["indexes"][0]["options"] = ["fillfactor=80"]
     actual["tables"][0]["indexes"][0]["tablespace"] = "fastspace"
 
     diffs = compare_schema_contract(expected, actual)
 
     assert [diff.path for diff in diffs] == [
+        "tables.Novel.checkConstraints.Novel_name_check.noInherit",
         "tables.Novel.foreignKeys.Novel_userId_fkey.matchType",
         "tables.Novel.indexes.Novel_userId_idx.options",
         "tables.Novel.indexes.Novel_userId_idx.tablespace",
         "tables.Novel.primaryKey.deferrable",
         "tables.Novel.uniqueConstraints.Novel_userId_key.validated",
     ]
+
+
+def test_compare_reports_a_missing_check_constraint_as_drift() -> None:
+    expected = sample_contract()
+    actual = copy.deepcopy(expected)
+    actual["tables"][0]["checkConstraints"] = []
+
+    diffs = compare_schema_contract(expected, actual)
+
+    assert [diff.path for diff in diffs] == ["tables.Novel.checkConstraints.Novel_name_check"]
+
+
+def test_without_video_preview_projection_only_removes_named_preview_structure() -> None:
+    contract = sample_contract()
+    novel = contract["tables"][0]
+    preview_unique = copy.deepcopy(novel["uniqueConstraints"][0])
+    preview_unique["name"] = "Novel_id_userId_key"
+    preview_unique["columns"] = ["id", "userId"]
+    novel["uniqueConstraints"].append(preview_unique)
+    preview_index = copy.deepcopy(novel["indexes"][0])
+    preview_index["name"] = "Novel_id_userId_key"
+    preview_index["unique"] = True
+    novel["indexes"].append(preview_index)
+    contract["tables"].extend(
+        [
+            {
+                "name": "Chapter",
+                "columns": [{"name": "id"}, {"name": "novelId"}],
+                "primaryKey": None,
+                "foreignKeys": [],
+                "uniqueConstraints": [
+                    {"name": "Chapter_id_novelId_key", "columns": ["id", "novelId"]},
+                    {"name": "Chapter_novelId_order_key", "columns": ["novelId", "id"]},
+                ],
+                "checkConstraints": [],
+                "indexes": [
+                    {"name": "Chapter_id_novelId_key", "keyItems": []},
+                    {"name": "Chapter_novelId_order_idx", "keyItems": []},
+                ],
+            },
+            {
+                "name": "ReviewArtifact",
+                "columns": [
+                    {"name": "id"},
+                    {"name": "videoSceneId"},
+                ],
+                "primaryKey": None,
+                "foreignKeys": [
+                    {
+                        "name": "ReviewArtifact_videoSceneId_fkey",
+                        "columns": ["videoSceneId"],
+                    }
+                ],
+                "uniqueConstraints": [
+                    {
+                        "name": "ReviewArtifact_id_videoSceneId_key",
+                        "columns": ["id", "videoSceneId"],
+                    }
+                ],
+                "checkConstraints": [
+                    {
+                        "name": "ReviewArtifact_video_check",
+                        "definition": 'CHECK ("videoSceneId" IS NOT NULL)',
+                    },
+                    {
+                        "name": "ReviewArtifact_revision_check",
+                        "definition": 'CHECK ("revision" > 0)',
+                    },
+                ],
+                "indexes": [
+                    {
+                        "name": "ReviewArtifact_videoSceneId_status_idx",
+                        "keyItems": [{"column": "videoSceneId"}],
+                        "includeColumns": [],
+                    },
+                    {
+                        "name": "ReviewArtifact_novelId_status_idx",
+                        "keyItems": [{"column": "novelId"}],
+                        "includeColumns": [],
+                    },
+                ],
+            },
+            {
+                "name": "VideoScene",
+                "columns": [],
+                "primaryKey": None,
+                "foreignKeys": [],
+                "uniqueConstraints": [],
+                "checkConstraints": [],
+                "indexes": [],
+            },
+        ]
+    )
+    contract["enums"].append(
+        {
+            "name": "ReviewArtifactKind",
+            "values": ["chapter_draft", "video_scene_plan"],
+        }
+    )
+
+    projected = project_schema_contract(contract, "without_video_preview")
+
+    projected_tables = {table["name"]: table for table in projected["tables"]}
+    assert "VideoScene" not in projected_tables
+    assert {item["name"] for item in projected_tables["Novel"]["uniqueConstraints"]} == {
+        "Novel_userId_key"
+    }
+    assert {item["name"] for item in projected_tables["Novel"]["indexes"]} == {"Novel_userId_idx"}
+    chapter = projected_tables["Chapter"]
+    assert [item["name"] for item in chapter["uniqueConstraints"]] == ["Chapter_novelId_order_key"]
+    assert [item["name"] for item in chapter["indexes"]] == ["Chapter_novelId_order_idx"]
+    review = projected_tables["ReviewArtifact"]
+    assert [item["name"] for item in review["columns"]] == ["id"]
+    assert review["foreignKeys"] == []
+    assert review["uniqueConstraints"] == []
+    assert [item["name"] for item in review["checkConstraints"]] == [
+        "ReviewArtifact_revision_check"
+    ]
+    assert [item["name"] for item in review["indexes"]] == ["ReviewArtifact_novelId_status_idx"]
+    review_kind = next(item for item in projected["enums"] if item["name"] == "ReviewArtifactKind")
+    assert review_kind["values"] == ["chapter_draft"]
+    assert projected["fingerprint"] == canonical_fingerprint(projected)
+    assert any(table["name"] == "VideoScene" for table in contract["tables"])
+
+
+def test_without_video_preview_projection_removes_every_checked_in_video_table() -> None:
+    root = Path(__file__).resolve().parents[4]
+    contract = load_schema_contract(
+        root
+        / "apps"
+        / "core-api"
+        / "src"
+        / "inkforge_core"
+        / "db"
+        / "schema-contract.json"
+    )
+
+    projected = project_schema_contract(contract, "without_video_preview")
+    projected_table_names = {table["name"] for table in projected["tables"]}
+
+    assert len(contract["tables"]) == 69
+    assert len(projected_table_names) == 44
+    assert not any(name.startswith("Video") for name in projected_table_names)
 
 
 def test_checked_in_contract_preserves_all_live_public_tables_without_secrets() -> None:
@@ -342,6 +498,32 @@ def test_checked_in_contract_preserves_all_live_public_tables_without_secrets() 
         "WritingTask",
         "WritingEventOutbox",
         "WritingRunCommand",
+        # 视频生产域使用独立控制面，不复用小说正文与写作任务表。
+        "VideoProject",
+        "VideoScene",
+        "VideoAsset",
+        "VideoAssetBinding",
+        "VideoGenerationTask",
+        "VideoReviewDecisionCommand",
+        "VideoChapterAdaptation",
+        "VideoChapterAdaptationHead",
+        "VideoAdaptationTask",
+        "VideoShotPlanVersion",
+        "VideoCinematicScene",
+        "VideoDramaticBeat",
+        "VideoDramaticBeatSourceAnchor",
+        "VideoShot",
+        "VideoShotSourceAnchor",
+        "VideoEpisodePlanVersion",
+        "VideoEpisodeBoundary",
+        "VideoShotPromptVersion",
+        "VideoShotPromptHead",
+        "VideoVisualCanon",
+        "VideoVisualCanonVersion",
+        "VideoShotVisualReferenceSet",
+        "VideoShotVisualReferenceBinding",
+        "VideoShotPromptVisualReference",
+        "VideoAdaptationDecisionCommand",
         "_FactionTerritories",
         "_prisma_migrations",
     }
@@ -482,6 +664,15 @@ def catalog_result_sets(
         [
             {
                 "table_name": "RagChunk",
+                "constraint_name": "RagChunk_embedding_check",
+                "definition": "CHECK (embedding IS NOT NULL)",
+                "is_validated": True,
+                "no_inherit": False,
+            }
+        ],
+        [
+            {
+                "table_name": "RagChunk",
                 "index_name": "RagChunk_mixed_idx",
                 "is_unique": False,
                 "method": "hnsw",
@@ -580,9 +771,7 @@ async def test_inspection_uses_only_catalog_selects_and_preserves_vector_dimensi
         {"name": "vector", "installed": True, "version": "0.8.1"},
     ]
     mixed_index = next(
-        index
-        for index in contract["tables"][0]["indexes"]
-        if index["name"] == "RagChunk_mixed_idx"
+        index for index in contract["tables"][0]["indexes"] if index["name"] == "RagChunk_mixed_idx"
     )
     assert [item["kind"] for item in mixed_index["keyItems"]] == ["column", "expression"]
     assert [item["opclass"] for item in mixed_index["keyItems"]] == [
@@ -606,7 +795,15 @@ async def test_inspection_uses_only_catalog_selects_and_preserves_vector_dimensi
     }
     assert contract["tables"][0]["foreignKeys"][0]["matchType"] == "SIMPLE"
     assert contract["tables"][0]["uniqueConstraints"][0]["validated"] is True
-    assert len(connection.statements) == 9
+    assert contract["tables"][0]["checkConstraints"] == [
+        {
+            "name": "RagChunk_embedding_check",
+            "definition": "CHECK (embedding IS NOT NULL)",
+            "validated": True,
+            "noInherit": False,
+        }
+    ]
+    assert len(connection.statements) == 10
     for sql in connection.statements:
         normalized = sql.lstrip().upper()
         assert normalized.startswith("SELECT")
@@ -681,9 +878,7 @@ async def test_shared_engine_schema_verification_never_disposes_main_pool(
 ) -> None:
     contract_path = tmp_path / "schema-contract.json"
     expected = sample_contract()
-    contract_path.write_text(
-        json.dumps(add_contract_fingerprint(expected)), encoding="utf-8"
-    )
+    contract_path.write_text(json.dumps(add_contract_fingerprint(expected)), encoding="utf-8")
     engine = FakeEngine(RecordingConnection(catalog_result_sets()))
 
     async def exact_inspection(*args: object, **kwargs: object) -> dict[str, Any]:
@@ -706,9 +901,7 @@ async def test_temporary_guard_engine_uses_shared_url_normalization(
 ) -> None:
     contract_path = tmp_path / "schema-contract.json"
     expected = sample_contract()
-    contract_path.write_text(
-        json.dumps(add_contract_fingerprint(expected)), encoding="utf-8"
-    )
+    contract_path.write_text(json.dumps(add_contract_fingerprint(expected)), encoding="utf-8")
     engine = FakeEngine(RecordingConnection(catalog_result_sets()))
     captured: dict[str, Any] = {}
 
@@ -750,9 +943,7 @@ async def test_export_refuses_existing_file_by_default_and_overwrites_atomically
         await export_schema_contract("postgresql+asyncpg://secret", output)
     assert connection.statements == []
 
-    exported = await export_schema_contract(
-        "postgresql+asyncpg://secret", output, overwrite=True
-    )
+    exported = await export_schema_contract("postgresql+asyncpg://secret", output, overwrite=True)
 
     assert connection.statements[0].lstrip().upper().startswith("SET TRANSACTION READ ONLY")
     assert connection.statements[1].strip() == "SET LOCAL search_path = pg_catalog, public"
@@ -786,9 +977,7 @@ class FailingEngine:
 async def test_connection_error_is_sanitized_and_not_reported_as_drift(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    secret_url = (
-        "postgresql+asyncpg://secret-user:secret-password@secret-host/private-db"  # noqa: S105
-    )
+    secret_url = "postgresql+asyncpg://secret-user:secret-password@secret-host/private-db"  # noqa: S105
     contract_path = tmp_path / "schema-contract.json"
     contract_path.write_text(
         json.dumps(add_contract_fingerprint(sample_contract())), encoding="utf-8"
@@ -865,9 +1054,7 @@ async def test_inspection_and_dispose_errors_are_sanitized_but_internal_errors_a
     monkeypatch.setattr(
         schema_guard,
         "create_async_engine",
-        lambda *args, **kwargs: DisposeFailingEngine(
-            RecordingConnection(catalog_result_sets())
-        ),
+        lambda *args, **kwargs: DisposeFailingEngine(RecordingConnection(catalog_result_sets())),
     )
     with pytest.raises(SchemaConnectionError) as dispose_error:
         await verify_live_schema("postgresql+asyncpg://unused", contract_path)
@@ -911,9 +1098,7 @@ async def test_verify_live_schema_returns_exact_ready_and_single_drift(
 ) -> None:
     contract_path = tmp_path / "schema-contract.json"
     expected = sample_contract()
-    contract_path.write_text(
-        json.dumps(add_contract_fingerprint(expected)), encoding="utf-8"
-    )
+    contract_path.write_text(json.dumps(add_contract_fingerprint(expected)), encoding="utf-8")
 
     async def inspect_exact(database_url: str, schema: str) -> dict[str, Any]:
         actual = copy.deepcopy(expected)

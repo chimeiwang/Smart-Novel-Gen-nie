@@ -1338,6 +1338,439 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/video/novels/{novel_id}/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Projects
+         * @description 列出当前小说的视频项目。
+         */
+        get: operations["list_projects_api_v1_video_novels__novel_id__projects_get"];
+        put?: never;
+        /**
+         * Create Project
+         * @description 为当前小说创建视频项目。
+         */
+        post: operations["create_project_api_v1_video_novels__novel_id__projects_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/video/projects/{project_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Project
+         * @description 加载视频制作台。
+         */
+        get: operations["get_project_api_v1_video_projects__project_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/video/projects/{project_id}/scenes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Scene
+         * @description 冻结原文并提交一个真实的视频规划任务。
+         */
+        post: operations["create_scene_api_v1_video_projects__project_id__scenes_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/video/scenes/{scene_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Scene
+         * @description 轮询场景、任务和审核状态。
+         */
+        get: operations["get_scene_api_v1_video_scenes__scene_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/video/scenes/{scene_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry Scene
+         * @description 复用冻结输入重新生成失败场景，不创建新的场景记录。
+         */
+        post: operations["retry_scene_api_v1_video_scenes__scene_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/video/scenes/{scene_id}/revise": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revise Scene
+         * @description 保存当前候选快照，并按作者意见重新规划同一个场景。
+         */
+        post: operations["revise_scene_api_v1_video_scenes__scene_id__revise_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/video/scenes/{scene_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve Scene
+         * @description 用户显式批准候选，正式写入场景方案。
+         */
+        post: operations["approve_scene_api_v1_video_scenes__scene_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/video/scenes/{scene_id}/prompt-preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Prompt
+         * @description 基于正式场景方案和已锁定素材生成一次性开发预览包。
+         */
+        post: operations["preview_prompt_api_v1_video_scenes__scene_id__prompt_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/video/projects/{project_id}/assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Asset
+         * @description 上传并登记一份真实图片、视频或音频素材。
+         */
+        post: operations["upload_asset_api_v1_video_projects__project_id__assets_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/video/assets/{asset_id}/rights": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Confirm Asset
+         * @description 确认或拒绝素材权利；只有 confirmed 会锁定素材。
+         */
+        patch: operations["confirm_asset_api_v1_video_assets__asset_id__rights_patch"];
+        trace?: never;
+    };
+    "/api/v1/video/assets/{asset_id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Asset
+         * @description 经过小说归属校验后返回素材内容。
+         */
+        get: operations["download_asset_api_v1_video_assets__asset_id__content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/video/assets/{asset_id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview Asset
+         * @description 经过归属校验后以内联响应预览视觉设定图片。
+         */
+        get: operations["preview_asset_api_v1_video_assets__asset_id__preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/video/projects/{project_id}/chapter-adaptations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Adaptations */
+        get: operations["list_adaptations_api_v1_video_projects__project_id__chapter_adaptations_get"];
+        put?: never;
+        /** Create Adaptation */
+        post: operations["create_adaptation_api_v1_video_projects__project_id__chapter_adaptations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/video/projects/{project_id}/visual-canons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Visual Canons */
+        get: operations["list_visual_canons_api_v1_video_projects__project_id__visual_canons_get"];
+        put?: never;
+        /** Set Visual Canon Candidate */
+        post: operations["set_visual_canon_candidate_api_v1_video_projects__project_id__visual_canons_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/video/visual-canons/{canon_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Visual Canon */
+        post: operations["approve_visual_canon_api_v1_video_visual_canons__canon_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/video/chapter-adaptations/{adaptation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Adaptation */
+        get: operations["get_adaptation_api_v1_video_chapter_adaptations__adaptation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/video/chapter-adaptations/{adaptation_id}/shot-plan-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Shot Plan */
+        post: operations["start_shot_plan_api_v1_video_chapter_adaptations__adaptation_id__shot_plan_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/video/chapter-adaptations/{adaptation_id}/shot-plan/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Confirm Shot Plan */
+        post: operations["confirm_shot_plan_api_v1_video_chapter_adaptations__adaptation_id__shot_plan_confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/video/chapter-adaptations/{adaptation_id}/candidate/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Discard Candidate */
+        post: operations["discard_candidate_api_v1_video_chapter_adaptations__adaptation_id__candidate_discard_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/video/chapter-adaptations/{adaptation_id}/episode-plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save Episode Plan */
+        put: operations["save_episode_plan_api_v1_video_chapter_adaptations__adaptation_id__episode_plan_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/video/chapter-adaptations/{adaptation_id}/prompt-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Start Prompt Run */
+        post: operations["start_prompt_run_api_v1_video_chapter_adaptations__adaptation_id__prompt_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/video/chapter-adaptations/{adaptation_id}/shots/{shot_id}/prompt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save Shot Prompt */
+        put: operations["save_shot_prompt_api_v1_video_chapter_adaptations__adaptation_id__shots__shot_id__prompt_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/video/chapter-adaptations/{adaptation_id}/shots/{shot_id}/visual-references": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save Shot Visual References */
+        put: operations["save_shot_visual_references_api_v1_video_chapter_adaptations__adaptation_id__shots__shot_id__visual_references_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/debug/workflow-runs": {
         parameters: {
             query?: never;
@@ -1438,6 +1871,32 @@ export interface components {
             /** Effective */
             effective: boolean;
         };
+        /**
+         * ApproveVideoSceneRequest
+         * @description 按候选 revision 原子批准视频场景，重复提交保持同一结果。
+         */
+        ApproveVideoSceneRequest: {
+            /** Clientrequestid */
+            clientRequestId: string;
+            /** Expectedartifactrevision */
+            expectedArtifactRevision: number;
+        };
+        /**
+         * ApproveVideoSceneResponse
+         * @description 用户批准后返回正式场景。
+         */
+        ApproveVideoSceneResponse: {
+            scene: components["schemas"]["VideoSceneResponse"];
+        };
+        /** ApproveVisualCanonRequest */
+        ApproveVisualCanonRequest: {
+            /** Clientrequestid */
+            clientRequestId: string;
+            /** Expectedrevision */
+            expectedRevision: number;
+            /** Candidateassetid */
+            candidateAssetId: string;
+        };
         /** ApprovedBeatPlanSummary */
         ApprovedBeatPlanSummary: {
             /** Scenecount */
@@ -1506,6 +1965,26 @@ export interface components {
             /** Index */
             index?: number | null;
         };
+        /**
+         * BeatCoverageGoal
+         * @description 一个节拍希望观众获得的内容，不预设必须使用哪类镜头完成。
+         */
+        BeatCoverageGoal: {
+            /** Goalkey */
+            goalKey: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "story_information" | "action" | "emotion" | "space" | "relationship" | "motif" | "transition";
+            /**
+             * Priority
+             * @enum {string}
+             */
+            priority: "essential" | "supporting";
+            /** Description */
+            description: string;
+        };
         /** BeatPlanDto */
         BeatPlanDto: {
             /** Id */
@@ -1556,6 +2035,29 @@ export interface components {
             totalUsage: components["schemas"]["TokenUsageBreakdown"];
             monthlyUsage: components["schemas"]["TokenUsageBreakdown"];
         };
+        /** Body_upload_asset_api_v1_video_projects__project_id__assets_post */
+        Body_upload_asset_api_v1_video_projects__project_id__assets_post: {
+            /** File */
+            file: string;
+            /** Name */
+            name: string;
+            /**
+             * Modality
+             * @enum {string}
+             */
+            modality: "image" | "video" | "audio";
+            /**
+             * Duty
+             * @enum {string}
+             */
+            duty: "identity" | "costume" | "scene" | "prop" | "style" | "storyboard" | "keyframe" | "motion" | "camera" | "voice" | "ambience" | "music";
+            /**
+             * Sourcekind
+             * @default user_upload
+             * @enum {string}
+             */
+            sourceKind: "user_upload" | "authorized_real" | "virtual" | "model_generated";
+        };
         /** Body_upload_reference_api_v1_styles__style_id__references_post */
         Body_upload_reference_api_v1_styles__style_id__references_post: {
             /** File */
@@ -1585,6 +2087,145 @@ export interface components {
             cancelledCommandId: string | null;
             /** Cancelledjobid */
             cancelledJobId: string | null;
+        };
+        /** ChapterAdaptationListResponse */
+        ChapterAdaptationListResponse: {
+            /** Adaptations */
+            adaptations: components["schemas"]["ChapterAdaptationResponse"][];
+        };
+        /**
+         * ChapterAdaptationPlanCandidate
+         * @description 进入 ReviewArtifact 的完整 Scene → Beat → Shot 候选。
+         */
+        ChapterAdaptationPlanCandidate: {
+            /**
+             * Schemaversion
+             * @constant
+             */
+            schemaVersion: "chapter_adaptation_plan_v3";
+            /** Adaptationid */
+            adaptationId: string;
+            /** Sourcehash */
+            sourceHash: string;
+            /** Scenes */
+            scenes: components["schemas"]["CinematicSceneCandidate"][];
+            /** Suggestedepisodebreakaftershotkeys */
+            suggestedEpisodeBreakAfterShotKeys?: string[];
+            /** Reviewsummary */
+            reviewSummary?: string | null;
+            /** Reviewfindings */
+            reviewFindings?: components["schemas"]["CinematicReviewFinding"][];
+        };
+        /** ChapterAdaptationResponse */
+        ChapterAdaptationResponse: {
+            /** Id */
+            id: string;
+            /** Projectid */
+            projectId: string;
+            /** Novelid */
+            novelId: string;
+            /** Chapterid */
+            chapterId: string | null;
+            /** Chaptertitle */
+            chapterTitle: string;
+            /**
+             * Chapterupdatedat
+             * Format: date-time
+             */
+            chapterUpdatedAt: string;
+            /** Sourcetext */
+            sourceText: string;
+            /** Sourcehash */
+            sourceHash: string;
+            /** Lifecyclestatus */
+            lifecycleStatus: string;
+            /** Headrevision */
+            headRevision: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "empty" | "generating" | "awaiting_review" | "approved" | "failed";
+            currentPlan: components["schemas"]["FormalChapterAdaptationPlan"] | null;
+            candidatePlan: components["schemas"]["ChapterAdaptationPlanCandidate"] | null;
+            episodePlan: components["schemas"]["EpisodePlanResponse"] | null;
+            /** Promptversions */
+            promptVersions: components["schemas"]["ShotPromptVersionResponse"][];
+            /** Promptcandidates */
+            promptCandidates: components["schemas"]["ShotPromptCandidateResponse"][];
+            /** Visualreferencesets */
+            visualReferenceSets: components["schemas"]["ShotVisualReferenceSetResponse"][];
+            reviewArtifact: components["schemas"]["ChapterAdaptationReviewSummary"] | null;
+            latestTask: components["schemas"]["ChapterAdaptationTaskResponse"] | null;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
+        /** ChapterAdaptationReviewSummary */
+        ChapterAdaptationReviewSummary: {
+            /** Id */
+            id: string;
+            /** Status */
+            status: string;
+            /** Revision */
+            revision: number;
+            /** Title */
+            title: string | null;
+            /** Summary */
+            summary: string | null;
+        };
+        /**
+         * ChapterAdaptationSourceRange
+         * @description 相对于不可变章节全文的 Unicode code point 左闭右开范围。
+         */
+        ChapterAdaptationSourceRange: {
+            /** Start */
+            start: number;
+            /** End */
+            end: number;
+            /** Sourcetext */
+            sourceText: string;
+        };
+        /** ChapterAdaptationTaskAcceptedResponse */
+        ChapterAdaptationTaskAcceptedResponse: {
+            adaptation: components["schemas"]["ChapterAdaptationResponse"];
+            task: components["schemas"]["ChapterAdaptationTaskResponse"];
+        };
+        /** ChapterAdaptationTaskResponse */
+        ChapterAdaptationTaskResponse: {
+            /** Id */
+            id: string;
+            /** Jobid */
+            jobId: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "shot_plan" | "shot_prompt";
+            /** Baseshotplanversionid */
+            baseShotPlanVersionId: string | null;
+            /** Workflow */
+            workflow: string;
+            /** Status */
+            status: string;
+            /** Checkpointstage */
+            checkpointStage: string;
+            /** Lasterrorcode */
+            lastErrorCode: string | null;
+            /** Lasterrormessage */
+            lastErrorMessage: string | null;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
         };
         /** ChapterIdSummary */
         ChapterIdSummary: {
@@ -1855,6 +2496,165 @@ export interface components {
         };
         /** @enum {string} */
         CharacterStatus: "active" | "missing" | "dead" | "imprisoned" | "unknown";
+        /**
+         * CinematicReviewFinding
+         * @description 面向作者的非阻断审镜发现。
+         */
+        CinematicReviewFinding: {
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "notice" | "warning";
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "plan" | "scene" | "beat" | "shot";
+            /** Scopekey */
+            scopeKey?: string | null;
+            /** Message */
+            message: string;
+            /** Evidence */
+            evidence: string;
+            /** Suggestion */
+            suggestion: string;
+        };
+        /**
+         * CinematicSceneCandidate
+         * @description 由时间、地点和连续行动空间决定的真实场景候选。
+         */
+        CinematicSceneCandidate: {
+            /** Scenekey */
+            sceneKey: string;
+            /** Title */
+            title: string;
+            /** Locationlabel */
+            locationLabel: string;
+            /** Timelabel */
+            timeLabel: string;
+            /** Objective */
+            objective: string;
+            /** Changesummary */
+            changeSummary: string;
+            /** Beats */
+            beats: components["schemas"]["DramaticBeatCandidate"][];
+        };
+        /**
+         * CinematicShotCandidate
+         * @description 候选镜头是一段连续机位和一个主要可见动作。
+         */
+        CinematicShotCandidate: {
+            /** Shotkey */
+            shotKey: string;
+            /** Title */
+            title: string;
+            /**
+             * Narrativepurpose
+             * @enum {string}
+             */
+            narrativePurpose: "establishing" | "action" | "dialogue" | "reaction" | "reveal" | "insert" | "transition" | "atmosphere";
+            /** Storyfunction */
+            storyFunction: string;
+            /** Audiencegain */
+            audienceGain: string;
+            /** Coveredgoalkeys */
+            coveredGoalKeys?: string[];
+            /**
+             * Sourcerelation
+             * @enum {string}
+             */
+            sourceRelation: "direct" | "derived" | "supplemental";
+            /**
+             * Shotscale
+             * @enum {string}
+             */
+            shotScale: "extreme_long" | "long" | "medium" | "medium_close" | "close" | "extreme_close" | "over_shoulder" | "two_shot" | "pov";
+            /**
+             * Cameraangle
+             * @enum {string}
+             */
+            cameraAngle: "eye_level" | "high_angle" | "low_angle" | "overhead" | "dutch_angle";
+            /**
+             * Cameramovement
+             * @enum {string}
+             */
+            cameraMovement: "locked" | "pan" | "tilt" | "push_in" | "pull_out" | "tracking" | "arc" | "handheld" | "focus_shift";
+            /** Visualintent */
+            visualIntent: string;
+            /**
+             * Speechmode
+             * @enum {string}
+             */
+            speechMode: "none" | "sync" | "offscreen" | "voiceover";
+            /** Spokentext */
+            spokenText?: string | null;
+            /** Sounddesign */
+            soundDesign: string;
+            /** Cutreason */
+            cutReason: string;
+            /** Timelinedurationms */
+            timelineDurationMs: number;
+            /** Sourceranges */
+            sourceRanges: components["schemas"]["ChapterAdaptationSourceRange"][];
+        };
+        /**
+         * CompiledAssetBinding
+         * @description 本次供应商请求中的局部素材编号映射。
+         */
+        CompiledAssetBinding: {
+            /** Assetid */
+            assetId: string;
+            /** Mediaassetid */
+            mediaAssetId: string | null;
+            /** Alias */
+            alias: string;
+            /**
+             * Modality
+             * @enum {string}
+             */
+            modality: "image" | "video" | "audio";
+            /**
+             * Duty
+             * @enum {string}
+             */
+            duty: "identity" | "costume" | "scene" | "prop" | "style" | "storyboard" | "keyframe" | "motion" | "camera" | "voice" | "ambience" | "music" | "relation_interaction";
+            /**
+             * Bindingscope
+             * @enum {string}
+             */
+            bindingScope: "canon_slot" | "scene_direct";
+            settingReference: components["schemas"]["SettingReference"] | null;
+            /** Featuredomain */
+            featureDomain?: ("character_identity" | "character_costume" | "location" | "prop" | "style" | "storyboard" | "keyframe" | "motion" | "camera" | "voice" | "ambience" | "music" | "relationship_interaction") | null;
+            /** Keyframerole */
+            keyframeRole?: ("initial_state" | "end_state" | "transition_anchor") | null;
+            /** Targetentity */
+            targetEntity: string;
+            /** Isfixture */
+            isFixture: boolean;
+        };
+        /** ConfirmAdaptationPlanRequest */
+        ConfirmAdaptationPlanRequest: {
+            /** Clientrequestid */
+            clientRequestId: string;
+            /** Expectedartifactrevision */
+            expectedArtifactRevision: number;
+            /** Expectedadaptationrevision */
+            expectedAdaptationRevision: number;
+            plan: components["schemas"]["ChapterAdaptationPlanCandidate"];
+        };
+        /**
+         * ConfirmVideoAssetRequest
+         * @description 用户确认素材权利并锁定，受限或拒绝素材不能锁定。
+         */
+        ConfirmVideoAssetRequest: {
+            /**
+             * Rightsstatus
+             * @enum {string}
+             */
+            rightsStatus: "confirmed" | "restricted" | "rejected";
+        };
         /** ContentDto */
         ContentDto: {
             /** Id */
@@ -1889,6 +2689,18 @@ export interface components {
             createdAt?: string | null;
             /** Updatedat */
             updatedAt?: string | null;
+        };
+        /** CreateChapterAdaptationRequest */
+        CreateChapterAdaptationRequest: {
+            /** Clientrequestid */
+            clientRequestId: string;
+            /** Chapterid */
+            chapterId: string;
+            /**
+             * Expectedchapterupdatedat
+             * Format: date-time
+             */
+            expectedChapterUpdatedAt: string;
         };
         /** CreateChapterResponse */
         CreateChapterResponse: {
@@ -2435,6 +3247,102 @@ export interface components {
             /** Name */
             name: string;
         };
+        /**
+         * CreateVideoProjectRequest
+         * @description 创建一个独立于写作任务的视频项目。
+         */
+        CreateVideoProjectRequest: {
+            /** Title */
+            title: string;
+            /**
+             * Mode
+             * @default highlight
+             * @enum {string}
+             */
+            mode: "concept" | "trailer" | "highlight" | "series";
+            /**
+             * Targetaspectratio
+             * @default 16:9
+             * @enum {string}
+             */
+            targetAspectRatio: "16:9" | "4:3" | "1:1" | "3:4" | "9:16" | "21:9" | "adaptive";
+            /**
+             * Targetlanguage
+             * @default zh-CN
+             */
+            targetLanguage: string;
+        };
+        /**
+         * CreateVideoSceneRequest
+         * @description 用章节版本和浏览器 UTF-16 选区创建不可变来源快照。
+         */
+        CreateVideoSceneRequest: {
+            /** Clientrequestid */
+            clientRequestId: string;
+            /** Chapterid */
+            chapterId: string;
+            /** Title */
+            title: string;
+            /**
+             * Expectedchapterupdatedat
+             * Format: date-time
+             */
+            expectedChapterUpdatedAt: string;
+            /** Selectionstartutf16 */
+            selectionStartUtf16: number;
+            /** Selectionendutf16 */
+            selectionEndUtf16: number;
+            /** Selectedtext */
+            selectedText: string;
+            /**
+             * Durationseconds
+             * @default 15
+             */
+            durationSeconds: number;
+        };
+        /**
+         * CreateVideoSceneResponse
+         * @description 场景入队后的初始响应。
+         */
+        CreateVideoSceneResponse: {
+            scene: components["schemas"]["VideoSceneResponse"];
+            task: components["schemas"]["VideoGenerationTaskResponse"];
+        };
+        /**
+         * CreateVisualCanonCandidateRequest
+         * @description 把已上传且已确认权利的图片放入一个视觉设定槽的候选位置。
+         */
+        CreateVisualCanonCandidateRequest: {
+            /** Clientrequestid */
+            clientRequestId: string;
+            /**
+             * Settingkind
+             * @enum {string}
+             */
+            settingKind: "character" | "location" | "item";
+            /** Settingid */
+            settingId: string;
+            /**
+             * Duty
+             * @enum {string}
+             */
+            duty: "identity" | "costume" | "scene" | "prop";
+            /** Variantkey */
+            variantKey: string;
+            /** Label */
+            label: string;
+            /** Candidateassetid */
+            candidateAssetId: string;
+            /** Includefeatures */
+            includeFeatures?: string[];
+            /** Excludefeatures */
+            excludeFeatures?: string[];
+            /**
+             * Defaultstrength
+             * @default 70
+             */
+            defaultStrength: number;
+        };
         /** CreateWritingSessionRequest */
         CreateWritingSessionRequest: {
             /** Novelid */
@@ -2557,6 +3465,15 @@ export interface components {
             /** Newtext */
             newText?: string | null;
         };
+        /** DiscardAdaptationCandidateRequest */
+        DiscardAdaptationCandidateRequest: {
+            /** Clientrequestid */
+            clientRequestId: string;
+            /** Expectedartifactrevision */
+            expectedArtifactRevision: number;
+            /** Expectedadaptationrevision */
+            expectedAdaptationRevision: number;
+        };
         /** @enum {string} */
         DocumentType: "outline" | "manuscript";
         /** DocumentVersionPayload */
@@ -2603,6 +3520,37 @@ export interface components {
             selectionEnd?: number | null;
             /** Selectedtexthash */
             selectedTextHash?: string | null;
+        };
+        /**
+         * DramaticBeatCandidate
+         * @description 戏剧节拍表达人物目标、信息、情绪、权力或行动结果的变化。
+         */
+        DramaticBeatCandidate: {
+            /** Beatkey */
+            beatKey: string;
+            /** Title */
+            title: string;
+            /** Dramaticturn */
+            dramaticTurn: string;
+            /** Visualstrategy */
+            visualStrategy: string;
+            /** Coveragegoals */
+            coverageGoals: components["schemas"]["BeatCoverageGoal"][];
+            /** Sourceranges */
+            sourceRanges: components["schemas"]["ChapterAdaptationSourceRange"][];
+            /** Shots */
+            shots: components["schemas"]["CinematicShotCandidate"][];
+        };
+        /** EpisodePlanResponse */
+        EpisodePlanResponse: {
+            /** Id */
+            id: string;
+            /** Versionno */
+            versionNo: number;
+            /** Shotplanversionid */
+            shotPlanVersionId: string;
+            /** Breakaftershotids */
+            breakAfterShotIds: string[];
         };
         /** ErrorResponse */
         ErrorResponse: {
@@ -2724,6 +3672,126 @@ export interface components {
              * Format: date-time
              */
             updatedAt: string;
+        };
+        /** FormalChapterAdaptationPlan */
+        FormalChapterAdaptationPlan: {
+            /**
+             * Schemaversion
+             * @constant
+             */
+            schemaVersion: "chapter_adaptation_plan_v3";
+            /** Planversionid */
+            planVersionId: string;
+            /** Versionno */
+            versionNo: number;
+            /** Basedonversionid */
+            basedOnVersionId?: string | null;
+            /** Adaptationid */
+            adaptationId: string;
+            /** Sourcehash */
+            sourceHash: string;
+            /** Scenes */
+            scenes: components["schemas"]["FormalCinematicScene"][];
+            /** Episodebreakaftershotkeys */
+            episodeBreakAfterShotKeys?: string[];
+        };
+        /** FormalCinematicScene */
+        FormalCinematicScene: {
+            /** Id */
+            id: string;
+            /** Scenekey */
+            sceneKey: string;
+            /** Title */
+            title: string;
+            /** Locationlabel */
+            locationLabel: string;
+            /** Timelabel */
+            timeLabel: string;
+            /** Objective */
+            objective: string;
+            /** Changesummary */
+            changeSummary: string;
+            /** Beats */
+            beats: components["schemas"]["FormalDramaticBeat"][];
+        };
+        /**
+         * FormalCinematicShot
+         * @description 批准后具有数据库身份的正式镜头读模型。
+         */
+        FormalCinematicShot: {
+            /** Shotkey */
+            shotKey: string;
+            /** Title */
+            title: string;
+            /**
+             * Narrativepurpose
+             * @enum {string}
+             */
+            narrativePurpose: "establishing" | "action" | "dialogue" | "reaction" | "reveal" | "insert" | "transition" | "atmosphere";
+            /** Storyfunction */
+            storyFunction: string;
+            /** Audiencegain */
+            audienceGain: string;
+            /** Coveredgoalkeys */
+            coveredGoalKeys?: string[];
+            /**
+             * Sourcerelation
+             * @enum {string}
+             */
+            sourceRelation: "direct" | "derived" | "supplemental";
+            /**
+             * Shotscale
+             * @enum {string}
+             */
+            shotScale: "extreme_long" | "long" | "medium" | "medium_close" | "close" | "extreme_close" | "over_shoulder" | "two_shot" | "pov";
+            /**
+             * Cameraangle
+             * @enum {string}
+             */
+            cameraAngle: "eye_level" | "high_angle" | "low_angle" | "overhead" | "dutch_angle";
+            /**
+             * Cameramovement
+             * @enum {string}
+             */
+            cameraMovement: "locked" | "pan" | "tilt" | "push_in" | "pull_out" | "tracking" | "arc" | "handheld" | "focus_shift";
+            /** Visualintent */
+            visualIntent: string;
+            /**
+             * Speechmode
+             * @enum {string}
+             */
+            speechMode: "none" | "sync" | "offscreen" | "voiceover";
+            /** Spokentext */
+            spokenText?: string | null;
+            /** Sounddesign */
+            soundDesign: string;
+            /** Cutreason */
+            cutReason: string;
+            /** Timelinedurationms */
+            timelineDurationMs: number;
+            /** Sourceranges */
+            sourceRanges: components["schemas"]["ChapterAdaptationSourceRange"][];
+            /** Id */
+            id: string;
+        };
+        /** FormalDramaticBeat */
+        FormalDramaticBeat: {
+            /** Id */
+            id: string;
+            /** Beatkey */
+            beatKey: string;
+            /** Title */
+            title: string;
+            /** Dramaticturn */
+            dramaticTurn: string;
+            /** Visualstrategy */
+            visualStrategy: string;
+            /** Coveragegoals */
+            coverageGoals: components["schemas"]["BeatCoverageGoal"][];
+            /** Sourceranges */
+            sourceRanges: components["schemas"]["ChapterAdaptationSourceRange"][];
+            /** Shots */
+            shots: components["schemas"]["FormalCinematicShot"][];
         };
         /** GlossaryDto */
         GlossaryDto: {
@@ -3316,6 +4384,35 @@ export interface components {
              */
             updatedAt: string;
         };
+        /**
+         * PromptPreviewBinding
+         * @description 正式方案中一个素材槽位与已锁定素材的本次预览映射。
+         */
+        PromptPreviewBinding: {
+            /** Slotid */
+            slotId: string;
+            /** Assetid */
+            assetId: string;
+        };
+        /**
+         * PromptPreviewRequest
+         * @description 仅用于当次编译的非持久化素材槽位选择。
+         */
+        PromptPreviewRequest: {
+            /** Previewbindings */
+            previewBindings?: components["schemas"]["PromptPreviewBinding"][];
+        };
+        /**
+         * PromptPreviewResponse
+         * @description 不保存绑定、且永远禁止提交供应商的开发预览包。
+         */
+        PromptPreviewResponse: {
+            promptPackage: components["schemas"]["SeedancePromptPackage"];
+            /** Resolvedslotids */
+            resolvedSlotIds: string[];
+            /** Missingslotids */
+            missingSlotIds: string[];
+        };
         /** QualityCheckDto */
         QualityCheckDto: {
             /** Id */
@@ -3654,6 +4751,18 @@ export interface components {
              */
             updatedAt: string;
         };
+        /**
+         * ReviseVideoSceneRequest
+         * @description 用作者的具体意见返工当前待审视频方案。
+         */
+        ReviseVideoSceneRequest: {
+            /** Clientrequestid */
+            clientRequestId: string;
+            /** Expectedartifactrevision */
+            expectedArtifactRevision: number;
+            /** Usermessage */
+            userMessage: string;
+        };
         /** RunQualityCheckRequest */
         RunQualityCheckRequest: {
             /** Clientrequestid */
@@ -3671,6 +4780,33 @@ export interface components {
             checkId: string;
             /** Taskid */
             taskId: string;
+        };
+        /** SaveEpisodePlanRequest */
+        SaveEpisodePlanRequest: {
+            /** Clientrequestid */
+            clientRequestId: string;
+            /** Expectedadaptationrevision */
+            expectedAdaptationRevision: number;
+            /** Shotplanversionid */
+            shotPlanVersionId: string;
+            /** Breakaftershotids */
+            breakAfterShotIds?: string[];
+        };
+        /** SaveShotPromptRequest */
+        SaveShotPromptRequest: {
+            /** Expectedpromptrevision */
+            expectedPromptRevision: number;
+            /** Candidatetaskid */
+            candidateTaskId?: string | null;
+            /** Currentprompt */
+            currentPrompt: string;
+        };
+        /** SaveShotVisualReferencesRequest */
+        SaveShotVisualReferencesRequest: {
+            /** Expectedrevision */
+            expectedRevision: number;
+            /** References */
+            references?: components["schemas"]["ShotVisualReferenceSelectionRequest"][];
         };
         /** SceneBeatDto */
         SceneBeatDto: {
@@ -3690,6 +4826,125 @@ export interface components {
             estimatedWords: number;
             /** Acceptancecriteria */
             acceptanceCriteria: string;
+        };
+        /**
+         * SeedanceOutputSpec
+         * @description 当前已由火山方舟公开文档确认的 Seedance 2.5 输出参数。
+         */
+        SeedanceOutputSpec: {
+            /**
+             * Model
+             * @default doubao-seedance-2-5-260628
+             * @constant
+             */
+            model: "doubao-seedance-2-5-260628";
+            /**
+             * Resolution
+             * @default 720p
+             * @enum {string}
+             */
+            resolution: "480p" | "720p";
+            /**
+             * Ratio
+             * @default 16:9
+             * @enum {string}
+             */
+            ratio: "16:9" | "4:3" | "1:1" | "3:4" | "9:16" | "21:9" | "adaptive";
+            /** Durationseconds */
+            durationSeconds: number;
+            /**
+             * Generateaudio
+             * @default true
+             */
+            generateAudio: boolean;
+            /**
+             * Outputformat
+             * @default mp4
+             * @enum {string}
+             */
+            outputFormat: "mp4" | "mov";
+            /**
+             * Watermark
+             * @default false
+             */
+            watermark: boolean;
+        };
+        /**
+         * SeedancePromptPackage
+         * @description 可展示、可审核，并区分官方建议长度与产品安全上限。
+         */
+        SeedancePromptPackage: {
+            /**
+             * Schemaversion
+             * @default 1.0
+             * @constant
+             */
+            schemaVersion: "1.0";
+            /** Sceneid */
+            sceneId: string;
+            /** Prompt */
+            prompt: string;
+            /** Promptcharactercount */
+            promptCharacterCount: number;
+            /**
+             * Recommendedpromptcharacters
+             * @default 500
+             */
+            recommendedPromptCharacters: number;
+            /**
+             * Maxpromptcharacters
+             * @default 2000
+             */
+            maxPromptCharacters: number;
+            /**
+             * Compileprofile
+             * @default legacy_single_prompt_v1
+             * @enum {string}
+             */
+            compileProfile: "legacy_single_prompt_v1" | "dual_layer_v1" | "seedance_cinematic_v2" | "seedance_director_v3" | "seedance_director_v3_compat";
+            /** Providerprompt */
+            providerPrompt?: string | null;
+            /** Providerpromptcharactercount */
+            providerPromptCharacterCount?: number | null;
+            /** Manifestprompt */
+            manifestPrompt?: string | null;
+            /** Manifestpromptcharactercount */
+            manifestPromptCharacterCount?: number | null;
+            /** Warnings */
+            warnings?: string[];
+            /** Assetbindings */
+            assetBindings: components["schemas"]["CompiledAssetBinding"][];
+            output: components["schemas"]["SeedanceOutputSpec"];
+            /** Previewonly */
+            previewOnly: boolean;
+            /** Assetready */
+            assetReady: boolean;
+            /** Submissionready */
+            submissionReady: boolean;
+            /** Fixtureonly */
+            fixtureOnly: boolean;
+        };
+        /**
+         * SeedanceShotPromptSpec
+         * @description 模型只填结构化内容，最终即梦文本由纯函数按固定顺序编译。
+         */
+        SeedanceShotPromptSpec: {
+            /** Subjectandscene */
+            subjectAndScene: string;
+            /** Visibleaction */
+            visibleAction: string;
+            /** Performance */
+            performance?: string | null;
+            /** Expressionandgaze */
+            expressionAndGaze?: string | null;
+            /** Camera */
+            camera: string;
+            /** Audio */
+            audio: string;
+            /** Continuity */
+            continuity?: string | null;
+            /** Negativeconstraints */
+            negativeConstraints?: string[];
         };
         /**
          * SelectionAttachmentMetadata
@@ -3747,6 +5002,19 @@ export interface components {
             /** Selectedtexthash */
             selectedTextHash: string;
         };
+        /**
+         * SettingReference
+         * @description 指向长篇冻结设定快照中的一个类型化条目。
+         */
+        SettingReference: {
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "character" | "relationship" | "location" | "item" | "world_setting";
+            /** Id */
+            id: string;
+        };
         /** @enum {string} */
         ShortMediumSourceKind: "idea" | "opening" | "ending" | "outline" | "mixed";
         /** ShortMediumStartWritingRunRequest */
@@ -3785,6 +5053,102 @@ export interface components {
             /** Userinstruction */
             userInstruction?: string | null;
         };
+        /** ShotPromptCandidateResponse */
+        ShotPromptCandidateResponse: {
+            /** Taskid */
+            taskId: string;
+            /** Shotid */
+            shotId: string;
+            /** Shotkey */
+            shotKey: string;
+            spec: components["schemas"]["SeedanceShotPromptSpec"];
+            /** Compiledprompt */
+            compiledPrompt: string;
+            /** Visualreferences */
+            visualReferences: components["schemas"]["ShotVisualReferenceSnapshot"][];
+            /** Qualitywarnings */
+            qualityWarnings?: string[];
+        };
+        /** ShotPromptVersionResponse */
+        ShotPromptVersionResponse: {
+            /** Id */
+            id: string;
+            /** Shotid */
+            shotId: string;
+            /** Shotkey */
+            shotKey: string;
+            /** Versionno */
+            versionNo: number;
+            /** Generatedtext */
+            generatedText: string | null;
+            /** Currenttext */
+            currentText: string;
+            /** Promptedited */
+            promptEdited: boolean;
+            /** Visualreferences */
+            visualReferences: components["schemas"]["ShotVisualReferenceSnapshot"][];
+            /** Headrevision */
+            headRevision: number;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
+        /** ShotVisualReferenceSelectionRequest */
+        ShotVisualReferenceSelectionRequest: {
+            /** Canonversionid */
+            canonVersionId: string;
+            /** Strength */
+            strength: number;
+        };
+        /** ShotVisualReferenceSetResponse */
+        ShotVisualReferenceSetResponse: {
+            /** Shotid */
+            shotId: string;
+            /** Shotkey */
+            shotKey: string;
+            /** Revision */
+            revision: number;
+            /** References */
+            references: components["schemas"]["ShotVisualReferenceSnapshot"][];
+        };
+        /**
+         * ShotVisualReferenceSnapshot
+         * @description 提示词与后续视频请求共同冻结的一份正式视觉参考。
+         */
+        ShotVisualReferenceSnapshot: {
+            /** Canonversionid */
+            canonVersionId: string;
+            /** Assetid */
+            assetId: string;
+            /** Assetsha256 */
+            assetSha256: string;
+            /**
+             * Settingkind
+             * @enum {string}
+             */
+            settingKind: "character" | "location" | "item";
+            /** Settingid */
+            settingId: string;
+            /** Settingname */
+            settingName: string;
+            /**
+             * Duty
+             * @enum {string}
+             */
+            duty: "identity" | "costume" | "scene" | "prop";
+            /** Variantkey */
+            variantKey: string;
+            /** Label */
+            label: string;
+            /** Includefeatures */
+            includeFeatures?: string[];
+            /** Excludefeatures */
+            excludeFeatures?: string[];
+            /** Strength */
+            strength: number;
+        };
         /** SourceBinding */
         SourceBinding: {
             /** Resourcetype */
@@ -3800,6 +5164,38 @@ export interface components {
             /** Revision */
             revision: number | null;
             absenceSentinel: components["schemas"]["AbsenceSentinel"] | null;
+        };
+        /** StartPromptRunRequest */
+        StartPromptRunRequest: {
+            /** Clientrequestid */
+            clientRequestId: string;
+            /** Expectedadaptationrevision */
+            expectedAdaptationRevision: number;
+            /** Shotplanversionid */
+            shotPlanVersionId: string;
+            /** Shotids */
+            shotIds?: string[];
+        };
+        /** StartShotPlanRunRequest */
+        StartShotPlanRunRequest: {
+            /** Clientrequestid */
+            clientRequestId: string;
+            /**
+             * Pacingpreset
+             * @default short_drama
+             * @enum {string}
+             */
+            pacingPreset: "short_drama" | "cinematic" | "dialogue_driven";
+            /**
+             * Targetepisodeseconds
+             * @default 90
+             * @enum {integer}
+             */
+            targetEpisodeSeconds: 60 | 90 | 120;
+            /** Baseshotplanversionid */
+            baseShotPlanVersionId?: string | null;
+            /** Revisionbrief */
+            revisionBrief?: string | null;
         };
         /** StartWritingRunRequest */
         StartWritingRunRequest: {
@@ -4393,6 +5789,331 @@ export interface components {
         VersionSource: "agent" | "manual" | "restore";
         /** @enum {string} */
         VersionStatus: "awaiting_user" | "applied";
+        /**
+         * VideoAssetBindingResponse
+         * @description 场景与真实素材之间的持久绑定。
+         */
+        VideoAssetBindingResponse: {
+            /** Id */
+            id: string;
+            /** Sceneid */
+            sceneId: string;
+            /** Assetid */
+            assetId: string;
+            /** Targetentity */
+            targetEntity: string;
+            /** Includefeatures */
+            includeFeatures: string[];
+            /** Excludefeatures */
+            excludeFeatures: string[];
+            /** Priority */
+            priority: number;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
+        /**
+         * VideoAssetResponse
+         * @description 素材库中可审核、可锁定的真实文件。
+         */
+        VideoAssetResponse: {
+            /** Id */
+            id: string;
+            /** Projectid */
+            projectId: string;
+            /** Name */
+            name: string;
+            /**
+             * Modality
+             * @enum {string}
+             */
+            modality: "image" | "video" | "audio";
+            /**
+             * Duty
+             * @enum {string}
+             */
+            duty: "identity" | "costume" | "scene" | "prop" | "style" | "storyboard" | "keyframe" | "motion" | "camera" | "voice" | "ambience" | "music";
+            /** Mimetype */
+            mimeType: string;
+            /** Bytesize */
+            byteSize: number;
+            /** Durationms */
+            durationMs: number | null;
+            /** Sha256 */
+            sha256: string;
+            /** Sourcekind */
+            sourceKind: string;
+            /** Rightsstatus */
+            rightsStatus: string;
+            /** Lockedat */
+            lockedAt: string | null;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
+        /**
+         * VideoGenerationTaskResponse
+         * @description 前端轮询所需的耐久生成任务状态。
+         */
+        VideoGenerationTaskResponse: {
+            /** Id */
+            id: string;
+            /** Jobid */
+            jobId: string;
+            /** Kind */
+            kind: string;
+            /** Status */
+            status: string;
+            /** Lasterrorcode */
+            lastErrorCode: string | null;
+            /** Lasterrormessage */
+            lastErrorMessage: string | null;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
+        /**
+         * VideoProjectDetailResponse
+         * @description 视频制作台一次加载所需的项目与场景。
+         */
+        VideoProjectDetailResponse: {
+            project: components["schemas"]["VideoProjectResponse"];
+            /** Scenes */
+            scenes: components["schemas"]["VideoSceneResponse"][];
+            /** Assets */
+            assets: components["schemas"]["VideoAssetResponse"][];
+            /** Previewenabled */
+            previewEnabled: boolean;
+            /** Seedanceconfigured */
+            seedanceConfigured: boolean;
+            /** Seedanceenabled */
+            seedanceEnabled: boolean;
+        };
+        /**
+         * VideoProjectListResponse
+         * @description 项目列表及创建第一个项目前也必须可见的能力状态。
+         */
+        VideoProjectListResponse: {
+            /** Projects */
+            projects: components["schemas"]["VideoProjectResponse"][];
+            /** Previewenabled */
+            previewEnabled: boolean;
+            /** Seedanceconfigured */
+            seedanceConfigured: boolean;
+            /** Seedanceenabled */
+            seedanceEnabled: boolean;
+        };
+        /**
+         * VideoProjectResponse
+         * @description 视频项目列表项。
+         */
+        VideoProjectResponse: {
+            /** Id */
+            id: string;
+            /** Novelid */
+            novelId: string;
+            /** Title */
+            title: string;
+            /** Mode */
+            mode: string;
+            /** Status */
+            status: string;
+            /** Targetaspectratio */
+            targetAspectRatio: string;
+            /** Targetlanguage */
+            targetLanguage: string;
+            /** Provider */
+            provider: string;
+            /** Revision */
+            revision: number;
+            /**
+             * Scenecount
+             * @default 0
+             */
+            sceneCount: number;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
+        /**
+         * VideoReviewArtifactSummary
+         * @description 视频场景当前待用户确认的 ReviewArtifact。
+         */
+        VideoReviewArtifactSummary: {
+            /** Id */
+            id: string;
+            /** Status */
+            status: string;
+            /** Revision */
+            revision: number;
+            /** Title */
+            title: string | null;
+            /** Summary */
+            summary: string | null;
+        };
+        /**
+         * VideoSceneResponse
+         * @description 视频制作台展示的场景、提示词与审核状态。
+         */
+        VideoSceneResponse: {
+            /** Id */
+            id: string;
+            /** Projectid */
+            projectId: string;
+            /** Chapterid */
+            chapterId: string | null;
+            /** Ordinal */
+            ordinal: number;
+            /** Title */
+            title: string;
+            /** Sourcetext */
+            sourceText: string;
+            /** Sourcehash */
+            sourceHash: string;
+            /** Durationseconds */
+            durationSeconds: number;
+            /** Status */
+            status: string;
+            /** Prompttext */
+            promptText: string | null;
+            /** Promptcharactercount */
+            promptCharacterCount: number | null;
+            /** Plan */
+            plan: {
+                [key: string]: unknown;
+            } | null;
+            /** Candidateplan */
+            candidatePlan: {
+                [key: string]: unknown;
+            } | null;
+            candidatePackage: components["schemas"]["SeedancePromptPackage"] | null;
+            reviewArtifact: components["schemas"]["VideoReviewArtifactSummary"] | null;
+            latestTask: components["schemas"]["VideoGenerationTaskResponse"] | null;
+            /** Assetbindings */
+            assetBindings: components["schemas"]["VideoAssetBindingResponse"][];
+            /** Revision */
+            revision: number;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
+        /** VisualCanonLibraryResponse */
+        VisualCanonLibraryResponse: {
+            /** Canons */
+            canons: components["schemas"]["VisualCanonResponse"][];
+        };
+        /** VisualCanonResponse */
+        VisualCanonResponse: {
+            /** Id */
+            id: string;
+            /** Projectid */
+            projectId: string;
+            /** Novelid */
+            novelId: string;
+            /**
+             * Settingkind
+             * @enum {string}
+             */
+            settingKind: "character" | "location" | "item";
+            /** Settingid */
+            settingId: string;
+            /** Settingname */
+            settingName: string;
+            /**
+             * Duty
+             * @enum {string}
+             */
+            duty: "identity" | "costume" | "scene" | "prop";
+            /** Variantkey */
+            variantKey: string;
+            /** Label */
+            label: string;
+            candidateAsset: components["schemas"]["VideoAssetResponse"] | null;
+            /** Candidateincludefeatures */
+            candidateIncludeFeatures: string[];
+            /** Candidateexcludefeatures */
+            candidateExcludeFeatures: string[];
+            /** Candidatedefaultstrength */
+            candidateDefaultStrength: number | null;
+            /** Currentversionid */
+            currentVersionId: string | null;
+            /** Versions */
+            versions: components["schemas"]["VisualCanonVersionResponse"][];
+            /** Revision */
+            revision: number;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
+        /** VisualCanonVersionResponse */
+        VisualCanonVersionResponse: {
+            /** Id */
+            id: string;
+            /** Canonid */
+            canonId: string;
+            /** Versionno */
+            versionNo: number;
+            asset: components["schemas"]["VideoAssetResponse"];
+            /** Settingname */
+            settingName: string;
+            /** Label */
+            label: string;
+            /** Includefeatures */
+            includeFeatures: string[];
+            /** Excludefeatures */
+            excludeFeatures: string[];
+            /** Defaultstrength */
+            defaultStrength: number;
+            /** Contenthash */
+            contentHash: string;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+        };
         /** WorkflowRunDetailResponse */
         WorkflowRunDetailResponse: {
             summary: components["schemas"]["WorkflowRunSummary"];
@@ -17348,6 +19069,3036 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["VersionDetailResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_projects_api_v1_video_novels__novel_id__projects_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                novel_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoProjectListResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_project_api_v1_video_novels__novel_id__projects_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                novel_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateVideoProjectRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoProjectResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_project_api_v1_video_projects__project_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoProjectDetailResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_scene_api_v1_video_projects__project_id__scenes_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateVideoSceneRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateVideoSceneResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_scene_api_v1_video_scenes__scene_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scene_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoSceneResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    retry_scene_api_v1_video_scenes__scene_id__retry_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scene_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateVideoSceneResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    revise_scene_api_v1_video_scenes__scene_id__revise_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scene_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviseVideoSceneRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateVideoSceneResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    approve_scene_api_v1_video_scenes__scene_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scene_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApproveVideoSceneRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApproveVideoSceneResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    preview_prompt_api_v1_video_scenes__scene_id__prompt_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scene_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PromptPreviewRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PromptPreviewResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    upload_asset_api_v1_video_projects__project_id__assets_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_upload_asset_api_v1_video_projects__project_id__assets_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoAssetResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    confirm_asset_api_v1_video_assets__asset_id__rights_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmVideoAssetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VideoAssetResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    download_asset_api_v1_video_assets__asset_id__content_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    preview_asset_api_v1_video_assets__asset_id__preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_adaptations_api_v1_video_projects__project_id__chapter_adaptations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChapterAdaptationListResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_adaptation_api_v1_video_projects__project_id__chapter_adaptations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateChapterAdaptationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChapterAdaptationResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_visual_canons_api_v1_video_projects__project_id__visual_canons_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VisualCanonLibraryResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_visual_canon_candidate_api_v1_video_projects__project_id__visual_canons_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateVisualCanonCandidateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VisualCanonResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    approve_visual_canon_api_v1_video_visual_canons__canon_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                canon_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApproveVisualCanonRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VisualCanonResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_adaptation_api_v1_video_chapter_adaptations__adaptation_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                adaptation_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChapterAdaptationResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    start_shot_plan_api_v1_video_chapter_adaptations__adaptation_id__shot_plan_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                adaptation_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartShotPlanRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChapterAdaptationTaskAcceptedResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    confirm_shot_plan_api_v1_video_chapter_adaptations__adaptation_id__shot_plan_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                adaptation_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfirmAdaptationPlanRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChapterAdaptationResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    discard_candidate_api_v1_video_chapter_adaptations__adaptation_id__candidate_discard_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                adaptation_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DiscardAdaptationCandidateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChapterAdaptationResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    save_episode_plan_api_v1_video_chapter_adaptations__adaptation_id__episode_plan_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                adaptation_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveEpisodePlanRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChapterAdaptationResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    start_prompt_run_api_v1_video_chapter_adaptations__adaptation_id__prompt_runs_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                adaptation_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartPromptRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChapterAdaptationTaskAcceptedResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    save_shot_prompt_api_v1_video_chapter_adaptations__adaptation_id__shots__shot_id__prompt_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                adaptation_id: string;
+                shot_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveShotPromptRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChapterAdaptationResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    save_shot_visual_references_api_v1_video_chapter_adaptations__adaptation_id__shots__shot_id__visual_references_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                adaptation_id: string;
+                shot_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveShotVisualReferencesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotVisualReferenceSetResponse"];
                 };
             };
             /** @description 统一错误响应 */

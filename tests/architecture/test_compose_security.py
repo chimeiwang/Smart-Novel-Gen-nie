@@ -140,9 +140,10 @@ def test_compose_nginx_preserves_only_trusted_https_forwarding() -> None:
     assert mapping_entries == ["default $scheme;", "~^https$ https;"]
     assert "HTTPS" not in mapping.group("body")
     assert "Https" not in mapping.group("body")
+    # 普通 API、视频大文件 API 与 Web 三个代理入口必须使用同一可信映射。
     assert nginx.count(
         "proxy_set_header X-Forwarded-Proto $inkforge_forwarded_proto;"
-    ) == 2
+    ) == 3
     assert "proxy_set_header X-Forwarded-Proto $scheme;" not in nginx
 
 
@@ -157,7 +158,8 @@ def test_compose_nginx_preserves_trusted_real_client_ip() -> None:
     assert mapping is not None
     mapping_entries = [line.strip() for line in mapping.group("body").splitlines() if line.strip()]
     assert mapping_entries == ["default $http_x_real_ip;", '"" $remote_addr;']
-    assert nginx.count("proxy_set_header X-Real-IP $inkforge_real_ip;") == 2
+    # 视频上传使用独立 location 后，代理入口数量由两个增加为三个。
+    assert nginx.count("proxy_set_header X-Real-IP $inkforge_real_ip;") == 3
     assert "proxy_set_header X-Real-IP $remote_addr;" not in nginx
 
 

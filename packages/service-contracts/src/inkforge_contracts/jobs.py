@@ -7,8 +7,10 @@ from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
 from .identity import Identifier
 from .long_serial import LONG_SERIAL_RUN_PAYLOAD_ADAPTER
 from .short_medium import ShortMediumRunPayload
+from .video import VideoPlanJobPayload
+from .video_adaptation import parse_video_adaptation_job_payload
 
-AgentJobKind = Literal["writing", "portrait", "rag", "quality"]
+AgentJobKind = Literal["writing", "portrait", "rag", "quality", "video"]
 AgentJobStatus = Literal["queued", "running", "completed", "failed", "cancelled"]
 
 
@@ -27,7 +29,19 @@ class AgentJobRequest(BaseModel):
     force: bool = False
 
     @model_validator(mode="after")
-    def validate_writing_payload(self) -> AgentJobRequest:
+    def validate_job_payload(self) -> AgentJobRequest:
+        """按任务类型校验队列载荷，避免处理器收到无结构 JSON。"""
+
+        if self.kind == "video":
+            workflow = self.payload.get("workflow")
+            if workflow in {
+                "chapter_cinematic_adaptation_v2",
+                "chapter_shot_prompt_v2",
+            }:
+                parse_video_adaptation_job_payload(self.payload)
+            else:
+                VideoPlanJobPayload.model_validate(self.payload)
+            return self
         if self.kind != "writing" or "workflow" not in self.payload:
             return self
         workflow = self.payload["workflow"]

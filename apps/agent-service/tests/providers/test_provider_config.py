@@ -42,3 +42,12 @@ def test_explicit_compatibility_profile_selects_deepseek_without_url_guessing() 
         }
     )
     assert isinstance(create_model_provider(deepseek), DeepSeekV4Provider)
+
+def test_optional_strict_base_url_normalizes_empty_environment_value() -> None:
+    assert Settings.model_validate({"openai_strict_base_url": "  "}).openai_strict_base_url is None
+    assert (
+        Settings.model_validate(
+            {"openai_strict_base_url": " https://gateway.example/deepseek-beta "}
+        ).openai_strict_base_url
+        == "https://gateway.example/deepseek-beta"
+    )

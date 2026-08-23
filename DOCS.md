@@ -22,12 +22,19 @@
 - Core 与 Agent 使用版本化 Pydantic 契约和 Ed25519 服务身份通信。
 - 生产由 `infra/compose.yaml` 编排，Nginx 是唯一公网入口。
 - 生产 SSH 只信任管理员离线核验的主机公钥；部署串行排队，新版本失败时由 `scripts/deploy-production.sh` 尝试恢复经验证的上一镜像。
-- PostgreSQL schema 默认禁止修改，并由只读 `schema-contract.json` 守卫。当前获批的版本化迁移例外有两个：
-  用户于 2026-08-21 明确批准的 `scripts/migrations/20260821_token_usage_task_run.sql`，以及用户于
-  2026-08-23 明确批准的第二个迁移 `scripts/migrations/20260823_token_usage_details.sql`。后者只能为
-  `TokenUsage` 增加可空 `INTEGER` `promptCacheMissTokens`/`reasoningTokens` 和三个 CHECK；无默认值、无回填、
-  无索引，旧行保持 `NULL`。两个迁移都必须先备份，只在服务器 dev PostgreSQL 受控执行并重复执行验证，随后从
-  真实库只读导出 `schema-contract.json`；它们不构成以后任意迁移的授权。
+- PostgreSQL schema 默认冻结并由只读 `schema-contract.json` 守卫。当前具名例外包括视频控制面与章节
+  改编域迁移 `20260807_video_production_control_plane.sql`、`20260817_video_review_decision_command.sql`、
+  `20260817_video_domain_ownership_chain.sql`、`20260818_video_chapter_adaptation_domain.sql`，它们只允许对
+  服务器端 `novelwriterdev` 开发库执行视频控制面、批准命令、章节改编域以及该域内视觉设定版本和逐镜参考绑定，
+  不授权生产或完整 production_v2 schema。用户于 2026-08-23 另行批准
+  `20260823_production_video_adaptation_domain.sql` 只向服务器端 `novelwriter` 正式库晋升这套已验证结构，
+  不迁开发数据、不启用视频功能，也不授权完整 production_v2 schema。正式库当前保留视频结构，但
+  `VIDEO_PREVIEW_ENABLED` 仍关闭，结构晋升不等同于功能开放。另有用户于 2026-08-21 明确批准的
+  `20260821_token_usage_task_run.sql`，以及用户于 2026-08-23 明确批准的第二个迁移
+  `20260823_token_usage_details.sql`；后者只能为 `TokenUsage` 增加可空 `INTEGER`
+  `promptCacheMissTokens`/`reasoningTokens` 和三个 CHECK；无默认值、无回填、无索引，旧行保持 `NULL`。
+  所有迁移都必须先备份，只在服务器 dev PostgreSQL 受控执行并重复执行验证，随后从真实库只读导出
+  `schema-contract.json`；它们不构成以后任意迁移的授权。
 - `TokenUsage` 两个新增可空诊断字段已在应用代码、契约和迁移脚本实现；服务器 dev 迁移、真实库只读
   `schema-contract.json` 导出及生产部署仍是远程门禁，不能按本地静态测试宣称完成。
 

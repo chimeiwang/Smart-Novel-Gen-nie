@@ -10,7 +10,7 @@ import tempfile
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -18,6 +18,39 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from .url import asyncpg_connection_options
 
 Contract = dict[str, Any]
+SchemaProfile = Literal["full", "without_video_preview"]
+
+_VIDEO_PREVIEW_TABLES = frozenset(
+    {
+        "VideoProject",
+        "VideoScene",
+        "VideoAsset",
+        "VideoAssetBinding",
+        "VideoGenerationTask",
+        "VideoReviewDecisionCommand",
+        "VideoChapterAdaptation",
+        "VideoChapterAdaptationHead",
+        "VideoAdaptationTask",
+        "VideoShotPlanVersion",
+        "VideoCinematicScene",
+        "VideoDramaticBeat",
+        "VideoDramaticBeatSourceAnchor",
+        "VideoShot",
+        "VideoShotSourceAnchor",
+        "VideoEpisodePlanVersion",
+        "VideoEpisodeBoundary",
+        "VideoShotPromptVersion",
+        "VideoShotPromptHead",
+        "VideoAdaptationDecisionCommand",
+        "VideoVisualCanon",
+        "VideoVisualCanonVersion",
+        "VideoShotVisualReferenceSet",
+        "VideoShotVisualReferenceBinding",
+        "VideoShotPromptVisualReference",
+    }
+)
+_VIDEO_PREVIEW_NOVEL_OBJECTS = frozenset({"Novel_id_userId_key"})
+_VIDEO_PREVIEW_CHAPTER_OBJECTS = frozenset({"Chapter_id_novelId_key"})
 
 
 class ContractIntegrityError(ValueError):
@@ -195,6 +228,23 @@ WHERE namespace.nspname = :schema
 ORDER BY table_class.relname, constraint_info.conname, key_position.ordinality
 """
 
+_CHECK_CONSTRAINTS_QUERY = """
+SELECT
+  table_class.relname AS table_name,
+  constraint_info.conname AS constraint_name,
+  pg_catalog.pg_get_constraintdef(constraint_info.oid, true) AS definition,
+  constraint_info.convalidated AS is_validated,
+  constraint_info.connoinherit AS no_inherit
+FROM pg_catalog.pg_constraint AS constraint_info
+JOIN pg_catalog.pg_class AS table_class
+  ON table_class.oid = constraint_info.conrelid
+JOIN pg_catalog.pg_namespace AS namespace
+  ON namespace.oid = table_class.relnamespace
+WHERE namespace.nspname = :schema
+  AND constraint_info.contype = 'c'
+ORDER BY table_class.relname, constraint_info.conname
+"""
+
 _SOURCE_QUERY = """
 SELECT
   current_setting('server_version') AS server_version,
@@ -316,6 +366,122 @@ def add_contract_fingerprint(contract: Mapping[str, object]) -> Contract:
     return result
 
 
+def project_schema_contract(
+    contract: Mapping[str, object], profile: SchemaProfile = "full"
+) -> Contract:
+    """按运行能力投影结构，同时保留所有非目标结构差异。"""
+
+    projected = cast(Contract, json.loads(json.dumps(contract, ensure_ascii=False)))
+    projected.pop("fingerprint", None)
+    if profile == "full":
+        return add_contract_fingerprint(projected)
+    if profile != "without_video_preview":
+        raise ValueError(f"未知数据库结构配置：{profile}")
+
+    tables = projected.get("tables")
+    if isinstance(tables, list):
+        remaining_tables: list[object] = []
+        for item in tables:
+            if not isinstance(item, dict):
+                remaining_tables.append(item)
+                continue
+            table_name = str(item.get("name", ""))
+            if table_name in _VIDEO_PREVIEW_TABLES:
+                continue
+            if table_name == "Novel":
+                _remove_named_objects(item, "uniqueConstraints", _VIDEO_PREVIEW_NOVEL_OBJECTS)
+                _remove_named_objects(item, "indexes", _VIDEO_PREVIEW_NOVEL_OBJECTS)
+            if table_name == "Chapter":
+                _remove_named_objects(item, "uniqueConstraints", _VIDEO_PREVIEW_CHAPTER_OBJECTS)
+                _remove_named_objects(item, "indexes", _VIDEO_PREVIEW_CHAPTER_OBJECTS)
+            if table_name == "ReviewArtifact":
+                _project_review_artifact_without_video(item)
+            remaining_tables.append(item)
+        projected["tables"] = remaining_tables
+
+    enums = projected.get("enums")
+    if isinstance(enums, list):
+        for item in enums:
+            if not isinstance(item, dict) or item.get("name") != "ReviewArtifactKind":
+                continue
+            values = item.get("values")
+            if isinstance(values, list):
+                item["values"] = [
+                    value
+                    for value in values
+                    if value not in {"video_scene_plan", "video_adaptation_plan"}
+                ]
+
+    return add_contract_fingerprint(projected)
+
+
+def _remove_named_objects(table: Contract, collection_name: str, names: frozenset[str]) -> None:
+    collection = table.get(collection_name)
+    if not isinstance(collection, list):
+        return
+    table[collection_name] = [
+        item
+        for item in collection
+        if not isinstance(item, dict) or str(item.get("name", "")) not in names
+    ]
+
+
+def _project_review_artifact_without_video(table: Contract) -> None:
+    video_columns = {
+        "videoSceneId",
+        "videoAdaptationId",
+        "videoAdaptationTaskId",
+    }
+    columns = table.get("columns")
+    if isinstance(columns, list):
+        table["columns"] = [
+            item
+            for item in columns
+            if not isinstance(item, dict) or item.get("name") not in video_columns
+        ]
+
+    for collection_name in ("foreignKeys", "uniqueConstraints"):
+        collection = table.get(collection_name)
+        if isinstance(collection, list):
+            table[collection_name] = [
+                item
+                for item in collection
+                if not isinstance(item, dict)
+                or video_columns.isdisjoint(item.get("columns", []))
+            ]
+
+    indexes = table.get("indexes")
+    if isinstance(indexes, list):
+        table["indexes"] = [
+            item
+            for item in indexes
+            if not isinstance(item, dict)
+            or not any(_index_references_column(item, column) for column in video_columns)
+        ]
+
+    check_constraints = table.get("checkConstraints")
+    if isinstance(check_constraints, list):
+        table["checkConstraints"] = [
+            item
+            for item in check_constraints
+            if not isinstance(item, dict)
+            or not any(
+                column
+                in f"{item.get('expression', '')}{item.get('definition', '')}"
+                for column in video_columns
+            )
+        ]
+
+def _index_references_column(index: Mapping[str, object], column_name: str) -> bool:
+    include_columns = index.get("includeColumns")
+    if isinstance(include_columns, list) and column_name in include_columns:
+        return True
+    key_items = index.get("keyItems")
+    return isinstance(key_items, list) and any(
+        isinstance(item, dict) and item.get("column") == column_name for item in key_items
+    )
+
+
 def load_schema_contract(path: str | Path) -> Contract:
     """加载结构契约，并在使用前验证其指纹。"""
 
@@ -366,9 +532,7 @@ async def _rows(
     return list(result.mappings().all())
 
 
-async def inspect_schema(
-    connection: CatalogConnection, schema: str = "public"
-) -> Contract:
+async def inspect_schema(connection: CatalogConnection, schema: str = "public") -> Contract:
     """通过只读信息架构与系统目录查询采集指定 schema 的结构。"""
 
     parameters: Mapping[str, object] = {"schema": schema}
@@ -382,6 +546,7 @@ async def inspect_schema(
     primary_key_rows = await _rows(connection, _PRIMARY_KEYS_QUERY, parameters)
     foreign_key_rows = await _rows(connection, _FOREIGN_KEYS_QUERY, parameters)
     unique_rows = await _rows(connection, _UNIQUE_CONSTRAINTS_QUERY, parameters)
+    check_rows = await _rows(connection, _CHECK_CONSTRAINTS_QUERY, parameters)
     index_rows = await _rows(
         connection,
         _INDEXES_QUERY,
@@ -399,6 +564,7 @@ async def inspect_schema(
             "primaryKey": None,
             "foreignKeys": [],
             "uniqueConstraints": [],
+            "checkConstraints": [],
             "indexes": [],
         }
 
@@ -473,6 +639,16 @@ async def inspect_schema(
     for (table_name, _), unique_constraint in unique_constraints.items():
         tables[table_name]["uniqueConstraints"].append(unique_constraint)
 
+    for row in check_rows:
+        tables[str(row["table_name"])]["checkConstraints"].append(
+            {
+                "name": str(row["constraint_name"]),
+                "definition": _normalize_default(row["definition"]),
+                "validated": bool(row["is_validated"]),
+                "noInherit": bool(row["no_inherit"]),
+            }
+        )
+
     indexes: dict[tuple[str, str], Contract] = {}
     for row in index_rows:
         table_name = str(row["table_name"])
@@ -491,9 +667,7 @@ async def inspect_schema(
                 "nullsNotDistinct": bool(row["nulls_not_distinct"]),
                 "options": _string_list(row["rel_options"]),
                 "tablespace": (
-                    str(row["tablespace_name"])
-                    if row["tablespace_name"] is not None
-                    else None
+                    str(row["tablespace_name"]) if row["tablespace_name"] is not None else None
                 ),
             },
         )
@@ -506,14 +680,10 @@ async def inspect_schema(
                     "column": None if is_expression else str(row["column_name"]),
                     "expression": str(row["expression"]) if is_expression else None,
                     "opclassSchema": (
-                        str(row["opclass_schema"])
-                        if row["opclass_schema"] is not None
-                        else None
+                        str(row["opclass_schema"]) if row["opclass_schema"] is not None else None
                     ),
                     "opclass": (
-                        str(row["opclass_name"])
-                        if row["opclass_name"] is not None
-                        else None
+                        str(row["opclass_name"]) if row["opclass_name"] is not None else None
                     ),
                     "collationSchema": (
                         str(row["collation_schema"])
@@ -521,9 +691,7 @@ async def inspect_schema(
                         else None
                     ),
                     "collation": (
-                        str(row["collation_name"])
-                        if row["collation_name"] is not None
-                        else None
+                        str(row["collation_name"]) if row["collation_name"] is not None else None
                     ),
                     "order": str(row["order_direction"]),
                     "nulls": str(row["nulls_position"]),
@@ -551,10 +719,11 @@ async def inspect_schema(
         table["columns"].sort(key=lambda item: item["name"])
         table["foreignKeys"].sort(key=lambda item: item["name"])
         table["uniqueConstraints"].sort(key=lambda item: item["name"])
+        table["checkConstraints"].sort(key=lambda item: item["name"])
         table["indexes"].sort(key=lambda item: item["name"])
 
     return {
-        "contractVersion": 1,
+        "contractVersion": 2,
         "schema": schema,
         "tables": [tables[name] for name in sorted(tables)],
         "enums": [{"name": name, "values": enums[name]} for name in sorted(enums)],
@@ -571,11 +740,7 @@ async def inspect_schema(
 def _named_items(value: object) -> dict[str, Mapping[str, object]]:
     if not isinstance(value, list):
         return {}
-    return {
-        str(item["name"]): item
-        for item in value
-        if isinstance(item, dict) and "name" in item
-    }
+    return {str(item["name"]): item for item in value if isinstance(item, dict) and "name" in item}
 
 
 def _append_value_diff(
@@ -712,11 +877,14 @@ def compare_schema_contract(
                 actual_primary,
             )
         else:
-            _append_value_diff(
-                diffs, f"{table_path}.primaryKey", expected_primary, actual_primary
-            )
+            _append_value_diff(diffs, f"{table_path}.primaryKey", expected_primary, actual_primary)
 
-        for collection_name in ("foreignKeys", "uniqueConstraints", "indexes"):
+        for collection_name in (
+            "foreignKeys",
+            "uniqueConstraints",
+            "checkConstraints",
+            "indexes",
+        ):
             expected_items, actual_items = _compare_named_collection(
                 diffs,
                 f"{table_path}.{collection_name}",
@@ -888,9 +1056,7 @@ def _write_contract_atomic(
             try:
                 os.link(temporary_path, output_path)
             except FileExistsError:
-                raise FileExistsError(
-                    "数据库结构契约已存在；必须显式允许覆盖。"
-                ) from None
+                raise FileExistsError("数据库结构契约已存在；必须显式允许覆盖。") from None
     finally:
         if temporary_path is not None:
             temporary_path.unlink(missing_ok=True)
@@ -918,13 +1084,18 @@ async def export_schema_contract(
 
 
 async def verify_live_schema(
-    database_url: str, contract_path: str | Path
+    database_url: str,
+    contract_path: str | Path,
+    *,
+    profile: SchemaProfile = "full",
 ) -> SchemaVerificationResult:
     """验证实时结构与已签指纹契约是否逐字段一致。"""
 
-    expected = load_schema_contract(contract_path)
-    actual = add_contract_fingerprint(
-        await _inspect_live(database_url, str(expected.get("schema", "public")))
+    full_expected = load_schema_contract(contract_path)
+    expected = project_schema_contract(full_expected, profile)
+    actual = project_schema_contract(
+        await _inspect_live(database_url, str(full_expected.get("schema", "public"))),
+        profile,
     )
     diffs = compare_schema_contract(expected, actual)
     return SchemaVerificationResult(
@@ -935,13 +1106,18 @@ async def verify_live_schema(
 
 
 async def verify_live_schema_with_engine(
-    engine: AsyncEngine, contract_path: str | Path
+    engine: AsyncEngine,
+    contract_path: str | Path,
+    *,
+    profile: SchemaProfile = "full",
 ) -> SchemaVerificationResult:
     """复用主连接池验证实时结构，不接管引擎生命周期。"""
 
-    expected = load_schema_contract(contract_path)
-    actual = add_contract_fingerprint(
-        await _inspect_with_engine(engine, str(expected.get("schema", "public")))
+    full_expected = load_schema_contract(contract_path)
+    expected = project_schema_contract(full_expected, profile)
+    actual = project_schema_contract(
+        await _inspect_with_engine(engine, str(full_expected.get("schema", "public"))),
+        profile,
     )
     diffs = compare_schema_contract(expected, actual)
     return SchemaVerificationResult(

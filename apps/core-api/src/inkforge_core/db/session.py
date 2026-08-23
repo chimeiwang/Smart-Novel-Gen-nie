@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from functools import partial
 from pathlib import Path
 from time import monotonic
 from typing import cast
@@ -17,7 +18,11 @@ from sqlalchemy.ext.asyncio import (
 
 from ..config import Settings
 from ..operations import register_readiness_check
-from .schema_guard import SchemaVerificationResult, verify_live_schema_with_engine
+from .schema_guard import (
+    SchemaProfile,
+    SchemaVerificationResult,
+    verify_live_schema_with_engine,
+)
 from .url import asyncpg_connection_options
 
 SCHEMA_CONTRACT_PATH = Path(__file__).with_name("schema-contract.json")
@@ -61,13 +66,17 @@ class DatabaseReadiness:
         contract_path: Path,
         *,
         schema_verifier: SchemaVerifier | None = None,
+        schema_profile: SchemaProfile = "full",
         monotonic_clock: MonotonicClock = monotonic,
         success_ttl_seconds: float = 30.0,
         failure_ttl_seconds: float = 5.0,
     ) -> None:
         self._engine = engine
         self._contract_path = contract_path
-        self._schema_verifier = schema_verifier or verify_live_schema_with_engine
+        self._schema_verifier = schema_verifier or cast(
+            SchemaVerifier,
+            partial(verify_live_schema_with_engine, profile=schema_profile),
+        )
         self._clock = monotonic_clock
         self._success_ttl_seconds = success_ttl_seconds
         self._failure_ttl_seconds = failure_ttl_seconds
@@ -116,9 +125,19 @@ def configure_database(app: FastAPI, settings: Settings) -> None:
         return
     database_url = settings.database_url.get_secret_value()
     engine = create_database_engine(database_url)
-    readiness = DatabaseReadiness(engine, SCHEMA_CONTRACT_PATH)
+    readiness = DatabaseReadiness(
+        engine,
+        SCHEMA_CONTRACT_PATH,
+        schema_profile=schema_profile_for_settings(settings),
+    )
     app.state.database_engine = engine
     app.state.database_session_factory = create_session_factory(engine)
     app.state.database_readiness = readiness
     register_readiness_check(app, "database", readiness.check_connection)
     register_readiness_check(app, "database_schema", readiness.check_schema)
+
+
+def schema_profile_for_settings(settings: Settings) -> SchemaProfile:
+    """视频开发预览关闭时，只校验生产可用的基础结构。"""
+
+    return "full" if settings.video_preview_enabled else "without_video_preview"

@@ -60,6 +60,22 @@ REPORT_NO_THINKING = ModelExecutionPolicy(
     policyId="v1:report-no-thinking",
     thinkingMode="disabled",
 )
+VIDEO_SCENE_PLAN_NO_THINKING = ModelExecutionPolicy(
+    policyId="v1:video-scene-plan-no-thinking",
+    thinkingMode="disabled",
+)
+VIDEO_ADAPTATION_PLAN_NO_THINKING = ModelExecutionPolicy(
+    policyId="v1:video-adaptation-plan-no-thinking",
+    thinkingMode="disabled",
+)
+VIDEO_ADAPTATION_REVIEW_NO_THINKING = ModelExecutionPolicy(
+    policyId="v1:video-adaptation-review-no-thinking",
+    thinkingMode="disabled",
+)
+VIDEO_ADAPTATION_PROMPT_NO_THINKING = ModelExecutionPolicy(
+    policyId="v1:video-adaptation-prompt-no-thinking",
+    thinkingMode="disabled",
+)
 LEGACY_PROVIDER_DEFAULT = ModelExecutionPolicy(
     policyId="legacy:provider-default",
     thinkingMode="provider_default",
@@ -118,6 +134,10 @@ __all__ = [
     "REPORT_NO_THINKING",
     "REPORT_OPERATIONS",
     "REVIEWER_NO_THINKING",
+    "VIDEO_ADAPTATION_PLAN_NO_THINKING",
+    "VIDEO_ADAPTATION_PROMPT_NO_THINKING",
+    "VIDEO_ADAPTATION_REVIEW_NO_THINKING",
+    "VIDEO_SCENE_PLAN_NO_THINKING",
     "resolve_agent_model_policy",
     "resolve_portrait_model_policy",
     "resolve_short_medium_model_policy",

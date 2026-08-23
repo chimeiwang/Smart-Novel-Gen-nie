@@ -45,7 +45,7 @@ safe_git() {
 verify_stack() {
   compose ps &&
   compose exec -T core-api python -c \
-    'import asyncio, os; from inkforge_core.db.schema_guard import verify_live_schema; from inkforge_core.db.session import SCHEMA_CONTRACT_PATH; result = asyncio.run(verify_live_schema(os.environ["DATABASE_URL"], SCHEMA_CONTRACT_PATH)); print(result.fingerprint); raise SystemExit(0 if result.ready else 1)' &&
+    'import asyncio, os; from inkforge_core.config import Settings; from inkforge_core.db.schema_guard import verify_live_schema; from inkforge_core.db.session import SCHEMA_CONTRACT_PATH, schema_profile_for_settings; settings = Settings(); result = asyncio.run(verify_live_schema(os.environ["DATABASE_URL"], SCHEMA_CONTRACT_PATH, profile=schema_profile_for_settings(settings))); print(result.fingerprint); raise SystemExit(0 if result.ready else 1)' &&
   COMPOSE_ENV_FILE=.env COMPOSE_OVERRIDE_FILE= sh scripts/compose_smoke.sh
 }
 
@@ -178,7 +178,7 @@ rollback() {
   original_status="$1"
   trap - EXIT
   set +e
-  echo "新版本部署失败（退出码：$original_status）" >&2
+  echo "新版本部署失败（退出码：${original_status}）" >&2
 
   if [ -z "$previous_tag" ]; then
     echo "本次为首次部署，没有可自动恢复的上一版本" >&2
@@ -201,7 +201,7 @@ rollback() {
   if [ "$rollback_status" -eq 0 ]; then
     echo "新版本部署失败，旧版本已恢复"
   else
-    echo "新版本部署失败，自动回滚也失败（退出码：$rollback_status）" >&2
+    echo "新版本部署失败，自动回滚也失败（退出码：${rollback_status}）" >&2
   fi
   exit "$original_status"
 }

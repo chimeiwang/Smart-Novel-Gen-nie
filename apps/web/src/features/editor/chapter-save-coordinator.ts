@@ -42,6 +42,7 @@ type ChapterSaveCoordinatorOptions = {
   save: SaveChapterDraft;
   storage?: ChapterDraftStorage;
   onStateChange?: (state: ChapterSaveState) => void;
+  onSaved?: (snapshot: ChapterDraftSnapshot, updatedAt: string) => void;
 };
 
 function cloneSnapshot(snapshot: ChapterDraftSnapshot): ChapterDraftSnapshot {
@@ -141,6 +142,7 @@ export class ChapterSaveCoordinator {
   readonly #save: SaveChapterDraft;
   readonly #storage?: ChapterDraftStorage;
   readonly #onStateChange?: (state: ChapterSaveState) => void;
+  readonly #onSaved?: (snapshot: ChapterDraftSnapshot, updatedAt: string) => void;
 
   #savedSnapshot: ChapterDraftSnapshot;
   #latestSnapshot: ChapterDraftSnapshot;
@@ -156,6 +158,7 @@ export class ChapterSaveCoordinator {
     this.#save = options.save;
     this.#storage = options.storage;
     this.#onStateChange = options.onStateChange;
+    this.#onSaved = options.onSaved;
     this.#savedSnapshot = cloneSnapshot(options.initialSnapshot);
     this.#latestSnapshot = cloneSnapshot(options.initialSnapshot);
     this.#updatedAt = options.initialUpdatedAt;
@@ -282,6 +285,7 @@ export class ChapterSaveCoordinator {
         this.#savedSnapshot = candidate;
         this.#updatedAt = response.updatedAt;
         this.#lastError = null;
+        if (!this.#disposed) this.#onSaved?.(cloneSnapshot(candidate), response.updatedAt);
       } catch (error) {
         this.#lastError = error;
         this.#persistLatestDraft();

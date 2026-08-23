@@ -108,6 +108,20 @@ PostgreSQL 重复执行验证；应用启动仍不得自动修改 schema。当�
 `promptCacheMissTokens`/`reasoningTokens` 和三个 CHECK；无默认值、无回填、无索引，旧行保持 `NULL`。
 执行前必须完成可恢复备份，只在服务器 dev PostgreSQL 受控执行并重复执行验证，随后从真实库只读导出新的
 `schema-contract.json`；应用启动仍不得自动修改 schema。本需求文档不表示该迁移已经执行或新版本已经部署。
+用户于 2026-08-23 明确批准
+`scripts/migrations/20260823_production_video_adaptation_domain.sql`：只允许把已在服务器端
+`novelwriterdev` 验证过的视频控制面、章节改编、分集、逐镜提示词、视觉设定版本和逐镜参考绑定
+结构晋升到服务器端 `novelwriter` 正式库。迁移只增加具名表、可空字段、枚举值、约束和索引，保留
+全部正式业务数据，不复制开发库数据，不启用 `VIDEO_PREVIEW_ENABLED`，也不构成完整视频
+production_v2 schema 授权。执行前必须完成完整可恢复备份，在正式库结构克隆库验证首次执行、重复
+执行和空视频域反向脚本；执行后必须只读导出并证明实际结构与当前
+`schema-contract.json` 精确一致。原有四个视频开发迁移继续只允许 `novelwriterdev`，不能改写其
+数据库名保护来执行正式迁移。正式 DDL 前必须先发布同时兼容迁移前基线和迁移后视频域的 Core
+版本：镜像内必须包含当前 full contract 和 `without_video_preview` profile，并先在迁移前结构上通过
+readiness；该 profile 必须覆盖全部 25 张视频表，不能遗漏视觉设定和逐镜参考表。旧 44 表 contract
+镜像不能直接面对迁移后结构。2026-08-23 首次正式执行因现网旧镜像缺少该能力已精确回滚；修正
+profile 后，兼容镜像已先行发布，同一具名迁移已再次执行并通过 full contract 与生产 readiness
+验收。正式库当前保留视频结构，但 `VIDEO_PREVIEW_ENABLED` 仍关闭，结构晋升不等同于功能开放。
 
 ## 人工日志
 
@@ -173,8 +187,8 @@ PostgreSQL 重复执行验证；应用启动仍不得自动修改 schema。当�
 - 生产 Compose 不创建 PostgreSQL 容器或数据卷，测试 Compose 使用独立测试数据库；
 - Core 通过 `host.docker.internal` 连接现有宿主机 PostgreSQL 14；
 - 不提供初始化 SQL；
-- 应用启动不执行迁移、建表或删表；获批的 2026-08-21 和 2026-08-23 `TokenUsage` 版本化迁移只能由受控
-  运维流程单独执行；
+- 应用启动不执行迁移、建表或删表；获批的 2026-08-21 与 2026-08-23 `TokenUsage` 版本化迁移，以及 2026-08-23
+  视频结构晋升，都只能由各自具名脚本和受控运维流程单独执行；本需求文档不表示 TokenUsage 迁移已经执行。
 - Core 启动就绪检查对现有 schema 做只读指纹校验。
 
 2 核 2 GB 默认限制：
