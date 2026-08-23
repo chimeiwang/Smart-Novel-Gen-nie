@@ -23,6 +23,11 @@ from .jobs.short_medium import (
     WritingJobDispatcher,
 )
 from .jobs.video import ModelVideoScenePlanner, VideoPromptJobHandler
+from .jobs.video_adaptation import (
+    ModelVideoAdaptationPlanner,
+    VideoAdaptationJobHandler,
+)
+from .jobs.video_dispatch import VideoJobDispatcher
 from .jobs.writing import WritingJobHandler
 from .observability import HumanWorkflowLog, WorkflowModelObserver
 from .observability.router import router as debug_router
@@ -343,13 +348,23 @@ def _configure_runtime(app: FastAPI, settings: Settings) -> None:
                     workflow_log=workflow_log,
                 )
                 # 视频规划与写作共用模型并发门和计费授权，但使用独立任务语义。
-                handlers["video"] = VideoPromptJobHandler(
-                    core,
-                    ModelVideoScenePlanner(
-                        model_runtime,
-                        max_output_tokens=settings.model_max_output_tokens,
+                handlers["video"] = VideoJobDispatcher(
+                    VideoPromptJobHandler(
+                        core,
+                        ModelVideoScenePlanner(
+                            model_runtime,
+                            max_output_tokens=settings.model_max_output_tokens,
+                        ),
+                        workflow_log=workflow_log,
                     ),
-                    workflow_log=workflow_log,
+                    VideoAdaptationJobHandler(
+                        core,
+                        ModelVideoAdaptationPlanner(
+                            model_runtime,
+                            max_output_tokens=settings.model_max_output_tokens,
+                        ),
+                        workflow_log=workflow_log,
+                    ),
                 )
                 if settings.rag_index_enabled and embedding_provider is not None:
                     handlers["rag"] = RagJobHandler(core, embedding_provider)

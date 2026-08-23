@@ -46,8 +46,7 @@ from inkforge_core.errors import ApiError
 from inkforge_core.video.repository import (
     VideoPromptPreviewContext,
     VideoRepository,
-    _build_long_serial_setting_snapshot,
-    _setting_entry_content_hash,
+    _require_preview_project_mode,
     _validate_callback_binding,
     _validate_retry_payload,
 )
@@ -59,6 +58,10 @@ from inkforge_core.video.schemas import (
     VideoAssetResponse,
 )
 from inkforge_core.video.service import VideoService
+from inkforge_core.video.setting_snapshot import (
+    build_long_serial_setting_snapshot,
+    setting_entry_content_hash,
+)
 from inkforge_core.video.storage import VideoAssetStorage
 from pydantic import ValidationError
 from starlette.datastructures import Headers, UploadFile
@@ -424,6 +427,20 @@ def test_preview_requests_narrow_mode_duration_source_and_duplicate_slots() -> N
         )
 
 
+def test_series_project_cannot_enter_legacy_video_scene_domain() -> None:
+    project = VideoProject(
+        id="project-series",
+        novelId="novel-1",
+        title="章节影视化",
+        mode="series",
+    )
+
+    with pytest.raises(ApiError) as caught:
+        _require_preview_project_mode(project)
+
+    assert caught.value.code == "VIDEO_PREVIEW_MODE_REQUIRED"
+
+
 @pytest.mark.asyncio
 async def test_switch_blocks_writes_but_keeps_legacy_reads(tmp_path: Path) -> None:
     repository = _RecordingRepository()
@@ -511,7 +528,7 @@ async def test_snapshot_freezes_typed_closed_entries_without_truncation() -> Non
         world_setting,
     )
 
-    snapshot = await _build_long_serial_setting_snapshot(session, "novel-1")  # type: ignore[arg-type]
+    snapshot = await build_long_serial_setting_snapshot(session, "novel-1")  # type: ignore[arg-type]
 
     assert {entry.kind for entry in snapshot.entries} == {
         "character",
@@ -527,7 +544,7 @@ async def test_snapshot_freezes_typed_closed_entries_without_truncation() -> Non
     assert world.content == long_world_content
     for entry in snapshot.entries:
         content = entry.model_dump(mode="json", exclude={"contentHash"})
-        assert entry.contentHash == _setting_entry_content_hash(content)
+        assert entry.contentHash == setting_entry_content_hash(content)
     assert snapshot.fingerprint == calculate_setting_snapshot_fingerprint(snapshot.entries)
 
 

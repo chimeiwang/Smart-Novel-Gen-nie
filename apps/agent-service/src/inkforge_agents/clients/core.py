@@ -23,6 +23,14 @@ from inkforge_contracts.video import (
     VideoPlanProgressResponse,
     VideoStoryPlanCheckpointCallback,
 )
+from inkforge_contracts.video_adaptation import (
+    VideoAdaptationCheckpointCallback,
+    VideoAdaptationFailureCallback,
+    VideoAdaptationPlanCompletionCallback,
+    VideoAdaptationPromptCompletionCallback,
+    VideoAdaptationWorkflowProgressQuery,
+    VideoAdaptationWorkflowProgressResponse,
+)
 from inkforge_service_auth import SignedServiceRequest, canonical_json_body
 from pydantic import BaseModel, ConfigDict, JsonValue
 
@@ -387,6 +395,111 @@ class CoreServiceClient:
         await self._request(
             "POST",
             f"/internal/v1/video/scenes/{callback.sceneId}/fail",
+            callback.model_dump(mode="json"),
+            scope=ServiceScope.VIDEO_WRITE,
+            resource=resource,
+            idempotency_key=callback.eventId,
+        )
+
+    async def get_video_adaptation_progress(
+        self,
+        resource: RunResource,
+        query: VideoAdaptationWorkflowProgressQuery,
+    ) -> VideoAdaptationWorkflowProgressResponse:
+        value = await self._request(
+            "POST",
+            f"/internal/v1/video/adaptations/{query.adaptationId}/progress",
+            query.model_dump(mode="json"),
+            scope=ServiceScope.VIDEO_WRITE,
+            resource=resource,
+            idempotency_key=_idempotency(
+                resource.runId,
+                "video-adaptation-progress",
+                query.model_dump(mode="json"),
+            ),
+        )
+        try:
+            response = VideoAdaptationWorkflowProgressResponse.model_validate(value)
+        except ValueError as exc:
+            raise CoreServiceError(
+                "核心服务返回的章节影视化进度不符合契约",
+                recoverable=False,
+                code="VIDEO_ADAPTATION_PROGRESS_INVALID",
+            ) from exc
+        if (
+            response.jobId,
+            response.runId,
+            response.taskId,
+            response.novelId,
+            response.projectId,
+            response.adaptationId,
+            response.workflow,
+        ) != (
+            query.jobId,
+            query.runId,
+            query.taskId,
+            query.novelId,
+            query.projectId,
+            query.adaptationId,
+            query.workflow,
+        ):
+            raise CoreServiceError(
+                "核心服务返回的章节影视化进度资源身份不匹配",
+                recoverable=False,
+                code="VIDEO_ADAPTATION_PROGRESS_RESOURCE_MISMATCH",
+            )
+        return response
+
+    async def save_video_adaptation_checkpoint(
+        self,
+        resource: RunResource,
+        callback: VideoAdaptationCheckpointCallback,
+    ) -> None:
+        await self._request(
+            "POST",
+            f"/internal/v1/video/adaptations/{callback.adaptationId}/checkpoint",
+            callback.model_dump(mode="json"),
+            scope=ServiceScope.VIDEO_WRITE,
+            resource=resource,
+            idempotency_key=callback.eventId,
+        )
+
+    async def complete_video_adaptation_plan(
+        self,
+        resource: RunResource,
+        callback: VideoAdaptationPlanCompletionCallback,
+    ) -> None:
+        await self._request(
+            "POST",
+            f"/internal/v1/video/adaptations/{callback.adaptationId}/plan/complete",
+            callback.model_dump(mode="json"),
+            scope=ServiceScope.VIDEO_WRITE,
+            resource=resource,
+            idempotency_key=callback.eventId,
+        )
+
+    async def complete_video_adaptation_prompts(
+        self,
+        resource: RunResource,
+        callback: VideoAdaptationPromptCompletionCallback,
+    ) -> None:
+        await self._request(
+            "POST",
+            f"/internal/v1/video/adaptations/{callback.adaptationId}/prompts/complete",
+            callback.model_dump(mode="json"),
+            scope=ServiceScope.VIDEO_WRITE,
+            resource=resource,
+            idempotency_key=callback.eventId,
+        )
+
+    async def fail_video_adaptation(
+        self,
+        resource: RunResource,
+        callback: VideoAdaptationFailureCallback,
+    ) -> None:
+        await self._request(
+            "POST",
+            f"/internal/v1/video/adaptations/{callback.adaptationId}/fail",
             callback.model_dump(mode="json"),
             scope=ServiceScope.VIDEO_WRITE,
             resource=resource,

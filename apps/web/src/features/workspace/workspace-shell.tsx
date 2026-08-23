@@ -397,6 +397,7 @@ export function WorkspaceShell({
                   content: visibleCurrentChapter.content,
                   updatedAt: visibleCurrentChapter.updatedAt,
                 } : undefined}
+                selectionBridge={selectionBridge}
               />
             </section>
           ) : (

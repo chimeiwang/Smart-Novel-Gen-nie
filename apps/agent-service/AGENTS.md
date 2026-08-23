@@ -48,6 +48,19 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 - `responses_json_schema_v1`、`chat_json_output_v1` 和历史 `legacy_strict_tool_v1` 不能在同一
   taskId 中切换。历史 legacy 活动任务应零模型稳定失败，由用户显式创建新的 retry/revise 任务。
 
+### 长篇章节影视化
+
+- `chapter_cinematic_adaptation_v2` 属于独立章节改编域，不创建或更新旧 `VideoScene`。Core 冻结完整章节并
+  通过 `VideoAdaptationTask` 投递；Agent 不回读 PostgreSQL。
+- 工作流使用 StateGraph 按“场景/戏剧节拍分析 → Core dramatic checkpoint → 电影化镜头设计 → 确定性门禁
+  → Cinematic Reviewer → 最多一次完整返工”执行。Reviewer 不做局部 patch。
+- 句末和换行生成的 `U` 编号只用于来源锚定，不是场景、节拍或镜头边界。对白换人、句子结束和原文换行
+  不能成为切镜理由；每镜必须有可见动作、声音任务和具体剪辑动机。
+- Core checkpoint 是跨重试耐久事实；已有 dramatic checkpoint 时禁止重新调用分析阶段。候选只通过签名回调
+  进入 `ReviewArtifact(video_adaptation_plan)`，Agent 不写正式 Scene、Beat、Shot 或 PromptVersion。
+- `chapter_shot_prompt_v2` 只为当前正式镜头生成结构化 `ShotPromptSpec`；最终即梦文本由确定性编译顺序产生，
+  不得改变已确认镜头边界或新增剧情结果。
+
 ## 关键入口
 
 - 应用工厂：`src/inkforge_agents/app.py`

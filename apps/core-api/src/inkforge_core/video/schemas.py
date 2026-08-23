@@ -24,7 +24,7 @@ class CreateVideoProjectRequest(VideoApiModel):
     """创建一个独立于写作任务的视频项目。"""
 
     title: str = Field(min_length=1, max_length=200)
-    mode: Literal["concept", "trailer", "highlight"] = "highlight"
+    mode: Literal["concept", "trailer", "highlight", "series"] = "highlight"
     targetAspectRatio: AspectRatio = "16:9"
     targetLanguage: str = Field(default="zh-CN", min_length=2, max_length=32)
 

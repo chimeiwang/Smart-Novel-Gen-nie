@@ -1,5 +1,20 @@
 # 草案审核、质量检查与工作流需求
 
+## 长篇章节影视化方案审核
+
+电影化镜头候选遵循 `proposal -> ReviewArtifact -> 作者结构编辑 -> 用户确认 -> Core 应用`。
+Artifact 使用 `kind=video_adaptation_plan`，并通过 `videoAdaptationId + videoAdaptationTaskId` 外键绑定改编根和
+来源任务。候选确认前不得创建正式 `VideoShotPlanVersion`、`VideoCinematicScene`、`VideoDramaticBeat`、
+`VideoShot` 或来源锚点。
+
+确认请求携带完整编辑后候选、`expectedArtifactRevision`、`expectedAdaptationRevision` 和稳定
+`clientRequestId`。Core 锁定 Artifact、AdaptationHead 和来源任务，重新校验不可变章节哈希、Unicode 范围、
+Scene/Beat/Shot 父子关系、连续 Key、镜头目的和切镜理由，然后在同一事务物化全部关系行、创建空 PromptHead、
+标记 Artifact applied、切换当前 ShotPlan 指针并写 `VideoAdaptationDecisionCommand`。任一步失败整体回滚。
+
+分集边界是独立不可变 `VideoEpisodePlanVersion`；逐镜 AI 提示词先保存在 `VideoAdaptationTask` 候选，只有用户
+明确编辑并保存后才创建 `VideoShotPromptVersion` 和切换 PromptHead。Agent 回调不得直接覆盖正式提示词。
+
 ## 长篇选区 ReviewArtifact 应用
 
 选区改写（章节正文或大纲正文/节点）必须保持 `proposal -> ReviewArtifact -> 用户确认 -> Core 应用` 闭环，禁止 CLI、Agent 或前端直接写入正式内容。选区草案的 `payload.target.mode` 为选区模式时，approve 只能提交结构化 `editedReplacement`（或 `editedReplacementFile`）；不得用 `editedContent` 伪装全文替换。全文章节/大纲草案继续使用 `editedContent`，Beat Plan 继续按结构化 Beat Plan 应用，语义不变。
@@ -68,6 +83,7 @@ stateDiagram-v2
 | beat_plan | 结构化 Beat Plan |
 | freeform_markdown | 自由 Markdown 文本 |
 | video_scene_plan | 仅限服务器 dev 库长篇视频开发预览的结构化场景方案 |
+| video_adaptation_plan | 仅限服务器 dev 库章节影视化 v2 的 Scene/Beat/Shot 关系化方案候选 |
 
 `video_scene_plan` 不构成生产视频 schema 授权。开发预览批准入口必须携带稳定 `clientRequestId` 和
 `expectedArtifactRevision`；Core 锁定场景与 Artifact 后执行版本 CAS，相同已应用 revision 可幂等返回，旧 revision
@@ -75,6 +91,10 @@ stateDiagram-v2
 返回首次完整结果，同键异载荷必须冲突；不同请求键重放同一已应用 revision 时可以各自保存结果相同的成功命令，
 但正式方案只能应用一次。候选批准前不得写入 `VideoScene.planJson`，批准、Artifact `applied` 与命令成功结果必须位于同一事务。该命令表只属于服务器 dev 库的开发预览，
 不构成生产视频 v2 schema 授权。
+
+`video_adaptation_plan` 同样只属于具名 `novelwriterdev` 章节改编域，不授权生产迁移或真实视频渲染。
+其批准入口使用独立 `VideoAdaptationDecisionCommand`，不得借用 `VideoReviewDecisionCommand.sceneId` 或
+把正式层级重新塞回 `VideoScene.planJson`。
 
 ## 草案审核主流程
 
