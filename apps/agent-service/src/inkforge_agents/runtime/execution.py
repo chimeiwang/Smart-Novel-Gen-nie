@@ -8,12 +8,23 @@ from ..definitions.agents import AgentId
 from ..operations.contracts import CreativeOperationKind
 from ..operations.definitions import OPERATION_DEFINITIONS, OperationDefinition
 from ..tools.safe_writes import SAFE_STRUCTURED_WRITE_INSTRUCTION
+from .errors import ModelExecutionStage
 
 AgentExecutionMode = Literal["primary", "reviewer", "reviser", "quality"]
 QUALITY_AGENT_ID: AgentId = "校验"
 
 _REVIEWER_TOOLS = frozenset({"submit_evaluation"})
 _QUALITY_TOOLS = frozenset({"submit_quality_report"})
+
+
+def validate_execution_stage(
+    mode: AgentExecutionMode,
+    stage: ModelExecutionStage,
+) -> None:
+    """确保调用方不能用隐式阶段覆盖显式执行模式。"""
+
+    if stage != mode and not (mode == "reviewer" and stage == "protocol_repair"):
+        raise ValueError("执行模式与执行阶段不一致")
 
 
 @dataclass(frozen=True, slots=True)

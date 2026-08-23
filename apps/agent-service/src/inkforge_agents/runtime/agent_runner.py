@@ -8,13 +8,16 @@ from ..definitions.agents import AGENT_DEFINITIONS, AgentId
 from ..operations.contracts import CreativeOperationKind
 from ..tools.registry import ToolContext, ToolRegistry
 from .agent_runtime import AgentRuntime
+from .errors import ModelExecutionStage
 from .execution import (
     AgentExecutionMode,
     build_execution_brief,
     resolve_execution_contract,
     validate_execution_agent,
+    validate_execution_stage,
 )
 from .messages import build_agent_messages
+from .model_policy import resolve_model_execution_policy
 from .model_runtime import ModelCallContext
 from .turn_result import AgentTurnResult
 
@@ -24,6 +27,7 @@ class AgentRunRequest(BaseModel):
 
     agentId: AgentId
     executionMode: AgentExecutionMode
+    stage: ModelExecutionStage
     operationKind: CreativeOperationKind | None
     userMessage: str
     contextMessages: list[str] = Field(default_factory=list)
@@ -36,6 +40,7 @@ class AgentRunRequest(BaseModel):
     def validate_execution_scope(self) -> Self:
         if self.agentId != self.toolContext.agentId:
             raise ValueError("运行智能体与工具上下文智能体不一致")
+        validate_execution_stage(self.executionMode, self.stage)
         if self.executionMode == "quality" and self.operationKind is not None:
             raise ValueError("质量模式不能绑定 CreativeOperation")
         if self.executionMode != "quality" and self.operationKind is None:
@@ -89,6 +94,19 @@ class AgentRunner:
             capabilities=definition.toolCapabilities,
             allowed_tool_names=execution.allowedToolNames,
         )
+        policy = resolve_model_execution_policy(
+            agent_id=request.agentId,
+            execution_mode=request.executionMode,
+            operation_kind=request.operationKind,
+            stage=request.stage,
+            version="review-v1",
+        )
+        if policy.requiredToolName and policy.requiredToolName not in {
+            tool.name for tool in tools
+        }:
+            raise ValueError(
+                "模型执行策略要求的终止工具未暴露：" + policy.requiredToolName
+            )
         result = await self._runtime.run(
             messages=messages,
             exposed_tools=tools,
