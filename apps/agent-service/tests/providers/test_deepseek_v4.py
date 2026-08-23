@@ -18,6 +18,19 @@ from inkforge_agents.runtime.model_policy import (
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "deepseek_v4"
 
 
+def _response_with_usage(usage: object) -> dict[str, Any]:
+    return {
+        "id": "resp-usage",
+        "choices": [
+            {
+                "message": {"role": "assistant", "content": "完成"},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": usage,
+    }
+
+
 def _settings(base_url: str = "https://api.deepseek.com") -> Settings:
     return Settings.model_validate(
         {
@@ -109,6 +122,149 @@ def test_deepseek_rejects_base_url_query_or_fragment(base_url: str) -> None:
     client = httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200)))
     with pytest.raises(ValueError, match="query|fragment"):
         DeepSeekV4Provider(_settings(base_url), client=client)
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://proxy.example/proxy/../openai",
+        "https://proxy.example/proxy/%2e%2e/openai",
+        "https://proxy.example/proxy//openai",
+        "https://proxy.example//proxy/openai",
+    ],
+)
+def test_deepseek_rejects_ambiguous_custom_base_url_path(base_url: str) -> None:
+    client = httpx.AsyncClient(transport=httpx.MockTransport(lambda _: httpx.Response(200)))
+    with pytest.raises(ValueError, match="路径"):
+        DeepSeekV4Provider(_settings(base_url), client=client)
+
+
+@pytest.mark.asyncio
+async def test_deepseek_accepts_a_single_slash_custom_prefix() -> None:
+    provider, _, client = _provider("https://proxy.example/proxy/openai")
+    assert provider._endpoint == "https://proxy.example/proxy/openai/chat/completions"
+    # 注入的测试 client 不由 Provider 所有，显式关闭避免测试资源泄漏。
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_http_error_does_not_expose_response_body() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            500,
+            content=b'{"error":"sk-secret prompt\xe6\x8f\x90\xe7\xa4\xba"}',
+            request=request,
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = DeepSeekV4Provider(_settings(), client=client)
+    try:
+        with pytest.raises(RuntimeError) as error:
+            await provider.complete_turn(_request())
+    finally:
+        await client.aclose()
+    assert "sk-secret" not in str(error.value)
+    assert "提示" not in str(error.value)
+    assert "HTTP 500" in str(error.value)
+    assert len(requests) == 1
+
+
+@pytest.mark.parametrize(
+    "choices",
+    [[], [{"message": {"content": "a"}}, {"message": {"content": "b"}}]],
+)
+@pytest.mark.asyncio
+async def test_deepseek_requires_exactly_one_choice(choices: list[dict[str, Any]]) -> None:
+    body = _response_with_usage(
+        {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+    )
+    body["choices"] = choices
+    provider, _, client = _provider(response=body)
+    try:
+        with pytest.raises(ValueError, match="choices.*恰好一个"):
+            await provider.complete_turn(_request())
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.parametrize(
+    "usage",
+    [
+        None,
+        {"completion_tokens": 1, "total_tokens": 2},
+        {"prompt_tokens": 1, "total_tokens": 2},
+        {"prompt_tokens": 1, "completion_tokens": 1},
+        {"prompt_tokens": True, "completion_tokens": 1, "total_tokens": 2},
+        {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 3},
+        {
+            "prompt_tokens": 2,
+            "completion_tokens": 1,
+            "total_tokens": 3,
+            "prompt_cache_hit_tokens": 1,
+            "prompt_cache_miss_tokens": True,
+        },
+        {
+            "prompt_tokens": 2,
+            "completion_tokens": 1,
+            "total_tokens": 3,
+            "prompt_cache_hit_tokens": 1,
+            "prompt_cache_miss_tokens": 1,
+            "completion_tokens_details": {"reasoning_tokens": 2},
+        },
+        {
+            "prompt_tokens": 1,
+            "completion_tokens": 1,
+            "total_tokens": 2,
+            "prompt_cache_hit_tokens": None,
+        },
+        {
+            "prompt_tokens": 1,
+            "completion_tokens": 1,
+            "total_tokens": 2,
+            "prompt_cache_miss_tokens": None,
+        },
+        {
+            "prompt_tokens": 1,
+            "completion_tokens": 1,
+            "total_tokens": 2,
+            "completion_tokens_details": {"reasoning_tokens": None},
+        },
+        {
+            "prompt_tokens": 1,
+            "completion_tokens": 1,
+            "total_tokens": 2,
+            "reasoning_tokens": None,
+        },
+    ],
+)
+@pytest.mark.asyncio
+async def test_deepseek_rejects_missing_invalid_or_inconsistent_usage(usage: object) -> None:
+    provider, _, client = _provider(response=_response_with_usage(usage))
+    try:
+        with pytest.raises(ValueError, match="用量"):
+            await provider.complete_turn(_request())
+    finally:
+        await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_deepseek_converts_invalid_utf8_to_sanitized_protocol_error() -> None:
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, content=b"\xff\xfe", request=request)
+        )
+    )
+    provider = DeepSeekV4Provider(_settings(), client=client)
+    try:
+        with pytest.raises(ValueError, match="JSON|协议") as error:
+            await provider.complete_turn(_request())
+    finally:
+        await client.aclose()
+    assert "UnicodeDecodeError" not in str(error.value)
+    assert "\\xff" not in str(error.value)
 
 
 @pytest.mark.asyncio

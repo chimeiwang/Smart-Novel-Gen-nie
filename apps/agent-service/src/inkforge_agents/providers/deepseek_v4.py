@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 import httpx
 
@@ -75,11 +75,10 @@ class DeepSeekV4Provider:
         except httpx.HTTPError as exc:
             raise RuntimeError(f"DeepSeek 请求失败：{exc}") from exc
         if response.is_error:
-            detail = response.text[:1000]
-            raise RuntimeError(f"DeepSeek 请求失败：HTTP {response.status_code} {detail}")
+            raise RuntimeError(f"DeepSeek 请求失败：HTTP {response.status_code}")
         try:
             body = response.json()
-        except (ValueError, json.JSONDecodeError) as exc:
+        except (ValueError, UnicodeError) as exc:
             raise ValueError("DeepSeek 响应不是有效 JSON") from exc
         return _parse_response(body)
 
@@ -92,6 +91,12 @@ def _completion_endpoint(base_url: str) -> str:
         raise ValueError("DeepSeek base URL 不能包含 fragment")
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("DeepSeek base URL 必须是有效 HTTP URL")
+    decoded_path = unquote(parsed.path)
+    if (
+        any(segment in {".", ".."} for segment in decoded_path.split("/"))
+        or "//" in decoded_path
+    ):
+        raise ValueError("DeepSeek base URL 路径包含不安全路径段")
     if (
         parsed.hostname
         and parsed.hostname.lower() == "api.deepseek.com"
@@ -152,8 +157,12 @@ def _parse_response(body: object) -> ModelTurnResult:
     if not isinstance(body, Mapping):
         raise ValueError("DeepSeek 响应顶层不是对象")
     choices = body.get("choices")
-    if not isinstance(choices, list) or not choices or not isinstance(choices[0], Mapping):
-        raise ValueError("DeepSeek 响应缺少 choices")
+    if (
+        not isinstance(choices, list)
+        or len(choices) != 1
+        or not isinstance(choices[0], Mapping)
+    ):
+        raise ValueError("DeepSeek 响应 choices 必须恰好一个")
     choice = choices[0]
     message = choice.get("message")
     if not isinstance(message, Mapping):
@@ -212,20 +221,60 @@ def _parse_tool_calls(raw: object) -> list[ModelToolCall]:
 
 
 def _parse_usage(raw: object) -> tuple[ModelUsage, ModelUsageDiagnostics]:
-    usage = raw if isinstance(raw, Mapping) else {}
-    prompt = _nonnegative_int(usage.get("prompt_tokens", 0), "prompt_tokens")
-    cached = _nonnegative_int(usage.get("prompt_cache_hit_tokens", 0), "prompt_cache_hit_tokens")
-    completion = _nonnegative_int(usage.get("completion_tokens", 0), "completion_tokens")
-    total = _nonnegative_int(usage.get("total_tokens", prompt + completion), "total_tokens")
-    miss_value = usage.get("prompt_cache_miss_tokens")
-    miss = None if miss_value is None else _nonnegative_int(miss_value, "prompt_cache_miss_tokens")
-    details = usage.get("completion_tokens_details")
-    reasoning_value = details.get("reasoning_tokens") if isinstance(details, Mapping) else None
-    reasoning = (
-        None if reasoning_value is None else _nonnegative_int(reasoning_value, "reasoning_tokens")
+    if not isinstance(raw, Mapping):
+        raise ValueError("DeepSeek 用量缺失或不是对象")
+    usage = raw
+    required = ("prompt_tokens", "completion_tokens", "total_tokens")
+    if any(field not in usage for field in required):
+        raise ValueError("DeepSeek 用量缺少必填字段")
+    prompt = _nonnegative_int(usage["prompt_tokens"], "prompt_tokens")
+    completion = _nonnegative_int(usage["completion_tokens"], "completion_tokens")
+    total = _nonnegative_int(usage["total_tokens"], "total_tokens")
+    if total != prompt + completion:
+        raise ValueError(
+            "DeepSeek 用量矛盾：total_tokens 不等于 prompt_tokens 与 completion_tokens 之和"
+        )
+    cached = (
+        _nonnegative_int(
+            usage["prompt_cache_hit_tokens"], "prompt_cache_hit_tokens"
+        )
+        if "prompt_cache_hit_tokens" in usage
+        else None
     )
-    if miss is not None and cached + miss != prompt:
+    miss = (
+        _nonnegative_int(
+            usage["prompt_cache_miss_tokens"], "prompt_cache_miss_tokens"
+        )
+        if "prompt_cache_miss_tokens" in usage
+        else None
+    )
+    if cached is not None and miss is not None and cached + miss != prompt:
         raise ValueError("DeepSeek 用量矛盾：缓存命中与未命中不等于 prompt_tokens")
+    details = usage.get("completion_tokens_details")
+    if details is not None and not isinstance(details, Mapping):
+        raise ValueError("DeepSeek 用量明细不是对象")
+    reasoning_value = (
+        details["reasoning_tokens"]
+        if isinstance(details, Mapping) and "reasoning_tokens" in details
+        else None
+    )
+    top_level_has_reasoning = "reasoning_tokens" in usage
+    if top_level_has_reasoning:
+        top_level_reasoning = usage["reasoning_tokens"]
+        if reasoning_value is not None and top_level_reasoning != reasoning_value:
+            raise ValueError("DeepSeek 用量矛盾：reasoning_tokens 重复值不一致")
+        reasoning_value = top_level_reasoning
+    if (
+        isinstance(details, Mapping)
+        and "reasoning_tokens" in details
+        and reasoning_value is None
+    ) or (top_level_has_reasoning and reasoning_value is None):
+        raise ValueError("DeepSeek 用量字段 reasoning_tokens 无效")
+    reasoning = (
+        None
+        if reasoning_value is None
+        else _nonnegative_int(reasoning_value, "reasoning_tokens")
+    )
     if reasoning is not None and reasoning > completion:
         raise ValueError("DeepSeek 用量矛盾：reasoning_tokens 大于 completion_tokens")
     diagnostics = ModelUsageDiagnostics(
@@ -235,7 +284,7 @@ def _parse_usage(raw: object) -> tuple[ModelUsage, ModelUsageDiagnostics]:
     )
     return ModelUsage(
         promptTokens=prompt,
-        cachedTokens=cached,
+        cachedTokens=cached if cached is not None else 0,
         completionTokens=completion,
         totalTokens=total,
     ), diagnostics
