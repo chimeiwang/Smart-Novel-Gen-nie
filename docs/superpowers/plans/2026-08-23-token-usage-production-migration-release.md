@@ -29,8 +29,11 @@ Expected: FAIL，原因是固定迁移工作流尚不存在。
 
 - [ ] **Step 3: 实现最小工作流并验证 GREEN**
 
-`inspect` 只检查工具与固定 dev 环境候选；`migrate_dev` 要求唯一候选，运行备份、SQL 哈希、双跑、旧行 NULL
-查询和只读 contract 导出，再上传单一 JSON Artifact。
+`inspect` 只检查工具，并从服务器 `.env` 的 `novelwriter` 连接安全派生、只读确认 `novelwriterdev`；
+`migrate_dev` 复用该固定派生规则，运行备份、SQL 哈希、双跑、旧行 NULL 查询和只读 contract 导出，再上传
+单一 JSON Artifact。派生器拒绝改变目标或身份的 query 参数，宿主机命令使用无密码 URL 和 `0600`
+临时 `.pgpass`，完整 dev URL 仅通过标准输入交给 Core 容器；SQL 自身也必须拒绝任何非 `novelwriterdev`
+数据库。
 
 - [ ] **Step 4: 提交 bootstrap**
 
@@ -45,7 +48,7 @@ Expected: FAIL，原因是固定迁移工作流尚不存在。
 - [ ] **Step 1: 触发 inspect 并读取日志**
 
 Run: `gh workflow run token-usage-details-migration.yml -f action=inspect`  
-Expected: 只显示工具和固定 dev 配置文件存在性，不输出 URL。
+Expected: 只显示工具、`.env` 存在性和 `novelwriterdev` 只读确认结果，不输出 URL。
 
 - [ ] **Step 2: 触发 migrate_dev 并下载 Artifact**
 
@@ -99,4 +102,3 @@ down 先精确核验两个列和三个约束，再删除约束与列；部署记
 - [ ] **Step 3: 汇报证据边界**
 
 分别报告：数据库迁移、contract、CI、生产部署、HTTPS/CLI 验收。任何未验证项保持未完成。
-
