@@ -162,7 +162,7 @@ jobs:
                       raise DatabaseUrlRejected("fragment")
                   try:
                       query_pairs = parse_qsl(
-                          parts.query, keep_blank_values=True, strict_parsing=True
+                          parts.query, keep_blank_values=True
                       )
                   except ValueError:
                       raise DatabaseUrlRejected("query_syntax") from None
@@ -471,7 +471,7 @@ jobs:
                       raise DatabaseUrlRejected("fragment")
                   try:
                       query_pairs = parse_qsl(
-                          parts.query, keep_blank_values=True, strict_parsing=True
+                          parts.query, keep_blank_values=True
                       )
                   except ValueError:
                       raise DatabaseUrlRejected("query_syntax") from None
