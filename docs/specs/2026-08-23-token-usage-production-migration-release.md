@@ -14,8 +14,15 @@
 
 - 工作流只能执行 `20260823_token_usage_details.sql`，禁止接收任意 SQL、任意服务器路径或任意数据库 URL。
 - SQL 文件必须匹配固定 SHA-256：
-  `1DE1CD58C589403303B40F2AA2AE9DE3C44F272E5DD6C09159327535F04C5142`。
-- dev 数据库配置只允许从服务器应用目录下固定候选文件读取；检查阶段只报告文件与工具是否存在，不能输出连接串。
+  `E5D7D5946828CA3E516666607104353ADE4C034F681544B83AD45E639E549760`。
+- 服务器没有独立 dev 环境文件。工作流只允许从应用目录现有 `.env` 解析唯一生产连接，强制源数据库名为
+  `novelwriter`，只把数据库路径派生为 `novelwriterdev`；query 只允许宿主机 libpq 与 Core asyncpg 都支持的
+  `sslmode` 和 `application_name`，拒绝任何可覆盖数据库、主机或身份的参数。派生后以只读查询再次确认数据库名，不能
+  输出连接串。
+- 宿主机 `psql`、`pg_dump` 只接收不含密码的连接 URL，密码只写入运行编号绑定、权限为 `0600` 的临时
+  `.pgpass`；Core 容器只通过标准输入读取完整 dev URL。临时凭据不得进入命令行、日志或 Artifact，并由
+  远端和 runner 两层 trap 精确清理。
+- 迁移 SQL 自身必须拒绝 `current_database() <> 'novelwriterdev'`，避免工作流配置错误触及生产库。
 - dev 与生产迁移前必须生成 PostgreSQL custom-format 备份和 `SHA256SUMS`，迁移必须连续执行两次。
 - dev 迁移后从真实数据库只读导出结构契约；提交前人工/自动核对差异只能包含两个 nullable INTEGER 列和三个 CHECK。
 - 生产迁移由部署脚本在新容器启动前执行。部署失败且本次部署首次增加这些字段时，先运行固定 down
@@ -31,7 +38,8 @@
 
 ### 3.2 Dev 迁移与 contract
 
-1. 手工触发工作流 `inspect`，确认服务器存在 `psql`、`pg_dump`、Docker 和唯一 dev 环境文件。
+1. 手工触发工作流 `inspect`，确认服务器存在 `psql`、`pg_dump`、Docker，并能从 `.env` 安全派生、只读连接
+   `novelwriterdev`。
 2. 手工触发 `migrate_dev`：备份、校验 SQL 哈希、执行两次、验证旧行明细保持 NULL。
 3. 使用当前 Core 容器的只读 schema 导出能力生成 contract，并通过 Actions Artifact 下载。
 4. 将真实 contract 写回功能分支，删除 `test_model_metadata.py` 的临时内存兼容层，运行 schema/全量验证。
@@ -49,4 +57,3 @@
 - dev 导出 contract 与 ORM、迁移脚本精确一致，本地临时兼容测试已删除。
 - main CI、生产 Compose、Core/Agent readiness、schema guard 和 HTTPS smoke 全部通过。
 - 线上只读执行 `auth.whoami`、作品列表/读取；真实付费模型任务必须使用明确作品和操作，不从“发布”授权推导任意正文写入。
-
