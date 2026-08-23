@@ -12,9 +12,8 @@ DO $verification$
 DECLARE
     table_oid oid;
     column_count integer;
-    constraint_oid oid;
-    constraint_definition text;
-    constraint_validated boolean;
+    expected_constraint record;
+    actual_constraint_definition text;
 BEGIN
     SELECT c.oid
     INTO table_oid
@@ -86,53 +85,52 @@ BEGIN
             || '"reasoningTokens" <= "completionTokens") NOT VALID';
     END IF;
 
-    SELECT con.oid, pg_get_constraintdef(con.oid, true), con.convalidated
-    INTO constraint_oid, constraint_definition, constraint_validated
-    FROM pg_constraint AS con
-    WHERE con.conrelid = table_oid
-      AND con.conname = 'TokenUsage_token_details_nonnegative_check';
-    IF constraint_oid IS NULL
-       OR position('promptCacheMissTokens' IN constraint_definition) = 0
-       OR position('reasoningTokens' IN constraint_definition) = 0
-       OR position('>= 0' IN constraint_definition) = 0
-       OR position('AND' IN upper(constraint_definition)) = 0 THEN
-        RAISE EXCEPTION 'TokenUsage 非负约束定义不一致';
-    END IF;
-    IF NOT constraint_validated THEN
-        EXECUTE 'ALTER TABLE "TokenUsage" VALIDATE CONSTRAINT "TokenUsage_token_details_nonnegative_check"';
-    END IF;
+    FOR expected_constraint IN
+        SELECT *
+        FROM (
+            VALUES
+                (
+                    'TokenUsage_token_details_nonnegative_check',
+                    $constraint$CHECK (((("promptCacheMissTokens" IS NULL) OR ("promptCacheMissTokens" >= 0)) AND (("reasoningTokens" IS NULL) OR ("reasoningTokens" >= 0))))$constraint$
+                ),
+                (
+                    'TokenUsage_prompt_cache_details_check',
+                    $constraint$CHECK (("promptCacheMissTokens" IS NULL) OR (("cachedTokens" + "promptCacheMissTokens") = "promptTokens"))$constraint$
+                ),
+                (
+                    'TokenUsage_reasoning_details_check',
+                    $constraint$CHECK (("reasoningTokens" IS NULL) OR ("reasoningTokens" <= "completionTokens"))$constraint$
+                )
+        ) AS definitions(name, definition)
+    LOOP
+        EXECUTE format(
+            'ALTER TABLE "TokenUsage" VALIDATE CONSTRAINT %I',
+            expected_constraint.name
+        );
 
-    SELECT con.oid, pg_get_constraintdef(con.oid, true), con.convalidated
-    INTO constraint_oid, constraint_definition, constraint_validated
-    FROM pg_constraint AS con
-    WHERE con.conrelid = table_oid
-      AND con.conname = 'TokenUsage_prompt_cache_details_check';
-    IF constraint_oid IS NULL
-       OR position('cachedTokens' IN constraint_definition) = 0
-       OR position('promptCacheMissTokens' IN constraint_definition) = 0
-       OR position('promptTokens' IN constraint_definition) = 0
-       OR position('+' IN constraint_definition) = 0
-       OR position('=' IN constraint_definition) = 0 THEN
-        RAISE EXCEPTION 'TokenUsage 缓存明细约束定义不一致';
-    END IF;
-    IF NOT constraint_validated THEN
-        EXECUTE 'ALTER TABLE "TokenUsage" VALIDATE CONSTRAINT "TokenUsage_prompt_cache_details_check"';
-    END IF;
+        SELECT regexp_replace(
+            pg_get_constraintdef(constraint_definition.oid),
+            '\s+',
+            '',
+            'g'
+        )
+        INTO actual_constraint_definition
+        FROM pg_constraint AS constraint_definition
+        WHERE constraint_definition.conrelid = table_oid
+          AND constraint_definition.conname = expected_constraint.name
+          AND constraint_definition.contype = 'c'
+          AND constraint_definition.convalidated;
 
-    SELECT con.oid, pg_get_constraintdef(con.oid, true), con.convalidated
-    INTO constraint_oid, constraint_definition, constraint_validated
-    FROM pg_constraint AS con
-    WHERE con.conrelid = table_oid
-      AND con.conname = 'TokenUsage_reasoning_details_check';
-    IF constraint_oid IS NULL
-       OR position('reasoningTokens' IN constraint_definition) = 0
-       OR position('completionTokens' IN constraint_definition) = 0
-       OR position('<=' IN constraint_definition) = 0 THEN
-        RAISE EXCEPTION 'TokenUsage 推理明细约束定义不一致';
-    END IF;
-    IF NOT constraint_validated THEN
-        EXECUTE 'ALTER TABLE "TokenUsage" VALIDATE CONSTRAINT "TokenUsage_reasoning_details_check"';
-    END IF;
+        IF actual_constraint_definition IS DISTINCT FROM regexp_replace(
+            expected_constraint.definition,
+            '\s+',
+            '',
+            'g'
+        ) THEN
+            RAISE EXCEPTION 'TokenUsage 检查约束定义不符合迁移契约：%',
+                expected_constraint.name;
+        END IF;
+    END LOOP;
 END;
 $verification$;
 

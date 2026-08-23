@@ -55,3 +55,25 @@ def test_token_usage_details_migration_self_verifies_columns_and_constraints() -
     assert "pg_get_constraintdef" in compact
     assert "convalidated" in compact
     assert "raise exception" in compact
+
+
+def test_token_usage_details_migration_compares_normalized_constraint_definitions_exactly() -> None:
+    compact = _compact(_migration())
+    normalized = re.sub(r"\s+", "", compact)
+
+    assert "regexp_replace" in compact
+    assert "is distinct from" in compact
+    assert "for expected_constraint in" in compact
+    assert "definitions(name, definition)" in compact
+    assert "actual_constraint_definition" in compact
+    assert "position(" not in compact
+
+    expected_definitions = (
+        'check(((('
+            '"promptcachemisstokens"isnull)or("promptcachemisstokens">=0))and('
+            '("reasoningtokens"isnull)or("reasoningtokens">=0))))',
+        'check(("promptcachemisstokens"isnull)or(('
+        '"cachedtokens"+"promptcachemisstokens")="prompttokens"))',
+        'check(("reasoningtokens"isnull)or("reasoningtokens"<="completiontokens"))',
+    )
+    assert all(definition in normalized for definition in expected_definitions)
