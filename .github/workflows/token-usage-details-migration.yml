@@ -181,15 +181,17 @@ jobs:
                       raise DatabaseUrlRejected("port") from None
                   if not username or not password or not hostname:
                       raise DatabaseUrlRejected("credentials")
+                  if hostname != "host.docker.internal":
+                      raise DatabaseUrlRejected("source_host")
+                  command_hostname = "127.0.0.1"
                   if any("\n" in value or "\r" in value for value in (username, password, hostname)):
                       raise DatabaseUrlRejected("newline")
                   pgpass = ":".join(
                       escape_pgpass(value)
-                      for value in (hostname, str(port), "novelwriterdev", username, password)
+                      for value in (command_hostname, str(port), "novelwriterdev", username, password)
                   ) + "\n"
                   write_private(pgpass_path, pgpass)
-                  safe_host = f"[{hostname}]" if ":" in hostname else hostname
-                  safe_netloc = f"{quote(username, safe='')}@{safe_host}"
+                  safe_netloc = f"{quote(username, safe='')}@{command_hostname}"
                   if parts.port is not None:
                       safe_netloc += f":{parts.port}"
                   return urlunsplit(
@@ -490,17 +492,19 @@ jobs:
                       raise DatabaseUrlRejected("port") from None
                   if not username or not password or not hostname:
                       raise DatabaseUrlRejected("credentials")
+                  if hostname != "host.docker.internal":
+                      raise DatabaseUrlRejected("source_host")
+                  command_hostname = "127.0.0.1"
                   if any("\n" in value or "\r" in value for value in (username, password, hostname)):
                       raise DatabaseUrlRejected("newline")
                   pgpass = ":".join(
                       escape_pgpass(value)
-                      for value in (hostname, str(port), "novelwriterdev", username, password)
+                      for value in (command_hostname, str(port), "novelwriterdev", username, password)
                   ) + "\n"
                   dev_parts = parts._replace(path="/novelwriterdev")
                   write_private(pgpass_path, pgpass)
                   write_private(url_path, urlunsplit(dev_parts))
-                  safe_host = f"[{hostname}]" if ":" in hostname else hostname
-                  safe_netloc = f"{quote(username, safe='')}@{safe_host}"
+                  safe_netloc = f"{quote(username, safe='')}@{command_hostname}"
                   if parts.port is not None:
                       safe_netloc += f":{parts.port}"
                   return urlunsplit(dev_parts._replace(netloc=safe_netloc))
