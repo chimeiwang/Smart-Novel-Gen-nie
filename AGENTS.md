@@ -10,10 +10,13 @@
 - 修改前端 UI 前先读 `DESIGN.md`。
 - 修改 Agent、写作流程或草案审核前先读 `apps/agent-service/AGENTS.md`、`docs/requirements/03-ai-writing-and-agents.md` 和 `docs/requirements/04-review-quality-and-workflow.md`。
 - 默认禁止修改现有 PostgreSQL schema。任何持久化改动必须先核对
-  `apps/core-api/src/inkforge_core/db/schema-contract.json`，应用不得自动建表、删表或迁移。唯一当前
-  例外是用户于 2026-08-21 明确批准的版本化迁移
-  `scripts/migrations/20260821_token_usage_task_run.sql`，且仅限 `TokenUsage` 模型调用归集字段、约束和
-  必要索引；它不授权其他结构调整或后续迁移。
+  `apps/core-api/src/inkforge_core/db/schema-contract.json`，应用不得自动建表、删表或迁移。当前获批的
+  版本化迁移例外有两个：用户于 2026-08-21 明确批准的
+  `scripts/migrations/20260821_token_usage_task_run.sql`，以及用户于 2026-08-23 明确批准的第二个迁移
+  `scripts/migrations/20260823_token_usage_details.sql`。后者仅限为 `TokenUsage` 增加可空 `INTEGER`
+  `promptCacheMissTokens`/`reasoningTokens` 和三个 CHECK；无默认值、无回填、无索引，旧行保持 `NULL`。
+  两个迁移都必须先备份，只在服务器 dev PostgreSQL 受控执行并重复执行验证，随后从真实库只读导出
+  `schema-contract.json`；它们不授权其他结构调整或后续迁移。
 
 ## 当前架构
 

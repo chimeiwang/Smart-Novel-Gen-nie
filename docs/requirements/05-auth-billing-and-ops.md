@@ -88,7 +88,7 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 
 2026-07-14 的 PostgreSQL schema 变更是用户明确批准的单次例外：新增 `WritingRunCommand`，为 `WritingStyle` 增加强制 `userId`，并为 `StylePortraitTask` 增加可空 `section`。迁移执行前必须完成可恢复备份；按已批准方案清空旧文风、文风参考和画像任务数据，同时保留用户、小说、章节、会话及其他正式数据。应用启动不得自动修改 schema。
 
-用户于 2026-08-21 另行明确批准唯一版本化迁移
+用户于 2026-08-21 另行明确批准的第一个版本化迁移为
 `scripts/migrations/20260821_token_usage_task_run.sql`：只允许为 `TokenUsage` 增加可空 `TEXT`
 `requestId/taskId/runId`，增加非空白 `requestId` 检查、`requestId` 唯一索引、
 `(userId, taskId, createdAt)` 和 `(runId, createdAt)` 复合索引。三个字段可空只为兼容历史行；历史值
@@ -96,6 +96,12 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 PostgreSQL 重复执行验证；应用启动仍不得自动修改 schema。当前仓库已提供迁移脚本和配套实现，但
 本需求文档不表示生产数据库已经迁移或新版本已经部署；实际执行后还必须从隔离库导出新的
 `schema-contract.json` 并验证生产实际结构与 contract 精确一致。
+
+用户于 2026-08-23 明确批准第二个版本化迁移
+`scripts/migrations/20260823_token_usage_details.sql`：只允许为 `TokenUsage` 增加可空 `INTEGER`
+`promptCacheMissTokens`/`reasoningTokens` 和三个 CHECK；无默认值、无回填、无索引，旧行保持 `NULL`。
+执行前必须完成可恢复备份，只在服务器 dev PostgreSQL 受控执行并重复执行验证，随后从真实库只读导出新的
+`schema-contract.json`；应用启动仍不得自动修改 schema。本需求文档不表示该迁移已经执行或新版本已经部署。
 
 ## 人工日志
 
@@ -159,8 +165,8 @@ PostgreSQL 重复执行验证；应用启动仍不得自动修改 schema。当�
 - 生产 Compose 不创建 PostgreSQL 容器或数据卷，测试 Compose 使用独立测试数据库；
 - Core 通过 `host.docker.internal` 连接现有宿主机 PostgreSQL 14；
 - 不提供初始化 SQL；
-- 应用启动不执行迁移、建表或删表；唯一获批的 2026-08-21 `TokenUsage` 版本化迁移只能由受控运维
-  流程单独执行；
+- 应用启动不执行迁移、建表或删表；获批的 2026-08-21 和 2026-08-23 `TokenUsage` 版本化迁移只能由受控
+  运维流程单独执行；
 - Core 启动就绪检查对现有 schema 做只读指纹校验。
 
 2 核 2 GB 默认限制：
