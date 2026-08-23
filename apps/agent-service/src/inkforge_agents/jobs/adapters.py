@@ -391,7 +391,6 @@ class CoreGraphAgentExecutor:
             AgentRunRequest(
                 agentId=cast(Any, agent_id),
                 executionMode=execution_mode,
-                stage=execution_mode,
                 operationKind=operation_kind,
                 userMessage=_required_text(state, "userMessage"),
                 contextMessages=context_messages,

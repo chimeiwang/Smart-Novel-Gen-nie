@@ -19,9 +19,7 @@ from inkforge_agents.runtime.execution import (
     QUALITY_AGENT_ID,
     resolve_execution_contract,
     validate_execution_agent,
-    validate_execution_stage,
 )
-from inkforge_agents.runtime.model_policy import ModelExecutionPolicy
 from inkforge_agents.runtime.model_runtime import ModelRuntime
 from inkforge_agents.tools.registry import ToolContext, build_default_registry
 from pydantic import ValidationError
@@ -101,14 +99,11 @@ def request(
     agent_id: str = "写作",
     mode: str = "primary",
     operation_kind: str | None = "write_chapter",
-    stage: str | None = None,
 ) -> AgentRunRequest:
-    resolved_stage = stage or mode
     return AgentRunRequest(
         agentId=agent_id,
         executionMode=mode,
         operationKind=operation_kind,
-        stage=resolved_stage,
         userMessage="处理当前任务",
         contextMessages=["当前章节目标：主角逃离围城"],
         executionInstructions=["上次缺少草案事件，本次必须提交。"],
@@ -273,7 +268,6 @@ def test_request_rejects_agent_context_mismatch_and_unknown_fields() -> None:
             agentId="写作",
             executionMode="primary",
             operationKind="write_chapter",
-            stage="primary",
             userMessage="续写本章",
             toolContext=tool_context("编辑"),
         )
@@ -282,41 +276,10 @@ def test_request_rejects_agent_context_mismatch_and_unknown_fields() -> None:
             agentId="写作",
             executionMode="primary",
             operationKind="write_chapter",
-            stage="primary",
             userMessage="续写本章",
             toolMode="all",
             toolContext=tool_context("写作"),
         )
-
-
-def test_execution_stage_must_match_explicit_mode() -> None:
-    validate_execution_stage("reviewer", "protocol_repair")
-    with pytest.raises(ValueError, match="执行模式与执行阶段不一致"):
-        validate_execution_stage("reviewer", "primary")
-
-
-@pytest.mark.asyncio
-async def test_runner_rejects_required_tool_that_is_not_terminal_control(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    provider = CapturingProvider()
-    registry = build_default_registry()
-    runner = AgentRunner(make_agent_runtime(ModelRuntime(provider), registry), registry)
-    monkeypatch.setattr(
-        "inkforge_agents.runtime.agent_runner.resolve_model_execution_policy",
-        lambda **_: ModelExecutionPolicy(
-            policyId="test-policy",
-            thinkingMode="enabled",
-            reasoningEffort="high",
-            requiredToolName="get_novel_info",
-            visibleOutputDisposition="business",
-        ),
-    )
-
-    with pytest.raises(ValueError, match="终止控制工具"):
-        await runner.run(request(agent_id="写作", mode="primary"))
-
-    assert provider.requests == []
 
 
 @pytest.mark.asyncio

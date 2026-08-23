@@ -89,7 +89,6 @@ class QualityJobHandler:
                 AgentRunRequest(
                     agentId=QUALITY_AGENT_ID,
                     executionMode="quality",
-                    stage="quality",
                     operationKind=None,
                     userMessage=message,
                     contextMessages=[
