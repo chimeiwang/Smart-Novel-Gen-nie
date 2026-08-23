@@ -9,7 +9,7 @@
 - 接到新需求后，先在 `docs/specs/` 新增或更新 spec，再修改实现。
 - 修改前端 UI 前先读 `DESIGN.md`。
 - 修改 Agent、写作流程或草案审核前先读 `apps/agent-service/AGENTS.md`、`docs/requirements/03-ai-writing-and-agents.md` 和 `docs/requirements/04-review-quality-and-workflow.md`。
-- PostgreSQL schema 默认冻结。已批准例外只有
+- PostgreSQL schema 默认冻结。已批准例外包括
   `scripts/migrations/20260807_video_production_control_plane.sql`、
   `scripts/migrations/20260817_video_review_decision_command.sql`、
   `scripts/migrations/20260817_video_domain_ownership_chain.sql` 与
@@ -17,11 +17,14 @@
   `novelwriterdev` 开发库执行视频预览控制面、批准命令、章节改编域以及该改编域内视觉设定版本、逐镜参考绑定的具名迁移；
   这些视频迁移不构成生产迁移或完整 production_v2 schema 授权。用户于 2026-08-23 另行批准
   `scripts/migrations/20260823_production_video_adaptation_domain.sql` 只对服务器端 `novelwriter`
-  正式库执行上述已验证结构的具名晋升；该脚本不迁移开发数据、不启用视频功能，也不授权其他生产 DDL。另有
-  `scripts/migrations/20260821_token_usage_task_run.sql` 对 `TokenUsage` 模型调用归集字段、约束和必要索引的
-  版本化迁移；它不授权其他结构调整。
-  任何其他持久化改动必须先更新 spec 和本文件、核对
-  `apps/core-api/src/inkforge_core/db/schema-contract.json`，应用启动仍不得自动建表、删表或执行迁移。
+  正式库执行上述已验证结构的具名晋升；该脚本不迁移开发数据、不启用视频功能，也不授权其他生产 DDL。
+  用户于 2026-08-21 明确批准的
+  `scripts/migrations/20260821_token_usage_task_run.sql`，以及用户于 2026-08-23 明确批准的第二个迁移
+  `scripts/migrations/20260823_token_usage_details.sql`，也属于具名例外；后者仅限为 `TokenUsage` 增加可空
+  `INTEGER` `promptCacheMissTokens`/`reasoningTokens` 和三个 CHECK；无默认值、无回填、无索引，旧行保持
+  `NULL`。所有迁移都必须先备份，只在服务器 dev PostgreSQL 受控执行并重复执行验证，随后从真实库只读导出
+  `schema-contract.json`；它们不授权其他结构调整或后续迁移。任何其他持久化改动必须先更新 spec 和本文件、
+  核对 `apps/core-api/src/inkforge_core/db/schema-contract.json`，应用启动仍不得自动建表、删表或执行迁移。
 
 ## 当前架构
 
