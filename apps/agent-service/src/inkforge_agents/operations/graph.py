@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Literal, Protocol, Self, cast
 
 from inkforge_contracts.long_serial import (
     ChapterTarget,
@@ -13,8 +13,9 @@ from inkforge_contracts.long_serial import (
 )
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, Send, interrupt
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError, model_validator
 
+from ..artifacts.patch import TextReplacePatch
 from ..definitions.agents import AgentId
 from ..graph.context import build_operation_context
 from ..graph.state import GraphState
@@ -82,9 +83,14 @@ class ReviewResult(BaseModel):
     verdict: Literal["pass", "revise", "block"]
     summary: str
     requiredChanges: str | None = None
-    revisionMode: Literal["patch", "rewrite"] = "rewrite"
-    patches: list[dict[str, Any]] = Field(default_factory=list)
+    revisionMode: Literal["patch", "rewrite"] | None = None
+    patches: list[TextReplacePatch] | None = None
     iteration: int = 0
+
+    @model_validator(mode="after")
+    def validate_revision_combination(self) -> Self:
+        _validate_review_revision_combination(self.verdict, self.revisionMode, self.patches)
+        return self
 
 
 class ReviewOutcome(BaseModel):
@@ -94,26 +100,73 @@ class ReviewOutcome(BaseModel):
     reviewer: AgentId
     summary: str
     requiredChanges: str | None = None
-    revisionMode: Literal["patch", "rewrite"] = "rewrite"
-    patches: list[dict[str, Any]] = Field(default_factory=list)
+    revisionMode: Literal["patch", "rewrite"] | None = None
+    patches: list[TextReplacePatch] | None = None
+
+    @model_validator(mode="after")
+    def validate_revision_combination(self) -> Self:
+        _validate_review_revision_combination(self.verdict, self.revisionMode, self.patches)
+        return self
 
 
-def decide_review_outcome(results: list[ReviewResult]) -> ReviewOutcome:
-    blockers = [result for result in results if result.verdict == "block"]
+def _validate_review_revision_combination(
+    verdict: Literal["pass", "revise", "block"],
+    revision_mode: Literal["patch", "rewrite"] | None,
+    patches: list[TextReplacePatch] | None,
+) -> None:
+    if verdict in {"pass", "block"}:
+        if revision_mode is not None or patches is not None:
+            raise ValueError("通过或阻断结论不得携带 revisionMode 或 patches")
+        return
+    if revision_mode is None:
+        raise ValueError("revise 结论必须声明 revisionMode")
+    if revision_mode == "patch":
+        if patches is None or not 1 <= len(patches) <= 20:
+            raise ValueError("patch 模式必须携带 1 到 20 个 patch")
+    elif patches is not None:
+        raise ValueError("rewrite 模式不得携带 patches")
+
+
+def decide_review_outcome(
+    results: list[ReviewResult],
+    *,
+    reviewer_order: tuple[AgentId, ...] | list[AgentId] | None = None,
+) -> ReviewOutcome:
+    ordered = _ordered_review_results(results, reviewer_order)
+    blockers = [result for result in ordered if result.verdict == "block"]
     if blockers:
-        return _outcome_from("block", blockers, "rewrite")
-    revisers = [result for result in results if result.verdict == "revise"]
+        return _outcome_from("block", blockers)
+    revisers = [result for result in ordered if result.verdict == "revise"]
     if revisers:
-        return _outcome_from("revise", revisers, "rewrite")
-    passed = results or [ReviewResult(reviewer="编辑", verdict="pass", summary="审核通过")]
-    return _outcome_from("pass", passed, "rewrite")
+        revision_mode: Literal["patch", "rewrite"] = (
+            "rewrite"
+            if any(result.revisionMode == "rewrite" for result in revisers)
+            else "patch"
+        )
+        return _outcome_from("revise", revisers, revision_mode)
+    passed = ordered or [ReviewResult(reviewer="编辑", verdict="pass", summary="审核通过")]
+    return _outcome_from("pass", passed)
+
+
+def _ordered_review_results(
+    results: list[ReviewResult], reviewer_order: tuple[AgentId, ...] | list[AgentId] | None
+) -> list[ReviewResult]:
+    if reviewer_order is None:
+        return list(results)
+    order = {reviewer: index for index, reviewer in enumerate(reviewer_order)}
+    return sorted(results, key=lambda result: order.get(result.reviewer, len(order)))
 
 
 def _outcome_from(
     verdict: Literal["pass", "revise", "block"],
     results: list[ReviewResult],
-    revision_mode: Literal["patch", "rewrite"],
+    revision_mode: Literal["patch", "rewrite"] | None = None,
 ) -> ReviewOutcome:
+    patches = (
+        [patch for result in results for patch in (result.patches or [])]
+        if revision_mode == "patch"
+        else None
+    )
     return ReviewOutcome(
         verdict=verdict,
         reviewer=results[0].reviewer,
@@ -122,7 +175,7 @@ def _outcome_from(
             f"{result.reviewer}：{result.requiredChanges or result.summary}" for result in results
         ),
         revisionMode=revision_mode,
-        patches=[patch for result in results for patch in result.patches],
+        patches=patches,
     )
 
 
@@ -338,15 +391,32 @@ def build_operation_graph(
                 iteration=state.get("artifactIteration", 0),
             )
         else:
-            review = ReviewResult(
-                reviewer=reviewer_id,
-                verdict=event["verdict"],
-                summary=event["summary"],
-                requiredChanges=event.get("requiredChanges"),
-                revisionMode=event.get("revisionMode", "rewrite"),
-                patches=event.get("patches", []),
-                iteration=state.get("artifactIteration", 0),
-            )
+            try:
+                review = ReviewResult.model_validate(
+                    {
+                        "reviewer": reviewer_id,
+                        "verdict": event.get("verdict"),
+                        "summary": event.get("summary"),
+                        "requiredChanges": event.get("requiredChanges"),
+                        "revisionMode": event.get("revisionMode"),
+                        "patches": event.get("patches"),
+                        "iteration": state.get("artifactIteration", 0),
+                    }
+                )
+                if (
+                    review.revisionMode == "patch"
+                    and _operation_definition(_operation(state)).textArtifactKind
+                    != "chapter_draft"
+                ):
+                    raise ValueError("局部 patch 仅支持章节文本草案")
+            except (ValidationError, ValueError):
+                review = ReviewResult(
+                    reviewer=reviewer_id,
+                    verdict="block",
+                    summary="复审结论不符合当前产物契约",
+                    requiredChanges="请由用户审核当前草案，或重新发起复审。",
+                    iteration=state.get("artifactIteration", 0),
+                )
         return {"reviewResults": [review.model_dump()]}
 
     async def merge_reviews(state: GraphState) -> dict[str, Any]:
@@ -357,7 +427,10 @@ def build_operation_graph(
             for result in state.get("reviewResults", [])
             if result.get("iteration") == iteration
         ]
-        outcome = decide_review_outcome(current)
+        outcome = decide_review_outcome(
+            current,
+            reviewer_order=list(_operation(state).reviewers),
+        )
         pending = outcome.model_dump() if outcome.verdict == "revise" else None
         return {
             "pendingRevision": pending,

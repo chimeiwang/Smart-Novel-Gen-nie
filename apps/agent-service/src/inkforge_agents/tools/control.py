@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Literal, Self
 
 from inkforge_contracts import ConsistencyQualityReport
 from pydantic import (
@@ -15,6 +15,7 @@ from pydantic import (
     model_validator,
 )
 
+from ..artifacts.patch import TextReplacePatch
 from .permissions import control_permission
 from .registry import ToolDefinition
 from .safe_writes import SAFE_STRUCTURED_WRITE_INSTRUCTION
@@ -221,7 +222,22 @@ class EvaluationArgs(StrictArgs):
     artifactId: str | None = Field(default=None, min_length=1, max_length=200)
     requiredChanges: str | None = Field(default=None, max_length=2000)
     revisionMode: Literal["patch", "rewrite"] | None = None
-    patches: list[dict[str, Any]] | None = Field(default=None, max_length=20)
+    patches: list[TextReplacePatch] | None = Field(default=None, min_length=1, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_revision_combination(self) -> Self:
+        if self.verdict in {"pass", "block"}:
+            if self.revisionMode is not None or self.patches is not None:
+                raise ValueError("通过或阻断结论不得携带 revisionMode 或 patches")
+            return self
+        if self.revisionMode is None:
+            raise ValueError("revise 结论必须声明 revisionMode")
+        if self.revisionMode == "patch":
+            if self.patches is None or not 1 <= len(self.patches) <= 20:
+                raise ValueError("patch 模式必须携带 1 到 20 个 patch")
+        elif self.patches is not None:
+            raise ValueError("rewrite 模式不得携带 patches")
+        return self
 
 
 def control_tools() -> list[ToolDefinition]:
