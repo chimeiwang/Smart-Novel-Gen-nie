@@ -1,5 +1,8 @@
 # 长篇章节影视化工作台 v2 架构规格
 
+> 后续目标驱动生成、非阻断审镜和正式方案修订以
+> `docs/specs/2026-08-19-goal-driven-shot-revision.md` 为准；本文保留首版领域落地背景。
+
 日期：2026-08-18
 状态：开发库实现与真实章节验收完成，数据库授权仅限 `novelwriterdev`
 适用范围：`long_serial` 长篇工作台的“视频制作”入口
@@ -504,7 +507,9 @@ PUT  /api/v1/video/chapter-adaptations/{adaptationId}/shots/{shotId}/prompt
 ## 11. 非目标
 
 - 本阶段不调用即梦视频生成 API；
-- 不上传角色定妆、首尾帧或真实视频素材；
+- 本规格原本不上传角色定妆；该限制已由
+  `docs/specs/2026-08-22-visual-canon-and-shot-references.md` 对角色、服装、场景和道具图片明确取代，
+  首尾帧与真实视频素材仍不在本阶段范围；
 - 不把章节自动等同于一集；
 - 不实现跨章合并，但数据模型不阻止未来多个来源快照；
 - 不把当前工作台伪装成完整 production_v2 渲染系统；

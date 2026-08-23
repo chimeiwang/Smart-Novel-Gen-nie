@@ -7,6 +7,7 @@ from datetime import datetime
 
 import pytest
 from inkforge_contracts.video_adaptation import (
+    BeatCoverageGoal,
     ChapterAdaptationPlanCandidate,
     ChapterAdaptationSourceRange,
     CinematicSceneCandidate,
@@ -52,7 +53,7 @@ def _candidate(source: str) -> ChapterAdaptationPlanCandidate:
         sourceText=source,
     )
     return ChapterAdaptationPlanCandidate(
-        schemaVersion="chapter_adaptation_plan_v2",
+        schemaVersion="chapter_adaptation_plan_v3",
         adaptationId="adaptation-1",
         sourceHash=hashlib.sha256(source.encode()).hexdigest(),
         scenes=[
@@ -69,19 +70,31 @@ def _candidate(source: str) -> ChapterAdaptationPlanCandidate:
                         title="钥匙揭示危险",
                         dramaticTurn="人物意识到危险",
                         visualStrategy="用建立镜头和钥匙特写完成揭示",
+                        coverageGoals=[
+                            BeatCoverageGoal(
+                                goalKey="G01",
+                                kind="story_information",
+                                priority="essential",
+                                description="观众看清染血钥匙并意识到危险",
+                            )
+                        ],
                         sourceRanges=[source_range],
                         shots=[
                             CinematicShotCandidate(
                                 shotKey="S01",
                                 title="建立书房",
                                 narrativePurpose="establishing",
-                                adaptationType="supplemental",
+                                storyFunction="交代雨夜书房和人物空间",
+                                audienceGain="观众获得人物与入口的空间关系",
+                                coveredGoalKeys=["G01"],
+                                sourceRelation="supplemental",
                                 shotScale="long",
                                 cameraAngle="eye_level",
                                 cameraMovement="locked",
                                 visualIntent="雨夜书房，门外冷光切入",
-                                audioMode="ambient",
-                                audioIntent="雨声",
+                                speechMode="none",
+                                spokenText=None,
+                                soundDesign="雨声",
                                 cutReason="进入新场景先建立空间",
                                 timelineDurationMs=2000,
                                 sourceRanges=[],
@@ -90,13 +103,17 @@ def _candidate(source: str) -> ChapterAdaptationPlanCandidate:
                                 shotKey="S02",
                                 title="钥匙落桌",
                                 narrativePurpose="reveal",
-                                adaptationType="direct",
+                                storyFunction="用关键物件兑现危险信息",
+                                audienceGain="观众看清钥匙带血",
+                                coveredGoalKeys=["G01"],
+                                sourceRelation="direct",
                                 shotScale="close",
                                 cameraAngle="eye_level",
                                 cameraMovement="push_in",
                                 visualIntent="染血钥匙落在桌面",
-                                audioMode="ambient",
-                                audioIntent="金属碰桌声",
+                                speechMode="none",
+                                spokenText=None,
+                                soundDesign="金属碰桌声",
                                 cutReason="关键物件改变信息量，需要特写揭示",
                                 timelineDurationMs=1500,
                                 sourceRanges=[source_range],
@@ -124,9 +141,17 @@ async def test_materialization_creates_relational_scene_beat_shot_and_prompt_hea
         sourceText=source,
         sourceHash=hashlib.sha256(source.encode()).hexdigest(),
     )
-    head = VideoChapterAdaptationHead(adaptationId=adaptation.id, revision=1)
+    head = VideoChapterAdaptationHead(
+        adaptationId=adaptation.id,
+        currentShotPlanVersionId="plan-v1",
+        revision=1,
+    )
     artifact = ReviewArtifact(id="artifact-1", videoAdaptationId=adaptation.id)
-    task = VideoAdaptationTask(id="task-1", adaptationId=adaptation.id)
+    task = VideoAdaptationTask(
+        id="task-1",
+        adaptationId=adaptation.id,
+        baseShotPlanVersionId="plan-v1",
+    )
 
     version = await _materialize_plan(  # type: ignore[arg-type]
         session,
@@ -139,9 +164,16 @@ async def test_materialization_creates_relational_scene_beat_shot_and_prompt_hea
     )
 
     assert version.adaptationId == adaptation.id
+    assert version.basedOnVersionId == "plan-v1"
     assert sum(isinstance(item, VideoCinematicScene) for item in session.added) == 1
     assert sum(isinstance(item, VideoDramaticBeat) for item in session.added) == 1
     assert sum(isinstance(item, VideoShot) for item in session.added) == 2
     assert sum(isinstance(item, VideoShotPromptHead) for item in session.added) == 2
     assert not any(isinstance(item, VideoScene) for item in session.added)
+    beat = next(item for item in session.added if isinstance(item, VideoDramaticBeat))
+    shot = next(item for item in session.added if isinstance(item, VideoShot))
+    assert beat.coverageGoalsJson is not None and '"G01"' in beat.coverageGoalsJson
+    assert shot.sourceRelation == "supplemental"
+    assert shot.storyFunction == "交代雨夜书房和人物空间"
+    assert shot.speechMode == "none"
     assert session.flush_count == 4

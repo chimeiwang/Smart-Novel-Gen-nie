@@ -92,6 +92,11 @@ EXPECTED_MODEL_TABLES = {
     "VideoEpisodeBoundary",
     "VideoShotPromptVersion",
     "VideoShotPromptHead",
+    "VideoVisualCanon",
+    "VideoVisualCanonVersion",
+    "VideoShotVisualReferenceSet",
+    "VideoShotVisualReferenceBinding",
+    "VideoShotPromptVisualReference",
     "VideoAdaptationDecisionCommand",
 }
 EXPECTED_TABLES = EXPECTED_MODEL_TABLES | {"_FactionTerritories"}
@@ -239,7 +244,7 @@ def test_timestamp_text_bigint_and_vector_types_preserve_existing_storage() -> N
     ]
     bigint_columns = [column for column in columns if isinstance(column.type, BigInteger)]
 
-    assert len(timestamp_columns) == 113
+    assert len(timestamp_columns) == 117
     assert all(column.type.precision == 3 for column in timestamp_columns)
     assert all(column.type.timezone is False for column in timestamp_columns)
     assert {(column.table.name, column.name) for column in bigint_columns} == {
@@ -349,29 +354,27 @@ def test_primary_keys_foreign_keys_and_indexes_match_the_frozen_contract() -> No
                         '"deletedAt"',
                         "IS NULL",
                     ),
-                        "VideoGenerationTask_due_idx": (
+                    "VideoGenerationTask_due_idx": (
                         '"status"',
                         "pending",
                         "submitted",
-                            "processing",
-                        ),
-                        "VideoAdaptationTask_due_idx": (
-                            '"status"',
-                            "pending",
-                            "submitted",
-                            "processing",
-                        ),
-                        "VideoChapterAdaptation_project_chapter_source_key": (
-                            '"chapterId"',
-                            "IS NOT NULL",
-                            '"lifecycleStatus"',
-                            "active",
-                        ),
+                        "processing",
+                    ),
+                    "VideoAdaptationTask_due_idx": (
+                        '"status"',
+                        "pending",
+                        "submitted",
+                        "processing",
+                    ),
+                    "VideoChapterAdaptation_project_chapter_source_key": (
+                        '"chapterId"',
+                        "IS NOT NULL",
+                        '"lifecycleStatus"',
+                        "active",
+                    ),
                 }
                 assert name in expected_predicate_tokens
-                assert all(
-                    token in predicate for token in expected_predicate_tokens[name]
-                )
+                assert all(token in predicate for token in expected_predicate_tokens[name])
             assert expected["includeColumns"] == []
             assert expected["options"] == []
             assert expected["nullsNotDistinct"] is False
@@ -490,9 +493,12 @@ def test_application_defaults_generate_compatible_ids_and_utc_naive_milliseconds
                 "VideoChapterAdaptationHead",
                 "VideoDramaticBeatSourceAnchor",
                 "VideoShotSourceAnchor",
-                "VideoEpisodeBoundary",
-                "VideoShotPromptHead",
-            }
+                    "VideoEpisodeBoundary",
+                    "VideoShotPromptHead",
+                    "VideoShotVisualReferenceSet",
+                    "VideoShotVisualReferenceBinding",
+                    "VideoShotPromptVisualReference",
+                }
         if "updatedAt" in table.c:
             assert table.c.updatedAt.default is not None
             assert table.c.updatedAt.default.arg.__wrapped__ is utc_now
@@ -951,7 +957,7 @@ def test_cascade_parent_delete_never_sets_child_foreign_key_to_null(loaded: bool
                 for statement in normalized
             ), normalized
         else:
-            assert not any('CREDITLEDGER' in statement for statement in normalized)
+            assert not any("CREDITLEDGER" in statement for statement in normalized)
         session.rollback()
     engine.dispose()
 
@@ -999,7 +1005,7 @@ def test_set_null_parent_delete_uses_orm_only_for_loaded_children(loaded: bool) 
             ), normalized
             assert novel.userId is None
         else:
-            assert not any('NOVEL' in statement for statement in normalized)
+            assert not any("NOVEL" in statement for statement in normalized)
         session.rollback()
     engine.dispose()
 
@@ -1180,14 +1186,9 @@ def test_schema_profile_tracks_the_video_preview_capability() -> None:
     from inkforge_core.config import Settings
     from inkforge_core.db.session import schema_profile_for_settings
 
+    assert schema_profile_for_settings(Settings(environment="dev")) == "without_video_preview"
     assert (
-        schema_profile_for_settings(Settings(environment="dev"))
-        == "without_video_preview"
-    )
-    assert (
-        schema_profile_for_settings(
-            Settings(environment="dev", video_preview_enabled=True)
-        )
+        schema_profile_for_settings(Settings(environment="dev", video_preview_enabled=True))
         == "full"
     )
 

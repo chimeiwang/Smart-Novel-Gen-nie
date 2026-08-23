@@ -10,8 +10,13 @@ from inkforge_contracts.video_adaptation import (
     ChapterPacingPreset,
     FormalChapterAdaptationPlan,
     SeedanceShotPromptSpec,
+    ShotVisualReferenceSnapshot,
+    VisualCanonDuty,
+    VisualSettingKind,
 )
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+
+from ..schemas import VideoAssetResponse
 
 ClientRequestId = Annotated[
     str,
@@ -33,6 +38,17 @@ class StartShotPlanRunRequest(VideoAdaptationApiModel):
     clientRequestId: ClientRequestId
     pacingPreset: ChapterPacingPreset = "short_drama"
     targetEpisodeSeconds: Literal[60, 90, 120] = 90
+    baseShotPlanVersionId: str | None = Field(default=None, min_length=1)
+    revisionBrief: Annotated[
+        str | None,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=1_200),
+    ] = None
+
+    @model_validator(mode="after")
+    def validate_revision(self) -> StartShotPlanRunRequest:
+        if self.revisionBrief is not None and self.baseShotPlanVersionId is None:
+            raise ValueError("没有正式镜头方案基线时不能提交修订重点")
+        return self
 
 
 class ConfirmAdaptationPlanRequest(VideoAdaptationApiModel):
@@ -77,10 +93,75 @@ class SaveShotPromptRequest(VideoAdaptationApiModel):
     ]
 
 
+class CreateVisualCanonCandidateRequest(VideoAdaptationApiModel):
+    """把已上传且已确认权利的图片放入一个视觉设定槽的候选位置。"""
+
+    clientRequestId: ClientRequestId
+    settingKind: VisualSettingKind
+    settingId: str = Field(min_length=1)
+    duty: VisualCanonDuty
+    variantKey: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$")
+    label: Annotated[
+        str,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=120),
+    ]
+    candidateAssetId: str = Field(min_length=1)
+    includeFeatures: list[
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+    ] = Field(default_factory=list, max_length=20)
+    excludeFeatures: list[
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+    ] = Field(default_factory=list, max_length=20)
+    defaultStrength: int = Field(default=70, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def validate_candidate(self) -> CreateVisualCanonCandidateRequest:
+        expected_kind = {
+            "identity": "character",
+            "costume": "character",
+            "scene": "location",
+            "prop": "item",
+        }[self.duty]
+        if self.settingKind != expected_kind:
+            raise ValueError("视觉设定职责与文字设定类型不匹配")
+        if len(set(self.includeFeatures)) != len(self.includeFeatures):
+            raise ValueError("包含特征不能重复")
+        if len(set(self.excludeFeatures)) != len(self.excludeFeatures):
+            raise ValueError("排除特征不能重复")
+        return self
+
+
+class ApproveVisualCanonRequest(VideoAdaptationApiModel):
+    clientRequestId: ClientRequestId
+    expectedRevision: int = Field(ge=1)
+    candidateAssetId: str = Field(min_length=1)
+
+
+class ShotVisualReferenceSelectionRequest(VideoAdaptationApiModel):
+    canonVersionId: str = Field(min_length=1)
+    strength: int = Field(ge=1, le=100)
+
+
+class SaveShotVisualReferencesRequest(VideoAdaptationApiModel):
+    expectedRevision: int = Field(ge=0)
+    references: list[ShotVisualReferenceSelectionRequest] = Field(
+        default_factory=list,
+        max_length=20,
+    )
+
+    @model_validator(mode="after")
+    def validate_unique_versions(self) -> SaveShotVisualReferencesRequest:
+        version_ids = [item.canonVersionId for item in self.references]
+        if len(set(version_ids)) != len(version_ids):
+            raise ValueError("同一镜头不能重复绑定同一视觉设定版本")
+        return self
+
+
 class ChapterAdaptationTaskResponse(VideoAdaptationApiModel):
     id: str
     jobId: str
     kind: Literal["shot_plan", "shot_prompt"]
+    baseShotPlanVersionId: str | None
     workflow: str
     status: str
     checkpointStage: str
@@ -105,6 +186,52 @@ class EpisodePlanResponse(VideoAdaptationApiModel):
     breakAfterShotIds: list[str]
 
 
+class VisualCanonVersionResponse(VideoAdaptationApiModel):
+    id: str
+    canonId: str
+    versionNo: int
+    asset: VideoAssetResponse
+    settingName: str
+    label: str
+    includeFeatures: list[str]
+    excludeFeatures: list[str]
+    defaultStrength: int
+    contentHash: str
+    createdAt: datetime
+
+
+class VisualCanonResponse(VideoAdaptationApiModel):
+    id: str
+    projectId: str
+    novelId: str
+    settingKind: VisualSettingKind
+    settingId: str
+    settingName: str
+    duty: VisualCanonDuty
+    variantKey: str
+    label: str
+    candidateAsset: VideoAssetResponse | None
+    candidateIncludeFeatures: list[str]
+    candidateExcludeFeatures: list[str]
+    candidateDefaultStrength: int | None
+    currentVersionId: str | None
+    versions: list[VisualCanonVersionResponse]
+    revision: int
+    createdAt: datetime
+    updatedAt: datetime
+
+
+class VisualCanonLibraryResponse(VideoAdaptationApiModel):
+    canons: list[VisualCanonResponse]
+
+
+class ShotVisualReferenceSetResponse(VideoAdaptationApiModel):
+    shotId: str
+    shotKey: str
+    revision: int = Field(ge=0)
+    references: list[ShotVisualReferenceSnapshot]
+
+
 class ShotPromptVersionResponse(VideoAdaptationApiModel):
     id: str
     shotId: str
@@ -113,6 +240,7 @@ class ShotPromptVersionResponse(VideoAdaptationApiModel):
     generatedText: str | None
     currentText: str
     promptEdited: bool
+    visualReferences: list[ShotVisualReferenceSnapshot]
     headRevision: int
     createdAt: datetime
 
@@ -123,6 +251,8 @@ class ShotPromptCandidateResponse(VideoAdaptationApiModel):
     shotKey: str
     spec: SeedanceShotPromptSpec
     compiledPrompt: str
+    visualReferences: list[ShotVisualReferenceSnapshot]
+    qualityWarnings: list[str] = Field(default_factory=list, max_length=12)
 
 
 class ChapterAdaptationResponse(VideoAdaptationApiModel):
@@ -142,6 +272,7 @@ class ChapterAdaptationResponse(VideoAdaptationApiModel):
     episodePlan: EpisodePlanResponse | None
     promptVersions: list[ShotPromptVersionResponse]
     promptCandidates: list[ShotPromptCandidateResponse]
+    visualReferenceSets: list[ShotVisualReferenceSetResponse]
     reviewArtifact: ChapterAdaptationReviewSummary | None
     latestTask: ChapterAdaptationTaskResponse | None
     createdAt: datetime

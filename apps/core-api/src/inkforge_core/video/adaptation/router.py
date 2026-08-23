@@ -10,16 +10,22 @@ from ...auth.dependencies import get_current_user
 from ...auth.repository import AuthUser
 from ...errors import ApiError
 from .schemas import (
+    ApproveVisualCanonRequest,
     ChapterAdaptationListResponse,
     ChapterAdaptationResponse,
     ChapterAdaptationTaskAcceptedResponse,
     ConfirmAdaptationPlanRequest,
     CreateChapterAdaptationRequest,
+    CreateVisualCanonCandidateRequest,
     DiscardAdaptationCandidateRequest,
     SaveEpisodePlanRequest,
     SaveShotPromptRequest,
+    SaveShotVisualReferencesRequest,
+    ShotVisualReferenceSetResponse,
     StartPromptRunRequest,
     StartShotPlanRunRequest,
+    VisualCanonLibraryResponse,
+    VisualCanonResponse,
 )
 from .service import VideoAdaptationService
 
@@ -68,6 +74,45 @@ async def list_adaptations(
     service: Service,
 ) -> ChapterAdaptationListResponse:
     return await service.list_adaptations(user.id, project_id)
+
+
+@router.get(
+    "/projects/{project_id}/visual-canons",
+    response_model=VisualCanonLibraryResponse,
+)
+async def list_visual_canons(
+    project_id: str,
+    user: User,
+    service: Service,
+) -> VisualCanonLibraryResponse:
+    return await service.list_visual_canons(user.id, project_id)
+
+
+@router.post(
+    "/projects/{project_id}/visual-canons",
+    response_model=VisualCanonResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def set_visual_canon_candidate(
+    project_id: str,
+    body: CreateVisualCanonCandidateRequest,
+    user: User,
+    service: Service,
+) -> VisualCanonResponse:
+    return await service.set_visual_canon_candidate(user.id, project_id, body)
+
+
+@router.post(
+    "/visual-canons/{canon_id}/approve",
+    response_model=VisualCanonResponse,
+)
+async def approve_visual_canon(
+    canon_id: str,
+    body: ApproveVisualCanonRequest,
+    user: User,
+    service: Service,
+) -> VisualCanonResponse:
+    return await service.approve_visual_canon(user.id, canon_id, body)
 
 
 @router.get(
@@ -161,3 +206,22 @@ async def save_shot_prompt(
     service: Service,
 ) -> ChapterAdaptationResponse:
     return await service.save_prompt(user.id, adaptation_id, shot_id, body)
+
+
+@router.put(
+    "/chapter-adaptations/{adaptation_id}/shots/{shot_id}/visual-references",
+    response_model=ShotVisualReferenceSetResponse,
+)
+async def save_shot_visual_references(
+    adaptation_id: str,
+    shot_id: str,
+    body: SaveShotVisualReferencesRequest,
+    user: User,
+    service: Service,
+) -> ShotVisualReferenceSetResponse:
+    return await service.save_shot_visual_references(
+        user.id,
+        adaptation_id,
+        shot_id,
+        body,
+    )

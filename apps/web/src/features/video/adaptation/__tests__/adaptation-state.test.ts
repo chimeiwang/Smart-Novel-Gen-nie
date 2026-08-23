@@ -9,6 +9,7 @@ import {
   deleteCandidateShot,
   durationMetrics,
   flattenCandidateShots,
+  localCoverageFindings,
   mergeShotWithNext,
   mergeSceneWithNext,
   restoreCandidateShot,
@@ -17,10 +18,12 @@ import type { AdaptationCandidate } from "../types";
 
 function candidate(): AdaptationCandidate {
   return {
-    schemaVersion: "chapter_adaptation_plan_v2",
+    schemaVersion: "chapter_adaptation_plan_v3",
     adaptationId: "adaptation-1",
     sourceHash: "a".repeat(64),
     suggestedEpisodeBreakAfterShotKeys: [],
+    reviewSummary: "镜头职责可供作者继续复核",
+    reviewFindings: [],
     scenes: [{
       sceneKey: "SC01",
       title: "雨夜书房",
@@ -33,19 +36,29 @@ function candidate(): AdaptationCandidate {
         title: "钥匙揭示危险",
         dramaticTurn: "人物意识到危险",
         visualStrategy: "空间、反应和物件揭示",
+        coverageGoals: [{
+          goalKey: "G01",
+          kind: "story_information",
+          priority: "essential",
+          description: "观众确认钥匙带来危险",
+        }],
         sourceRanges: [{ start: 0, end: 8, sourceText: "甲乙丙丁戊己庚辛" }],
         shots: [
           {
             shotKey: "S01",
             title: "建立书房",
             narrativePurpose: "establishing",
-            adaptationType: "supplemental",
+            storyFunction: "交代人物所在空间",
+            audienceGain: "观众看清人物与入口关系",
+            coveredGoalKeys: ["G01"],
+            sourceRelation: "supplemental",
             shotScale: "long",
             cameraAngle: "eye_level",
             cameraMovement: "locked",
             visualIntent: "建立空间",
-            audioMode: "ambient",
-            audioIntent: "雨声",
+            speechMode: "none",
+            spokenText: null,
+            soundDesign: "雨声",
             cutReason: "进入新场景先建立空间",
             timelineDurationMs: 2000,
             sourceRanges: [],
@@ -54,13 +67,17 @@ function candidate(): AdaptationCandidate {
             shotKey: "S02",
             title: "钥匙落桌",
             narrativePurpose: "reveal",
-            adaptationType: "direct",
+            storyFunction: "揭示关键物件",
+            audienceGain: "观众意识到危险已经发生",
+            coveredGoalKeys: ["G01"],
+            sourceRelation: "direct",
             shotScale: "close",
             cameraAngle: "eye_level",
             cameraMovement: "push_in",
             visualIntent: "钥匙落桌",
-            audioMode: "ambient",
-            audioIntent: "金属声",
+            speechMode: "none",
+            spokenText: null,
+            soundDesign: "金属声",
             cutReason: "关键物件改变信息量",
             timelineDurationMs: 1500,
             sourceRanges: [{ start: 0, end: 4, sourceText: "甲乙丙丁" }],
@@ -125,6 +142,18 @@ describe("章节影视化候选纯状态", () => {
     assert.equal(mergeShotWithNext(value, "S01"), null);
   });
 
+  it("未覆盖叙事目标只形成可见建议，不阻止候选继续编辑", () => {
+    const value = candidate();
+    value.scenes[0]!.beats[0]!.shots.forEach((shot) => {
+      shot.coveredGoalKeys = [];
+    });
+
+    const findings = localCoverageFindings(value);
+
+    assert.ok(findings.some((finding) => finding.message === "必要叙事目标尚未覆盖"));
+    assert.equal(flattenCandidateShots(value).length, 2);
+  });
+
   it("计算原文覆盖和短视频节奏分布", () => {
     const value = candidate();
     assert.equal(candidateSourceCoverage(value, 8), 50);
@@ -149,7 +178,18 @@ describe("章节影视化候选纯状态", () => {
       title: "二层平台",
       locationLabel: "黄铜匣前",
       timeLabel: "第九声钟后",
-      beats: [{ ...value.scenes[0]!.beats[0]!, beatKey: "B02" }],
+      beats: [{
+        ...value.scenes[0]!.beats[0]!,
+        beatKey: "B02",
+        coverageGoals: [{
+          ...value.scenes[0]!.beats[0]!.coverageGoals[0]!,
+          goalKey: "G02",
+        }],
+        shots: value.scenes[0]!.beats[0]!.shots.map((shot) => ({
+          ...shot,
+          coveredGoalKeys: ["G02"],
+        })),
+      }],
     });
     const merged = mergeSceneWithNext(value, "SC01");
     assert.ok(merged);

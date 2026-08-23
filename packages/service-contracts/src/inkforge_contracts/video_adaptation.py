@@ -19,7 +19,22 @@ from pydantic import (
 from .video import AspectRatio, LongSerialSettingSnapshot, VideoPlanningModel
 
 ChapterPacingPreset = Literal["short_drama", "cinematic", "dialogue_driven"]
-ChapterAdaptationType = Literal["direct", "visualized", "voiceover", "supplemental"]
+ShotSourceRelation = Literal["direct", "derived", "supplemental"]
+ShotSpeechMode = Literal["none", "sync", "offscreen", "voiceover"]
+VisualSettingKind = Literal["character", "location", "item"]
+VisualCanonDuty = Literal["identity", "costume", "scene", "prop"]
+CoverageGoalKind = Literal[
+    "story_information",
+    "action",
+    "emotion",
+    "space",
+    "relationship",
+    "motif",
+    "transition",
+]
+CoverageGoalPriority = Literal["essential", "supporting"]
+ReviewFindingSeverity = Literal["notice", "warning"]
+ReviewFindingScope = Literal["plan", "scene", "beat", "shot"]
 ShotNarrativePurpose = Literal[
     "establishing",
     "action",
@@ -59,15 +74,6 @@ ShotCameraMovement = Literal[
     "handheld",
     "focus_shift",
 ]
-ShotAudioMode = Literal[
-    "sync_dialogue",
-    "offscreen_dialogue",
-    "voiceover",
-    "ambient",
-    "music",
-    "silence",
-]
-
 _MECHANICAL_CUT_MARKERS = (
     "说话人变化",
     "说话人切换",
@@ -101,19 +107,54 @@ class ChapterAdaptationSourceRange(VideoAdaptationContractModel):
         return self
 
 
+class BeatCoverageGoal(VideoAdaptationContractModel):
+    """一个节拍希望观众获得的内容，不预设必须使用哪类镜头完成。"""
+
+    goalKey: str = Field(pattern=r"^G[0-9]{2,3}$")
+    kind: CoverageGoalKind
+    priority: CoverageGoalPriority
+    description: str = Field(min_length=1, max_length=500)
+
+
+class CinematicReviewFinding(VideoAdaptationContractModel):
+    """面向作者的非阻断审镜发现。"""
+
+    severity: ReviewFindingSeverity
+    scope: ReviewFindingScope
+    scopeKey: str | None = Field(default=None, min_length=1, max_length=16)
+    message: str = Field(min_length=1, max_length=600)
+    evidence: str = Field(min_length=1, max_length=800)
+    suggestion: str = Field(min_length=1, max_length=800)
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> CinematicReviewFinding:
+        if self.scope == "plan" and self.scopeKey is not None:
+            raise ValueError("方案级审镜发现不能携带局部 Key")
+        if self.scope != "plan" and self.scopeKey is None:
+            raise ValueError("局部审镜发现必须携带作用域 Key")
+        return self
+
+
 class CinematicShotCandidate(VideoAdaptationContractModel):
     """候选镜头是一段连续机位和一个主要可见动作。"""
 
     shotKey: str = Field(pattern=r"^S[0-9]{2,3}$")
     title: str = Field(min_length=1, max_length=120)
     narrativePurpose: ShotNarrativePurpose
-    adaptationType: ChapterAdaptationType
+    storyFunction: str = Field(min_length=1, max_length=800)
+    audienceGain: str = Field(min_length=1, max_length=800)
+    coveredGoalKeys: list[str] = Field(default_factory=list, max_length=12)
+    sourceRelation: ShotSourceRelation
     shotScale: ShotScale
     cameraAngle: ShotCameraAngle
     cameraMovement: ShotCameraMovement
     visualIntent: str = Field(min_length=1, max_length=1_200)
-    audioMode: ShotAudioMode
-    audioIntent: str = Field(min_length=1, max_length=600)
+    speechMode: ShotSpeechMode
+    spokenText: Annotated[
+        str | None,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=800),
+    ] = None
+    soundDesign: str = Field(min_length=1, max_length=600)
     cutReason: str = Field(min_length=1, max_length=600)
     timelineDurationMs: int = Field(strict=True, ge=500, le=15_000)
     sourceRanges: list[ChapterAdaptationSourceRange] = Field(max_length=12)
@@ -122,11 +163,14 @@ class CinematicShotCandidate(VideoAdaptationContractModel):
     def validate_shot(self) -> CinematicShotCandidate:
         if self.timelineDurationMs % 500 != 0:
             raise ValueError("镜头时间线时长只允许 500ms 粒度")
-        if self.adaptationType == "supplemental":
-            if self.sourceRanges:
-                raise ValueError("补充镜头不能伪造原文来源")
-        elif not self.sourceRanges:
-            raise ValueError("非补充镜头至少需要一个原文来源")
+        if self.sourceRelation in {"direct", "derived"} and not self.sourceRanges:
+            raise ValueError("原文直呈或合理推导镜头至少需要一个原文来源")
+        if len(set(self.coveredGoalKeys)) != len(self.coveredGoalKeys):
+            raise ValueError("镜头承担的覆盖目标不能重复")
+        if self.speechMode == "none" and self.spokenText is not None:
+            raise ValueError("无对白镜头不能携带 spokenText")
+        if self.speechMode != "none" and self.spokenText is None:
+            raise ValueError("存在对白或旁白时必须提供 spokenText")
         if _is_mechanical_cut_reason(self.cutReason):
             raise ValueError("镜头不能使用说话人、句子或换行作为机械切镜理由")
         _validate_ordered_ranges(self.sourceRanges, label="镜头来源")
@@ -140,27 +184,30 @@ class DramaticBeatCandidate(VideoAdaptationContractModel):
     title: str = Field(min_length=1, max_length=160)
     dramaticTurn: str = Field(min_length=1, max_length=800)
     visualStrategy: str = Field(min_length=1, max_length=800)
+    coverageGoals: list[BeatCoverageGoal] = Field(min_length=1, max_length=12)
     sourceRanges: list[ChapterAdaptationSourceRange] = Field(min_length=1, max_length=24)
     shots: list[CinematicShotCandidate] = Field(min_length=1, max_length=40)
 
     @model_validator(mode="after")
     def validate_beat(self) -> DramaticBeatCandidate:
         _validate_ordered_ranges(self.sourceRanges, label="节拍来源")
+        goal_keys = [goal.goalKey for goal in self.coverageGoals]
+        if len(set(goal_keys)) != len(goal_keys):
+            raise ValueError("同一戏剧节拍的覆盖目标不能重复")
         for shot in self.shots:
+            if set(shot.coveredGoalKeys) - set(goal_keys):
+                raise ValueError(f"镜头 {shot.shotKey} 引用了所属节拍之外的覆盖目标")
             for source_range in shot.sourceRanges:
                 if not any(
                     beat_range.start <= source_range.start
                     and beat_range.end >= source_range.end
                     and source_range.sourceText
                     == beat_range.sourceText[
-                        source_range.start - beat_range.start :
-                        source_range.end - beat_range.start
+                        source_range.start - beat_range.start : source_range.end - beat_range.start
                     ]
                     for beat_range in self.sourceRanges
                 ):
-                    raise ValueError(
-                        f"镜头 {shot.shotKey} 的来源必须属于所属戏剧节拍"
-                    )
+                    raise ValueError(f"镜头 {shot.shotKey} 的来源必须属于所属戏剧节拍")
         return self
 
 
@@ -179,11 +226,13 @@ class CinematicSceneCandidate(VideoAdaptationContractModel):
 class ChapterAdaptationPlanCandidate(VideoAdaptationContractModel):
     """进入 ReviewArtifact 的完整 Scene → Beat → Shot 候选。"""
 
-    schemaVersion: Literal["chapter_adaptation_plan_v2"]
+    schemaVersion: Literal["chapter_adaptation_plan_v3"]
     adaptationId: str = Field(min_length=1)
     sourceHash: str = Field(pattern=r"^[0-9a-f]{64}$")
     scenes: list[CinematicSceneCandidate] = Field(min_length=1, max_length=30)
     suggestedEpisodeBreakAfterShotKeys: list[str] = Field(default_factory=list, max_length=119)
+    reviewSummary: str | None = Field(default=None, min_length=1, max_length=1_200)
+    reviewFindings: list[CinematicReviewFinding] = Field(default_factory=list, max_length=480)
 
     @model_validator(mode="after")
     def validate_timeline(self) -> ChapterAdaptationPlanCandidate:
@@ -194,6 +243,10 @@ class ChapterAdaptationPlanCandidate(VideoAdaptationContractModel):
         beat_keys = [beat.beatKey for beat in beats]
         if beat_keys != _ordered_keys("B", len(beat_keys)):
             raise ValueError("戏剧节拍 Key 必须从 B01 连续递增")
+        goals = [goal for beat in beats for goal in beat.coverageGoals]
+        goal_keys = [goal.goalKey for goal in goals]
+        if goal_keys != _ordered_keys("G", len(goal_keys)):
+            raise ValueError("覆盖目标 Key 必须从 G01 连续递增")
         shots = [shot for beat in beats for shot in beat.shots]
         shot_keys = [shot.shotKey for shot in shots]
         if len(shots) > 120:
@@ -208,6 +261,14 @@ class ChapterAdaptationPlanCandidate(VideoAdaptationContractModel):
             raise ValueError("建议分集边界只能引用非末尾镜头")
         if boundaries != sorted(boundaries, key=positions.__getitem__):
             raise ValueError("建议分集边界必须按镜头顺序排列")
+        valid_scope_keys = {
+            "scene": set(scene_keys),
+            "beat": set(beat_keys),
+            "shot": set(shot_keys),
+        }
+        for finding in self.reviewFindings:
+            if finding.scope != "plan" and finding.scopeKey not in valid_scope_keys[finding.scope]:
+                raise ValueError("审镜发现引用了方案之外的作用域 Key")
         return self
 
 
@@ -223,6 +284,7 @@ class FormalDramaticBeat(VideoAdaptationContractModel):
     title: str
     dramaticTurn: str
     visualStrategy: str
+    coverageGoals: list[BeatCoverageGoal]
     sourceRanges: list[ChapterAdaptationSourceRange]
     shots: list[FormalCinematicShot]
 
@@ -239,13 +301,22 @@ class FormalCinematicScene(VideoAdaptationContractModel):
 
 
 class FormalChapterAdaptationPlan(VideoAdaptationContractModel):
-    schemaVersion: Literal["chapter_adaptation_plan_v2"]
+    schemaVersion: Literal["chapter_adaptation_plan_v3"]
     planVersionId: str = Field(min_length=1)
     versionNo: int = Field(ge=1)
+    basedOnVersionId: str | None = None
     adaptationId: str = Field(min_length=1)
     sourceHash: str = Field(pattern=r"^[0-9a-f]{64}$")
     scenes: list[FormalCinematicScene]
     episodeBreakAfterShotKeys: list[str] = Field(default_factory=list)
+
+
+class CoverageGoalDraft(VideoAdaptationContractModel):
+    """模型只描述目标，稳定 G 编号由 Agent 按时间线物化。"""
+
+    kind: CoverageGoalKind
+    priority: CoverageGoalPriority
+    description: str = Field(min_length=1, max_length=500)
 
 
 class DramaticBeatDraft(VideoAdaptationContractModel):
@@ -255,6 +326,7 @@ class DramaticBeatDraft(VideoAdaptationContractModel):
     sourceUnitIds: list[str] = Field(min_length=1)
     dramaticTurn: str = Field(min_length=1, max_length=800)
     visualStrategy: str = Field(min_length=1, max_length=800)
+    coverageGoals: list[CoverageGoalDraft] = Field(min_length=1, max_length=12)
 
 
 class DramaticSceneDraft(VideoAdaptationContractModel):
@@ -276,6 +348,7 @@ class DramaticBeatCheckpoint(VideoAdaptationContractModel):
     sourceUnitIds: list[str]
     dramaticTurn: str
     visualStrategy: str
+    coverageGoals: list[BeatCoverageGoal]
 
 
 class DramaticSceneCheckpoint(VideoAdaptationContractModel):
@@ -289,23 +362,26 @@ class DramaticSceneCheckpoint(VideoAdaptationContractModel):
 
 
 class DramaticStructureCheckpoint(VideoAdaptationContractModel):
-    schemaVersion: Literal["dramatic_structure_v2_1"] = "dramatic_structure_v2_1"
+    schemaVersion: Literal["dramatic_structure_v3"] = "dramatic_structure_v3"
     scenes: list[DramaticSceneCheckpoint]
 
 
 class CinematicShotDesignDraft(VideoAdaptationContractModel):
-    """模型第二阶段只引用服务器生成的 beatKey 和 sourceUnitIds。"""
+    """模型第二阶段在服务器指定的 Beat 槽内，只引用 sourceUnitIds 和 Goal Key。"""
 
-    beatKey: str = Field(pattern=r"^B[0-9]{2,3}$")
     title: str = Field(min_length=1, max_length=120)
     narrativePurpose: str = Field(min_length=1, max_length=80)
-    adaptationType: str = Field(min_length=1, max_length=80)
+    storyFunction: str = Field(min_length=1, max_length=800)
+    audienceGain: str = Field(min_length=1, max_length=800)
+    coveredGoalKeys: list[str] = Field(min_length=1, max_length=12)
+    sourceRelation: str = Field(min_length=1, max_length=80)
     shotScale: str = Field(min_length=1, max_length=80)
     cameraAngle: str = Field(min_length=1, max_length=80)
     cameraMovement: str = Field(min_length=1, max_length=80)
     visualIntent: str = Field(min_length=1, max_length=1_200)
-    audioMode: str = Field(min_length=1, max_length=80)
-    audioIntent: str = Field(min_length=1, max_length=600)
+    speechMode: str = Field(min_length=1, max_length=80)
+    spokenText: str | None = Field(default=None, min_length=1, max_length=800)
+    soundDesign: str = Field(min_length=1, max_length=600)
     cutReason: str = Field(min_length=1, max_length=600)
     # 模型草案兼容供应商常见的秒、毫秒和带单位字符串；正式候选由 Agent 归一为严格整数。
     timelineDurationMs: int | float | str
@@ -313,14 +389,15 @@ class CinematicShotDesignDraft(VideoAdaptationContractModel):
 
     @model_validator(mode="after")
     def validate_design(self) -> CinematicShotDesignDraft:
-        # adaptationType、来源有无和 500ms 粒度由 Agent 根据来源数组确定性归一。
+        # 来源关系、目标归属和 500ms 粒度由 Agent 根据 checkpoint 确定性归一。
         if _is_mechanical_cut_reason(self.cutReason):
             raise ValueError("镜头不能使用说话人、句子或换行作为机械切镜理由")
         return self
 
 
 class CinematicShotDesignResult(VideoAdaptationContractModel):
-    shots: list[CinematicShotDesignDraft] = Field(min_length=1, max_length=120)
+    # Agent 在调用前把它改造成以全部 B Key 为 required properties 的闭合对象。
+    beatsByKey: dict[str, list[CinematicShotDesignDraft]]
     suggestedEpisodeBreakAfterShotNumbers: list[int] = Field(default_factory=list)
 
 
@@ -328,6 +405,7 @@ class CinematicReviewResult(VideoAdaptationContractModel):
     decision: Literal["pass", "revise"]
     summary: str = Field(min_length=1, max_length=1_200)
     requiredChanges: list[str] = Field(default_factory=list, max_length=20)
+    findings: list[CinematicReviewFinding] = Field(default_factory=list, max_length=240)
 
     @model_validator(mode="after")
     def validate_review(self) -> CinematicReviewResult:
@@ -352,6 +430,12 @@ class ChapterAdaptationPlanJobPayload(VideoAdaptationContractModel):
     targetLanguage: str = Field(min_length=2, max_length=32)
     pacingPreset: ChapterPacingPreset
     targetEpisodeSeconds: Literal[60, 90, 120]
+    baseShotPlanVersionId: str | None = Field(default=None, min_length=1)
+    baseShotPlan: ChapterAdaptationPlanCandidate | None = None
+    revisionBrief: Annotated[
+        str | None,
+        StringConstraints(strip_whitespace=True, min_length=1, max_length=1_200),
+    ] = None
     planningRoute: Literal["responses_json_schema_v1"] = "responses_json_schema_v1"
     planningModel: VideoPlanningModel = "deepseek-v4-flash"
 
@@ -359,6 +443,66 @@ class ChapterAdaptationPlanJobPayload(VideoAdaptationContractModel):
     def validate_source(self) -> ChapterAdaptationPlanJobPayload:
         if hashlib.sha256(self.sourceText.encode("utf-8")).hexdigest() != self.sourceHash:
             raise ValueError("章节改编来源哈希不一致")
+        if (self.baseShotPlanVersionId is None) != (self.baseShotPlan is None):
+            raise ValueError("正式方案基线 ID 与内容必须同时提供")
+        if self.revisionBrief is not None and self.baseShotPlan is None:
+            raise ValueError("没有正式方案基线时不能提交修订重点")
+        if self.baseShotPlan is not None and (
+            self.baseShotPlan.adaptationId != self.adaptationId
+            or self.baseShotPlan.sourceHash != self.sourceHash
+        ):
+            raise ValueError("正式方案基线与章节改编来源不一致")
+        return self
+
+
+class ShotVisualReferenceSnapshot(VideoAdaptationContractModel):
+    """提示词与后续视频请求共同冻结的一份正式视觉参考。"""
+
+    canonVersionId: str = Field(min_length=1)
+    assetId: str = Field(min_length=1)
+    assetSha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    settingKind: VisualSettingKind
+    settingId: str = Field(min_length=1)
+    settingName: str = Field(min_length=1, max_length=200)
+    duty: VisualCanonDuty
+    variantKey: str = Field(pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$")
+    label: str = Field(min_length=1, max_length=120)
+    includeFeatures: list[
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+    ] = Field(default_factory=list, max_length=20)
+    excludeFeatures: list[
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=120)]
+    ] = Field(default_factory=list, max_length=20)
+    strength: int = Field(strict=True, ge=1, le=100)
+
+    @model_validator(mode="after")
+    def validate_duty(self) -> ShotVisualReferenceSnapshot:
+        expected_kind = {
+            "identity": "character",
+            "costume": "character",
+            "scene": "location",
+            "prop": "item",
+        }[self.duty]
+        if self.settingKind != expected_kind:
+            raise ValueError("视觉参考职责与文字设定类型不匹配")
+        if len(set(self.includeFeatures)) != len(self.includeFeatures):
+            raise ValueError("视觉参考包含特征不能重复")
+        if len(set(self.excludeFeatures)) != len(self.excludeFeatures):
+            raise ValueError("视觉参考排除特征不能重复")
+        return self
+
+
+class ShotVisualReferenceBundle(VideoAdaptationContractModel):
+    """一个目标镜头在任务创建时冻结的有序视觉参考集合。"""
+
+    shotKey: str = Field(pattern=r"^S[0-9]{2,3}$")
+    references: list[ShotVisualReferenceSnapshot] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_references(self) -> ShotVisualReferenceBundle:
+        version_ids = [item.canonVersionId for item in self.references]
+        if len(set(version_ids)) != len(version_ids):
+            raise ValueError("同一镜头不能重复绑定同一视觉设定版本")
         return self
 
 
@@ -377,6 +521,8 @@ class ChapterAdaptationPromptJobPayload(VideoAdaptationContractModel):
     ratio: AspectRatio
     targetLanguage: str = Field(min_length=2, max_length=32)
     settingSnapshot: LongSerialSettingSnapshot
+    # 空数组只兼容升级前已经入队的开发任务；新任务由 Core 为每个目标镜头完整冻结一项。
+    visualReferenceBundles: list[ShotVisualReferenceBundle] = Field(default_factory=list)
     planningRoute: Literal["responses_json_schema_v1"] = "responses_json_schema_v1"
     planningModel: VideoPlanningModel = "deepseek-v4-flash"
 
@@ -396,12 +542,13 @@ class ChapterAdaptationPromptJobPayload(VideoAdaptationContractModel):
             raise ValueError("逐镜提示词目标不能重复")
         if set(self.targetShotKeys) - plan_keys:
             raise ValueError("逐镜提示词引用了方案之外的镜头")
+        bundle_keys = [item.shotKey for item in self.visualReferenceBundles]
+        if bundle_keys and bundle_keys != self.targetShotKeys:
+            raise ValueError("视觉参考集合必须按目标镜头顺序完整冻结")
         return self
 
 
-type VideoAdaptationJobPayload = (
-    ChapterAdaptationPlanJobPayload | ChapterAdaptationPromptJobPayload
-)
+type VideoAdaptationJobPayload = ChapterAdaptationPlanJobPayload | ChapterAdaptationPromptJobPayload
 _VIDEO_ADAPTATION_JOB_ADAPTER: TypeAdapter[VideoAdaptationJobPayload] = TypeAdapter(
     VideoAdaptationJobPayload
 )
@@ -469,18 +616,25 @@ class SeedanceShotPromptSpec(VideoAdaptationContractModel):
 
     subjectAndScene: str = Field(min_length=1, max_length=600)
     visibleAction: str = Field(min_length=1, max_length=600)
-    performance: str = Field(min_length=1, max_length=500)
+    # 历史候选保留独立表演和连续性段；新模型 Schema 不再请求这两个字段。
+    performance: str | None = Field(default=None, min_length=1, max_length=500)
+    # 新模型按镜头内容选择性填写；物件、无人和只见手部的镜头必须为 null。
+    expressionAndGaze: str | None = Field(default=None, min_length=1, max_length=500)
     camera: str = Field(min_length=1, max_length=500)
     audio: str = Field(min_length=1, max_length=500)
-    continuity: str = Field(min_length=1, max_length=500)
-    negativeConstraints: list[
-        Annotated[str, StringConstraints(min_length=1, max_length=240)]
-    ] = Field(default_factory=list, max_length=12)
+    continuity: str | None = Field(default=None, min_length=1, max_length=500)
+    negativeConstraints: list[Annotated[str, StringConstraints(min_length=1, max_length=240)]] = (
+        Field(default_factory=list, max_length=12)
+    )
 
 
 class ShotPromptSpecCandidate(VideoAdaptationContractModel):
     shotKey: str = Field(pattern=r"^S[0-9]{2,3}$")
     spec: SeedanceShotPromptSpec
+    # 质量提醒由 Agent 门禁生成，模型不得自行提交；它不阻断用户继续编辑候选。
+    qualityWarnings: list[Annotated[str, StringConstraints(min_length=1, max_length=300)]] = Field(
+        default_factory=list, max_length=12
+    )
 
 
 class ShotPromptSpecResult(VideoAdaptationContractModel):
@@ -539,19 +693,25 @@ def compile_seedance_shot_prompt(
         raise ValueError("即梦提示词镜头时长必须是 500ms 到 15000ms 的 500ms 倍数")
     duration_seconds = timeline_duration_ms / 1000
     duration_text = (
-        str(int(duration_seconds))
-        if duration_seconds.is_integer()
-        else f"{duration_seconds:.1f}"
+        str(int(duration_seconds)) if duration_seconds.is_integer() else f"{duration_seconds:.1f}"
     )
     parts = [
         f"{ratio} 画幅，{duration_text} 秒",
         _sentence_content(spec.subjectAndScene),
         _sentence_content(spec.visibleAction),
-        f"表演：{_sentence_content(spec.performance)}",
-        f"摄影机：{_sentence_content(spec.camera)}",
-        f"声音：{_sentence_content(spec.audio)}",
-        f"连续性：{_sentence_content(spec.continuity)}",
     ]
+    if spec.performance is not None:
+        parts.append(f"表演：{_sentence_content(spec.performance)}")
+    if spec.expressionAndGaze is not None:
+        parts.append(f"表情与视线：{_sentence_content(spec.expressionAndGaze)}")
+    parts.extend(
+        [
+            f"摄影机：{_sentence_content(spec.camera)}",
+            f"声音：{_sentence_content(spec.audio)}",
+        ]
+    )
+    if spec.continuity is not None:
+        parts.append(f"连续性：{_sentence_content(spec.continuity)}")
     if spec.negativeConstraints:
         parts.append(
             f"禁止：{'；'.join(_sentence_content(item) for item in spec.negativeConstraints)}"
@@ -583,8 +743,7 @@ def _is_mechanical_cut_reason(reason: str) -> bool:
 
     normalized = "".join(reason.split())
     return normalized in _MECHANICAL_CUT_MARKERS or (
-        len(normalized) <= 18
-        and any(marker in normalized for marker in _MECHANICAL_CUT_MARKERS)
+        len(normalized) <= 18 and any(marker in normalized for marker in _MECHANICAL_CUT_MARKERS)
     )
 
 

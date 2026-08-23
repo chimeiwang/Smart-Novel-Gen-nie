@@ -48,8 +48,7 @@ def validate_plan_against_source(
             ]:
                 if (
                     source_range.end > len(source_text)
-                    or source_text[source_range.start : source_range.end]
-                    != source_range.sourceText
+                    or source_text[source_range.start : source_range.end] != source_range.sourceText
                 ):
                     raise ApiError(
                         status_code=409,

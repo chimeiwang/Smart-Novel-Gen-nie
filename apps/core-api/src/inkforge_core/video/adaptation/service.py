@@ -14,17 +14,24 @@ from inkforge_contracts.video_adaptation import (
 from ...errors import ApiError
 from .repository import VideoAdaptationRepository
 from .schemas import (
+    ApproveVisualCanonRequest,
     ChapterAdaptationListResponse,
     ChapterAdaptationResponse,
     ChapterAdaptationTaskAcceptedResponse,
     ConfirmAdaptationPlanRequest,
     CreateChapterAdaptationRequest,
+    CreateVisualCanonCandidateRequest,
     DiscardAdaptationCandidateRequest,
     SaveEpisodePlanRequest,
     SaveShotPromptRequest,
+    SaveShotVisualReferencesRequest,
+    ShotVisualReferenceSetResponse,
     StartPromptRunRequest,
     StartShotPlanRunRequest,
+    VisualCanonLibraryResponse,
+    VisualCanonResponse,
 )
+from .visual_canon import VideoVisualCanonRepository
 
 
 class VideoAdaptationService:
@@ -33,10 +40,12 @@ class VideoAdaptationService:
     def __init__(
         self,
         repository: VideoAdaptationRepository,
+        visual_canon_repository: VideoVisualCanonRepository,
         *,
         video_preview_enabled: bool,
     ) -> None:
         self._repository = repository
+        self._visual_canon_repository = visual_canon_repository
         self._video_preview_enabled = video_preview_enabled
 
     async def create_adaptation(
@@ -136,6 +145,50 @@ class VideoAdaptationService:
     ) -> ChapterAdaptationResponse:
         self._require_enabled()
         return await self._repository.save_prompt(
+            user_id,
+            adaptation_id,
+            shot_id,
+            request,
+        )
+
+    async def list_visual_canons(
+        self,
+        user_id: str,
+        project_id: str,
+    ) -> VisualCanonLibraryResponse:
+        return await self._visual_canon_repository.list_canons(user_id, project_id)
+
+    async def set_visual_canon_candidate(
+        self,
+        user_id: str,
+        project_id: str,
+        request: CreateVisualCanonCandidateRequest,
+    ) -> VisualCanonResponse:
+        self._require_enabled()
+        return await self._visual_canon_repository.set_candidate(
+            user_id,
+            project_id,
+            request,
+        )
+
+    async def approve_visual_canon(
+        self,
+        user_id: str,
+        canon_id: str,
+        request: ApproveVisualCanonRequest,
+    ) -> VisualCanonResponse:
+        self._require_enabled()
+        return await self._visual_canon_repository.approve(user_id, canon_id, request)
+
+    async def save_shot_visual_references(
+        self,
+        user_id: str,
+        adaptation_id: str,
+        shot_id: str,
+        request: SaveShotVisualReferencesRequest,
+    ) -> ShotVisualReferenceSetResponse:
+        self._require_enabled()
+        return await self._visual_canon_repository.save_shot_references(
             user_id,
             adaptation_id,
             shot_id,

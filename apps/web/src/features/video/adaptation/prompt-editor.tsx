@@ -1,9 +1,11 @@
 "use client";
+/* eslint-disable @next/next/no-img-element */
 
 import { countTextLength } from "@/shared/lib/word-count";
 import { flattenFormalShots, groupFormalEpisodes } from "./adaptation-state";
 import { formatDuration, shotScaleLabel } from "./shot-timeline";
-import type { FormalPlan, FormalShot, PromptCandidate, PromptVersion } from "./types";
+import type { FormalPlan, FormalShot, PromptCandidate, PromptVersion, ShotVisualReference } from "./types";
+import { assetPreviewUrl, dutyLabel, sameVisualReferences } from "./visual-canon-state";
 
 export function PromptEditor({
   plan,
@@ -14,6 +16,8 @@ export function PromptEditor({
   breakAfterShotIds,
   promptText,
   aspectRatio,
+  visualReferences,
+  currentVisualReferences,
   taskActive,
   working,
   onSelect,
@@ -29,6 +33,8 @@ export function PromptEditor({
   breakAfterShotIds: string[];
   promptText: string;
   aspectRatio: string;
+  visualReferences: ShotVisualReference[];
+  currentVisualReferences: ShotVisualReference[];
   taskActive: boolean;
   working: string | null;
   onSelect: (shotKey: string) => void;
@@ -39,6 +45,13 @@ export function PromptEditor({
   const shots = flattenFormalShots(plan);
   const navigationEpisodes = buildPromptNavigation(plan, breakAfterShotIds);
   const selectedVersion = versions.find((item) => item.shotId === selectedShot?.id) ?? null;
+  const hasFrozenReferenceSnapshot = Boolean(candidate || selectedVersion);
+  const referenceSnapshotChanged = hasFrozenReferenceSnapshot && !sameVisualReferences(
+    visualReferences,
+    currentVisualReferences,
+  );
+  const referenceSnapshotOwner = candidate ? "当前 AI 候选" : "当前正式版本";
+  const referenceSnapshotMoment = candidate ? "生成时" : "保存时";
   return (
     <div className="adaptation-prompt-layout">
       <aside className="adaptation-prompt-shots">
@@ -81,16 +94,59 @@ export function PromptEditor({
               <div><strong>切镜理由</strong><p>{selectedShot.cutReason}</p></div>
               <div><strong>来源</strong><p>{selectedShot.sourceRanges.map((range) => range.sourceText).join(" / ") || "补充镜头，无独立原句"}</p></div>
             </div>
+            {visualReferences.length ? (
+              <section className="adaptation-prompt-references" aria-label="随提示词提交的视觉参考">
+                <header><strong>本版本绑定 {visualReferences.length} 张参考图</strong><span>生成视频时需连同提示词一起提交</span></header>
+                <div>{visualReferences.map((reference) => (
+                  <figure key={reference.canonVersionId}>
+                    <img src={assetPreviewUrl(reference.assetId)} alt={`${reference.settingName}${dutyLabel(reference.duty)}`} />
+                    <figcaption><b>{reference.settingName}</b><span>{dutyLabel(reference.duty)} · {reference.label}</span><small>强度 {reference.strength}</small></figcaption>
+                  </figure>
+                ))}</div>
+              </section>
+            ) : (
+              <div className="notice notice-warning">
+                {referenceSnapshotChanged
+                  ? `${referenceSnapshotOwner}${referenceSnapshotMoment}未绑定视觉参考，历史快照不会自动采用后来新增的图片。`
+                  : "当前提示词没有绑定视觉参考，角色身份、服装和场景稳定性仍主要依赖文字。"}
+              </div>
+            )}
+            {referenceSnapshotChanged ? (
+              <section className="adaptation-reference-change notice notice-warning">
+                <div>
+                  <strong>当前镜头参考已更新</strong>
+                  <span>
+                    {referenceSnapshotOwner}固定 {visualReferences.length} 张，当前镜头为 {currentVisualReferences.length} 张；
+                    重新生成候选后才会冻结当前版本与强度。
+                  </span>
+                </div>
+                <button
+                  className="button secondary sm"
+                  type="button"
+                  disabled={taskActive || working !== null}
+                  onClick={onGenerate}
+                >
+                  {taskActive ? "生成中..." : "按当前参考重新生成"}
+                </button>
+              </section>
+            ) : null}
+            {candidate?.qualityWarnings?.length ? (
+              <aside className="adaptation-prompt-warnings" aria-label="AI 候选质量提醒">
+                <strong>AI 候选仍有 {candidate.qualityWarnings.length} 项需确认</strong>
+                <ul>{candidate.qualityWarnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>
+              </aside>
+            ) : null}
             {candidate ? (
               <details className="adaptation-prompt-spec">
                 <summary>查看 AI 结构化提示词依据</summary>
                 <dl>
                   <dt>主体与场景</dt><dd>{candidate.spec.subjectAndScene}</dd>
                   <dt>动作</dt><dd>{candidate.spec.visibleAction}</dd>
-                  <dt>表演</dt><dd>{candidate.spec.performance}</dd>
+                  {candidate.spec.performance ? <><dt>表演</dt><dd>{candidate.spec.performance}</dd></> : null}
+                  {candidate.spec.expressionAndGaze ? <><dt>表情与视线</dt><dd>{candidate.spec.expressionAndGaze}</dd></> : null}
                   <dt>摄影机</dt><dd>{candidate.spec.camera}</dd>
                   <dt>声音</dt><dd>{candidate.spec.audio}</dd>
-                  <dt>连续性</dt><dd>{candidate.spec.continuity}</dd>
+                  {candidate.spec.continuity ? <><dt>连续性</dt><dd>{candidate.spec.continuity}</dd></> : null}
                 </dl>
               </details>
             ) : null}

@@ -87,6 +87,7 @@ from .video.adaptation.internal_router import router as video_adaptation_interna
 from .video.adaptation.repository import VideoAdaptationRepository
 from .video.adaptation.router import router as video_adaptation_router
 from .video.adaptation.service import VideoAdaptationService
+from .video.adaptation.visual_canon import VideoVisualCanonRepository
 from .video.dispatcher import VideoTaskDispatcher
 from .video.internal_router import router as video_internal_router
 from .video.repository import VideoRepository
@@ -277,9 +278,7 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
             event_store,
         )
     if getattr(app.state, "writing_outbox_readiness", None) is None:
-        app.state.writing_outbox_readiness = WritingOutboxReadiness(
-            writing_outbox_repository
-        )
+        app.state.writing_outbox_readiness = WritingOutboxReadiness(writing_outbox_repository)
     app.state.writing_task_repository = writing_task_repository
     app.state.writing_command_repository = writing_command_repository
     writing_submitter = WritingTaskAgentSubmitter(agent_client) if agent_client else None
@@ -324,6 +323,7 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
         )
         app.state.video_adaptation_service = VideoAdaptationService(
             video_adaptation_repository,
+            VideoVisualCanonRepository(session_factory),
             video_preview_enabled=True,
         )
     if (
@@ -344,10 +344,7 @@ def _configure_business_services(app: FastAPI, settings: Settings) -> None:
         WritingRunCancellationRepository(session_factory),
         command_dispatcher,
     )
-    if (
-        command_dispatcher is not None
-        and getattr(app.state, "writing_reconciler", None) is None
-    ):
+    if command_dispatcher is not None and getattr(app.state, "writing_reconciler", None) is None:
         app.state.writing_reconciler = WritingRunReconciler(
             writing_task_repository,
             command_dispatcher,

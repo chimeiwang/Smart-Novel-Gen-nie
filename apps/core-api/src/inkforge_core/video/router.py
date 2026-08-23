@@ -225,3 +225,15 @@ async def download_asset(
 
     path, mime_type, filename = await service.get_asset_file(user.id, asset_id)
     return FileResponse(path, media_type=mime_type, filename=filename)
+
+
+@router.get("/assets/{asset_id}/preview", response_class=FileResponse)
+async def preview_asset(
+    asset_id: str,
+    user: User,
+    service: Service,
+) -> FileResponse:
+    """经过归属校验后以内联响应预览视觉设定图片。"""
+
+    path, mime_type, _filename = await service.get_asset_file(user.id, asset_id)
+    return FileResponse(path, media_type=mime_type)

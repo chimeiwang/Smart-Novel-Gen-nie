@@ -12,6 +12,7 @@ def test_video_adaptation_has_independent_service_modules() -> None:
         "apps/core-api/src/inkforge_core/video/adaptation/repository.py",
         "apps/core-api/src/inkforge_core/video/adaptation/router.py",
         "apps/core-api/src/inkforge_core/video/adaptation/validation.py",
+        "apps/core-api/src/inkforge_core/video/adaptation/visual_canon.py",
         "apps/agent-service/src/inkforge_agents/jobs/video_adaptation.py",
         "apps/agent-service/src/inkforge_agents/jobs/video_dispatch.py",
         "packages/service-contracts/src/inkforge_contracts/video_adaptation.py",
@@ -65,4 +66,8 @@ def test_dev_migration_refuses_every_database_except_novelwriterdev() -> None:
     assert '"VideoShot_beat_scene_plan_fkey"' in source
     assert '"VideoChapterAdaptationHead_current_episode_plan_fkey"' in source
     assert '"VideoShotPromptVersion_source_task_plan_fkey"' in source
+    assert 'CREATE TABLE IF NOT EXISTS "VideoVisualCanon"' in source
+    assert 'CREATE TABLE IF NOT EXISTS "VideoVisualCanonVersion"' in source
+    assert 'CREATE TABLE IF NOT EXISTS "VideoShotVisualReferenceSet"' in source
+    assert 'CREATE TABLE IF NOT EXISTS "VideoShotPromptVisualReference"' in source
     assert 'ALTER TABLE "VideoScene"' not in source

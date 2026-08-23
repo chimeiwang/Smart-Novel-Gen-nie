@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import json
-from typing import Literal, cast
+from typing import Any, Literal, cast
 
 from inkforge_contracts.video import AspectRatio
 from inkforge_contracts.video_adaptation import (
+    BeatCoverageGoal,
     ChapterAdaptationPlanCandidate,
+    ChapterAdaptationPromptJobPayload,
     ChapterAdaptationSourceRange,
-    ChapterAdaptationType,
     CinematicSceneCandidate,
     CinematicShotCandidate,
     DramaticBeatCandidate,
@@ -17,13 +18,15 @@ from inkforge_contracts.video_adaptation import (
     FormalCinematicScene,
     FormalCinematicShot,
     FormalDramaticBeat,
-    ShotAudioMode,
     ShotCameraAngle,
     ShotCameraMovement,
     ShotNarrativePurpose,
     ShotPromptSpecBatch,
     ShotScale,
+    ShotSourceRelation,
+    ShotSpeechMode,
     compile_seedance_shot_prompt,
+    parse_video_adaptation_job_payload,
 )
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,6 +57,11 @@ from .schemas import (
     EpisodePlanResponse,
     ShotPromptCandidateResponse,
     ShotPromptVersionResponse,
+    ShotVisualReferenceSetResponse,
+)
+from .visual_canon import (
+    load_prompt_visual_reference_map,
+    load_shot_visual_reference_sets,
 )
 
 
@@ -114,7 +122,7 @@ async def load_adaptation_response(
         .limit(1)
     )
     candidate_plan = _candidate_from_artifact(artifact, adaptation.id)
-    current_plan, episode_plan, prompt_versions = await _load_formal_plan(
+    current_plan, episode_plan, prompt_versions, visual_reference_sets = await _load_formal_plan(
         session,
         adaptation=adaptation,
         head=head,
@@ -150,6 +158,7 @@ async def load_adaptation_response(
         episodePlan=episode_plan,
         promptVersions=prompt_versions,
         promptCandidates=prompt_candidates,
+        visualReferenceSets=visual_reference_sets,
         reviewArtifact=(
             ChapterAdaptationReviewSummary(
                 id=artifact.id,
@@ -208,9 +217,10 @@ async def _load_formal_plan(
     FormalChapterAdaptationPlan | None,
     EpisodePlanResponse | None,
     list[ShotPromptVersionResponse],
+    list[ShotVisualReferenceSetResponse],
 ]:
     if head.currentShotPlanVersionId is None:
-        return None, None, []
+        return None, None, [], []
     version = await session.get(VideoShotPlanVersion, head.currentShotPlanVersionId)
     if version is None or version.adaptationId != adaptation.id:
         raise ApiError(
@@ -287,21 +297,65 @@ async def _load_formal_plan(
                 shot_anchor.endCodePoint,
             )
         )
+    goals_by_beat: dict[str, list[BeatCoverageGoal]] = {}
+    goal_number = 0
+    for beat in beats:
+        if beat.coverageGoalsJson is None:
+            # v1 正式数据没有覆盖目标；提供明确兼容投影，不改写旧版本行。
+            goal_number += 1
+            goals_by_beat[beat.id] = [
+                BeatCoverageGoal(
+                    goalKey=f"G{goal_number:02d}",
+                    kind="story_information",
+                    priority="essential",
+                    description=beat.dramaticTurn,
+                )
+            ]
+            continue
+        try:
+            goals = [
+                BeatCoverageGoal.model_validate(item) for item in json.loads(beat.coverageGoalsJson)
+            ]
+        except (TypeError, ValueError) as exc:
+            raise ApiError(
+                status_code=409,
+                code="VIDEO_ADAPTATION_PLAN_INVALID",
+                message="正式镜头方案的覆盖目标数据损坏",
+            ) from exc
+        goals_by_beat[beat.id] = goals
+        goal_number += len(goals)
     shots_by_beat: dict[str, list[FormalCinematicShot]] = {}
     for shot in shots:
+        goal_keys = [goal.goalKey for goal in goals_by_beat.get(shot.beatId, [])]
+        covered_goal_keys = _json_string_list(
+            shot.coveredGoalKeysJson,
+            fallback=goal_keys[:1],
+            error_message="正式镜头方案的目标绑定数据损坏",
+        )
+        speech_mode = _formal_speech_mode(shot)
         shots_by_beat.setdefault(shot.beatId, []).append(
             FormalCinematicShot(
                 id=shot.id,
                 shotKey=shot.shotKey,
                 title=shot.title,
                 narrativePurpose=cast(ShotNarrativePurpose, shot.narrativePurpose),
-                adaptationType=cast(ChapterAdaptationType, shot.adaptationType),
+                storyFunction=shot.storyFunction or shot.cutReason,
+                audienceGain=shot.audienceGain or shot.visualIntent,
+                coveredGoalKeys=covered_goal_keys,
+                sourceRelation=_formal_source_relation(shot),
                 shotScale=cast(ShotScale, shot.shotScale),
                 cameraAngle=cast(ShotCameraAngle, shot.cameraAngle),
                 cameraMovement=cast(ShotCameraMovement, shot.cameraMovement),
                 visualIntent=shot.visualIntent,
-                audioMode=cast(ShotAudioMode, shot.audioMode),
-                audioIntent=shot.audioIntent,
+                speechMode=speech_mode,
+                spokenText=(
+                    shot.spokenText
+                    if shot.spokenText is not None
+                    else shot.audioIntent
+                    if speech_mode != "none"
+                    else None
+                ),
+                soundDesign=shot.audioIntent,
                 cutReason=shot.cutReason,
                 timelineDurationMs=shot.timelineDurationMs,
                 sourceRanges=shot_anchor_map.get(shot.id, []),
@@ -316,6 +370,7 @@ async def _load_formal_plan(
                 title=beat.title,
                 dramaticTurn=beat.dramaticTurn,
                 visualStrategy=beat.visualStrategy,
+                coverageGoals=goals_by_beat[beat.id],
                 sourceRanges=beat_anchor_map.get(beat.id, []),
                 shots=shots_by_beat.get(beat.id, []),
             )
@@ -343,16 +398,18 @@ async def _load_formal_plan(
         else []
     )
     plan = FormalChapterAdaptationPlan(
-        schemaVersion="chapter_adaptation_plan_v2",
+        schemaVersion="chapter_adaptation_plan_v3",
         planVersionId=version.id,
         versionNo=version.versionNo,
+        basedOnVersionId=version.basedOnVersionId,
         adaptationId=adaptation.id,
         sourceHash=adaptation.sourceHash,
         scenes=formal_scenes,
         episodeBreakAfterShotKeys=episode_break_keys,
     )
     prompt_versions = await _load_prompt_versions(session, shots=shots)
-    return plan, episode_plan, prompt_versions
+    visual_reference_sets = await load_shot_visual_reference_sets(session, shots=shots)
+    return plan, episode_plan, prompt_versions, visual_reference_sets
 
 
 async def _load_episode_plan(
@@ -405,9 +462,7 @@ async def _load_prompt_versions(
     heads = list(
         (
             await session.scalars(
-                select(VideoShotPromptHead).where(
-                    VideoShotPromptHead.shotId.in_(shot_map)
-                )
+                select(VideoShotPromptHead).where(VideoShotPromptHead.shotId.in_(shot_map))
             )
         ).all()
     )
@@ -417,11 +472,13 @@ async def _load_prompt_versions(
     versions = list(
         (
             await session.scalars(
-                select(VideoShotPromptVersion).where(
-                    VideoShotPromptVersion.id.in_(version_ids)
-                )
+                select(VideoShotPromptVersion).where(VideoShotPromptVersion.id.in_(version_ids))
             )
         ).all()
+    )
+    references_by_version = await load_prompt_visual_reference_map(
+        session,
+        prompt_version_ids=[item.id for item in versions],
     )
     head_by_shot = {head.shotId: head for head in heads}
     return [
@@ -433,9 +490,9 @@ async def _load_prompt_versions(
             generatedText=version.generatedText,
             currentText=version.currentText,
             promptEdited=(
-                version.generatedText is None
-                or version.currentText != version.generatedText
+                version.generatedText is None or version.currentText != version.generatedText
             ),
+            visualReferences=references_by_version.get(version.id, []),
             headRevision=head_by_shot[version.shotId].revision,
             createdAt=version.createdAt,
         )
@@ -456,9 +513,55 @@ def _candidate_from_artifact(
             "adaptationId": adaptation_id,
         }:
             return None
-        return ChapterAdaptationPlanCandidate.model_validate(payload["candidate"])
+        raw_candidate = payload["candidate"]
+        if raw_candidate.get("schemaVersion") == "chapter_adaptation_plan_v2":
+            raw_candidate = _upgrade_legacy_candidate(raw_candidate)
+        return ChapterAdaptationPlanCandidate.model_validate(raw_candidate)
     except (AttributeError, KeyError, TypeError, ValueError):
         return None
+
+
+def _upgrade_legacy_candidate(value: dict[str, Any]) -> dict[str, Any]:
+    """只读兼容尚未处理的 v2 ReviewArtifact，不改写原 Artifact。"""
+
+    upgraded = cast(dict[str, Any], json.loads(json.dumps(value, ensure_ascii=False)))
+    upgraded["schemaVersion"] = "chapter_adaptation_plan_v3"
+    upgraded.setdefault("reviewSummary", None)
+    upgraded.setdefault("reviewFindings", [])
+    goal_number = 0
+    for scene in upgraded.get("scenes", []):
+        for beat in scene.get("beats", []):
+            goal_number += 1
+            goal_key = f"G{goal_number:02d}"
+            beat["coverageGoals"] = [
+                {
+                    "goalKey": goal_key,
+                    "kind": "story_information",
+                    "priority": "essential",
+                    "description": beat.get("dramaticTurn") or beat.get("title"),
+                }
+            ]
+            for shot in beat.get("shots", []):
+                adaptation_type = shot.pop("adaptationType", "direct")
+                audio_mode = shot.pop("audioMode", "ambient")
+                audio_intent = shot.pop("audioIntent", "保持现场声音连续")
+                speech_mode = {
+                    "sync_dialogue": "sync",
+                    "offscreen_dialogue": "offscreen",
+                    "voiceover": "voiceover",
+                }.get(audio_mode, "none")
+                shot["storyFunction"] = shot.get("cutReason") or shot.get("visualIntent")
+                shot["audienceGain"] = shot.get("visualIntent") or shot.get("title")
+                shot["coveredGoalKeys"] = [goal_key]
+                shot["sourceRelation"] = {
+                    "supplemental": "supplemental",
+                    "visualized": "derived",
+                    "voiceover": "derived",
+                }.get(adaptation_type, "direct")
+                shot["speechMode"] = speech_mode
+                shot["spokenText"] = audio_intent if speech_mode != "none" else None
+                shot["soundDesign"] = audio_intent
+    return upgraded
 
 
 def _prompt_candidates_from_tasks(
@@ -496,6 +599,16 @@ def _prompt_candidates_from_tasks(
             batch = ShotPromptSpecBatch.model_validate(result["promptBatch"])
         except (KeyError, TypeError, ValueError):
             continue
+        visual_references_by_shot = {}
+        try:
+            payload = parse_video_adaptation_job_payload(task.requestJson)
+            if isinstance(payload, ChapterAdaptationPromptJobPayload):
+                visual_references_by_shot = {
+                    item.shotKey: item.references for item in payload.visualReferenceBundles
+                }
+        except (AttributeError, TypeError, ValueError):
+            # 升级前已完成的开发任务没有视觉参考字段，继续按空集合读取。
+            pass
         for item in batch.prompts:
             shot = shot_by_key.get(item.shotKey)
             if shot is None or shot.id in seen_shot_ids:
@@ -521,6 +634,8 @@ def _prompt_candidates_from_tasks(
                     shotKey=item.shotKey,
                     spec=item.spec,
                     compiledPrompt=compiled_prompt,
+                    visualReferences=visual_references_by_shot.get(item.shotKey, []),
+                    qualityWarnings=item.qualityWarnings,
                 )
             )
     shot_position = {shot.id: index for index, shot in enumerate(shot_by_key.values())}
@@ -532,6 +647,7 @@ def _task_response(task: VideoAdaptationTask) -> ChapterAdaptationTaskResponse:
         id=task.id,
         jobId=task.jobId,
         kind=cast(Literal["shot_plan", "shot_prompt"], task.kind),
+        baseShotPlanVersionId=task.baseShotPlanVersionId,
         workflow=task.workflow,
         status=task.status,
         checkpointStage=task.checkpointStage,
@@ -571,13 +687,61 @@ def _source_range(source_text: str, start: int, end: int) -> ChapterAdaptationSo
     )
 
 
+def _formal_source_relation(shot: VideoShot) -> ShotSourceRelation:
+    if shot.sourceRelation in {"direct", "derived", "supplemental"}:
+        return cast(ShotSourceRelation, shot.sourceRelation)
+    if shot.adaptationType == "supplemental":
+        return "supplemental"
+    if shot.adaptationType in {"visualized", "voiceover"}:
+        return "derived"
+    return "direct"
+
+
+def _formal_speech_mode(shot: VideoShot) -> ShotSpeechMode:
+    if shot.speechMode in {"none", "sync", "offscreen", "voiceover"}:
+        return cast(ShotSpeechMode, shot.speechMode)
+    return cast(
+        ShotSpeechMode,
+        {
+            "sync_dialogue": "sync",
+            "offscreen_dialogue": "offscreen",
+            "voiceover": "voiceover",
+        }.get(shot.audioMode, "none"),
+    )
+
+
+def _json_string_list(
+    value: str | None,
+    *,
+    fallback: list[str],
+    error_message: str,
+) -> list[str]:
+    if value is None:
+        return fallback
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError) as exc:
+        raise ApiError(
+            status_code=409,
+            code="VIDEO_ADAPTATION_PLAN_INVALID",
+            message=error_message,
+        ) from exc
+    if not isinstance(parsed, list) or any(not isinstance(item, str) for item in parsed):
+        raise ApiError(
+            status_code=409,
+            code="VIDEO_ADAPTATION_PLAN_INVALID",
+            message=error_message,
+        )
+    return parsed
+
+
 def candidate_from_formal_plan(
     plan: FormalChapterAdaptationPlan,
 ) -> ChapterAdaptationPlanCandidate:
     """移除数据库身份，只保留 Agent 需要的不可变镜头内容。"""
 
     return ChapterAdaptationPlanCandidate(
-        schemaVersion="chapter_adaptation_plan_v2",
+        schemaVersion="chapter_adaptation_plan_v3",
         adaptationId=plan.adaptationId,
         sourceHash=plan.sourceHash,
         scenes=[
@@ -594,6 +758,7 @@ def candidate_from_formal_plan(
                         title=beat.title,
                         dramaticTurn=beat.dramaticTurn,
                         visualStrategy=beat.visualStrategy,
+                        coverageGoals=beat.coverageGoals,
                         sourceRanges=beat.sourceRanges,
                         shots=[
                             CinematicShotCandidate.model_validate(

@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS "VideoAdaptationTask" (
     FOREIGN KEY ("projectId", "novelId") REFERENCES "VideoProject"("id", "novelId")
     ON DELETE CASCADE ON UPDATE CASCADE,
   CONSTRAINT "VideoAdaptationTask_kind_workflow_check" CHECK (
-    ("kind" = 'shot_plan' AND "workflow" = 'chapter_cinematic_adaptation_v2' AND "baseShotPlanVersionId" IS NULL)
+    ("kind" = 'shot_plan' AND "workflow" = 'chapter_cinematic_adaptation_v2')
     OR
     ("kind" = 'shot_prompt' AND "workflow" = 'chapter_shot_prompt_v2' AND "baseShotPlanVersionId" IS NOT NULL)
   ),
@@ -107,6 +107,16 @@ CREATE TABLE IF NOT EXISTS "VideoAdaptationTask" (
   CONSTRAINT "VideoAdaptationTask_result_json_check"
     CHECK ("resultJson" IS NULL OR COALESCE(jsonb_typeof("resultJson"::jsonb) = 'object', FALSE)),
   CONSTRAINT "VideoAdaptationTask_attempt_check" CHECK ("attemptCount" >= 0)
+);
+
+-- shot_plan 允许可空正式方案基线；旧约束来自本迁移已执行版本，需显式替换。
+ALTER TABLE "VideoAdaptationTask"
+DROP CONSTRAINT IF EXISTS "VideoAdaptationTask_kind_workflow_check";
+ALTER TABLE "VideoAdaptationTask"
+ADD CONSTRAINT "VideoAdaptationTask_kind_workflow_check" CHECK (
+  ("kind" = 'shot_plan' AND "workflow" = 'chapter_cinematic_adaptation_v2')
+  OR
+  ("kind" = 'shot_prompt' AND "workflow" = 'chapter_shot_prompt_v2' AND "baseShotPlanVersionId" IS NOT NULL)
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS "VideoAdaptationTask_id_adaptationId_key"
@@ -322,6 +332,7 @@ CREATE TABLE IF NOT EXISTS "VideoDramaticBeat" (
   "title" TEXT NOT NULL,
   "dramaticTurn" TEXT NOT NULL,
   "visualStrategy" TEXT NOT NULL,
+  "coverageGoalsJson" TEXT,
   CONSTRAINT "VideoDramaticBeat_pkey" PRIMARY KEY ("id"),
   CONSTRAINT "VideoDramaticBeat_scene_plan_fkey"
     FOREIGN KEY ("sceneId", "planVersionId")
@@ -334,6 +345,19 @@ CREATE TABLE IF NOT EXISTS "VideoDramaticBeat" (
   ),
   CONSTRAINT "VideoDramaticBeat_plan_key_key" UNIQUE ("planVersionId", "beatKey"),
   CONSTRAINT "VideoDramaticBeat_plan_ordinal_key" UNIQUE ("planVersionId", "ordinal")
+);
+
+ALTER TABLE "VideoDramaticBeat"
+ADD COLUMN IF NOT EXISTS "coverageGoalsJson" TEXT;
+ALTER TABLE "VideoDramaticBeat"
+DROP CONSTRAINT IF EXISTS "VideoDramaticBeat_coverage_goals_check";
+ALTER TABLE "VideoDramaticBeat"
+ADD CONSTRAINT "VideoDramaticBeat_coverage_goals_check" CHECK (
+  "coverageGoalsJson" IS NULL
+  OR (
+    COALESCE(jsonb_typeof("coverageGoalsJson"::jsonb) = 'array', FALSE)
+    AND jsonb_array_length("coverageGoalsJson"::jsonb) > 0
+  )
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS "VideoDramaticBeat_id_planVersionId_key"
@@ -367,12 +391,18 @@ CREATE TABLE IF NOT EXISTS "VideoShot" (
   "title" TEXT NOT NULL,
   "narrativePurpose" TEXT NOT NULL,
   "adaptationType" TEXT NOT NULL,
+  "sourceRelation" TEXT,
+  "storyFunction" TEXT,
+  "audienceGain" TEXT,
+  "coveredGoalKeysJson" TEXT,
   "shotScale" TEXT NOT NULL,
   "cameraAngle" TEXT NOT NULL,
   "cameraMovement" TEXT NOT NULL,
   "visualIntent" TEXT NOT NULL,
   "audioMode" TEXT NOT NULL,
   "audioIntent" TEXT NOT NULL,
+  "speechMode" TEXT,
+  "spokenText" TEXT,
   "cutReason" TEXT NOT NULL,
   "timelineDurationMs" INTEGER NOT NULL,
   CONSTRAINT "VideoShot_pkey" PRIMARY KEY ("id"),
@@ -412,6 +442,33 @@ CREATE TABLE IF NOT EXISTS "VideoShot" (
   ),
   CONSTRAINT "VideoShot_plan_key_key" UNIQUE ("planVersionId", "shotKey"),
   CONSTRAINT "VideoShot_plan_ordinal_key" UNIQUE ("planVersionId", "ordinal")
+);
+
+ALTER TABLE "VideoShot" ADD COLUMN IF NOT EXISTS "sourceRelation" TEXT;
+ALTER TABLE "VideoShot" ADD COLUMN IF NOT EXISTS "storyFunction" TEXT;
+ALTER TABLE "VideoShot" ADD COLUMN IF NOT EXISTS "audienceGain" TEXT;
+ALTER TABLE "VideoShot" ADD COLUMN IF NOT EXISTS "coveredGoalKeysJson" TEXT;
+ALTER TABLE "VideoShot" ADD COLUMN IF NOT EXISTS "speechMode" TEXT;
+ALTER TABLE "VideoShot" ADD COLUMN IF NOT EXISTS "spokenText" TEXT;
+ALTER TABLE "VideoShot"
+DROP CONSTRAINT IF EXISTS "VideoShot_goal_driven_fields_check";
+ALTER TABLE "VideoShot"
+ADD CONSTRAINT "VideoShot_goal_driven_fields_check" CHECK (
+  (
+    "sourceRelation" IS NULL AND "storyFunction" IS NULL AND "audienceGain" IS NULL
+    AND "coveredGoalKeysJson" IS NULL AND "speechMode" IS NULL AND "spokenText" IS NULL
+  )
+  OR (
+    "sourceRelation" IN ('direct', 'derived', 'supplemental')
+    AND COALESCE(btrim("storyFunction") <> '', FALSE)
+    AND COALESCE(btrim("audienceGain") <> '', FALSE)
+    AND COALESCE(jsonb_typeof("coveredGoalKeysJson"::jsonb) = 'array', FALSE)
+    AND "speechMode" IN ('none', 'sync', 'offscreen', 'voiceover')
+    AND (
+      ("speechMode" = 'none' AND "spokenText" IS NULL)
+      OR ("speechMode" <> 'none' AND COALESCE(btrim("spokenText") <> '', FALSE))
+    )
+  )
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS "VideoShot_id_planVersionId_key"
@@ -581,6 +638,8 @@ CREATE TABLE IF NOT EXISTS "VideoShotPromptVersion" (
 
 CREATE UNIQUE INDEX IF NOT EXISTS "VideoShotPromptVersion_id_shotId_key"
 ON "VideoShotPromptVersion"("id", "shotId");
+CREATE UNIQUE INDEX IF NOT EXISTS "VideoShotPromptVersion_id_shot_plan_key"
+ON "VideoShotPromptVersion"("id", "shotId", "shotPlanVersionId");
 
 DO $prompt_source_task_plan_fk$
 BEGIN
@@ -630,6 +689,238 @@ CREATE TABLE IF NOT EXISTS "VideoShotPromptHead" (
     REFERENCES "VideoShotPromptVersion"("id", "shotId")
     ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT "VideoShotPromptHead_revision_check" CHECK ("revision" > 0)
+);
+
+-- VideoAsset 只保存媒体文件；视觉设定槽负责候选、批准版本和当前 Head。
+CREATE TABLE IF NOT EXISTS "VideoVisualCanon" (
+  "id" TEXT NOT NULL,
+  "projectId" TEXT NOT NULL,
+  "novelId" TEXT NOT NULL,
+  "settingKind" TEXT NOT NULL,
+  "settingId" TEXT NOT NULL,
+  "settingName" TEXT NOT NULL,
+  "duty" TEXT NOT NULL,
+  "variantKey" TEXT NOT NULL,
+  "label" TEXT NOT NULL,
+  "candidateAssetId" TEXT,
+  "candidateIncludeFeaturesJson" TEXT,
+  "candidateExcludeFeaturesJson" TEXT,
+  "candidateDefaultStrength" INTEGER,
+  "currentVersionId" TEXT,
+  "revision" INTEGER NOT NULL DEFAULT 1,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL,
+  CONSTRAINT "VideoVisualCanon_pkey" PRIMARY KEY ("id"),
+  CONSTRAINT "VideoVisualCanon_project_novel_fkey"
+    FOREIGN KEY ("projectId", "novelId") REFERENCES "VideoProject"("id", "novelId")
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "VideoVisualCanon_candidate_asset_fkey"
+    FOREIGN KEY ("candidateAssetId", "projectId") REFERENCES "VideoAsset"("id", "projectId")
+    ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT "VideoVisualCanon_kind_duty_check" CHECK (
+    ("settingKind" = 'character' AND "duty" IN ('identity', 'costume'))
+    OR ("settingKind" = 'location' AND "duty" = 'scene')
+    OR ("settingKind" = 'item' AND "duty" = 'prop')
+  ),
+  CONSTRAINT "VideoVisualCanon_text_check" CHECK (
+    btrim("settingId") <> '' AND btrim("settingName") <> '' AND btrim("label") <> ''
+    AND "variantKey" ~ '^[a-z0-9][a-z0-9_-]{0,63}$'
+  ),
+  CONSTRAINT "VideoVisualCanon_candidate_check" CHECK (
+    (
+      "candidateAssetId" IS NULL
+      AND "candidateIncludeFeaturesJson" IS NULL
+      AND "candidateExcludeFeaturesJson" IS NULL
+      AND "candidateDefaultStrength" IS NULL
+    )
+    OR (
+      "candidateAssetId" IS NOT NULL
+      AND COALESCE(jsonb_typeof("candidateIncludeFeaturesJson"::jsonb) = 'array', FALSE)
+      AND COALESCE(jsonb_typeof("candidateExcludeFeaturesJson"::jsonb) = 'array', FALSE)
+      AND "candidateDefaultStrength" BETWEEN 1 AND 100
+    )
+  ),
+  CONSTRAINT "VideoVisualCanon_revision_check" CHECK ("revision" > 0)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "VideoVisualCanon_id_project_novel_key"
+ON "VideoVisualCanon"("id", "projectId", "novelId");
+CREATE UNIQUE INDEX IF NOT EXISTS "VideoVisualCanon_slot_key"
+ON "VideoVisualCanon"("projectId", "settingKind", "settingId", "duty", "variantKey");
+CREATE INDEX IF NOT EXISTS "VideoVisualCanon_project_setting_idx"
+ON "VideoVisualCanon"("projectId", "settingKind", "settingId");
+
+CREATE TABLE IF NOT EXISTS "VideoVisualCanonVersion" (
+  "id" TEXT NOT NULL,
+  "canonId" TEXT NOT NULL,
+  "projectId" TEXT NOT NULL,
+  "novelId" TEXT NOT NULL,
+  "versionNo" INTEGER NOT NULL,
+  "assetId" TEXT NOT NULL,
+  "settingName" TEXT NOT NULL,
+  "label" TEXT NOT NULL,
+  "includeFeaturesJson" TEXT NOT NULL,
+  "excludeFeaturesJson" TEXT NOT NULL,
+  "defaultStrength" INTEGER NOT NULL,
+  "approvedByUserId" TEXT NOT NULL,
+  "contentHash" TEXT NOT NULL,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT "VideoVisualCanonVersion_pkey" PRIMARY KEY ("id"),
+  CONSTRAINT "VideoVisualCanonVersion_canon_scope_fkey"
+    FOREIGN KEY ("canonId", "projectId", "novelId")
+    REFERENCES "VideoVisualCanon"("id", "projectId", "novelId")
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "VideoVisualCanonVersion_asset_project_fkey"
+    FOREIGN KEY ("assetId", "projectId") REFERENCES "VideoAsset"("id", "projectId")
+    ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT "VideoVisualCanonVersion_user_fkey"
+    FOREIGN KEY ("approvedByUserId") REFERENCES "User"("id")
+    ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT "VideoVisualCanonVersion_version_check" CHECK ("versionNo" > 0),
+  CONSTRAINT "VideoVisualCanonVersion_features_check" CHECK (
+    COALESCE(jsonb_typeof("includeFeaturesJson"::jsonb) = 'array', FALSE)
+    AND COALESCE(jsonb_typeof("excludeFeaturesJson"::jsonb) = 'array', FALSE)
+  ),
+  CONSTRAINT "VideoVisualCanonVersion_strength_check" CHECK ("defaultStrength" BETWEEN 1 AND 100),
+  CONSTRAINT "VideoVisualCanonVersion_text_check" CHECK (
+    btrim("settingName") <> '' AND btrim("label") <> ''
+  ),
+  CONSTRAINT "VideoVisualCanonVersion_hash_check" CHECK ("contentHash" ~ '^[0-9a-f]{64}$'),
+  CONSTRAINT "VideoVisualCanonVersion_canon_version_key" UNIQUE ("canonId", "versionNo")
+);
+
+-- 已执行过早期开发版本时，把显示快照从 Canon Head 固定到不可变版本。
+ALTER TABLE "VideoVisualCanonVersion" ADD COLUMN IF NOT EXISTS "settingName" TEXT;
+ALTER TABLE "VideoVisualCanonVersion" ADD COLUMN IF NOT EXISTS "label" TEXT;
+UPDATE "VideoVisualCanonVersion" AS version
+SET
+  "settingName" = canon."settingName",
+  "label" = canon."label"
+FROM "VideoVisualCanon" AS canon
+WHERE version."canonId" = canon."id"
+  AND (version."settingName" IS NULL OR version."label" IS NULL);
+ALTER TABLE "VideoVisualCanonVersion" ALTER COLUMN "settingName" SET NOT NULL;
+ALTER TABLE "VideoVisualCanonVersion" ALTER COLUMN "label" SET NOT NULL;
+ALTER TABLE "VideoVisualCanonVersion"
+DROP CONSTRAINT IF EXISTS "VideoVisualCanonVersion_text_check";
+ALTER TABLE "VideoVisualCanonVersion"
+ADD CONSTRAINT "VideoVisualCanonVersion_text_check" CHECK (
+  btrim("settingName") <> '' AND btrim("label") <> ''
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "VideoVisualCanonVersion_id_canonId_key"
+ON "VideoVisualCanonVersion"("id", "canonId");
+CREATE UNIQUE INDEX IF NOT EXISTS "VideoVisualCanonVersion_id_project_novel_key"
+ON "VideoVisualCanonVersion"("id", "projectId", "novelId");
+
+DO $visual_canon_current_version_fk$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'VideoVisualCanon_current_version_fkey'
+      AND conrelid = 'public."VideoVisualCanon"'::regclass
+  ) THEN
+    ALTER TABLE "VideoVisualCanon"
+    ADD CONSTRAINT "VideoVisualCanon_current_version_fkey"
+      FOREIGN KEY ("currentVersionId", "id")
+      REFERENCES "VideoVisualCanonVersion"("id", "canonId")
+      ON DELETE RESTRICT ON UPDATE CASCADE;
+  END IF;
+END
+$visual_canon_current_version_fk$;
+
+CREATE TABLE IF NOT EXISTS "VideoShotVisualReferenceSet" (
+  "shotId" TEXT NOT NULL,
+  "planVersionId" TEXT NOT NULL,
+  "adaptationId" TEXT NOT NULL,
+  "projectId" TEXT NOT NULL,
+  "novelId" TEXT NOT NULL,
+  "revision" INTEGER NOT NULL DEFAULT 1,
+  "updatedAt" TIMESTAMP(3) NOT NULL,
+  CONSTRAINT "VideoShotVisualReferenceSet_pkey" PRIMARY KEY ("shotId"),
+  CONSTRAINT "VideoShotVisualReferenceSet_shot_plan_fkey"
+    FOREIGN KEY ("shotId", "planVersionId") REFERENCES "VideoShot"("id", "planVersionId")
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "VideoShotVisualReferenceSet_plan_adaptation_fkey"
+    FOREIGN KEY ("planVersionId", "adaptationId")
+    REFERENCES "VideoShotPlanVersion"("id", "adaptationId")
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "VideoShotVisualReferenceSet_adaptation_project_fkey"
+    FOREIGN KEY ("adaptationId", "projectId")
+    REFERENCES "VideoChapterAdaptation"("id", "projectId")
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "VideoShotVisualReferenceSet_adaptation_novel_fkey"
+    FOREIGN KEY ("adaptationId", "novelId")
+    REFERENCES "VideoChapterAdaptation"("id", "novelId")
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "VideoShotVisualReferenceSet_project_novel_fkey"
+    FOREIGN KEY ("projectId", "novelId") REFERENCES "VideoProject"("id", "novelId")
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "VideoShotVisualReferenceSet_revision_check" CHECK ("revision" > 0)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS "VideoShotVisualReferenceSet_scope_key"
+ON "VideoShotVisualReferenceSet"("shotId", "planVersionId", "adaptationId", "projectId", "novelId");
+
+CREATE TABLE IF NOT EXISTS "VideoShotVisualReferenceBinding" (
+  "shotId" TEXT NOT NULL,
+  "ordinal" INTEGER NOT NULL,
+  "planVersionId" TEXT NOT NULL,
+  "adaptationId" TEXT NOT NULL,
+  "projectId" TEXT NOT NULL,
+  "novelId" TEXT NOT NULL,
+  "canonVersionId" TEXT NOT NULL,
+  "strength" INTEGER NOT NULL,
+  CONSTRAINT "VideoShotVisualReferenceBinding_pkey" PRIMARY KEY ("shotId", "ordinal"),
+  CONSTRAINT "VideoShotVisualReferenceBinding_set_scope_fkey"
+    FOREIGN KEY ("shotId", "planVersionId", "adaptationId", "projectId", "novelId")
+    REFERENCES "VideoShotVisualReferenceSet"(
+      "shotId", "planVersionId", "adaptationId", "projectId", "novelId"
+    ) ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "VideoShotVisualReferenceBinding_canon_scope_fkey"
+    FOREIGN KEY ("canonVersionId", "projectId", "novelId")
+    REFERENCES "VideoVisualCanonVersion"("id", "projectId", "novelId")
+    ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT "VideoShotVisualReferenceBinding_ordinal_check" CHECK ("ordinal" > 0),
+  CONSTRAINT "VideoShotVisualReferenceBinding_strength_check" CHECK ("strength" BETWEEN 1 AND 100),
+  CONSTRAINT "VideoShotVisualReferenceBinding_shot_canon_key" UNIQUE ("shotId", "canonVersionId")
+);
+
+CREATE TABLE IF NOT EXISTS "VideoShotPromptVisualReference" (
+  "promptVersionId" TEXT NOT NULL,
+  "shotId" TEXT NOT NULL,
+  "shotPlanVersionId" TEXT NOT NULL,
+  "adaptationId" TEXT NOT NULL,
+  "projectId" TEXT NOT NULL,
+  "novelId" TEXT NOT NULL,
+  "ordinal" INTEGER NOT NULL,
+  "canonVersionId" TEXT NOT NULL,
+  "strength" INTEGER NOT NULL,
+  CONSTRAINT "VideoShotPromptVisualReference_pkey" PRIMARY KEY ("promptVersionId", "ordinal"),
+  CONSTRAINT "VideoShotPromptVisualReference_prompt_scope_fkey"
+    FOREIGN KEY ("promptVersionId", "shotId", "shotPlanVersionId")
+    REFERENCES "VideoShotPromptVersion"("id", "shotId", "shotPlanVersionId")
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "VideoShotPromptVisualReference_plan_adaptation_fkey"
+    FOREIGN KEY ("shotPlanVersionId", "adaptationId")
+    REFERENCES "VideoShotPlanVersion"("id", "adaptationId")
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "VideoShotPromptVisualReference_adaptation_project_fkey"
+    FOREIGN KEY ("adaptationId", "projectId")
+    REFERENCES "VideoChapterAdaptation"("id", "projectId")
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "VideoShotPromptVisualReference_adaptation_novel_fkey"
+    FOREIGN KEY ("adaptationId", "novelId")
+    REFERENCES "VideoChapterAdaptation"("id", "novelId")
+    ON DELETE CASCADE ON UPDATE CASCADE,
+  CONSTRAINT "VideoShotPromptVisualReference_canon_scope_fkey"
+    FOREIGN KEY ("canonVersionId", "projectId", "novelId")
+    REFERENCES "VideoVisualCanonVersion"("id", "projectId", "novelId")
+    ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT "VideoShotPromptVisualReference_ordinal_check" CHECK ("ordinal" > 0),
+  CONSTRAINT "VideoShotPromptVisualReference_strength_check" CHECK ("strength" BETWEEN 1 AND 100),
+  CONSTRAINT "VideoShotPromptVisualReference_prompt_canon_key"
+    UNIQUE ("promptVersionId", "canonVersionId")
 );
 
 CREATE TABLE IF NOT EXISTS "VideoAdaptationDecisionCommand" (
@@ -695,6 +986,11 @@ COMMENT ON TABLE "VideoDramaticBeat" IS '正式场景中由目标、信息、情
 COMMENT ON TABLE "VideoShot" IS '正式戏剧节拍中的最终剪辑镜头，不等同于供应商生成片段';
 COMMENT ON TABLE "VideoEpisodePlanVersion" IS '固定引用一个镜头方案版本的不可变分集边界版本';
 COMMENT ON TABLE "VideoShotPromptVersion" IS '用户明确保存的逐镜即梦提示词不可变版本';
+COMMENT ON TABLE "VideoVisualCanon" IS '项目内文字设定对应的候选和当前视觉设定槽';
+COMMENT ON TABLE "VideoVisualCanonVersion" IS '用户批准后引用已锁定图片的不可变视觉设定版本';
+COMMENT ON TABLE "VideoShotVisualReferenceSet" IS '正式镜头当前视觉参考集合的 CAS Head';
+COMMENT ON TABLE "VideoShotVisualReferenceBinding" IS '镜头参考集合中的有序视觉版本与参考强度';
+COMMENT ON TABLE "VideoShotPromptVisualReference" IS '正式提示词版本冻结的视觉参考版本';
 COMMENT ON COLUMN "ReviewArtifact"."videoAdaptationId" IS '章节影视化镜头方案候选的明确审核目标';
 COMMENT ON COLUMN "ReviewArtifact"."videoAdaptationTaskId" IS '产生章节影视化候选的耐久来源任务';
 

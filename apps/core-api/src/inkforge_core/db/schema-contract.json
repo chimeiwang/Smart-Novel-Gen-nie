@@ -224,7 +224,7 @@
       "version": "0.8.0"
     }
   ],
-  "fingerprint": "7f4dbf70c7eea44f24b5048292ab212390d0ea87bdcfa78e22128c1d265ddbc5",
+  "fingerprint": "36904c220803175dbb65dc38329f29b8d41f1386cac46f4992d8f77ad6653f40",
   "schema": "public",
   "source": {
     "product": "PostgreSQL",
@@ -6459,7 +6459,14 @@
       "uniqueConstraints": []
     },
     {
-      "checkConstraints": [],
+      "checkConstraints": [
+        {
+          "definition": "CHECK (\"requestId\" IS NULL OR btrim(\"requestId\") <> ''::text)",
+          "name": "TokenUsage_requestId_check",
+          "noInherit": false,
+          "validated": true
+        }
+      ],
       "columns": [
         {
           "default": null,
@@ -7360,7 +7367,7 @@
           "validated": true
         },
         {
-          "definition": "CHECK (kind = 'shot_plan'::text AND workflow = 'chapter_cinematic_adaptation_v2'::text AND \"baseShotPlanVersionId\" IS NULL OR kind = 'shot_prompt'::text AND workflow = 'chapter_shot_prompt_v2'::text AND \"baseShotPlanVersionId\" IS NOT NULL)",
+          "definition": "CHECK (kind = 'shot_plan'::text AND workflow = 'chapter_cinematic_adaptation_v2'::text OR kind = 'shot_prompt'::text AND workflow = 'chapter_shot_prompt_v2'::text AND \"baseShotPlanVersionId\" IS NOT NULL)",
           "name": "VideoAdaptationTask_kind_workflow_check",
           "noInherit": false,
           "validated": true
@@ -9361,6 +9368,12 @@
     {
       "checkConstraints": [
         {
+          "definition": "CHECK (\"coverageGoalsJson\" IS NULL OR COALESCE(jsonb_typeof(\"coverageGoalsJson\"::jsonb) = 'array'::text, false) AND jsonb_array_length(\"coverageGoalsJson\"::jsonb) > 0)",
+          "name": "VideoDramaticBeat_coverage_goals_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
           "definition": "CHECK (\"beatKey\" ~ '^B[0-9]{2,3}$'::text)",
           "name": "VideoDramaticBeat_key_check",
           "noInherit": false,
@@ -9385,6 +9398,13 @@
           "formatType": "text",
           "name": "beatKey",
           "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "coverageGoalsJson",
+          "nullable": true,
           "udtName": "text"
         },
         {
@@ -12104,6 +12124,12 @@
           "validated": true
         },
         {
+          "definition": "CHECK (\"sourceRelation\" IS NULL AND \"storyFunction\" IS NULL AND \"audienceGain\" IS NULL AND \"coveredGoalKeysJson\" IS NULL AND \"speechMode\" IS NULL AND \"spokenText\" IS NULL OR (\"sourceRelation\" = ANY (ARRAY['direct'::text, 'derived'::text, 'supplemental'::text])) AND COALESCE(btrim(\"storyFunction\") <> ''::text, false) AND COALESCE(btrim(\"audienceGain\") <> ''::text, false) AND COALESCE(jsonb_typeof(\"coveredGoalKeysJson\"::jsonb) = 'array'::text, false) AND (\"speechMode\" = ANY (ARRAY['none'::text, 'sync'::text, 'offscreen'::text, 'voiceover'::text])) AND (\"speechMode\" = 'none'::text AND \"spokenText\" IS NULL OR \"speechMode\" <> 'none'::text AND COALESCE(btrim(\"spokenText\") <> ''::text, false)))",
+          "name": "VideoShot_goal_driven_fields_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
           "definition": "CHECK (\"shotKey\" ~ '^S[0-9]{2,3}$'::text)",
           "name": "VideoShot_key_check",
           "noInherit": false,
@@ -12151,6 +12177,13 @@
         {
           "default": null,
           "formatType": "text",
+          "name": "audienceGain",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
           "name": "audioIntent",
           "nullable": false,
           "udtName": "text"
@@ -12181,6 +12214,13 @@
           "formatType": "text",
           "name": "cameraMovement",
           "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "coveredGoalKeysJson",
+          "nullable": true,
           "udtName": "text"
         },
         {
@@ -12237,6 +12277,34 @@
           "formatType": "text",
           "name": "shotScale",
           "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "sourceRelation",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "speechMode",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "spokenText",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "storyFunction",
+          "nullable": true,
           "udtName": "text"
         },
         {
@@ -13239,6 +13307,56 @@
               "opclassSchema": "pg_catalog",
               "order": "ASC",
               "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "shotId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "shotPlanVersionId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 3
+            }
+          ],
+          "method": "btree",
+          "name": "VideoShotPromptVersion_id_shot_plan_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
             }
           ],
           "method": "btree",
@@ -13309,6 +13427,289 @@
           "deferrable": false,
           "initiallyDeferred": false,
           "name": "VideoShotPromptVersion_shot_version_key",
+          "validated": true
+        }
+      ]
+    },
+    {
+      "checkConstraints": [
+        {
+          "definition": "CHECK (ordinal > 0)",
+          "name": "VideoShotPromptVisualReference_ordinal_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (strength >= 1 AND strength <= 100)",
+          "name": "VideoShotPromptVisualReference_strength_check",
+          "noInherit": false,
+          "validated": true
+        }
+      ],
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "adaptationId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "canonVersionId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "ordinal",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "projectId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "promptVersionId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "shotId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "shotPlanVersionId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "strength",
+          "nullable": false,
+          "udtName": "int4"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "adaptationId",
+            "novelId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoShotPromptVisualReference_adaptation_novel_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "novelId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoChapterAdaptation",
+          "validated": true
+        },
+        {
+          "columns": [
+            "adaptationId",
+            "projectId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoShotPromptVisualReference_adaptation_project_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "projectId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoChapterAdaptation",
+          "validated": true
+        },
+        {
+          "columns": [
+            "canonVersionId",
+            "projectId",
+            "novelId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoShotPromptVisualReference_canon_scope_fkey",
+          "onDelete": "RESTRICT",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "projectId",
+            "novelId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoVisualCanonVersion",
+          "validated": true
+        },
+        {
+          "columns": [
+            "shotPlanVersionId",
+            "adaptationId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoShotPromptVisualReference_plan_adaptation_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "adaptationId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoShotPlanVersion",
+          "validated": true
+        },
+        {
+          "columns": [
+            "promptVersionId",
+            "shotId",
+            "shotPlanVersionId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoShotPromptVisualReference_prompt_scope_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "shotId",
+            "shotPlanVersionId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoShotPromptVersion",
+          "validated": true
+        }
+      ],
+      "indexes": [
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "promptVersionId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "ordinal",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "int4_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "VideoShotPromptVisualReference_pkey",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "promptVersionId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "canonVersionId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "VideoShotPromptVisualReference_prompt_canon_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        }
+      ],
+      "name": "VideoShotPromptVisualReference",
+      "primaryKey": {
+        "columns": [
+          "promptVersionId",
+          "ordinal"
+        ],
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "VideoShotPromptVisualReference_pkey",
+        "validated": true
+      },
+      "uniqueConstraints": [
+        {
+          "columns": [
+            "promptVersionId",
+            "canonVersionId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "name": "VideoShotPromptVisualReference_prompt_canon_key",
           "validated": true
         }
       ]
@@ -13438,6 +13839,1290 @@
         "validated": true
       },
       "uniqueConstraints": []
+    },
+    {
+      "checkConstraints": [
+        {
+          "definition": "CHECK (ordinal > 0)",
+          "name": "VideoShotVisualReferenceBinding_ordinal_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (strength >= 1 AND strength <= 100)",
+          "name": "VideoShotVisualReferenceBinding_strength_check",
+          "noInherit": false,
+          "validated": true
+        }
+      ],
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "adaptationId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "canonVersionId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "ordinal",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "planVersionId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "projectId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "shotId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "strength",
+          "nullable": false,
+          "udtName": "int4"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "canonVersionId",
+            "projectId",
+            "novelId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoShotVisualReferenceBinding_canon_scope_fkey",
+          "onDelete": "RESTRICT",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "projectId",
+            "novelId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoVisualCanonVersion",
+          "validated": true
+        },
+        {
+          "columns": [
+            "shotId",
+            "planVersionId",
+            "adaptationId",
+            "projectId",
+            "novelId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoShotVisualReferenceBinding_set_scope_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "shotId",
+            "planVersionId",
+            "adaptationId",
+            "projectId",
+            "novelId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoShotVisualReferenceSet",
+          "validated": true
+        }
+      ],
+      "indexes": [
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "shotId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "ordinal",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "int4_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "VideoShotVisualReferenceBinding_pkey",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "shotId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "canonVersionId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "VideoShotVisualReferenceBinding_shot_canon_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        }
+      ],
+      "name": "VideoShotVisualReferenceBinding",
+      "primaryKey": {
+        "columns": [
+          "shotId",
+          "ordinal"
+        ],
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "VideoShotVisualReferenceBinding_pkey",
+        "validated": true
+      },
+      "uniqueConstraints": [
+        {
+          "columns": [
+            "shotId",
+            "canonVersionId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "name": "VideoShotVisualReferenceBinding_shot_canon_key",
+          "validated": true
+        }
+      ]
+    },
+    {
+      "checkConstraints": [
+        {
+          "definition": "CHECK (revision > 0)",
+          "name": "VideoShotVisualReferenceSet_revision_check",
+          "noInherit": false,
+          "validated": true
+        }
+      ],
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "adaptationId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "planVersionId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "projectId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "1",
+          "formatType": "integer",
+          "name": "revision",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "shotId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "adaptationId",
+            "novelId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoShotVisualReferenceSet_adaptation_novel_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "novelId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoChapterAdaptation",
+          "validated": true
+        },
+        {
+          "columns": [
+            "adaptationId",
+            "projectId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoShotVisualReferenceSet_adaptation_project_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "projectId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoChapterAdaptation",
+          "validated": true
+        },
+        {
+          "columns": [
+            "planVersionId",
+            "adaptationId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoShotVisualReferenceSet_plan_adaptation_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "adaptationId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoShotPlanVersion",
+          "validated": true
+        },
+        {
+          "columns": [
+            "projectId",
+            "novelId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoShotVisualReferenceSet_project_novel_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "novelId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoProject",
+          "validated": true
+        },
+        {
+          "columns": [
+            "shotId",
+            "planVersionId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoShotVisualReferenceSet_shot_plan_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "planVersionId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoShot",
+          "validated": true
+        }
+      ],
+      "indexes": [
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "shotId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
+          ],
+          "method": "btree",
+          "name": "VideoShotVisualReferenceSet_pkey",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "shotId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "planVersionId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "adaptationId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 3
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "projectId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 4
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 5
+            }
+          ],
+          "method": "btree",
+          "name": "VideoShotVisualReferenceSet_scope_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        }
+      ],
+      "name": "VideoShotVisualReferenceSet",
+      "primaryKey": {
+        "columns": [
+          "shotId"
+        ],
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "VideoShotVisualReferenceSet_pkey",
+        "validated": true
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "checkConstraints": [
+        {
+          "definition": "CHECK (\"candidateAssetId\" IS NULL AND \"candidateIncludeFeaturesJson\" IS NULL AND \"candidateExcludeFeaturesJson\" IS NULL AND \"candidateDefaultStrength\" IS NULL OR \"candidateAssetId\" IS NOT NULL AND COALESCE(jsonb_typeof(\"candidateIncludeFeaturesJson\"::jsonb) = 'array'::text, false) AND COALESCE(jsonb_typeof(\"candidateExcludeFeaturesJson\"::jsonb) = 'array'::text, false) AND \"candidateDefaultStrength\" >= 1 AND \"candidateDefaultStrength\" <= 100)",
+          "name": "VideoVisualCanon_candidate_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (\"settingKind\" = 'character'::text AND (duty = ANY (ARRAY['identity'::text, 'costume'::text])) OR \"settingKind\" = 'location'::text AND duty = 'scene'::text OR \"settingKind\" = 'item'::text AND duty = 'prop'::text)",
+          "name": "VideoVisualCanon_kind_duty_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (revision > 0)",
+          "name": "VideoVisualCanon_revision_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (btrim(\"settingId\") <> ''::text AND btrim(\"settingName\") <> ''::text AND btrim(label) <> ''::text AND \"variantKey\" ~ '^[a-z0-9][a-z0-9_-]{0,63}$'::text)",
+          "name": "VideoVisualCanon_text_check",
+          "noInherit": false,
+          "validated": true
+        }
+      ],
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "candidateAssetId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "candidateDefaultStrength",
+          "nullable": true,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "candidateExcludeFeaturesJson",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "candidateIncludeFeaturesJson",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "currentVersionId",
+          "nullable": true,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "duty",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "label",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "projectId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "1",
+          "formatType": "integer",
+          "name": "revision",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "settingId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "settingKind",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "settingName",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "variantKey",
+          "nullable": false,
+          "udtName": "text"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "candidateAssetId",
+            "projectId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoVisualCanon_candidate_asset_fkey",
+          "onDelete": "RESTRICT",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "projectId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoAsset",
+          "validated": true
+        },
+        {
+          "columns": [
+            "currentVersionId",
+            "id"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoVisualCanon_current_version_fkey",
+          "onDelete": "RESTRICT",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "canonId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoVisualCanonVersion",
+          "validated": true
+        },
+        {
+          "columns": [
+            "projectId",
+            "novelId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoVisualCanon_project_novel_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "novelId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoProject",
+          "validated": true
+        }
+      ],
+      "indexes": [
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "projectId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 3
+            }
+          ],
+          "method": "btree",
+          "name": "VideoVisualCanon_id_project_novel_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
+          ],
+          "method": "btree",
+          "name": "VideoVisualCanon_pkey",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "projectId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "settingKind",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "settingId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 3
+            }
+          ],
+          "method": "btree",
+          "name": "VideoVisualCanon_project_setting_idx",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": false,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "projectId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "settingKind",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "settingId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 3
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "duty",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 4
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "variantKey",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 5
+            }
+          ],
+          "method": "btree",
+          "name": "VideoVisualCanon_slot_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        }
+      ],
+      "name": "VideoVisualCanon",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "VideoVisualCanon_pkey",
+        "validated": true
+      },
+      "uniqueConstraints": []
+    },
+    {
+      "checkConstraints": [
+        {
+          "definition": "CHECK (COALESCE(jsonb_typeof(\"includeFeaturesJson\"::jsonb) = 'array'::text, false) AND COALESCE(jsonb_typeof(\"excludeFeaturesJson\"::jsonb) = 'array'::text, false))",
+          "name": "VideoVisualCanonVersion_features_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (\"contentHash\" ~ '^[0-9a-f]{64}$'::text)",
+          "name": "VideoVisualCanonVersion_hash_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (\"defaultStrength\" >= 1 AND \"defaultStrength\" <= 100)",
+          "name": "VideoVisualCanonVersion_strength_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (btrim(\"settingName\") <> ''::text AND btrim(label) <> ''::text)",
+          "name": "VideoVisualCanonVersion_text_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (\"versionNo\" > 0)",
+          "name": "VideoVisualCanonVersion_version_check",
+          "noInherit": false,
+          "validated": true
+        }
+      ],
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "approvedByUserId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "assetId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "canonId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "contentHash",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "defaultStrength",
+          "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "excludeFeaturesJson",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "includeFeaturesJson",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "label",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "novelId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "projectId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "settingName",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "versionNo",
+          "nullable": false,
+          "udtName": "int4"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "assetId",
+            "projectId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoVisualCanonVersion_asset_project_fkey",
+          "onDelete": "RESTRICT",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "projectId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoAsset",
+          "validated": true
+        },
+        {
+          "columns": [
+            "canonId",
+            "projectId",
+            "novelId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoVisualCanonVersion_canon_scope_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id",
+            "projectId",
+            "novelId"
+          ],
+          "targetSchema": "public",
+          "targetTable": "VideoVisualCanon",
+          "validated": true
+        },
+        {
+          "columns": [
+            "approvedByUserId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "VideoVisualCanonVersion_user_fkey",
+          "onDelete": "RESTRICT",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "User",
+          "validated": true
+        }
+      ],
+      "indexes": [
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "canonId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": null,
+              "collationSchema": null,
+              "column": "versionNo",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "int4_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "VideoVisualCanonVersion_canon_version_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "canonId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            }
+          ],
+          "method": "btree",
+          "name": "VideoVisualCanonVersion_id_canonId_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "projectId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 2
+            },
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "novelId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 3
+            }
+          ],
+          "method": "btree",
+          "name": "VideoVisualCanonVersion_id_project_novel_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
+          ],
+          "method": "btree",
+          "name": "VideoVisualCanonVersion_pkey",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        }
+      ],
+      "name": "VideoVisualCanonVersion",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "VideoVisualCanonVersion_pkey",
+        "validated": true
+      },
+      "uniqueConstraints": [
+        {
+          "columns": [
+            "canonId",
+            "versionNo"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "name": "VideoVisualCanonVersion_canon_version_key",
+          "validated": true
+        }
+      ]
     },
     {
       "checkConstraints": [],

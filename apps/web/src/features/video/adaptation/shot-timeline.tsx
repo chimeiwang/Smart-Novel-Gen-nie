@@ -1,13 +1,14 @@
 "use client";
 
-import { purposeLabel } from "./adaptation-state";
-import type { CandidateShot } from "./types";
+import { beatCoverageStatus, purposeLabel } from "./adaptation-state";
+import type { CandidateShot, CoverageGoal } from "./types";
 
 export type TimelineShot = CandidateShot & { id?: string };
 export type TimelineBeat = {
   beatKey: string;
   title: string;
   dramaticTurn: string;
+  coverageGoals: CoverageGoal[];
   shots: TimelineShot[];
 };
 export type TimelineScene = {
@@ -49,6 +50,14 @@ export function ShotTimeline({
                   <span>{beat.beatKey}</span>
                   <div><strong>{beat.title}</strong><small>{beat.dramaticTurn}</small></div>
                 </div>
+                <div className="adaptation-goal-list">
+                  {beatCoverageStatus(beat).map((goal) => (
+                    <span className={goal.coveredBy.length ? "covered" : "uncovered"} key={goal.goalKey}>
+                      {goal.goalKey} · {goal.description}
+                      <i>{goal.coveredBy.length ? goal.coveredBy.join(" / ") : "未覆盖"}</i>
+                    </span>
+                  ))}
+                </div>
                 <div className="adaptation-shot-list">
                   {beat.shots.map((shot) => (
                     <button
@@ -60,7 +69,7 @@ export function ShotTimeline({
                       <span className="adaptation-shot-key">{shot.shotKey}</span>
                       <span className="adaptation-shot-copy">
                         <strong>{shot.title}</strong>
-                        <small>{shot.visualIntent}</small>
+                        <small>{shot.storyFunction}</small>
                       </span>
                       <span className="adaptation-shot-meta">
                         <i>{purposeLabel(shot.narrativePurpose)}</i>

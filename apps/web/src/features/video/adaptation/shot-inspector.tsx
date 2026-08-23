@@ -2,12 +2,13 @@
 
 import { formatDuration, shotScaleLabel, type TimelineShot } from "./shot-timeline";
 import { purposeLabel } from "./adaptation-state";
-import type { CandidateShot } from "./types";
+import type { CandidateShot, CoverageGoal } from "./types";
 
 export function ShotInspector({
   shot,
   sceneTitle,
   beatTitle,
+  coverageGoals,
   editable,
   discardedCount,
   onChange,
@@ -15,10 +16,12 @@ export function ShotInspector({
   onDelete,
   onRestore,
   onAdd,
+  onToggleGoal,
 }: {
   shot: TimelineShot | null;
   sceneTitle: string;
   beatTitle: string;
+  coverageGoals: CoverageGoal[];
   editable: boolean;
   discardedCount: number;
   onChange: (patch: Partial<Omit<CandidateShot, "shotKey" | "sourceRanges">>) => void;
@@ -26,6 +29,7 @@ export function ShotInspector({
   onDelete: () => void;
   onRestore: () => void;
   onAdd: (purpose: CandidateShot["narrativePurpose"]) => void;
+  onToggleGoal: (goalKey: string) => void;
 }) {
   if (!shot) {
     return <aside className="adaptation-inspector"><div className="empty">请选择一个镜头。</div></aside>;
@@ -45,18 +49,37 @@ export function ShotInspector({
         <label className="video-field">镜头标题
           <input className="input" disabled={!editable} value={shot.title} onChange={(event) => onChange({ title: event.target.value })} />
         </label>
+        <label className="video-field">本镜作用
+          <textarea className="textarea" disabled={!editable} value={shot.storyFunction} onChange={(event) => onChange({ storyFunction: event.target.value })} />
+        </label>
+        <label className="video-field">观众获得
+          <textarea className="textarea" disabled={!editable} value={shot.audienceGain} onChange={(event) => onChange({ audienceGain: event.target.value })} />
+        </label>
+        <section className="adaptation-inspector-goals">
+          <strong>本镜承担的叙事目标</strong>
+          <div>{coverageGoals.map((goal) => (
+            <label key={goal.goalKey}>
+              <input
+                type="checkbox"
+                disabled={!editable}
+                checked={(shot.coveredGoalKeys ?? []).includes(goal.goalKey)}
+                onChange={() => onToggleGoal(goal.goalKey)}
+              />
+              <span>{goal.goalKey} · {goal.description}</span>
+            </label>
+          ))}</div>
+        </section>
         <div className="grid-two">
           <label className="video-field">镜头目的
             <select className="select" disabled={!editable} value={shot.narrativePurpose} onChange={(event) => onChange({ narrativePurpose: event.target.value as CandidateShot["narrativePurpose"] })}>
               {PURPOSE_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
             </select>
           </label>
-          <label className="video-field">改编方式
-            <select className="select" disabled={!editable} value={shot.adaptationType} onChange={(event) => onChange({ adaptationType: event.target.value as CandidateShot["adaptationType"] })}>
-              <option value="direct">原文直拍</option>
-              <option value="visualized">视觉化</option>
-              <option value="voiceover">旁白视觉化</option>
-              <option value="supplemental">补充镜头</option>
+          <label className="video-field">与原文关系
+            <select className="select" disabled={!editable} value={shot.sourceRelation} onChange={(event) => onChange({ sourceRelation: event.target.value as CandidateShot["sourceRelation"] })}>
+              <option value="direct">原文直呈</option>
+              <option value="derived">合理推导</option>
+              <option value="supplemental">视听补充</option>
             </select>
           </label>
         </div>
@@ -86,15 +109,21 @@ export function ShotInspector({
           <textarea className="textarea" disabled={!editable} value={shot.visualIntent} onChange={(event) => onChange({ visualIntent: event.target.value })} />
         </label>
         <div className="grid-two">
-          <label className="video-field">声音方式
-            <select className="select" disabled={!editable} value={shot.audioMode} onChange={(event) => onChange({ audioMode: event.target.value as CandidateShot["audioMode"] })}>
-              <option value="sync_dialogue">画内对白</option><option value="offscreen_dialogue">画外对白</option><option value="voiceover">旁白</option><option value="ambient">环境声</option><option value="music">音乐</option><option value="silence">静默</option>
+          <label className="video-field">对白位置
+            <select className="select" disabled={!editable} value={shot.speechMode} onChange={(event) => onChange({
+              speechMode: event.target.value as CandidateShot["speechMode"],
+              spokenText: event.target.value === "none" ? null : shot.spokenText ?? "请填写实际台词",
+            })}>
+              <option value="none">无对白</option><option value="sync">画内对白</option><option value="offscreen">画外对白</option><option value="voiceover">旁白</option>
             </select>
           </label>
-          <label className="video-field">声音任务
-            <input className="input" disabled={!editable} value={shot.audioIntent} onChange={(event) => onChange({ audioIntent: event.target.value })} />
+          <label className="video-field">环境声与音效
+            <input className="input" disabled={!editable} value={shot.soundDesign} onChange={(event) => onChange({ soundDesign: event.target.value })} />
           </label>
         </div>
+        {shot.speechMode !== "none" ? <label className="video-field">实际台词
+          <textarea className="textarea" disabled={!editable} value={shot.spokenText ?? ""} onChange={(event) => onChange({ spokenText: event.target.value })} />
+        </label> : null}
         <label className="video-field">为什么在这里切镜
           <textarea className="textarea" disabled={!editable} value={shot.cutReason} onChange={(event) => onChange({ cutReason: event.target.value })} />
         </label>

@@ -33,9 +33,16 @@ def _task(
     *,
     task_id: str = "task-1",
     shot_key: str = "S01",
+    quality_warnings: list[str] | None = None,
 ) -> SimpleNamespace:
     batch = ShotPromptSpecBatch(
-        prompts=[ShotPromptSpecCandidate(shotKey=shot_key, spec=spec)]
+        prompts=[
+            ShotPromptSpecCandidate(
+                shotKey=shot_key,
+                spec=spec,
+                qualityWarnings=quality_warnings or [],
+            )
+        ]
     )
     return SimpleNamespace(
         id=task_id,
@@ -61,7 +68,7 @@ def _plan() -> SimpleNamespace:
 
 def test_prompt_candidate_remains_visible_before_it_is_saved() -> None:
     candidates = _prompt_candidates_from_tasks(  # type: ignore[arg-type]
-        [_task(_prompt_spec())],
+        [_task(_prompt_spec(), quality_warnings=["动作密度仍需人工确认"])],
         current_plan=_plan(),
         prompt_versions=[],
         ratio="16:9",
@@ -69,6 +76,7 @@ def test_prompt_candidate_remains_visible_before_it_is_saved() -> None:
 
     assert len(candidates) == 1
     assert candidates[0].shotId == "shot-1"
+    assert candidates[0].qualityWarnings == ["动作密度仍需人工确认"]
 
 
 def test_saved_prompt_candidate_does_not_override_manual_current_text() -> None:
@@ -86,6 +94,7 @@ def test_saved_prompt_candidate_does_not_override_manual_current_text() -> None:
         generatedText=generated,
         currentText=f"{generated} 手动补充连续性。",
         promptEdited=True,
+        visualReferences=[],
         headRevision=2,
         createdAt=datetime(2026, 8, 18, tzinfo=UTC),
     )
@@ -102,9 +111,7 @@ def test_saved_prompt_candidate_does_not_override_manual_current_text() -> None:
 
 def test_new_single_shot_task_keeps_other_unsaved_candidates_visible() -> None:
     first_spec = _prompt_spec()
-    second_spec = first_spec.model_copy(
-        update={"visibleAction": "林岚从邮袋中抽出灰蓝色信封"}
-    )
+    second_spec = first_spec.model_copy(update={"visibleAction": "林岚从邮袋中抽出灰蓝色信封"})
 
     candidates = _prompt_candidates_from_tasks(  # type: ignore[arg-type]
         [

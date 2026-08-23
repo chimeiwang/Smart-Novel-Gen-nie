@@ -3342,9 +3342,7 @@ class VideoChapterAdaptation(Base):
             "chapterId",
             "sourceHash",
             unique=True,
-            postgresql_where=text(
-                '"chapterId" IS NOT NULL AND "lifecycleStatus" = \'active\''
-            ),
+            postgresql_where=text('"chapterId" IS NOT NULL AND "lifecycleStatus" = \'active\''),
         ),
         Index("VideoChapterAdaptation_project_created_idx", "projectId", "createdAt"),
         {"schema": "public"},
@@ -3376,9 +3374,7 @@ class VideoAdaptationTask(Base):
         Text, nullable=False, server_default=text("'none'::text")
     )
     checkpointJson: Mapped[str | None] = mapped_column(Text, nullable=True)
-    attemptCount: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("0")
-    )
+    attemptCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
     nextAttemptAt: Mapped[datetime] = mapped_column(
         TIMESTAMP(precision=3, timezone=False),
         nullable=False,
@@ -3642,6 +3638,8 @@ class VideoDramaticBeat(Base):
     title: Mapped[str] = mapped_column(Text, nullable=False)
     dramaticTurn: Mapped[str] = mapped_column(Text, nullable=False)
     visualStrategy: Mapped[str] = mapped_column(Text, nullable=False)
+    # 旧正式版本保持 NULL；新版本保存严格 BeatCoverageGoal 数组。
+    coverageGoalsJson: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     __table_args__ = (
         PrimaryKeyConstraint("id", name="VideoDramaticBeat_pkey"),
@@ -3682,9 +3680,7 @@ class VideoDramaticBeatSourceAnchor(Base):
     endCodePoint: Mapped[int] = mapped_column(Integer, nullable=False)
 
     __table_args__ = (
-        PrimaryKeyConstraint(
-            "beatId", "ordinal", name="VideoDramaticBeatSourceAnchor_pkey"
-        ),
+        PrimaryKeyConstraint("beatId", "ordinal", name="VideoDramaticBeatSourceAnchor_pkey"),
         ForeignKeyConstraint(
             ("beatId", "planVersionId"),
             ("public.VideoDramaticBeat.id", "public.VideoDramaticBeat.planVersionId"),
@@ -3708,13 +3704,20 @@ class VideoShot(Base):
     ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     narrativePurpose: Mapped[str] = mapped_column(Text, nullable=False)
+    # adaptationType/audioMode/audioIntent 为 v1 兼容列；公共模型使用下列正交字段。
     adaptationType: Mapped[str] = mapped_column(Text, nullable=False)
+    sourceRelation: Mapped[str | None] = mapped_column(Text, nullable=True)
+    storyFunction: Mapped[str | None] = mapped_column(Text, nullable=True)
+    audienceGain: Mapped[str | None] = mapped_column(Text, nullable=True)
+    coveredGoalKeysJson: Mapped[str | None] = mapped_column(Text, nullable=True)
     shotScale: Mapped[str] = mapped_column(Text, nullable=False)
     cameraAngle: Mapped[str] = mapped_column(Text, nullable=False)
     cameraMovement: Mapped[str] = mapped_column(Text, nullable=False)
     visualIntent: Mapped[str] = mapped_column(Text, nullable=False)
     audioMode: Mapped[str] = mapped_column(Text, nullable=False)
     audioIntent: Mapped[str] = mapped_column(Text, nullable=False)
+    speechMode: Mapped[str | None] = mapped_column(Text, nullable=True)
+    spokenText: Mapped[str | None] = mapped_column(Text, nullable=True)
     cutReason: Mapped[str] = mapped_column(Text, nullable=False)
     timelineDurationMs: Mapped[int] = mapped_column(Integer, nullable=False)
 
@@ -3857,9 +3860,7 @@ class VideoEpisodeBoundary(Base):
     ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
 
     __table_args__ = (
-        PrimaryKeyConstraint(
-            "episodePlanVersionId", "ordinal", name="VideoEpisodeBoundary_pkey"
-        ),
+        PrimaryKeyConstraint("episodePlanVersionId", "ordinal", name="VideoEpisodeBoundary_pkey"),
         ForeignKeyConstraint(
             ("episodePlanVersionId", "shotPlanVersionId"),
             (
@@ -3959,6 +3960,13 @@ class VideoShotPromptVersion(Base):
             unique=True,
         ),
         Index("VideoShotPromptVersion_id_shotId_key", "id", "shotId", unique=True),
+        Index(
+            "VideoShotPromptVersion_id_shot_plan_key",
+            "id",
+            "shotId",
+            "shotPlanVersionId",
+            unique=True,
+        ),
         {"schema": "public"},
     )
 
@@ -3993,6 +4001,347 @@ class VideoShotPromptHead(Base):
             name="VideoShotPromptHead_current_version_fkey",
             ondelete="RESTRICT",
             onupdate="CASCADE",
+        ),
+        {"schema": "public"},
+    )
+
+
+class VideoVisualCanon(Base):
+    """项目内一个可版本化的角色、服装、场景或道具视觉设定槽。"""
+
+    __tablename__ = "VideoVisualCanon"
+    id: Mapped[str] = mapped_column(Text, nullable=False, default=generate_id)
+    projectId: Mapped[str] = mapped_column(Text, nullable=False)
+    novelId: Mapped[str] = mapped_column(Text, nullable=False)
+    settingKind: Mapped[str] = mapped_column(Text, nullable=False)
+    settingId: Mapped[str] = mapped_column(Text, nullable=False)
+    settingName: Mapped[str] = mapped_column(Text, nullable=False)
+    duty: Mapped[str] = mapped_column(Text, nullable=False)
+    variantKey: Mapped[str] = mapped_column(Text, nullable=False)
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    # 候选只影响当前槽，不会改变已经批准的 currentVersionId。
+    candidateAssetId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    candidateIncludeFeaturesJson: Mapped[str | None] = mapped_column(Text, nullable=True)
+    candidateExcludeFeaturesJson: Mapped[str | None] = mapped_column(Text, nullable=True)
+    candidateDefaultStrength: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    currentVersionId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    createdAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    updatedAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="VideoVisualCanon_pkey"),
+        ForeignKeyConstraint(
+            ("projectId", "novelId"),
+            ("public.VideoProject.id", "public.VideoProject.novelId"),
+            name="VideoVisualCanon_project_novel_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("candidateAssetId", "projectId"),
+            ("public.VideoAsset.id", "public.VideoAsset.projectId"),
+            name="VideoVisualCanon_candidate_asset_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("currentVersionId", "id"),
+            ("public.VideoVisualCanonVersion.id", "public.VideoVisualCanonVersion.canonId"),
+            name="VideoVisualCanon_current_version_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+            use_alter=True,
+        ),
+        Index(
+            "VideoVisualCanon_id_project_novel_key",
+            "id",
+            "projectId",
+            "novelId",
+            unique=True,
+        ),
+        Index(
+            "VideoVisualCanon_slot_key",
+            "projectId",
+            "settingKind",
+            "settingId",
+            "duty",
+            "variantKey",
+            unique=True,
+        ),
+        Index("VideoVisualCanon_project_setting_idx", "projectId", "settingKind", "settingId"),
+        {"schema": "public"},
+    )
+
+
+class VideoVisualCanonVersion(Base):
+    """用户批准后不可变的视觉设定版本，引用一份已锁定图片素材。"""
+
+    __tablename__ = "VideoVisualCanonVersion"
+    id: Mapped[str] = mapped_column(Text, nullable=False, default=generate_id)
+    canonId: Mapped[str] = mapped_column(Text, nullable=False)
+    projectId: Mapped[str] = mapped_column(Text, nullable=False)
+    novelId: Mapped[str] = mapped_column(Text, nullable=False)
+    versionNo: Mapped[int] = mapped_column(Integer, nullable=False)
+    assetId: Mapped[str] = mapped_column(Text, nullable=False)
+    settingName: Mapped[str] = mapped_column(Text, nullable=False)
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    includeFeaturesJson: Mapped[str] = mapped_column(Text, nullable=False)
+    excludeFeaturesJson: Mapped[str] = mapped_column(Text, nullable=False)
+    defaultStrength: Mapped[int] = mapped_column(Integer, nullable=False)
+    approvedByUserId: Mapped[str] = mapped_column(Text, nullable=False)
+    contentHash: Mapped[str] = mapped_column(Text, nullable=False)
+    createdAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="VideoVisualCanonVersion_pkey"),
+        ForeignKeyConstraint(
+            ("canonId", "projectId", "novelId"),
+            (
+                "public.VideoVisualCanon.id",
+                "public.VideoVisualCanon.projectId",
+                "public.VideoVisualCanon.novelId",
+            ),
+            name="VideoVisualCanonVersion_canon_scope_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("assetId", "projectId"),
+            ("public.VideoAsset.id", "public.VideoAsset.projectId"),
+            name="VideoVisualCanonVersion_asset_project_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("approvedByUserId",),
+            ("public.User.id",),
+            name="VideoVisualCanonVersion_user_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        Index(
+            "VideoVisualCanonVersion_canon_version_key",
+            "canonId",
+            "versionNo",
+            unique=True,
+        ),
+        Index(
+            "VideoVisualCanonVersion_id_canonId_key",
+            "id",
+            "canonId",
+            unique=True,
+        ),
+        Index(
+            "VideoVisualCanonVersion_id_project_novel_key",
+            "id",
+            "projectId",
+            "novelId",
+            unique=True,
+        ),
+        {"schema": "public"},
+    )
+
+
+class VideoShotVisualReferenceSet(Base):
+    """正式镜头当前采用的视觉参考集合 Head，revision 用于浏览器 CAS。"""
+
+    __tablename__ = "VideoShotVisualReferenceSet"
+    shotId: Mapped[str] = mapped_column(Text, nullable=False)
+    planVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    adaptationId: Mapped[str] = mapped_column(Text, nullable=False)
+    projectId: Mapped[str] = mapped_column(Text, nullable=False)
+    novelId: Mapped[str] = mapped_column(Text, nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    updatedAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("shotId", name="VideoShotVisualReferenceSet_pkey"),
+        ForeignKeyConstraint(
+            ("shotId", "planVersionId"),
+            ("public.VideoShot.id", "public.VideoShot.planVersionId"),
+            name="VideoShotVisualReferenceSet_shot_plan_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("planVersionId", "adaptationId"),
+            ("public.VideoShotPlanVersion.id", "public.VideoShotPlanVersion.adaptationId"),
+            name="VideoShotVisualReferenceSet_plan_adaptation_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("adaptationId", "projectId"),
+            ("public.VideoChapterAdaptation.id", "public.VideoChapterAdaptation.projectId"),
+            name="VideoShotVisualReferenceSet_adaptation_project_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("adaptationId", "novelId"),
+            ("public.VideoChapterAdaptation.id", "public.VideoChapterAdaptation.novelId"),
+            name="VideoShotVisualReferenceSet_adaptation_novel_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("projectId", "novelId"),
+            ("public.VideoProject.id", "public.VideoProject.novelId"),
+            name="VideoShotVisualReferenceSet_project_novel_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        Index(
+            "VideoShotVisualReferenceSet_scope_key",
+            "shotId",
+            "planVersionId",
+            "adaptationId",
+            "projectId",
+            "novelId",
+            unique=True,
+        ),
+        {"schema": "public"},
+    )
+
+
+class VideoShotVisualReferenceBinding(Base):
+    """镜头参考集合中的一个有序正式视觉版本与参考强度。"""
+
+    __tablename__ = "VideoShotVisualReferenceBinding"
+    shotId: Mapped[str] = mapped_column(Text, nullable=False)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    planVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    adaptationId: Mapped[str] = mapped_column(Text, nullable=False)
+    projectId: Mapped[str] = mapped_column(Text, nullable=False)
+    novelId: Mapped[str] = mapped_column(Text, nullable=False)
+    canonVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    strength: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    __table_args__ = (
+        PrimaryKeyConstraint("shotId", "ordinal", name="VideoShotVisualReferenceBinding_pkey"),
+        ForeignKeyConstraint(
+            ("shotId", "planVersionId", "adaptationId", "projectId", "novelId"),
+            (
+                "public.VideoShotVisualReferenceSet.shotId",
+                "public.VideoShotVisualReferenceSet.planVersionId",
+                "public.VideoShotVisualReferenceSet.adaptationId",
+                "public.VideoShotVisualReferenceSet.projectId",
+                "public.VideoShotVisualReferenceSet.novelId",
+            ),
+            name="VideoShotVisualReferenceBinding_set_scope_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("canonVersionId", "projectId", "novelId"),
+            (
+                "public.VideoVisualCanonVersion.id",
+                "public.VideoVisualCanonVersion.projectId",
+                "public.VideoVisualCanonVersion.novelId",
+            ),
+            name="VideoShotVisualReferenceBinding_canon_scope_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        Index(
+            "VideoShotVisualReferenceBinding_shot_canon_key",
+            "shotId",
+            "canonVersionId",
+            unique=True,
+        ),
+        {"schema": "public"},
+    )
+
+
+class VideoShotPromptVisualReference(Base):
+    """正式提示词版本冻结的视觉参考，后续换图不会改变旧提示词依据。"""
+
+    __tablename__ = "VideoShotPromptVisualReference"
+    promptVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    shotId: Mapped[str] = mapped_column(Text, nullable=False)
+    shotPlanVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    adaptationId: Mapped[str] = mapped_column(Text, nullable=False)
+    projectId: Mapped[str] = mapped_column(Text, nullable=False)
+    novelId: Mapped[str] = mapped_column(Text, nullable=False)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    canonVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    strength: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "promptVersionId",
+            "ordinal",
+            name="VideoShotPromptVisualReference_pkey",
+        ),
+        ForeignKeyConstraint(
+            ("promptVersionId", "shotId", "shotPlanVersionId"),
+            (
+                "public.VideoShotPromptVersion.id",
+                "public.VideoShotPromptVersion.shotId",
+                "public.VideoShotPromptVersion.shotPlanVersionId",
+            ),
+            name="VideoShotPromptVisualReference_prompt_scope_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("shotPlanVersionId", "adaptationId"),
+            ("public.VideoShotPlanVersion.id", "public.VideoShotPlanVersion.adaptationId"),
+            name="VideoShotPromptVisualReference_plan_adaptation_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("adaptationId", "projectId"),
+            ("public.VideoChapterAdaptation.id", "public.VideoChapterAdaptation.projectId"),
+            name="VideoShotPromptVisualReference_adaptation_project_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("adaptationId", "novelId"),
+            ("public.VideoChapterAdaptation.id", "public.VideoChapterAdaptation.novelId"),
+            name="VideoShotPromptVisualReference_adaptation_novel_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("canonVersionId", "projectId", "novelId"),
+            (
+                "public.VideoVisualCanonVersion.id",
+                "public.VideoVisualCanonVersion.projectId",
+                "public.VideoVisualCanonVersion.novelId",
+            ),
+            name="VideoShotPromptVisualReference_canon_scope_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        Index(
+            "VideoShotPromptVisualReference_prompt_canon_key",
+            "promptVersionId",
+            "canonVersionId",
+            unique=True,
         ),
         {"schema": "public"},
     )

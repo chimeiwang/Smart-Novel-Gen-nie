@@ -14,6 +14,7 @@ import {
   durationMetrics,
   flattenCandidateShots,
   flattenFormalShots,
+  localCoverageFindings,
   mergeShotWithNext,
   mergeSceneWithNext,
   restoreCandidateShot,
@@ -23,8 +24,10 @@ import {
 import { EpisodeEditor } from "./episode-editor";
 import { PromptEditor } from "./prompt-editor";
 import { ShotInspector } from "./shot-inspector";
+import { ShotPlanAudit } from "./shot-plan-audit";
 import { ShotTimeline, type TimelineScene } from "./shot-timeline";
 import { SourcePanel } from "./source-panel";
+import { VisualCanonPanel } from "./visual-canon-panel";
 import type {
   AdaptationCandidate,
   ChapterAdaptation,
@@ -32,10 +35,11 @@ import type {
   CandidateShot,
   FormalShot,
   SourceSelection,
+  VisualCanon,
   VideoProject,
 } from "./types";
 
-type Stage = "review" | "episodes" | "prompts";
+type Stage = "review" | "episodes" | "visuals" | "prompts";
 const ACTIVE_TASKS = new Set(["pending", "submitted", "processing"]);
 
 export function ChapterAdaptationWorkspace({
@@ -45,6 +49,7 @@ export function ChapterAdaptationWorkspace({
   selectionBridge,
 }: ChapterAdaptationWorkspaceProps) {
   const [projects, setProjects] = useState<VideoProject[]>([]);
+  const [visualCanons, setVisualCanons] = useState<VisualCanon[]>([]);
   const [previewEnabled, setPreviewEnabled] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [adaptation, setAdaptation] = useState<ChapterAdaptation | null>(null);
@@ -57,6 +62,8 @@ export function ChapterAdaptationWorkspace({
   const [pacingPreset, setPacingPreset] = useState<"short_drama" | "cinematic" | "dialogue_driven">("short_drama");
   const [targetEpisodeSeconds, setTargetEpisodeSeconds] = useState<60 | 90 | 120>(90);
   const [promptText, setPromptText] = useState("");
+  const [revisionBrief, setRevisionBrief] = useState("");
+  const [draftEdited, setDraftEdited] = useState(false);
   const [loading, setLoading] = useState(true);
   const [working, setWorking] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -66,14 +73,23 @@ export function ChapterAdaptationWorkspace({
   const replaceAdaptation = useCallback((next: ChapterAdaptation) => {
     setAdaptation(next);
     setDraftPlan(next.candidatePlan ? cloneCandidate(next.candidatePlan) : null);
+    setDraftEdited(false);
     setEpisodeBreakIds(next.episodePlan?.breakAfterShotIds ?? []);
   }, []);
 
   const loadAdaptations = useCallback(async (projectId: string) => {
-    const result = requireApiData(await browserApi.GET(
-      "/api/v1/video/projects/{project_id}/chapter-adaptations",
-      { params: { path: { project_id: projectId } } },
-    ));
+    const [adaptationsResponse, canonsResponse] = await Promise.all([
+      browserApi.GET(
+        "/api/v1/video/projects/{project_id}/chapter-adaptations",
+        { params: { path: { project_id: projectId } } },
+      ),
+      browserApi.GET(
+        "/api/v1/video/projects/{project_id}/visual-canons",
+        { params: { path: { project_id: projectId } } },
+      ),
+    ]);
+    const result = requireApiData(adaptationsResponse);
+    setVisualCanons(requireApiData(canonsResponse).canons);
     const chapterAdaptations = currentChapterId
       ? result.adaptations.filter((item) => item.chapterId === currentChapterId)
       : [];
@@ -108,6 +124,7 @@ export function ChapterAdaptationWorkspace({
       else {
         setActiveProjectId(null);
         setAdaptation(null);
+        setVisualCanons([]);
       }
     } catch (loadError) {
       setError(errorMessage(loadError, "加载章节影视化工作台失败"));
@@ -144,8 +161,19 @@ export function ChapterAdaptationWorkspace({
   const candidatePlan = draftPlan ?? adaptation?.candidatePlan ?? null;
   const formalPlan = adaptation?.currentPlan ?? null;
   const editable = Boolean(adaptation?.candidatePlan && candidatePlan);
+  // 审镜只操作待审候选；分集、视觉设定和提示词必须始终固定到当前正式版本。
+  const activePlan = stage === "review"
+    ? candidatePlan ?? formalPlan
+    : formalPlan ?? candidatePlan;
+  const activePlanKind = stage === "review" && candidatePlan
+    ? "candidate"
+    : formalPlan
+      ? "formal"
+      : candidatePlan
+        ? "candidate"
+        : null;
   const timelineScenes = useMemo<TimelineScene[]>(() => (
-    candidatePlan?.scenes ?? formalPlan?.scenes ?? []
+    activePlan?.scenes ?? []
   ).map((scene) => ({
     sceneKey: scene.sceneKey,
     title: scene.title,
@@ -156,9 +184,10 @@ export function ChapterAdaptationWorkspace({
       beatKey: beat.beatKey,
       title: beat.title,
       dramaticTurn: beat.dramaticTurn,
+      coverageGoals: beat.coverageGoals,
       shots: beat.shots,
     })),
-  })), [candidatePlan, formalPlan]);
+  })), [activePlan]);
   const timelineShots = useMemo(() => timelineScenes.flatMap((scene) => scene.beats.flatMap((beat) => beat.shots)), [timelineScenes]);
 
   useEffect(() => {
@@ -176,6 +205,19 @@ export function ChapterAdaptationWorkspace({
     : null;
   const selectedPromptCandidate = adaptation?.promptCandidates.find((item) => item.shotId === selectedFormalShot?.id) ?? null;
   const selectedPromptVersion = adaptation?.promptVersions.find((item) => item.shotId === selectedFormalShot?.id) ?? null;
+  const currentVisualReferences = adaptation?.visualReferenceSets.find(
+    (item) => item.shotId === selectedFormalShot?.id,
+  )?.references ?? [];
+  const liveCoverageFindings = useMemo(
+    () => candidatePlan ? localCoverageFindings(candidatePlan) : [],
+    [candidatePlan],
+  );
+
+  const applyDraftPlan = (next: AdaptationCandidate | null) => {
+    if (!next) return;
+    setDraftPlan(next);
+    setDraftEdited(true);
+  };
 
   useEffect(() => {
     const timer = window.setTimeout(() => setPromptText(
@@ -204,6 +246,7 @@ export function ChapterAdaptationWorkspace({
     ));
     setProjects((current) => [project, ...current]);
     setActiveProjectId(project.id);
+    setVisualCanons([]);
     return project.id;
   };
 
@@ -227,6 +270,7 @@ export function ChapterAdaptationWorkspace({
           },
         ));
       }
+      const basePlan = current.id === adaptation?.id ? formalPlan : null;
       const accepted = requireApiData(await browserApi.POST(
         "/api/v1/video/chapter-adaptations/{adaptation_id}/shot-plan-runs",
         {
@@ -235,6 +279,8 @@ export function ChapterAdaptationWorkspace({
             clientRequestId: createClientRequestId(),
             pacingPreset,
             targetEpisodeSeconds,
+            baseShotPlanVersionId: basePlan?.planVersionId ?? null,
+            revisionBrief: basePlan && revisionBrief.trim() ? revisionBrief.trim() : null,
           },
         },
       ));
@@ -315,7 +361,7 @@ export function ChapterAdaptationWorkspace({
         },
       ));
       replaceAdaptation(result);
-      setStage("prompts");
+      setStage("visuals");
     } catch (saveError) {
       setError(errorMessage(saveError, "保存分集版本失败"));
     } finally {
@@ -389,15 +435,19 @@ export function ChapterAdaptationWorkspace({
   if (loading) return <div className="panel empty">正在加载章节影视化工作台...</div>;
   const candidateShots = candidatePlan ? flattenCandidateShots(candidatePlan) : [];
   const formalShots = formalPlan ? flattenFormalShots(formalPlan) : [];
-  const metrics = durationMetrics(candidateShots.length ? candidateShots : formalShots);
-  const sourceShots = candidateShots.length ? candidateShots : formalShots;
+  const metrics = durationMetrics(timelineShots);
+  const metricsLabel = activePlanKind === "candidate"
+    ? "待审候选"
+    : formalPlan
+      ? `正式 v${formalPlan.versionNo}`
+      : "尚无方案";
 
   return (
     <section className="panel chapter-adaptation-workspace">
       <header className="chapter-adaptation-header">
         <div>
           <h2>{adaptation?.chapterTitle ?? currentChapter?.title ?? "章节影视化"}</h2>
-          <span>{statusLabel(adaptation, taskActive)}</span>
+          <span>{statusLabel(adaptation, taskActive, stage)}</span>
         </div>
         <div className="chapter-adaptation-controls">
           <label>节奏
@@ -412,12 +462,14 @@ export function ChapterAdaptationWorkspace({
           </label>
           {stage === "review" ? (
             <>
-              <button className="button secondary" type="button" disabled={!previewEnabled || !currentChapter || taskActive || editable || working !== null} onClick={() => void startPlan()}>{taskActive ? "分析中..." : editable ? "候选待处理" : adaptation ? "重新电影化拆镜" : "开始电影化拆镜"}</button>
+              <button className="button secondary" type="button" disabled={!previewEnabled || !currentChapter || taskActive || editable || working !== null} onClick={() => void startPlan()}>{taskActive ? "分析中..." : editable ? "候选待处理" : formalPlan ? `基于 v${formalPlan.versionNo} 生成修订候选` : adaptation ? "重新分析章节" : "开始分析章节"}</button>
               {editable ? <button className="button ghost" type="button" disabled={working !== null} onClick={() => void discardCandidate()}>{working === "discard" ? "放弃中..." : "放弃候选"}</button> : null}
               {editable ? <button className="button primary" type="button" disabled={working !== null} onClick={() => void confirmPlan()}>{working === "confirm" ? "确认中..." : `确认 ${candidateShots.length} 个镜头`}</button> : null}
             </>
           ) : stage === "episodes" ? (
-            <button className="button primary" type="button" disabled={!formalPlan || working !== null} onClick={() => void saveEpisodes()}>{working === "episodes" ? "保存中..." : "保存分集并进入提示词"}</button>
+            <button className="button primary" type="button" disabled={!formalPlan || working !== null} onClick={() => void saveEpisodes()}>{working === "episodes" ? "保存中..." : "保存分集并进入视觉设定"}</button>
+          ) : stage === "visuals" ? (
+            <button className="button primary" type="button" disabled={!formalPlan} onClick={() => setStage("prompts")}>进入逐镜提示词</button>
           ) : (
               <button className="button secondary" type="button" disabled={!formalPlan || taskActive || working !== null} onClick={() => void generatePrompts([])}>{taskActive ? "提示词生成中..." : "批量生成未完成提示词"}</button>
           )}
@@ -426,6 +478,7 @@ export function ChapterAdaptationWorkspace({
       <nav className="chapter-adaptation-steps">
         <StageButton value="review" current={stage} label="拆镜与审镜" onSelect={setStage} />
         <StageButton value="episodes" current={stage} label="在镜头间分集" disabled={!formalPlan} onSelect={setStage} />
+        <StageButton value="visuals" current={stage} label="角色与场景稳定" disabled={!formalPlan} onSelect={setStage} />
         <StageButton value="prompts" current={stage} label="逐镜提示词" disabled={!formalPlan} onSelect={setStage} />
       </nav>
       {error ? <div className="notice notice-danger" role="alert">{error}</div> : null}
@@ -436,19 +489,51 @@ export function ChapterAdaptationWorkspace({
       ) : null}
       {!previewEnabled ? <div className="notice notice-warning">当前环境未开启视频开发预览写入。</div> : null}
       {sourceChanged ? <div className="notice notice-warning">当前章节正文已经修改，这里保留的是旧快照；重新电影化拆镜会创建新的章节改编。</div> : null}
+      {stage !== "review" && candidatePlan && formalPlan ? (
+        <section className="adaptation-version-context notice notice-warning">
+          <div>
+            <strong>当前正在处理正式 v{formalPlan.versionNo}（{formalShots.length} 镜）</strong>
+            <span>另有待审候选（{candidateShots.length} 镜）；只有确认后才会成为新的正式版本，不会静默覆盖当前工作。</span>
+          </div>
+          <button className="button secondary sm" type="button" onClick={() => setStage("review")}>返回审镜</button>
+        </section>
+      ) : null}
       {(candidatePlan || formalPlan) ? (
         <div className="chapter-adaptation-metrics">
-          <span>{timelineScenes.length} 场</span><span>{timelineScenes.reduce((sum, scene) => sum + scene.beats.length, 0)} 节拍</span><span>{sourceShots.length} 镜</span>
+          <strong>{metricsLabel}</strong>
+          <span>{timelineScenes.length} 场</span><span>{timelineScenes.reduce((sum, scene) => sum + scene.beats.length, 0)} 节拍</span><span>{timelineShots.length} 镜</span>
           <span>约 {Number((metrics.totalMs / 1000).toFixed(1))} 秒</span><span>平均 {Number((metrics.averageMs / 1000).toFixed(1))} 秒/镜</span>
-          {candidatePlan ? <span>原文覆盖 {candidateSourceCoverage(candidatePlan, Array.from(adaptation?.sourceText ?? "").length)}%</span> : null}
+          {activePlanKind === "candidate" && candidatePlan ? <span>原文覆盖 {candidateSourceCoverage(candidatePlan, Array.from(adaptation?.sourceText ?? "").length)}%</span> : null}
         </div>
+      ) : null}
+      {stage === "review" && formalPlan && !candidatePlan ? (
+        <section className="adaptation-revision-brief">
+          <div><strong>从正式 v{formalPlan.versionNo} 继续</strong><span>AI 会重新分析叙事目标，保留有效镜头并生成完整待审修订；当前版本不会被改写。</span></div>
+          <textarea
+            className="textarea"
+            value={revisionBrief}
+            maxLength={1200}
+            disabled={taskActive || working !== null}
+            placeholder="可选：写下这次最想解决的问题，例如空间关系不清、镜头职责重复、画外对白声层错误……"
+            onChange={(event) => setRevisionBrief(event.target.value)}
+          />
+        </section>
+      ) : null}
+      {stage === "review" && candidatePlan ? (
+        <ShotPlanAudit
+          reviewSummary={candidatePlan.reviewSummary ?? null}
+          initialFindings={candidatePlan.reviewFindings ?? []}
+          liveFindings={liveCoverageFindings}
+          edited={draftEdited}
+          onSelectShot={setSelectedShotKey}
+        />
       ) : null}
       {stage === "review" ? (
         (candidatePlan || formalPlan) ? (
           <div className="chapter-adaptation-review-grid">
             <SourcePanel
               sourceText={adaptation?.sourceText ?? currentChapter?.content ?? ""}
-              shots={sourceShots}
+              shots={timelineShots}
               selectedShotKey={selectedShotKey}
               editable={editable}
               selection={sourceSelection}
@@ -457,13 +542,13 @@ export function ChapterAdaptationWorkspace({
               onRewrite={() => void rewriteSelection()}
               onBind={() => {
                 if (!draftPlan || !selectedShotKey || !sourceSelection) return;
-                setDraftPlan(bindShotSource(draftPlan, selectedShotKey, sourceSelection));
+                applyDraftPlan(bindShotSource(draftPlan, selectedShotKey, sourceSelection));
                 setSourceSelection(null);
               }}
               onAddFromSelection={() => {
                 if (!draftPlan || !selectedShotKey || !sourceSelection) return;
                 const next = addShotAfter(draftPlan, selectedShotKey, sourceSelection, "action");
-                if (next) setDraftPlan(next);
+                applyDraftPlan(next);
                 setSourceSelection(null);
               }}
               onClearSelection={() => setSourceSelection(null)}
@@ -476,7 +561,7 @@ export function ChapterAdaptationWorkspace({
               onMergeScene={(sceneKey) => {
                 if (!draftPlan) return;
                 const next = mergeSceneWithNext(draftPlan, sceneKey);
-                if (next) setDraftPlan(next);
+                if (next) applyDraftPlan(next);
                 else setError("当前场景之后没有可合并场景");
               }}
             />
@@ -484,27 +569,36 @@ export function ChapterAdaptationWorkspace({
               shot={selectedLocation?.shot ?? null}
               sceneTitle={selectedLocation?.scene.title ?? ""}
               beatTitle={selectedLocation?.beat.title ?? ""}
+              coverageGoals={selectedLocation?.beat.coverageGoals ?? []}
               editable={editable}
               discardedCount={discardedShots.length}
-              onChange={(patch) => draftPlan && selectedShotKey && setDraftPlan(updateCandidateShot(draftPlan, selectedShotKey, patch))}
+              onChange={(patch) => draftPlan && selectedShotKey && applyDraftPlan(updateCandidateShot(draftPlan, selectedShotKey, patch))}
+              onToggleGoal={(goalKey) => {
+                if (!draftPlan || !selectedShotKey || !selectedLocation) return;
+                const current = selectedLocation.shot.coveredGoalKeys ?? [];
+                const coveredGoalKeys = current.includes(goalKey)
+                  ? current.filter((item) => item !== goalKey)
+                  : [...current, goalKey];
+                applyDraftPlan(updateCandidateShot(draftPlan, selectedShotKey, { coveredGoalKeys }));
+              }}
               onMerge={() => {
                 if (!draftPlan || !selectedShotKey) return;
                 const next = mergeShotWithNext(draftPlan, selectedShotKey);
-                if (next) setDraftPlan(next); else setError("只能合并同一节拍中的相邻镜头，且合并后不能超过 15 秒");
+                if (next) applyDraftPlan(next); else setError("只能合并同一节拍中的相邻镜头；时长不能超过 15 秒，且两镜对白位置不能冲突");
               }}
               onDelete={() => {
                 if (!draftPlan || !selectedShotKey) return;
                 const result = deleteCandidateShot(draftPlan, selectedShotKey);
                 if (!result) return setError("每个戏剧节拍至少保留一个镜头");
                 setDiscardedShots((current) => [...current, result.discarded]);
-                setDraftPlan(result.plan);
+                applyDraftPlan(result.plan);
               }}
               onRestore={() => {
                 const discarded = discardedShots.at(-1);
                 if (!draftPlan || !discarded) return;
                 const next = restoreCandidateShot(draftPlan, discarded);
                 if (next) {
-                  setDraftPlan(next);
+                  applyDraftPlan(next);
                   setDiscardedShots((current) => current.slice(0, -1));
                 }
               }}
@@ -513,20 +607,42 @@ export function ChapterAdaptationWorkspace({
                 const needsSource = purpose === "action";
                 if (needsSource && !sourceSelection) return setError("新增动作镜头前，请先在左侧选择对应原文");
                 const next = addShotAfter(draftPlan, selectedShotKey, needsSource ? sourceSelection : null, purpose);
-                if (next) setDraftPlan(next);
+                applyDraftPlan(next);
                 setSourceSelection(null);
               }}
             />
           </div>
         ) : (
           <div className="chapter-adaptation-empty">
-            <strong>{taskActive ? "AI 正在识别场景和戏剧节拍" : "把当前章节转成可审核的电影化镜头"}</strong>
-            <p>AI 会先理解场景与戏剧变化，再设计有切镜动机的镜头；不会按对白和句号机械拆分。</p>
-            {!taskActive ? <button className="button primary" type="button" disabled={!previewEnabled || !currentChapter} onClick={() => void startPlan()}>开始电影化拆镜</button> : <span>任务已进入耐久队列，可以安全刷新页面。</span>}
+            <strong>{taskActive ? "AI 正在识别场景、戏剧节拍和观众目标" : "把当前章节转成可审核的镜头时间线"}</strong>
+            <p>AI 先判断观众在每个节拍中必须获得什么，再用镜头完成目标；不会按对白、句号或固定景别模板机械拆分。</p>
+            {!taskActive ? <button className="button primary" type="button" disabled={!previewEnabled || !currentChapter} onClick={() => void startPlan()}>开始分析章节</button> : <span>任务已进入耐久队列，可以安全刷新页面。</span>}
           </div>
         )
       ) : null}
       {stage === "episodes" && formalPlan ? <EpisodeEditor plan={formalPlan} breakAfterShotIds={episodeBreakIds} targetEpisodeSeconds={targetEpisodeSeconds} onToggle={(shotId) => setEpisodeBreakIds((current) => toggleEpisodeBoundary(formalPlan, current, shotId))} /> : null}
+      {stage === "visuals" && formalPlan && activeProjectId && adaptation ? <VisualCanonPanel
+        novelId={novelId}
+        projectId={activeProjectId}
+        adaptationId={adaptation.id}
+        plan={formalPlan}
+        selectedShot={selectedFormalShot}
+        canons={visualCanons}
+        referenceSets={adaptation.visualReferenceSets}
+        onSelectShot={setSelectedShotKey}
+        onCanonChanged={(canon) => setVisualCanons((current) => {
+          const exists = current.some((item) => item.id === canon.id);
+          return exists
+            ? current.map((item) => item.id === canon.id ? canon : item)
+            : [...current, canon];
+        })}
+        onReferenceSetChanged={(referenceSet) => setAdaptation((current) => current ? {
+          ...current,
+          visualReferenceSets: current.visualReferenceSets.some((item) => item.shotId === referenceSet.shotId)
+            ? current.visualReferenceSets.map((item) => item.shotId === referenceSet.shotId ? referenceSet : item)
+            : [...current.visualReferenceSets, referenceSet],
+        } : current)}
+      /> : null}
       {stage === "prompts" && formalPlan ? <PromptEditor
         plan={formalPlan}
         selectedShot={selectedFormalShot}
@@ -536,6 +652,11 @@ export function ChapterAdaptationWorkspace({
         breakAfterShotIds={adaptation?.episodePlan?.breakAfterShotIds ?? []}
         promptText={promptText}
         aspectRatio={projects.find((item) => item.id === activeProjectId)?.targetAspectRatio ?? "9:16"}
+        visualReferences={selectedPromptCandidate?.visualReferences
+          ?? selectedPromptVersion?.visualReferences
+          ?? currentVisualReferences
+          ?? []}
+        currentVisualReferences={currentVisualReferences}
         taskActive={taskActive}
         working={working}
         onSelect={setSelectedShotKey}
@@ -551,9 +672,10 @@ function StageButton({ value, current, label, disabled = false, onSelect }: { va
   return <button className={current === value ? "active" : ""} type="button" disabled={disabled} onClick={() => onSelect(value)}>{label}</button>;
 }
 
-function statusLabel(adaptation: ChapterAdaptation | null, taskActive: boolean): string {
+function statusLabel(adaptation: ChapterAdaptation | null, taskActive: boolean, stage: Stage): string {
   if (taskActive && adaptation?.latestTask?.kind === "shot_prompt") return "正在生成逐镜即梦提示词";
   if (taskActive) return adaptation?.latestTask?.checkpointStage === "dramatic_structure" ? "已完成戏剧分析，正在设计镜头" : "正在分析章节";
+  if (stage !== "review" && adaptation?.currentPlan) return `正在处理正式镜头方案 v${adaptation.currentPlan.versionNo}`;
   if (adaptation?.state === "awaiting_review") return "电影化镜头候选等待确认";
   if (adaptation?.state === "approved") return `正式镜头方案 v${adaptation.currentPlan?.versionNo ?? 1}`;
   if (adaptation?.state === "failed") return adaptation.latestTask?.lastErrorMessage ?? "任务失败，可重新提交";
@@ -562,7 +684,8 @@ function statusLabel(adaptation: ChapterAdaptation | null, taskActive: boolean):
 
 function initialStage(adaptation: ChapterAdaptation): Stage {
   if (adaptation.candidatePlan || !adaptation.currentPlan) return "review";
-  if (adaptation.episodePlan || adaptation.promptVersions.length || adaptation.promptCandidates.length) return "prompts";
+  if (adaptation.promptVersions.length || adaptation.promptCandidates.length) return "prompts";
+  if (adaptation.episodePlan) return "visuals";
   return "episodes";
 }
 

@@ -19,6 +19,7 @@ from inkforge_contracts.video_adaptation import (
     DramaticBeatCandidate,
     DramaticStructureCheckpoint,
     ShotPromptSpecBatch,
+    ShotVisualReferenceSnapshot,
     VideoAdaptationCheckpointCallback,
     VideoAdaptationFailureCallback,
     VideoAdaptationJobPayload,
@@ -79,6 +80,11 @@ from .validation import (
     canonical_json_hash,
     validate_episode_boundaries,
     validate_plan_against_source,
+)
+from .visual_canon import (
+    add_prompt_visual_references,
+    current_shot_reference_snapshots,
+    freeze_visual_reference_bundles,
 )
 
 _ACTIVE_TASK_STATUSES = {"pending", "submitted", "processing"}
@@ -244,8 +250,7 @@ class VideoAdaptationRepository:
                     lock=True,
                 )
                 idempotency_key = (
-                    f"video-adaptation-plan:{user_id}:{adaptation.id}:"
-                    f"{request.clientRequestId}"
+                    f"video-adaptation-plan:{user_id}:{adaptation.id}:{request.clientRequestId}"
                 )
                 existing = await session.scalar(
                     select(VideoAdaptationTask).where(
@@ -258,6 +263,8 @@ class VideoAdaptationRepository:
                         not isinstance(payload, ChapterAdaptationPlanJobPayload)
                         or payload.pacingPreset != request.pacingPreset
                         or payload.targetEpisodeSeconds != request.targetEpisodeSeconds
+                        or payload.baseShotPlanVersionId != request.baseShotPlanVersionId
+                        or payload.revisionBrief != request.revisionBrief
                     ):
                         raise ApiError(
                             status_code=409,
@@ -279,6 +286,32 @@ class VideoAdaptationRepository:
                         code="VIDEO_ADAPTATION_REVIEW_PENDING",
                         message="当前已有待确认镜头方案，请先确认或放弃",
                     )
+                base_plan = None
+                if head.currentShotPlanVersionId is not None:
+                    if request.baseShotPlanVersionId != head.currentShotPlanVersionId:
+                        raise ApiError(
+                            status_code=409,
+                            code="VIDEO_ADAPTATION_BASE_PLAN_REQUIRED",
+                            message="已有正式方案时必须基于当前版本创建修订候选",
+                        )
+                    detail = await load_adaptation_response(
+                        session,
+                        user_id=user_id,
+                        adaptation_id=adaptation.id,
+                    )
+                    if detail.currentPlan is None:
+                        raise ApiError(
+                            status_code=409,
+                            code="VIDEO_ADAPTATION_BASE_PLAN_INVALID",
+                            message="当前正式镜头方案无法读取",
+                        )
+                    base_plan = candidate_from_formal_plan(detail.currentPlan)
+                elif request.baseShotPlanVersionId is not None:
+                    raise ApiError(
+                        status_code=409,
+                        code="VIDEO_ADAPTATION_BASE_PLAN_INVALID",
+                        message="当前改编还没有可作为修订基线的正式方案",
+                    )
                 task_id = generate_id()
                 payload = ChapterAdaptationPlanJobPayload(
                     workflow="chapter_cinematic_adaptation_v2",
@@ -292,6 +325,9 @@ class VideoAdaptationRepository:
                     targetLanguage=project.targetLanguage,
                     pacingPreset=request.pacingPreset,
                     targetEpisodeSeconds=request.targetEpisodeSeconds,
+                    baseShotPlanVersionId=request.baseShotPlanVersionId,
+                    baseShotPlan=base_plan,
+                    revisionBrief=request.revisionBrief,
                 )
                 inherited_checkpoint: str | None = None
                 prior_failed = await session.scalar(
@@ -312,21 +348,18 @@ class VideoAdaptationRepository:
                 )
                 if prior_failed is not None:
                     try:
-                        prior_payload = parse_video_adaptation_job_payload(
-                            prior_failed.requestJson
-                        )
+                        prior_payload = parse_video_adaptation_job_payload(prior_failed.requestJson)
                         if (
                             isinstance(prior_payload, ChapterAdaptationPlanJobPayload)
                             and prior_payload.sourceHash == payload.sourceHash
                             and prior_payload.pacingPreset == payload.pacingPreset
-                            and prior_payload.targetEpisodeSeconds
-                            == payload.targetEpisodeSeconds
+                            and prior_payload.targetEpisodeSeconds == payload.targetEpisodeSeconds
+                            and prior_payload.baseShotPlanVersionId == payload.baseShotPlanVersionId
+                            and prior_payload.revisionBrief == payload.revisionBrief
                         ):
-                            inherited_checkpoint = (
-                                DramaticStructureCheckpoint.model_validate_json(
-                                    prior_failed.checkpointJson or ""
-                                ).model_dump_json()
-                            )
+                            inherited_checkpoint = DramaticStructureCheckpoint.model_validate_json(
+                                prior_failed.checkpointJson or ""
+                            ).model_dump_json()
                     except (ValidationError, ValueError):
                         inherited_checkpoint = None
                 task = VideoAdaptationTask(
@@ -334,7 +367,7 @@ class VideoAdaptationRepository:
                     adaptationId=adaptation.id,
                     projectId=project.id,
                     novelId=project.novelId,
-                    baseShotPlanVersionId=None,
+                    baseShotPlanVersionId=request.baseShotPlanVersionId,
                     jobId=f"{self._job_prefix}{task_id}",
                     kind="shot_plan",
                     workflow=payload.workflow,
@@ -368,8 +401,7 @@ class VideoAdaptationRepository:
                     lock=True,
                 )
                 idempotency_key = (
-                    f"video-adaptation-prompt:{user_id}:{adaptation.id}:"
-                    f"{request.clientRequestId}"
+                    f"video-adaptation-prompt:{user_id}:{adaptation.id}:{request.clientRequestId}"
                 )
                 existing = await session.scalar(
                     select(VideoAdaptationTask).where(
@@ -393,8 +425,7 @@ class VideoAdaptationRepository:
                                 await session.scalars(
                                     select(VideoShot.shotKey)
                                     .where(
-                                        VideoShot.planVersionId
-                                        == request.shotPlanVersionId,
+                                        VideoShot.planVersionId == request.shotPlanVersionId,
                                         VideoShot.id.in_(request.shotIds),
                                     )
                                     .order_by(VideoShot.ordinal)
@@ -430,12 +461,16 @@ class VideoAdaptationRepository:
                         code="VIDEO_ADAPTATION_PLAN_REQUIRED",
                         message="请先确认电影化镜头方案",
                     )
-                shots = [
-                    shot
-                    for scene in detail.currentPlan.scenes
-                    for beat in scene.beats
-                    for shot in beat.shots
-                ]
+                shots = list(
+                    (
+                        await session.scalars(
+                            select(VideoShot)
+                            .where(VideoShot.planVersionId == request.shotPlanVersionId)
+                            .order_by(VideoShot.ordinal)
+                            .with_for_update()
+                        )
+                    ).all()
+                )
                 requested_ids = set(request.shotIds)
                 if requested_ids:
                     targets = [shot for shot in shots if shot.id in requested_ids]
@@ -460,6 +495,11 @@ class VideoAdaptationRepository:
                     session,
                     adaptation.novelId,
                 )
+                visual_reference_bundles = await freeze_visual_reference_bundles(
+                    session,
+                    shots=shots,
+                    target_shot_keys=target_keys,
+                )
                 task_id = generate_id()
                 payload = ChapterAdaptationPromptJobPayload(
                     workflow="chapter_shot_prompt_v2",
@@ -474,6 +514,7 @@ class VideoAdaptationRepository:
                     ratio=cast(AspectRatio, project.targetAspectRatio),
                     targetLanguage=project.targetLanguage,
                     settingSnapshot=setting_snapshot,
+                    visualReferenceBundles=visual_reference_bundles,
                 )
                 task = VideoAdaptationTask(
                     id=task_id,
@@ -856,8 +897,7 @@ class VideoAdaptationRepository:
                 existing = await session.scalar(
                     select(VideoAdaptationDecisionCommand).where(
                         VideoAdaptationDecisionCommand.requestedByUserId == user_id,
-                        VideoAdaptationDecisionCommand.clientRequestId
-                        == request.clientRequestId,
+                        VideoAdaptationDecisionCommand.clientRequestId == request.clientRequestId,
                     )
                 )
                 if existing is not None:
@@ -908,6 +948,12 @@ class VideoAdaptationRepository:
                             status_code=409,
                             code="VIDEO_ADAPTATION_SOURCE_TASK_INVALID",
                             message="待确认方案缺少可核验的完成任务",
+                        )
+                    if task.baseShotPlanVersionId != head.currentShotPlanVersionId:
+                        raise ApiError(
+                            status_code=409,
+                            code="VIDEO_ADAPTATION_BASE_PLAN_STALE",
+                            message="正式镜头方案已经变化，请基于当前版本重新生成修订候选",
                         )
                     validate_plan_against_source(
                         request.plan,
@@ -1014,13 +1060,17 @@ class VideoAdaptationRepository:
                 else:
                     if head.revision != request.expectedAdaptationRevision:
                         raise _adaptation_revision_conflict(head.revision)
-                    version_no = int(
-                        await session.scalar(
-                            select(func.coalesce(func.max(VideoEpisodePlanVersion.versionNo), 0))
-                            .where(VideoEpisodePlanVersion.adaptationId == adaptation.id)
+                    version_no = (
+                        int(
+                            await session.scalar(
+                                select(
+                                    func.coalesce(func.max(VideoEpisodePlanVersion.versionNo), 0)
+                                ).where(VideoEpisodePlanVersion.adaptationId == adaptation.id)
+                            )
+                            or 0
                         )
-                        or 0
-                    ) + 1
+                        + 1
+                    )
                     version = VideoEpisodePlanVersion(
                         id=generate_id(),
                         adaptationId=adaptation.id,
@@ -1136,13 +1186,17 @@ class VideoAdaptationRepository:
                 )
                 generated_text = current_version.generatedText if current_version else None
                 source_task_id = current_version.sourceTaskId if current_version else None
+                visual_references = await current_shot_reference_snapshots(
+                    session,
+                    shot=shot,
+                )
                 if request.candidateTaskId is not None:
                     task = await session.get(
                         VideoAdaptationTask,
                         request.candidateTaskId,
                         with_for_update=True,
                     )
-                    generated_text = _prompt_candidate_text(
+                    generated_text, visual_references = _prompt_candidate(
                         task,
                         adaptation=adaptation,
                         plan_version_id=head.currentShotPlanVersionId,
@@ -1155,6 +1209,13 @@ class VideoAdaptationRepository:
                         "shotId": shot.id,
                         "generatedText": generated_text,
                         "currentText": request.currentPrompt,
+                        "visualReferences": [
+                            {
+                                "canonVersionId": item.canonVersionId,
+                                "strength": item.strength,
+                            }
+                            for item in visual_references
+                        ],
                     }
                 )
                 if current_version is not None and current_version.contentHash == content_hash:
@@ -1167,13 +1228,17 @@ class VideoAdaptationRepository:
                             message="镜头提示词版本已经变化",
                             details={"currentRevision": prompt_head.revision},
                         )
-                    version_no = int(
-                        await session.scalar(
-                            select(func.coalesce(func.max(VideoShotPromptVersion.versionNo), 0))
-                            .where(VideoShotPromptVersion.shotId == shot.id)
+                    version_no = (
+                        int(
+                            await session.scalar(
+                                select(
+                                    func.coalesce(func.max(VideoShotPromptVersion.versionNo), 0)
+                                ).where(VideoShotPromptVersion.shotId == shot.id)
+                            )
+                            or 0
                         )
-                        or 0
-                    ) + 1
+                        + 1
+                    )
                     version = VideoShotPromptVersion(
                         id=generate_id(),
                         shotId=shot.id,
@@ -1188,6 +1253,12 @@ class VideoAdaptationRepository:
                     )
                     session.add(version)
                     await session.flush()
+                    await add_prompt_visual_references(
+                        session,
+                        prompt_version=version,
+                        adaptation=adaptation,
+                        references=visual_references,
+                    )
                     prompt_head.currentVersionId = version.id
                     prompt_head.revision += 1
                     prompt_head.updatedAt = utc_now()
@@ -1205,19 +1276,22 @@ async def _materialize_plan(
     user_id: str,
     plan: ChapterAdaptationPlanCandidate,
 ) -> VideoShotPlanVersion:
-    version_no = int(
-        await session.scalar(
-            select(func.coalesce(func.max(VideoShotPlanVersion.versionNo), 0)).where(
-                VideoShotPlanVersion.adaptationId == adaptation.id
+    version_no = (
+        int(
+            await session.scalar(
+                select(func.coalesce(func.max(VideoShotPlanVersion.versionNo), 0)).where(
+                    VideoShotPlanVersion.adaptationId == adaptation.id
+                )
             )
+            or 0
         )
-        or 0
-    ) + 1
+        + 1
+    )
     version = VideoShotPlanVersion(
         id=generate_id(),
         adaptationId=adaptation.id,
         versionNo=version_no,
-        basedOnVersionId=head.currentShotPlanVersionId,
+        basedOnVersionId=task.baseShotPlanVersionId,
         sourceTaskId=task.id,
         reviewArtifactId=artifact.id,
         createdByUserId=user_id,
@@ -1260,6 +1334,10 @@ async def _materialize_plan(
                 title=beat_candidate.title,
                 dramaticTurn=beat_candidate.dramaticTurn,
                 visualStrategy=beat_candidate.visualStrategy,
+                coverageGoalsJson=json.dumps(
+                    [goal.model_dump(mode="json") for goal in beat_candidate.coverageGoals],
+                    ensure_ascii=False,
+                ),
             )
             session.add(beat)
             beat_rows.append((beat, beat_candidate, scene.id))
@@ -1292,13 +1370,22 @@ async def _materialize_plan(
                 ordinal=shot_ordinal,
                 title=shot_candidate.title,
                 narrativePurpose=shot_candidate.narrativePurpose,
-                adaptationType=shot_candidate.adaptationType,
+                adaptationType=_legacy_adaptation_type(shot_candidate.sourceRelation),
+                sourceRelation=shot_candidate.sourceRelation,
+                storyFunction=shot_candidate.storyFunction,
+                audienceGain=shot_candidate.audienceGain,
+                coveredGoalKeysJson=json.dumps(
+                    shot_candidate.coveredGoalKeys,
+                    ensure_ascii=False,
+                ),
                 shotScale=shot_candidate.shotScale,
                 cameraAngle=shot_candidate.cameraAngle,
                 cameraMovement=shot_candidate.cameraMovement,
                 visualIntent=shot_candidate.visualIntent,
-                audioMode=shot_candidate.audioMode,
-                audioIntent=shot_candidate.audioIntent,
+                audioMode=_legacy_audio_mode(shot_candidate.speechMode),
+                audioIntent=shot_candidate.soundDesign,
+                speechMode=shot_candidate.speechMode,
+                spokenText=shot_candidate.spokenText,
                 cutReason=shot_candidate.cutReason,
                 timelineDurationMs=shot_candidate.timelineDurationMs,
             )
@@ -1507,23 +1594,20 @@ def _validate_task_payload(
     ):
         raise ValueError("章节影视化任务冻结输入与任务归属不一致")
     if isinstance(payload, ChapterAdaptationPlanJobPayload):
-        if task.kind != "shot_plan" or task.baseShotPlanVersionId is not None:
+        if task.kind != "shot_plan" or task.baseShotPlanVersionId != payload.baseShotPlanVersionId:
             raise ValueError("章节拆镜任务类型或基础版本不一致")
-    elif (
-        task.kind != "shot_prompt"
-        or task.baseShotPlanVersionId != payload.shotPlanVersionId
-    ):
+    elif task.kind != "shot_prompt" or task.baseShotPlanVersionId != payload.shotPlanVersionId:
         raise ValueError("逐镜提示词任务类型或基础版本不一致")
 
 
-def _prompt_candidate_text(
+def _prompt_candidate(
     task: VideoAdaptationTask | None,
     *,
     adaptation: VideoChapterAdaptation,
     plan_version_id: str,
     shot: VideoShot,
     ratio: AspectRatio,
-) -> str:
+) -> tuple[str, list[ShotVisualReferenceSnapshot]]:
     if (
         task is None
         or task.adaptationId != adaptation.id
@@ -1541,11 +1625,23 @@ def _prompt_candidate_text(
         result = json.loads(task.resultJson)
         batch = ShotPromptSpecBatch.model_validate(result["promptBatch"])
         item = next(prompt for prompt in batch.prompts if prompt.shotKey == shot.shotKey)
-        return compile_seedance_shot_prompt(
+        payload = parse_video_adaptation_job_payload(task.requestJson)
+        if not isinstance(payload, ChapterAdaptationPromptJobPayload):
+            raise ValueError("候选任务不是逐镜提示词任务")
+        references = next(
+            (
+                bundle.references
+                for bundle in payload.visualReferenceBundles
+                if bundle.shotKey == shot.shotKey
+            ),
+            [],
+        )
+        compiled = compile_seedance_shot_prompt(
             item.spec,
             ratio=ratio,
             timeline_duration_ms=shot.timelineDurationMs,
         )
+        return compiled, references
     except (KeyError, StopIteration, TypeError, ValueError) as exc:
         raise ApiError(
             status_code=409,
@@ -1559,6 +1655,7 @@ def _task_response(task: VideoAdaptationTask) -> ChapterAdaptationTaskResponse:
         id=task.id,
         jobId=task.jobId,
         kind=cast(Literal["shot_plan", "shot_prompt"], task.kind),
+        baseShotPlanVersionId=task.baseShotPlanVersionId,
         workflow=task.workflow,
         status=task.status,
         checkpointStage=task.checkpointStage,
@@ -1589,16 +1686,38 @@ def _fail_task(
 def _candidate_summary(candidate: ChapterAdaptationPlanCandidate) -> str:
     beats = sum(len(scene.beats) for scene in candidate.scenes)
     shots = sum(len(beat.shots) for scene in candidate.scenes for beat in scene.beats)
-    duration_seconds = sum(
-        shot.timelineDurationMs
-        for scene in candidate.scenes
-        for beat in scene.beats
-        for shot in beat.shots
-    ) / 1000
+    duration_seconds = (
+        sum(
+            shot.timelineDurationMs
+            for scene in candidate.scenes
+            for beat in scene.beats
+            for shot in beat.shots
+        )
+        / 1000
+    )
     return (
         f"{len(candidate.scenes)} 个场景 · {beats} 个戏剧节拍 · "
         f"{shots} 个镜头 · 约 {duration_seconds:g} 秒"
     )
+
+
+def _legacy_adaptation_type(source_relation: str) -> str:
+    """为既有开发库列保存无歧义兼容值，公共领域不再读取该字段。"""
+
+    if source_relation == "derived":
+        return "visualized"
+    return source_relation
+
+
+def _legacy_audio_mode(speech_mode: str) -> str:
+    """旧单值声层只用于兼容约束，真实对白与声音职责保存在新列。"""
+
+    return {
+        "sync": "sync_dialogue",
+        "offscreen": "offscreen_dialogue",
+        "voiceover": "voiceover",
+        "none": "ambient",
+    }[speech_mode]
 
 
 def _adaptation_revision_conflict(current_revision: int) -> ApiError:

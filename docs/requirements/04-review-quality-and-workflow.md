@@ -9,11 +9,26 @@ Artifact 使用 `kind=video_adaptation_plan`，并通过 `videoAdaptationId + vi
 
 确认请求携带完整编辑后候选、`expectedArtifactRevision`、`expectedAdaptationRevision` 和稳定
 `clientRequestId`。Core 锁定 Artifact、AdaptationHead 和来源任务，重新校验不可变章节哈希、Unicode 范围、
-Scene/Beat/Shot 父子关系、连续 Key、镜头目的和切镜理由，然后在同一事务物化全部关系行、创建空 PromptHead、
+Scene/Beat/Goal/Shot 父子关系、连续 Key、镜头职责和切镜理由，然后在同一事务物化全部关系行、创建空 PromptHead、
 标记 Artifact applied、切换当前 ShotPlan 指针并写 `VideoAdaptationDecisionCommand`。任一步失败整体回滚。
+
+电影语法和节奏评估以 `reviewSummary + reviewFindings` 随候选进入人工审核。未覆盖目标、空间关系、平均时长、
+慢镜比例、景别单调、相邻重复和生成可执行性都只能作为有证据的 notice/warning；不能禁用作者确认。硬门禁只负责
+来源、版本、时间线、Key、父子引用、字段完整性和单镜时长合法性。正式方案修订任务必须绑定当前
+`baseShotPlanVersionId`，确认后创建新版本并保留旧版本不变。
 
 分集边界是独立不可变 `VideoEpisodePlanVersion`；逐镜 AI 提示词先保存在 `VideoAdaptationTask` 候选，只有用户
 明确编辑并保存后才创建 `VideoShotPromptVersion` 和切换 PromptHead。Agent 回调不得直接覆盖正式提示词。
+
+视觉设定图片先进入项目内候选槽。只有用户确认素材权利并点击批准后，Core 才创建不可变
+`VideoVisualCanonVersion` 并切换当前版本；AI 不得自行批准。镜头参考集合使用独立 revision CAS。若用户从 AI 候选
+保存提示词，PromptVersion 必须复制来源任务冻结的视觉版本；没有候选时复制保存时的当前镜头集合，后续换图不得
+静默改变旧提示词依据。
+
+前端同时存在待审镜头候选与当前正式方案时，审镜步骤只展示候选指标，分集、视觉设定和提示词步骤只操作并标明
+正式版本；不得用候选镜头数量或 Key 冒充正式上下文。提示词候选/正式版本继续展示自身冻结参考，若当前镜头参考
+已经变化，页面必须说明历史快照不会自动更新，并由用户显式重新生成候选。高成本视觉效果没有正式依据时先进入
+一次提示词纠正，纠正后仍存在只显示非阻断质量提醒，不得自动修改已确认镜头或正式提示词。
 
 ## 长篇选区 ReviewArtifact 应用
 

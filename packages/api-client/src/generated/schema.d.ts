@@ -1562,6 +1562,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/video/assets/{asset_id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Preview Asset
+         * @description 经过归属校验后以内联响应预览视觉设定图片。
+         */
+        get: operations["preview_asset_api_v1_video_assets__asset_id__preview_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/video/projects/{project_id}/chapter-adaptations": {
         parameters: {
             query?: never;
@@ -1574,6 +1594,41 @@ export interface paths {
         put?: never;
         /** Create Adaptation */
         post: operations["create_adaptation_api_v1_video_projects__project_id__chapter_adaptations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/video/projects/{project_id}/visual-canons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Visual Canons */
+        get: operations["list_visual_canons_api_v1_video_projects__project_id__visual_canons_get"];
+        put?: never;
+        /** Set Visual Canon Candidate */
+        post: operations["set_visual_canon_candidate_api_v1_video_projects__project_id__visual_canons_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/video/visual-canons/{canon_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Visual Canon */
+        post: operations["approve_visual_canon_api_v1_video_visual_canons__canon_id__approve_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1699,6 +1754,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/video/chapter-adaptations/{adaptation_id}/shots/{shot_id}/visual-references": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Save Shot Visual References */
+        put: operations["save_shot_visual_references_api_v1_video_chapter_adaptations__adaptation_id__shots__shot_id__visual_references_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/debug/workflow-runs": {
         parameters: {
             query?: never;
@@ -1816,6 +1888,15 @@ export interface components {
         ApproveVideoSceneResponse: {
             scene: components["schemas"]["VideoSceneResponse"];
         };
+        /** ApproveVisualCanonRequest */
+        ApproveVisualCanonRequest: {
+            /** Clientrequestid */
+            clientRequestId: string;
+            /** Expectedrevision */
+            expectedRevision: number;
+            /** Candidateassetid */
+            candidateAssetId: string;
+        };
         /** ApprovedBeatPlanSummary */
         ApprovedBeatPlanSummary: {
             /** Scenecount */
@@ -1883,6 +1964,26 @@ export interface components {
             section: string;
             /** Index */
             index?: number | null;
+        };
+        /**
+         * BeatCoverageGoal
+         * @description 一个节拍希望观众获得的内容，不预设必须使用哪类镜头完成。
+         */
+        BeatCoverageGoal: {
+            /** Goalkey */
+            goalKey: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "story_information" | "action" | "emotion" | "space" | "relationship" | "motif" | "transition";
+            /**
+             * Priority
+             * @enum {string}
+             */
+            priority: "essential" | "supporting";
+            /** Description */
+            description: string;
         };
         /** BeatPlanDto */
         BeatPlanDto: {
@@ -2001,7 +2102,7 @@ export interface components {
              * Schemaversion
              * @constant
              */
-            schemaVersion: "chapter_adaptation_plan_v2";
+            schemaVersion: "chapter_adaptation_plan_v3";
             /** Adaptationid */
             adaptationId: string;
             /** Sourcehash */
@@ -2010,6 +2111,10 @@ export interface components {
             scenes: components["schemas"]["CinematicSceneCandidate"][];
             /** Suggestedepisodebreakaftershotkeys */
             suggestedEpisodeBreakAfterShotKeys?: string[];
+            /** Reviewsummary */
+            reviewSummary?: string | null;
+            /** Reviewfindings */
+            reviewFindings?: components["schemas"]["CinematicReviewFinding"][];
         };
         /** ChapterAdaptationResponse */
         ChapterAdaptationResponse: {
@@ -2048,6 +2153,8 @@ export interface components {
             promptVersions: components["schemas"]["ShotPromptVersionResponse"][];
             /** Promptcandidates */
             promptCandidates: components["schemas"]["ShotPromptCandidateResponse"][];
+            /** Visualreferencesets */
+            visualReferenceSets: components["schemas"]["ShotVisualReferenceSetResponse"][];
             reviewArtifact: components["schemas"]["ChapterAdaptationReviewSummary"] | null;
             latestTask: components["schemas"]["ChapterAdaptationTaskResponse"] | null;
             /**
@@ -2097,6 +2204,8 @@ export interface components {
              * @enum {string}
              */
             kind: "shot_plan" | "shot_prompt";
+            /** Baseshotplanversionid */
+            baseShotPlanVersionId: string | null;
             /** Workflow */
             workflow: string;
             /** Status */
@@ -2388,6 +2497,30 @@ export interface components {
         /** @enum {string} */
         CharacterStatus: "active" | "missing" | "dead" | "imprisoned" | "unknown";
         /**
+         * CinematicReviewFinding
+         * @description 面向作者的非阻断审镜发现。
+         */
+        CinematicReviewFinding: {
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "notice" | "warning";
+            /**
+             * Scope
+             * @enum {string}
+             */
+            scope: "plan" | "scene" | "beat" | "shot";
+            /** Scopekey */
+            scopeKey?: string | null;
+            /** Message */
+            message: string;
+            /** Evidence */
+            evidence: string;
+            /** Suggestion */
+            suggestion: string;
+        };
+        /**
          * CinematicSceneCandidate
          * @description 由时间、地点和连续行动空间决定的真实场景候选。
          */
@@ -2421,11 +2554,17 @@ export interface components {
              * @enum {string}
              */
             narrativePurpose: "establishing" | "action" | "dialogue" | "reaction" | "reveal" | "insert" | "transition" | "atmosphere";
+            /** Storyfunction */
+            storyFunction: string;
+            /** Audiencegain */
+            audienceGain: string;
+            /** Coveredgoalkeys */
+            coveredGoalKeys?: string[];
             /**
-             * Adaptationtype
+             * Sourcerelation
              * @enum {string}
              */
-            adaptationType: "direct" | "visualized" | "voiceover" | "supplemental";
+            sourceRelation: "direct" | "derived" | "supplemental";
             /**
              * Shotscale
              * @enum {string}
@@ -2444,12 +2583,14 @@ export interface components {
             /** Visualintent */
             visualIntent: string;
             /**
-             * Audiomode
+             * Speechmode
              * @enum {string}
              */
-            audioMode: "sync_dialogue" | "offscreen_dialogue" | "voiceover" | "ambient" | "music" | "silence";
-            /** Audiointent */
-            audioIntent: string;
+            speechMode: "none" | "sync" | "offscreen" | "voiceover";
+            /** Spokentext */
+            spokenText?: string | null;
+            /** Sounddesign */
+            soundDesign: string;
             /** Cutreason */
             cutReason: string;
             /** Timelinedurationms */
@@ -3167,6 +3308,41 @@ export interface components {
             scene: components["schemas"]["VideoSceneResponse"];
             task: components["schemas"]["VideoGenerationTaskResponse"];
         };
+        /**
+         * CreateVisualCanonCandidateRequest
+         * @description 把已上传且已确认权利的图片放入一个视觉设定槽的候选位置。
+         */
+        CreateVisualCanonCandidateRequest: {
+            /** Clientrequestid */
+            clientRequestId: string;
+            /**
+             * Settingkind
+             * @enum {string}
+             */
+            settingKind: "character" | "location" | "item";
+            /** Settingid */
+            settingId: string;
+            /**
+             * Duty
+             * @enum {string}
+             */
+            duty: "identity" | "costume" | "scene" | "prop";
+            /** Variantkey */
+            variantKey: string;
+            /** Label */
+            label: string;
+            /** Candidateassetid */
+            candidateAssetId: string;
+            /** Includefeatures */
+            includeFeatures?: string[];
+            /** Excludefeatures */
+            excludeFeatures?: string[];
+            /**
+             * Defaultstrength
+             * @default 70
+             */
+            defaultStrength: number;
+        };
         /** CreateWritingSessionRequest */
         CreateWritingSessionRequest: {
             /** Novelid */
@@ -3358,6 +3534,8 @@ export interface components {
             dramaticTurn: string;
             /** Visualstrategy */
             visualStrategy: string;
+            /** Coveragegoals */
+            coverageGoals: components["schemas"]["BeatCoverageGoal"][];
             /** Sourceranges */
             sourceRanges: components["schemas"]["ChapterAdaptationSourceRange"][];
             /** Shots */
@@ -3501,11 +3679,13 @@ export interface components {
              * Schemaversion
              * @constant
              */
-            schemaVersion: "chapter_adaptation_plan_v2";
+            schemaVersion: "chapter_adaptation_plan_v3";
             /** Planversionid */
             planVersionId: string;
             /** Versionno */
             versionNo: number;
+            /** Basedonversionid */
+            basedOnVersionId?: string | null;
             /** Adaptationid */
             adaptationId: string;
             /** Sourcehash */
@@ -3548,11 +3728,17 @@ export interface components {
              * @enum {string}
              */
             narrativePurpose: "establishing" | "action" | "dialogue" | "reaction" | "reveal" | "insert" | "transition" | "atmosphere";
+            /** Storyfunction */
+            storyFunction: string;
+            /** Audiencegain */
+            audienceGain: string;
+            /** Coveredgoalkeys */
+            coveredGoalKeys?: string[];
             /**
-             * Adaptationtype
+             * Sourcerelation
              * @enum {string}
              */
-            adaptationType: "direct" | "visualized" | "voiceover" | "supplemental";
+            sourceRelation: "direct" | "derived" | "supplemental";
             /**
              * Shotscale
              * @enum {string}
@@ -3571,12 +3757,14 @@ export interface components {
             /** Visualintent */
             visualIntent: string;
             /**
-             * Audiomode
+             * Speechmode
              * @enum {string}
              */
-            audioMode: "sync_dialogue" | "offscreen_dialogue" | "voiceover" | "ambient" | "music" | "silence";
-            /** Audiointent */
-            audioIntent: string;
+            speechMode: "none" | "sync" | "offscreen" | "voiceover";
+            /** Spokentext */
+            spokenText?: string | null;
+            /** Sounddesign */
+            soundDesign: string;
             /** Cutreason */
             cutReason: string;
             /** Timelinedurationms */
@@ -3598,6 +3786,8 @@ export interface components {
             dramaticTurn: string;
             /** Visualstrategy */
             visualStrategy: string;
+            /** Coveragegoals */
+            coverageGoals: components["schemas"]["BeatCoverageGoal"][];
             /** Sourceranges */
             sourceRanges: components["schemas"]["ChapterAdaptationSourceRange"][];
             /** Shots */
@@ -4611,6 +4801,13 @@ export interface components {
             /** Currentprompt */
             currentPrompt: string;
         };
+        /** SaveShotVisualReferencesRequest */
+        SaveShotVisualReferencesRequest: {
+            /** Expectedrevision */
+            expectedRevision: number;
+            /** References */
+            references?: components["schemas"]["ShotVisualReferenceSelectionRequest"][];
+        };
         /** SceneBeatDto */
         SceneBeatDto: {
             /** Id */
@@ -4737,13 +4934,15 @@ export interface components {
             /** Visibleaction */
             visibleAction: string;
             /** Performance */
-            performance: string;
+            performance?: string | null;
+            /** Expressionandgaze */
+            expressionAndGaze?: string | null;
             /** Camera */
             camera: string;
             /** Audio */
             audio: string;
             /** Continuity */
-            continuity: string;
+            continuity?: string | null;
             /** Negativeconstraints */
             negativeConstraints?: string[];
         };
@@ -4865,6 +5064,10 @@ export interface components {
             spec: components["schemas"]["SeedanceShotPromptSpec"];
             /** Compiledprompt */
             compiledPrompt: string;
+            /** Visualreferences */
+            visualReferences: components["schemas"]["ShotVisualReferenceSnapshot"][];
+            /** Qualitywarnings */
+            qualityWarnings?: string[];
         };
         /** ShotPromptVersionResponse */
         ShotPromptVersionResponse: {
@@ -4882,6 +5085,8 @@ export interface components {
             currentText: string;
             /** Promptedited */
             promptEdited: boolean;
+            /** Visualreferences */
+            visualReferences: components["schemas"]["ShotVisualReferenceSnapshot"][];
             /** Headrevision */
             headRevision: number;
             /**
@@ -4889,6 +5094,60 @@ export interface components {
              * Format: date-time
              */
             createdAt: string;
+        };
+        /** ShotVisualReferenceSelectionRequest */
+        ShotVisualReferenceSelectionRequest: {
+            /** Canonversionid */
+            canonVersionId: string;
+            /** Strength */
+            strength: number;
+        };
+        /** ShotVisualReferenceSetResponse */
+        ShotVisualReferenceSetResponse: {
+            /** Shotid */
+            shotId: string;
+            /** Shotkey */
+            shotKey: string;
+            /** Revision */
+            revision: number;
+            /** References */
+            references: components["schemas"]["ShotVisualReferenceSnapshot"][];
+        };
+        /**
+         * ShotVisualReferenceSnapshot
+         * @description 提示词与后续视频请求共同冻结的一份正式视觉参考。
+         */
+        ShotVisualReferenceSnapshot: {
+            /** Canonversionid */
+            canonVersionId: string;
+            /** Assetid */
+            assetId: string;
+            /** Assetsha256 */
+            assetSha256: string;
+            /**
+             * Settingkind
+             * @enum {string}
+             */
+            settingKind: "character" | "location" | "item";
+            /** Settingid */
+            settingId: string;
+            /** Settingname */
+            settingName: string;
+            /**
+             * Duty
+             * @enum {string}
+             */
+            duty: "identity" | "costume" | "scene" | "prop";
+            /** Variantkey */
+            variantKey: string;
+            /** Label */
+            label: string;
+            /** Includefeatures */
+            includeFeatures?: string[];
+            /** Excludefeatures */
+            excludeFeatures?: string[];
+            /** Strength */
+            strength: number;
         };
         /** SourceBinding */
         SourceBinding: {
@@ -4933,6 +5192,10 @@ export interface components {
              * @enum {integer}
              */
             targetEpisodeSeconds: 60 | 90 | 120;
+            /** Baseshotplanversionid */
+            baseShotPlanVersionId?: string | null;
+            /** Revisionbrief */
+            revisionBrief?: string | null;
         };
         /** StartWritingRunRequest */
         StartWritingRunRequest: {
@@ -5752,6 +6015,88 @@ export interface components {
              * Format: date-time
              */
             updatedAt: string;
+        };
+        /** VisualCanonLibraryResponse */
+        VisualCanonLibraryResponse: {
+            /** Canons */
+            canons: components["schemas"]["VisualCanonResponse"][];
+        };
+        /** VisualCanonResponse */
+        VisualCanonResponse: {
+            /** Id */
+            id: string;
+            /** Projectid */
+            projectId: string;
+            /** Novelid */
+            novelId: string;
+            /**
+             * Settingkind
+             * @enum {string}
+             */
+            settingKind: "character" | "location" | "item";
+            /** Settingid */
+            settingId: string;
+            /** Settingname */
+            settingName: string;
+            /**
+             * Duty
+             * @enum {string}
+             */
+            duty: "identity" | "costume" | "scene" | "prop";
+            /** Variantkey */
+            variantKey: string;
+            /** Label */
+            label: string;
+            candidateAsset: components["schemas"]["VideoAssetResponse"] | null;
+            /** Candidateincludefeatures */
+            candidateIncludeFeatures: string[];
+            /** Candidateexcludefeatures */
+            candidateExcludeFeatures: string[];
+            /** Candidatedefaultstrength */
+            candidateDefaultStrength: number | null;
+            /** Currentversionid */
+            currentVersionId: string | null;
+            /** Versions */
+            versions: components["schemas"]["VisualCanonVersionResponse"][];
+            /** Revision */
+            revision: number;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
+        /** VisualCanonVersionResponse */
+        VisualCanonVersionResponse: {
+            /** Id */
+            id: string;
+            /** Canonid */
+            canonId: string;
+            /** Versionno */
+            versionNo: number;
+            asset: components["schemas"]["VideoAssetResponse"];
+            /** Settingname */
+            settingName: string;
+            /** Label */
+            label: string;
+            /** Includefeatures */
+            includeFeatures: string[];
+            /** Excludefeatures */
+            excludeFeatures: string[];
+            /** Defaultstrength */
+            defaultStrength: number;
+            /** Contenthash */
+            contentHash: string;
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
         };
         /** WorkflowRunDetailResponse */
         WorkflowRunDetailResponse: {
@@ -20196,6 +20541,118 @@ export interface operations {
             };
         };
     };
+    preview_asset_api_v1_video_assets__asset_id__preview_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                asset_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     list_adaptations_api_v1_video_projects__project_id__chapter_adaptations_get: {
         parameters: {
             query?: never;
@@ -20334,6 +20791,356 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChapterAdaptationResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_visual_canons_api_v1_video_projects__project_id__visual_canons_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VisualCanonLibraryResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    set_visual_canon_candidate_api_v1_video_projects__project_id__visual_canons_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateVisualCanonCandidateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VisualCanonResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    approve_visual_canon_api_v1_video_visual_canons__canon_id__approve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                canon_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApproveVisualCanonRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VisualCanonResponse"];
                 };
             };
             /** @description 统一错误响应 */
@@ -21157,6 +21964,125 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ChapterAdaptationResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    save_shot_visual_references_api_v1_video_chapter_adaptations__adaptation_id__shots__shot_id__visual_references_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                adaptation_id: string;
+                shot_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SaveShotVisualReferencesRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ShotVisualReferenceSetResponse"];
                 };
             };
             /** @description 统一错误响应 */

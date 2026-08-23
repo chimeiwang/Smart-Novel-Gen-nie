@@ -4,6 +4,7 @@ import type {
   CandidateShot,
   FormalPlan,
   FormalShot,
+  ReviewFinding,
   SourceRange,
 } from "./types";
 
@@ -30,13 +31,16 @@ export function cloneCandidate(plan: AdaptationCandidate): AdaptationCandidate {
       ...scene,
       beats: scene.beats.map((beat) => ({
         ...beat,
+        coverageGoals: beat.coverageGoals.map((goal) => ({ ...goal })),
         sourceRanges: beat.sourceRanges.map((range) => ({ ...range })),
         shots: beat.shots.map((shot) => ({
           ...shot,
+          coveredGoalKeys: [...(shot.coveredGoalKeys ?? [])],
           sourceRanges: shot.sourceRanges.map((range) => ({ ...range })),
         })),
       })),
     })),
+    reviewFindings: (plan.reviewFindings ?? []).map((finding) => ({ ...finding })),
   };
 }
 
@@ -49,17 +53,24 @@ export function flattenFormalShots(plan: FormalPlan): FormalShot[] {
 }
 
 export function renumberCandidate(plan: AdaptationCandidate): AdaptationCandidate {
+  const sceneKeyMap = new Map<string, string>();
+  const beatKeyMap = new Map<string, string>();
   const shotKeyMap = new Map<string, string>();
   let beatNumber = 0;
   let shotNumber = 0;
-  const scenes = plan.scenes.map((scene, sceneIndex) => ({
-    ...scene,
-    sceneKey: key("SC", sceneIndex + 1),
-    beats: scene.beats.map((beat) => {
+  const scenes = plan.scenes.map((scene, sceneIndex) => {
+    const sceneKey = key("SC", sceneIndex + 1);
+    sceneKeyMap.set(scene.sceneKey, sceneKey);
+    return {
+      ...scene,
+      sceneKey,
+      beats: scene.beats.map((beat) => {
       beatNumber += 1;
+      const beatKey = key("B", beatNumber);
+      beatKeyMap.set(beat.beatKey, beatKey);
       return {
         ...beat,
-        beatKey: key("B", beatNumber),
+        beatKey,
         shots: beat.shots.map((shot) => {
           shotNumber += 1;
           const shotKey = key("S", shotNumber);
@@ -67,8 +78,9 @@ export function renumberCandidate(plan: AdaptationCandidate): AdaptationCandidat
           return { ...shot, shotKey };
         }),
       };
-    }),
-  }));
+      }),
+    };
+  });
   const lastShotKey = key("S", shotNumber);
   return {
     ...plan,
@@ -76,6 +88,15 @@ export function renumberCandidate(plan: AdaptationCandidate): AdaptationCandidat
     suggestedEpisodeBreakAfterShotKeys: (plan.suggestedEpisodeBreakAfterShotKeys ?? [])
       .map((shotKey) => shotKeyMap.get(shotKey))
       .filter((shotKey): shotKey is string => Boolean(shotKey) && shotKey !== lastShotKey),
+    reviewFindings: (plan.reviewFindings ?? []).flatMap((finding) => {
+      if (finding.scope === "plan") return [finding];
+      const mapped = finding.scope === "scene"
+        ? sceneKeyMap.get(finding.scopeKey ?? "")
+        : finding.scope === "beat"
+          ? beatKeyMap.get(finding.scopeKey ?? "")
+          : shotKeyMap.get(finding.scopeKey ?? "");
+      return mapped ? [{ ...finding, scopeKey: mapped }] : [];
+    }),
   };
 }
 
@@ -92,10 +113,7 @@ export function updateCandidateShot(
         ...beat,
         shots: beat.shots.map((shot) => {
           if (shot.shotKey !== shotKey) return shot;
-          if (patch.adaptationType === "supplemental") {
-            return { ...shot, ...patch, sourceRanges: [] };
-          }
-          if (patch.adaptationType && shot.sourceRanges.length === 0) return shot;
+          if (patch.sourceRelation && patch.sourceRelation !== "supplemental" && shot.sourceRanges.length === 0) return shot;
           return { ...shot, ...patch };
         }),
       })),
@@ -115,7 +133,6 @@ export function bindShotSource(
   const shot = beat?.shots[location.shotIndex];
   if (!beat || !shot) return plan;
   beat.sourceRanges = mergeSourceRanges([...beat.sourceRanges, sourceRange]);
-  shot.adaptationType = shot.adaptationType === "supplemental" ? "direct" : shot.adaptationType;
   shot.sourceRanges = [{ ...sourceRange }];
   return next;
 }
@@ -135,15 +152,19 @@ export function addShotAfter(
     shotKey: "S999",
     title: purposeLabel(purpose),
     narrativePurpose: purpose,
-    adaptationType: sourceRange ? "direct" : "supplemental",
+    storyFunction: `补足当前节拍中的${purposeLabel(purpose)}职责`,
+    audienceGain: "请说明这个镜头结束后观众新增的信息、情绪或空间认知。",
+    coveredGoalKeys: [],
+    sourceRelation: sourceRange ? "direct" : "supplemental",
     shotScale: purpose === "insert" ? "close" : purpose === "establishing" ? "long" : "medium_close",
     cameraAngle: "eye_level",
     cameraMovement: "locked",
     visualIntent: sourceRange
       ? "根据选中原文设计一个连续机位和一个主要可见动作。"
       : "补充当前戏剧节拍所需的建立、反应、插入或转场画面，不新增剧情结果。",
-    audioMode: "ambient",
-    audioIntent: "延续相邻镜头的环境声，不擅自新增对白。",
+    speechMode: "none",
+    spokenText: null,
+    soundDesign: "延续相邻镜头的环境声，不擅自新增对白。",
     cutReason: `人工新增${purposeLabel(purpose)}，用于完成当前戏剧节拍的画面关系`,
     timelineDurationMs: purpose === "reaction" || purpose === "insert" ? 1500 : 3000,
     sourceRanges: sourceRange ? [{ ...sourceRange }] : [],
@@ -163,6 +184,7 @@ export function mergeShotWithNext(
   const current = currentBeat?.shots[location.shotIndex];
   const following = currentBeat?.shots[location.shotIndex + 1];
   if (!current || !following) return null;
+  if (current.speechMode !== "none" && following.speechMode !== "none" && current.speechMode !== following.speechMode) return null;
   const ranges = uniqueRanges([...current.sourceRanges, ...following.sourceRanges]);
   if (ranges.length > 12 || current.timelineDurationMs + following.timelineDurationMs > 15_000) return null;
   const next = cloneCandidate(plan);
@@ -171,10 +193,18 @@ export function mergeShotWithNext(
   const merged: CandidateShot = {
     ...current,
     title: `${current.title} / ${following.title}`,
-    adaptationType: ranges.length ? current.adaptationType === "supplemental" ? "direct" : current.adaptationType : "supplemental",
+    storyFunction: `${current.storyFunction}；随后${following.storyFunction}`,
+    audienceGain: `${current.audienceGain}；随后${following.audienceGain}`,
+    coveredGoalKeys: [...new Set([
+      ...(current.coveredGoalKeys ?? []),
+      ...(following.coveredGoalKeys ?? []),
+    ])],
+    sourceRelation: mergedSourceRelation(current, following, ranges.length > 0),
     sourceRanges: ranges,
     visualIntent: `${current.visualIntent}；随后${following.visualIntent}`,
-    audioIntent: `${current.audioIntent}；随后${following.audioIntent}`,
+    speechMode: current.speechMode === "none" ? following.speechMode : current.speechMode,
+    spokenText: [current.spokenText, following.spokenText].filter(Boolean).join("；") || null,
+    soundDesign: `${current.soundDesign}；随后${following.soundDesign}`,
     cutReason: current.cutReason,
     timelineDurationMs: current.timelineDurationMs + following.timelineDurationMs,
   };
@@ -286,6 +316,39 @@ export function durationMetrics(shots: Array<Pick<CandidateShot, "timelineDurati
   };
 }
 
+export function beatCoverageStatus(beat: Pick<CandidateBeat, "coverageGoals" | "shots">) {
+  return beat.coverageGoals.map((goal) => ({
+    ...goal,
+    coveredBy: beat.shots
+      .filter((shot) => (shot.coveredGoalKeys ?? []).includes(goal.goalKey))
+      .map((shot) => shot.shotKey),
+  }));
+}
+
+export function localCoverageFindings(plan: AdaptationCandidate): ReviewFinding[] {
+  return plan.scenes.flatMap((scene) => scene.beats.flatMap((beat) => {
+    const findings: ReviewFinding[] = beatCoverageStatus(beat)
+      .filter((goal) => goal.coveredBy.length === 0)
+      .map((goal) => ({
+        severity: goal.priority === "essential" ? "warning" : "notice",
+        scope: "beat",
+        scopeKey: beat.beatKey,
+        message: goal.priority === "essential" ? "必要叙事目标尚未覆盖" : "辅助叙事目标尚未覆盖",
+        evidence: `${goal.goalKey} ${goal.description}`,
+        suggestion: "让现有镜头承担该目标，或按作者判断调整目标，而不是机械新增镜头。",
+      }));
+    beat.shots.filter((shot) => (shot.coveredGoalKeys ?? []).length === 0).forEach((shot) => findings.push({
+      severity: "notice",
+      scope: "shot",
+      scopeKey: shot.shotKey,
+      message: "镜头尚未关联叙事目标",
+      evidence: shot.storyFunction,
+      suggestion: "确认它是否带来独立信息、情绪或空间认知；否则考虑合并或删除。",
+    }));
+    return findings;
+  }));
+}
+
 export function groupFormalEpisodes(plan: FormalPlan, breakAfterShotIds: string[]): FormalShot[][] {
   const breaks = new Set(breakAfterShotIds);
   const groups: FormalShot[][] = [];
@@ -339,6 +402,17 @@ function mergeSourceRanges(ranges: SourceRange[]): SourceRange[] {
 
 function joinDistinct(left: string, right: string): string {
   return left.trim() === right.trim() ? left : `${left} / ${right}`;
+}
+
+function mergedSourceRelation(
+  current: CandidateShot,
+  following: CandidateShot,
+  hasSource: boolean,
+): CandidateShot["sourceRelation"] {
+  if (!hasSource) return "supplemental";
+  if (current.sourceRelation === following.sourceRelation) return current.sourceRelation;
+  if (current.sourceRelation === "derived" || following.sourceRelation === "derived") return "derived";
+  return "derived";
 }
 
 function key(prefix: string, number: number): string {

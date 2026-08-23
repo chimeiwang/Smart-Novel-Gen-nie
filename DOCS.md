@@ -25,7 +25,8 @@
 - PostgreSQL schema 默认冻结并由只读 `schema-contract.json` 守卫。当前具名例外包括视频控制面与章节
   改编域迁移 `20260807_video_production_control_plane.sql`、`20260817_video_review_decision_command.sql`、
   `20260817_video_domain_ownership_chain.sql`、`20260818_video_chapter_adaptation_domain.sql`，它们只允许对
-  服务器端 `novelwriterdev` 开发库执行，不授权生产或完整 production_v2 schema；另有
+  服务器端 `novelwriterdev` 开发库执行视频控制面、批准命令、章节改编域以及该域内视觉设定版本和
+  逐镜参考绑定，不授权生产或完整 production_v2 schema；另有
   `20260821_token_usage_task_run.sql`，只允许增加 `TokenUsage` 模型调用归集字段、约束和必要索引。
 
 ## 文档类型
