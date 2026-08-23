@@ -117,6 +117,9 @@ jobs:
 
           SAFE_QUERY_KEYS = {"application_name", "sslmode"}
 
+          class DatabaseUrlRejected(Exception):
+              pass
+
           def write_private(path: str, payload: str) -> None:
               descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
               with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as target:
@@ -138,7 +141,7 @@ jobs:
                               value = value[1:-1].strip()
                           matches.append(value)
                   if len(matches) != 1 or not matches[0]:
-                      return ""
+                      raise DatabaseUrlRejected("database_url_count")
                   value = matches[0]
                   normalized = (
                       "postgresql://" + value[len("postgresql+asyncpg://") :]
@@ -147,27 +150,28 @@ jobs:
                   )
                   parts = urlsplit(normalized)
                   if (
-                      parts.scheme != "postgresql"
-                      or not parts.netloc
-                      or parts.path != "/novelwriter"
-                      or parts.fragment
+                      parts.scheme != "postgresql" or not parts.netloc
                   ):
-                      return ""
+                      raise DatabaseUrlRejected("scheme_or_authority")
+                  if parts.path != "/novelwriter":
+                      raise DatabaseUrlRejected("source_database")
+                  if parts.fragment:
+                      raise DatabaseUrlRejected("fragment")
                   query_pairs = parse_qsl(parts.query, keep_blank_values=True, strict_parsing=True)
                   query_keys = [key for key, _value in query_pairs]
                   if (
                       len(query_keys) != len(set(query_keys))
                       or any(key not in SAFE_QUERY_KEYS for key in query_keys)
                   ):
-                      return ""
+                      raise DatabaseUrlRejected("query")
                   username = unquote(parts.username or "")
                   password = unquote(parts.password or "")
                   hostname = parts.hostname or ""
                   port = parts.port or 5432
                   if not username or not password or not hostname:
-                      return ""
+                      raise DatabaseUrlRejected("credentials")
                   if any("\n" in value or "\r" in value for value in (username, password, hostname)):
-                      return ""
+                      raise DatabaseUrlRejected("newline")
                   pgpass = ":".join(
                       escape_pgpass(value)
                       for value in (hostname, str(port), "novelwriterdev", username, password)
@@ -180,10 +184,16 @@ jobs:
                   return urlunsplit(
                       parts._replace(netloc=safe_netloc, path="/novelwriterdev")
                   )
+              except DatabaseUrlRejected:
+                  raise
               except (OSError, UnicodeError, ValueError):
-                  return ""
+                  raise DatabaseUrlRejected("parse_or_temp_file") from None
 
-          parsed = derive_dev_database_url(sys.argv[1], sys.argv[2])
+          try:
+              parsed = derive_dev_database_url(sys.argv[1], sys.argv[2])
+          except DatabaseUrlRejected as exc:
+              print(f"database-url-check:{exc}", file=sys.stderr)
+              raise SystemExit(1) from None
           if parsed:
               print(parsed, end="")
           else:
@@ -401,6 +411,9 @@ jobs:
 
           SAFE_QUERY_KEYS = {"application_name", "sslmode"}
 
+          class DatabaseUrlRejected(Exception):
+              pass
+
           def write_private(path: str, payload: str) -> None:
               descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
               with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as target:
@@ -422,7 +435,7 @@ jobs:
                               value = value[1:-1].strip()
                           matches.append(value)
                   if len(matches) != 1 or not matches[0]:
-                      return ""
+                      raise DatabaseUrlRejected("database_url_count")
                   value = matches[0]
                   normalized = (
                       "postgresql://" + value[len("postgresql+asyncpg://") :]
@@ -431,27 +444,28 @@ jobs:
                   )
                   parts = urlsplit(normalized)
                   if (
-                      parts.scheme != "postgresql"
-                      or not parts.netloc
-                      or parts.path != "/novelwriter"
-                      or parts.fragment
+                      parts.scheme != "postgresql" or not parts.netloc
                   ):
-                      return ""
+                      raise DatabaseUrlRejected("scheme_or_authority")
+                  if parts.path != "/novelwriter":
+                      raise DatabaseUrlRejected("source_database")
+                  if parts.fragment:
+                      raise DatabaseUrlRejected("fragment")
                   query_pairs = parse_qsl(parts.query, keep_blank_values=True, strict_parsing=True)
                   query_keys = [key for key, _value in query_pairs]
                   if (
                       len(query_keys) != len(set(query_keys))
                       or any(key not in SAFE_QUERY_KEYS for key in query_keys)
                   ):
-                      return ""
+                      raise DatabaseUrlRejected("query")
                   username = unquote(parts.username or "")
                   password = unquote(parts.password or "")
                   hostname = parts.hostname or ""
                   port = parts.port or 5432
                   if not username or not password or not hostname:
-                      return ""
+                      raise DatabaseUrlRejected("credentials")
                   if any("\n" in value or "\r" in value for value in (username, password, hostname)):
-                      return ""
+                      raise DatabaseUrlRejected("newline")
                   pgpass = ":".join(
                       escape_pgpass(value)
                       for value in (hostname, str(port), "novelwriterdev", username, password)
@@ -464,10 +478,16 @@ jobs:
                   if parts.port is not None:
                       safe_netloc += f":{parts.port}"
                   return urlunsplit(dev_parts._replace(netloc=safe_netloc))
+              except DatabaseUrlRejected:
+                  raise
               except (OSError, UnicodeError, ValueError):
-                  return ""
+                  raise DatabaseUrlRejected("parse_or_temp_file") from None
 
-          parsed = derive_dev_database_url(sys.argv[1], sys.argv[2], sys.argv[3])
+          try:
+              parsed = derive_dev_database_url(sys.argv[1], sys.argv[2], sys.argv[3])
+          except DatabaseUrlRejected as exc:
+              print(f"database-url-check:{exc}", file=sys.stderr)
+              raise SystemExit(1) from None
           if parsed:
               print(parsed, end="")
           else:
