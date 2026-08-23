@@ -148,7 +148,10 @@ jobs:
                       if value.startswith("postgresql+asyncpg://")
                       else value
                   )
-                  parts = urlsplit(normalized)
+                  try:
+                      parts = urlsplit(normalized)
+                  except ValueError:
+                      raise DatabaseUrlRejected("url_split") from None
                   if (
                       parts.scheme != "postgresql" or not parts.netloc
                   ):
@@ -157,7 +160,12 @@ jobs:
                       raise DatabaseUrlRejected("source_database")
                   if parts.fragment:
                       raise DatabaseUrlRejected("fragment")
-                  query_pairs = parse_qsl(parts.query, keep_blank_values=True, strict_parsing=True)
+                  try:
+                      query_pairs = parse_qsl(
+                          parts.query, keep_blank_values=True, strict_parsing=True
+                      )
+                  except ValueError:
+                      raise DatabaseUrlRejected("query_syntax") from None
                   query_keys = [key for key, _value in query_pairs]
                   if (
                       len(query_keys) != len(set(query_keys))
@@ -167,7 +175,10 @@ jobs:
                   username = unquote(parts.username or "")
                   password = unquote(parts.password or "")
                   hostname = parts.hostname or ""
-                  port = parts.port or 5432
+                  try:
+                      port = parts.port or 5432
+                  except ValueError:
+                      raise DatabaseUrlRejected("port") from None
                   if not username or not password or not hostname:
                       raise DatabaseUrlRejected("credentials")
                   if any("\n" in value or "\r" in value for value in (username, password, hostname)):
@@ -446,7 +457,10 @@ jobs:
                       if value.startswith("postgresql+asyncpg://")
                       else value
                   )
-                  parts = urlsplit(normalized)
+                  try:
+                      parts = urlsplit(normalized)
+                  except ValueError:
+                      raise DatabaseUrlRejected("url_split") from None
                   if (
                       parts.scheme != "postgresql" or not parts.netloc
                   ):
@@ -455,7 +469,12 @@ jobs:
                       raise DatabaseUrlRejected("source_database")
                   if parts.fragment:
                       raise DatabaseUrlRejected("fragment")
-                  query_pairs = parse_qsl(parts.query, keep_blank_values=True, strict_parsing=True)
+                  try:
+                      query_pairs = parse_qsl(
+                          parts.query, keep_blank_values=True, strict_parsing=True
+                      )
+                  except ValueError:
+                      raise DatabaseUrlRejected("query_syntax") from None
                   query_keys = [key for key, _value in query_pairs]
                   if (
                       len(query_keys) != len(set(query_keys))
@@ -465,7 +484,10 @@ jobs:
                   username = unquote(parts.username or "")
                   password = unquote(parts.password or "")
                   hostname = parts.hostname or ""
-                  port = parts.port or 5432
+                  try:
+                      port = parts.port or 5432
+                  except ValueError:
+                      raise DatabaseUrlRejected("port") from None
                   if not username or not password or not hostname:
                       raise DatabaseUrlRejected("credentials")
                   if any("\n" in value or "\r" in value for value in (username, password, hostname)):
