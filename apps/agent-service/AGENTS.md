@@ -24,9 +24,12 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 - 选区操作只能返回 replacement；Agent Service 不负责拼接全文。文档运行只回传一个最终候选
   结果，全文检查只回传报告。
 
-### 长篇视频导演规划
+### 历史长篇视频导演规划收敛
 
-- 视频生成只服务 `long_serial`；Agent 只消费 Core 冻结的原文、设定快照、时长、画幅、
+- 旧 `VideoScene` 公共创建、查询、重试、返工、批准和提示词预览入口已经退役，不能再创建新的旧任务。
+  Agent handler、内部回调和耐久 dispatcher 只用于已存在历史任务的恢复与终态收敛；不得把它们重新注册为
+  浏览器或 CLI 产品入口。
+- 历史视频规划任务只服务 `long_serial`；Agent 只消费 Core 冻结的原文、设定快照、时长、画幅、
   规划路由和模型身份，不得回读 PostgreSQL 或当前可变资料。
 - 默认使用 DeepSeek Responses 的 `text.format=json_schema` 分三阶段生成轻量创意草案：
   场景素材、故事节拍、摄影灯光。草案不得携带数据库 ID、正式素材 ID、节拍时间、调用账本

@@ -44,7 +44,6 @@ from inkforge_core.db.models import (
 )
 from inkforge_core.errors import ApiError
 from inkforge_core.video.repository import (
-    VideoPromptPreviewContext,
     VideoRepository,
     _require_preview_project_mode,
     _validate_callback_binding,
@@ -56,6 +55,8 @@ from inkforge_core.video.schemas import (
     CreateVideoSceneRequest,
     PromptPreviewRequest,
     VideoAssetResponse,
+    VideoProjectDetailResponse,
+    VideoProjectResponse,
 )
 from inkforge_core.video.service import VideoService
 from inkforge_core.video.setting_snapshot import (
@@ -137,10 +138,9 @@ class _PreviewSessionFactory:
 
 
 class _RecordingRepository:
-    """记录服务层调用并返回可确定性编译的正式方案。"""
+    """记录当前项目与素材服务层调用。"""
 
-    def __init__(self, context: VideoPromptPreviewContext | None = None) -> None:
-        self.context = context
+    def __init__(self) -> None:
         self.create_calls = 0
         self.list_calls = 0
         self.upload_calls = 0
@@ -154,16 +154,6 @@ class _RecordingRepository:
         del args
         self.list_calls += 1
         return []
-
-    async def prepare_prompt_preview(
-        self,
-        user_id: str,
-        scene_id: str,
-        request: PromptPreviewRequest,
-    ) -> VideoPromptPreviewContext:
-        del user_id, scene_id, request
-        assert self.context is not None
-        return self.context
 
     async def require_project(self, user_id: str, project_id: str) -> None:
         assert (user_id, project_id) == ("user-1", "project-1")
@@ -623,71 +613,6 @@ async def test_repository_preview_accepts_locked_keyframe_for_relationship_slot(
 
 
 @pytest.mark.asyncio
-async def test_service_compiles_preview_only_package_even_when_all_assets_resolved(
-    tmp_path: Path,
-) -> None:
-    context = VideoPromptPreviewContext(
-        scene_plan=_scene_plan(),
-        selections={
-            "slot-character": "asset-character",
-            "slot-relationship": "asset-relation",
-            "slot-ambience": "asset-ambience",
-        },
-        resolved_slot_ids=(
-            "slot-character",
-            "slot-relationship",
-            "slot-ambience",
-        ),
-        missing_slot_ids=(),
-    )
-    service = _video_service(
-        tmp_path,
-        _RecordingRepository(context),
-        enabled=True,
-    )
-
-    response = await service.preview_prompt(
-        "user-1",
-        "scene-1",
-        PromptPreviewRequest.model_validate(
-            {
-                "previewBindings": [
-                    {"slotId": "slot-character", "assetId": "asset-character"},
-                    {"slotId": "slot-relationship", "assetId": "asset-relation"},
-                    {"slotId": "slot-ambience", "assetId": "asset-ambience"},
-                ]
-            }
-        ),
-    )
-
-    assert response.resolvedSlotIds == [
-        "slot-character",
-        "slot-relationship",
-        "slot-ambience",
-    ]
-    assert response.missingSlotIds == []
-    assert response.promptPackage.assetReady is True
-    assert response.promptPackage.previewOnly is True
-    assert response.promptPackage.submissionReady is False
-    assert response.promptPackage.compileProfile == "seedance_director_v3_compat"
-    assert response.promptPackage.providerPrompt == response.promptPackage.prompt
-    assert (
-        response.promptPackage.manifestPromptCharacterCount
-        > response.promptPackage.providerPromptCharacterCount
-    )
-    assert [binding.assetId for binding in response.promptPackage.assetBindings] == [
-        "slot-character",
-        "slot-relationship",
-        "slot-ambience",
-    ]
-    assert [binding.mediaAssetId for binding in response.promptPackage.assetBindings] == [
-        "asset-character",
-        "asset-relation",
-        "asset-ambience",
-    ]
-
-
-@pytest.mark.asyncio
 async def test_upload_uses_planned_asset_validation_without_fake_materialization(
     tmp_path: Path,
 ) -> None:
@@ -791,10 +716,14 @@ def test_retry_payload_reuses_exact_frozen_scene_input() -> None:
     assert caught.value.code == "VIDEO_RETRY_INPUT_MISMATCH"
 
 
-def test_public_router_exposes_preview_and_removes_legacy_free_text_binding() -> None:
+def test_public_router_exposes_assets_and_retires_legacy_scene_routes() -> None:
     paths = {route.path for route in router.routes}
 
-    assert "/video/scenes/{scene_id}/prompt-preview" in paths
-    assert "/video/scenes/{scene_id}/retry" in paths
-    assert "/video/scenes/{scene_id}/revise" in paths
-    assert "/video/scenes/{scene_id}/asset-bindings" not in paths
+    assert "/video/assets/{asset_id}/content" in paths
+    assert "/video/assets/{asset_id}/preview" in paths
+    assert not any("/scenes" in path for path in paths)
+
+
+def test_public_project_contract_no_longer_exposes_legacy_scenes() -> None:
+    assert "sceneCount" not in VideoProjectResponse.model_fields
+    assert "scenes" not in VideoProjectDetailResponse.model_fields

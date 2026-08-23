@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, TextIO, cast
 
 from .api import (
+    BinaryResponse,
     CoreApiClient,
     CoreApiError,
     CoreTransportError,
@@ -26,6 +27,8 @@ if TYPE_CHECKING:
 
 class ApiClient(Protocol):
     def request(self, method: str, path: str, **kwargs: Any) -> Any: ...
+
+    def request_bytes(self, method: str, path: str, **kwargs: Any) -> BinaryResponse: ...
 
     def login(self, username: str, password: str) -> tuple[dict[str, Any], str]: ...
 
@@ -283,7 +286,10 @@ def emit_command_result(
         try:
             write_json_line(stdout, frame)
         except KeyboardInterrupt as interrupt:
-            if spec.name != "long.task.watch" or not isinstance(result, Generator):
+            if spec.name not in {
+                "long.task.watch",
+                "long.video.adaptation.watch",
+            } or not isinstance(result, Generator):
                 raise
             try:
                 interrupted_frame = result.throw(interrupt)

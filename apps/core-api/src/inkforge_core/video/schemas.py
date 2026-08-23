@@ -198,7 +198,6 @@ class VideoProjectResponse(VideoApiModel):
     targetLanguage: str
     provider: str
     revision: int
-    sceneCount: int = 0
     createdAt: datetime
     updatedAt: datetime
 
@@ -213,10 +212,9 @@ class VideoProjectListResponse(VideoApiModel):
 
 
 class VideoProjectDetailResponse(VideoApiModel):
-    """视频制作台一次加载所需的项目与场景。"""
+    """章节影视化工作台加载项目素材所需的公共信息。"""
 
     project: VideoProjectResponse
-    scenes: list[VideoSceneResponse]
     assets: list[VideoAssetResponse]
     previewEnabled: bool
     seedanceConfigured: bool

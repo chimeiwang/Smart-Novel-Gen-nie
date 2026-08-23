@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 from datetime import UTC, datetime
-from pathlib import Path
 
 import pytest
 from inkforge_contracts.video import (
@@ -25,7 +24,6 @@ from inkforge_core.db.models import (
 from inkforge_core.errors import ApiError
 from inkforge_core.video.repository import (
     VideoRepository,
-    VideoTaskAcceptance,
     _apply_revised_artifact,
     _artifact_revision_snapshot,
     _scene_response,
@@ -34,11 +32,7 @@ from inkforge_core.video.repository import (
 )
 from inkforge_core.video.schemas import (
     ReviseVideoSceneRequest,
-    VideoGenerationTaskResponse,
-    VideoSceneResponse,
 )
-from inkforge_core.video.service import VideoService
-from inkforge_core.video.storage import VideoAssetStorage
 from pydantic import ValidationError
 
 
@@ -522,106 +516,3 @@ async def test_scene_read_model_hides_draft_candidate_during_revise() -> None:
     assert response.candidatePackage is None
     assert response.reviewArtifact is not None
     assert response.reviewArtifact.status == "draft"
-
-
-class _RevisionRepository:
-    """为服务层测试返回确定的耐久受理结果。"""
-
-    def __init__(
-        self,
-        acceptance: VideoTaskAcceptance,
-        latest_task: VideoGenerationTaskResponse,
-    ) -> None:
-        self.acceptance = acceptance
-        self.latest_task = latest_task
-
-    async def revise_scene_task(
-        self,
-        user_id: str,
-        scene_id: str,
-        request: ReviseVideoSceneRequest,
-    ) -> VideoTaskAcceptance:
-        assert (user_id, scene_id) == ("user-1", "scene-1")
-        assert request.expectedArtifactRevision == 1
-        return self.acceptance
-
-    async def get_scene(self, user_id: str, scene_id: str) -> VideoSceneResponse:
-        assert (user_id, scene_id) == ("user-1", "scene-1")
-        now = datetime.now(UTC)
-        payload = _payload()
-        return VideoSceneResponse(
-            id=scene_id,
-            projectId="project-1",
-            chapterId="chapter-1",
-            ordinal=1,
-            title="机关启动",
-            sourceText=payload.sourceText,
-            sourceHash=hashlib.sha256(payload.sourceText.encode()).hexdigest(),
-            durationSeconds=15,
-            status="generating",
-            promptText=None,
-            promptCharacterCount=None,
-            plan=None,
-            candidatePlan=None,
-            candidatePackage=None,
-            reviewArtifact=None,
-            latestTask=self.latest_task,
-            assetBindings=[],
-            revision=1,
-            createdAt=now,
-            updatedAt=now,
-        )
-
-
-def _service(
-    tmp_path: Path,
-    repository: _RevisionRepository,
-) -> VideoService:
-    return VideoService(
-        repository,  # type: ignore[arg-type]
-        VideoAssetStorage(tmp_path),
-        video_preview_enabled=True,
-    )
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize("latest_is_accepted", [True, False])
-async def test_service_returns_durably_accepted_task_without_direct_dispatch(
-    tmp_path: Path,
-    latest_is_accepted: bool,
-) -> None:
-    payload = _payload()
-    now = datetime.now(UTC)
-    accepted_task = VideoGenerationTaskResponse(
-        id="task-revise-1",
-        jobId="video-plan-task-revise-1",
-        kind="plan",
-        status="pending",
-        lastErrorCode=None,
-        lastErrorMessage=None,
-        createdAt=now,
-        updatedAt=now,
-    )
-    latest_task = (
-        accepted_task
-        if latest_is_accepted
-        else accepted_task.model_copy(
-            update={"id": "task-newer", "jobId": "video-plan-task-newer"}
-        )
-    )
-    acceptance = VideoTaskAcceptance(
-        scene_id="scene-1",
-        task_id=accepted_task.id,
-        replay_task=None if latest_is_accepted else accepted_task,
-    )
-    repository = _RevisionRepository(acceptance, latest_task)
-    service = _service(tmp_path, repository)
-    request = ReviseVideoSceneRequest(
-        clientRequestId="0123456789abcdef",
-        expectedArtifactRevision=1,
-        userMessage=payload.revisionInstruction,
-    )
-
-    response = await service.revise_scene("user-1", "scene-1", request)
-
-    assert response.task.id == accepted_task.id

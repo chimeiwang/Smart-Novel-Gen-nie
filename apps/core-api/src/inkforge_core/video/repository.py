@@ -197,28 +197,26 @@ class VideoRepository:
                 )
                 session.add(project)
                 await session.flush()
-                response = _project_response(project, scene_count=0)
+                response = _project_response(project)
         return response
 
     async def list_projects(self, user_id: str, novel_id: str) -> list[VideoProjectResponse]:
         """只返回当前用户小说下未软删除的项目。"""
 
         async with self._session_factory() as session:
-            rows = (
-                await session.execute(
-                    select(VideoProject, func.count(VideoScene.id))
+            projects = (
+                await session.scalars(
+                    select(VideoProject)
                     .join(Novel, Novel.id == VideoProject.novelId)
-                    .outerjoin(VideoScene, VideoScene.projectId == VideoProject.id)
                     .where(
                         Novel.userId == user_id,
                         VideoProject.novelId == novel_id,
                         VideoProject.deletedAt.is_(None),
                     )
-                    .group_by(VideoProject.id)
                     .order_by(VideoProject.updatedAt.desc(), VideoProject.id)
                 )
             ).all()
-        return [_project_response(project, int(scene_count)) for project, scene_count in rows]
+        return [_project_response(project) for project in projects]
 
     async def get_project(
         self,
@@ -229,18 +227,10 @@ class VideoRepository:
         seedance_configured: bool,
         seedance_enabled: bool,
     ) -> VideoProjectDetailResponse:
-        """加载项目、场景、最新任务和当前审核草案。"""
+        """加载当前项目、素材和能力状态，不再暴露旧 VideoScene。"""
 
         async with self._session_factory() as session:
             project = await _require_owned_project(session, user_id, project_id)
-            scenes = (
-                await session.scalars(
-                    select(VideoScene)
-                    .where(VideoScene.projectId == project_id)
-                    .order_by(VideoScene.ordinal, VideoScene.id)
-                )
-            ).all()
-            scene_responses = [await _scene_response(session, scene) for scene in scenes]
             assets = (
                 await session.scalars(
                     select(VideoAsset)
@@ -249,8 +239,7 @@ class VideoRepository:
                 )
             ).all()
         return VideoProjectDetailResponse(
-            project=_project_response(project, len(scenes)),
-            scenes=scene_responses,
+            project=_project_response(project),
             assets=[_asset_response(asset) for asset in assets],
             previewEnabled=preview_enabled,
             seedanceConfigured=seedance_configured,
@@ -2997,7 +2986,7 @@ def _validate_plan_against_frozen_snapshot(
         ) from exc
 
 
-def _project_response(project: VideoProject, scene_count: int) -> VideoProjectResponse:
+def _project_response(project: VideoProject) -> VideoProjectResponse:
     """把 ORM 对象转换成稳定公共响应。"""
 
     return VideoProjectResponse(
@@ -3010,7 +2999,6 @@ def _project_response(project: VideoProject, scene_count: int) -> VideoProjectRe
         targetLanguage=project.targetLanguage,
         provider=project.provider,
         revision=project.revision,
-        sceneCount=scene_count,
         createdAt=project.createdAt,
         updatedAt=project.updatedAt,
     )

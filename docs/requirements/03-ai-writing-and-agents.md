@@ -2,6 +2,9 @@
 
 ## 长篇章节影视化任务
 
+旧 `VideoScene` 的选区创建、查询、重试、返工、批准和提示词预览公共接口已经退役。数据库表、内部回调、
+dispatcher 和 Agent handler 只为已存在历史任务保留终态收敛能力，不得再形成新任务入口。
+
 长篇视频工作台的新入口使用独立 `VideoChapterAdaptation`，不再把完整章节或镜头方案写入旧
 `VideoScene.planJson`。`JobKind=video` 新增两个判别 workflow：
 

@@ -20,8 +20,8 @@ Manager，不写入仓库、普通配置、stdout 或日志。远程 Core 默认
 `INKFORGE_CLI_ALLOW_INSECURE_HTTP_ORIGIN` 设置为一个完整 HTTP origin；该放行只匹配这个地址，
 不得使用通配值。
 
-除登录外，命令都从 stdin 读取一个 UTF-8 JSON 对象，stdout 返回 JSON；`short.agent.watch` 和
-`long.task.watch` 返回 JSONL。例如：
+除登录外，命令都从 stdin 读取一个 UTF-8 JSON 对象，stdout 返回 JSON；`short.agent.watch`、
+`long.task.watch` 和 `long.video.adaptation.watch` 返回 JSONL。例如：
 
 ```powershell
 '{}' | uv run --package inkforge-cli inkforge auth.whoami
@@ -69,6 +69,69 @@ Codex 的完整操作规程位于用户 Skill：
   `long.task.cancel`。
 - 本规格列出的整份大纲正文、大纲节点、设定、参考资料和小说文风应用命令已实现；伏笔和用户级文风资产写入仍未开放。
   任何调用都不能用读接口或批量请求绕过幂等、CAS、Diff 确认和来源绑定门槛。
+
+## 长篇章节影视化边界
+
+`long.video.*` 覆盖当前“章节 → 镜头候选 → 人工编辑确认 → 分集 → 视觉设定 → 逐镜提示词”主链，
+不暴露已经被当前产品方案替代的旧 `VideoScene` 选区规划命令。所有命令只调用 Core
+`/api/v1/video/**`，不连接 PostgreSQL、Agent Service 或内部接口。
+
+典型顺序：
+
+```text
+long.video.project.create
+long.video.adaptation.create
+long.video.plan.start
+long.video.adaptation.watch
+long.video.adaptation.get
+long.video.plan.confirm
+long.video.episode.save
+long.video.asset.upload
+long.video.asset.rights
+long.video.canon.candidate.set
+long.video.canon.approve
+long.video.reference.save
+long.video.prompt.start
+long.video.adaptation.watch
+long.video.prompt.save
+```
+
+- `long.video.plan.confirm` 用 `plan` 或 `planFile` 提交完整编辑后候选；命令先回读 Artifact 与改编
+  revision，冲突时不发确认请求。
+- `long.video.prompt.save` 用 `currentPrompt` 或 `currentPromptFile` 保存完整提示词，不截断。
+- `long.video.asset.upload` 保持文件原始字节；`long.video.asset.download` 必须显式指定
+  `outputFile`，二进制不会写入 stdout。
+- `long.video.asset.preview` 调用浏览器内联预览接口，但在 CLI 中仍把完整字节写入显式文件。
+- `long.video.adaptation.watch` 轮询公共改编聚合，输出 JSONL；停止 watcher 不取消服务端任务。
+- 项目创建和素材上传的现有 API 没有幂等键。网络结果不确定时先 list/get 核对，不能盲目重试。
+- 正式镜头、视觉设定版本和提示词仍分别需要用户显式确认。CLI 不提供自动批准整条流水线的命令。
+- 生产环境当前关闭视频预览写入；CLI 不会绕过 `VIDEO_PREVIEW_ENABLED`。
+
+各命令的业务输入如下；所有命令还可以带可选 `profile`。表中的“二选一”表示必须且只能提供一项。
+
+| 命令 | 必填字段 | 可选字段 |
+| --- | --- | --- |
+| `long.video.project.list` | `novelId` | `outputFile` |
+| `long.video.project.get` | `projectId` | `outputFile` |
+| `long.video.project.create` | `novelId`, `title` | `mode`, `targetAspectRatio`, `targetLanguage` |
+| `long.video.asset.upload` | `projectId`, `filePath`, `name`, `modality`, `duty` | `sourceKind` |
+| `long.video.asset.rights` | `assetId`, `rightsStatus` | 无 |
+| `long.video.asset.download` | `assetId`, `outputFile` | 无 |
+| `long.video.asset.preview` | `assetId`, `outputFile` | 无 |
+| `long.video.adaptation.list` | `projectId` | `outputFile` |
+| `long.video.adaptation.get` | `adaptationId` | `outputFile` |
+| `long.video.adaptation.create` | `projectId`, `chapterId`, `expectedChapterUpdatedAt`, `clientRequestId` | 无 |
+| `long.video.adaptation.watch` | `adaptationId`, `taskId` | 无 |
+| `long.video.plan.start` | `adaptationId`, `clientRequestId` | `pacingPreset`, `targetEpisodeSeconds`, `baseShotPlanVersionId`, `revisionBrief` |
+| `long.video.plan.confirm` | `adaptationId`, `clientRequestId`, `expectedArtifactRevision`, `expectedAdaptationRevision`, `plan`/`planFile` 二选一 | 无 |
+| `long.video.plan.discard` | `adaptationId`, `clientRequestId`, `expectedArtifactRevision`, `expectedAdaptationRevision` | 无 |
+| `long.video.episode.save` | `adaptationId`, `clientRequestId`, `expectedAdaptationRevision`, `shotPlanVersionId`, `breakAfterShotIds` | 无 |
+| `long.video.prompt.start` | `adaptationId`, `clientRequestId`, `expectedAdaptationRevision`, `shotPlanVersionId` | `shotIds` |
+| `long.video.prompt.save` | `adaptationId`, `shotId`, `expectedPromptRevision`, `currentPrompt`/`currentPromptFile` 二选一 | `candidateTaskId` |
+| `long.video.canon.list` | `projectId` | `outputFile` |
+| `long.video.canon.candidate.set` | `projectId`, `clientRequestId`, `settingKind`, `settingId`, `duty`, `variantKey`, `label`, `candidateAssetId` | `includeFeatures`, `excludeFeatures`, `defaultStrength` |
+| `long.video.canon.approve` | `canonId`, `clientRequestId`, `expectedRevision`, `candidateAssetId` | 无 |
+| `long.video.reference.save` | `adaptationId`, `shotId`, `expectedRevision`, `references` | 无 |
 
 ## 命令清单
 
@@ -170,5 +233,26 @@ long.reference.delete
 long.reference.reindex
 long.style.apply
 long.style.clear
+long.video.project.list
+long.video.project.get
+long.video.project.create
+long.video.asset.upload
+long.video.asset.rights
+long.video.asset.download
+long.video.asset.preview
+long.video.adaptation.list
+long.video.adaptation.get
+long.video.adaptation.create
+long.video.adaptation.watch
+long.video.plan.start
+long.video.plan.confirm
+long.video.plan.discard
+long.video.episode.save
+long.video.prompt.start
+long.video.prompt.save
+long.video.canon.list
+long.video.canon.candidate.set
+long.video.canon.approve
+long.video.reference.save
 ```
 <!-- command-list:end -->

@@ -7,6 +7,7 @@ from collections.abc import Callable
 import httpx
 import pytest
 from inkforge_cli.api import (
+    BinaryResponse,
     CoreApiClient,
     CoreApiError,
     CoreTransportError,
@@ -34,6 +35,36 @@ def test_client_sends_only_public_api_cookie_and_parses_json() -> None:
         return httpx.Response(200, json={"id": "user-1", "username": "nie"})
 
     assert make_client(handler).request("GET", "/api/v1/auth/me")["username"] == "nie"
+
+
+def test_client_downloads_complete_public_binary_without_json_parsing() -> None:
+    content = b"\x89PNG\r\n\x1a\n\x00\xff\x10"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/video/assets/asset-1/content"
+        assert request.headers["cookie"] == "inkforge-token=session-cookie"
+        return httpx.Response(
+            200,
+            content=content,
+            headers={"content-type": "image/png"},
+            request=request,
+        )
+
+    response = make_client(handler).request_bytes(
+        "GET",
+        "/api/v1/video/assets/asset-1/content",
+    )
+
+    assert response == BinaryResponse(content=content, media_type="image/png")
+
+
+def test_binary_client_rejects_internal_paths_before_transport() -> None:
+    client = make_client(
+        lambda request: pytest.fail(f"不应发出请求：{request.url}")
+    )
+
+    with pytest.raises(ValueError):
+        client.request_bytes("GET", "/internal/v1/video/assets/asset-1")
 
 
 @pytest.mark.parametrize(("status", "exit_code"), [(401, 3), (409, 4)])
