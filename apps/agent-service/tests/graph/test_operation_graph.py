@@ -5,7 +5,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from inkforge_agents.artifacts.patch import apply_text_patches
+from inkforge_agents.artifacts.patch import PatchApplicationError, apply_text_patches
+from inkforge_agents.clients.core import CoreServiceError
+from inkforge_agents.graph.snapshots import deserialize_snapshot, serialize_snapshot
 from inkforge_agents.graph.state import create_initial_state
 from inkforge_agents.operations.contracts import (
     CreativeOperation,
@@ -725,6 +727,7 @@ class PatchReviewExecutor:
     def __init__(self, *, patch_find: str = "旧句") -> None:
         self.reviser_calls = 0
         self.reviewer_calls = 0
+        self.primary_calls = 0
         self.patch_find = patch_find
 
     async def run(
@@ -737,6 +740,7 @@ class PatchReviewExecutor:
     ) -> dict[str, Any]:
         del state, operation_kind
         if execution_mode == "primary":
+            self.primary_calls += 1
             return {
                 "visibleContent": "ARTIFACT_OUTPUT_START\n旧句\nARTIFACT_OUTPUT_END",
                 "controlEvents": [
@@ -831,6 +835,109 @@ async def test_ambiguous_patch_waits_for_user_without_rewrite() -> None:
     assert executor.reviewer_calls == 1
     assert artifacts.actions == ["submit", "await"]
     assert result["patchFailureCode"] == "PATCH_TARGET_AMBIGUOUS"
+    assert result["artifactStatus"] == "blocked"
+    assert result["phase"] == "waiting_user"
+
+
+class ConflictArtifactPort(ArtifactPort):
+    def __init__(self) -> None:
+        super().__init__(initial_content="旧句")
+        self.mark_calls = 0
+
+    async def patch(
+        self,
+        state: dict[str, Any],
+        artifact_id: str,
+        patches: list[Any],
+    ) -> str:
+        del state, artifact_id, patches
+        raise CoreServiceError(
+            "核心服务拒绝智能体回调",
+            recoverable=False,
+            code="ARTIFACT_REVISION_CONFLICT",
+        )
+
+    async def mark_awaiting_user(self, artifact_id: str) -> None:
+        self.mark_calls += 1
+        await super().mark_awaiting_user(artifact_id)
+
+
+@pytest.mark.asyncio
+async def test_cas_conflict_waits_without_second_core_write_or_model_retry() -> None:
+    executor = PatchReviewExecutor()
+    artifacts = ConflictArtifactPort()
+    graph = build_operation_graph(
+        OperationDependencies(agentExecutor=executor, artifacts=artifacts)
+    )
+
+    result = await graph.ainvoke(_patch_state())
+
+    assert executor.primary_calls == 1
+    assert executor.reviser_calls == 0
+    assert executor.reviewer_calls == 1
+    assert artifacts.mark_calls == 0
+    assert result["patchFailureCode"] == "ARTIFACT_REVISION_CONFLICT"
+    assert result["artifactStatus"] == "blocked"
+    assert result["pendingRevision"] is None
+    assert result["phase"] == "waiting_user"
+    stable = {
+        key: value
+        for key, value in result.items()
+        if key not in {"__interrupt__", "runtimeContext"}
+    }
+    restored = deserialize_snapshot(serialize_snapshot(stable))
+    assert restored["artifactStatus"] == "blocked"
+    assert restored["patchFailureCode"] == "ARTIFACT_REVISION_CONFLICT"
+
+
+@pytest.mark.asyncio
+async def test_unknown_core_patch_error_propagates_instead_of_becoming_patch_failure() -> None:
+    class UnknownErrorArtifactPort(ArtifactPort):
+        async def patch(
+            self,
+            state: dict[str, Any],
+            artifact_id: str,
+            patches: list[Any],
+        ) -> str:
+            del state, artifact_id, patches
+            raise CoreServiceError("核心服务暂时不可用", recoverable=True, code="OTHER")
+
+    graph = build_operation_graph(
+        OperationDependencies(
+            agentExecutor=PatchReviewExecutor(),
+            artifacts=UnknownErrorArtifactPort(initial_content="旧句"),
+        )
+    )
+
+    with pytest.raises(CoreServiceError, match="核心服务暂时不可用"):
+        await graph.ainvoke(_patch_state())
+
+
+@pytest.mark.asyncio
+async def test_unsupported_patch_waits_with_fixed_failure_code_without_rewrite() -> None:
+    class UnsupportedArtifactPort(ArtifactPort):
+        async def patch(
+            self,
+            state: dict[str, Any],
+            artifact_id: str,
+            patches: list[Any],
+        ) -> str:
+            del state, artifact_id, patches
+            raise PatchApplicationError("PATCH_ARTIFACT_UNSUPPORTED")
+
+    executor = PatchReviewExecutor()
+    graph = build_operation_graph(
+        OperationDependencies(
+            agentExecutor=executor,
+            artifacts=UnsupportedArtifactPort(initial_content="旧句"),
+        )
+    )
+
+    result = await graph.ainvoke(_patch_state())
+
+    assert executor.primary_calls == 1
+    assert executor.reviser_calls == 0
+    assert result["patchFailureCode"] == "PATCH_ARTIFACT_UNSUPPORTED"
     assert result["artifactStatus"] == "blocked"
     assert result["phase"] == "waiting_user"
 

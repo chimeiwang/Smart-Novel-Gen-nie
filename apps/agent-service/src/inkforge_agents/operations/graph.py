@@ -33,6 +33,15 @@ _LONG_SERIAL_SCOPE_ADAPTER: TypeAdapter[LongSerialScope] = TypeAdapter(LongSeria
 _SOURCE_BINDINGS_ADAPTER: TypeAdapter[list[SourceBinding]] = TypeAdapter(
     list[SourceBinding]
 )
+_PATCH_FAILURE_CODES = frozenset(
+    {
+        "PATCH_TARGET_NOT_FOUND",
+        "PATCH_TARGET_AMBIGUOUS",
+        "PATCH_OVERLAP",
+        "PATCH_ARTIFACT_UNSUPPORTED",
+        "ARTIFACT_REVISION_CONFLICT",
+    }
+)
 
 
 class AgentExecutorPort(Protocol):
@@ -434,12 +443,6 @@ def build_operation_graph(
                         "iteration": state.get("artifactIteration", 0),
                     }
                 )
-                if (
-                    review.revisionMode == "patch"
-                    and _operation_definition(_operation(state)).textArtifactKind
-                    != "chapter_draft"
-                ):
-                    raise ValueError("局部 patch 仅支持章节文本草案")
             except (ValidationError, ValueError):
                 review = ReviewResult(
                     reviewer=reviewer_id,
@@ -497,13 +500,15 @@ def build_operation_graph(
                     raise PatchApplicationError("PATCH_ARTIFACT_UNSUPPORTED")
                 await dependencies.artifacts.patch(dict(state), artifact_id, patches)
             except PatchApplicationError as exc:
-                failure_code = exc.code
-            except CoreServiceError as exc:
                 failure_code = (
-                    "ARTIFACT_REVISION_CONFLICT"
-                    if exc.code == "ARTIFACT_REVISION_CONFLICT"
-                    else "PATCH_CORE_ERROR"
+                    exc.code
+                    if exc.code in _PATCH_FAILURE_CODES
+                    else "PATCH_ARTIFACT_UNSUPPORTED"
                 )
+            except CoreServiceError as exc:
+                if exc.code != "ARTIFACT_REVISION_CONFLICT":
+                    raise
+                failure_code = "ARTIFACT_REVISION_CONFLICT"
             except (ValidationError, ValueError):
                 failure_code = "PATCH_ARTIFACT_UNSUPPORTED"
         if failure_code is not None:
@@ -512,6 +517,9 @@ def build_operation_graph(
                 "errorMessage": _patch_failure_message(failure_code),
                 "artifactStatus": "blocked",
                 "pendingRevision": None,
+                "skipArtifactPersistence": (
+                    failure_code == "ARTIFACT_REVISION_CONFLICT"
+                ),
                 "operationStep": "apply_artifact_patch",
                 "operationStage": "局部修订失败",
             }
@@ -519,6 +527,7 @@ def build_operation_graph(
             "artifactIteration": state.get("artifactIteration", 0) + 1,
             "pendingRevision": None,
             "patchFailureCode": None,
+            "skipArtifactPersistence": False,
             "artifactStatus": "patched",
             "operationStep": "apply_artifact_patch",
             "operationStage": "应用局部修订",
@@ -555,7 +564,7 @@ def build_operation_graph(
     async def mark_awaiting_user(state: GraphState) -> dict[str, Any]:
         await ensure_active(state)
         artifact_id = state.get("activeArtifactId")
-        if artifact_id:
+        if artifact_id and not state.get("skipArtifactPersistence"):
             await dependencies.artifacts.mark_awaiting_user(artifact_id)
         return {
             "artifactStatus": (
@@ -605,6 +614,8 @@ def build_operation_graph(
             return Command(
                 update={
                     "userDecision": "revise",
+                    "patchFailureCode": None,
+                    "skipArtifactPersistence": False,
                     "pendingRevision": {
                         "verdict": "revise",
                         "revisionMode": "rewrite",
@@ -647,6 +658,8 @@ def build_operation_graph(
                 update={
                     "resumeDecision": None,
                     "userDecision": "revise",
+                    "patchFailureCode": None,
+                    "skipArtifactPersistence": False,
                     "pendingRevision": {
                         "verdict": "revise",
                         "revisionMode": "rewrite",
@@ -893,6 +906,5 @@ def _patch_failure_message(code: str) -> str:
         "PATCH_OVERLAP": "局部修订范围发生重叠，请重新提交修改。",
         "PATCH_ARTIFACT_UNSUPPORTED": "当前草案不支持局部修订，请改用完整返工。",
         "ARTIFACT_REVISION_CONFLICT": "草案已被其他操作修改，请重新审核当前草案。",
-        "PATCH_CORE_ERROR": "局部修订未能保存，请重新审核当前草案。",
     }
     return messages.get(code, "局部修订未能应用，请重新审核当前草案。")

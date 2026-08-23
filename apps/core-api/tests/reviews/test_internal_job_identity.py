@@ -151,3 +151,31 @@ async def test_revision_conflict_does_not_change_payload_or_create_revision() ->
     assert existing.revision == 2
     assert existing.payloadJson == '{"kind":"chapter_draft","content":"原正文"}'
     assert session.added == []
+
+
+@pytest.mark.asyncio
+async def test_existing_revision_requires_expected_revision_without_bypass() -> None:
+    existing = SimpleNamespace(
+        id="artifact-1",
+        kind="chapter_draft",
+        revision=2,
+        payloadJson='{"kind":"chapter_draft","content":"原正文"}',
+    )
+    session = _Session(
+        [
+            SimpleNamespace(id="task-1", chapterId="chapter-1"),
+            "job-1",
+            existing,
+        ]
+    )
+    repository = ReviewRepository(lambda: session)  # type: ignore[arg-type]
+
+    with pytest.raises(ApiError) as caught:
+        await repository.create_or_revise(
+            "user-1", _create_request(expected_revision=None)
+        )
+
+    assert caught.value.code == "ARTIFACT_REVISION_CONFLICT"
+    assert existing.revision == 2
+    assert existing.payloadJson == '{"kind":"chapter_draft","content":"原正文"}'
+    assert session.added == []

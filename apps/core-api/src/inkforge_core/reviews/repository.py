@@ -469,10 +469,9 @@ class ReviewRepository:
                         code="ARTIFACT_REVISION_CONFLICT",
                         message="新建草案不得携带 expectedRevision",
                     )
-                if (
-                    existing is not None
-                    and request.expectedRevision is not None
-                    and existing.revision != request.expectedRevision
+                if existing is not None and (
+                    request.expectedRevision is None
+                    or existing.revision != request.expectedRevision
                 ):
                     raise ApiError(
                         status_code=409,
