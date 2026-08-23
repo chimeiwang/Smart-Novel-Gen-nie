@@ -1,0 +1,499 @@
+name: TokenUsage dev 迁移
+
+"on":
+  workflow_dispatch:
+    inputs:
+      action:
+        description: 选择只读检查或执行 dev 迁移
+        required: true
+        type: choice
+        options:
+          - inspect
+          - migrate_dev
+
+permissions:
+  contents: read
+
+jobs:
+  migration:
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: token-usage-details-dev-migration
+      cancel-in-progress: false
+    timeout-minutes: 30
+    env:
+      APP_DIR: ${{ vars.APP_DIR }}
+      SQL_PATH: scripts/migrations/20260823_token_usage_details.sql
+      SQL_SHA256: 1DE1CD58C589403303B40F2AA2AE9DE3C44F272E5DD6C09159327535F04C5142
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: 准备严格 SSH
+        shell: bash
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
+        run: |
+          set -eu
+          ssh_dir="$RUNNER_TEMP/inkforge-token-usage-ssh"
+          mkdir -p "$ssh_dir"
+          umask 077
+          test -n "$SERVER_SSH_KEY"
+          test -n "$DEPLOY_SSH_KNOWN_HOSTS"
+          printf '%s\n' "$SERVER_SSH_KEY" > "$ssh_dir/deploy_key"
+          printf '%s\n' "$DEPLOY_SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          chmod 600 "$ssh_dir/deploy_key" "$ssh_dir/known_hosts"
+
+      - name: 校验固定迁移 SQL
+        shell: bash
+        run: |
+          set -eu
+          test -f "$SQL_PATH"
+          printf '%s  %s\n' "$SQL_SHA256" "$SQL_PATH" | sha256sum --check --status -
+
+      - name: inspect
+        if: inputs.action == 'inspect'
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          set -eu
+          ssh_dir="$RUNNER_TEMP/inkforge-token-usage-ssh"
+          printf -v remote_command 'bash -s -- %q' "$APP_DIR"
+          ssh \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            -o TCPKeepAlive=yes \
+            -i "$ssh_dir/deploy_key" \
+            "$SERVER_USER@$SERVER_HOST" \
+            "$remote_command" <<'REMOTE'
+          set -eu
+          umask 077
+          app_dir=$1
+          [ -n "$app_dir" ] || { echo "APP_DIR 未配置" >&2; exit 1; }
+          cd -- "$app_dir"
+
+          missing_tools=0
+          for tool in psql pg_dump pg_restore sha256sum docker python3 timeout; do
+            if command -v "$tool" >/dev/null 2>&1; then
+              printf '%s: present\n' "$tool"
+            else
+              printf '%s: missing\n' "$tool"
+              missing_tools=1
+            fi
+          done
+          set +x
+          readable_count=0
+          database_url_count=0
+          database_url=""
+          for env_file in .env.dev .env.development; do
+            if [ -r "$env_file" ]; then
+              printf '%s: present\n' "$env_file"
+              readable_count=$((readable_count + 1))
+              if parsed_url="$(python3 - "$env_file" <<'PY'
+          import sys
+          from pathlib import Path
+
+          def parse_database_url(path: str) -> str:
+              try:
+                  matches = []
+                  for raw_line in Path(path).read_text(encoding="utf-8").splitlines():
+                      line = raw_line.strip()
+                      if not line or line.startswith("#"):
+                          continue
+                      if line.startswith("DATABASE_URL="):
+                          value = line[len("DATABASE_URL=") :].strip()
+                          if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+                              value = value[1:-1].strip()
+                          matches.append(value)
+                  if len(matches) != 1 or not matches[0]:
+                      return ""
+                  return matches[0]
+              except (OSError, UnicodeError):
+                  return ""
+
+          parsed = parse_database_url(sys.argv[1])
+          if parsed:
+              print(parsed, end="")
+          else:
+              raise SystemExit(1)
+          PY
+              )"; then
+                database_url_count=$((database_url_count + 1))
+                database_url="$parsed_url"
+              fi
+            else
+              printf '%s: missing\n' "$env_file"
+            fi
+          done
+          [ "$missing_tools" -eq 0 ] || { echo "服务器缺少必要命令" >&2; exit 1; }
+          [ "$readable_count" -eq 1 ] && [ "$database_url_count" -eq 1 ] || {
+            echo "dev 环境文件必须恰好一个可读且含一条非空 DATABASE_URL" >&2
+            exit 1
+          }
+          REMOTE
+
+      - name: migrate_dev
+        if: inputs.action == 'migrate_dev'
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          set -eu
+          ssh_dir="$RUNNER_TEMP/inkforge-token-usage-ssh"
+          contract_path="$RUNNER_TEMP/inkforge-token-usage-schema-contract.json"
+          rm -f "$contract_path"
+
+          run_id="$GITHUB_RUN_ID"
+          run_attempt="$GITHUB_RUN_ATTEMPT"
+          case "$run_id" in
+            ''|*[!0-9]*) echo "GitHub 运行编号不符合固定临时路径约定" >&2; exit 1 ;;
+          esac
+          case "$run_attempt" in
+            ''|*[!0-9]*) echo "GitHub 尝试编号不符合固定临时路径约定" >&2; exit 1 ;;
+          esac
+          remote_sql="/tmp/inkforge-token-usage-details-$run_id-$run_attempt.sql"
+          remote_contract="/tmp/inkforge-token-usage-details-$run_id-$run_attempt.json"
+          cleanup_remote() {
+            set +e
+            ssh \
+              -o BatchMode=yes \
+              -o ConnectTimeout=15 \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+              -o ServerAliveInterval=15 \
+              -o ServerAliveCountMax=4 \
+              -o TCPKeepAlive=yes \
+              -i "$ssh_dir/deploy_key" \
+              "$SERVER_USER@$SERVER_HOST" \
+              sh -s -- "$remote_sql" "$remote_contract" <<'REMOTE_CLEANUP' >/dev/null 2>&1
+          set -eu
+          umask 077
+          sql_temp=$1
+          contract_temp=$2
+          case "$sql_temp" in
+            /tmp/inkforge-token-usage-details-[0-9]*-[0-9]*.sql) ;;
+            *) exit 1 ;;
+          esac
+          case "$contract_temp" in
+            /tmp/inkforge-token-usage-details-[0-9]*-[0-9]*.json) ;;
+            *) exit 1 ;;
+          esac
+          rm -f -- "$sql_temp" "$contract_temp"
+          REMOTE_CLEANUP
+          }
+          trap cleanup_remote EXIT
+
+          ssh \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            -o TCPKeepAlive=yes \
+            -i "$ssh_dir/deploy_key" \
+            "$SERVER_USER@$SERVER_HOST" \
+            sh -s -- "$remote_sql" "$remote_contract" <<'REMOTE_PREPARE'
+          set -eu
+          umask 077
+          sql_temp=$1
+          contract_temp=$2
+          case "$sql_temp" in
+            /tmp/inkforge-token-usage-details-[0-9]*-[0-9]*.sql) ;;
+            *) echo "SQL 临时路径不符合固定约定" >&2; exit 1 ;;
+          esac
+          case "$contract_temp" in
+            /tmp/inkforge-token-usage-details-[0-9]*-[0-9]*.json) ;;
+            *) echo "contract 临时路径不符合固定约定" >&2; exit 1 ;;
+          esac
+          : > "$sql_temp"
+          : > "$contract_temp"
+          chmod 600 "$sql_temp" "$contract_temp"
+          REMOTE_PREPARE
+
+          scp -q \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            -o TCPKeepAlive=yes \
+            -i "$ssh_dir/deploy_key" \
+            "$SQL_PATH" "$SERVER_USER@$SERVER_HOST:$remote_sql"
+
+          printf -v remote_command 'bash -s -- %q %q %q %q %q' \
+            "$APP_DIR" "$remote_sql" "$remote_contract" "$run_id" "$run_attempt"
+          ssh \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            -o TCPKeepAlive=yes \
+            -i "$ssh_dir/deploy_key" \
+            "$SERVER_USER@$SERVER_HOST" \
+            "$remote_command" <<'REMOTE'
+          set -eu
+          app_dir=$1
+          sql_temp=$2
+          contract_temp=$3
+          run_id=$4
+          run_attempt=$5
+          umask 077
+          case "$sql_temp" in
+            /tmp/inkforge-token-usage-details-[0-9]*-[0-9]*.sql) ;;
+            *) echo "SQL 临时文件路径不符合固定约定" >&2; exit 1 ;;
+          esac
+          case "$run_id" in
+            ''|*[!0-9]*) echo "运行编号不符合固定临时路径约定" >&2; exit 1 ;;
+          esac
+          case "$run_attempt" in
+            ''|*[!0-9]*) echo "尝试编号不符合固定临时路径约定" >&2; exit 1 ;;
+          esac
+          expected_sql="/tmp/inkforge-token-usage-details-$run_id-$run_attempt.sql"
+          expected_contract="/tmp/inkforge-token-usage-details-$run_id-$run_attempt.json"
+          [ "$sql_temp" = "$expected_sql" ] || {
+            echo "SQL 临时文件路径不符合固定约定" >&2
+            exit 1
+          }
+          case "$contract_temp" in
+            "$expected_contract") ;;
+            *) echo "contract 临时文件路径不符合固定约定" >&2; exit 1 ;;
+          esac
+          [ -n "$app_dir" ] || { echo "APP_DIR 未配置" >&2; exit 1; }
+          cd -- "$app_dir"
+
+          set +x
+          readable_count=0
+          database_url_count=0
+          database_url=""
+          for candidate in "$app_dir/.env.dev" "$app_dir/.env.development"; do
+            if [ -r "$candidate" ]; then
+              readable_count=$((readable_count + 1))
+              if parsed_url="$(python3 - "$candidate" <<'PY'
+          import sys
+          from pathlib import Path
+
+          def parse_database_url(path: str) -> str:
+              try:
+                  matches = []
+                  for raw_line in Path(path).read_text(encoding="utf-8").splitlines():
+                      line = raw_line.strip()
+                      if not line or line.startswith("#"):
+                          continue
+                      if line.startswith("DATABASE_URL="):
+                          value = line[len("DATABASE_URL=") :].strip()
+                          if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+                              value = value[1:-1].strip()
+                          matches.append(value)
+                  if len(matches) != 1 or not matches[0]:
+                      return ""
+                  return matches[0]
+              except (OSError, UnicodeError):
+                  return ""
+
+          parsed = parse_database_url(sys.argv[1])
+          if parsed:
+              print(parsed, end="")
+          else:
+              raise SystemExit(1)
+          PY
+              )"; then
+                database_url_count=$((database_url_count + 1))
+                database_url="$parsed_url"
+              fi
+            fi
+          done
+          [ "$readable_count" -eq 1 ] && [ "$database_url_count" -eq 1 ] || {
+            echo "dev 环境文件必须恰好一个可读且含一条非空 DATABASE_URL" >&2
+            exit 1
+          }
+          DATABASE_URL="$database_url"
+          export DATABASE_URL
+
+          for required_command in psql pg_dump pg_restore sha256sum docker python3; do
+            command -v "$required_command" >/dev/null 2>&1 || {
+              echo "服务器缺少必要命令" >&2
+              exit 1
+            }
+          done
+
+          backup_report=""
+          if ! backup_report="$(timeout 600 env BACKUP_ROOT=/srv/backups/inkforge-dev sh scripts/backup.sh 2>/dev/null)"; then
+            echo "数据库备份失败" >&2
+            exit 1
+          fi
+          case "$backup_report" in
+            备份完成：*) backup_dir="${backup_report#备份完成：}" ;;
+            *) echo "无法定位新建备份目录" >&2; exit 1 ;;
+          esac
+          [ -d "$backup_dir" ] || { echo "备份目录不存在" >&2; exit 1; }
+          (
+            cd -- "$backup_dir"
+            sha256sum --check SHA256SUMS >/dev/null 2>&1
+          ) || { echo "备份 SHA256 校验失败" >&2; exit 1; }
+          timeout 180 pg_restore --list "$backup_dir/database.dump" >/dev/null 2>&1 || {
+            echo "备份 pg_restore list 校验失败" >&2
+            exit 1
+          }
+
+          printf '%s  %s\n' \
+            '1DE1CD58C589403303B40F2AA2AE9DE3C44F272E5DD6C09159327535F04C5142' \
+            "$sql_temp" | sha256sum --check --status -
+          database_url="$(printf '%s' "$DATABASE_URL" | sed 's#^postgresql+asyncpg://#postgresql://#')"
+          for attempt in 1 2; do
+            if ! PGOPTIONS='-c statement_timeout=120000 -c lock_timeout=30000' \
+              timeout 180 psql -v ON_ERROR_STOP=1 "$database_url" -f "$sql_temp" >/dev/null 2>&1; then
+              echo "固定迁移执行失败" >&2
+              exit 1
+            fi
+          done
+
+          verification="$(PGOPTIONS='-c statement_timeout=120000 -c lock_timeout=30000' \
+            timeout 180 psql -v ON_ERROR_STOP=1 -Atq "$database_url" <<'SQL'
+          BEGIN;
+          SET TRANSACTION READ ONLY;
+          WITH column_state AS (
+              SELECT
+                  count(*) AS column_count,
+                  bool_and(
+                      attribute.atttypid = 'int4'::regtype
+                      AND NOT attribute.attnotnull
+                      AND NOT attribute.atthasdef
+                      AND attribute.attidentity = ''
+                      AND attribute.attgenerated = ''
+                  ) AS columns_valid
+              FROM pg_attribute AS attribute
+              JOIN pg_class AS table_definition ON table_definition.oid = attribute.attrelid
+              JOIN pg_namespace AS namespace_definition
+                  ON namespace_definition.oid = table_definition.relnamespace
+              WHERE namespace_definition.nspname = 'public'
+                AND table_definition.relname = 'TokenUsage'
+                AND table_definition.relkind IN ('r', 'p')
+                AND attribute.attname IN ('promptCacheMissTokens', 'reasoningTokens')
+                AND NOT attribute.attisdropped
+          ), constraint_state AS (
+              SELECT
+                  count(*) AS constraint_count,
+                  bool_and(constraint_definition.convalidated) AS constraints_valid
+              FROM pg_constraint AS constraint_definition
+              WHERE constraint_definition.conrelid = 'public."TokenUsage"'::regclass
+                AND constraint_definition.contype = 'c'
+                AND constraint_definition.conname IN (
+                    'TokenUsage_token_details_nonnegative_check',
+                    'TokenUsage_prompt_cache_details_check',
+                    'TokenUsage_reasoning_details_check'
+                )
+          ), null_state AS (
+              SELECT NOT EXISTS (
+                  SELECT 1
+                  FROM public."TokenUsage"
+                  WHERE "promptCacheMissTokens" IS NOT NULL
+                     OR "reasoningTokens" IS NOT NULL
+              ) AS existing_rows_null
+          )
+          SELECT CASE
+              WHEN column_state.column_count = 2
+               AND column_state.columns_valid IS TRUE
+               AND constraint_state.constraint_count = 3
+               AND constraint_state.constraints_valid IS TRUE
+               AND null_state.existing_rows_null
+              THEN 'ok'
+              ELSE 'fail'
+          END
+          FROM column_state, constraint_state, null_state;
+          COMMIT;
+          SQL
+          )"
+          [ "$verification" = "ok" ] || {
+            echo "迁移后只读结构与历史行校验失败" >&2
+            exit 1
+          }
+
+          core_containers="$(timeout 180 docker ps \
+            --filter label=com.docker.compose.project=inkforge \
+            --filter label=com.docker.compose.service=core-api \
+            --format '{{.ID}}')"
+          [ -n "$core_containers" ] || { echo "未找到正在运行的 Core 容器" >&2; exit 1; }
+          case "$core_containers" in
+            *$'\n'*) echo "运行中的 Core 容器不唯一" >&2; exit 1 ;;
+            *) core_container="$core_containers" ;;
+          esac
+          running_state="$(timeout 180 docker inspect --format '{{.State.Running}}' "$core_container" 2>/dev/null)" || {
+            echo "无法读取 Core 容器运行状态" >&2
+            exit 1
+          }
+          [ "$running_state" = "true" ] || { echo "Core 容器未运行" >&2; exit 1; }
+          if ! timeout 180 docker exec -i "$core_container" python3 -c \
+            'from inkforge_core.db.schema_guard import export_schema_contract' </dev/null >/dev/null 2>&1; then
+            echo "当前 Core 容器不支持 schema_guard 只读导出" >&2
+            exit 1
+          fi
+          container_contract="/tmp/inkforge-token-usage-details-$run_id-$run_attempt.json"
+          if ! timeout 180 docker exec -i "$core_container" sh -eu -c \
+            'test -w /tmp && rm -f "$1" && : > "$1" && rm -f "$1"' sh "$container_contract" \
+            </dev/null >/dev/null 2>&1; then
+            echo "Core 容器 /tmp 不可写" >&2
+            exit 1
+          fi
+          cleanup_container_contract() {
+            set +e
+            timeout 180 docker exec -i "$core_container" rm -f "$container_contract" </dev/null >/dev/null 2>&1
+          }
+          trap cleanup_container_contract EXIT
+          if ! printf '%s' "$DATABASE_URL" | timeout 180 docker exec -i "$core_container" python3 -c \
+            'import asyncio, sys; from inkforge_core.db.schema_guard import export_schema_contract; database_url = sys.stdin.read(); contract = asyncio.run(export_schema_contract(database_url, sys.argv[1])); print("schema-contract:" + str(contract["fingerprint"]))' \
+            "$container_contract"; then
+            echo "schema_guard 只读 contract 导出失败" >&2
+            exit 1
+          fi
+          rm -f "$contract_temp"
+          if ! timeout 180 docker cp "$core_container:$container_contract" "$contract_temp" >/dev/null 2>&1; then
+            echo "无法复制 schema contract" >&2
+            exit 1
+          fi
+          [ -s "$contract_temp" ] || { echo "schema contract 为空" >&2; exit 1; }
+          chmod 600 "$contract_temp"
+          REMOTE
+
+          scp -q \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            -o TCPKeepAlive=yes \
+            -i "$ssh_dir/deploy_key" \
+            "$SERVER_USER@$SERVER_HOST:$remote_contract" "$contract_path"
+
+          python - "$contract_path" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          with Path(sys.argv[1]).open(encoding="utf-8") as contract_file:
+              contract = json.load(contract_file)
+          if not isinstance(contract, dict) or not contract.get("fingerprint"):
+              raise SystemExit("schema contract 格式无效")
+          PY
+
+      - name: 上传 dev schema contract
+        if: inputs.action == 'migrate_dev'
+        uses: actions/upload-artifact@v4
+        with:
+          name: token-usage-dev-schema-contract
+          path: ${{ runner.temp }}/inkforge-token-usage-schema-contract.json
+          if-no-files-found: error
