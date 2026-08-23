@@ -47,7 +47,8 @@ DeepSeek V4 官方文档说明：思考模式只真正区分 `high` 和 `max`，
   transport 不在 Provider 内自动循环请求；
 - 不实现跨进程结果恢复、reservation、Redis fencing、AES-GCM 恢复文件或
   `outcome_unknown`；
-- 不增加 PostgreSQL 字段、表、索引或迁移；
+- 除用户已明确批准的 `TokenUsage.promptCacheMissTokens`、`TokenUsage.reasoningTokens` 两个
+  nullable 整数字段及其非负/上界检查约束外，不增加其他 PostgreSQL 字段、表、索引或迁移；
 - 不修改 ReviewArtifact 公共用户决策接口；
 - 不调用真实付费模型做测试。
 
@@ -91,7 +92,8 @@ class ModelExecutionPolicy(BaseModel):
 - `thinkingMode=enabled` 时本期只允许 `high`；`max` 仅保留契约能力，不在默认矩阵中使用；
 - 生产调用必须显式携带策略；`ModelTurnRequest.policy` 不设置生产默认值；
 - `provider_default` 只允许测试、旧快照兼容和未迁移的明确 legacy 路径；
-- 策略身份进入模型请求哈希和人工日志结构头，但不进入 Core 四项 TokenUsage 计费载荷。
+- 策略身份进入模型请求哈希和人工日志结构头，但不进入 Core TokenUsage；新增 Token 明细不改变
+  现有四项用量的计费计算。
 
 ### 5.2 固定策略矩阵
 
@@ -187,6 +189,7 @@ AgentRuntime 必须在后续请求的 assistant 消息中同时回放：
 reasoningContent
 providerResponseId
 diagnostics.reasoningTokens
+diagnostics.promptCacheMissTokens
 diagnostics.providerUsageKeys
 ```
 
@@ -195,13 +198,25 @@ diagnostics.providerUsageKeys
 ```text
 promptTokens      = usage.prompt_tokens
 cachedTokens      = usage.prompt_cache_hit_tokens
+promptCacheMissTokens = usage.prompt_cache_miss_tokens
 completionTokens  = usage.completion_tokens
 totalTokens       = usage.total_tokens
 reasoningTokens   = usage.completion_tokens_details.reasoning_tokens
 ```
 
-reasoning token 是 completion token 的子项，只用于诊断，禁止再次加到总量或计费载荷。缺失时记录为空，
-不得伪造为零。
+reasoning token 是 completion token 的子项，禁止再次加到总量或计费金额。`visibleCompletionTokens`
+只按 `completionTokens - reasoningTokens` 派生，不单独持久化。供应商缺失
+`prompt_cache_miss_tokens` 或 `reasoning_tokens` 时对应字段记录为空，不得伪造为零；thinking disabled
+且供应商明确返回零时必须保留零。
+
+DeepSeek 明细存在时必须校验：
+
+```text
+cachedTokens + promptCacheMissTokens = promptTokens
+0 <= reasoningTokens <= completionTokens
+```
+
+违反关系时按供应商响应协议错误失败，不能保存矛盾用量。
 
 工具 `arguments` 必须先保留原始字符串再解析；非法 JSON、非对象参数、缺失工具名必须在执行工具前失败，
 不得静默转成空对象。`ModelFinishReason` 增加 `insufficient_system_resource`，AgentRuntime 在接受正文或
@@ -285,11 +300,59 @@ policyId
 thinkingMode
 reasoningEffort
 reasoningTokens
+promptCacheMissTokens
+visibleCompletionTokens
 providerResponseId
 ```
 
-日志继续保留完整 messages 和可见 output，但明确排除 `reasoningContent`。TokenUsage 的四项计费用量、
-taskId、runId 和 requestId 保持不变；本期不修改数据库 schema。
+日志继续保留完整 messages 和可见 output，但明确排除 `reasoningContent`。
+
+### 8.1 TokenUsage 持久化
+
+新增迁移 `scripts/migrations/20260823_token_usage_details.sql`，只增加：
+
+```text
+promptCacheMissTokens INTEGER NULL
+reasoningTokens INTEGER NULL
+```
+
+规则：
+
+- 旧记录保持 `NULL`，不回填、不推测历史明细；
+- 新字段没有 server default，generic 或供应商未报告时允许 `NULL`；
+- 增加检查约束：两字段非空时必须非负，`promptCacheMissTokens <= promptTokens`，
+  `reasoningTokens <= completionTokens`；`promptCacheMissTokens` 非空时还必须满足
+  `cachedTokens + promptCacheMissTokens = promptTokens`；
+- 不新增索引，继续使用现有 taskId/runId/requestId 索引；
+- requestId 幂等比较必须包含两个新字段；相同 requestId 明细不一致时保持冲突，不能覆盖首次记录；
+- 积分计算继续只使用现有 prompt/cached/completion/total 语义，reasoning token 已包含在
+  completion token 中，不能二次收费；
+- `reasoning_content` 正文永远不进入 TokenUsage 或其他数据库字段。
+
+Agent 到 Core 的 `ReportModelUsageRequest` 增加两个可选非负整数，并保持旧调用可省略。Core Pydantic
+校验必须重复执行数据库相同的等式和上界约束，不能只信任 Provider。Core 保存后，
+`GET /api/v1/billing/usage/tasks/{taskId}` 的每个 call 增加：
+
+```text
+promptCacheMissTokens: int | null
+reasoningTokens: int | null
+visibleCompletionTokens: int | null
+tokenDetailsComplete: bool
+```
+
+逐请求中，只有两个新增字段都非空时，`visibleCompletionTokens = completionTokens - reasoningTokens`
+且 `tokenDetailsComplete=true`；任一新增字段为空时，`visibleCompletionTokens=NULL` 且
+`tokenDetailsComplete=false`。旧记录和 generic 未提供明细都遵循该规则。
+
+任务汇总增加同名三个 nullable 数值和 `tokenDetailsComplete`。只要任一请求缺少任一供应商明细，汇总
+明细就返回 `NULL` 且 `tokenDetailsComplete=false`，禁止把未知历史数据当作零；全部请求明细完整时才求和，
+并返回 `tokenDetailsComplete=true`。空任务的明细汇总为 `NULL/false`。
+
+本迁移只在服务器专用 dev PostgreSQL 验证，不创建本地临时数据库、不连接本地 PostgreSQL。开发验证
+通过后再更新只读 `schema-contract.json` 指纹，并按现有受控发布流程迁移生产；迁移前备份由发布流程
+负责。
+
+### 8.2 生产观测
 
 上线后按 taskId/runId 对比：
 
@@ -321,11 +384,22 @@ taskId、runId 和 requestId 保持不变；本期不修改数据库 schema。
 - `apps/agent-service/src/inkforge_agents/jobs/short_medium.py`
 - `apps/agent-service/src/inkforge_agents/jobs/portrait.py`
 - `apps/agent-service/src/inkforge_agents/clients/core.py`
+- `apps/core-api/src/inkforge_core/billing/schemas.py`
+- `apps/core-api/src/inkforge_core/billing/router.py`
+- `apps/core-api/src/inkforge_core/billing/service.py`
+- `apps/core-api/src/inkforge_core/billing/repository.py`
+- `apps/core-api/src/inkforge_core/db/models.py`
+- `apps/core-api/src/inkforge_core/db/schema-contract.json`
 - `apps/core-api/src/inkforge_core/reviews/schemas.py`
 - `apps/core-api/src/inkforge_core/reviews/internal_router.py`
 - `apps/core-api/src/inkforge_core/reviews/repository.py`
+- `apps/core-api/tests/billing/test_usage_charge.py`
+- `apps/core-api/tests/billing/test_task_usage_api.py`
+- `apps/core-api/tests/db/test_model_metadata.py`
 - `apps/core-api/tests/reviews/test_internal_job_identity.py`
 - `apps/core-api/tests/reviews/test_artifact_lifecycle.py`
+- `scripts/migrations/20260823_token_usage_details.sql`
+- `packages/api-client/` 中由 Core OpenAPI 生成的客户端文件
 - `infra/compose.yaml`
 
 按实际实现同步检查 `apps/agent-service/AGENTS.md`、03 号和 04 号需求文档；只有实现与测试通过后，
@@ -348,6 +422,8 @@ taskId、runId 和 requestId 保持不变；本期不修改数据库 schema。
 - thinking 工具轮次完整回放 `reasoning_content`，第二轮不会因缺字段产生 400；
 - thinking enabled 不发送 `tool_choice`，disabled Reviewer/Quality 发送指定终止工具；
 - reasoning token 只进入诊断，不重复计费；
+- DeepSeek 报告的 cache miss/reasoning 明细沿 requestId/taskId/runId 写入 TokenUsage；
+- 任务用量 API 的逐请求明细与完整性标记正确，旧 `NULL` 数据不会被汇总成零；
 - `insufficient_system_resource` 在业务结果或工具副作用前失败并保留原始完成原因；
 - DeepSeek 原始 HTTP transport 遇到错误响应时单次只发送一个 HTTP 请求；
 - generic profile 的行为和现有 SDK 默认重试保持不变，不纳入 DeepSeek 单次 HTTP 请求断言；
@@ -369,19 +445,27 @@ taskId、runId 和 requestId 保持不变；本期不修改数据库 schema。
 - Agent Service 相关 pytest、Ruff、Mypy 通过；
 - Core ReviewArtifact 相关测试通过；
 - Compose 配置检查通过；
-- PostgreSQL schema 指纹保持不变；
+- 除已批准的两个 nullable TokenUsage 字段和对应检查约束外，PostgreSQL schema 指纹没有其他变化；
+- 迁移可安全重跑并核验同名字段/约束的实际定义，旧记录保持 NULL；
+- 本地只运行静态迁移、模型元数据和契约测试，不连接本地数据库；
+- 运行 `npm run api:generate`、`npm run api:check`、`npm run typecheck`，确认任务用量公共响应和生成
+  客户端没有漂移；
 - 工作树中的既有 `.tmp/` 不进入提交。
 
 ## 11. 发布与回退
 
-分三步发布，每一步可独立回退：
+分四阶段发布，每一步可独立回退：
 
-1. 先发布 DeepSeek 专用 transport 和日志诊断，策略保持等价；
-2. 再启用 Reviewer/Quality thinking disabled；
-3. 最后启用 patch 图节点。
+1. 先在服务器 dev 数据库验证 TokenUsage 明细迁移并更新结构指纹；生产发布时必须先完成备份和
+   生产数据库迁移，确认字段/约束后，才能启动会接收或发送新明细的 Core/Agent 版本；
+2. 发布 Core 公共/内部用量契约、生成客户端、DeepSeek 专用 transport 和日志诊断，策略保持等价；
+3. 启用 Reviewer/Quality thinking disabled；
+4. 启用 patch 图节点。
 
 回退时：
 
 - profile 可切回 `generic`；
 - 策略可切回明确的 `provider_default`，但不能恢复隐式缺省；
 - patch 节点可关闭并让 patch 结论直接进入用户确认，禁止恢复“自动升级 rewrite”的旧行为。
+- TokenUsage 新列保持 nullable；应用回退时保留列和历史明细，不执行破坏性降级迁移，旧版本可以忽略
+  新列。
