@@ -21,6 +21,7 @@ from inkforge_agents.runtime.execution import (
     validate_execution_agent,
     validate_execution_stage,
 )
+from inkforge_agents.runtime.model_policy import ModelExecutionPolicy
 from inkforge_agents.runtime.model_runtime import ModelRuntime
 from inkforge_agents.tools.registry import ToolContext, build_default_registry
 from pydantic import ValidationError
@@ -292,6 +293,30 @@ def test_execution_stage_must_match_explicit_mode() -> None:
     validate_execution_stage("reviewer", "protocol_repair")
     with pytest.raises(ValueError, match="执行模式与执行阶段不一致"):
         validate_execution_stage("reviewer", "primary")
+
+
+@pytest.mark.asyncio
+async def test_runner_rejects_required_tool_that_is_not_terminal_control(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = CapturingProvider()
+    registry = build_default_registry()
+    runner = AgentRunner(make_agent_runtime(ModelRuntime(provider), registry), registry)
+    monkeypatch.setattr(
+        "inkforge_agents.runtime.agent_runner.resolve_model_execution_policy",
+        lambda **_: ModelExecutionPolicy(
+            policyId="test-policy",
+            thinkingMode="enabled",
+            reasoningEffort="high",
+            requiredToolName="get_novel_info",
+            visibleOutputDisposition="business",
+        ),
+    )
+
+    with pytest.raises(ValueError, match="终止控制工具"):
+        await runner.run(request(agent_id="写作", mode="primary"))
+
+    assert provider.requests == []
 
 
 @pytest.mark.asyncio

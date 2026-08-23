@@ -101,12 +101,16 @@ class AgentRunner:
             stage=request.stage,
             version="review-v1",
         )
-        if policy.requiredToolName and policy.requiredToolName not in {
-            tool.name for tool in tools
-        }:
-            raise ValueError(
-                "模型执行策略要求的终止工具未暴露：" + policy.requiredToolName
-            )
+        if policy.requiredToolName:
+            if policy.requiredToolName not in execution.terminalControlTools:
+                raise ValueError(
+                    "模型执行策略要求的工具必须属于终止控制工具："
+                    + policy.requiredToolName
+                )
+            if policy.requiredToolName not in {tool.name for tool in tools}:
+                raise ValueError(
+                    "模型执行策略要求的终止工具未暴露：" + policy.requiredToolName
+                )
         result = await self._runtime.run(
             messages=messages,
             exposed_tools=tools,

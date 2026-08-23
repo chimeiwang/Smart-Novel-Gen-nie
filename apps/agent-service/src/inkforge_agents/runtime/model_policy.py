@@ -1,14 +1,18 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from ..definitions.agents import AgentId
 from ..operations.contracts import CreativeOperationKind
 from .errors import ModelExecutionStage
-
-ModelExecutionMode = Literal["primary", "reviewer", "reviser", "quality"]
+from .execution import (
+    AgentExecutionMode,
+    resolve_execution_contract,
+    validate_execution_agent,
+    validate_execution_stage,
+)
 
 
 class ModelExecutionPolicy(BaseModel):
@@ -30,20 +34,29 @@ class ModelExecutionPolicy(BaseModel):
 def resolve_model_execution_policy(
     *,
     agent_id: AgentId,
-    execution_mode: ModelExecutionMode | str,
+    execution_mode: AgentExecutionMode | str,
     operation_kind: CreativeOperationKind | str | None,
     stage: ModelExecutionStage,
     version: str,
 ) -> ModelExecutionPolicy:
     """按调用方显式提供的执行场景选择策略，不让 Provider 反推业务角色。"""
 
-    del agent_id, execution_mode, operation_kind
-    if not version:
-        raise ValueError("模型执行策略版本不能为空")
+    if version not in {"legacy", "review-v1"}:
+        raise ValueError("模型执行策略版本不受支持")
+    valid_modes = {"primary", "reviewer", "reviser", "quality"}
+    if execution_mode not in valid_modes:
+        raise ValueError(f"AGENT_EXECUTION_MODE_INVALID：执行模式不可用 {execution_mode}")
+    mode = cast(AgentExecutionMode, execution_mode)
+    validate_execution_stage(mode, stage)
+    contract = resolve_execution_contract(
+        mode,
+        cast(CreativeOperationKind | None, operation_kind),
+    )
+    validate_execution_agent(contract, agent_id)
 
     if version == "legacy":
         return ModelExecutionPolicy(
-            policyId=f"legacy:{stage}",
+            policyId=f"legacy:{_canonical_stage_name(stage)}",
             thinkingMode="provider_default",
             visibleOutputDisposition="business"
             if stage in {"primary", "reviser"}
@@ -69,9 +82,13 @@ def resolve_model_execution_policy(
     }
     thinking_mode, reasoning_effort, required_tool, disposition = mapping[stage]
     return ModelExecutionPolicy(
-        policyId=f"{version}:{stage}",
+        policyId=f"{version}:{_canonical_stage_name(stage)}",
         thinkingMode=thinking_mode,  # type: ignore[arg-type]
         reasoningEffort=reasoning_effort,  # type: ignore[arg-type]
         requiredToolName=required_tool,
         visibleOutputDisposition=disposition,  # type: ignore[arg-type]
     )
+
+
+def _canonical_stage_name(stage: ModelExecutionStage) -> str:
+    return "protocol-repair" if stage == "protocol_repair" else stage
