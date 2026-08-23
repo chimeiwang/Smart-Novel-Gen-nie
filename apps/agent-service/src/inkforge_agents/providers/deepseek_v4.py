@@ -74,7 +74,7 @@ class DeepSeekV4Provider:
             )
         except httpx.HTTPError as exc:
             raise RuntimeError(f"DeepSeek 请求失败：{exc}") from exc
-        if response.is_error:
+        if not response.is_success:
             raise RuntimeError(f"DeepSeek 请求失败：HTTP {response.status_code}")
         try:
             body = response.json()

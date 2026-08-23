@@ -475,3 +475,35 @@ async def test_http_error_is_single_request() -> None:
     finally:
         await client.aclose()
     assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [301, 302, 307])
+async def test_http_redirect_with_valid_model_json_is_rejected_without_body_leak(
+    status_code: int,
+) -> None:
+    provider, _, client = _provider(
+        response={
+            "id": "redirect-secret-response-body",
+            "choices": [
+                {
+                    "message": {"role": "assistant", "content": "不应解析"},
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 1,
+                "prompt_cache_hit_tokens": 0,
+                "completion_tokens": 1,
+                "total_tokens": 2,
+            },
+        },
+        status_code=status_code,
+    )
+    try:
+        with pytest.raises(RuntimeError, match=f"HTTP {status_code}") as error:
+            await provider.complete_turn(_request())
+    finally:
+        await client.aclose()
+    assert "redirect-secret-response-body" not in str(error.value)
+    assert "不应解析" not in str(error.value)
