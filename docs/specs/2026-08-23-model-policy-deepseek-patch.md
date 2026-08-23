@@ -276,7 +276,8 @@ block > rewrite > patch > pass
 
 patch 路径不调用 Primary 或 Reviser 模型。
 
-如果任一 patch 找不到、命中多处、范围重叠、目标 Artifact 已变化或 Core 修订冲突：
+如果任一 patch 找不到、命中多处、范围重叠、目标 Artifact 已变化，或 Core 返回
+`ARTIFACT_REVISION_CONFLICT`：
 
 - 不应用任何 patch；
 - 不自动降级为 rewrite；
@@ -286,6 +287,9 @@ patch 路径不调用 Primary 或 Reviser 模型。
 - GraphState 保留固定 `patchFailureCode` 和不含原文的中文 `patchFailureMessage`，供现有任务/SSE
   状态展示与测试读取，不新增数据库字段；
 - 保留原 ReviewArtifact，不修改正式正文。
+
+其他 `CoreServiceError`（包括 Core、网络或协议错误）不得转换为 `patchFailureCode` 或等待用户状态，
+必须作为运行错误上抛，由现有任务错误收敛和基础设施重试边界处理；不能伪装成 patch 内容不通过。
 
 `patchFailureCode` 只允许：`PATCH_TARGET_NOT_FOUND`、`PATCH_TARGET_AMBIGUOUS`、
 `PATCH_OVERLAP`、`PATCH_ARTIFACT_UNSUPPORTED`、`ARTIFACT_REVISION_CONFLICT`。错误消息不得包含

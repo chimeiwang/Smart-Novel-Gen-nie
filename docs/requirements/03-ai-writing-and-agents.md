@@ -291,7 +291,7 @@ Agent Runtime 是唯一多轮 tool-call loop。
 - 设定/大纲/伏笔/正文/Beat Plan 等正式变更必须进入 ReviewArtifact。
 - `plan_chapter` 只能提交 Beat Plan，`write_chapter/rewrite_scene` 只能提交 `chapter_draft`，设定/大纲/伏笔 Operation 只能提交 `agent_updates`。
 - Beat Plan 是简洁剧情骨架；节拍验收只表达一句可观察结果，不得重复作品设定、全局禁令、文风要求或专业规程。章节级验收可省略，需要时最多三条结果；权威上下文中的名称、时间和数值必须原样使用。
-- reviewer 的 `revise + rewrite` 进入现有 Reviser 完整返工；全部结论为严格 `revise + patch` 时，进入确定性局部 patch 节点创建同一 ReviewArtifact 的新 revision，不调用 Primary 或 Reviser。patch 找不到、多命中、重叠、非章节目标、版本冲突或 Core 失败时原子放弃并等待用户，不能静默升级为 rewrite。
+- reviewer 的 `revise + rewrite` 进入现有 Reviser 完整返工；全部结论为严格 `revise + patch` 时，进入确定性局部 patch 节点创建同一 ReviewArtifact 的新 revision，不调用 Primary 或 Reviser。patch 找不到、多命中、重叠、非章节目标或 `ARTIFACT_REVISION_CONFLICT` 时原子放弃并等待用户，不能静默升级为 rewrite；其他 Core、网络或协议错误作为运行错误上抛，不能伪装成内容不通过。
 - 职责外任务只能在正文说明边界，不得通过越权工具硬写草案。
 
 ## 模型消息、上下文与恢复
@@ -347,7 +347,7 @@ Provider 必须提供规范化完成原因并保留供应商原始值。`length`
 - 稳定快照写入 `WritingTask.graphStateJson`，并拒绝 `runtime`、回调、聚合作品数据和控制事件等仅运行时字段。
 - Python 智能体服务已迁移五个智能体定义、系统提示词、能力与工具白名单、严格工具参数校验和唯一多轮工具循环；模型运行时仍只负责单次供应商调用。
 - 只读且并发安全的工具可以并行执行，控制工具按模型调用顺序生成结构化事件；未暴露工具、无效参数和最大轮次均明确终止，不截断用户可见文本。
-- Python LangGraph 已迁移 CreativeOperation 路由、复审 `Send` 扇出、四种显式执行模式、确定性复审优先级、rewrite/patch 分流、最大修订次数、用户中断和 `Command` 恢复；图状态快照使用版本信封并排除 `runtimeContext` 等运行时字段。patch 失败进入脱敏 `patchFailureCode` 的 `blocked`/`waiting_user`，不会调用 Reviser。
+- Python LangGraph 已迁移 CreativeOperation 路由、复审 `Send` 扇出、四种显式执行模式、确定性复审优先级、rewrite/patch 分流、最大修订次数、用户中断和 `Command` 恢复；图状态快照使用版本信封并排除 `runtimeContext` 等运行时字段。确定性 patch 错误及 `ARTIFACT_REVISION_CONFLICT` 进入脱敏 `patchFailureCode` 的 `blocked`/`waiting_user`，不会调用 Reviser；其他 Core、网络或协议错误保持运行错误传播。
 - OperationDefinition 已成为工具、终止事件、产物 kind 和 artifactKey 的运行契约；reviewer 无读取工具，reviser 只基于 Core 权威草案返工，错误产物不会静默兜底。
 - OpenAI-compatible Provider 已把规范化和原始完成原因传入 Runtime 与人工日志；长度截断、内容过滤、矛盾完成原因和非法 unknown 响应不会被当成成功。
 - 人工模型日志按 v2 长度分帧保存；Core 成功接受 usage report 后形成的 billable 模型调用区块，可用
