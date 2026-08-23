@@ -3,7 +3,11 @@ from inkforge_core.errors import ApiError
 from inkforge_core.reviews.apply import resolve_apply_target
 from inkforge_core.reviews.diff import ArtifactPatchError, apply_text_replace_patch
 from inkforge_core.reviews.repository import ReviewRepository
-from inkforge_core.reviews.schemas import CreateArtifactRequest, assert_status_transition
+from inkforge_core.reviews.schemas import (
+    CreateArtifactRequest,
+    ReviewArtifactDecisionRequest,
+    assert_status_transition,
+)
 from inkforge_core.reviews.updates import filter_agent_updates_by_selection
 from pydantic import ValidationError
 
@@ -151,5 +155,16 @@ def test_create_artifact_expected_revision_is_strict_positive_integer(value: obj
                 "payload": {"kind": "chapter_draft", "content": "正文"},
                 "createdByAgent": "写作",
                 "unexpected": True,
+            }
+        )
+
+
+def test_artifact_decision_expected_revision_rejects_boolean() -> None:
+    with pytest.raises(ValidationError):
+        ReviewArtifactDecisionRequest.model_validate(
+            {
+                "clientRequestId": "client-request-1234",
+                "expectedRevision": True,
+                "decision": "revise",
             }
         )

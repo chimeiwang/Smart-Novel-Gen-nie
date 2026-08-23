@@ -4,7 +4,7 @@ from typing import Any, cast
 
 import pytest
 from inkforge_agents.artifacts.patch import PatchApplicationError, TextReplacePatch
-from inkforge_agents.clients.core import RunResource
+from inkforge_agents.clients.core import CoreServiceError, RunResource
 from inkforge_agents.jobs.adapters import (
     CoreArtifactPort,
     CoreGraphAgentExecutor,
@@ -252,6 +252,99 @@ async def test_artifact_port_patch_failure_does_not_call_core_or_mutate_record()
     assert caught.value.code == "PATCH_TARGET_NOT_FOUND"
     assert core.artifacts == []
     assert port.review_context("artifact-1") == before
+
+
+@pytest.mark.asyncio
+async def test_artifact_port_conflict_quarantines_once_then_rethrows_without_local_update() -> None:
+    class ConflictCore(CoreClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.quarantine_calls = 0
+
+        async def create_artifact(
+            self,
+            resource: object,
+            payload: dict[str, Any],
+            *,
+            idempotency_key: str,
+        ) -> dict[str, Any]:
+            del resource, idempotency_key
+            if payload.get("expectedRevision") is not None:
+                raise CoreServiceError(
+                    "核心服务拒绝智能体回调",
+                    recoverable=False,
+                    code="ARTIFACT_REVISION_CONFLICT",
+                )
+            return await super().create_artifact(
+                object(), payload, idempotency_key="unused"
+            )
+
+        async def mark_artifact_awaiting_user_after_conflict(
+            self,
+            resource: object,
+            artifact_id: str,
+            *,
+            idempotency_key: str,
+        ) -> dict[str, Any]:
+            del resource, idempotency_key
+            self.quarantine_calls += 1
+            return {"artifactId": artifact_id, "status": "awaiting_user", "revision": 3}
+
+    core = ConflictCore()
+    port = CoreArtifactPort(core)
+    state = _hydration_state()
+    port.hydrate(_resource(), state, _active_artifact())
+    before = port.review_context("artifact-1")
+
+    with pytest.raises(CoreServiceError) as caught:
+        await port.patch(
+            state,
+            "artifact-1",
+            [TextReplacePatch(kind="text_replace", find="完整正文", replace="修订正文")],
+        )
+
+    assert caught.value.code == "ARTIFACT_REVISION_CONFLICT"
+    assert core.quarantine_calls == 1
+    assert port.review_context("artifact-1") == before
+
+
+@pytest.mark.asyncio
+async def test_artifact_port_quarantine_failure_propagates_core_error() -> None:
+    class FailingQuarantineCore(CoreClient):
+        async def create_artifact(
+            self,
+            resource: object,
+            payload: dict[str, Any],
+            *,
+            idempotency_key: str,
+        ) -> dict[str, Any]:
+            del resource, payload, idempotency_key
+            raise CoreServiceError(
+                "核心服务拒绝智能体回调",
+                recoverable=True,
+                code="ARTIFACT_REVISION_CONFLICT",
+            )
+
+        async def mark_artifact_awaiting_user_after_conflict(
+            self,
+            resource: object,
+            artifact_id: str,
+            *,
+            idempotency_key: str,
+        ) -> dict[str, Any]:
+            del resource, artifact_id, idempotency_key
+            raise CoreServiceError("核心服务暂时不可用", recoverable=True)
+
+    core = FailingQuarantineCore()
+    port = CoreArtifactPort(core)
+    port.hydrate(_resource(), _hydration_state(), _active_artifact())
+
+    with pytest.raises(CoreServiceError, match="核心服务暂时不可用"):
+        await port.patch(
+            _hydration_state(),
+            "artifact-1",
+            [TextReplacePatch(kind="text_replace", find="完整正文", replace="修订正文")],
+        )
 
 
 @pytest.mark.asyncio

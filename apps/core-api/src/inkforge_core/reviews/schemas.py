@@ -86,7 +86,7 @@ class ArtifactSelectionRef(ReviewSchema):
 
 class ReviewArtifactDecisionRequest(ReviewSchema):
     clientRequestId: str = Field(min_length=16, max_length=128)
-    expectedRevision: int = Field(ge=1)
+    expectedRevision: StrictInt = Field(ge=1)
     decision: Literal["approve", "discard", "revise"]
     editedContent: str | None = None
     editedReplacement: str | None = None
@@ -109,6 +109,19 @@ class ArtifactDecisionAcceptedResponse(ReviewSchema):
     status: Literal["pending", "submitted", "processing", "succeeded", "failed"]
     savedCount: int = 0
     deleted: bool = False
+
+
+class ArtifactConflictQuarantineRequest(ReviewSchema):
+    runId: str = Field(min_length=1, max_length=256)
+    taskId: str = Field(min_length=1, max_length=256)
+    novelId: str = Field(min_length=1, max_length=256)
+    jobId: str = Field(min_length=1, max_length=256)
+
+
+class ArtifactConflictQuarantineResponse(ReviewSchema):
+    artifactId: str
+    status: Literal["awaiting_user"]
+    revision: StrictInt = Field(ge=1)
 
 
 class CreateArtifactRequest(ReviewSchema):

@@ -9,7 +9,7 @@ from typing import Any, Protocol, cast
 from pydantic import JsonValue
 
 from ..artifacts.patch import PatchApplicationError, TextReplacePatch, apply_text_patches
-from ..clients.core import CoreServiceClient, RunResource
+from ..clients.core import CoreServiceClient, CoreServiceError, RunResource
 from ..operations.contracts import CreativeOperationKind
 from ..operations.definitions import OPERATION_DEFINITIONS
 from ..runtime.agent_runner import AgentRunner, AgentRunRequest
@@ -245,11 +245,28 @@ class CoreArtifactPort:
             "payload": updated_payload,
             "expectedRevision": record.revision,
         }
-        response = await self._core.create_artifact(
-            record.resource,
-            cast(dict[str, JsonValue], request),
-            idempotency_key=_idempotency(record.resource.runId, request),
-        )
+        try:
+            response = await self._core.create_artifact(
+                record.resource,
+                cast(dict[str, JsonValue], request),
+                idempotency_key=_idempotency(record.resource.runId, request),
+            )
+        except CoreServiceError as exc:
+            if exc.code != "ARTIFACT_REVISION_CONFLICT":
+                raise
+            await self._core.mark_artifact_awaiting_user_after_conflict(
+                record.resource,
+                artifact_id,
+                idempotency_key=_idempotency(
+                    record.resource.runId,
+                    {
+                        "operation": "artifact-quarantine",
+                        "artifactId": artifact_id,
+                        "revision": record.revision,
+                    },
+                ),
+            )
+            raise
         returned_id = response.get("id")
         if returned_id != artifact_id:
             raise RuntimeError(

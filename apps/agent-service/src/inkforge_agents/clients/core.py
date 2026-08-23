@@ -233,6 +233,42 @@ class CoreServiceClient:
             idempotency_key=idempotency_key,
         )
 
+    async def mark_artifact_awaiting_user_after_conflict(
+        self,
+        resource: RunResource,
+        artifact_id: str,
+        *,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        value = await self._request(
+            "POST",
+            f"/internal/v1/review-artifacts/{artifact_id}/awaiting-user-after-conflict",
+            _with_writing_job(
+                {
+                    "runId": resource.runId,
+                    "taskId": resource.taskId,
+                    "novelId": resource.novelId,
+                },
+                resource,
+            ),
+            scope=ServiceScope.TOOL_WRITE,
+            resource=resource,
+            idempotency_key=idempotency_key,
+        )
+        if (
+            value.get("artifactId") != artifact_id
+            or value.get("status") != "awaiting_user"
+            or isinstance(value.get("revision"), bool)
+            or not isinstance(value.get("revision"), int)
+            or value["revision"] < 1
+        ):
+            raise CoreServiceError(
+                "核心服务返回的草案隔离凭证无效",
+                recoverable=False,
+                code="ARTIFACT_QUARANTINE_RESPONSE_INVALID",
+            )
+        return value
+
     async def submit_evaluation(
         self,
         resource: RunResource,
