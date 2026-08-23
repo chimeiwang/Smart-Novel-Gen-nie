@@ -45,7 +45,8 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 
 - Agent 上报实际 token usage；
 - Core 在同一短事务中以 `requestId` 幂等处理余额和用量，把授权校验后的 `requestId/taskId/runId`
-  与四项 token 一起写入 `TokenUsage`；
+  与四项 token 一起写入 `TokenUsage`；DeepSeek 可报告的 `promptCacheMissTokens` 与 `reasoningTokens`
+  作为可空诊断字段一并保存，reasoning token 已包含在 completion 中，不重复计费；
 - 金额大于零时同步扣减余额并写入 `CreditLedger.ai_charge`，其 `requestId` 与 `TokenUsage` 相同；
 - 四项 token 全为零的真实计费调用仍写入一条 `TokenUsage`，但不写 `CreditLedger`、不扣余额；重复零
   usage 不产生任何写副作用，`balanceAfterMicros` 返回重放时查询到的当前余额；
@@ -64,6 +65,11 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 不属于当前用户的任务统一返回 404；响应包含 `taskId`、调用数、四项 token 汇总，以及按
 `createdAt, id` 升序排列的完整逐调用 `requestId`、`runId`、`agentId`、`model`、四项 token 和 UTC
 `createdAt`。接口不截断或分页调用明细，也不返回 prompt 正文、模型输出、余额或 `grantToken`。
+
+逐请求的两个新增诊断字段缺一时保持 `NULL`，并返回 `tokenDetailsComplete=false`；只有两者都存在时才派生
+`visibleCompletionTokens`。任务汇总只有全部调用明细完整时才求和，否则保持 `NULL/false`。这两个字段的
+应用代码、契约和迁移脚本已经实现，但服务器 dev PostgreSQL 迁移、真实库只读 `schema-contract.json`
+导出和生产部署尚未完成，属于远程门禁。
 
 计费和草案应用属于关键写入，禁止放入可丢弃队列。
 
@@ -111,6 +117,8 @@ PostgreSQL 重复执行验证；应用启动仍不得自动修改 schema。当�
 - 使用 `INKFORGE-HUMAN-LOG/2` 长度分帧格式保存完整模型 messages、模型正文和中文状态切换；正文
   中出现日志标记或 JSON 不得污染结构解析。
 - 每个模型调用区块记录 `taskId`、`runId`、Core 计费 `requestId`、provider/model 和四项实际 token；
+- 可选 `promptCacheMissTokens`、`reasoningTokens` 仅作为诊断结构头记录；DeepSeek 原始 `reasoning_content`
+  只在进程内工具轮次回放，绝不持久化或写入日志正文；
   非计费调用显示无计费请求标识，Provider 无可靠 usage 的失败不伪造 token，任何区块都不记录
   `grantToken`。
 - 旧版日志原文进入 `trust=unverified` 的只读 legacy 边界；残缺尾部只在可信运行元数据完整时隔离为

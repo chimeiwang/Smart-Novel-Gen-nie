@@ -28,6 +28,8 @@
   `TokenUsage` 增加可空 `INTEGER` `promptCacheMissTokens`/`reasoningTokens` 和三个 CHECK；无默认值、无回填、
   无索引，旧行保持 `NULL`。两个迁移都必须先备份，只在服务器 dev PostgreSQL 受控执行并重复执行验证，随后从
   真实库只读导出 `schema-contract.json`；它们不构成以后任意迁移的授权。
+- `TokenUsage` 两个新增可空诊断字段已在应用代码、契约和迁移脚本实现；服务器 dev 迁移、真实库只读
+  `schema-contract.json` 导出及生产部署仍是远程门禁，不能按本地静态测试宣称完成。
 
 ## 文档类型
 

@@ -291,7 +291,7 @@ Agent Runtime 是唯一多轮 tool-call loop。
 - 设定/大纲/伏笔/正文/Beat Plan 等正式变更必须进入 ReviewArtifact。
 - `plan_chapter` 只能提交 Beat Plan，`write_chapter/rewrite_scene` 只能提交 `chapter_draft`，设定/大纲/伏笔 Operation 只能提交 `agent_updates`。
 - Beat Plan 是简洁剧情骨架；节拍验收只表达一句可观察结果，不得重复作品设定、全局禁令、文风要求或专业规程。章节级验收可省略，需要时最多三条结果；权威上下文中的名称、时间和数值必须原样使用。
-- reviewer 的任何修改请求统一进入完整 rewrite；保留具体修改意见，但不执行跨服务局部 patch。
+- reviewer 的 `revise + rewrite` 进入现有 Reviser 完整返工；全部结论为严格 `revise + patch` 时，进入确定性局部 patch 节点创建同一 ReviewArtifact 的新 revision，不调用 Primary 或 Reviser。patch 找不到、多命中、重叠、非章节目标、版本冲突或 Core 失败时原子放弃并等待用户，不能静默升级为 rewrite。
 - 职责外任务只能在正文说明边界，不得通过越权工具硬写草案。
 
 ## 模型消息、上下文与恢复
@@ -311,16 +311,20 @@ Agent Service 使用 `MODEL_MAX_OUTPUT_TOKENS` 表达当前部署模型的单次
 计费模型调用仍先向 Core 申请有限正整数 grant；模型授权生命周期为 1200 秒，供单次模型调用完成后上报实际用量，不改变内部服务请求令牌的短期约束。Core 可以按可用余额缩小额度，`ModelRuntime` 校验授权后把实际 `maxOutputTokens` 精确传给 Provider，任何调用都不得绕过授权上限。
 
 billable Provider 成功响应形成 `ModelTurnResult` 后，Agent 使用同一调用的 `taskId`、`runId` 和 Core
-计费 `requestId` 上报 `promptTokens`、`cachedTokens`、`completionTokens`、`totalTokens`。只有 Core 成功
-接受 usage report 且配置了 observer，人工模型日志才记录这些身份、provider/model、四项 usage、完整
-messages 与 output；report 失败时异常向上传播，不留下该次模型区块。非 billable Provider 成功后直接
-调用 observer，但只有 observer 与运行 context 都存在时才写区块，并明确显示没有计费请求标识。
+计费 `requestId` 上报 `promptTokens`、`cachedTokens`、`completionTokens`、`totalTokens`，以及可选的
+`promptCacheMissTokens`、`reasoningTokens` 诊断。只有 Core 成功接受 usage report 且配置了 observer，
+人工模型日志才记录这些身份、provider/model、四项 usage、诊断结构头、完整 messages 与 output；
+DeepSeek 原始 `reasoning_content` 只用于进程内工具轮次回放，绝不写入稳定快照、ReviewArtifact、Core
+或日志正文。report 失败时异常向上传播，不留下该次模型区块。非 billable Provider 成功后直接调用
+observer，但只有 observer 与运行 context 都存在时才写区块，并明确显示没有计费请求标识。
 任何日志都不得记录 `grantToken`；Provider 在返回可靠 usage 前失败时不伪造 token。
 
 Provider 必须提供规范化完成原因并保留供应商原始值。`length`、`content_filter`、`stop`/`tool_calls` 与实际工具状态矛盾、以及没有合法工具调用的 `unknown` 都在接受正文或执行工具副作用前失败，当前不把 `length` 作为自动续写信号；文风画像只接受 `stop`、无工具调用且正文非空的纯文本响应，半截画像不能成功。人工模型日志记录规范化值和完整原始值。
 
-上述输出与上下文能力不修改 ReviewArtifact 状态机。模型用量归集只使用用户于 2026-08-21 明确批准的
-`TokenUsage` 有界版本化迁移，并新增按写作任务查询的公共 OpenAPI；不授权其他 PostgreSQL 结构调整。
+上述输出与上下文能力不修改 ReviewArtifact 状态机。模型用量归集只使用用户于 2026-08-21 和 2026-08-23
+明确批准的两个 `TokenUsage` 有界版本化迁移，并新增按写作任务查询的公共 OpenAPI；不授权其他 PostgreSQL
+结构调整。两个新增可空诊断字段的代码、契约和迁移脚本已实现，服务器 dev 迁移与 schema-contract 导出
+仍属远程门禁，未在本地执行。
 
 ## 验收标准
 
@@ -343,7 +347,7 @@ Provider 必须提供规范化完成原因并保留供应商原始值。`length`
 - 稳定快照写入 `WritingTask.graphStateJson`，并拒绝 `runtime`、回调、聚合作品数据和控制事件等仅运行时字段。
 - Python 智能体服务已迁移五个智能体定义、系统提示词、能力与工具白名单、严格工具参数校验和唯一多轮工具循环；模型运行时仍只负责单次供应商调用。
 - 只读且并发安全的工具可以并行执行，控制工具按模型调用顺序生成结构化事件；未暴露工具、无效参数和最大轮次均明确终止，不截断用户可见文本。
-- Python LangGraph 已迁移 CreativeOperation 路由、复审 `Send` 扇出、四种显式执行模式、确定性复审优先级、rewrite-only 返工、最大修订次数、用户中断和 `Command` 恢复；图状态快照使用版本信封并排除 `runtimeContext` 等运行时字段。
+- Python LangGraph 已迁移 CreativeOperation 路由、复审 `Send` 扇出、四种显式执行模式、确定性复审优先级、rewrite/patch 分流、最大修订次数、用户中断和 `Command` 恢复；图状态快照使用版本信封并排除 `runtimeContext` 等运行时字段。patch 失败进入脱敏 `patchFailureCode` 的 `blocked`/`waiting_user`，不会调用 Reviser。
 - OperationDefinition 已成为工具、终止事件、产物 kind 和 artifactKey 的运行契约；reviewer 无读取工具，reviser 只基于 Core 权威草案返工，错误产物不会静默兜底。
 - OpenAI-compatible Provider 已把规范化和原始完成原因传入 Runtime 与人工日志；长度截断、内容过滤、矛盾完成原因和非法 unknown 响应不会被当成成功。
 - 人工模型日志按 v2 长度分帧保存；Core 成功接受 usage report 后形成的 billable 模型调用区块，可用
@@ -354,3 +358,5 @@ Provider 必须提供规范化完成原因并保留供应商原始值。`length`
 - Core 对账器可以强制修复 Redis 中缺失的 queued 索引或完全丢失的运行键，但不得重新打开 Redis 已记录为 completed、failed 或 cancelled 的运行。
 - Agent 队列消费者已在单进程内提供默认三个执行槽，不同 `novelId` 可并行、同一 `novelId` 只执行一个 job，每个 claim 独立续租；共享 `ModelRuntime` 同时把普通 Agent、Reviewer、中短篇、质量和画像的模型调用总数限制为三个。消费槽致命错误会立即停止新领取并使 readiness 失败，其他已领取任务排空后由监督器重启；配置 1 保留串行回退路径。
 - Agent Service 不连接数据库，所有读取工具和业务写入都通过 Core 内部工具网关完成。
+- 生产模型请求使用显式 `ModelExecutionPolicy`：创作/完整重写使用 thinking enabled + high；Reviewer、Quality、问答、复审报告、中短篇 `full_check` 和文风画像使用 thinking disabled。DeepSeek 原始 transport 的 `reasoning_content` 仅用于进程内工具轮次回放，绝不进入稳定快照、ReviewArtifact、Core 用量或人工日志正文。
+- `TokenUsage` 已在应用代码、共享契约和迁移脚本中支持可空 `promptCacheMissTokens`/`reasoningTokens`；服务器 dev 迁移、真实库只读 schema-contract 导出及生产部署仍是远程门禁，未在本地执行或宣称完成。

@@ -315,7 +315,7 @@ WorkflowStep 记录运行步骤：
 - 草案执行显式区分 primary、reviewer 和 reviser：reviewer 无读取工具，只读取注入的 Core 权威草案并提交一次 evaluation；reviser 获得原 payload、revision、artifactKey 和合并后的 requiredChanges，按原 Operation 产物契约生成同类新 revision。`plan_chapter` 的两种模式额外读取 primary 生成时的冻结最小作品投影，避免复审证据少于生成证据。
 - 草案完成复审并进入 `awaiting_user` 后，Agent Service 必须发送草案等待确认事件，前端再通过 Core 查询权威草案内容，不能依赖进程内状态猜测。
 - 服务重启或新命令恢复自动复审/返工前，Agent Service 必须从 Core `planning.activeArtifact` 水合权威草案；approve/discard 已由 Core 事务完成，不依赖草案继续存在。等待态、完成态和错误态都只有在对应 checkpoint/回调返回合法 `applied/already_applied` 凭证后，才能按当前 QueueJob 的 `runId/jobId` 释放进程内记录；等待态不再依赖先发 Redis 事件。
-- 首版跨服务复审不实现局部草案 patch；所有修改结论归一为完整 rewrite，同时保留原 requiredChanges 和 patch 意图。不能把完整返工描述为局部修订，也不能因此直接写正式小说数据。
+- Reviewer 的 `revise + rewrite` 使用现有 Reviser 完整返工；全部结论为严格 `revise + patch` 时，Agent 使用确定性 patch 节点创建同一 ReviewArtifact 的新 revision，不调用 Primary 或 Reviser。patch 目标找不到、多命中、重叠、非章节文本、版本冲突或 Core 失败时不应用任何修改、不自动降级为 rewrite，进入带脱敏 failure code 的 `blocked`/`waiting_user`。
 - 一致性终检由“校验”Agent 的 quality 模式执行，并通过共享严格报告契约保存完整 WorkflowRun 输出；旧商业评分列不承载一致性数据。
 - 正文、大纲、Beat Plan 和 `agent_updates` 只有在 `awaiting_user` 状态下由用户批准后才能正式写入；应用失败会恢复为等待用户确认。
 - `revision_brief` 永远不能正式应用，部分 `agent_updates` 只执行用户明确选择的 section 或 item。

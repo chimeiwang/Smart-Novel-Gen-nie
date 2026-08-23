@@ -174,6 +174,33 @@ def test_agent_queue_terminal_retention_is_configurable() -> None:
     )
 
 
+def test_production_agent_explicitly_selects_deepseek_profile_and_root_url() -> None:
+    source = COMPOSE.read_text(encoding="utf-8")
+    agent = _service_block(source, "agent-service")
+
+    assert (
+        "OPENAI_COMPATIBILITY_PROFILE: ${OPENAI_COMPATIBILITY_PROFILE:-deepseek_v4}"
+        in agent
+    )
+    assert "OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.deepseek.com}" in agent
+    assert "/v1" not in agent.split("OPENAI_BASE_URL:", 1)[1].splitlines()[0]
+
+
+def test_model_examples_document_explicit_profile_boundary_without_secrets() -> None:
+    for path in (ROOT / ".env.example", ROOT / ".env.local.example"):
+        source = path.read_text(encoding="utf-8")
+        assert "OPENAI_COMPATIBILITY_PROFILE=generic|deepseek_v4" in source
+        assert re.search(r"(?m)^OPENAI_API_KEY=\s*$", source)
+        assert "API key" in source
+        assert "根据 URL" in source
+        if path.name == ".env.local.example":
+            assert "MODEL_PROVIDER=fake" in source
+            assert "OPENAI_COMPATIBILITY_PROFILE=generic" in source
+        else:
+            assert "MODEL_PROVIDER=openai_compatible" in source
+            assert "OPENAI_COMPATIBILITY_PROFILE=deepseek_v4" in source
+
+
 def test_agent_parallel_limit_is_explicit_and_keeps_one_process() -> None:
     compose = COMPOSE.read_text(encoding="utf-8")
     agent = _service_block(compose, "agent-service")
