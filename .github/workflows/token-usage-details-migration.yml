@@ -25,7 +25,7 @@ jobs:
     env:
       APP_DIR: ${{ vars.APP_DIR }}
       SQL_PATH: scripts/migrations/20260823_token_usage_details.sql
-      SQL_SHA256: 1DE1CD58C589403303B40F2AA2AE9DE3C44F272E5DD6C09159327535F04C5142
+      SQL_SHA256: E5D7D5946828CA3E516666607104353ADE4C034F681544B83AD45E639E549760
 
     steps:
       - name: Checkout
@@ -63,7 +63,8 @@ jobs:
         run: |
           set -eu
           ssh_dir="$RUNNER_TEMP/inkforge-token-usage-ssh"
-          printf -v remote_command 'bash -s -- %q' "$APP_DIR"
+          printf -v remote_command 'bash -s -- %q %q %q' \
+            "$APP_DIR" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
           ssh \
             -o BatchMode=yes \
             -o ConnectTimeout=15 \
@@ -78,6 +79,21 @@ jobs:
           set -eu
           umask 077
           app_dir=$1
+          run_id=$2
+          run_attempt=$3
+          case "$run_id" in
+            ''|*[!0-9]*) echo "运行编号不符合固定临时路径约定" >&2; exit 1 ;;
+          esac
+          case "$run_attempt" in
+            ''|*[!0-9]*) echo "尝试编号不符合固定临时路径约定" >&2; exit 1 ;;
+          esac
+          pgpass_file="/tmp/inkforge-token-usage-details-inspect-$run_id-$run_attempt.pgpass"
+          case "$pgpass_file" in
+            /tmp/inkforge-token-usage-details-inspect-[0-9]*-[0-9]*.pgpass) ;;
+            *) echo "凭据临时路径不符合固定约定" >&2; exit 1 ;;
+          esac
+          rm -f -- "$pgpass_file"
+          trap 'rm -f -- "$pgpass_file"' EXIT
           [ -n "$app_dir" ] || { echo "APP_DIR 未配置" >&2; exit 1; }
           cd -- "$app_dir"
 
@@ -91,18 +107,25 @@ jobs:
             fi
           done
           set +x
-          readable_count=0
-          database_url_count=0
-          database_url=""
-          for env_file in .env.dev .env.development; do
-            if [ -r "$env_file" ]; then
-              printf '%s: present\n' "$env_file"
-              readable_count=$((readable_count + 1))
-              if parsed_url="$(python3 - "$env_file" <<'PY'
+          env_file="$app_dir/.env"
+          [ -r "$env_file" ] || { echo ".env: missing" >&2; exit 1; }
+          database_url="$(python3 - "$env_file" "$pgpass_file" <<'PY'
+          import os
           import sys
           from pathlib import Path
+          from urllib.parse import parse_qsl, quote, unquote, urlsplit, urlunsplit
 
-          def parse_database_url(path: str) -> str:
+          SAFE_QUERY_KEYS = {"application_name", "sslmode"}
+
+          def write_private(path: str, payload: str) -> None:
+              descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+              with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as target:
+                  target.write(payload)
+
+          def escape_pgpass(value: str) -> str:
+              return value.replace("\\", "\\\\").replace(":", "\\:")
+
+          def derive_dev_database_url(path: str, pgpass_path: str) -> str:
               try:
                   matches = []
                   for raw_line in Path(path).read_text(encoding="utf-8").splitlines():
@@ -116,29 +139,77 @@ jobs:
                           matches.append(value)
                   if len(matches) != 1 or not matches[0]:
                       return ""
-                  return matches[0]
-              except (OSError, UnicodeError):
+                  value = matches[0]
+                  normalized = (
+                      "postgresql://" + value[len("postgresql+asyncpg://") :]
+                      if value.startswith("postgresql+asyncpg://")
+                      else value
+                  )
+                  parts = urlsplit(normalized)
+                  if (
+                      parts.scheme != "postgresql"
+                      or not parts.netloc
+                      or parts.path != "/novelwriter"
+                      or parts.fragment
+                  ):
+                      return ""
+                  query_pairs = parse_qsl(parts.query, keep_blank_values=True, strict_parsing=True)
+                  query_keys = [key for key, _value in query_pairs]
+                  if (
+                      len(query_keys) != len(set(query_keys))
+                      or any(key not in SAFE_QUERY_KEYS for key in query_keys)
+                  ):
+                      return ""
+                  username = unquote(parts.username or "")
+                  password = unquote(parts.password or "")
+                  hostname = parts.hostname or ""
+                  port = parts.port or 5432
+                  if not username or not password or not hostname:
+                      return ""
+                  if any("\n" in value or "\r" in value for value in (username, password, hostname)):
+                      return ""
+                  pgpass = ":".join(
+                      escape_pgpass(value)
+                      for value in (hostname, str(port), "novelwriterdev", username, password)
+                  ) + "\n"
+                  write_private(pgpass_path, pgpass)
+                  safe_host = f"[{hostname}]" if ":" in hostname else hostname
+                  safe_netloc = f"{quote(username, safe='')}@{safe_host}"
+                  if parts.port is not None:
+                      safe_netloc += f":{parts.port}"
+                  return urlunsplit(
+                      parts._replace(netloc=safe_netloc, path="/novelwriterdev")
+                  )
+              except (OSError, UnicodeError, ValueError):
                   return ""
 
-          parsed = parse_database_url(sys.argv[1])
+          parsed = derive_dev_database_url(sys.argv[1], sys.argv[2])
           if parsed:
               print(parsed, end="")
           else:
               raise SystemExit(1)
           PY
-              )"; then
-                database_url_count=$((database_url_count + 1))
-                database_url="$parsed_url"
-              fi
-            else
-              printf '%s: missing\n' "$env_file"
-            fi
-          done
-          [ "$missing_tools" -eq 0 ] || { echo "服务器缺少必要命令" >&2; exit 1; }
-          [ "$readable_count" -eq 1 ] && [ "$database_url_count" -eq 1 ] || {
-            echo "dev 环境文件必须恰好一个可读且含一条非空 DATABASE_URL" >&2
+          )" || { echo ".env DATABASE_URL 不能安全派生 novelwriterdev" >&2; exit 1; }
+          [ -s "$pgpass_file" ] || { echo "临时 pgpass 未生成" >&2; exit 1; }
+          [ "$(stat -c '%a' "$pgpass_file")" = "600" ] || {
+            echo "临时 pgpass 权限不正确" >&2
             exit 1
           }
+          PGPASSFILE="$pgpass_file"
+          export PGPASSFILE
+          [ "$missing_tools" -eq 0 ] || { echo "服务器缺少必要命令" >&2; exit 1; }
+          database_name="$(PGOPTIONS='-c statement_timeout=30000 -c lock_timeout=5000' \
+            timeout 45 psql -v ON_ERROR_STOP=1 -Atq "$database_url" \
+            -c 'SELECT current_database()')" || {
+              echo "novelwriterdev 只读连接检查失败" >&2
+              exit 1
+            }
+          [ "$database_name" = "novelwriterdev" ] || {
+            echo "目标数据库不是 novelwriterdev" >&2
+            exit 1
+          }
+          printf '.env: present\n'
+          printf 'novelwriterdev: verified\n'
           REMOTE
 
       - name: migrate_dev
@@ -163,6 +234,8 @@ jobs:
           esac
           remote_sql="/tmp/inkforge-token-usage-details-$run_id-$run_attempt.sql"
           remote_contract="/tmp/inkforge-token-usage-details-$run_id-$run_attempt.json"
+          remote_pgpass="/tmp/inkforge-token-usage-details-$run_id-$run_attempt.pgpass"
+          remote_database_url="/tmp/inkforge-token-usage-details-$run_id-$run_attempt.database-url"
           cleanup_remote() {
             set +e
             ssh \
@@ -175,11 +248,14 @@ jobs:
               -o TCPKeepAlive=yes \
               -i "$ssh_dir/deploy_key" \
               "$SERVER_USER@$SERVER_HOST" \
-              sh -s -- "$remote_sql" "$remote_contract" <<'REMOTE_CLEANUP' >/dev/null 2>&1
+              sh -s -- "$remote_sql" "$remote_contract" "$remote_pgpass" "$remote_database_url" \
+              <<'REMOTE_CLEANUP' >/dev/null 2>&1
           set -eu
           umask 077
           sql_temp=$1
           contract_temp=$2
+          pgpass_temp=$3
+          database_url_temp=$4
           case "$sql_temp" in
             /tmp/inkforge-token-usage-details-[0-9]*-[0-9]*.sql) ;;
             *) exit 1 ;;
@@ -188,7 +264,15 @@ jobs:
             /tmp/inkforge-token-usage-details-[0-9]*-[0-9]*.json) ;;
             *) exit 1 ;;
           esac
-          rm -f -- "$sql_temp" "$contract_temp"
+          case "$pgpass_temp" in
+            /tmp/inkforge-token-usage-details-[0-9]*-[0-9]*.pgpass) ;;
+            *) exit 1 ;;
+          esac
+          case "$database_url_temp" in
+            /tmp/inkforge-token-usage-details-[0-9]*-[0-9]*.database-url) ;;
+            *) exit 1 ;;
+          esac
+          rm -f -- "$sql_temp" "$contract_temp" "$pgpass_temp" "$database_url_temp"
           REMOTE_CLEANUP
           }
           trap cleanup_remote EXIT
@@ -203,11 +287,14 @@ jobs:
             -o TCPKeepAlive=yes \
             -i "$ssh_dir/deploy_key" \
             "$SERVER_USER@$SERVER_HOST" \
-            sh -s -- "$remote_sql" "$remote_contract" <<'REMOTE_PREPARE'
+            sh -s -- "$remote_sql" "$remote_contract" "$remote_pgpass" "$remote_database_url" \
+            <<'REMOTE_PREPARE'
           set -eu
           umask 077
           sql_temp=$1
           contract_temp=$2
+          pgpass_temp=$3
+          database_url_temp=$4
           case "$sql_temp" in
             /tmp/inkforge-token-usage-details-[0-9]*-[0-9]*.sql) ;;
             *) echo "SQL 临时路径不符合固定约定" >&2; exit 1 ;;
@@ -216,6 +303,15 @@ jobs:
             /tmp/inkforge-token-usage-details-[0-9]*-[0-9]*.json) ;;
             *) echo "contract 临时路径不符合固定约定" >&2; exit 1 ;;
           esac
+          case "$pgpass_temp" in
+            /tmp/inkforge-token-usage-details-[0-9]*-[0-9]*.pgpass) ;;
+            *) echo "pgpass 临时路径不符合固定约定" >&2; exit 1 ;;
+          esac
+          case "$database_url_temp" in
+            /tmp/inkforge-token-usage-details-[0-9]*-[0-9]*.database-url) ;;
+            *) echo "数据库 URL 临时路径不符合固定约定" >&2; exit 1 ;;
+          esac
+          rm -f -- "$pgpass_temp" "$database_url_temp"
           : > "$sql_temp"
           : > "$contract_temp"
           chmod 600 "$sql_temp" "$contract_temp"
@@ -264,6 +360,8 @@ jobs:
           esac
           expected_sql="/tmp/inkforge-token-usage-details-$run_id-$run_attempt.sql"
           expected_contract="/tmp/inkforge-token-usage-details-$run_id-$run_attempt.json"
+          pgpass_file="/tmp/inkforge-token-usage-details-$run_id-$run_attempt.pgpass"
+          database_url_file="/tmp/inkforge-token-usage-details-$run_id-$run_attempt.database-url"
           [ "$sql_temp" = "$expected_sql" ] || {
             echo "SQL 临时文件路径不符合固定约定" >&2
             exit 1
@@ -272,21 +370,46 @@ jobs:
             "$expected_contract") ;;
             *) echo "contract 临时文件路径不符合固定约定" >&2; exit 1 ;;
           esac
+          case "$pgpass_file" in
+            /tmp/inkforge-token-usage-details-[0-9]*-[0-9]*.pgpass) ;;
+            *) echo "pgpass 临时文件路径不符合固定约定" >&2; exit 1 ;;
+          esac
+          case "$database_url_file" in
+            /tmp/inkforge-token-usage-details-[0-9]*-[0-9]*.database-url) ;;
+            *) echo "数据库 URL 临时文件路径不符合固定约定" >&2; exit 1 ;;
+          esac
+          rm -f -- "$pgpass_file" "$database_url_file"
+          trap 'rm -f -- "$pgpass_file" "$database_url_file"' EXIT
           [ -n "$app_dir" ] || { echo "APP_DIR 未配置" >&2; exit 1; }
           cd -- "$app_dir"
 
           set +x
-          readable_count=0
-          database_url_count=0
-          database_url=""
-          for candidate in "$app_dir/.env.dev" "$app_dir/.env.development"; do
-            if [ -r "$candidate" ]; then
-              readable_count=$((readable_count + 1))
-              if parsed_url="$(python3 - "$candidate" <<'PY'
+          for required_command in psql pg_dump pg_restore sha256sum docker python3 timeout; do
+            command -v "$required_command" >/dev/null 2>&1 || {
+              echo "服务器缺少必要命令" >&2
+              exit 1
+            }
+          done
+
+          env_file="$app_dir/.env"
+          [ -r "$env_file" ] || { echo ".env 不可读" >&2; exit 1; }
+          database_url="$(python3 - "$env_file" "$pgpass_file" "$database_url_file" <<'PY'
+          import os
           import sys
           from pathlib import Path
+          from urllib.parse import parse_qsl, quote, unquote, urlsplit, urlunsplit
 
-          def parse_database_url(path: str) -> str:
+          SAFE_QUERY_KEYS = {"application_name", "sslmode"}
+
+          def write_private(path: str, payload: str) -> None:
+              descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+              with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as target:
+                  target.write(payload)
+
+          def escape_pgpass(value: str) -> str:
+              return value.replace("\\", "\\\\").replace(":", "\\:")
+
+          def derive_dev_database_url(path: str, pgpass_path: str, url_path: str) -> str:
               try:
                   matches = []
                   for raw_line in Path(path).read_text(encoding="utf-8").splitlines():
@@ -300,35 +423,79 @@ jobs:
                           matches.append(value)
                   if len(matches) != 1 or not matches[0]:
                       return ""
-                  return matches[0]
-              except (OSError, UnicodeError):
+                  value = matches[0]
+                  normalized = (
+                      "postgresql://" + value[len("postgresql+asyncpg://") :]
+                      if value.startswith("postgresql+asyncpg://")
+                      else value
+                  )
+                  parts = urlsplit(normalized)
+                  if (
+                      parts.scheme != "postgresql"
+                      or not parts.netloc
+                      or parts.path != "/novelwriter"
+                      or parts.fragment
+                  ):
+                      return ""
+                  query_pairs = parse_qsl(parts.query, keep_blank_values=True, strict_parsing=True)
+                  query_keys = [key for key, _value in query_pairs]
+                  if (
+                      len(query_keys) != len(set(query_keys))
+                      or any(key not in SAFE_QUERY_KEYS for key in query_keys)
+                  ):
+                      return ""
+                  username = unquote(parts.username or "")
+                  password = unquote(parts.password or "")
+                  hostname = parts.hostname or ""
+                  port = parts.port or 5432
+                  if not username or not password or not hostname:
+                      return ""
+                  if any("\n" in value or "\r" in value for value in (username, password, hostname)):
+                      return ""
+                  pgpass = ":".join(
+                      escape_pgpass(value)
+                      for value in (hostname, str(port), "novelwriterdev", username, password)
+                  ) + "\n"
+                  dev_parts = parts._replace(path="/novelwriterdev")
+                  write_private(pgpass_path, pgpass)
+                  write_private(url_path, urlunsplit(dev_parts))
+                  safe_host = f"[{hostname}]" if ":" in hostname else hostname
+                  safe_netloc = f"{quote(username, safe='')}@{safe_host}"
+                  if parts.port is not None:
+                      safe_netloc += f":{parts.port}"
+                  return urlunsplit(dev_parts._replace(netloc=safe_netloc))
+              except (OSError, UnicodeError, ValueError):
                   return ""
 
-          parsed = parse_database_url(sys.argv[1])
+          parsed = derive_dev_database_url(sys.argv[1], sys.argv[2], sys.argv[3])
           if parsed:
               print(parsed, end="")
           else:
               raise SystemExit(1)
           PY
-              )"; then
-                database_url_count=$((database_url_count + 1))
-                database_url="$parsed_url"
-              fi
-            fi
-          done
-          [ "$readable_count" -eq 1 ] && [ "$database_url_count" -eq 1 ] || {
-            echo "dev 环境文件必须恰好一个可读且含一条非空 DATABASE_URL" >&2
+          )" || { echo ".env DATABASE_URL 不能安全派生 novelwriterdev" >&2; exit 1; }
+          [ -s "$pgpass_file" ] && [ -s "$database_url_file" ] || {
+            echo "数据库凭据临时文件未生成" >&2
             exit 1
           }
-          DATABASE_URL="$database_url"
-          export DATABASE_URL
-
-          for required_command in psql pg_dump pg_restore sha256sum docker python3; do
-            command -v "$required_command" >/dev/null 2>&1 || {
-              echo "服务器缺少必要命令" >&2
+          [ "$(stat -c '%a' "$pgpass_file")" = "600" ] \
+            && [ "$(stat -c '%a' "$database_url_file")" = "600" ] || {
+              echo "数据库凭据临时文件权限不正确" >&2
               exit 1
             }
-          done
+          DATABASE_URL="$database_url"
+          PGPASSFILE="$pgpass_file"
+          export DATABASE_URL PGPASSFILE
+          database_name="$(PGOPTIONS='-c statement_timeout=30000 -c lock_timeout=5000' \
+            timeout 45 psql -v ON_ERROR_STOP=1 -Atq "$database_url" \
+            -c 'SELECT current_database()')" || {
+              echo "novelwriterdev 只读连接检查失败" >&2
+              exit 1
+            }
+          [ "$database_name" = "novelwriterdev" ] || {
+            echo "目标数据库不是 novelwriterdev" >&2
+            exit 1
+          }
 
           backup_report=""
           if ! backup_report="$(timeout 600 env BACKUP_ROOT=/srv/backups/inkforge-dev sh scripts/backup.sh 2>/dev/null)"; then
@@ -350,9 +517,8 @@ jobs:
           }
 
           printf '%s  %s\n' \
-            '1DE1CD58C589403303B40F2AA2AE9DE3C44F272E5DD6C09159327535F04C5142' \
+            'E5D7D5946828CA3E516666607104353ADE4C034F681544B83AD45E639E549760' \
             "$sql_temp" | sha256sum --check --status -
-          database_url="$(printf '%s' "$DATABASE_URL" | sed 's#^postgresql+asyncpg://#postgresql://#')"
           for attempt in 1 2; do
             if ! PGOPTIONS='-c statement_timeout=120000 -c lock_timeout=30000' \
               timeout 180 psql -v ON_ERROR_STOP=1 "$database_url" -f "$sql_temp" >/dev/null 2>&1; then
@@ -451,11 +617,12 @@ jobs:
           cleanup_container_contract() {
             set +e
             timeout 180 docker exec -i "$core_container" rm -f "$container_contract" </dev/null >/dev/null 2>&1
+            rm -f -- "$pgpass_file" "$database_url_file"
           }
           trap cleanup_container_contract EXIT
-          if ! printf '%s' "$DATABASE_URL" | timeout 180 docker exec -i "$core_container" python3 -c \
+          if ! timeout 180 docker exec -i "$core_container" python3 -c \
             'import asyncio, sys; from inkforge_core.db.schema_guard import export_schema_contract; database_url = sys.stdin.read(); contract = asyncio.run(export_schema_contract(database_url, sys.argv[1])); print("schema-contract:" + str(contract["fingerprint"]))' \
-            "$container_contract"; then
+            "$container_contract" < "$database_url_file"; then
             echo "schema_guard 只读 contract 导出失败" >&2
             exit 1
           fi

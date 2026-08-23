@@ -3,6 +3,15 @@ BEGIN;
 SET LOCAL search_path = pg_catalog, public;
 SELECT pg_advisory_xact_lock(hashtext('inkforge:20260823:token_usage_details'));
 
+DO $database_guard$
+BEGIN
+    IF current_database() <> 'novelwriterdev' THEN
+        RAISE EXCEPTION 'TokenUsage 明细迁移只允许在 novelwriterdev 执行，当前数据库为 %',
+            current_database();
+    END IF;
+END;
+$database_guard$;
+
 ALTER TABLE "TokenUsage"
     ADD COLUMN IF NOT EXISTS "promptCacheMissTokens" INTEGER;
 ALTER TABLE "TokenUsage"
