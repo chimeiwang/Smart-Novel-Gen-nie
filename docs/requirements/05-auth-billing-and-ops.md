@@ -201,7 +201,8 @@ PostgreSQL 重复执行验证；应用启动仍不得自动修改 schema。当�
 | `AGENT_MAX_CONCURRENCY` | Agent | 单进程不同项目队列 job 与全局模型调用上限，只允许 1、2 或 3，2 核 2 GB 默认 3；同一 `novelId` 始终串行 |
 | `RAG_INDEX_ENABLED` | Core、Agent | 同时启用资料索引投递和 embedding 就绪校验；两端必须使用相同值 |
 | `OPENAI_API_KEY` | Agent | 模型服务密钥 |
-| `OPENAI_BASE_URL` | Agent | 模型服务地址 |
+| `OPENAI_COMPATIBILITY_PROFILE` | Agent | 显式兼容协议，只允许 `generic` 或 `deepseek_v4`；生产默认 `deepseek_v4`，不能根据 URL 推断 |
+| `OPENAI_BASE_URL` | Agent | 模型服务根地址；生产默认 `https://api.deepseek.com`，与 profile 配套但不决定 profile |
 | `OPENAI_MODEL` | Agent | 模型名称 |
 | `CORE_SERVICE_PRIVATE_KEY_PATH` | Core | Core 签名私钥 |
 | `AGENT_SERVICE_PUBLIC_KEY_PATH` | Core | Agent 验签公钥 |

@@ -1,6 +1,8 @@
 import re
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).parents[2]
 COMPOSE = ROOT / "infra" / "compose.yaml"
 DEPLOYMENT_FILES = (
@@ -9,6 +11,33 @@ DEPLOYMENT_FILES = (
     ROOT / "scripts" / "upload-docker-images.sh",
 )
 PRODUCTION_SERVICES = ("nginx", "web", "core-api", "agent-service", "redis")
+_COMPOSE_DEFAULT_EXPRESSION = re.compile(
+    r"^\$\{(?P<name>[A-Za-z_][A-Za-z0-9_]*):-(?P<default>.*)\}$"
+)
+
+
+def _compose_environment_mapping(service: str) -> dict[str, str]:
+    document = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))
+    assert isinstance(document, dict)
+    services = document.get("services")
+    assert isinstance(services, dict)
+    service_config = services.get(service)
+    assert isinstance(service_config, dict)
+    environment = service_config.get("environment")
+    assert isinstance(environment, dict)
+    assert all(
+        isinstance(key, str) and isinstance(value, str)
+        for key, value in environment.items()
+    )
+    return environment
+
+
+def _expand_compose_default(expression: object, overrides: dict[str, str]) -> str:
+    assert isinstance(expression, str)
+    match = _COMPOSE_DEFAULT_EXPRESSION.fullmatch(expression)
+    assert match is not None, f"不是受控 Compose 默认表达式：{expression}"
+    value = overrides.get(match.group("name"))
+    return match.group("default") if value in (None, "") else value
 
 
 def _service_block(source: str, service: str) -> str:
@@ -174,16 +203,27 @@ def test_agent_queue_terminal_retention_is_configurable() -> None:
     )
 
 
-def test_production_agent_explicitly_selects_deepseek_profile_and_root_url() -> None:
-    source = COMPOSE.read_text(encoding="utf-8")
-    agent = _service_block(source, "agent-service")
+def test_production_agent_static_compose_interpolation_contract_for_deepseek_defaults() -> None:
+    """仅验证静态 Compose 插值契约，不等同真实 Docker 展开；Docker 验证另行进行。"""
+    environment = _compose_environment_mapping("agent-service")
 
-    assert (
-        "OPENAI_COMPATIBILITY_PROFILE: ${OPENAI_COMPATIBILITY_PROFILE:-deepseek_v4}"
-        in agent
-    )
-    assert "OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.deepseek.com}" in agent
-    assert "/v1" not in agent.split("OPENAI_BASE_URL:", 1)[1].splitlines()[0]
+    profile_expression = environment["OPENAI_COMPATIBILITY_PROFILE"]
+    base_url_expression = environment["OPENAI_BASE_URL"]
+    assert profile_expression == "${OPENAI_COMPATIBILITY_PROFILE:-deepseek_v4}"
+    assert base_url_expression == "${OPENAI_BASE_URL:-https://api.deepseek.com}"
+
+    for variable, expression, default in (
+        (
+            "OPENAI_COMPATIBILITY_PROFILE",
+            profile_expression,
+            "deepseek_v4",
+        ),
+        ("OPENAI_BASE_URL", base_url_expression, "https://api.deepseek.com"),
+    ):
+        assert _expand_compose_default(expression, {}) == default
+        assert _expand_compose_default(expression, {variable: ""}) == default
+        override = "generic" if variable == "OPENAI_COMPATIBILITY_PROFILE" else "https://proxy.test"
+        assert _expand_compose_default(expression, {variable: override}) == override
 
 
 def test_model_examples_document_explicit_profile_boundary_without_secrets() -> None:
