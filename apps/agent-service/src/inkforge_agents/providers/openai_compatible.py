@@ -32,6 +32,7 @@ def normalize_finish_reason(value: object) -> ModelFinishReason:
         "length": "length",
         "max_tokens": "length",
         "content_filter": "content_filter",
+        "insufficient_system_resource": "insufficient_system_resource",
     }
     return aliases.get(value, "unknown")
 
@@ -138,5 +139,11 @@ class OpenAICompatibleProvider:
                 cachedTokens=int(input_details.get("cache_read", 0)),
                 completionTokens=completion_tokens,
                 totalTokens=total_tokens,
+            ),
+            providerResponseId=_raw_finish_reason(response.response_metadata.get("id")),
+            reasoningContent=(
+                response.additional_kwargs.get("reasoning_content")
+                if isinstance(response.additional_kwargs.get("reasoning_content"), str)
+                else None
             ),
         )

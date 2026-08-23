@@ -112,6 +112,7 @@ class AgentRuntime:
                 ModelMessage(
                     role="assistant",
                     content=response.content,
+                    reasoning_content=response.reasoningContent,
                     toolCalls=response.toolCalls,
                 )
             )
@@ -283,6 +284,11 @@ class AgentRuntime:
         if response.finishReason == "content_filter":
             raise RuntimeError(
                 "MODEL_OUTPUT_FILTERED：供应商报告模型输出被内容过滤"
+                f"（原始原因：{raw_finish_reason}）"
+            )
+        if response.finishReason == "insufficient_system_resource":
+            raise RuntimeError(
+                "MODEL_INSUFFICIENT_SYSTEM_RESOURCE：供应商报告系统资源不足"
                 f"（原始原因：{raw_finish_reason}）"
             )
 

@@ -1,0 +1,5 @@
+{
+  "id": "resp-invalid-tool-1",
+  "choices": [{"message": {"role": "assistant", "content": null, "tool_calls": [{"id": "call-invalid", "type": "function", "function": {"name": "lookup", "arguments": "[1,2]"}}]}, "finish_reason": "tool_calls"}],
+  "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
+}

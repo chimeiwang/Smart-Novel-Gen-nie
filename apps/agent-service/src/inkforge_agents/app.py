@@ -103,6 +103,10 @@ def create_app(
             )
             if embedding_http is not None:
                 await embedding_http.aclose()
+            provider = cast(ModelProvider | None, getattr(app.state, "model_provider", None))
+            provider_close = getattr(provider, "aclose", None)
+            if provider_close is not None:
+                await provider_close()
             redis = getattr(app.state, "redis", None)
             if redis is not None:
                 await redis.aclose()

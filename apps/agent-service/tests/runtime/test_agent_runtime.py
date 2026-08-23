@@ -806,3 +806,37 @@ async def test_runtime_stops_at_max_iterations_and_surfaces_provider_failure() -
             exposed_tools=[],
             context=context(),
         )
+
+
+@pytest.mark.asyncio
+async def test_runtime_replays_reasoning_content_with_assistant_tool_call() -> None:
+    first = turn("", ("call-1", "get_novel_info", {})).model_copy(
+        update={"reasoningContent": "先读取作品资料"}
+    )
+    provider = ScriptedProvider([first, turn("已完成")])
+    registry = build_default_registry(RecordingGateway())
+    runtime = make_agent_runtime(ModelRuntime(provider), registry)
+
+    await runtime.run(
+        policy=CREATIVE_HIGH,
+        messages=[{"role": "user", "content": "请调用工具"}],
+        exposed_tools=registry.for_agent(agent_id="设定", capabilities={"novel.read"}),
+        context=context(),
+    )
+
+    assert provider.requests[1].messages[1].reasoningContent == "先读取作品资料"
+
+
+@pytest.mark.asyncio
+async def test_runtime_rejects_insufficient_system_resource_before_visible_content() -> None:
+    response = turn("不应展示", finish_reason="insufficient_system_resource")
+    registry = build_default_registry(RecordingGateway())
+    runtime = make_agent_runtime(ModelRuntime(ScriptedProvider([response])), registry)
+
+    with pytest.raises(RuntimeError, match="MODEL_INSUFFICIENT_SYSTEM_RESOURCE"):
+        await runtime.run(
+            policy=LEGACY_PROVIDER_DEFAULT,
+            messages=[{"role": "user", "content": "测试"}],
+            exposed_tools=[],
+            context=context(),
+        )

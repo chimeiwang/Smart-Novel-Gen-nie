@@ -165,6 +165,24 @@ class HumanWorkflowLog:
                 f"运行标识：{record.context.runId}",
                 f"计费请求标识：{billing_request_id}",
                 f"模型：{record.provider}/{record.model}",
+                f"policyId：{record.policyId}",
+                f"思考模式：{record.thinkingMode}",
+                "推理强度："
+                + (record.reasoningEffort if record.reasoningEffort is not None else "未设置"),
+                "推理 Token："
+                + (str(record.reasoningTokens) if record.reasoningTokens is not None else "未提供"),
+                "缓存未命中 Token："
+                + (
+                    str(record.promptCacheMissTokens)
+                    if record.promptCacheMissTokens is not None
+                    else "未提供"
+                ),
+                "供应商响应标识："
+                + (
+                    record.providerResponseId
+                    if record.providerResponseId is not None
+                    else "未提供"
+                ),
                 "Token 消耗："
                 f"输入 {usage.promptTokens} | "
                 f"缓存 {usage.cachedTokens} | "
@@ -193,7 +211,16 @@ class HumanWorkflowLog:
             _append_frame(
                 path,
                 _LogFrame(
-                    header={"type": "model", "sequence": sequence},
+                    header={
+                        "type": "model",
+                        "sequence": sequence,
+                        "policyId": record.policyId,
+                        "thinkingMode": record.thinkingMode,
+                        "reasoningEffort": record.reasoningEffort,
+                        "reasoningTokens": record.reasoningTokens,
+                        "promptCacheMissTokens": record.promptCacheMissTokens,
+                        "providerResponseId": record.providerResponseId,
+                    },
                     content="\n".join(sections),
                 ),
             )

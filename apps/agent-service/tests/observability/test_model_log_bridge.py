@@ -9,6 +9,7 @@ from inkforge_agents.providers.base import (
     ModelTurnRequest,
     ModelTurnResult,
     ModelUsage,
+    ModelUsageDiagnostics,
 )
 from inkforge_agents.runtime.model_policy import LEGACY_PROVIDER_DEFAULT
 from inkforge_agents.runtime.model_runtime import ModelCallContext, ModelRuntime
@@ -26,6 +27,8 @@ class LongOutputProvider:
         del request
         return ModelTurnResult(
             content=self._output,
+            reasoningContent="这段推理不得进入人工日志正文",
+            providerResponseId="response-bridge-1",
             toolCalls=[],
             usage=ModelUsage(
                 promptTokens=10,
@@ -35,6 +38,11 @@ class LongOutputProvider:
             ),
             finishReason="length",
             rawFinishReason="max_tokens",
+            diagnostics=ModelUsageDiagnostics(
+                promptCacheMissTokens=3,
+                reasoningTokens=4,
+                providerUsageKeys=["completion_tokens_details", "prompt_tokens"],
+            ),
         )
 
 
@@ -86,4 +94,11 @@ async def test_model_runtime_records_complete_provider_result_in_human_log(
     assert "Token 消耗：输入 10 | 缓存 0 | 输出 20 | 合计 30" in written
     assert "完成原因：length" in written
     assert "供应商原始原因：max_tokens" in written
+    assert "policyId：legacy:provider-default" in written
+    assert "思考模式：provider_default" in written
+    assert "推理强度：未设置" in written
+    assert "推理 Token：4" in written
+    assert "缓存未命中 Token：3" in written
+    assert "供应商响应标识：response-bridge-1" in written
+    assert "这段推理不得进入人工日志正文" not in written
     assert "grantToken" not in written

@@ -16,6 +16,7 @@ ModelFinishReason = Literal[
     "tool_calls",
     "length",
     "content_filter",
+    "insufficient_system_resource",
     "unknown",
 ]
 
@@ -33,6 +34,7 @@ class ModelMessage(BaseModel):
 
     role: Literal["system", "user", "assistant", "tool"]
     content: str
+    reasoningContent: str | None = Field(default=None, alias="reasoning_content")
     name: str | None = None
     tool_call_id: str | None = Field(default=None, alias="toolCallId")
     tool_calls: list[ModelToolCall] = Field(default_factory=list, alias="toolCalls")
@@ -81,6 +83,14 @@ class ModelUsage(BaseModel):
     totalTokens: NonNegativeInt
 
 
+class ModelUsageDiagnostics(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    promptCacheMissTokens: int | None = Field(default=None, ge=0)
+    reasoningTokens: int | None = Field(default=None, ge=0)
+    providerUsageKeys: list[str] = Field(default_factory=list)
+
+
 class ModelTurnResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -89,6 +99,9 @@ class ModelTurnResult(BaseModel):
     usage: ModelUsage
     finishReason: ModelFinishReason
     rawFinishReason: str | None = None
+    reasoningContent: str | None = None
+    providerResponseId: str | None = None
+    diagnostics: ModelUsageDiagnostics = Field(default_factory=ModelUsageDiagnostics)
 
 
 class ModelProvider(Protocol):
