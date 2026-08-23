@@ -94,6 +94,7 @@ def _completion_endpoint(base_url: str) -> str:
     decoded_path = unquote(parsed.path)
     if (
         any(segment in {".", ".."} for segment in decoded_path.split("/"))
+        or "\\" in decoded_path
         or "//" in decoded_path
     ):
         raise ValueError("DeepSeek base URL 路径包含不安全路径段")

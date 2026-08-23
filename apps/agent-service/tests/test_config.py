@@ -33,6 +33,10 @@ def test_queue_terminal_retention_days_defaults_to_seven_and_rejects_zero() -> N
         Settings.model_validate({"queue_terminal_retention_days": 0})
 
 
+def test_deepseek_base_url_defaults_to_official_root() -> None:
+    assert Settings.model_validate({}).openai_base_url == "https://api.deepseek.com"
+
+
 def test_queue_terminal_retention_days_reads_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

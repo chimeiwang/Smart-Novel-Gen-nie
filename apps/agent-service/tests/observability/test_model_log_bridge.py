@@ -12,7 +12,11 @@ from inkforge_agents.providers.base import (
     ModelUsageDiagnostics,
 )
 from inkforge_agents.runtime.model_policy import LEGACY_PROVIDER_DEFAULT
-from inkforge_agents.runtime.model_runtime import ModelCallContext, ModelRuntime
+from inkforge_agents.runtime.model_runtime import (
+    ModelCallContext,
+    ModelCallLogRecord,
+    ModelRuntime,
+)
 
 
 class LongOutputProvider:
@@ -102,3 +106,61 @@ async def test_model_runtime_records_complete_provider_result_in_human_log(
     assert "供应商响应标识：response-bridge-1" in written
     assert "这段推理不得进入人工日志正文" not in written
     assert "grantToken" not in written
+
+
+@pytest.mark.parametrize(
+    ("reasoning_tokens", "expected_visible", "expected_text"),
+    [(4, 16, "可见输出 Token：16"), (None, None, "可见输出 Token：未提供")],
+)
+def test_human_log_header_and_text_derive_visible_completion_tokens(
+    tmp_path: Path,
+    reasoning_tokens: int | None,
+    expected_visible: int | None,
+    expected_text: str,
+) -> None:
+    workflow_log = HumanWorkflowLog(tmp_path)
+    workflow_log.start_run(
+        run_id="run-visible",
+        task_id="task-visible",
+        run_kind="诊断测试",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id=None,
+    )
+    workflow_log.record_model_call(
+        ModelCallLogRecord(
+            context=ModelCallContext(
+                userId="user-1",
+                novelId="novel-1",
+                taskId="task-visible",
+                runId="run-visible",
+                agentId="校验",
+            ),
+            provider="openai_compatible",
+            model="deepseek-v4-flash",
+            billingRequestId=None,
+            messages=[{"role": "user", "content": "测试"}],
+            output="完成",
+            usage=ModelUsage(
+                promptTokens=10,
+                cachedTokens=0,
+                completionTokens=20,
+                totalTokens=30,
+            ),
+            finishReason="stop",
+            rawFinishReason="stop",
+            policyId="v1:quality-no-thinking",
+            thinkingMode="disabled",
+            reasoningTokens=reasoning_tokens,
+        )
+    )
+    written = workflow_log.finish_run("run-visible", "完成").read_text(
+        encoding="utf-8"
+    )
+    expected_json = (
+        '"visibleCompletionTokens":null'
+        if expected_visible is None
+        else f'"visibleCompletionTokens":{expected_visible}'
+    )
+    assert expected_json in written
+    assert expected_text in written

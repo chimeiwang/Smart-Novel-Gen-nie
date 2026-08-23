@@ -129,6 +129,7 @@ def test_deepseek_rejects_base_url_query_or_fragment(base_url: str) -> None:
     [
         "https://proxy.example/proxy/../openai",
         "https://proxy.example/proxy/%2e%2e/openai",
+        "https://proxy.example/proxy/%5c..%5c/openai",
         "https://proxy.example/proxy//openai",
         "https://proxy.example//proxy/openai",
     ],

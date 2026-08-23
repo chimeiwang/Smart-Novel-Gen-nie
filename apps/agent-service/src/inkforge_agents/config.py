@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     model_provider: ModelProviderName = "openai_compatible"
     openai_compatibility_profile: OpenAICompatibilityProfile = "generic"
     openai_api_key: SecretStr | None = None
-    openai_base_url: str = "https://api.deepseek.com/v1"
+    openai_base_url: str = "https://api.deepseek.com"
     openai_model: str = "deepseek-v4-flash"
     model_max_output_tokens: int = Field(default=384_000, ge=1, le=1_000_000)
     agent_max_concurrency: int = Field(default=3, ge=1, le=3)

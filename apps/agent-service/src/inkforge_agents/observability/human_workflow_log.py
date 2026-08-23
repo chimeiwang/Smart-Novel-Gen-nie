@@ -159,6 +159,11 @@ class HumanWorkflowLog:
             sequence = _next_sequence(frames, "model")
             billing_request_id = record.billingRequestId or "无"
             usage = record.usage
+            visible_completion_tokens = (
+                usage.completionTokens - record.reasoningTokens
+                if record.reasoningTokens is not None
+                else None
+            )
             sections = [
                 f"\nA{sequence:02d} 智能体：{record.context.agentId}",
                 f"任务标识：{record.context.taskId}",
@@ -175,6 +180,12 @@ class HumanWorkflowLog:
                 + (
                     str(record.promptCacheMissTokens)
                     if record.promptCacheMissTokens is not None
+                    else "未提供"
+                ),
+                "可见输出 Token："
+                + (
+                    str(visible_completion_tokens)
+                    if visible_completion_tokens is not None
                     else "未提供"
                 ),
                 "供应商响应标识："
@@ -218,6 +229,7 @@ class HumanWorkflowLog:
                         "thinkingMode": record.thinkingMode,
                         "reasoningEffort": record.reasoningEffort,
                         "reasoningTokens": record.reasoningTokens,
+                        "visibleCompletionTokens": visible_completion_tokens,
                         "promptCacheMissTokens": record.promptCacheMissTokens,
                         "providerResponseId": record.providerResponseId,
                     },
