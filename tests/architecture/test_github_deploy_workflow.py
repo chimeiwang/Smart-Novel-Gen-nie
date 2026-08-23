@@ -51,18 +51,32 @@ def test_workflow_pins_sql_hash_and_uses_production_ssh_environment() -> None:
     assert "DATABASE_URL" not in source.split("jobs:", maxsplit=1)[0]
 
 
-def test_inspect_reports_tools_and_fixed_env_candidates_without_reading_them() -> None:
+def test_inspect_fails_for_missing_tools_and_invalid_fixed_env_candidates() -> None:
     source = _source()
     inspect = source.split("if: inputs.action == 'inspect'", maxsplit=1)[1]
     inspect = inspect.split("if: inputs.action == 'migrate_dev'", maxsplit=1)[0]
 
-    for tool in ("psql", "pg_dump", "sha256sum", "docker", "uv"):
+    for tool in ("psql", "pg_dump", "pg_restore", "sha256sum", "docker", "python3"):
         assert tool in inspect
     assert ".env.dev" in inspect
     assert ".env.development" in inspect
+    assert "missing_tools" in inspect
+    assert "readable_count" in inspect
+    assert "database_url_count" in inspect
+    assert "DATABASE_URL" in inspect
+    assert "uv" not in inspect
     assert "cat " not in inspect
-    assert "source " not in inspect
-    assert "DATABASE_URL" not in inspect
+
+
+def test_env_parser_is_pure_text_and_never_sources_candidate_files() -> None:
+    source = _source()
+    assert "python3 - \"$candidate\"" in source
+    assert "def parse_database_url" in source
+    assert "read_text" in source
+    assert ". \"$candidate\"" not in source
+    assert "source \"$candidate\"" not in source
+    assert "eval " not in source
+    assert "set +x" in source
 
 
 def test_migrate_dev_backs_up_double_runs_and_verifies_read_only_contract() -> None:
@@ -86,13 +100,46 @@ def test_migrate_dev_backs_up_double_runs_and_verifies_read_only_contract() -> N
         "atthasdef",
         "promptCacheMissTokens",
         "reasoningTokens",
-        "uv run python scripts/export_schema_contract.py --database-url "
-        '"$DATABASE_URL" --output "$contract_temp"',
+        "docker ps",
+        "docker exec -i",
+        "schema_guard",
+        "export_schema_contract",
+        'printf \'%s\' "$DATABASE_URL" | docker exec -i',
+        "docker cp",
         "upload-artifact",
         "trap",
     ):
         assert value in migrate
     assert "pg_restore --list" in migrate
+    assert "uv run python scripts/export_schema_contract.py" not in source
+    assert "contract-$run_id.json" in migrate
+    assert "$run_id.json" in migrate
     assert "reasoning_content" not in source
     assert "GITHUB_ENV" not in source
     assert "GITHUB_STEP_SUMMARY" not in source
+
+
+def test_secrets_are_scoped_to_ssh_steps_and_contract_is_only_artifact() -> None:
+    source = _source()
+    job_env = source.split("    steps:", maxsplit=1)[0]
+    assert "SERVER_SSH_KEY" not in job_env
+    assert "DEPLOY_SSH_KNOWN_HOSTS" not in job_env
+    assert "secrets.SERVER_SSH_KEY" in source.split("- name: 准备严格 SSH", maxsplit=1)[1].split(
+        "run:", maxsplit=1
+    )[0]
+    assert "secrets.DEPLOY_SSH_KNOWN_HOSTS" in source.split(
+        "- name: 准备严格 SSH", maxsplit=1
+    )[1].split("run:", maxsplit=1)[0]
+
+    migrate = source.split("if: inputs.action == 'migrate_dev'", maxsplit=1)[1]
+    backup_index = migrate.index("BACKUP_ROOT=/srv/backups/inkforge-dev sh scripts/backup.sh")
+    double_run_index = migrate.index("for attempt in 1 2")
+    assert backup_index < double_run_index
+    assert double_run_index < migrate.index("schema_guard")
+    assert migrate.index("schema_guard") < migrate.index("docker cp")
+
+    artifact = source.split("uses: actions/upload-artifact@v4", maxsplit=1)[1]
+    assert "schema-contract" in artifact
+    assert "database.dump" not in artifact
+    assert "SHA256SUMS" not in artifact
+    assert ".env." not in artifact

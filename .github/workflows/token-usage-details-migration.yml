@@ -19,10 +19,6 @@ jobs:
     runs-on: ubuntu-latest
     environment: production
     env:
-      SERVER_HOST: ${{ secrets.SERVER_HOST }}
-      SERVER_USER: ${{ secrets.SERVER_USER }}
-      SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
-      DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
       APP_DIR: ${{ vars.APP_DIR }}
       SQL_PATH: scripts/migrations/20260823_token_usage_details.sql
       SQL_SHA256: 1DE1CD58C589403303B40F2AA2AE9DE3C44F272E5DD6C09159327535F04C5142
@@ -33,6 +29,9 @@ jobs:
 
       - name: 准备严格 SSH
         shell: bash
+        env:
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          DEPLOY_SSH_KNOWN_HOSTS: ${{ secrets.DEPLOY_SSH_KNOWN_HOSTS }}
         run: |
           set -eu
           ssh_dir="$RUNNER_TEMP/inkforge-token-usage-ssh"
@@ -54,6 +53,9 @@ jobs:
       - name: inspect
         if: inputs.action == 'inspect'
         shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
         run: |
           set -eu
           ssh_dir="$RUNNER_TEMP/inkforge-token-usage-ssh"
@@ -72,30 +74,72 @@ jobs:
           [ -n "$app_dir" ] || { echo "APP_DIR 未配置" >&2; exit 1; }
           cd -- "$app_dir"
 
-          missing_uv=0
-          for tool in psql pg_dump sha256sum docker uv; do
+          missing_tools=0
+          for tool in psql pg_dump pg_restore sha256sum docker python3; do
             if command -v "$tool" >/dev/null 2>&1; then
               printf '%s: present\n' "$tool"
             else
               printf '%s: missing\n' "$tool"
-              if [ "$tool" = "uv" ]; then
-                missing_uv=1
-              fi
+              missing_tools=1
             fi
           done
+          set +x
+          readable_count=0
+          database_url_count=0
+          database_url=""
           for env_file in .env.dev .env.development; do
             if [ -r "$env_file" ]; then
               printf '%s: present\n' "$env_file"
+              readable_count=$((readable_count + 1))
+              if parsed_url="$(python3 - "$env_file" <<'PY'
+          import sys
+          from pathlib import Path
+
+          def parse_database_url(path: str) -> str:
+              try:
+                  matches = []
+                  for raw_line in Path(path).read_text(encoding="utf-8").splitlines():
+                      line = raw_line.strip()
+                      if not line or line.startswith("#"):
+                          continue
+                      if line.startswith("DATABASE_URL="):
+                          value = line[len("DATABASE_URL=") :].strip()
+                          if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+                              value = value[1:-1].strip()
+                          matches.append(value)
+                  if len(matches) != 1 or not matches[0]:
+                      return ""
+                  return matches[0]
+              except (OSError, UnicodeError):
+                  return ""
+
+          parsed = parse_database_url(sys.argv[1])
+          if parsed:
+              print(parsed, end="")
+          else:
+              raise SystemExit(1)
+          PY
+              )"; then
+                database_url_count=$((database_url_count + 1))
+                database_url="$parsed_url"
+              fi
             else
               printf '%s: missing\n' "$env_file"
             fi
           done
-          [ "$missing_uv" -eq 0 ] || { echo "服务器缺少 uv，停止检查" >&2; exit 1; }
+          [ "$missing_tools" -eq 0 ] || { echo "服务器缺少必要命令" >&2; exit 1; }
+          [ "$readable_count" -eq 1 ] && [ "$database_url_count" -eq 1 ] || {
+            echo "dev 环境文件必须恰好一个可读且含一条非空 DATABASE_URL" >&2
+            exit 1
+          }
           REMOTE
 
       - name: migrate_dev
         if: inputs.action == 'migrate_dev'
         shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
         run: |
           set -eu
           ssh_dir="$RUNNER_TEMP/inkforge-token-usage-ssh"
@@ -115,7 +159,11 @@ jobs:
             *) echo "服务器 SQL 临时路径不符合固定约定" >&2; exit 1 ;;
           esac
 
-          remote_contract=""
+          run_id="$GITHUB_RUN_ID"
+          case "$run_id" in
+            ''|*[!0-9]*) echo "GitHub 运行编号不符合固定临时路径约定" >&2; exit 1 ;;
+          esac
+          remote_contract="/tmp/inkforge-token-usage-contract-$run_id.json"
           cleanup_remote() {
             set +e
             ssh \
@@ -124,31 +172,9 @@ jobs:
               -o UserKnownHostsFile="$ssh_dir/known_hosts" \
               -i "$ssh_dir/deploy_key" \
               "$SERVER_USER@$SERVER_HOST" \
-              "rm -f -- '$remote_sql'" >/dev/null 2>&1
-            if [ -n "$remote_contract" ]; then
-              ssh \
-                -o BatchMode=yes \
-                -o StrictHostKeyChecking=yes \
-                -o UserKnownHostsFile="$ssh_dir/known_hosts" \
-                -i "$ssh_dir/deploy_key" \
-                "$SERVER_USER@$SERVER_HOST" \
-                "rm -f -- '$remote_contract'" >/dev/null 2>&1
-            fi
+              "rm -f -- '$remote_sql' '$remote_contract'" >/dev/null 2>&1
           }
           trap cleanup_remote EXIT
-
-          printf -v create_contract_command 'mktemp --tmpdir=/tmp inkforge-token-usage-contract.XXXXXX.json'
-          remote_contract="$(ssh \
-            -o BatchMode=yes \
-            -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
-            -i "$ssh_dir/deploy_key" \
-            "$SERVER_USER@$SERVER_HOST" \
-            "$create_contract_command")"
-          case "$remote_contract" in
-            /tmp/inkforge-token-usage-contract.*.json) ;;
-            *) echo "服务器 contract 临时路径不符合固定约定" >&2; exit 1 ;;
-          esac
 
           scp -q \
             -o BatchMode=yes \
@@ -157,7 +183,7 @@ jobs:
             -i "$ssh_dir/deploy_key" \
             "$SQL_PATH" "$SERVER_USER@$SERVER_HOST:$remote_sql"
 
-          printf -v remote_command 'bash -s -- %q %q %q' "$APP_DIR" "$remote_sql" "$remote_contract"
+          printf -v remote_command 'bash -s -- %q %q %q %q' "$APP_DIR" "$remote_sql" "$remote_contract" "$run_id"
           ssh \
             -o BatchMode=yes \
             -o StrictHostKeyChecking=yes \
@@ -171,45 +197,71 @@ jobs:
           app_dir=$1
           sql_temp=$2
           contract_temp=$3
+          run_id=$4
           case "$sql_temp" in
             /tmp/inkforge-token-usage-details.*) ;;
             *) echo "SQL 临时文件路径不符合固定约定" >&2; exit 1 ;;
           esac
+          case "$run_id" in
+            ''|*[!0-9]*) echo "运行编号不符合固定临时路径约定" >&2; exit 1 ;;
+          esac
+          expected_contract="/tmp/inkforge-token-usage-contract-$run_id.json"
           case "$contract_temp" in
-            /tmp/inkforge-token-usage-contract.*.json) ;;
+            "$expected_contract") ;;
             *) echo "contract 临时文件路径不符合固定约定" >&2; exit 1 ;;
           esac
           [ -n "$app_dir" ] || { echo "APP_DIR 未配置" >&2; exit 1; }
           cd -- "$app_dir"
 
-          database_env_file=""
-          database_env_count=0
+          set +x
+          readable_count=0
+          database_url_count=0
+          database_url=""
           for candidate in "$app_dir/.env.dev" "$app_dir/.env.development"; do
-            if [ -r "$candidate" ] && (
-              set +x
-              unset DATABASE_URL
-              set -a
-              . "$candidate" >/dev/null 2>&1
-              set +a
-              [ -n "${DATABASE_URL:-}" ]
-            ); then
-              database_env_file="$candidate"
-              database_env_count=$((database_env_count + 1))
+            if [ -r "$candidate" ]; then
+              readable_count=$((readable_count + 1))
+              if parsed_url="$(python3 - "$candidate" <<'PY'
+          import sys
+          from pathlib import Path
+
+          def parse_database_url(path: str) -> str:
+              try:
+                  matches = []
+                  for raw_line in Path(path).read_text(encoding="utf-8").splitlines():
+                      line = raw_line.strip()
+                      if not line or line.startswith("#"):
+                          continue
+                      if line.startswith("DATABASE_URL="):
+                          value = line[len("DATABASE_URL=") :].strip()
+                          if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+                              value = value[1:-1].strip()
+                          matches.append(value)
+                  if len(matches) != 1 or not matches[0]:
+                      return ""
+                  return matches[0]
+              except (OSError, UnicodeError):
+                  return ""
+
+          parsed = parse_database_url(sys.argv[1])
+          if parsed:
+              print(parsed, end="")
+          else:
+              raise SystemExit(1)
+          PY
+              )"; then
+                database_url_count=$((database_url_count + 1))
+                database_url="$parsed_url"
+              fi
             fi
           done
-          [ "$database_env_count" -eq 1 ] || {
-            echo "dev 环境文件必须恰好一个可读且含非空 DATABASE_URL" >&2
+          [ "$readable_count" -eq 1 ] && [ "$database_url_count" -eq 1 ] || {
+            echo "dev 环境文件必须恰好一个可读且含一条非空 DATABASE_URL" >&2
             exit 1
           }
+          DATABASE_URL="$database_url"
+          export DATABASE_URL
 
-          set +x
-          unset DATABASE_URL
-          set -a
-          . "$database_env_file" >/dev/null 2>&1
-          set +a
-          [ -n "${DATABASE_URL:-}" ] || { echo "DATABASE_URL 为空" >&2; exit 1; }
-
-          for required_command in psql pg_dump pg_restore sha256sum uv; do
+          for required_command in psql pg_dump pg_restore sha256sum docker python3; do
             command -v "$required_command" >/dev/null 2>&1 || {
               echo "服务器缺少必要命令" >&2
               exit 1
@@ -306,9 +358,46 @@ jobs:
             exit 1
           }
 
+          core_containers="$(docker ps \
+            --filter label=com.docker.compose.project=inkforge \
+            --filter label=com.docker.compose.service=core-api \
+            --format '{{.ID}}')"
+          [ -n "$core_containers" ] || { echo "未找到正在运行的 Core 容器" >&2; exit 1; }
+          case "$core_containers" in
+            *$'\n'*) echo "运行中的 Core 容器不唯一" >&2; exit 1 ;;
+            *) core_container="$core_containers" ;;
+          esac
+          running_state="$(docker inspect --format '{{.State.Running}}' "$core_container" 2>/dev/null)" || {
+            echo "无法读取 Core 容器运行状态" >&2
+            exit 1
+          }
+          [ "$running_state" = "true" ] || { echo "Core 容器未运行" >&2; exit 1; }
+          if ! docker exec -i "$core_container" python3 -c \
+            'from inkforge_core.db.schema_guard import export_schema_contract' </dev/null >/dev/null 2>&1; then
+            echo "当前 Core 容器不支持 schema_guard 只读导出" >&2
+            exit 1
+          fi
+          container_contract="/tmp/inkforge-token-usage-contract-$run_id.json"
+          if ! docker exec -i "$core_container" sh -eu -c \
+            'test -w /tmp && rm -f "$1" && : > "$1" && rm -f "$1"' sh "$container_contract" \
+            </dev/null >/dev/null 2>&1; then
+            echo "Core 容器 /tmp 不可写" >&2
+            exit 1
+          fi
+          cleanup_container_contract() {
+            set +e
+            docker exec -i "$core_container" rm -f "$container_contract" </dev/null >/dev/null 2>&1
+          }
+          trap cleanup_container_contract EXIT
+          if ! printf '%s' "$DATABASE_URL" | docker exec -i "$core_container" python3 -c \
+            'import asyncio, sys; from inkforge_core.db.schema_guard import export_schema_contract; database_url = sys.stdin.read(); contract = asyncio.run(export_schema_contract(database_url, sys.argv[1])); print("schema-contract:" + str(contract["fingerprint"]))' \
+            "$container_contract"; then
+            echo "schema_guard 只读 contract 导出失败" >&2
+            exit 1
+          fi
           rm -f "$contract_temp"
-          if ! uv run python scripts/export_schema_contract.py --database-url "$DATABASE_URL" --output "$contract_temp" >/dev/null 2>&1; then
-            echo "schema contract 只读导出失败" >&2
+          if ! docker cp "$core_container:$container_contract" "$contract_temp" >/dev/null 2>&1; then
+            echo "无法复制 schema contract" >&2
             exit 1
           fi
           [ -s "$contract_temp" ] || { echo "schema contract 为空" >&2; exit 1; }
