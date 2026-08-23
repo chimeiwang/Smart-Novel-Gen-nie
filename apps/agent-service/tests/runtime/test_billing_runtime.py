@@ -8,6 +8,7 @@ from inkforge_agents.providers.base import (
     ModelTurnRequest,
     ModelTurnResult,
     ModelUsage,
+    ModelUsageDiagnostics,
 )
 from inkforge_agents.runtime.model_policy import LEGACY_PROVIDER_DEFAULT
 from inkforge_agents.runtime.model_runtime import (
@@ -224,6 +225,42 @@ async def test_billable_runtime_authorizes_then_reports_exact_usage() -> None:
     assert billing.usages[0]["totalTokens"] == 130
     assert billing.usages[0]["grantToken"] == "grant"
     assert billing.usages[0]["requestId"] == "grant-request-1"
+
+
+@pytest.mark.asyncio
+async def test_billable_runtime_reports_provider_token_details_without_rebilling() -> None:
+    class DetailedProvider(Provider):
+        async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+            result = await super().complete_turn(request)
+            return result.model_copy(
+                update={
+                    "diagnostics": ModelUsageDiagnostics(
+                        promptCacheMissTokens=80,
+                        reasoningTokens=12,
+                    )
+                }
+            )
+
+    billing = Billing()
+    runtime = ModelRuntime(DetailedProvider(), billing=billing)  # type: ignore[arg-type]
+    await runtime.run_turn(
+        ModelTurnRequest(
+            messages=[{"role": "user", "content": "明细"}],
+            tools=[],
+            maxOutputTokens=128,
+            policy=LEGACY_PROVIDER_DEFAULT,
+        ),
+        context=ModelCallContext(
+            userId="user-1",
+            novelId="novel-1",
+            taskId="task-1",
+            runId="run-1",
+            agentId="写作",
+        ),
+    )
+
+    assert billing.usages[0]["promptCacheMissTokens"] == 80
+    assert billing.usages[0]["reasoningTokens"] == 12
 
 
 @pytest.mark.asyncio

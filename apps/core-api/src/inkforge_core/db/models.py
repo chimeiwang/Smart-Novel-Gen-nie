@@ -1909,7 +1909,9 @@ class TokenUsage(Base):
     id: Mapped[str] = mapped_column(Text, nullable=False, default=generate_id)
     model: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("''::text"))
     novelId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    promptCacheMissTokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     promptTokens: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    reasoningTokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     requestId: Mapped[str | None] = mapped_column(Text, nullable=True)
     taskId: Mapped[str | None] = mapped_column(Text, nullable=True)
     runId: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -1935,6 +1937,20 @@ class TokenUsage(Base):
         CheckConstraint(
             '"requestId" IS NULL OR btrim("requestId") <> \'\'',
             name="TokenUsage_requestId_check",
+        ),
+        CheckConstraint(
+            '("promptCacheMissTokens" IS NULL OR "promptCacheMissTokens" >= 0) '
+            'AND ("reasoningTokens" IS NULL OR "reasoningTokens" >= 0)',
+            name="TokenUsage_token_details_nonnegative_check",
+        ),
+        CheckConstraint(
+            '"promptCacheMissTokens" IS NULL OR '
+            '"cachedTokens" + "promptCacheMissTokens" = "promptTokens"',
+            name="TokenUsage_prompt_cache_details_check",
+        ),
+        CheckConstraint(
+            '"reasoningTokens" IS NULL OR "reasoningTokens" <= "completionTokens"',
+            name="TokenUsage_reasoning_details_check",
         ),
         Index("TokenUsage_agentId_idx", "agentId"),
         Index("TokenUsage_novelId_idx", "novelId"),

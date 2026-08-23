@@ -88,9 +88,26 @@ def _business_contract_tables() -> dict[str, dict[str, Any]]:
     }
     token_usage = tables["TokenUsage"]
     known_columns = {column["name"] for column in token_usage["columns"]}
-    for column_name in ("requestId", "taskId", "runId"):
+    for column_name in (
+        "promptCacheMissTokens",
+        "reasoningTokens",
+        "requestId",
+        "taskId",
+        "runId",
+    ):
         if column_name not in known_columns:
             # 隔离迁移阶段先由专项测试锁定新增列；数据库演练后再刷新冻结契约。
+            if column_name in {"promptCacheMissTokens", "reasoningTokens"}:
+                token_usage["columns"].append(
+                    {
+                        "default": None,
+                        "formatType": "integer",
+                        "name": column_name,
+                        "nullable": True,
+                        "udtName": "int4",
+                    }
+                )
+                continue
             token_usage["columns"].append(
                 {
                     "default": None,
@@ -353,9 +370,12 @@ def test_primary_keys_foreign_keys_and_indexes_match_the_frozen_contract() -> No
             {table.primary_key, *table.foreign_key_constraints}
         )
         if table_name == "TokenUsage":
-            assert {
-                constraint.name for constraint in other_constraints
-            } == {"TokenUsage_requestId_check"}
+            assert {constraint.name for constraint in other_constraints} == {
+                "TokenUsage_requestId_check",
+                "TokenUsage_token_details_nonnegative_check",
+                "TokenUsage_prompt_cache_details_check",
+                "TokenUsage_reasoning_details_check",
+            }
         else:
             assert not other_constraints
 
@@ -369,15 +389,39 @@ def test_token_usage_attribution_metadata_is_exact() -> None:
         assert column.nullable is True
         assert column.server_default is None
 
+    for column_name in ("promptCacheMissTokens", "reasoningTokens"):
+        column = table.c[column_name]
+        assert isinstance(column.type, Integer)
+        assert column.nullable is True
+        assert column.server_default is None
+
     constraints = {
         constraint.name: constraint
         for constraint in table.constraints
         if isinstance(constraint, CheckConstraint)
     }
-    assert set(constraints) == {"TokenUsage_requestId_check"}
+    assert set(constraints) == {
+        "TokenUsage_requestId_check",
+        "TokenUsage_token_details_nonnegative_check",
+        "TokenUsage_prompt_cache_details_check",
+        "TokenUsage_reasoning_details_check",
+    }
     constraint_sql = str(constraints["TokenUsage_requestId_check"].sqltext)
     assert '"requestId" IS NULL' in constraint_sql
     assert 'btrim("requestId")' in constraint_sql
+
+    assert '"promptCacheMissTokens" IS NULL' in str(
+        constraints["TokenUsage_token_details_nonnegative_check"].sqltext
+    )
+    assert '"reasoningTokens" IS NULL' in str(
+        constraints["TokenUsage_token_details_nonnegative_check"].sqltext
+    )
+    assert '"cachedTokens" + "promptCacheMissTokens" = "promptTokens"' in str(
+        constraints["TokenUsage_prompt_cache_details_check"].sqltext
+    )
+    assert '"reasoningTokens" <= "completionTokens"' in str(
+        constraints["TokenUsage_reasoning_details_check"].sqltext
+    )
 
     indexes = {index.name: index for index in table.indexes}
     expected = {
