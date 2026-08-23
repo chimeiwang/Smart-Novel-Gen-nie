@@ -15,7 +15,8 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, Send, interrupt
 from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError, model_validator
 
-from ..artifacts.patch import TextReplacePatch
+from ..artifacts.patch import PatchApplicationError, TextReplacePatch
+from ..clients.core import CoreServiceError
 from ..definitions.agents import AgentId
 from ..graph.context import build_operation_context
 from ..graph.state import GraphState
@@ -58,6 +59,13 @@ class ArtifactPort(Protocol):
         state: dict[str, Any],
         event: dict[str, Any],
         content: str,
+    ) -> str: ...
+
+    async def patch(
+        self,
+        state: dict[str, Any],
+        artifact_id: str,
+        patches: list[TextReplacePatch],
     ) -> str: ...
 
     async def mark_awaiting_user(self, artifact_id: str) -> None: ...
@@ -467,8 +475,54 @@ def build_operation_graph(
     def route_after_review(state: GraphState) -> str:
         pending = state.get("pendingRevision")
         if pending and state.get("artifactIteration", 0) < state.get("maxArtifactIterations", 5):
+            if pending.get("revisionMode") == "patch":
+                return "applyArtifactPatch"
             return "reviseArtifact"
         return "markArtifactAwaitingUser"
+
+    async def apply_artifact_patch(state: GraphState) -> dict[str, Any]:
+        await ensure_active(state)
+        artifact_id = state.get("activeArtifactId")
+        pending = state.get("pendingRevision")
+        failure_code: str | None = None
+        if not isinstance(artifact_id, str) or not artifact_id:
+            failure_code = "PATCH_ARTIFACT_UNSUPPORTED"
+        elif not isinstance(pending, dict):
+            failure_code = "PATCH_ARTIFACT_UNSUPPORTED"
+        else:
+            try:
+                outcome = ReviewOutcome.model_validate(pending)
+                patches = outcome.patches
+                if outcome.revisionMode != "patch" or not patches:
+                    raise PatchApplicationError("PATCH_ARTIFACT_UNSUPPORTED")
+                await dependencies.artifacts.patch(dict(state), artifact_id, patches)
+            except PatchApplicationError as exc:
+                failure_code = exc.code
+            except CoreServiceError as exc:
+                failure_code = (
+                    "ARTIFACT_REVISION_CONFLICT"
+                    if exc.code == "ARTIFACT_REVISION_CONFLICT"
+                    else "PATCH_CORE_ERROR"
+                )
+            except (ValidationError, ValueError):
+                failure_code = "PATCH_ARTIFACT_UNSUPPORTED"
+        if failure_code is not None:
+            return {
+                "patchFailureCode": failure_code,
+                "errorMessage": _patch_failure_message(failure_code),
+                "artifactStatus": "blocked",
+                "pendingRevision": None,
+                "operationStep": "apply_artifact_patch",
+                "operationStage": "局部修订失败",
+            }
+        return {
+            "artifactIteration": state.get("artifactIteration", 0) + 1,
+            "pendingRevision": None,
+            "patchFailureCode": None,
+            "artifactStatus": "patched",
+            "operationStep": "apply_artifact_patch",
+            "operationStage": "应用局部修订",
+        }
 
     async def revise(state: GraphState) -> dict[str, Any]:
         await ensure_active(state)
@@ -504,7 +558,11 @@ def build_operation_graph(
         if artifact_id:
             await dependencies.artifacts.mark_awaiting_user(artifact_id)
         return {
-            "artifactStatus": "awaiting_user" if artifact_id else "none",
+            "artifactStatus": (
+                "blocked"
+                if artifact_id and state.get("patchFailureCode")
+                else "awaiting_user" if artifact_id else "none"
+            ),
             "phase": "waiting_user" if artifact_id else state.get("phase", "active"),
             "operationStep": "mark_awaiting_user",
             "operationStage": "等待用户决策",
@@ -615,6 +673,7 @@ def build_operation_graph(
     builder.add_node("reviewArtifact", review_artifact)
     builder.add_node("reviewArtifactWorker", review_worker)
     builder.add_node("mergeArtifactReviews", merge_reviews)
+    builder.add_node("applyArtifactPatch", apply_artifact_patch)
     builder.add_node("reviseArtifact", revise)
     builder.add_node("markArtifactAwaitingUser", mark_awaiting_user)
     builder.add_node("awaitUserDecision", await_user)
@@ -630,6 +689,12 @@ def build_operation_graph(
     builder.add_conditional_edges("reviewArtifact", route_review_workers)
     builder.add_edge("reviewArtifactWorker", "mergeArtifactReviews")
     builder.add_conditional_edges("mergeArtifactReviews", route_after_review)
+    builder.add_conditional_edges(
+        "applyArtifactPatch",
+        lambda state: "markArtifactAwaitingUser"
+        if state.get("patchFailureCode")
+        else "reviewArtifact",
+    )
     builder.add_edge("reviseArtifact", "submitArtifactOrRespond")
     builder.add_edge("markArtifactAwaitingUser", "awaitUserDecision")
     builder.add_edge("suggestNextAction", END)
@@ -819,3 +884,15 @@ def _required_state_text(state: GraphState, key: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"图状态缺少 {key}")
     return value
+
+
+def _patch_failure_message(code: str) -> str:
+    messages = {
+        "PATCH_TARGET_NOT_FOUND": "局部修订目标未找到，请确认草案内容后重试。",
+        "PATCH_TARGET_AMBIGUOUS": "局部修订目标不唯一，请确认草案内容后重试。",
+        "PATCH_OVERLAP": "局部修订范围发生重叠，请重新提交修改。",
+        "PATCH_ARTIFACT_UNSUPPORTED": "当前草案不支持局部修订，请改用完整返工。",
+        "ARTIFACT_REVISION_CONFLICT": "草案已被其他操作修改，请重新审核当前草案。",
+        "PATCH_CORE_ERROR": "局部修订未能保存，请重新审核当前草案。",
+    }
+    return messages.get(code, "局部修订未能应用，请重新审核当前草案。")

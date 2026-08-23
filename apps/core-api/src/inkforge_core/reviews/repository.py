@@ -463,6 +463,26 @@ class ReviewRepository:
                         )
                         .with_for_update()
                     )
+                if existing is None and request.expectedRevision is not None:
+                    raise ApiError(
+                        status_code=409,
+                        code="ARTIFACT_REVISION_CONFLICT",
+                        message="新建草案不得携带 expectedRevision",
+                    )
+                if (
+                    existing is not None
+                    and request.expectedRevision is not None
+                    and existing.revision != request.expectedRevision
+                ):
+                    raise ApiError(
+                        status_code=409,
+                        code="ARTIFACT_REVISION_CONFLICT",
+                        message="待审核草案修订号已变化",
+                        details={
+                            "expectedRevision": request.expectedRevision,
+                            "currentRevision": existing.revision,
+                        },
+                    )
                 payload = dict(request.payload)
                 await _materialize_selection_payload(
                     session, payload, kind=request.kind, novel_id=request.novelId

@@ -59,6 +59,9 @@ class CoreServiceError(RuntimeError):
         self.code = code
 
 
+_FORWARDED_CORE_ERROR_CODES = frozenset({"ARTIFACT_REVISION_CONFLICT"})
+
+
 class CoreServiceClient:
     def __init__(self, http: httpx.AsyncClient, signer: RequestSigner) -> None:
         self._http = http
@@ -505,9 +508,19 @@ class CoreServiceClient:
             response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             recoverable = exc.response.status_code >= 500
+            code: str | None = None
+            try:
+                body_value = exc.response.json()
+            except ValueError:
+                body_value = None
+            if isinstance(body_value, dict):
+                body_code = body_value.get("code")
+                if isinstance(body_code, str) and body_code in _FORWARDED_CORE_ERROR_CODES:
+                    code = body_code
             raise CoreServiceError(
                 "核心服务拒绝智能体回调",
                 recoverable=recoverable,
+                code=code,
             ) from exc
         except httpx.HTTPError as exc:
             raise CoreServiceError("核心服务暂时不可用", recoverable=True) from exc

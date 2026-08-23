@@ -122,6 +122,24 @@ def test_internal_artifact_request_is_strict_and_kind_matches_payload() -> None:
                 "createdByAgent": "写作",
             }
         )
+
+
+@pytest.mark.parametrize("value", [True, False, 0, -1])
+def test_create_artifact_expected_revision_is_strict_positive_integer(value: object) -> None:
+    with pytest.raises(ValidationError):
+        CreateArtifactRequest.model_validate(
+            {
+                "runId": "run-1",
+                "taskId": "task-1",
+                "novelId": "novel-1",
+                "jobId": "job-1",
+                "kind": "chapter_draft",
+                "status": "under_review",
+                "payload": {"kind": "chapter_draft", "content": "正文"},
+                "createdByAgent": "写作",
+                "expectedRevision": value,
+            }
+        )
     with pytest.raises(ValidationError):
         CreateArtifactRequest.model_validate(
             {

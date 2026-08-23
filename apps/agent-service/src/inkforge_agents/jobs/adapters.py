@@ -8,6 +8,7 @@ from typing import Any, Protocol, cast
 
 from pydantic import JsonValue
 
+from ..artifacts.patch import PatchApplicationError, TextReplacePatch, apply_text_patches
 from ..clients.core import CoreServiceClient, RunResource
 from ..operations.contracts import CreativeOperationKind
 from ..operations.definitions import OPERATION_DEFINITIONS
@@ -206,7 +207,11 @@ class CoreArtifactPort:
 
     async def mark_awaiting_user(self, artifact_id: str) -> None:
         record = self._require_record(artifact_id)
-        request = {**record.request, "status": "awaiting_user"}
+        request = {
+            **record.request,
+            "status": "awaiting_user",
+            "expectedRevision": record.revision,
+        }
         response = await self._core.create_artifact(
             record.resource,
             request,
@@ -214,6 +219,45 @@ class CoreArtifactPort:
         )
         record.request = request
         record.revision = _revision(response)
+
+    async def patch(
+        self,
+        state: dict[str, Any],
+        artifact_id: str,
+        patches: list[TextReplacePatch],
+    ) -> str:
+        del state
+        record = self._require_record(artifact_id)
+        if record.request.get("kind") != "chapter_draft":
+            raise PatchApplicationError("PATCH_ARTIFACT_UNSUPPORTED")
+        payload = record.request.get("payload")
+        if not isinstance(payload, Mapping) or payload.get("kind") != "chapter_draft":
+            raise PatchApplicationError("PATCH_ARTIFACT_UNSUPPORTED")
+        content = payload.get("content")
+        if not isinstance(content, str):
+            raise PatchApplicationError("PATCH_ARTIFACT_UNSUPPORTED")
+        updated_content = apply_text_patches(content, patches)
+        updated_payload = dict(payload)
+        updated_payload["content"] = updated_content
+        request = {
+            **record.request,
+            "status": "under_review",
+            "payload": updated_payload,
+            "expectedRevision": record.revision,
+        }
+        response = await self._core.create_artifact(
+            record.resource,
+            cast(dict[str, JsonValue], request),
+            idempotency_key=_idempotency(record.resource.runId, request),
+        )
+        returned_id = response.get("id")
+        if returned_id != artifact_id:
+            raise RuntimeError(
+                "ARTIFACT_REVISION_IDENTITY_MISMATCH：Core 返回了不同的草案标识"
+            )
+        record.request = request
+        record.revision = _revision(response)
+        return artifact_id
 
     async def apply(self, artifact_id: str) -> None:
         del artifact_id
@@ -301,6 +345,10 @@ class CoreArtifactPort:
             "createdByAgent": agent_id,
             "reviewerAgent": event.get("reviewerAgent"),
         }
+        if expected_artifact_id is not None:
+            request["expectedRevision"] = self._require_record(
+                expected_artifact_id
+            ).revision
         response = await self._core.create_artifact(
             resource,
             request,

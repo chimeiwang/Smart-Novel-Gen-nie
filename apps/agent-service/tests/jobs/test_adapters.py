@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, cast
 
 import pytest
+from inkforge_agents.artifacts.patch import PatchApplicationError, TextReplacePatch
 from inkforge_agents.clients.core import RunResource
 from inkforge_agents.jobs.adapters import (
     CoreArtifactPort,
@@ -43,7 +44,9 @@ class CoreClient:
         self.resources.append(resource)
         del idempotency_key
         self.artifacts.append(payload)
-        return {"id": "artifact-1", "revision": len(self.artifacts)}
+        expected = payload.get("expectedRevision")
+        revision = expected + 1 if isinstance(expected, int) else len(self.artifacts)
+        return {"id": "artifact-1", "revision": revision}
 
     async def submit_evaluation(
         self,
@@ -209,6 +212,46 @@ def test_artifact_port_rejects_release_without_owned_record() -> None:
 
     with pytest.raises(RuntimeError, match="缺少待审核草案上下文"):
         port.release("artifact-1", _resource())
+
+
+@pytest.mark.asyncio
+async def test_artifact_port_patch_uses_authoritative_revision_and_updates_after_core_success(
+) -> None:
+    core = CoreClient()
+    port = CoreArtifactPort(core)
+    state = _hydration_state()
+    port.hydrate(_resource(), state, _active_artifact())
+
+    await port.patch(
+        state,
+        "artifact-1",
+        [TextReplacePatch(kind="text_replace", find="完整正文", replace="修订正文")],
+    )
+
+    assert core.artifacts[-1]["expectedRevision"] == 2
+    assert core.artifacts[-1]["payload"]["content"] == "修订正文"
+    assert port.review_context("artifact-1")["revision"] == 3
+    assert port.review_context("artifact-1")["payload"]["content"] == "修订正文"
+
+
+@pytest.mark.asyncio
+async def test_artifact_port_patch_failure_does_not_call_core_or_mutate_record() -> None:
+    core = CoreClient()
+    port = CoreArtifactPort(core)
+    state = _hydration_state()
+    port.hydrate(_resource(), state, _active_artifact())
+    before = port.review_context("artifact-1")
+
+    with pytest.raises(PatchApplicationError) as caught:
+        await port.patch(
+            state,
+            "artifact-1",
+            [TextReplacePatch(kind="text_replace", find="不存在", replace="修订")],
+        )
+
+    assert caught.value.code == "PATCH_TARGET_NOT_FOUND"
+    assert core.artifacts == []
+    assert port.review_context("artifact-1") == before
 
 
 @pytest.mark.asyncio

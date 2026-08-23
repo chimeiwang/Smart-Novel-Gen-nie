@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal
 
 from inkforge_contracts.long_serial import SourceBinding
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, StrictInt, model_validator
 
 ArtifactStatus = Literal["draft", "under_review", "awaiting_user", "applying", "applied"]
 ArtifactKind = Literal[
@@ -127,6 +127,7 @@ class CreateArtifactRequest(ReviewSchema):
     diff: JsonValue | None = None
     createdByAgent: Literal["设定", "剧情", "写作", "校验", "编辑"]
     reviewerAgent: Literal["设定", "剧情", "写作", "校验", "编辑"] | None = None
+    expectedRevision: StrictInt | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def validate_payload_kind(self) -> CreateArtifactRequest:
