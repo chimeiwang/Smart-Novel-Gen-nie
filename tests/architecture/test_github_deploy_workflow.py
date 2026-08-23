@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
+
+import yaml
 
 ROOT = Path(__file__).parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "token-usage-details-migration.yml"
@@ -104,7 +109,7 @@ def test_migrate_dev_backs_up_double_runs_and_verifies_read_only_contract() -> N
         "docker exec -i",
         "schema_guard",
         "export_schema_contract",
-        'printf \'%s\' "$DATABASE_URL" | docker exec -i',
+        'printf \'%s\' "$DATABASE_URL" | timeout 180 docker exec -i',
         "docker cp",
         "upload-artifact",
         "trap",
@@ -112,8 +117,8 @@ def test_migrate_dev_backs_up_double_runs_and_verifies_read_only_contract() -> N
         assert value in migrate
     assert "pg_restore --list" in migrate
     assert "uv run python scripts/export_schema_contract.py" not in source
-    assert "contract-$run_id.json" in migrate
-    assert "$run_id.json" in migrate
+    assert "details-$run_id-$run_attempt.json" in migrate
+    assert "$run_id-$run_attempt.json" in migrate
     assert "reasoning_content" not in source
     assert "GITHUB_ENV" not in source
     assert "GITHUB_STEP_SUMMARY" not in source
@@ -143,3 +148,71 @@ def test_secrets_are_scoped_to_ssh_steps_and_contract_is_only_artifact() -> None
     assert "database.dump" not in artifact
     assert "SHA256SUMS" not in artifact
     assert ".env." not in artifact
+
+
+def test_workflow_semantics_concurrency_timeout_and_all_shell_blocks() -> None:
+    source = _source()
+    workflow = yaml.safe_load(source)
+    assert workflow["on"] == {
+        "workflow_dispatch": {
+            "inputs": {
+                "action": {
+                    "description": "选择只读检查或执行 dev 迁移",
+                    "required": True,
+                    "type": "choice",
+                    "options": ["inspect", "migrate_dev"],
+                }
+            }
+        }
+    }
+    job = workflow["jobs"]["migration"]
+    assert job["environment"] == "production"
+    assert job["concurrency"] == {
+        "group": "token-usage-details-dev-migration",
+        "cancel-in-progress": False,
+    }
+    assert job["timeout-minutes"] == 30
+
+    run_blocks = [step["run"] for step in job["steps"] if "run" in step]
+    bash_path = shutil.which("bash")
+    assert bash_path is not None
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        for index, run_block in enumerate(run_blocks):
+            shell_file = Path(temporary_directory) / f"step-{index}.sh"
+            shell_file.write_text(run_block, encoding="utf-8")
+            result = subprocess.run(  # noqa: S603
+                [bash_path, "-n"],
+                input=shell_file.read_bytes().replace(b"\r", b""),
+                capture_output=True,
+            )
+            assert result.returncode == 0, result.stderr.decode()
+
+
+def test_remote_transports_have_uniform_timeouts_and_fixed_numeric_temp_paths() -> None:
+    source = _source()
+    transport_commands = re.findall(r"^\s+(ssh|scp)(?: -q)?\s+\\$", source, re.MULTILINE)
+    assert transport_commands
+    for option in (
+        "-o ConnectTimeout=15",
+        "-o ServerAliveInterval=15",
+        "-o ServerAliveCountMax=4",
+        "-o TCPKeepAlive=yes",
+        "-o StrictHostKeyChecking=yes",
+    ):
+        assert source.count(option) >= len(transport_commands)
+
+    assert "timeout 600 env BACKUP_ROOT=/srv/backups/inkforge-dev sh scripts/backup.sh" in source
+    assert "timeout 180 psql" in source
+    assert "PGOPTIONS='-c statement_timeout=120000 -c lock_timeout=30000'" in source
+    assert "timeout 180 docker exec" in source
+    assert "timeout 180 docker cp" in source
+    assert "timeout " in source
+
+    assert "GITHUB_RUN_ID" in source
+    assert "GITHUB_RUN_ATTEMPT" in source
+    assert "mktemp" not in source
+    assert "case \"$run_id\" in" in source
+    assert "case \"$run_attempt\" in" in source
+    assert "umask 077" in source
+    assert 'sh -s -- "$remote_sql" "$remote_contract"' in source
+    assert "rm -f -- '$remote_sql' '$remote_contract'" not in source
