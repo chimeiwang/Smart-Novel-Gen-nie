@@ -346,7 +346,7 @@ def test_migrate_dev_backs_up_double_runs_and_verifies_read_only_contract() -> N
         "schema_guard",
         "export_schema_contract",
         '"$container_contract" < "$database_url_file"',
-        "docker cp",
+        'sys.stdout.buffer.write(Path(sys.argv[1]).read_bytes())',
         "upload-artifact",
         "trap",
     ):
@@ -381,7 +381,9 @@ def test_secrets_are_scoped_to_ssh_steps_and_contract_is_only_artifact() -> None
     assert database_guard_index < backup_index
     assert backup_index < double_run_index
     assert double_run_index < migrate.index("schema_guard")
-    assert migrate.index("schema_guard") < migrate.index("docker cp")
+    assert migrate.index("schema_guard") < migrate.index(
+        'sys.stdout.buffer.write(Path(sys.argv[1]).read_bytes())'
+    )
 
     artifact = source.split("uses: actions/upload-artifact@v4", maxsplit=1)[1]
     assert "schema-contract" in artifact
@@ -448,7 +450,7 @@ def test_remote_transports_have_uniform_timeouts_and_fixed_numeric_temp_paths() 
     assert "timeout 180 psql" in source
     assert "PGOPTIONS='-c statement_timeout=120000 -c lock_timeout=30000'" in source
     assert "timeout 180 docker exec" in source
-    assert "timeout 180 docker cp" in source
+    assert 'timeout 180 docker exec -i "$core_container" python3 -c' in source
     assert "timeout " in source
 
     assert "GITHUB_RUN_ID" in source

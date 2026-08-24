@@ -716,9 +716,11 @@ jobs:
             echo "schema_guard 只读 contract 导出失败" >&2
             exit 1
           fi
-          rm -f "$contract_temp"
-          if ! timeout 180 docker cp "$core_container:$container_contract" "$contract_temp" >/dev/null 2>&1; then
-            echo "无法复制 schema contract" >&2
+          : > "$contract_temp"
+          if ! timeout 180 docker exec -i "$core_container" python3 -c \
+            'import sys; from pathlib import Path; sys.stdout.buffer.write(Path(sys.argv[1]).read_bytes())' \
+            "$container_contract" </dev/null >"$contract_temp" 2>/dev/null; then
+            echo "无法传输 schema contract" >&2
             exit 1
           fi
           [ -s "$contract_temp" ] || { echo "schema contract 为空" >&2; exit 1; }

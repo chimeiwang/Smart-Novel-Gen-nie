@@ -32,6 +32,8 @@
   部署用户对 `/srv/backups/inkforge-dev` 和 `/srv/backups/inkforge` 均无写权限；dev 备份固定写入应用目录下
   的私有 `.token-usage-dev-backups`，不得因此提权或复用生产备份目录。
 - dev 迁移后从真实数据库只读导出结构契约；提交前人工/自动核对差异只能包含两个 nullable INTEGER 列和三个 CHECK。
+- 结构契约从 Core 容器通过 `docker exec` 标准输出定向写入宿主机 `0600` 临时文件，不依赖服务器当前不可用的
+  `docker cp` 容器文件复制；标准输出只能进入文件，不能进入日志。
 - 固定 SQL 失败时，工作流只允许读取本次运行私有错误文件并输出预定义原因码；不得回显 PostgreSQL 异常正文、
   SQL、连接串或凭据。错误文件必须绑定运行编号并由 trap 清理。
 - CHECK 定义一致性不得拿手写字符串直接比对 PostgreSQL 的格式化文本；迁移应在事务内临时表上创建同一组
