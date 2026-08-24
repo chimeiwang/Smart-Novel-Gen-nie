@@ -3,7 +3,11 @@ from inkforge_core.errors import ApiError
 from inkforge_core.reviews.apply import resolve_apply_target
 from inkforge_core.reviews.diff import ArtifactPatchError, apply_text_replace_patch
 from inkforge_core.reviews.repository import ReviewRepository
-from inkforge_core.reviews.schemas import CreateArtifactRequest, assert_status_transition
+from inkforge_core.reviews.schemas import (
+    CreateArtifactRequest,
+    ReviewArtifactDecisionRequest,
+    assert_status_transition,
+)
 from inkforge_core.reviews.updates import filter_agent_updates_by_selection
 from pydantic import ValidationError
 
@@ -122,6 +126,24 @@ def test_internal_artifact_request_is_strict_and_kind_matches_payload() -> None:
                 "createdByAgent": "写作",
             }
         )
+
+
+@pytest.mark.parametrize("value", [True, False, 0, -1])
+def test_create_artifact_expected_revision_is_strict_positive_integer(value: object) -> None:
+    with pytest.raises(ValidationError):
+        CreateArtifactRequest.model_validate(
+            {
+                "runId": "run-1",
+                "taskId": "task-1",
+                "novelId": "novel-1",
+                "jobId": "job-1",
+                "kind": "chapter_draft",
+                "status": "under_review",
+                "payload": {"kind": "chapter_draft", "content": "正文"},
+                "createdByAgent": "写作",
+                "expectedRevision": value,
+            }
+        )
     with pytest.raises(ValidationError):
         CreateArtifactRequest.model_validate(
             {
@@ -133,5 +155,16 @@ def test_internal_artifact_request_is_strict_and_kind_matches_payload() -> None:
                 "payload": {"kind": "chapter_draft", "content": "正文"},
                 "createdByAgent": "写作",
                 "unexpected": True,
+            }
+        )
+
+
+def test_artifact_decision_expected_revision_rejects_boolean() -> None:
+    with pytest.raises(ValidationError):
+        ReviewArtifactDecisionRequest.model_validate(
+            {
+                "clientRequestId": "client-request-1234",
+                "expectedRevision": True,
+                "decision": "revise",
             }
         )

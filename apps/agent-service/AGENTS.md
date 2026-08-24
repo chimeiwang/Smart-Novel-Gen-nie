@@ -122,8 +122,13 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 - Agent 的产物提交工具必须配置为终止控制工具；`propose_updates`、`finish_update_builder` 等产物完成事件成功后应立即结束本轮工具循环。
 - `sync_lore` 已从当前可执行 Operation 和前端入口中删除；共享类型仅保留历史快照解析兼容，路由和分类器不得生成新的同步设定任务。
 - 当前运行创建草案后，`CoreArtifactPort` 保存已提交 Core 的完整请求快照；reviewer 只接收该权威草案并提交一次评审，reviser 接收同一草案、revision、artifactKey、原 payload 和合并后的 `requiredChanges`，按原 Operation 产物契约生成同类新 revision。`plan_chapter` 复审与返工额外接收主 Agent 生成草案时使用的冻结最小作品投影，用于核对名称、时间、数值和剧情边界，但仍不开放读取工具。没有权威快照时必须显式失败，不得猜测或从正文反推草案。
-- 首版不提供跨服务草案局部 patch。所有修改结论在合并时归一为完整 rewrite，保留具体修改意见和 patch 意图但不进入 patch 节点，不得伪装成局部修订成功，也不得绕过 ReviewArtifact 直接修改正式内容。
+- Reviewer 的 `revise + rewrite` 才调用 Reviser 完整返工；全部 Reviewer 都是严格 `revise + patch` 时，图使用确定性 patch 节点创建同一 ReviewArtifact 的新 revision，不调用 Primary 或 Reviser。patch 找不到、多命中、重叠、非章节目标或 `ARTIFACT_REVISION_CONFLICT` 时，原子放弃修改并进入 `blocked`/`waiting_user`，不得静默升级为 rewrite；其他 Core、网络或协议错误必须作为运行错误上抛，不能伪装成内容不通过。
 - 一致性终检固定由“校验”Agent 的 `quality` 模式执行，结果使用 Agent、Core 共用的严格报告契约；商业性、追读和爽点评审仍属于“编辑”职责。
+
+### 模型策略与 DeepSeek 传输
+
+- 生产模型请求必须在业务入口显式携带 `ModelExecutionPolicy`。长篇初稿、场景/整章/选区改写、中短篇大纲正文和选区替换使用 `thinking=enabled`、`reasoningEffort=high`；长篇 Reviewer、一致性 Quality、问答、复审报告、中短篇 `full_check` 和文风画像使用 `thinking=disabled`。`provider_default` 只保留测试、旧快照兼容和明确 legacy 路径，不能由 Agent ID、工具集合或 URL 推断。
+- `OPENAI_COMPATIBILITY_PROFILE=generic` 继续使用通用 ChatOpenAI；`deepseek_v4` 使用 DeepSeek 原始 JSON transport。DeepSeek 工具轮次的 `reasoning_content` 只在进程内消息回放，不进入稳定快照、ReviewArtifact、Core 用量或人工日志正文；日志只记录策略和用量诊断结构头。
 
 ## 数据与信任边界
 
@@ -153,10 +158,11 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 - Redis OOM、MISCONF、READONLY 和达到阈值的连续基础设施失败必须交给监督器并使 readiness 失败；TypeError、Pydantic 契约错误和未知程序异常不得在消费循环中无限吞掉。
 - `MODEL_MAX_OUTPUT_TOKENS` 表达当前部署模型的单次最大输出能力，默认 `384000`，合法范围为 `1..1_000_000`；普通 Agent 与文风画像共用该值。它不是目标篇幅，不要求模型生成到该长度，也不承诺无限输出。
 - 计费模型每次调用前仍必须向 Core 申请有限正整数 grant；模型授权生命周期为 1200 秒，供单次模型调用完成后上报实际用量，不改变内部服务请求令牌的短期约束。Core 可以按可用余额缩小额度，`ModelRuntime` 必须把实际授权的 `maxOutputTokens` 精确传给 Provider，禁止绕过授权上限。
-- Provider 成功形成规范化 `ModelTurnResult` 后，`ModelRuntime` 先向 Core 上报四项实际 token，再把同一
-  调用的 `taskId`、`runId`、Core 计费 `requestId`、provider、model、usage、完整 messages 和完整
-  output 交给人工日志 observer。非计费调用的计费请求标识明确为“无”；Provider 在返回 usage 前失败
-  时不伪造 token，人工日志绝不记录 `grantToken`。
+- Provider 成功形成规范化 `ModelTurnResult` 后，`ModelRuntime` 先向 Core 上报四项实际 token 及可选
+  `promptCacheMissTokens`/`reasoningTokens` 诊断，再把同一调用的 `taskId`、`runId`、Core 计费
+  `requestId`、provider、model、usage、完整 messages 和完整 output 交给人工日志 observer。DeepSeek
+  原始 `reasoning_content` 永不写入快照、ReviewArtifact、Core 或日志正文；非计费调用的计费请求标识
+  明确为“无”，Provider 在返回 usage 前失败时不伪造 token，人工日志绝不记录 `grantToken`。
 - Provider 必须返回规范化 `finishReason` 并保留供应商原始原因；`length`、`content_filter`、完成原因与工具状态矛盾，以及无合法工具调用的 `unknown` 都必须在接受正文或执行工具副作用前失败，当前不把 `length` 作为自动续写信号。文风画像只接受 `stop`、无工具调用且正文非空的纯文本响应，半截画像不得成功。人工模型日志同时记录规范化值和未经截断的原始值。
 - 人工日志当前使用 `INKFORGE-HUMAN-LOG/2` 长度分帧格式，结构头与正文按字节长度隔离，正文中的
   日志标记或 JSON 不参与结构解析。旧版文本迁入 `trust=unverified` 的只读 legacy 帧；残缺尾部只在

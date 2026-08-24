@@ -1166,6 +1166,14 @@ async def test_planner_uses_responses_drafts_and_compiles_fixture_package() -> N
         _CINEMATOGRAPHY_FORMAT_NAME,
     ]
     assert all(request.thinkingMode == "disabled" for request in provider.requests)
+    assert [
+        (request.policy.policyId, request.policy.thinkingMode, request.policy.reasoningEffort)
+        for request in provider.requests
+    ] == [
+        ("v1:video-scene-plan-no-thinking", "disabled", None),
+        ("v1:video-scene-plan-no-thinking", "disabled", None),
+        ("v1:video-scene-plan-no-thinking", "disabled", None),
+    ]
     assert all(request.tools == [] for request in provider.requests)
     assert all(request.requiredToolName is None for request in provider.requests)
     assert all(

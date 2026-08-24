@@ -96,7 +96,8 @@ def test_workflow_pins_sql_hash_and_uses_production_ssh_environment() -> None:
     source = _source()
 
     assert "scripts/migrations/20260823_token_usage_details.sql" in source
-    assert hashlib.sha256(MIGRATION.read_bytes()).hexdigest().upper() == EXPECTED_SHA256
+    migration_bytes = MIGRATION.read_bytes().replace(b"\r\n", b"\n")
+    assert hashlib.sha256(migration_bytes).hexdigest().upper() == EXPECTED_SHA256
     assert EXPECTED_SHA256 in source
     for value in (
         "environment: production",

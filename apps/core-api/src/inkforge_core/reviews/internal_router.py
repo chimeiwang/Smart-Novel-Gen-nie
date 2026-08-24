@@ -12,6 +12,8 @@ from ..writing.tasks import WritingTaskRepository
 from .repository import ReviewRepository
 from .router import get_review_repository
 from .schemas import (
+    ArtifactConflictQuarantineRequest,
+    ArtifactConflictQuarantineResponse,
     CreateArtifactRequest,
     ReviewArtifactResponse,
     SubmitArtifactEvaluationRequest,
@@ -87,6 +89,39 @@ async def create_or_revise_artifact(
         novel_id=body.novelId,
     )
     return await repository.create_or_revise(user_id, body)
+
+
+@router.post(
+    "/{artifact_id}/awaiting-user-after-conflict",
+    response_model=ArtifactConflictQuarantineResponse,
+)
+async def quarantine_artifact_after_revision_conflict(
+    artifact_id: str,
+    body: ArtifactConflictQuarantineRequest,
+    request: Request,
+    verifier: Verifier,
+    repository: Repository,
+    task_repository: TaskRepository,
+) -> ArtifactConflictQuarantineResponse:
+    _require_authorization_header(request)
+    actual_novel_id, user_id = await task_repository.get_task_resources(body.taskId)
+    if actual_novel_id != body.novelId:
+        raise ApiError(
+            status_code=403,
+            code="ARTIFACT_TASK_MISMATCH",
+            message="待审核草案与任务小说不匹配",
+        )
+    await _verify(
+        request,
+        verifier,
+        run_id=body.runId,
+        task_id=body.taskId,
+        novel_id=body.novelId,
+    )
+    result = await repository.mark_awaiting_user_after_conflict(
+        user_id, artifact_id, body
+    )
+    return ArtifactConflictQuarantineResponse.model_validate(result)
 
 
 @router.post("/{artifact_id}/evaluations", response_model=ReviewArtifactResponse)

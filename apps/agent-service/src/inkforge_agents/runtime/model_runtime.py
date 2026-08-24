@@ -38,6 +38,12 @@ class ModelCallLogRecord(BaseModel):
     usage: ModelUsage
     finishReason: ModelFinishReason
     rawFinishReason: str | None
+    policyId: str = "未提供"
+    thinkingMode: str = "未提供"
+    reasoningEffort: str | None = None
+    reasoningTokens: int | None = None
+    promptCacheMissTokens: int | None = None
+    providerResponseId: str | None = None
 
 
 class BillingPort(Protocol):
@@ -183,7 +189,9 @@ class ModelRuntime:
                     "grantToken": grant_token,
                     "promptTokens": result.usage.promptTokens,
                     "cachedTokens": result.usage.cachedTokens,
+                    "promptCacheMissTokens": result.diagnostics.promptCacheMissTokens,
                     "completionTokens": result.usage.completionTokens,
+                    "reasoningTokens": result.diagnostics.reasoningTokens,
                     "totalTokens": result.usage.totalTokens,
                 },
                 grant_request_id,
@@ -260,6 +268,12 @@ class ModelRuntime:
                 usage=result.usage,
                 finishReason=result.finishReason,
                 rawFinishReason=result.rawFinishReason,
+                policyId=request.policy.policyId,
+                thinkingMode=request.policy.thinkingMode,
+                reasoningEffort=request.policy.reasoningEffort,
+                reasoningTokens=result.diagnostics.reasoningTokens,
+                promptCacheMissTokens=result.diagnostics.promptCacheMissTokens,
+                providerResponseId=result.providerResponseId,
             )
         )
 

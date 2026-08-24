@@ -17,6 +17,7 @@ from inkforge_core.billing.repository import (
 from inkforge_core.billing.schemas import ModelGrantClaims, ReportModelUsageRequest
 from inkforge_core.billing.service import BillingService
 from inkforge_core.db.models import CreditLedger, TokenUsage, User
+from pydantic import ValidationError
 from sqlalchemy import DefaultClause, MetaData, func, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
@@ -59,6 +60,47 @@ def _usage(
         completion_tokens=completion_tokens,
         total_tokens=100 + completion_tokens,
     )
+
+
+def _report_request(**overrides: object) -> ReportModelUsageRequest:
+    values: dict[str, object] = {
+        "requestId": "request-report",
+        "taskId": "task-report",
+        "runId": "run-report",
+        "novelId": "novel-1",
+        "grantToken": "grant-token",
+        "promptTokens": 100,
+        "cachedTokens": 40,
+        "completionTokens": 20,
+        "totalTokens": 120,
+    }
+    values.update(overrides)
+    return ReportModelUsageRequest(**values)
+
+
+@pytest.mark.parametrize(
+    "field_value",
+    [
+        {"promptCacheMissTokens": True},
+        {"reasoningTokens": False},
+        {"promptCacheMissTokens": -1},
+        {"reasoningTokens": -1},
+        {"promptCacheMissTokens": 50},
+        {"reasoningTokens": 21},
+    ],
+)
+def test_report_model_usage_rejects_invalid_token_details(
+    field_value: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        _report_request(**field_value)
+
+
+def test_report_model_usage_allows_legacy_calls_without_token_details() -> None:
+    request = _report_request()
+
+    assert request.promptCacheMissTokens is None
+    assert request.reasoningTokens is None
 
 
 def _empty_usage() -> ChargeUsage:
@@ -323,6 +365,8 @@ async def test_legacy_ledger_retry_is_idempotent_without_backfilling_usage(
         ("cached_tokens", 41),
         ("completion_tokens", 21),
         ("total_tokens", 121),
+        ("prompt_cache_miss_tokens", 61),
+        ("reasoning_tokens", 11),
     ],
 )
 async def test_legacy_ledger_retry_with_different_persisted_payload_conflicts(
@@ -518,5 +562,44 @@ async def test_zero_usage_writes_one_token_usage_and_retries_idempotently(
         assert usage.requestId == "request-empty"
         assert usage.taskId == "task-empty"
         assert usage.runId == "run-empty"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_token_details_are_persisted_and_reasoning_is_not_billed(
+    tmp_path: Path,
+) -> None:
+    engine, factory = await _create_database(tmp_path / "Token明细.db")
+    try:
+        async with factory() as session, session.begin():
+            session.add(
+                User(
+                    id="user-1",
+                    username="alice",
+                    passwordHash="固定哈希",
+                    creditBalanceMicros=1_000_000,
+                )
+            )
+        repository = BillingRepository(factory)
+        detailed = replace(
+            _usage(request_id="request-detailed"),
+            prompt_cache_miss_tokens=60,
+            reasoning_tokens=10,
+        )
+        plain = _usage(request_id="request-plain")
+
+        detailed_result = await repository.charge_usage(detailed)
+        plain_result = await repository.charge_usage(plain)
+
+        async with factory() as session:
+            usage = (
+                await session.execute(
+                    select(TokenUsage).where(TokenUsage.requestId == "request-detailed")
+                )
+            ).scalar_one()
+        assert usage.promptCacheMissTokens == 60
+        assert usage.reasoningTokens == 10
+        assert detailed_result.charged_micros == plain_result.charged_micros
     finally:
         await engine.dispose()

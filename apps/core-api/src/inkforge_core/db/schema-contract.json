@@ -224,13 +224,13 @@
       "version": "0.8.0"
     }
   ],
-  "fingerprint": "36904c220803175dbb65dc38329f29b8d41f1386cac46f4992d8f77ad6653f40",
+  "fingerprint": "fd73816e69299a516d6e71f8eaca16e9f06d710d6dbc9e4e78012f0b18a57010",
   "schema": "public",
   "source": {
     "product": "PostgreSQL",
     "serverVersion": "14.23 (Ubuntu 14.23-0ubuntu0.22.04.1)",
     "serverVersionNum": 140023,
-    "sourceId": "6946abf71f0bd5fa08828f59f34df7358816082fbe3787c451c2a0b2d95c338e"
+    "sourceId": "6dabfab4ee7b39b3cf4429416350eb9d1f2f5bcfc9a5dc17ef08177acacac8b2"
   },
   "tables": [
     {
@@ -6461,8 +6461,26 @@
     {
       "checkConstraints": [
         {
+          "definition": "CHECK (\"promptCacheMissTokens\" IS NULL OR (\"cachedTokens\" + \"promptCacheMissTokens\") = \"promptTokens\")",
+          "name": "TokenUsage_prompt_cache_details_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (\"reasoningTokens\" IS NULL OR \"reasoningTokens\" <= \"completionTokens\")",
+          "name": "TokenUsage_reasoning_details_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
           "definition": "CHECK (\"requestId\" IS NULL OR btrim(\"requestId\") <> ''::text)",
           "name": "TokenUsage_requestId_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK ((\"promptCacheMissTokens\" IS NULL OR \"promptCacheMissTokens\" >= 0) AND (\"reasoningTokens\" IS NULL OR \"reasoningTokens\" >= 0))",
+          "name": "TokenUsage_token_details_nonnegative_check",
           "noInherit": false,
           "validated": true
         }
@@ -6518,10 +6536,24 @@
           "udtName": "text"
         },
         {
+          "default": null,
+          "formatType": "integer",
+          "name": "promptCacheMissTokens",
+          "nullable": true,
+          "udtName": "int4"
+        },
+        {
           "default": "0",
           "formatType": "integer",
           "name": "promptTokens",
           "nullable": false,
+          "udtName": "int4"
+        },
+        {
+          "default": null,
+          "formatType": "integer",
+          "name": "reasoningTokens",
+          "nullable": true,
           "udtName": "int4"
         },
         {

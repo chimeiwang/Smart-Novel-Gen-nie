@@ -4954,8 +4954,16 @@ export interface components {
             promptTokens: number;
             /** Cachedtokens */
             cachedTokens: number;
+            /** Promptcachemisstokens */
+            promptCacheMissTokens: number | null;
             /** Completiontokens */
             completionTokens: number;
+            /** Reasoningtokens */
+            reasoningTokens: number | null;
+            /** Visiblecompletiontokens */
+            visibleCompletionTokens: number | null;
+            /** Tokendetailscomplete */
+            tokenDetailsComplete: boolean;
             /** Totaltokens */
             totalTokens: number;
             /**
@@ -4974,8 +4982,16 @@ export interface components {
             promptTokens: number;
             /** Cachedtokens */
             cachedTokens: number;
+            /** Promptcachemisstokens */
+            promptCacheMissTokens: number | null;
             /** Completiontokens */
             completionTokens: number;
+            /** Reasoningtokens */
+            reasoningTokens: number | null;
+            /** Visiblecompletiontokens */
+            visibleCompletionTokens: number | null;
+            /** Tokendetailscomplete */
+            tokenDetailsComplete: boolean;
             /** Totaltokens */
             totalTokens: number;
             /** Calls */

@@ -20,6 +20,7 @@ from ..clients.core import RunResource
 from ..providers.base import ModelMessage, ModelTurnRequest, ModelTurnResult
 from ..queue.consumer import NonRetryableJobError
 from ..queue.repository import QueueJob
+from ..runtime.model_policy import resolve_short_medium_model_policy
 from ..runtime.model_runtime import ModelCallContext, ModelRuntime
 from .workflow_log import WorkflowLogPort
 
@@ -511,6 +512,7 @@ def _build_request(
         ],
         tools=[],
         maxOutputTokens=384_000,
+        policy=resolve_short_medium_model_policy(payload.operation),
     )
 
 

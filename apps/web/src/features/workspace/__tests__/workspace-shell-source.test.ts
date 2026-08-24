@@ -49,7 +49,7 @@ test("工作区保留统一三栏并按需挂载视频制作台", async () => {
 
 test("中短篇作品只进入简化写作台且没有视频入口", async () => {
   const shellUrl = new URL("../workspace-shell.tsx", import.meta.url);
-  const source = await readFile(shellUrl, "utf8");
+  const source = (await readFile(shellUrl, "utf8")).replaceAll("\r\n", "\n");
 
   assert.match(source, /novel\.storyLengthProfile === "short_medium"/);
   assert.match(source, /<ShortMediumWorkspace/);

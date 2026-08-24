@@ -45,7 +45,8 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 
 - Agent 上报实际 token usage；
 - Core 在同一短事务中以 `requestId` 幂等处理余额和用量，把授权校验后的 `requestId/taskId/runId`
-  与四项 token 一起写入 `TokenUsage`；
+  与四项 token 一起写入 `TokenUsage`；DeepSeek 可报告的 `promptCacheMissTokens` 与 `reasoningTokens`
+  作为可空诊断字段一并保存，reasoning token 已包含在 completion 中，不重复计费；
 - 金额大于零时同步扣减余额并写入 `CreditLedger.ai_charge`，其 `requestId` 与 `TokenUsage` 相同；
 - 四项 token 全为零的真实计费调用仍写入一条 `TokenUsage`，但不写 `CreditLedger`、不扣余额；重复零
   usage 不产生任何写副作用，`balanceAfterMicros` 返回重放时查询到的当前余额；
@@ -64,6 +65,11 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 不属于当前用户的任务统一返回 404；响应包含 `taskId`、调用数、四项 token 汇总，以及按
 `createdAt, id` 升序排列的完整逐调用 `requestId`、`runId`、`agentId`、`model`、四项 token 和 UTC
 `createdAt`。接口不截断或分页调用明细，也不返回 prompt 正文、模型输出、余额或 `grantToken`。
+
+逐请求的两个新增诊断字段缺一时保持 `NULL`，并返回 `tokenDetailsComplete=false`；只有两者都存在时才派生
+`visibleCompletionTokens`。任务汇总只有全部调用明细完整时才求和，否则保持 `NULL/false`。这两个字段的
+应用代码、契约和迁移脚本已经实现，但服务器 dev PostgreSQL 迁移、真实库只读 `schema-contract.json`
+导出和生产部署尚未完成，属于远程门禁。
 
 计费和草案应用属于关键写入，禁止放入可丢弃队列。
 
@@ -88,7 +94,7 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
 
 2026-07-14 的 PostgreSQL schema 变更是用户明确批准的单次例外：新增 `WritingRunCommand`，为 `WritingStyle` 增加强制 `userId`，并为 `StylePortraitTask` 增加可空 `section`。迁移执行前必须完成可恢复备份；按已批准方案清空旧文风、文风参考和画像任务数据，同时保留用户、小说、章节、会话及其他正式数据。应用启动不得自动修改 schema。
 
-用户于 2026-08-21 另行明确批准唯一版本化迁移
+用户于 2026-08-21 另行明确批准的第一个版本化迁移为
 `scripts/migrations/20260821_token_usage_task_run.sql`：只允许为 `TokenUsage` 增加可空 `TEXT`
 `requestId/taskId/runId`，增加非空白 `requestId` 检查、`requestId` 唯一索引、
 `(userId, taskId, createdAt)` 和 `(runId, createdAt)` 复合索引。三个字段可空只为兼容历史行；历史值
@@ -97,6 +103,11 @@ PostgreSQL 重复执行验证；应用启动仍不得自动修改 schema。当�
 本需求文档不表示生产数据库已经迁移或新版本已经部署；实际执行后还必须从隔离库导出新的
 `schema-contract.json` 并验证生产实际结构与 contract 精确一致。
 
+用户于 2026-08-23 明确批准第二个版本化迁移
+`scripts/migrations/20260823_token_usage_details.sql`：只允许为 `TokenUsage` 增加可空 `INTEGER`
+`promptCacheMissTokens`/`reasoningTokens` 和三个 CHECK；无默认值、无回填、无索引，旧行保持 `NULL`。
+执行前必须完成可恢复备份，只在服务器 dev PostgreSQL 受控执行并重复执行验证，随后从真实库只读导出新的
+`schema-contract.json`；应用启动仍不得自动修改 schema。本需求文档不表示该迁移已经执行或新版本已经部署。
 用户于 2026-08-23 明确批准
 `scripts/migrations/20260823_production_video_adaptation_domain.sql`：只允许把已在服务器端
 `novelwriterdev` 验证过的视频控制面、章节改编、分集、逐镜提示词、视觉设定版本和逐镜参考绑定
@@ -120,6 +131,8 @@ profile 后，兼容镜像已先行发布，同一具名迁移已再次执行并
 - 使用 `INKFORGE-HUMAN-LOG/2` 长度分帧格式保存完整模型 messages、模型正文和中文状态切换；正文
   中出现日志标记或 JSON 不得污染结构解析。
 - 每个模型调用区块记录 `taskId`、`runId`、Core 计费 `requestId`、provider/model 和四项实际 token；
+- 可选 `promptCacheMissTokens`、`reasoningTokens` 仅作为诊断结构头记录；DeepSeek 原始 `reasoning_content`
+  只在进程内工具轮次回放，绝不持久化或写入日志正文；
   非计费调用显示无计费请求标识，Provider 无可靠 usage 的失败不伪造 token，任何区块都不记录
   `grantToken`。
 - 旧版日志原文进入 `trust=unverified` 的只读 legacy 边界；残缺尾部只在可信运行元数据完整时隔离为
@@ -174,8 +187,8 @@ profile 后，兼容镜像已先行发布，同一具名迁移已再次执行并
 - 生产 Compose 不创建 PostgreSQL 容器或数据卷，测试 Compose 使用独立测试数据库；
 - Core 通过 `host.docker.internal` 连接现有宿主机 PostgreSQL 14；
 - 不提供初始化 SQL；
-- 应用启动不执行迁移、建表或删表；获批的 2026-08-21 `TokenUsage` 版本化迁移与 2026-08-23 视频
-  结构晋升只能分别由具名脚本和受控运维流程单独执行；
+- 应用启动不执行迁移、建表或删表；获批的 2026-08-21 与 2026-08-23 `TokenUsage` 版本化迁移，以及 2026-08-23
+  视频结构晋升，都只能由各自具名脚本和受控运维流程单独执行；本需求文档不表示 TokenUsage 迁移已经执行。
 - Core 启动就绪检查对现有 schema 做只读指纹校验。
 
 2 核 2 GB 默认限制：
@@ -202,7 +215,8 @@ profile 后，兼容镜像已先行发布，同一具名迁移已再次执行并
 | `AGENT_MAX_CONCURRENCY` | Agent | 单进程不同项目队列 job 与全局模型调用上限，只允许 1、2 或 3，2 核 2 GB 默认 3；同一 `novelId` 始终串行 |
 | `RAG_INDEX_ENABLED` | Core、Agent | 同时启用资料索引投递和 embedding 就绪校验；两端必须使用相同值 |
 | `OPENAI_API_KEY` | Agent | 模型服务密钥 |
-| `OPENAI_BASE_URL` | Agent | 模型服务地址 |
+| `OPENAI_COMPATIBILITY_PROFILE` | Agent | 显式兼容协议，只允许 `generic` 或 `deepseek_v4`；生产默认 `deepseek_v4`，不能根据 URL 推断 |
+| `OPENAI_BASE_URL` | Agent | 模型服务根地址；生产默认 `https://api.deepseek.com`，与 profile 配套但不决定 profile |
 | `OPENAI_MODEL` | Agent | 模型名称 |
 | `CORE_SERVICE_PRIVATE_KEY_PATH` | Core | Core 签名私钥 |
 | `AGENT_SERVICE_PUBLIC_KEY_PATH` | Core | Agent 验签公钥 |

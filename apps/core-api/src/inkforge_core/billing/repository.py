@@ -57,6 +57,8 @@ class ChargeUsage:
     cached_tokens: int
     completion_tokens: int
     total_tokens: int
+    prompt_cache_miss_tokens: int | None = None
+    reasoning_tokens: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +104,8 @@ class TaskUsageCallSnapshot:
     cached_tokens: int
     completion_tokens: int
     total_tokens: int
+    prompt_cache_miss_tokens: int | None
+    reasoning_tokens: int | None
     created_at: datetime
 
 
@@ -285,7 +289,9 @@ class BillingRepository:
                             model=usage.model,
                             promptTokens=usage.prompt_tokens,
                             cachedTokens=usage.cached_tokens,
+                            promptCacheMissTokens=usage.prompt_cache_miss_tokens,
                             completionTokens=usage.completion_tokens,
+                            reasoningTokens=usage.reasoning_tokens,
                             totalTokens=usage.total_tokens,
                             agentId=usage.agent_id,
                             novelId=usage.novel_id,
@@ -419,7 +425,9 @@ def _task_usage_call_snapshot(item: TokenUsage) -> TaskUsageCallSnapshot:
         model=item.model,
         prompt_tokens=item.promptTokens,
         cached_tokens=item.cachedTokens,
+        prompt_cache_miss_tokens=item.promptCacheMissTokens,
         completion_tokens=item.completionTokens,
+        reasoning_tokens=item.reasoningTokens,
         total_tokens=item.totalTokens,
         created_at=created_at,
     )
@@ -468,7 +476,9 @@ def _same_usage(existing: TokenUsage, usage: ChargeUsage) -> bool:
         and existing.agentId == usage.agent_id
         and existing.promptTokens == usage.prompt_tokens
         and existing.cachedTokens == usage.cached_tokens
+        and existing.promptCacheMissTokens == usage.prompt_cache_miss_tokens
         and existing.completionTokens == usage.completion_tokens
+        and existing.reasoningTokens == usage.reasoning_tokens
         and existing.totalTokens == usage.total_tokens
     )
 
@@ -516,4 +526,6 @@ def _same_legacy_charge(
         and existing.completionTokens == usage.completion_tokens
         and existing.totalTokens == usage.total_tokens
         and existing.amountMicros == -amount
+        and usage.prompt_cache_miss_tokens is None
+        and usage.reasoning_tokens is None
     )

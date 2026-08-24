@@ -1,0 +1,13 @@
+{
+  "id": "resp-tool-1",
+  "choices": [{
+    "message": {
+      "role": "assistant",
+      "content": null,
+      "reasoning_content": "先查资料，再继续写作。",
+      "tool_calls": [{"id": "call-1", "type": "function", "function": {"name": "lookup", "arguments": "{\"query\":\"世界观\"}"}}]
+    },
+    "finish_reason": "tool_calls"
+  }],
+  "usage": {"prompt_tokens": 100, "prompt_cache_hit_tokens": 70, "prompt_cache_miss_tokens": 30, "completion_tokens": 40, "total_tokens": 140, "completion_tokens_details": {"reasoning_tokens": 12}}
+}

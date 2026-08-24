@@ -8,7 +8,9 @@ from inkforge_agents.providers.base import (
     ModelTurnRequest,
     ModelTurnResult,
     ModelUsage,
+    ModelUsageDiagnostics,
 )
+from inkforge_agents.runtime.model_policy import LEGACY_PROVIDER_DEFAULT, REPORT_NO_THINKING
 from inkforge_agents.runtime.model_runtime import (
     ModelCallContext,
     ModelCallLogRecord,
@@ -115,6 +117,7 @@ async def test_model_runtime_limits_process_wide_parallel_calls() -> None:
         messages=[{"role": "user", "content": "并发测试"}],
         tools=[],
         maxOutputTokens=128,
+        policy=LEGACY_PROVIDER_DEFAULT,
     )
     tasks = [asyncio.create_task(runtime.run_turn(request)) for _ in range(4)]
     try:
@@ -180,6 +183,7 @@ async def test_model_runtime_limits_billable_authorizations() -> None:
         messages=[{"role": "user", "content": "计费并发测试"}],
         tools=[],
         maxOutputTokens=128,
+        policy=LEGACY_PROVIDER_DEFAULT,
     )
     context = ModelCallContext(
         userId="user-1",
@@ -216,6 +220,7 @@ async def test_billable_runtime_authorizes_then_reports_exact_usage() -> None:
         messages=[{"role": "user", "content": "正文" * 10_000}],
         tools=[],
         maxOutputTokens=4096,
+        policy=LEGACY_PROVIDER_DEFAULT,
     )
 
     result = await runtime.run_turn(request, context=context)
@@ -228,6 +233,42 @@ async def test_billable_runtime_authorizes_then_reports_exact_usage() -> None:
     assert billing.usages[0]["totalTokens"] == 130
     assert billing.usages[0]["grantToken"] == "grant"
     assert billing.usages[0]["requestId"] == "grant-request-1"
+
+
+@pytest.mark.asyncio
+async def test_billable_runtime_reports_provider_token_details_without_rebilling() -> None:
+    class DetailedProvider(Provider):
+        async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+            result = await super().complete_turn(request)
+            return result.model_copy(
+                update={
+                    "diagnostics": ModelUsageDiagnostics(
+                        promptCacheMissTokens=80,
+                        reasoningTokens=12,
+                    )
+                }
+            )
+
+    billing = Billing()
+    runtime = ModelRuntime(DetailedProvider(), billing=billing)  # type: ignore[arg-type]
+    await runtime.run_turn(
+        ModelTurnRequest(
+            messages=[{"role": "user", "content": "明细"}],
+            tools=[],
+            maxOutputTokens=128,
+            policy=LEGACY_PROVIDER_DEFAULT,
+        ),
+        context=ModelCallContext(
+            userId="user-1",
+            novelId="novel-1",
+            taskId="task-1",
+            runId="run-1",
+            agentId="写作",
+        ),
+    )
+
+    assert billing.usages[0]["promptCacheMissTokens"] == 80
+    assert billing.usages[0]["reasoningTokens"] == 12
 
 
 @pytest.mark.asyncio
@@ -250,6 +291,7 @@ async def test_billable_runtime_classifies_authorization_failure() -> None:
                 messages=[{"role": "user", "content": "正文"}],
                 tools=[],
                 maxOutputTokens=128,
+                policy=LEGACY_PROVIDER_DEFAULT,
             ),
             context=ModelCallContext(
                 userId="user-1",
@@ -276,6 +318,7 @@ async def test_billable_runtime_classifies_provider_failure() -> None:
                 messages=[{"role": "user", "content": "正文"}],
                 tools=[],
                 maxOutputTokens=128,
+                policy=LEGACY_PROVIDER_DEFAULT,
             ),
             context=ModelCallContext(
                 userId="user-1",
@@ -314,6 +357,7 @@ async def test_billable_runtime_classifies_usage_report_failure_without_logging(
                 messages=[{"role": "user", "content": "正文"}],
                 tools=[],
                 maxOutputTokens=128,
+                policy=LEGACY_PROVIDER_DEFAULT,
             ),
             context=ModelCallContext(
                 userId="user-1",
@@ -338,6 +382,7 @@ async def test_结构化输出模式把响应_schema_纳入预授权估算() -> 
         messages=[{"role": "user", "content": "生成导演草案"}],
         tools=[],
         maxOutputTokens=2_048,
+        policy=REPORT_NO_THINKING,
         structuredOutput={
             "route": "responses_json_schema_v1",
             "name": "director_draft",
@@ -394,6 +439,7 @@ async def test_计费运行时使用较小授权且不修改原请求() -> None:
         messages=[{"role": "user", "content": "正文"}],
         tools=[],
         maxOutputTokens=4_096,
+        policy=LEGACY_PROVIDER_DEFAULT,
     )
 
     await runtime.run_turn(request, context=context)
@@ -427,6 +473,7 @@ async def test_计费运行时在调用供应商前拒绝非法授权(
         messages=[{"role": "user", "content": "正文"}],
         tools=[],
         maxOutputTokens=4_096,
+        policy=LEGACY_PROVIDER_DEFAULT,
     )
 
     with pytest.raises(RuntimeError, match="模型授权输出上限无效"):
@@ -458,6 +505,7 @@ async def test_fake_runtime_never_calls_billing() -> None:
             messages=[{"role": "user", "content": "测试"}],
             tools=[],
             maxOutputTokens=128,
+            policy=LEGACY_PROVIDER_DEFAULT,
         ),
         context=ModelCallContext(
             userId="user-1",
@@ -497,6 +545,7 @@ async def test_runtime_records_complete_messages_without_tool_schema(billable: b
         messages=[{"role": "user", "content": "完整请求" * 5000}],
         tools=[{"name": "secret_tool", "description": "不应记录", "parameters": {}}],
         maxOutputTokens=128,
+        policy=LEGACY_PROVIDER_DEFAULT,
     )
 
     await runtime.run_turn(request, context=context)
@@ -555,6 +604,7 @@ async def test_结构化输出人工日志不记录正文_schema_或草案() -> 
         messages=[{"role": "user", "content": "章节正文秘密"}],
         tools=[],
         maxOutputTokens=1_024,
+        policy=REPORT_NO_THINKING,
         structuredOutput={
             "route": "responses_json_schema_v1",
             "name": "director_draft",
@@ -610,6 +660,7 @@ async def test_结构化输出人工日志只记录安全诊断() -> None:
         messages=[{"role": "user", "content": "不能进入日志的失败草案秘密"}],
         tools=[],
         maxOutputTokens=1_024,
+        policy=REPORT_NO_THINKING,
         structuredOutput={
             "route": "responses_json_schema_v1",
             "name": "director_draft",

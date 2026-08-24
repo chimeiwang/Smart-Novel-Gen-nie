@@ -135,6 +135,12 @@ def test_beat_plan_reviewer_brief_allows_frozen_source_facts() -> None:
 
     assert "冻结作品事实" in brief
     assert "不得调用读取工具" in brief
+    assert "小范围、可唯一定位的章节文本修改" in brief
+    assert "优先使用 revisionMode=patch 并提交严格 patches" in brief
+    assert "结构性、大范围或无法安全定位" in brief
+    assert "revisionMode=rewrite" in brief
+    assert "pass/block 组合仍按协议" in brief
+    assert "需要修改时统一提出完整 rewrite 意见" not in brief
 
 
 def test_structured_update_brief_is_scoped_to_operation_builder_tools() -> None:
@@ -174,7 +180,12 @@ def test_reviewer_brief_is_authoritative_and_single_submission() -> None:
     assert "Core 权威草案" in brief
     assert "不得重新读取" in brief
     assert "只调用一次 submit_evaluation" in brief
-    assert "完整 rewrite" in brief
+    assert "小范围、可唯一定位的章节文本修改" in brief
+    assert "优先使用 revisionMode=patch 并提交严格 patches" in brief
+    assert "结构性、大范围或无法安全定位" in brief
+    assert "revisionMode=rewrite" in brief
+    assert "pass/block 组合仍按协议" in brief
+    assert "需要修改时统一提出完整 rewrite 意见" not in brief
     assert "生成正文草案" not in brief
     assert "begin_artifact_output" not in brief
 

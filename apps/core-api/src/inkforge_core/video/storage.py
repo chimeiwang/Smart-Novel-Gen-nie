@@ -175,7 +175,7 @@ class VideoAssetStorage:
         """使用排他创建和 O_NOFOLLOW 防止覆盖及链接攻击。"""
 
         self._assert_root_containment(target)
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
         if hasattr(os, "O_NOFOLLOW"):
             flags |= os.O_NOFOLLOW
         try:

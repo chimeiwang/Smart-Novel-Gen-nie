@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 Environment = Literal["dev", "test", "production"]
 ModelProviderName = Literal["fake", "openai_compatible"]
+OpenAICompatibilityProfile = Literal["generic", "deepseek_v4"]
 
 
 class Settings(BaseSettings):
@@ -20,8 +21,9 @@ class Settings(BaseSettings):
 
     environment: Environment = "dev"
     model_provider: ModelProviderName = "openai_compatible"
+    openai_compatibility_profile: OpenAICompatibilityProfile = "generic"
     openai_api_key: SecretStr | None = None
-    openai_base_url: str = "https://api.deepseek.com/v1"
+    openai_base_url: str = "https://api.deepseek.com"
     openai_strict_base_url: str | None = None
     openai_model: str = "deepseek-v4-flash"
     model_max_output_tokens: int = Field(default=384_000, ge=1, le=1_000_000)

@@ -5,6 +5,7 @@ from typing import Any, Protocol
 from ..clients.core import RunResource
 from ..providers.base import ModelMessage, ModelTurnRequest
 from ..queue.repository import QueueJob
+from ..runtime.model_policy import resolve_portrait_model_policy
 from ..runtime.model_runtime import ModelCallContext, ModelRuntime
 from .workflow_log import WorkflowLogPort
 
@@ -167,6 +168,7 @@ class ModelPortraitGenerator:
                     ],
                     tools=[],
                     maxOutputTokens=self._max_output_tokens,
+                    policy=resolve_portrait_model_policy(),
                 ),
                 context=ModelCallContext(
                     userId=resource.userId,

@@ -29,6 +29,7 @@ from ..short_medium.repository import is_short_medium_artifact_key
 from ..writing.source_bindings import verify_source_bindings
 from ..writing.transaction_locks import WritingLockRequest, lock_writing_rows
 from .schemas import (
+    ArtifactConflictQuarantineRequest,
     ArtifactEvaluationResponse,
     ArtifactKind,
     ArtifactStatus,
@@ -463,6 +464,25 @@ class ReviewRepository:
                         )
                         .with_for_update()
                     )
+                if existing is None and request.expectedRevision is not None:
+                    raise ApiError(
+                        status_code=409,
+                        code="ARTIFACT_REVISION_CONFLICT",
+                        message="新建草案不得携带 expectedRevision",
+                    )
+                if existing is not None and (
+                    request.expectedRevision is None
+                    or existing.revision != request.expectedRevision
+                ):
+                    raise ApiError(
+                        status_code=409,
+                        code="ARTIFACT_REVISION_CONFLICT",
+                        message="待审核草案修订号已变化",
+                        details={
+                            "expectedRevision": request.expectedRevision,
+                            "currentRevision": existing.revision,
+                        },
+                    )
                 payload = dict(request.payload)
                 await _materialize_selection_payload(
                     session, payload, kind=request.kind, novel_id=request.novelId
@@ -567,6 +587,69 @@ class ReviewRepository:
                     )
                 )
         return await self.get_response(user_id, artifact.id)
+
+    async def mark_awaiting_user_after_conflict(
+        self,
+        user_id: str,
+        artifact_id: str,
+        request: ArtifactConflictQuarantineRequest,
+    ) -> dict[str, Any]:
+        async with self._session_factory() as session:
+            async with session.begin():
+                task = await session.scalar(
+                    select(WritingTask)
+                    .join(Novel, Novel.id == WritingTask.novelId)
+                    .where(
+                        WritingTask.id == request.taskId,
+                        WritingTask.novelId == request.novelId,
+                        Novel.userId == user_id,
+                    )
+                    .with_for_update()
+                )
+                if task is None:
+                    raise ApiError(
+                        status_code=403,
+                        code="ARTIFACT_TASK_MISMATCH",
+                        message="待审核草案与写作任务资源不匹配",
+                    )
+                await _require_current_writing_job(session, task.id, request.jobId)
+                artifact = await session.scalar(
+                    select(ReviewArtifact)
+                    .join(Novel, Novel.id == ReviewArtifact.novelId)
+                    .where(
+                        ReviewArtifact.id == artifact_id,
+                        ReviewArtifact.taskId == request.taskId,
+                        ReviewArtifact.novelId == request.novelId,
+                        Novel.userId == user_id,
+                    )
+                    .with_for_update()
+                )
+                if artifact is None:
+                    raise ApiError(
+                        status_code=403,
+                        code="ARTIFACT_TASK_MISMATCH",
+                        message="待审核草案与写作任务资源不匹配",
+                    )
+                if artifact.taskId != request.taskId or artifact.novelId != request.novelId:
+                    raise ApiError(
+                        status_code=403,
+                        code="ARTIFACT_TASK_MISMATCH",
+                        message="待审核草案与写作任务资源不匹配",
+                    )
+                if artifact.status == "under_review":
+                    artifact.status = "awaiting_user"
+                    artifact.updatedAt = utc_now()
+                elif artifact.status != "awaiting_user":
+                    raise ApiError(
+                        status_code=409,
+                        code="ARTIFACT_STATUS_CONFLICT",
+                        message="当前草案状态不能隔离为等待用户确认",
+                    )
+                return {
+                    "artifactId": artifact.id,
+                    "status": "awaiting_user",
+                    "revision": artifact.revision,
+                }
 
     async def submit_evaluation(
         self,

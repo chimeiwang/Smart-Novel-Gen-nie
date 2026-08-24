@@ -1,0 +1,137 @@
+BEGIN;
+
+SET LOCAL search_path = pg_catalog, public;
+SELECT pg_advisory_xact_lock(hashtext('inkforge:20260823:token_usage_details'));
+
+DO $database_guard$
+BEGIN
+    IF current_database() <> 'novelwriter' THEN
+        RAISE EXCEPTION 'TokenUsage 明细回退只允许在 novelwriter 执行，当前数据库为 %',
+            current_database();
+    END IF;
+END;
+$database_guard$;
+
+CREATE TEMP TABLE token_usage_details_constraint_contract (
+    "promptCacheMissTokens" INTEGER,
+    "reasoningTokens" INTEGER,
+    "cachedTokens" INTEGER NOT NULL,
+    "promptTokens" INTEGER NOT NULL,
+    "completionTokens" INTEGER NOT NULL
+) ON COMMIT DROP;
+
+ALTER TABLE pg_temp.token_usage_details_constraint_contract
+    ADD CONSTRAINT "TokenUsage_token_details_nonnegative_check"
+    CHECK (("promptCacheMissTokens" IS NULL OR "promptCacheMissTokens" >= 0)
+        AND ("reasoningTokens" IS NULL OR "reasoningTokens" >= 0)),
+    ADD CONSTRAINT "TokenUsage_prompt_cache_details_check"
+    CHECK ("promptCacheMissTokens" IS NULL OR
+        "cachedTokens" + "promptCacheMissTokens" = "promptTokens"),
+    ADD CONSTRAINT "TokenUsage_reasoning_details_check"
+    CHECK ("reasoningTokens" IS NULL OR
+        "reasoningTokens" <= "completionTokens");
+
+DO $verification$
+DECLARE
+    table_oid oid;
+    column_count integer;
+    expected_constraint record;
+    actual_constraint_definition text;
+BEGIN
+    SELECT c.oid
+    INTO table_oid
+    FROM pg_class AS c
+    JOIN pg_namespace AS n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public'
+      AND c.relname = 'TokenUsage'
+      AND c.relkind IN ('r', 'p');
+
+    IF table_oid IS NULL THEN
+        RAISE EXCEPTION 'public."TokenUsage" 不存在';
+    END IF;
+
+    SELECT count(*)
+    INTO column_count
+    FROM pg_attribute AS attribute
+    WHERE attribute.attrelid = table_oid
+      AND attribute.attname IN ('promptCacheMissTokens', 'reasoningTokens')
+      AND NOT attribute.attisdropped;
+
+    IF column_count <> 2 THEN
+        RAISE EXCEPTION 'TokenUsage Token 明细列数量不正确：%', column_count;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM pg_attribute AS attribute
+        WHERE attribute.attrelid = table_oid
+          AND attribute.attname IN ('promptCacheMissTokens', 'reasoningTokens')
+          AND NOT attribute.attisdropped
+          AND (
+              attribute.atttypid <> 'int4'::regtype
+              OR attribute.attnotnull
+              OR attribute.atthasdef
+              OR attribute.attidentity <> ''
+              OR attribute.attgenerated <> ''
+          )
+    ) THEN
+        RAISE EXCEPTION 'TokenUsage Token 明细列不符合可回退契约';
+    END IF;
+
+    FOR expected_constraint IN
+        SELECT
+            constraint_definition.conname AS name,
+            regexp_replace(
+                pg_get_constraintdef(constraint_definition.oid),
+                '\s+',
+                '',
+                'g'
+            ) AS definition
+        FROM pg_constraint AS constraint_definition
+        WHERE constraint_definition.conrelid =
+            'pg_temp.token_usage_details_constraint_contract'::regclass
+          AND constraint_definition.contype = 'c'
+    LOOP
+        EXECUTE format(
+            'ALTER TABLE "TokenUsage" VALIDATE CONSTRAINT %I',
+            expected_constraint.name
+        );
+
+        SELECT regexp_replace(
+            pg_get_constraintdef(constraint_definition.oid),
+            '\s+',
+            '',
+            'g'
+        )
+        INTO actual_constraint_definition
+        FROM pg_constraint AS constraint_definition
+        WHERE constraint_definition.conrelid = table_oid
+          AND constraint_definition.conname = expected_constraint.name
+          AND constraint_definition.contype = 'c'
+          AND constraint_definition.convalidated;
+
+        IF actual_constraint_definition IS DISTINCT FROM expected_constraint.definition THEN
+            RAISE EXCEPTION 'TokenUsage 检查约束不符合可回退契约：%',
+                expected_constraint.name;
+        END IF;
+    END LOOP;
+
+    IF EXISTS (
+        SELECT 1
+        FROM public."TokenUsage"
+        WHERE "promptCacheMissTokens" IS NOT NULL
+           OR "reasoningTokens" IS NOT NULL
+    ) THEN
+        RAISE EXCEPTION 'TokenUsage 明细列已经包含数据，拒绝自动回退';
+    END IF;
+END;
+$verification$;
+
+ALTER TABLE public."TokenUsage"
+    DROP CONSTRAINT "TokenUsage_token_details_nonnegative_check",
+    DROP CONSTRAINT "TokenUsage_prompt_cache_details_check",
+    DROP CONSTRAINT "TokenUsage_reasoning_details_check",
+    DROP COLUMN "promptCacheMissTokens",
+    DROP COLUMN "reasoningTokens";
+
+COMMIT;

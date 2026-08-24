@@ -372,6 +372,50 @@ async def test_artifact_writes_bind_job_to_signed_body_and_idempotency_key() -> 
 
 
 @pytest.mark.asyncio
+async def test_conflict_quarantine_client_binds_internal_identity_and_response() -> None:
+    requests: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={"artifactId": "artifact-1", "status": "awaiting_user", "revision": 3},
+        )
+
+    http = httpx.AsyncClient(
+        base_url="https://core.example",
+        transport=httpx.MockTransport(handler),
+    )
+    signer = Signer()
+    client = CoreServiceClient(http, signer)  # type: ignore[arg-type]
+    resource = RunResource(
+        userId="user-1",
+        novelId="novel-1",
+        taskId="task-1",
+        runId="run-1",
+        jobId="job-1",
+    )
+
+    result = await client.mark_artifact_awaiting_user_after_conflict(
+        resource, "artifact-1", idempotency_key="quarantine-1"
+    )
+
+    assert result["revision"] == 3
+    assert requests[0].url.path == (
+        "/internal/v1/review-artifacts/artifact-1/awaiting-user-after-conflict"
+    )
+    body = json.loads(requests[0].content)
+    assert body == {
+        "runId": "run-1",
+        "taskId": "task-1",
+        "novelId": "novel-1",
+        "jobId": "job-1",
+    }
+    assert signer.calls[0]["scope"] == (ServiceScope.TOOL_WRITE,)
+    await http.aclose()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("callback_name", ["event", "checkpoint", "complete", "fail"])
 async def test_writing_boundary_rejects_missing_callback_receipt(
     callback_name: str,

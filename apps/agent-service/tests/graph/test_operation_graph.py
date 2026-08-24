@@ -5,6 +5,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from inkforge_agents.artifacts.patch import PatchApplicationError, apply_text_patches
+from inkforge_agents.clients.core import CoreServiceError
+from inkforge_agents.graph.snapshots import deserialize_snapshot, serialize_snapshot
 from inkforge_agents.graph.state import create_initial_state
 from inkforge_agents.operations.contracts import (
     CreativeOperation,
@@ -131,14 +134,15 @@ class AgentExecutor:
 
 
 class ArtifactPort:
-    def __init__(self) -> None:
+    def __init__(self, *, initial_content: str = "完整正文") -> None:
         self.actions: list[str] = []
         self.context: dict[str, Any] | None = None
+        self.initial_content = initial_content
 
     async def submit(self, state: dict[str, Any], event: dict[str, Any], content: str) -> str:
         del state
         if event.get("type") == "begin_artifact_output":
-            assert content in {"完整正文", "初稿", "完整返工稿"}
+            assert content in {"完整正文", "初稿", "完整返工稿", "旧句", "重复。重复。"}
         if event.get("type") == "submit_beat_plan":
             assert content == "章节规划正文"
         self.actions.append("submit")
@@ -147,7 +151,28 @@ class ArtifactPort:
             "artifactKey": event["artifactKey"],
             "kind": event["kind"],
             "revision": 1,
-            "payload": {"kind": event["kind"], "content": content},
+            "payload": {
+                "kind": event["kind"],
+                "content": self.initial_content if self.initial_content != "完整正文" else content,
+            },
+        }
+        return "artifact-1"
+
+    async def patch(
+        self,
+        state: dict[str, Any],
+        artifact_id: str,
+        patches: list[Any],
+    ) -> str:
+        del state
+        assert artifact_id == "artifact-1"
+        assert self.context is not None
+        content = apply_text_patches(self.context["payload"]["content"], patches)
+        self.actions.append("patch")
+        self.context = {
+            **self.context,
+            "revision": int(self.context["revision"]) + 1,
+            "payload": {"kind": "chapter_draft", "content": content},
         }
         return "artifact-1"
 
@@ -641,8 +666,7 @@ class RevisionFlowExecutor:
                         "verdict": "revise",
                         "summary": "错字与衔接问题",
                         "requiredChanges": "修正错字并补足场景衔接",
-                        "revisionMode": "patch",
-                        "patches": [{"kind": "text_replace", "find": "甲", "replace": "乙"}],
+                        "revisionMode": "rewrite",
                     }
                 ],
             }
@@ -655,7 +679,7 @@ class RevisionFlowExecutor:
 
 
 @pytest.mark.asyncio
-async def test_graph_passes_explicit_modes_and_revises_without_patch_node() -> None:
+async def test_graph_passes_explicit_modes_and_revises_by_rewrite() -> None:
     executor = RevisionFlowExecutor()
     artifacts = ArtifactPort()
     graph = build_operation_graph(
@@ -696,7 +720,306 @@ async def test_graph_passes_explicit_modes_and_revises_without_patch_node() -> N
     ]
     assert all(kind == "write_chapter" for _, _, kind in executor.calls)
     assert artifacts.actions == ["submit", "revise", "await"]
-    assert "applyArtifactPatch" not in graph.get_graph().nodes
+    assert "applyArtifactPatch" in graph.get_graph().nodes
+
+
+class PatchReviewExecutor:
+    def __init__(self, *, patch_find: str = "旧句") -> None:
+        self.reviser_calls = 0
+        self.reviewer_calls = 0
+        self.primary_calls = 0
+        self.patch_find = patch_find
+        self.calls: list[tuple[str, AgentExecutionMode, CreativeOperationKind]] = []
+
+    async def run(
+        self,
+        agent_id: str,
+        state: dict[str, Any],
+        *,
+        execution_mode: AgentExecutionMode,
+        operation_kind: CreativeOperationKind,
+    ) -> dict[str, Any]:
+        del state
+        self.calls.append((agent_id, execution_mode, operation_kind))
+        if execution_mode == "primary":
+            self.primary_calls += 1
+            return {
+                "visibleContent": "ARTIFACT_OUTPUT_START\n旧句\nARTIFACT_OUTPUT_END",
+                "controlEvents": [
+                    {
+                        "type": "begin_artifact_output",
+                        "kind": "chapter_draft",
+                        "summary": "正文草案",
+                        "artifactKey": "task-1:write_chapter",
+                    }
+                ],
+            }
+        if execution_mode == "reviser":
+            self.reviser_calls += 1
+            raise AssertionError("patch 路径不得调用 reviser")
+        self.reviewer_calls += 1
+        if self.reviewer_calls == 1:
+            return {
+                "visibleContent": "需要局部修改",
+                "controlEvents": [
+                    {
+                        "type": "submit_evaluation",
+                        "verdict": "revise",
+                        "summary": "替换旧句",
+                        "requiredChanges": "替换旧句",
+                        "revisionMode": "patch",
+                        "patches": [
+                            {"kind": "text_replace", "find": self.patch_find, "replace": "新句"}
+                        ],
+                    }
+                ],
+            }
+        return {
+            "visibleContent": "通过",
+            "controlEvents": [
+                {"type": "submit_evaluation", "verdict": "pass", "summary": "通过"}
+            ],
+        }
+
+
+def _patch_state() -> dict[str, Any]:
+    state = _state(
+        task_id="task-1",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+        user_message="局部修订",
+    )
+    state["currentOperation"] = CreativeOperation(
+        kind="write_chapter",
+        targetType="chapter",
+        targetId="chapter-1",
+        userGoal="局部修订",
+        primaryAgent="写作",
+        reviewers=["校验"],
+        outputKind="chapter_text",
+        requiresArtifact=True,
+        requiresUserApproval=True,
+        confidence=1,
+        reasoning="测试局部修订",
+    ).model_dump()
+    return state
+
+
+@pytest.mark.asyncio
+async def test_patch_path_does_not_call_reviser_and_rechecks_review() -> None:
+    executor = PatchReviewExecutor()
+    artifacts = ArtifactPort(initial_content="旧句")
+    graph = build_operation_graph(
+        OperationDependencies(agentExecutor=executor, artifacts=artifacts)
+    )
+
+    result = await graph.ainvoke(_patch_state())
+
+    assert executor.reviser_calls == 0
+    assert executor.reviewer_calls == 2
+    assert artifacts.actions == ["submit", "patch", "await"]
+    assert result["artifactIteration"] == 1
+    assert result["phase"] == "waiting_user"
+
+
+def test_initial_state_has_independent_patch_failure_message() -> None:
+    state = _patch_state()
+
+    assert state["patchFailureCode"] is None
+    assert state["patchFailureMessage"] is None
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_patch_waits_for_user_without_rewrite() -> None:
+    executor = PatchReviewExecutor(patch_find="重复")
+    artifacts = ArtifactPort(initial_content="重复。重复。")
+    graph = build_operation_graph(
+        OperationDependencies(agentExecutor=executor, artifacts=artifacts)
+    )
+    state = _patch_state()
+    result = await graph.ainvoke(state)
+
+    assert executor.reviser_calls == 0
+    assert executor.reviewer_calls == 1
+    assert artifacts.actions == ["submit", "await"]
+    assert result["patchFailureCode"] == "PATCH_TARGET_AMBIGUOUS"
+    assert result["patchFailureMessage"] == "局部修订目标不唯一，请确认草案内容后重试。"
+    assert result.get("errorMessage") is None
+    assert result["artifactStatus"] == "blocked"
+    assert result["phase"] == "waiting_user"
+
+
+class ConflictArtifactPort(ArtifactPort):
+    def __init__(self) -> None:
+        super().__init__(initial_content="旧句")
+        self.mark_calls = 0
+
+    async def patch(
+        self,
+        state: dict[str, Any],
+        artifact_id: str,
+        patches: list[Any],
+    ) -> str:
+        del state, artifact_id, patches
+        raise CoreServiceError(
+            "核心服务拒绝智能体回调",
+            recoverable=False,
+            code="ARTIFACT_REVISION_CONFLICT",
+        )
+
+    async def mark_awaiting_user(self, artifact_id: str) -> None:
+        self.mark_calls += 1
+        await super().mark_awaiting_user(artifact_id)
+
+
+class PatchFailureThenRewriteExecutor(PatchReviewExecutor):
+    async def run(
+        self,
+        agent_id: str,
+        state: dict[str, Any],
+        *,
+        execution_mode: AgentExecutionMode,
+        operation_kind: CreativeOperationKind,
+    ) -> dict[str, Any]:
+        if execution_mode == "reviser":
+            self.calls.append((agent_id, execution_mode, operation_kind))
+            self.reviser_calls += 1
+            return {
+                "visibleContent": "ARTIFACT_OUTPUT_START\n完整返工稿\nARTIFACT_OUTPUT_END",
+                "controlEvents": [
+                    {
+                        "type": "begin_artifact_output",
+                        "kind": "chapter_draft",
+                        "summary": "完整返工稿",
+                    }
+                ],
+            }
+        return await super().run(
+            agent_id,
+            state,
+            execution_mode=execution_mode,
+            operation_kind=operation_kind,
+        )
+
+
+@pytest.mark.asyncio
+async def test_cas_conflict_waits_without_second_core_write_or_model_retry() -> None:
+    executor = PatchReviewExecutor()
+    artifacts = ConflictArtifactPort()
+    graph = build_operation_graph(
+        OperationDependencies(agentExecutor=executor, artifacts=artifacts)
+    )
+
+    result = await graph.ainvoke(_patch_state())
+
+    assert executor.primary_calls == 1
+    assert executor.reviser_calls == 0
+    assert executor.reviewer_calls == 1
+    assert artifacts.mark_calls == 0
+    assert result["patchFailureCode"] == "ARTIFACT_REVISION_CONFLICT"
+    assert result["artifactStatus"] == "blocked"
+    assert result["pendingRevision"] is None
+    assert result["phase"] == "waiting_user"
+    stable = {
+        key: value
+        for key, value in result.items()
+        if key not in {"__interrupt__", "runtimeContext"}
+    }
+    restored = deserialize_snapshot(serialize_snapshot(stable))
+    assert restored["artifactStatus"] == "blocked"
+    assert restored["patchFailureCode"] == "ARTIFACT_REVISION_CONFLICT"
+    assert restored["patchFailureMessage"] == (
+        "草案已被其他操作修改，请重新审核当前草案。"
+    )
+
+
+@pytest.mark.asyncio
+async def test_patch_failure_user_revise_clears_failure_state_and_reenters_review() -> None:
+    executor = PatchFailureThenRewriteExecutor(patch_find="重复")
+    artifacts = ArtifactPort(initial_content="重复。重复。")
+    graph = build_operation_graph(
+        OperationDependencies(agentExecutor=executor, artifacts=artifacts),
+        checkpointer=InMemorySaver(),
+    )
+    config = {"configurable": {"thread_id": "patch-failure-revise"}}
+
+    first = await graph.ainvoke(_patch_state(), config)
+    assert first["__interrupt__"]
+    assert first["patchFailureCode"] == "PATCH_TARGET_AMBIGUOUS"
+    assert first["patchFailureMessage"]
+    assert first.get("errorMessage") is None
+
+    resumed = await graph.ainvoke(
+        Command(resume={"decision": "revise", "feedback": "完整返工"}),
+        config,
+    )
+
+    assert resumed["__interrupt__"]
+    assert resumed["patchFailureCode"] is None
+    assert resumed["patchFailureMessage"] is None
+    assert resumed.get("errorMessage") is None
+    assert resumed["artifactStatus"] == "awaiting_user"
+    assert executor.reviser_calls == 1
+    assert [mode for _, mode, _ in executor.calls] == [
+        "primary",
+        "reviewer",
+        "reviser",
+        "reviewer",
+    ]
+    assert artifacts.actions == ["submit", "await", "revise", "await"]
+
+
+@pytest.mark.asyncio
+async def test_unknown_core_patch_error_propagates_instead_of_becoming_patch_failure() -> None:
+    class UnknownErrorArtifactPort(ArtifactPort):
+        async def patch(
+            self,
+            state: dict[str, Any],
+            artifact_id: str,
+            patches: list[Any],
+        ) -> str:
+            del state, artifact_id, patches
+            raise CoreServiceError("核心服务暂时不可用", recoverable=True, code="OTHER")
+
+    graph = build_operation_graph(
+        OperationDependencies(
+            agentExecutor=PatchReviewExecutor(),
+            artifacts=UnknownErrorArtifactPort(initial_content="旧句"),
+        )
+    )
+
+    with pytest.raises(CoreServiceError, match="核心服务暂时不可用"):
+        await graph.ainvoke(_patch_state())
+
+
+@pytest.mark.asyncio
+async def test_unsupported_patch_waits_with_fixed_failure_code_without_rewrite() -> None:
+    class UnsupportedArtifactPort(ArtifactPort):
+        async def patch(
+            self,
+            state: dict[str, Any],
+            artifact_id: str,
+            patches: list[Any],
+        ) -> str:
+            del state, artifact_id, patches
+            raise PatchApplicationError("PATCH_ARTIFACT_UNSUPPORTED")
+
+    executor = PatchReviewExecutor()
+    graph = build_operation_graph(
+        OperationDependencies(
+            agentExecutor=executor,
+            artifacts=UnsupportedArtifactPort(initial_content="旧句"),
+        )
+    )
+
+    result = await graph.ainvoke(_patch_state())
+
+    assert executor.primary_calls == 1
+    assert executor.reviser_calls == 0
+    assert result["patchFailureCode"] == "PATCH_ARTIFACT_UNSUPPORTED"
+    assert result["artifactStatus"] == "blocked"
+    assert result["phase"] == "waiting_user"
 
 
 @pytest.mark.asyncio

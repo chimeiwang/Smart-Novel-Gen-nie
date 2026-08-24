@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Any, Literal, Protocol, cast
+from typing import Any, Literal, Protocol, Self, cast
 
 from inkforge_contracts.long_serial import (
     ChapterTarget,
@@ -13,8 +13,10 @@ from inkforge_contracts.long_serial import (
 )
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, Send, interrupt
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, ConfigDict, TypeAdapter, ValidationError, model_validator
 
+from ..artifacts.patch import PatchApplicationError, TextReplacePatch
+from ..clients.core import CoreServiceError
 from ..definitions.agents import AgentId
 from ..graph.context import build_operation_context
 from ..graph.state import GraphState
@@ -30,6 +32,15 @@ from .definitions import OPERATION_DEFINITIONS, OperationDefinition
 _LONG_SERIAL_SCOPE_ADAPTER: TypeAdapter[LongSerialScope] = TypeAdapter(LongSerialScope)
 _SOURCE_BINDINGS_ADAPTER: TypeAdapter[list[SourceBinding]] = TypeAdapter(
     list[SourceBinding]
+)
+_PATCH_FAILURE_CODES = frozenset(
+    {
+        "PATCH_TARGET_NOT_FOUND",
+        "PATCH_TARGET_AMBIGUOUS",
+        "PATCH_OVERLAP",
+        "PATCH_ARTIFACT_UNSUPPORTED",
+        "ARTIFACT_REVISION_CONFLICT",
+    }
 )
 
 
@@ -59,6 +70,13 @@ class ArtifactPort(Protocol):
         content: str,
     ) -> str: ...
 
+    async def patch(
+        self,
+        state: dict[str, Any],
+        artifact_id: str,
+        patches: list[TextReplacePatch],
+    ) -> str: ...
+
     async def mark_awaiting_user(self, artifact_id: str) -> None: ...
 
     async def apply(self, artifact_id: str) -> None: ...
@@ -82,9 +100,14 @@ class ReviewResult(BaseModel):
     verdict: Literal["pass", "revise", "block"]
     summary: str
     requiredChanges: str | None = None
-    revisionMode: Literal["patch", "rewrite"] = "rewrite"
-    patches: list[dict[str, Any]] = Field(default_factory=list)
+    revisionMode: Literal["patch", "rewrite"] | None = None
+    patches: list[TextReplacePatch] | None = None
     iteration: int = 0
+
+    @model_validator(mode="after")
+    def validate_revision_combination(self) -> Self:
+        _validate_review_revision_combination(self.verdict, self.revisionMode, self.patches)
+        return self
 
 
 class ReviewOutcome(BaseModel):
@@ -94,26 +117,96 @@ class ReviewOutcome(BaseModel):
     reviewer: AgentId
     summary: str
     requiredChanges: str | None = None
-    revisionMode: Literal["patch", "rewrite"] = "rewrite"
-    patches: list[dict[str, Any]] = Field(default_factory=list)
+    revisionMode: Literal["patch", "rewrite"] | None = None
+    patches: list[TextReplacePatch] | None = None
+
+    @model_validator(mode="after")
+    def validate_revision_combination(self) -> Self:
+        _validate_review_revision_combination(self.verdict, self.revisionMode, self.patches)
+        return self
 
 
-def decide_review_outcome(results: list[ReviewResult]) -> ReviewOutcome:
-    blockers = [result for result in results if result.verdict == "block"]
+def _validate_review_revision_combination(
+    verdict: Literal["pass", "revise", "block"],
+    revision_mode: Literal["patch", "rewrite"] | None,
+    patches: list[TextReplacePatch] | None,
+) -> None:
+    if verdict in {"pass", "block"}:
+        if revision_mode is not None or patches is not None:
+            raise ValueError("通过或阻断结论不得携带 revisionMode 或 patches")
+        return
+    if revision_mode is None:
+        raise ValueError("revise 结论必须声明 revisionMode")
+    if revision_mode == "patch":
+        if patches is None or not 1 <= len(patches) <= 20:
+            raise ValueError("patch 模式必须携带 1 到 20 个 patch")
+    elif patches is not None:
+        raise ValueError("rewrite 模式不得携带 patches")
+
+
+def decide_review_outcome(
+    results: list[ReviewResult],
+    *,
+    reviewer_order: tuple[AgentId, ...] | list[AgentId] | None = None,
+) -> ReviewOutcome:
+    ordered = _ordered_review_results(results, reviewer_order)
+    blockers = [result for result in ordered if result.verdict == "block"]
     if blockers:
-        return _outcome_from("block", blockers, "rewrite")
-    revisers = [result for result in results if result.verdict == "revise"]
+        return _outcome_from("block", blockers)
+    revisers = [result for result in ordered if result.verdict == "revise"]
     if revisers:
-        return _outcome_from("revise", revisers, "rewrite")
-    passed = results or [ReviewResult(reviewer="编辑", verdict="pass", summary="审核通过")]
-    return _outcome_from("pass", passed, "rewrite")
+        revision_mode: Literal["patch", "rewrite"] = (
+            "rewrite"
+            if any(result.revisionMode == "rewrite" for result in revisers)
+            else "patch"
+        )
+        return _outcome_from("revise", revisers, revision_mode)
+    passed = ordered or [ReviewResult(reviewer="编辑", verdict="pass", summary="审核通过")]
+    return _outcome_from("pass", passed)
+
+
+def validate_review_results(
+    results: list[ReviewResult], reviewer_order: tuple[AgentId, ...] | list[AgentId]
+) -> list[ReviewResult]:
+    """在复审聚合入口校验结果身份和数量，并按 Operation 顺序返回。"""
+
+    if len(set(reviewer_order)) != len(reviewer_order):
+        raise ValueError("Operation reviewer 配置不得重复")
+    reviewers = [result.reviewer for result in results]
+    if len(set(reviewers)) != len(reviewers):
+        raise ValueError("Reviewer 结果包含重复 reviewer")
+    declared = set(reviewer_order)
+    undeclared = sorted(set(reviewers) - declared)
+    if undeclared:
+        raise ValueError("Reviewer 结果包含未声明 reviewer")
+    if len(results) != len(reviewer_order):
+        raise ValueError("Reviewer 结果数量与 Operation 声明不一致")
+    missing = [reviewer for reviewer in reviewer_order if reviewer not in set(reviewers)]
+    if missing:
+        raise ValueError("Reviewer 结果缺少声明 reviewer")
+    order = {reviewer: index for index, reviewer in enumerate(reviewer_order)}
+    return sorted(results, key=lambda result: order[result.reviewer])
+
+
+def _ordered_review_results(
+    results: list[ReviewResult], reviewer_order: tuple[AgentId, ...] | list[AgentId] | None
+) -> list[ReviewResult]:
+    if reviewer_order is None:
+        return list(results)
+    order = {reviewer: index for index, reviewer in enumerate(reviewer_order)}
+    return sorted(results, key=lambda result: order.get(result.reviewer, len(order)))
 
 
 def _outcome_from(
     verdict: Literal["pass", "revise", "block"],
     results: list[ReviewResult],
-    revision_mode: Literal["patch", "rewrite"],
+    revision_mode: Literal["patch", "rewrite"] | None = None,
 ) -> ReviewOutcome:
+    patches = (
+        [patch for result in results for patch in (result.patches or [])]
+        if revision_mode == "patch"
+        else None
+    )
     return ReviewOutcome(
         verdict=verdict,
         reviewer=results[0].reviewer,
@@ -122,7 +215,7 @@ def _outcome_from(
             f"{result.reviewer}：{result.requiredChanges or result.summary}" for result in results
         ),
         revisionMode=revision_mode,
-        patches=[patch for result in results for patch in result.patches],
+        patches=patches,
     )
 
 
@@ -338,15 +431,26 @@ def build_operation_graph(
                 iteration=state.get("artifactIteration", 0),
             )
         else:
-            review = ReviewResult(
-                reviewer=reviewer_id,
-                verdict=event["verdict"],
-                summary=event["summary"],
-                requiredChanges=event.get("requiredChanges"),
-                revisionMode=event.get("revisionMode", "rewrite"),
-                patches=event.get("patches", []),
-                iteration=state.get("artifactIteration", 0),
-            )
+            try:
+                review = ReviewResult.model_validate(
+                    {
+                        "reviewer": reviewer_id,
+                        "verdict": event.get("verdict"),
+                        "summary": event.get("summary"),
+                        "requiredChanges": event.get("requiredChanges"),
+                        "revisionMode": event.get("revisionMode"),
+                        "patches": event.get("patches"),
+                        "iteration": state.get("artifactIteration", 0),
+                    }
+                )
+            except (ValidationError, ValueError):
+                review = ReviewResult(
+                    reviewer=reviewer_id,
+                    verdict="block",
+                    summary="复审结论不符合当前产物契约",
+                    requiredChanges="请由用户审核当前草案，或重新发起复审。",
+                    iteration=state.get("artifactIteration", 0),
+                )
         return {"reviewResults": [review.model_dump()]}
 
     async def merge_reviews(state: GraphState) -> dict[str, Any]:
@@ -357,7 +461,12 @@ def build_operation_graph(
             for result in state.get("reviewResults", [])
             if result.get("iteration") == iteration
         ]
-        outcome = decide_review_outcome(current)
+        reviewer_order = list(_operation(state).reviewers)
+        current = validate_review_results(current, reviewer_order)
+        outcome = decide_review_outcome(
+            current,
+            reviewer_order=reviewer_order,
+        )
         pending = outcome.model_dump() if outcome.verdict == "revise" else None
         return {
             "pendingRevision": pending,
@@ -369,8 +478,61 @@ def build_operation_graph(
     def route_after_review(state: GraphState) -> str:
         pending = state.get("pendingRevision")
         if pending and state.get("artifactIteration", 0) < state.get("maxArtifactIterations", 5):
+            if pending.get("revisionMode") == "patch":
+                return "applyArtifactPatch"
             return "reviseArtifact"
         return "markArtifactAwaitingUser"
+
+    async def apply_artifact_patch(state: GraphState) -> dict[str, Any]:
+        await ensure_active(state)
+        artifact_id = state.get("activeArtifactId")
+        pending = state.get("pendingRevision")
+        failure_code: str | None = None
+        if not isinstance(artifact_id, str) or not artifact_id:
+            failure_code = "PATCH_ARTIFACT_UNSUPPORTED"
+        elif not isinstance(pending, dict):
+            failure_code = "PATCH_ARTIFACT_UNSUPPORTED"
+        else:
+            try:
+                outcome = ReviewOutcome.model_validate(pending)
+                patches = outcome.patches
+                if outcome.revisionMode != "patch" or not patches:
+                    raise PatchApplicationError("PATCH_ARTIFACT_UNSUPPORTED")
+                await dependencies.artifacts.patch(dict(state), artifact_id, patches)
+            except PatchApplicationError as exc:
+                failure_code = (
+                    exc.code
+                    if exc.code in _PATCH_FAILURE_CODES
+                    else "PATCH_ARTIFACT_UNSUPPORTED"
+                )
+            except CoreServiceError as exc:
+                if exc.code != "ARTIFACT_REVISION_CONFLICT":
+                    raise
+                failure_code = "ARTIFACT_REVISION_CONFLICT"
+            except (ValidationError, ValueError):
+                failure_code = "PATCH_ARTIFACT_UNSUPPORTED"
+        if failure_code is not None:
+            return {
+                "patchFailureCode": failure_code,
+                "patchFailureMessage": _patch_failure_message(failure_code),
+                "artifactStatus": "blocked",
+                "pendingRevision": None,
+                "skipArtifactPersistence": (
+                    failure_code == "ARTIFACT_REVISION_CONFLICT"
+                ),
+                "operationStep": "apply_artifact_patch",
+                "operationStage": "局部修订无法安全应用",
+            }
+        return {
+            "artifactIteration": state.get("artifactIteration", 0) + 1,
+            "pendingRevision": None,
+            "patchFailureCode": None,
+            "patchFailureMessage": None,
+            "skipArtifactPersistence": False,
+            "artifactStatus": "patched",
+            "operationStep": "apply_artifact_patch",
+            "operationStage": "应用局部修订",
+        }
 
     async def revise(state: GraphState) -> dict[str, Any]:
         await ensure_active(state)
@@ -403,13 +565,21 @@ def build_operation_graph(
     async def mark_awaiting_user(state: GraphState) -> dict[str, Any]:
         await ensure_active(state)
         artifact_id = state.get("activeArtifactId")
-        if artifact_id:
+        if artifact_id and not state.get("skipArtifactPersistence"):
             await dependencies.artifacts.mark_awaiting_user(artifact_id)
         return {
-            "artifactStatus": "awaiting_user" if artifact_id else "none",
+            "artifactStatus": (
+                "blocked"
+                if artifact_id and state.get("patchFailureCode")
+                else "awaiting_user" if artifact_id else "none"
+            ),
             "phase": "waiting_user" if artifact_id else state.get("phase", "active"),
             "operationStep": "mark_awaiting_user",
-            "operationStage": "等待用户决策",
+            "operationStage": (
+                "局部修订无法安全应用"
+                if state.get("patchFailureCode")
+                else "等待用户决策"
+            ),
         }
 
     async def await_user(
@@ -431,13 +601,25 @@ def build_operation_graph(
         if selected == "approve":
             await dependencies.artifacts.apply(artifact_id)
             return Command(
-                update={"userDecision": "approve", "artifactStatus": "applied"},
+                update={
+                    "userDecision": "approve",
+                    "artifactStatus": "applied",
+                    "patchFailureCode": None,
+                    "patchFailureMessage": None,
+                    "skipArtifactPersistence": False,
+                },
                 goto="suggestNextAction",
             )
         if selected == "discard":
             await dependencies.artifacts.discard(artifact_id)
             return Command(
-                update={"userDecision": "discard", "artifactStatus": "discarded"},
+                update={
+                    "userDecision": "discard",
+                    "artifactStatus": "discarded",
+                    "patchFailureCode": None,
+                    "patchFailureMessage": None,
+                    "skipArtifactPersistence": False,
+                },
                 goto="suggestNextAction",
             )
         if selected == "revise":
@@ -449,6 +631,9 @@ def build_operation_graph(
             return Command(
                 update={
                     "userDecision": "revise",
+                    "patchFailureCode": None,
+                    "patchFailureMessage": None,
+                    "skipArtifactPersistence": False,
                     "pendingRevision": {
                         "verdict": "revise",
                         "revisionMode": "rewrite",
@@ -474,6 +659,9 @@ def build_operation_graph(
                     "resumeDecision": None,
                     "userDecision": "approve",
                     "artifactStatus": "applied",
+                    "patchFailureCode": None,
+                    "patchFailureMessage": None,
+                    "skipArtifactPersistence": False,
                 },
                 goto="suggestNextAction",
             )
@@ -483,6 +671,9 @@ def build_operation_graph(
                     "resumeDecision": None,
                     "userDecision": "discard",
                     "artifactStatus": "discarded",
+                    "patchFailureCode": None,
+                    "patchFailureMessage": None,
+                    "skipArtifactPersistence": False,
                 },
                 goto="suggestNextAction",
             )
@@ -491,6 +682,9 @@ def build_operation_graph(
                 update={
                     "resumeDecision": None,
                     "userDecision": "revise",
+                    "patchFailureCode": None,
+                    "patchFailureMessage": None,
+                    "skipArtifactPersistence": False,
                     "pendingRevision": {
                         "verdict": "revise",
                         "revisionMode": "rewrite",
@@ -517,6 +711,7 @@ def build_operation_graph(
     builder.add_node("reviewArtifact", review_artifact)
     builder.add_node("reviewArtifactWorker", review_worker)
     builder.add_node("mergeArtifactReviews", merge_reviews)
+    builder.add_node("applyArtifactPatch", apply_artifact_patch)
     builder.add_node("reviseArtifact", revise)
     builder.add_node("markArtifactAwaitingUser", mark_awaiting_user)
     builder.add_node("awaitUserDecision", await_user)
@@ -532,6 +727,12 @@ def build_operation_graph(
     builder.add_conditional_edges("reviewArtifact", route_review_workers)
     builder.add_edge("reviewArtifactWorker", "mergeArtifactReviews")
     builder.add_conditional_edges("mergeArtifactReviews", route_after_review)
+    builder.add_conditional_edges(
+        "applyArtifactPatch",
+        lambda state: "markArtifactAwaitingUser"
+        if state.get("patchFailureCode")
+        else "reviewArtifact",
+    )
     builder.add_edge("reviseArtifact", "submitArtifactOrRespond")
     builder.add_edge("markArtifactAwaitingUser", "awaitUserDecision")
     builder.add_edge("suggestNextAction", END)
@@ -721,3 +922,14 @@ def _required_state_text(state: GraphState, key: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"图状态缺少 {key}")
     return value
+
+
+def _patch_failure_message(code: str) -> str:
+    messages = {
+        "PATCH_TARGET_NOT_FOUND": "局部修订目标未找到，请确认草案内容后重试。",
+        "PATCH_TARGET_AMBIGUOUS": "局部修订目标不唯一，请确认草案内容后重试。",
+        "PATCH_OVERLAP": "局部修订范围发生重叠，请重新提交修改。",
+        "PATCH_ARTIFACT_UNSUPPORTED": "当前草案不支持局部修订，请改用完整返工。",
+        "ARTIFACT_REVISION_CONFLICT": "草案已被其他操作修改，请重新审核当前草案。",
+    }
+    return messages.get(code, "局部修订未能应用，请重新审核当前草案。")

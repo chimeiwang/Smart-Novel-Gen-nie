@@ -196,10 +196,15 @@ class WritingJobHandler:
         interrupt_artifact_id = _artifact_id_from_interrupt(result.get("__interrupt__"))
         if interrupt_artifact_id is not None:
             stable["activeArtifactId"] = interrupt_artifact_id
-            stable["artifactStatus"] = "awaiting_user"
+            if stable.get("artifactStatus") != "blocked":
+                stable["artifactStatus"] = "awaiting_user"
             stable["phase"] = "waiting_user"
             stable["operationStep"] = "await_user_decision"
-            stable["operationStage"] = "等待用户决策"
+            stable["operationStage"] = (
+                "局部修订无法安全应用"
+                if stable.get("patchFailureCode")
+                else "等待用户决策"
+            )
         stable_artifact_id = stable.get("activeArtifactId")
         if (
             owned_artifact_id is None

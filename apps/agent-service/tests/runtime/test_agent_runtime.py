@@ -12,6 +12,7 @@ from inkforge_agents.providers.base import (
 from inkforge_agents.providers.fake import FakeModelProvider
 from inkforge_agents.queue.cancellation import JobCancelledError
 from inkforge_agents.runtime.agent_runtime import AgentRuntime
+from inkforge_agents.runtime.model_policy import CREATIVE_HIGH, LEGACY_PROVIDER_DEFAULT
 from inkforge_agents.runtime.model_runtime import ModelRuntime
 from inkforge_agents.tools.registry import (
     ToolContext,
@@ -108,6 +109,7 @@ async def test_fake_provider_plan_chapter_uses_valid_strict_arguments() -> None:
     runtime = make_agent_runtime(ModelRuntime(FakeModelProvider()), registry)
 
     result = await runtime.run(
+        policy=LEGACY_PROVIDER_DEFAULT,
         messages=[{"role": "user", "content": "规划当前章节"}],
         exposed_tools=registry.for_agent(
             agent_id="剧情", capabilities={"control.beat"}
@@ -167,6 +169,7 @@ async def test_runtime_accumulates_full_text_and_parallelizes_safe_reads() -> No
     runtime = make_agent_runtime(ModelRuntime(provider), registry)
 
     result = await runtime.run(
+        policy=CREATIVE_HIGH,
         messages=[{"role": "user", "content": "分析设定"}],
         exposed_tools=registry.for_agent(
             agent_id="设定",
@@ -179,6 +182,10 @@ async def test_runtime_accumulates_full_text_and_parallelizes_safe_reads() -> No
     assert gateway.max_active == 2
     assert len(provider.requests) == 2
     assert result.usage.totalTokens == 30
+    assert [request.policy for request in provider.requests] == [
+        CREATIVE_HIGH,
+        CREATIVE_HIGH,
+    ]
 
 
 @pytest.mark.asyncio
@@ -195,6 +202,7 @@ async def test_runtime_stops_after_model_cancellation_without_recording_content_
 
     with pytest.raises(JobCancelledError):
         await runtime.run(
+            policy=LEGACY_PROVIDER_DEFAULT,
             messages=[{"role": "user", "content": "分析设定"}],
             exposed_tools=registry.for_agent(
                 agent_id="设定", capabilities={"novel.read"}
@@ -226,6 +234,7 @@ async def test_运行时保留超过旧输出边界的完整正文() -> None:
     )
 
     result = await runtime.run(
+        policy=LEGACY_PROVIDER_DEFAULT,
         messages=[{"role": "user", "content": "生成长正文"}],
         exposed_tools=[],
         context=context("写作"),
@@ -264,6 +273,7 @@ async def test_runtime_captures_control_events_in_model_order() -> None:
     runtime = make_agent_runtime(ModelRuntime(provider), registry)
 
     result = await runtime.run(
+        policy=LEGACY_PROVIDER_DEFAULT,
         messages=[{"role": "user", "content": "复审"}],
         exposed_tools=registry.for_agent(
             agent_id="校验",
@@ -314,6 +324,7 @@ async def test_runtime_constrains_update_builder_lifecycle() -> None:
     runtime = make_agent_runtime(ModelRuntime(provider), registry)
 
     result = await runtime.run(
+        policy=LEGACY_PROVIDER_DEFAULT,
         messages=[{"role": "user", "content": "同步设定"}],
         exposed_tools=registry.for_agent(
             agent_id="设定",
@@ -346,6 +357,7 @@ async def test_runtime_rejects_unexposed_tool_and_invalid_arguments() -> None:
 
     with pytest.raises(RuntimeError, match="MODEL_TOOL_NOT_EXPOSED"):
         await unauthorized.run(
+            policy=LEGACY_PROVIDER_DEFAULT,
             messages=[{"role": "user", "content": "越权调用"}],
             exposed_tools=[],
             context=context(),
@@ -357,6 +369,7 @@ async def test_runtime_rejects_unexposed_tool_and_invalid_arguments() -> None:
     )
     with pytest.raises(RuntimeError, match="MODEL_TOOL_ARGUMENTS_INVALID"):
         await invalid.run(
+            policy=LEGACY_PROVIDER_DEFAULT,
             messages=[{"role": "user", "content": "读取角色"}],
             exposed_tools=registry.for_agent(
                 agent_id="设定", capabilities={"character.read"}
@@ -399,6 +412,7 @@ async def test_runtime_rejects_exposed_control_tool_not_authorized_for_agent() -
 
     with pytest.raises(PermissionError, match="当前智能体无权执行工具"):
         await runtime.run(
+            policy=LEGACY_PROVIDER_DEFAULT,
             messages=[{"role": "user", "content": "越权质量检查"}],
             exposed_tools=[registry.require("submit_quality_report")],
             context=context("设定"),
@@ -432,6 +446,7 @@ async def test_runtime_rejects_same_name_unregistered_exposed_tool() -> None:
 
     with pytest.raises(ValueError, match="工具定义与注册表不一致"):
         await runtime.run(
+            policy=LEGACY_PROVIDER_DEFAULT,
             messages=[{"role": "user", "content": "读取小说"}],
             exposed_tools=[unregistered],
             context=context("设定"),
@@ -467,6 +482,7 @@ async def test_runtime_rejects_empty_tool_call_id_before_control_event(
 
     with pytest.raises(RuntimeError, match="MODEL_TOOL_CALL_ID_INVALID"):
         await runtime.run(
+            policy=LEGACY_PROVIDER_DEFAULT,
             messages=[{"role": "user", "content": "校验"}],
             exposed_tools=[registry.require("submit_validation_report")],
             context=context("校验"),
@@ -501,6 +517,7 @@ async def test_runtime_rejects_duplicate_tool_call_id_before_any_side_effect() -
 
     with pytest.raises(RuntimeError, match="MODEL_TOOL_CALL_ID_DUPLICATE"):
         await runtime.run(
+            policy=LEGACY_PROVIDER_DEFAULT,
             messages=[{"role": "user", "content": "校验"}],
             exposed_tools=[
                 registry.require("submit_validation_report"),
@@ -523,6 +540,7 @@ async def test_runtime_preserves_empty_raw_finish_reason_in_error() -> None:
 
     with pytest.raises(RuntimeError, match="原始原因：）"):
         await runtime.run(
+            policy=LEGACY_PROVIDER_DEFAULT,
             messages=[{"role": "user", "content": "测试"}],
             exposed_tools=[],
             context=context(),
@@ -560,6 +578,7 @@ async def test_runtime_rejects_incomplete_output_before_content_or_tool_side_eff
 
     with pytest.raises(RuntimeError, match=error_code):
         await runtime.run(
+            policy=LEGACY_PROVIDER_DEFAULT,
             messages=[{"role": "user", "content": "生成"}],
             exposed_tools=registry.for_agent(
                 agent_id="设定", capabilities={"novel.read"}
@@ -586,6 +605,7 @@ async def test_runtime_rejects_finish_reason_and_tool_call_mismatch(
 
     with pytest.raises(RuntimeError, match="PROVIDER_FINISH_REASON_INVALID"):
         await runtime.run(
+            policy=LEGACY_PROVIDER_DEFAULT,
             messages=[{"role": "user", "content": "测试"}],
             exposed_tools=registry.for_agent(
                 agent_id="设定", capabilities={"novel.read"}
@@ -603,6 +623,7 @@ async def test_runtime_rejects_unknown_finish_reason_without_tools() -> None:
 
     with pytest.raises(RuntimeError, match="PROVIDER_FINISH_REASON_UNKNOWN"):
         await runtime.run(
+            policy=LEGACY_PROVIDER_DEFAULT,
             messages=[{"role": "user", "content": "测试"}],
             exposed_tools=[],
             context=context(),
@@ -640,6 +661,7 @@ async def test_runtime_preflights_unknown_tool_calls_before_execution(
 
     with pytest.raises(RuntimeError, match=error_code):
         await runtime.run(
+            policy=LEGACY_PROVIDER_DEFAULT,
             messages=[{"role": "user", "content": "测试"}],
             exposed_tools=exposed,
             context=context(),
@@ -669,6 +691,7 @@ async def test_runtime_allows_unknown_finish_reason_with_valid_tool_calls() -> N
     )
 
     result = await runtime.run(
+        policy=LEGACY_PROVIDER_DEFAULT,
         messages=[{"role": "user", "content": "测试"}],
         exposed_tools=registry.for_agent(
             agent_id="设定", capabilities={"novel.read"}
@@ -701,6 +724,7 @@ async def test_runtime_validates_all_tool_calls_before_first_side_effect() -> No
 
     with pytest.raises(RuntimeError, match="MODEL_TOOL_ARGUMENTS_INVALID"):
         await runtime.run(
+            policy=LEGACY_PROVIDER_DEFAULT,
             messages=[{"role": "user", "content": "测试"}],
             exposed_tools=registry.for_agent(
                 agent_id="设定",
@@ -744,6 +768,7 @@ async def test_runtime_rejects_multiple_terminal_tools_before_side_effects() -> 
 
     with pytest.raises(RuntimeError, match="MODEL_TERMINAL_TOOL_CONFLICT"):
         await runtime.run(
+            policy=LEGACY_PROVIDER_DEFAULT,
             messages=[{"role": "user", "content": "复审"}],
             exposed_tools=registry.for_agent(
                 agent_id="校验",
@@ -762,6 +787,7 @@ async def test_runtime_stops_at_max_iterations_and_surfaces_provider_failure() -
     registry = build_default_registry(RecordingGateway())
     runtime = make_agent_runtime(ModelRuntime(looping), registry)
     result = await runtime.run(
+        policy=LEGACY_PROVIDER_DEFAULT,
         messages=[{"role": "user", "content": "循环"}],
         exposed_tools=registry.for_agent(agent_id="设定", capabilities={"novel.read"}),
         context=context(),
@@ -775,7 +801,42 @@ async def test_runtime_stops_at_max_iterations_and_surfaces_provider_failure() -
     )
     with pytest.raises(RuntimeError, match="^MODEL_PROVIDER_FAILED："):
         await failing.run(
+            policy=LEGACY_PROVIDER_DEFAULT,
             messages=[{"role": "user", "content": "失败"}],
+            exposed_tools=[],
+            context=context(),
+        )
+
+
+@pytest.mark.asyncio
+async def test_runtime_replays_reasoning_content_with_assistant_tool_call() -> None:
+    first = turn("", ("call-1", "get_novel_info", {})).model_copy(
+        update={"reasoningContent": "先读取作品资料"}
+    )
+    provider = ScriptedProvider([first, turn("已完成")])
+    registry = build_default_registry(RecordingGateway())
+    runtime = make_agent_runtime(ModelRuntime(provider), registry)
+
+    await runtime.run(
+        policy=CREATIVE_HIGH,
+        messages=[{"role": "user", "content": "请调用工具"}],
+        exposed_tools=registry.for_agent(agent_id="设定", capabilities={"novel.read"}),
+        context=context(),
+    )
+
+    assert provider.requests[1].messages[1].reasoningContent == "先读取作品资料"
+
+
+@pytest.mark.asyncio
+async def test_runtime_rejects_insufficient_system_resource_before_visible_content() -> None:
+    response = turn("不应展示", finish_reason="insufficient_system_resource")
+    registry = build_default_registry(RecordingGateway())
+    runtime = make_agent_runtime(ModelRuntime(ScriptedProvider([response])), registry)
+
+    with pytest.raises(RuntimeError, match="MODEL_INSUFFICIENT_SYSTEM_RESOURCE"):
+        await runtime.run(
+            policy=LEGACY_PROVIDER_DEFAULT,
+            messages=[{"role": "user", "content": "测试"}],
             exposed_tools=[],
             context=context(),
         )

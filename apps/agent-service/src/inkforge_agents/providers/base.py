@@ -1,14 +1,22 @@
 from __future__ import annotations
 
-from typing import Literal, Protocol
+from typing import Literal, Protocol, Self
 
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, NonNegativeInt, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    NonNegativeInt,
+    model_validator,
+)
 
 ModelFinishReason = Literal[
     "stop",
     "tool_calls",
     "length",
     "content_filter",
+    "insufficient_system_resource",
     "unknown",
 ]
 ModelThinkingMode = Literal["provider_default", "disabled"]
@@ -82,6 +90,7 @@ class ModelMessage(BaseModel):
 
     role: Literal["system", "user", "assistant", "tool"]
     content: str
+    reasoningContent: str | None = Field(default=None, alias="reasoning_content")
     name: str | None = None
     tool_call_id: str | None = Field(default=None, alias="toolCallId")
     tool_calls: list[ModelToolCall] = Field(default_factory=list, alias="toolCalls")
@@ -118,12 +127,30 @@ class ModelStructuredOutputDiagnostic(BaseModel):
     keyword: str = Field(min_length=1, max_length=64, pattern=r"^[a-zA-Z0-9_$.-]+$")
 
 
+class ModelExecutionPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    policyId: str = Field(min_length=1)
+    thinkingMode: Literal["provider_default", "enabled", "disabled"]
+    reasoningEffort: Literal["high", "max"] | None = None
+    requiredToolName: str | None = Field(default=None, min_length=1)
+
+    @model_validator(mode="after")
+    def validate_thinking(self) -> Self:
+        if self.thinkingMode == "disabled" and self.reasoningEffort is not None:
+            raise ValueError("关闭思考时不能设置推理强度")
+        if self.thinkingMode == "enabled" and self.reasoningEffort is None:
+            raise ValueError("启用思考时必须设置推理强度")
+        return self
+
+
 class ModelTurnRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     messages: list[ModelMessage]
     tools: list[ModelTool]
     maxOutputTokens: int = Field(gt=0)
+    policy: ModelExecutionPolicy
     # 默认不干预供应商能力；只有确定不需要长链路推理的 strict 任务才显式关闭。
     thinkingMode: ModelThinkingMode = "provider_default"
     # strict 结构任务可指定唯一必调函数，Provider 负责下发 named tool_choice。
@@ -158,6 +185,14 @@ class ModelUsage(BaseModel):
     totalTokens: NonNegativeInt
 
 
+class ModelUsageDiagnostics(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    promptCacheMissTokens: int | None = Field(default=None, ge=0)
+    reasoningTokens: int | None = Field(default=None, ge=0)
+    providerUsageKeys: list[str] = Field(default_factory=list)
+
+
 class ModelTurnResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -178,6 +213,9 @@ class ModelTurnResult(BaseModel):
     usage: ModelUsage
     finishReason: ModelFinishReason
     rawFinishReason: str | None = None
+    reasoningContent: str | None = None
+    providerResponseId: str | None = None
+    diagnostics: ModelUsageDiagnostics = Field(default_factory=ModelUsageDiagnostics)
     # 真实 Provider 按 Runtime 最终授权后的请求填写，错误诊断不得再使用配置上限冒充。
     effectiveMaxOutputTokens: int | None = Field(default=None, gt=0)
 
