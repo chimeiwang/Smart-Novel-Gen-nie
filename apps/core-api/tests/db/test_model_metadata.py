@@ -107,43 +107,11 @@ def _contract() -> dict[str, Any]:
 
 
 def _business_contract_tables() -> dict[str, dict[str, Any]]:
-    tables = {
+    return {
         table["name"]: table
         for table in _contract()["tables"]
         if table["name"] != "_prisma_migrations"
     }
-    token_usage = tables["TokenUsage"]
-    known_columns = {column["name"] for column in token_usage["columns"]}
-    for column_name in (
-        "promptCacheMissTokens",
-        "reasoningTokens",
-        "requestId",
-        "taskId",
-        "runId",
-    ):
-        if column_name not in known_columns:
-            # 隔离迁移阶段先由专项测试锁定新增列；数据库演练后再刷新冻结契约。
-            if column_name in {"promptCacheMissTokens", "reasoningTokens"}:
-                token_usage["columns"].append(
-                    {
-                        "default": None,
-                        "formatType": "integer",
-                        "name": column_name,
-                        "nullable": True,
-                        "udtName": "int4",
-                    }
-                )
-                continue
-            token_usage["columns"].append(
-                {
-                    "default": None,
-                    "formatType": "text",
-                    "name": column_name,
-                    "nullable": True,
-                    "udtName": "text",
-                }
-            )
-    return tables
 
 
 def _mapped_tables() -> dict[str, Any]:
@@ -325,15 +293,6 @@ def test_primary_keys_foreign_keys_and_indexes_match_the_frozen_contract() -> No
             if index["name"] != expected_primary_key["name"]
         }
         actual_indexes = {index.name: index for index in table.indexes}
-        if table_name == "TokenUsage":
-            # 隔离迁移阶段先由专项测试锁定新增索引；数据库演练后再刷新冻结契约。
-            for name in (
-                "TokenUsage_requestId_key",
-                "TokenUsage_userId_taskId_createdAt_idx",
-                "TokenUsage_runId_createdAt_idx",
-            ):
-                if name not in expected_indexes:
-                    actual_indexes.pop(name, None)
         assert set(actual_indexes) == set(expected_indexes), table_name
         for name, expected in expected_indexes.items():
             actual = actual_indexes[name]
