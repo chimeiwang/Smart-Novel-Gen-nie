@@ -17,6 +17,25 @@ ALTER TABLE "TokenUsage"
 ALTER TABLE "TokenUsage"
     ADD COLUMN IF NOT EXISTS "reasoningTokens" INTEGER;
 
+CREATE TEMP TABLE token_usage_details_constraint_contract (
+    "promptCacheMissTokens" INTEGER,
+    "reasoningTokens" INTEGER,
+    "cachedTokens" INTEGER NOT NULL,
+    "promptTokens" INTEGER NOT NULL,
+    "completionTokens" INTEGER NOT NULL
+) ON COMMIT DROP;
+
+ALTER TABLE pg_temp.token_usage_details_constraint_contract
+    ADD CONSTRAINT "TokenUsage_token_details_nonnegative_check"
+    CHECK (("promptCacheMissTokens" IS NULL OR "promptCacheMissTokens" >= 0)
+        AND ("reasoningTokens" IS NULL OR "reasoningTokens" >= 0)),
+    ADD CONSTRAINT "TokenUsage_prompt_cache_details_check"
+    CHECK ("promptCacheMissTokens" IS NULL OR
+        "cachedTokens" + "promptCacheMissTokens" = "promptTokens"),
+    ADD CONSTRAINT "TokenUsage_reasoning_details_check"
+    CHECK ("reasoningTokens" IS NULL OR
+        "reasoningTokens" <= "completionTokens");
+
 DO $verification$
 DECLARE
     table_oid oid;
@@ -95,22 +114,18 @@ BEGIN
     END IF;
 
     FOR expected_constraint IN
-        SELECT *
-        FROM (
-            VALUES
-                (
-                    'TokenUsage_token_details_nonnegative_check',
-                    $constraint$CHECK (((("promptCacheMissTokens" IS NULL) OR ("promptCacheMissTokens" >= 0)) AND (("reasoningTokens" IS NULL) OR ("reasoningTokens" >= 0))))$constraint$
-                ),
-                (
-                    'TokenUsage_prompt_cache_details_check',
-                    $constraint$CHECK (("promptCacheMissTokens" IS NULL) OR (("cachedTokens" + "promptCacheMissTokens") = "promptTokens"))$constraint$
-                ),
-                (
-                    'TokenUsage_reasoning_details_check',
-                    $constraint$CHECK (("reasoningTokens" IS NULL) OR ("reasoningTokens" <= "completionTokens"))$constraint$
-                )
-        ) AS definitions(name, definition)
+        SELECT
+            constraint_definition.conname AS name,
+            regexp_replace(
+                pg_get_constraintdef(constraint_definition.oid),
+                '\s+',
+                '',
+                'g'
+            ) AS definition
+        FROM pg_constraint AS constraint_definition
+        WHERE constraint_definition.conrelid =
+            'pg_temp.token_usage_details_constraint_contract'::regclass
+          AND constraint_definition.contype = 'c'
     LOOP
         EXECUTE format(
             'ALTER TABLE "TokenUsage" VALIDATE CONSTRAINT %I',
@@ -130,12 +145,7 @@ BEGIN
           AND constraint_definition.contype = 'c'
           AND constraint_definition.convalidated;
 
-        IF actual_constraint_definition IS DISTINCT FROM regexp_replace(
-            expected_constraint.definition,
-            '\s+',
-            '',
-            'g'
-        ) THEN
+        IF actual_constraint_definition IS DISTINCT FROM expected_constraint.definition THEN
             RAISE EXCEPTION 'TokenUsage 检查约束定义不符合迁移契约：%',
                 expected_constraint.name;
         END IF;
