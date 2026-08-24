@@ -17,6 +17,8 @@
 
 普通 ChatOpenAI 调用捕获 SDK 的超时、连接和 HTTP 状态异常，转换为现有 `ProviderTransportError`。只保留稳定错误码、HTTP 状态码和经过字符白名单校验的供应商请求 ID；原始响应正文、异常消息和底层异常链不得继续传播。
 
+生产使用 `deepseek_v4` 兼容配置时，独立的 `DeepSeekV4Provider` 必须遵守同一错误契约：`httpx.TimeoutException` 映射为 `timeout_error`，其他 `httpx.HTTPError` 映射为 `connection_error`，非 2xx 响应映射为带状态码的 `http_error`。只从固定响应头读取并校验 requestId，不得记录响应正文。
+
 ### ModelRuntime 边界
 
 ModelRuntime 负责补齐业务运行上下文和请求形状，形成失败记录：

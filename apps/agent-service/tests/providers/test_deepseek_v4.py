@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 import pytest
 from inkforge_agents.config import Settings
-from inkforge_agents.providers.base import ModelTurnRequest
+from inkforge_agents.providers.base import ModelTurnRequest, ProviderTransportError
 from inkforge_agents.providers.deepseek_v4 import DeepSeekV4Provider
 from inkforge_agents.runtime.model_policy import (
     CREATIVE_HIGH,
@@ -162,20 +162,57 @@ async def test_http_error_does_not_expose_response_body() -> None:
         return httpx.Response(
             500,
             content=b'{"error":"sk-secret prompt\xe6\x8f\x90\xe7\xa4\xba"}',
+            headers={"x-request-id": "deepseek-request-500"},
             request=request,
         )
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     provider = DeepSeekV4Provider(_settings(), client=client)
     try:
-        with pytest.raises(RuntimeError) as error:
+        with pytest.raises(ProviderTransportError) as error:
             await provider.complete_turn(_request())
     finally:
         await client.aclose()
-    assert "sk-secret" not in str(error.value)
-    assert "提示" not in str(error.value)
-    assert "HTTP 500" in str(error.value)
+    assert error.value.code == "http_error"
+    assert error.value.statusCode == 500
+    assert error.value.requestId == "deepseek-request-500"
+    assert "sk-secret" not in repr(error.value)
+    assert "提示" not in repr(error.value)
     assert len(requests) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error_factory", "expected_code"),
+    [
+        (lambda request: httpx.ReadTimeout("SECRET_TIMEOUT", request=request), "timeout_error"),
+        (
+            lambda request: httpx.RemoteProtocolError("SECRET_PROTOCOL_BODY", request=request),
+            "connection_error",
+        ),
+    ],
+)
+async def test_transport_error_is_classified_without_private_message(
+    error_factory: Any,
+    expected_code: str,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise error_factory(request)
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = DeepSeekV4Provider(_settings(), client=client)
+    try:
+        with pytest.raises(ProviderTransportError) as caught:
+            await provider.complete_turn(_request())
+    finally:
+        await client.aclose()
+
+    assert caught.value.code == expected_code
+    assert caught.value.statusCode is None
+    assert caught.value.requestId is None
+    assert "SECRET" not in repr(caught.value)
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 @pytest.mark.parametrize(
@@ -184,9 +221,7 @@ async def test_http_error_does_not_expose_response_body() -> None:
 )
 @pytest.mark.asyncio
 async def test_deepseek_requires_exactly_one_choice(choices: list[dict[str, Any]]) -> None:
-    body = _response_with_usage(
-        {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
-    )
+    body = _response_with_usage({"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2})
     body["choices"] = choices
     provider, _, client = _provider(response=body)
     try:
@@ -470,11 +505,13 @@ async def test_assistant_reasoning_content_is_replayed_in_second_request() -> No
 async def test_http_error_is_single_request() -> None:
     provider, requests, client = _provider(response={"error": {"message": "bad"}}, status_code=429)
     try:
-        with pytest.raises(RuntimeError, match="DeepSeek 请求失败"):
+        with pytest.raises(ProviderTransportError) as caught:
             await provider.complete_turn(_request())
     finally:
         await client.aclose()
     assert len(requests) == 1
+    assert caught.value.code == "http_error"
+    assert caught.value.statusCode == 429
 
 
 @pytest.mark.asyncio
@@ -501,9 +538,10 @@ async def test_http_redirect_with_valid_model_json_is_rejected_without_body_leak
         status_code=status_code,
     )
     try:
-        with pytest.raises(RuntimeError, match=f"HTTP {status_code}") as error:
+        with pytest.raises(ProviderTransportError) as error:
             await provider.complete_turn(_request())
     finally:
         await client.aclose()
     assert "redirect-secret-response-body" not in str(error.value)
     assert "不应解析" not in str(error.value)
+    assert error.value.statusCode == status_code

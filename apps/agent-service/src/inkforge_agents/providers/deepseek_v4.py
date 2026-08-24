@@ -16,6 +16,7 @@ from .base import (
     ModelTurnResult,
     ModelUsage,
     ModelUsageDiagnostics,
+    ProviderTransportError,
 )
 from .openai_compatible import normalize_finish_reason
 
@@ -63,6 +64,8 @@ class DeepSeekV4Provider:
                 for tool in request.tools
             ]
         _apply_policy(payload, request)
+        response: httpx.Response | None = None
+        transport_error: ProviderTransportError | None = None
         try:
             response = await self._client.post(
                 self._endpoint,
@@ -72,10 +75,30 @@ class DeepSeekV4Provider:
                 },
                 json=payload,
             )
+        except httpx.TimeoutException:
+            transport_error = ProviderTransportError(
+                code="timeout_error",
+                statusCode=None,
+                requestId=None,
+            )
         except httpx.HTTPError as exc:
-            raise RuntimeError(f"DeepSeek 请求失败：{exc}") from exc
+            del exc
+            transport_error = ProviderTransportError(
+                code="connection_error",
+                statusCode=None,
+                requestId=None,
+            )
+        # 离开捕获块后再抛出，避免原始网络异常及其请求信息进入异常链和日志。
+        if transport_error is not None:
+            raise transport_error
+        if response is None:
+            raise RuntimeError("DeepSeek HTTP 客户端未返回响应")
         if not response.is_success:
-            raise RuntimeError(f"DeepSeek 请求失败：HTTP {response.status_code}")
+            raise ProviderTransportError(
+                code="http_error",
+                statusCode=response.status_code,
+                requestId=_response_request_id(response),
+            )
         try:
             body = response.json()
         except (ValueError, UnicodeError) as exc:
@@ -106,6 +129,19 @@ def _completion_endpoint(base_url: str) -> str:
     ):
         return "https://api.deepseek.com/chat/completions"
     return base_url.rstrip("/") + "/chat/completions"
+
+
+def _response_request_id(response: httpx.Response) -> str | None:
+    """只读取固定响应头中的短标识，禁止让任意头值进入日志。"""
+
+    for header in ("x-request-id", "request-id", "x-ds-request-id"):
+        value = response.headers.get(header)
+        if not isinstance(value, str) or not value or len(value) > 256:
+            continue
+        allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.:")
+        if all(character in allowed for character in value):
+            return value
+    return None
 
 
 def _message_to_wire(message: ModelMessage) -> dict[str, Any]:
@@ -158,11 +194,7 @@ def _parse_response(body: object) -> ModelTurnResult:
     if not isinstance(body, Mapping):
         raise ValueError("DeepSeek 响应顶层不是对象")
     choices = body.get("choices")
-    if (
-        not isinstance(choices, list)
-        or len(choices) != 1
-        or not isinstance(choices[0], Mapping)
-    ):
+    if not isinstance(choices, list) or len(choices) != 1 or not isinstance(choices[0], Mapping):
         raise ValueError("DeepSeek 响应 choices 必须恰好一个")
     choice = choices[0]
     message = choice.get("message")
@@ -241,13 +273,9 @@ def _parse_usage(raw: object) -> tuple[ModelUsage, ModelUsageDiagnostics]:
         raise ValueError(
             "DeepSeek 用量矛盾：total_tokens 不等于 prompt_tokens 与 completion_tokens 之和"
         )
-    cached = _nonnegative_int(
-        usage["prompt_cache_hit_tokens"], "prompt_cache_hit_tokens"
-    )
+    cached = _nonnegative_int(usage["prompt_cache_hit_tokens"], "prompt_cache_hit_tokens")
     miss = (
-        _nonnegative_int(
-            usage["prompt_cache_miss_tokens"], "prompt_cache_miss_tokens"
-        )
+        _nonnegative_int(usage["prompt_cache_miss_tokens"], "prompt_cache_miss_tokens")
         if "prompt_cache_miss_tokens" in usage
         else None
     )
@@ -268,15 +296,11 @@ def _parse_usage(raw: object) -> tuple[ModelUsage, ModelUsageDiagnostics]:
             raise ValueError("DeepSeek 用量矛盾：reasoning_tokens 重复值不一致")
         reasoning_value = top_level_reasoning
     if (
-        isinstance(details, Mapping)
-        and "reasoning_tokens" in details
-        and reasoning_value is None
+        isinstance(details, Mapping) and "reasoning_tokens" in details and reasoning_value is None
     ) or (top_level_has_reasoning and reasoning_value is None):
         raise ValueError("DeepSeek 用量字段 reasoning_tokens 无效")
     reasoning = (
-        None
-        if reasoning_value is None
-        else _nonnegative_int(reasoning_value, "reasoning_tokens")
+        None if reasoning_value is None else _nonnegative_int(reasoning_value, "reasoning_tokens")
     )
     if reasoning is not None and reasoning > completion:
         raise ValueError("DeepSeek 用量矛盾：reasoning_tokens 大于 completion_tokens")
