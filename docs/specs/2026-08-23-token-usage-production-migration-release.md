@@ -14,7 +14,7 @@
 
 - 工作流只能执行 `20260823_token_usage_details.sql`，禁止接收任意 SQL、任意服务器路径或任意数据库 URL。
 - SQL 文件必须匹配固定 SHA-256：
-  `E5D7D5946828CA3E516666607104353ADE4C034F681544B83AD45E639E549760`。
+  `BF6817A82F74E76B8F98D356749795A1EC04BCFCED090DB3F8B463F62ABCAB93`。
 - 服务器没有独立 dev 环境文件。工作流只允许从应用目录现有 `.env` 解析唯一生产连接，强制源数据库名为
   `novelwriter`，只把数据库路径派生为 `novelwriterdev`；query 只允许宿主机 libpq 与 Core asyncpg 都支持的
   `sslmode` 和 `application_name`，拒绝任何可覆盖数据库、主机或身份的参数。派生后以只读查询再次确认数据库名，不能
@@ -34,6 +34,8 @@
 - dev 迁移后从真实数据库只读导出结构契约；提交前人工/自动核对差异只能包含两个 nullable INTEGER 列和三个 CHECK。
 - 固定 SQL 失败时，工作流只允许读取本次运行私有错误文件并输出预定义原因码；不得回显 PostgreSQL 异常正文、
   SQL、连接串或凭据。错误文件必须绑定运行编号并由 trap 清理。
+- CHECK 定义一致性不得拿手写字符串直接比对 PostgreSQL 的格式化文本；迁移应在事务内临时表上创建同一组
+  约束，以数据库解析后的规范定义作为比较基准，仍需逐个 `VALIDATE CONSTRAINT`。
 - 生产迁移由部署脚本在新容器启动前执行。部署失败且本次部署首次增加这些字段时，先运行固定 down
   脚本删除三个约束与两个纯诊断列，再恢复旧镜像；正式正文、用户数据和旧 TokenUsage 字段不得变更。
 - `reasoning_content` 正文不进入数据库、构建产物或工作流 Artifact。工作流 Artifact 只允许包含结构契约和非敏感校验元数据。

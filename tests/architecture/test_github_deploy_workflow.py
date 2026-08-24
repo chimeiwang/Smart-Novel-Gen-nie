@@ -15,7 +15,7 @@ import yaml
 ROOT = Path(__file__).parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "token-usage-details-migration.yml"
 MIGRATION = ROOT / "scripts" / "migrations" / "20260823_token_usage_details.sql"
-EXPECTED_SHA256 = "E5D7D5946828CA3E516666607104353ADE4C034F681544B83AD45E639E549760"
+EXPECTED_SHA256 = "BF6817A82F74E76B8F98D356749795A1EC04BCFCED090DB3F8B463F62ABCAB93"
 
 
 def _source() -> str:
@@ -285,6 +285,17 @@ def test_migration_itself_refuses_every_database_except_novelwriterdev() -> None
 
     assert "current_database() <> 'novelwriterdev'" in migration
     assert "TokenUsage 明细迁移只允许在 novelwriterdev 执行" in migration
+
+
+def test_migration_compares_constraints_using_postgres_canonical_definitions() -> None:
+    migration = MIGRATION.read_text(encoding="utf-8")
+
+    assert "CREATE TEMP TABLE token_usage_details_constraint_contract" in migration
+    assert "ON COMMIT DROP" in migration
+    assert "pg_temp.token_usage_details_constraint_contract" in migration
+    assert "pg_get_constraintdef" in migration
+    assert "expected_constraint.definition" in migration
+    assert "$constraint$CHECK" not in migration
 
 
 def test_migration_failure_only_emits_fixed_reason_codes() -> None:

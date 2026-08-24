@@ -25,7 +25,7 @@ jobs:
     env:
       APP_DIR: ${{ vars.APP_DIR }}
       SQL_PATH: scripts/migrations/20260823_token_usage_details.sql
-      SQL_SHA256: E5D7D5946828CA3E516666607104353ADE4C034F681544B83AD45E639E549760
+      SQL_SHA256: BF6817A82F74E76B8F98D356749795A1EC04BCFCED090DB3F8B463F62ABCAB93
 
     steps:
       - name: Checkout
@@ -587,7 +587,7 @@ jobs:
           }
 
           printf '%s  %s\n' \
-            'E5D7D5946828CA3E516666607104353ADE4C034F681544B83AD45E639E549760' \
+            'BF6817A82F74E76B8F98D356749795A1EC04BCFCED090DB3F8B463F62ABCAB93' \
             "$sql_temp" | sha256sum --check --status -
           for attempt in 1 2; do
             if ! PGOPTIONS='-c statement_timeout=120000 -c lock_timeout=30000' \
