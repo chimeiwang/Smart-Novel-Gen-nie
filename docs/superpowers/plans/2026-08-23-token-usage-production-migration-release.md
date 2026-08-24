@@ -33,7 +33,8 @@ Expected: FAIL，原因是固定迁移工作流尚不存在。
 `migrate_dev` 复用该固定派生规则，运行备份、SQL 哈希、双跑、旧行 NULL 查询和只读 contract 导出，再上传
 单一 JSON Artifact。派生器拒绝改变目标或身份的 query 参数，宿主机命令使用无密码 URL 和 `0600`
 临时 `.pgpass`，完整 dev URL 仅通过标准输入交给 Core 容器；SQL 自身也必须拒绝任何非 `novelwriterdev`
-数据库。
+数据库。生产 `.env` 的 `host.docker.internal` 只在宿主机命令中固定映射为 `127.0.0.1`，容器 URL 保持原主机名；
+解析失败只输出固定原因码。
 
 - [ ] **Step 4: 提交 bootstrap**
 
