@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, Any, BinaryIO
 
-from ..runtime.model_runtime import ModelCallLogRecord
+from ..runtime.model_runtime import ModelCallFailureLogRecord, ModelCallLogRecord
 
 _LOG_MAGIC = b"INKFORGE-HUMAN-LOG/2\n"
 _FRAME_PREFIX_PATTERN = re.compile(rb"INKFORGE-FRAME ([0-9]+) ([0-9]+)\n")
@@ -137,10 +137,7 @@ class HumanWorkflowLog:
                 path,
                 _LogFrame(
                     header={"type": "state", "sequence": sequence},
-                    content=(
-                        f"\nS{sequence:03d} 状态切换\n"
-                        f"节点：{node}\n字段：{_json(changes)}\n"
-                    ),
+                    content=(f"\nS{sequence:03d} 状态切换\n节点：{node}\n字段：{_json(changes)}\n"),
                 ),
             )
 
@@ -156,7 +153,7 @@ class HumanWorkflowLog:
                     novel_id=record.context.novelId,
                 ),
             )
-            sequence = _next_sequence(frames, "model")
+            sequence = _next_model_attempt_sequence(frames)
             billing_request_id = record.billingRequestId or "无"
             usage = record.usage
             visible_completion_tokens = (
@@ -190,9 +187,7 @@ class HumanWorkflowLog:
                 ),
                 "供应商响应标识："
                 + (
-                    record.providerResponseId
-                    if record.providerResponseId is not None
-                    else "未提供"
+                    record.providerResponseId if record.providerResponseId is not None else "未提供"
                 ),
                 "Token 消耗："
                 f"输入 {usage.promptTokens} | "
@@ -211,11 +206,7 @@ class HumanWorkflowLog:
                     record.output,
                     f"完成原因：{record.finishReason}",
                     "供应商原始原因："
-                    + (
-                        record.rawFinishReason
-                        if record.rawFinishReason is not None
-                        else "未提供"
-                    ),
+                    + (record.rawFinishReason if record.rawFinishReason is not None else "未提供"),
                     "",
                 )
             )
@@ -234,6 +225,63 @@ class HumanWorkflowLog:
                         "providerResponseId": record.providerResponseId,
                     },
                     content="\n".join(sections),
+                ),
+            )
+
+    def record_model_failure(self, record: ModelCallFailureLogRecord) -> None:
+        """写入供应商失败的安全摘要，不复制请求、响应或异常正文。"""
+
+        with self._lock:
+            path = self._require_path(record.context.runId)
+            frames = _ensure_v2_log(
+                path,
+                expected_identity=_ExpectedRunIdentity(
+                    run_id=record.context.runId,
+                    task_id=record.context.taskId,
+                    user_id=record.context.userId,
+                    novel_id=record.context.novelId,
+                ),
+            )
+            sequence = _next_model_attempt_sequence(frames)
+            status_code = str(record.statusCode) if record.statusCode is not None else "未提供"
+            provider_request_id = record.providerRequestId or "未提供"
+            structured_route = record.structuredRoute or "普通对话"
+            _append_frame(
+                path,
+                _LogFrame(
+                    header={
+                        "type": "model_failure",
+                        "sequence": sequence,
+                        "failureCode": record.failureCode,
+                        "exceptionType": record.exceptionType,
+                        "statusCode": record.statusCode,
+                        "providerRequestId": record.providerRequestId,
+                        "elapsedMs": record.elapsedMs,
+                        "messageCount": record.messageCount,
+                        "toolCount": record.toolCount,
+                        "structuredRoute": record.structuredRoute,
+                        "requestedMaxOutputTokens": record.requestedMaxOutputTokens,
+                    },
+                    content="\n".join(
+                        (
+                            f"\nM{sequence:02d} 模型调用失败",
+                            f"智能体：{record.context.agentId}",
+                            f"任务标识：{record.context.taskId}",
+                            f"运行标识：{record.context.runId}",
+                            f"模型：{record.provider}/{record.model}",
+                            f"错误分类：{record.failureCode}",
+                            f"异常类型：{record.exceptionType}",
+                            f"HTTP 状态：{status_code}",
+                            f"供应商请求标识：{provider_request_id}",
+                            f"耗时毫秒：{record.elapsedMs}",
+                            f"消息数：{record.messageCount}",
+                            f"工具数：{record.toolCount}",
+                            f"结构化路由：{structured_route}",
+                            f"请求输出上限：{record.requestedMaxOutputTokens}",
+                            "请求、响应与原始异常正文未写入人工日志",
+                            "",
+                        )
+                    ),
                 ),
             )
 
@@ -329,11 +377,7 @@ def _legacy_summary(content: str) -> WorkflowRunSummary | None:
         runKind="旧版未验证",
         userId=user_id,
         novelId=novel_id,
-        chapterId=(
-            str(metadata["chapterId"])
-            if metadata.get("chapterId") is not None
-            else None
-        ),
+        chapterId=(str(metadata["chapterId"]) if metadata.get("chapterId") is not None else None),
         startedAt=started_at,
         endedAt=started_at,
         status="旧版未验证",
@@ -345,14 +389,8 @@ def _v2_summary(
     *,
     tail_damaged: bool = False,
 ) -> WorkflowRunSummary | None:
-    metadata_frames = [
-        frame.header for frame in frames if frame.header.get("type") == "metadata"
-    ]
-    if (
-        len(metadata_frames) != 1
-        or not frames
-        or frames[0].header.get("type") != "metadata"
-    ):
+    metadata_frames = [frame.header for frame in frames if frame.header.get("type") == "metadata"]
+    if len(metadata_frames) != 1 or not frames or frames[0].header.get("type") != "metadata":
         return None
     metadata = metadata_frames[0]
     run_id = _required_metadata_text(metadata, "runId")
@@ -369,30 +407,24 @@ def _v2_summary(
     ):
         return None
     run_headers = [frame.header for frame in frames if frame.header.get("type") == "run"]
-    finish_headers = [
-        frame.header for frame in frames if frame.header.get("type") == "finish"
-    ]
+    finish_headers = [frame.header for frame in frames if frame.header.get("type") == "finish"]
     legacy_header = next(
         (frame.header for frame in frames if frame.header.get("type") == "legacy"),
         {},
     )
-    run_kind = str(run_headers[-1].get("runKind", "未知运行")) if run_headers else (
-        "旧版未验证" if legacy_header else "未知运行"
+    run_kind = (
+        str(run_headers[-1].get("runKind", "未知运行"))
+        if run_headers
+        else ("旧版未验证" if legacy_header else "未知运行")
     )
-    ended_at = (
-        str(finish_headers[-1].get("endedAt", started_at))
-        if finish_headers
-        else started_at
-    )
+    ended_at = str(finish_headers[-1].get("endedAt", started_at)) if finish_headers else started_at
     trusted_status = (
         str(finish_headers[-1].get("status", "执行中"))
         if finish_headers
         else ("旧版未验证" if legacy_header and not run_headers else "执行中")
     )
     chapter_id = metadata.get("chapterId")
-    if chapter_id is not None and (
-        not isinstance(chapter_id, str) or not chapter_id.strip()
-    ):
+    if chapter_id is not None and (not isinstance(chapter_id, str) or not chapter_id.strip()):
         return None
     return WorkflowRunSummary(
         runId=run_id,
@@ -493,6 +525,11 @@ def _next_sequence(frames: list[_LogFrame], frame_type: str) -> int:
     return sequence + 1
 
 
+def _next_model_attempt_sequence(frames: list[_LogFrame]) -> int:
+    sequence = sum(1 for frame in frames if frame.header.get("type") in {"model", "model_failure"})
+    return sequence + 1
+
+
 def _is_v2_log(path: Path) -> bool:
     with path.open("rb") as handle:
         return handle.read(len(_LOG_MAGIC)) == _LOG_MAGIC
@@ -534,9 +571,7 @@ def _scan_v2_frames(path: Path, *, include_content: bool) -> _FrameScan:
                     header = json.loads(header_bytes.decode("utf-8"))
                 except (UnicodeDecodeError, json.JSONDecodeError) as exc:
                     raise ValueError("人工日志结构头不是有效 JSON") from exc
-                if not isinstance(header, dict) or not isinstance(
-                    header.get("type"), str
-                ):
+                if not isinstance(header, dict) or not isinstance(header.get("type"), str):
                     raise ValueError("人工日志结构头字段无效")
 
                 content_offset = handle.tell()
@@ -691,9 +726,7 @@ def _quarantine_tail(
             target.flush()
             os.fsync(target.fileno())
         digest_value = digest.hexdigest()
-        recovery_path = path.with_name(
-            f"{path.stem}.recovery-{digest_value}-{expected_length}.bin"
-        )
+        recovery_path = path.with_name(f"{path.stem}.recovery-{digest_value}-{expected_length}.bin")
         if recovery_path.exists():
             if not _files_equal(temporary_path, recovery_path):
                 raise ValueError("人工日志残缺尾部隔离文件冲突")

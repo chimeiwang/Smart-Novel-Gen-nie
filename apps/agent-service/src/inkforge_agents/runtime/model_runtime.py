@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
+import re
+from time import monotonic
 from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict
@@ -13,7 +16,10 @@ from ..providers.base import (
     ModelTurnRequest,
     ModelTurnResult,
     ModelUsage,
+    ProviderTransportError,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class ModelCallContext(BaseModel):
@@ -46,6 +52,25 @@ class ModelCallLogRecord(BaseModel):
     providerResponseId: str | None = None
 
 
+class ModelCallFailureLogRecord(BaseModel):
+    """模型失败的安全诊断；禁止携带请求、响应或原始异常文本。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    context: ModelCallContext
+    provider: str
+    model: str
+    failureCode: str
+    exceptionType: str
+    statusCode: int | None = None
+    providerRequestId: str | None = None
+    elapsedMs: int
+    messageCount: int
+    toolCount: int
+    structuredRoute: ModelStructuredOutputRoute | None = None
+    requestedMaxOutputTokens: int
+
+
 class BillingPort(Protocol):
     async def authorize(
         self,
@@ -64,6 +89,8 @@ class BillingPort(Protocol):
 
 class ModelCallObserver(Protocol):
     def record_model_call(self, record: ModelCallLogRecord) -> None: ...
+
+    def record_model_failure(self, record: ModelCallFailureLogRecord) -> None: ...
 
 
 class ModelRuntime:
@@ -121,7 +148,7 @@ class ModelRuntime:
         context: ModelCallContext | None = None,
     ) -> ModelTurnResult:
         if not self._provider.billable or self._billing is None:
-            result = await _complete_provider(self._provider, request)
+            result = await self._complete_provider(request, context=context)
             self._record(context, request, result, billing_request_id=None)
             return result
         if context is None:
@@ -177,7 +204,7 @@ class ModelRuntime:
             if granted_max == request.maxOutputTokens
             else request.model_copy(update={"maxOutputTokens": granted_max})
         )
-        result = await _complete_provider(self._provider, provider_request)
+        result = await self._complete_provider(provider_request, context=context)
         try:
             await self._billing.report(
                 context,
@@ -205,6 +232,40 @@ class ModelRuntime:
             billing_request_id=grant_request_id,
         )
         return result
+
+    async def _complete_provider(
+        self,
+        request: ModelTurnRequest,
+        *,
+        context: ModelCallContext | None,
+    ) -> ModelTurnResult:
+        started_at = monotonic()
+        try:
+            return await self._provider.complete_turn(request)
+        except Exception as exc:
+            record = _model_failure_record(
+                provider=self._provider,
+                request=request,
+                context=context,
+                error=exc,
+                elapsed_ms=max(0, round((monotonic() - started_at) * 1000)),
+            )
+            _log_model_failure(record)
+            callback = getattr(self._observer, "record_model_failure", None)
+            if record is not None and callable(callback):
+                try:
+                    callback(record)
+                except Exception:
+                    # 诊断日志不可用不能覆盖真正的供应商失败，也不能输出异常正文。
+                    logger.warning(
+                        "模型供应商失败记录写入人工日志失败",
+                        extra={
+                            "task_id": record.context.taskId,
+                            "run_id": record.context.runId,
+                            "agent_id": record.context.agentId,
+                        },
+                    )
+            raise RuntimeError("MODEL_PROVIDER_FAILED：模型供应商调用失败") from exc
 
     def _record(
         self,
@@ -278,14 +339,88 @@ class ModelRuntime:
         )
 
 
-async def _complete_provider(
+def _safe_exception_type(error: Exception) -> str:
+    value = type(error).__name__
+    return (
+        value
+        if len(value) <= 64 and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", value)
+        else "UnknownError"
+    )
+
+
+def _model_failure_record(
+    *,
     provider: ModelProvider,
     request: ModelTurnRequest,
-) -> ModelTurnResult:
-    try:
-        return await provider.complete_turn(request)
-    except Exception as exc:
-        raise RuntimeError("MODEL_PROVIDER_FAILED：模型供应商调用失败") from exc
+    context: ModelCallContext | None,
+    error: Exception,
+    elapsed_ms: int,
+) -> ModelCallFailureLogRecord | None:
+    if context is None:
+        return None
+    transport_error = error if isinstance(error, ProviderTransportError) else None
+    return ModelCallFailureLogRecord(
+        context=context,
+        provider=provider.provider_name,
+        model=provider.model_name,
+        failureCode=(transport_error.code if transport_error is not None else "unexpected_error"),
+        exceptionType=_safe_exception_type(error),
+        statusCode=(transport_error.statusCode if transport_error is not None else None),
+        providerRequestId=(transport_error.requestId if transport_error is not None else None),
+        elapsedMs=elapsed_ms,
+        messageCount=len(request.messages),
+        toolCount=len(request.tools),
+        structuredRoute=(
+            request.structuredOutput.route if request.structuredOutput is not None else None
+        ),
+        requestedMaxOutputTokens=request.maxOutputTokens,
+    )
+
+
+def _log_model_failure(record: ModelCallFailureLogRecord | None) -> None:
+    if record is None:
+        logger.warning("模型供应商调用失败 context=missing")
+        return
+    fields: dict[str, object] = {
+        "user_id": record.context.userId,
+        "novel_id": record.context.novelId,
+        "task_id": record.context.taskId,
+        "run_id": record.context.runId,
+        "agent_id": record.context.agentId,
+        "provider_name": record.provider,
+        "model_name": record.model,
+        "failure_code": record.failureCode,
+        "exception_type": record.exceptionType,
+        "status_code": record.statusCode,
+        "provider_request_id": record.providerRequestId,
+        "elapsed_ms": record.elapsedMs,
+        "message_count": record.messageCount,
+        "tool_count": record.toolCount,
+        "structured_route": record.structuredRoute,
+        "requested_max_output_tokens": record.requestedMaxOutputTokens,
+    }
+    # 默认 Uvicorn 文本格式不会展示 LogRecord.extra，因此消息本身也输出同一组安全字段。
+    logger.warning(
+        "模型供应商调用失败 task_id=%s run_id=%s agent_id=%s provider=%s model=%s "
+        "failure_code=%s exception_type=%s status_code=%s provider_request_id=%s "
+        "elapsed_ms=%s message_count=%s tool_count=%s structured_route=%s "
+        "requested_max_output_tokens=%s",
+        record.context.taskId,
+        record.context.runId,
+        record.context.agentId,
+        record.provider,
+        record.model,
+        record.failureCode,
+        record.exceptionType,
+        record.statusCode,
+        record.providerRequestId,
+        record.elapsedMs,
+        record.messageCount,
+        record.toolCount,
+        record.structuredRoute,
+        record.requestedMaxOutputTokens,
+        extra=fields,
+    )
 
 
 def _model_request_id(
