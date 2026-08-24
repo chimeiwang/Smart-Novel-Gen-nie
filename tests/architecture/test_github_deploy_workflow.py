@@ -130,6 +130,11 @@ def test_inspect_derives_and_verifies_the_fixed_dev_database() -> None:
     assert "DATABASE_URL" in inspect
     assert "uv" not in inspect
     assert "cat " not in inspect
+    assert "for backup_root in /srv/backups/inkforge-dev /srv/backups/inkforge" in inspect
+    assert '"$app_dir/.token-usage-dev-backups"' in inspect
+    assert "backup-root:%s:writable" in inspect
+    assert "backup-root:%s:missing-parent-writable" in inspect
+    assert "backup-root:%s:not-writable" in inspect
 
 
 def test_env_parser_is_pure_text_and_never_sources_production_env() -> None:

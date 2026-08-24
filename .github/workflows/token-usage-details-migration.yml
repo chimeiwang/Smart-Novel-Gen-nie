@@ -235,6 +235,17 @@ jobs:
             echo "目标数据库不是 novelwriterdev" >&2
             exit 1
           }
+          for backup_root in /srv/backups/inkforge-dev /srv/backups/inkforge \
+            "$app_dir/.token-usage-dev-backups"; do
+            if [ -d "$backup_root" ] && [ -w "$backup_root" ]; then
+              printf 'backup-root:%s:writable\n' "$backup_root"
+            elif [ ! -e "$backup_root" ] && [ -d "$(dirname "$backup_root")" ] \
+              && [ -w "$(dirname "$backup_root")" ]; then
+              printf 'backup-root:%s:missing-parent-writable\n' "$backup_root"
+            else
+              printf 'backup-root:%s:not-writable\n' "$backup_root"
+            fi
+          done
           printf '.env: present\n'
           printf 'novelwriterdev: verified\n'
           REMOTE
