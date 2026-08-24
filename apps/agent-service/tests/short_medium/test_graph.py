@@ -16,6 +16,7 @@ from inkforge_agents.jobs.short_medium import (
 from inkforge_agents.observability.human_workflow_log import HumanWorkflowLog
 from inkforge_agents.observability.model_observer import WorkflowModelObserver
 from inkforge_agents.providers.base import (
+    ModelExecutionPolicy,
     ModelMessage,
     ModelTurnRequest,
     ModelTurnResult,
@@ -24,6 +25,11 @@ from inkforge_agents.providers.base import (
 from inkforge_agents.providers.fake import FakeModelProvider
 from inkforge_agents.queue.consumer import NonRetryableJobError
 from inkforge_agents.queue.repository import QueueJob
+from inkforge_agents.runtime.model_policy import (
+    CREATIVE_HIGH,
+    LEGACY_PROVIDER_DEFAULT,
+    REPORT_NO_THINKING,
+)
 from inkforge_agents.runtime.model_runtime import ModelRuntime
 
 
@@ -782,8 +788,101 @@ async def test_model_generator_uses_configured_output_limit() -> None:
             messages=[ModelMessage(role="user", content="请求")],
             tools=[],
             maxOutputTokens=384_000,
+            policy=LEGACY_PROVIDER_DEFAULT,
         ),
     )
 
     assert runtime.request is not None
     assert runtime.request.maxOutputTokens == 12_345
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("operation", "expected_policy"),
+    [
+        ("generate_outline", CREATIVE_HIGH),
+        ("generate_manuscript", CREATIVE_HIGH),
+        ("replace_selection", CREATIVE_HIGH),
+        ("full_check", REPORT_NO_THINKING),
+    ],
+)
+async def test_short_medium_handler_passes_operation_policy_to_real_generator(
+    operation: str,
+    expected_policy: ModelExecutionPolicy,
+) -> None:
+    class Runtime:
+        def __init__(self) -> None:
+            self.requests: list[ModelTurnRequest] = []
+
+        async def run_turn(
+            self,
+            request: ModelTurnRequest,
+            *,
+            context: object,
+        ) -> ModelTurnResult:
+            del context
+            self.requests.append(request)
+            content = "甲" * 6_000 if operation == "generate_manuscript" else "结果"
+            return ModelTurnResult(
+                content=content,
+                toolCalls=[],
+                finishReason="stop",
+                usage=ModelUsage(promptTokens=1, completionTokens=1, totalTokens=2),
+            )
+
+    base_content = "基础正文"
+    selected_text = "选区"
+    job = manuscript_job(15_000)
+    payload: dict[str, Any] = {
+        "workflow": "short_medium",
+        "operation": operation,
+        "documentType": "outline" if operation == "replace_selection" else "manuscript",
+    }
+    if operation == "generate_outline":
+        payload.update(
+            {
+                "documentType": "outline",
+                "targetTotalWordCount": 15_000,
+                "sourceKind": "idea",
+                "sourceText": "一段灵感",
+            }
+        )
+    elif operation == "generate_manuscript":
+        payload.update(job.payload)
+    elif operation == "replace_selection":
+        payload.update(
+            {
+                "baseVersionId": "outline-version-1",
+                "baseContentHash": hashlib.sha256(base_content.encode()).hexdigest(),
+                "selectionStart": 0,
+                "selectionEnd": len(selected_text),
+                "selectedText": selected_text,
+                "selectedTextHash": hashlib.sha256(selected_text.encode()).hexdigest(),
+                "contextBefore": "",
+                "contextAfter": "",
+                "userInstruction": "替换选区",
+            }
+        )
+    else:
+        payload.update(
+            {
+                "chapterId": "chapter-1",
+                "baseVersionId": "manuscript-version-1",
+                "baseContent": base_content,
+                "baseContentHash": hashlib.sha256(base_content.encode()).hexdigest(),
+            }
+        )
+    job = job.model_copy(update={"payload": payload})
+    runtime = Runtime()
+    handler = ShortMediumWritingJobHandler(
+        Core(),
+        ModelShortMediumGenerator(runtime, max_output_tokens=12_345),  # type: ignore[arg-type]
+    )
+
+    await handler(job)
+
+    assert len(runtime.requests) == 1
+    actual_policy = runtime.requests[0].policy
+    assert actual_policy.policyId == expected_policy.policyId
+    assert actual_policy.thinkingMode == expected_policy.thinkingMode
+    assert actual_policy.reasoningEffort == expected_policy.reasoningEffort

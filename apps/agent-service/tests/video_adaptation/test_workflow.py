@@ -493,6 +493,14 @@ async def test_plan_workflow_persists_dramatic_checkpoint_before_cinematic_candi
         "chapter_goal_driven_shot_design_v3",
         "chapter_cinematic_review_v3",
     ]
+    assert [
+        (request.policy.policyId, request.policy.thinkingMode, request.policy.reasoningEffort)
+        for request in provider.requests
+    ] == [
+        ("v1:video-adaptation-plan-no-thinking", "disabled", None),
+        ("v1:video-adaptation-plan-no-thinking", "disabled", None),
+        ("v1:video-adaptation-review-no-thinking", "disabled", None),
+    ]
 
 
 @pytest.mark.asyncio
@@ -582,6 +590,11 @@ async def test_prompt_workflow_returns_versioned_batch_without_asking_model_for_
     assert len(core.prompt_completed) == 1
     assert core.prompt_completed[0].promptBatch.schemaVersion == "shot_prompt_spec_batch_v2"
     prompt_request = provider.requests[-1]
+    assert (
+        prompt_request.policy.policyId,
+        prompt_request.policy.thinkingMode,
+        prompt_request.policy.reasoningEffort,
+    ) == ("v1:video-adaptation-prompt-no-thinking", "disabled", None)
     assert prompt_request.structuredOutput is not None
     assert "schemaVersion" not in prompt_request.structuredOutput.jsonSchema.get(
         "properties",
@@ -1136,8 +1149,9 @@ async def test_missing_beat_completion_preserves_existing_slots() -> None:
             "suggestedEpisodeBreakAfterShotNumbers": [],
         }
     )
+    provider = _Provider()
     planner = ModelVideoAdaptationPlanner(
-        ModelRuntime(_Provider()),
+        ModelRuntime(provider),
         max_output_tokens=48_000,
     )
 
@@ -1154,6 +1168,12 @@ async def test_missing_beat_completion_preserves_existing_slots() -> None:
         units=units,
     )
 
+    assert len(provider.requests) == 1
+    assert (
+        provider.requests[0].policy.policyId,
+        provider.requests[0].policy.thinkingMode,
+        provider.requests[0].policy.reasoningEffort,
+    ) == ("v1:video-adaptation-plan-no-thinking", "disabled", None)
     assert completed.beatsByKey["B01"][0].title == "推门"
     assert completed.beatsByKey["B02"][0].title == "钥匙显现"
 

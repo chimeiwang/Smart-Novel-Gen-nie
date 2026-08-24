@@ -14,12 +14,15 @@ import pytest
 from inkforge_agents.config import Settings
 from inkforge_agents.providers.base import (
     ModelTool,
-    ModelTurnRequest,
     ModelTurnResult,
     ModelUsage,
     ProviderTransportError,
 )
+from inkforge_agents.providers.base import (
+    ModelTurnRequest as BaseModelTurnRequest,
+)
 from inkforge_agents.providers.openai_compatible import OpenAICompatibleProvider
+from inkforge_agents.runtime.model_policy import LEGACY_PROVIDER_DEFAULT
 from inkforge_contracts.video import (
     CharacterSettingSnapshot,
     LocationSettingSnapshot,
@@ -34,6 +37,14 @@ from inkforge_contracts.video import (
 from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
 from openai import AsyncOpenAI, InternalServerError
+
+
+class ModelTurnRequest(BaseModelTurnRequest):
+    """兼容 main 视频侧旧构造器；生产契约仍要求显式 policy。"""
+
+    def __init__(self, **data: Any) -> None:
+        data.setdefault("policy", LEGACY_PROVIDER_DEFAULT)
+        super().__init__(**data)
 
 
 def assert_exception_chain_is_sanitized(
@@ -172,6 +183,7 @@ async def test_complete_turn_normalizes_provider_finish_reason(
             messages=[{"role": "user", "content": "测试"}],
             tools=[],
             maxOutputTokens=128,
+            policy=LEGACY_PROVIDER_DEFAULT,
         )
     )
 
@@ -186,6 +198,7 @@ async def test_complete_turn_treats_missing_finish_reason_as_unknown() -> None:
             messages=[{"role": "user", "content": "测试"}],
             tools=[],
             maxOutputTokens=128,
+            policy=LEGACY_PROVIDER_DEFAULT,
         )
     )
 

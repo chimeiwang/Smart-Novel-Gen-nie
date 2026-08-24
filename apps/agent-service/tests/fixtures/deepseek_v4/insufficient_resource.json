@@ -1,0 +1,5 @@
+{
+  "id": "resp-resource-1",
+  "choices": [{"message": {"role": "assistant", "content": ""}, "finish_reason": "insufficient_system_resource"}],
+  "usage": {"prompt_tokens": 1, "prompt_cache_hit_tokens": 0, "completion_tokens": 0, "total_tokens": 1}
+}

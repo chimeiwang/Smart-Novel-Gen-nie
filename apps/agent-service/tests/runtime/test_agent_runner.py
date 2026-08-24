@@ -8,6 +8,7 @@ import pytest
 from inkforge_agents.definitions.agents import AGENT_DEFINITIONS
 from inkforge_agents.operations.definitions import OPERATION_DEFINITIONS
 from inkforge_agents.providers.base import (
+    ModelExecutionPolicy,
     ModelToolCall,
     ModelTurnRequest,
     ModelTurnResult,
@@ -19,6 +20,11 @@ from inkforge_agents.runtime.execution import (
     QUALITY_AGENT_ID,
     resolve_execution_contract,
     validate_execution_agent,
+)
+from inkforge_agents.runtime.model_policy import (
+    CREATIVE_HIGH,
+    QUALITY_NO_THINKING,
+    REVIEWER_NO_THINKING,
 )
 from inkforge_agents.runtime.model_runtime import ModelRuntime
 from inkforge_agents.tools.registry import ToolContext, build_default_registry
@@ -152,22 +158,42 @@ async def test_reviser_keeps_required_changes_out_of_system_messages() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("agent_id", "mode", "operation_kind", "expected"),
+    (
+        "agent_id",
+        "mode",
+        "operation_kind",
+        "expected",
+        "expected_policy",
+    ),
     [
         (
             "写作",
             "primary",
             "write_chapter",
             OPERATION_DEFINITIONS["write_chapter"].allowedToolNames,
+            CREATIVE_HIGH,
         ),
-        ("校验", "reviewer", "write_chapter", frozenset({"submit_evaluation"})),
+        (
+            "校验",
+            "reviewer",
+            "write_chapter",
+            frozenset({"submit_evaluation"}),
+            REVIEWER_NO_THINKING,
+        ),
         (
             "写作",
             "reviser",
             "write_chapter",
             OPERATION_DEFINITIONS["write_chapter"].allowedToolNames,
+            CREATIVE_HIGH,
         ),
-        (QUALITY_AGENT_ID, "quality", None, frozenset({"submit_quality_report"})),
+        (
+            QUALITY_AGENT_ID,
+            "quality",
+            None,
+            frozenset({"submit_quality_report"}),
+            QUALITY_NO_THINKING,
+        ),
     ],
 )
 async def test_runner_exposes_exact_execution_mode_tools(
@@ -175,6 +201,7 @@ async def test_runner_exposes_exact_execution_mode_tools(
     mode: str,
     operation_kind: str | None,
     expected: frozenset[str],
+    expected_policy: ModelExecutionPolicy,
 ) -> None:
     provider = CapturingProvider()
     registry = build_default_registry()
@@ -186,6 +213,26 @@ async def test_runner_exposes_exact_execution_mode_tools(
 
     assert len(provider.requests) == 1
     assert {tool.name for tool in provider.requests[0].tools} == expected
+    actual_policy = provider.requests[0].policy
+    assert actual_policy.policyId == expected_policy.policyId
+    assert actual_policy.thinkingMode == expected_policy.thinkingMode
+    assert actual_policy.reasoningEffort == expected_policy.reasoningEffort
+    assert actual_policy.requiredToolName == expected_policy.requiredToolName
+
+
+@pytest.mark.asyncio
+async def test_runner_rejects_required_policy_tool_before_provider() -> None:
+    provider = CapturingProvider()
+    registry = build_default_registry()
+    registry.for_execution = lambda **kwargs: []  # type: ignore[method-assign]
+    runner = AgentRunner(make_agent_runtime(ModelRuntime(provider), registry), registry)
+
+    with pytest.raises(ValueError, match="模型策略要求的终止工具未暴露"):
+        await runner.run(
+            request(agent_id="校验", mode="reviewer", operation_kind="write_chapter")
+        )
+
+    assert provider.requests == []
 
 
 @pytest.mark.asyncio

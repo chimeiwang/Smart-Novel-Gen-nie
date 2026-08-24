@@ -9,7 +9,7 @@
 - 接到新需求后，先在 `docs/specs/` 新增或更新 spec，再修改实现。
 - 修改前端 UI 前先读 `DESIGN.md`。
 - 修改 Agent、写作流程或草案审核前先读 `apps/agent-service/AGENTS.md`、`docs/requirements/03-ai-writing-and-agents.md` 和 `docs/requirements/04-review-quality-and-workflow.md`。
-- PostgreSQL schema 默认冻结。已批准例外只有
+- PostgreSQL schema 默认冻结。已批准例外包括
   `scripts/migrations/20260807_video_production_control_plane.sql`、
   `scripts/migrations/20260817_video_review_decision_command.sql`、
   `scripts/migrations/20260817_video_domain_ownership_chain.sql` 与
@@ -17,19 +17,20 @@
   `novelwriterdev` 开发库执行视频预览控制面、批准命令、章节改编域以及该改编域内视觉设定版本、逐镜参考绑定的具名迁移；
   这些视频迁移不构成生产迁移或完整 production_v2 schema 授权。用户于 2026-08-23 另行批准
   `scripts/migrations/20260823_production_video_adaptation_domain.sql` 只对服务器端 `novelwriter`
-  正式库执行上述已验证结构的具名晋升；该脚本不迁移开发数据、不启用视频功能，也不授权其他生产 DDL。另有
-  `scripts/migrations/20260821_token_usage_task_run.sql` 对 `TokenUsage` 模型调用归集字段、约束和必要索引的
-  版本化迁移；它不授权其他结构调整。用户于 2026-08-24 批准先实现逐镜视频生成 P0，因此另行允许
-  `scripts/migrations/20260824_video_shot_render_p0.sql` 只对服务器端 `novelwriterdev` 开发库新增逐镜
-  Seedance 耐久任务、不可变候选 Take、Take head 与确认命令；该迁移不授权生产 DDL、不迁移开发数据、
-  不开启生产视频功能，也不允许复用或恢复旧 `VideoScene`/`VideoGenerationTask` 公共语义。用户于
-  2026-08-24 进一步批准一次性实现 P1–P3，因此另行允许
-  `scripts/migrations/20260824_video_post_production_p1_p3.sql` 只对服务器端 `novelwriterdev` 开发库新增
-  受控 Take 抽帧来源事实、逐镜关键帧版本、分集非破坏性粗剪版本、声音/字幕版本及耐久整集导出任务，并为现有
-  `VideoAsset.duty` 增加 `sfx` 与 `episode_export`；该迁移不得对
-  `novelwriter` 正式库执行，不迁移开发数据、不启用生产功能，也不授权图片生成、TTS 或其他生产 DDL。
-  任何其他持久化改动必须先更新 spec 和本文件、核对
-  `apps/core-api/src/inkforge_core/db/schema-contract.json`，应用启动仍不得自动建表、删表或执行迁移。
+  正式库执行上述已验证结构的具名晋升；该脚本不迁移开发数据、不启用视频功能，也不授权其他生产 DDL。
+  用户于 2026-08-21 明确批准 `scripts/migrations/20260821_token_usage_task_run.sql`；用户于 2026-08-23
+  另行批准 `scripts/migrations/20260823_token_usage_details.sql` 及其固定生产 forward/rollback，只为
+  `TokenUsage` 增加可空 `INTEGER` `promptCacheMissTokens`/`reasoningTokens` 和三个 CHECK；无默认值、无回填、
+  无索引，旧行保持 `NULL`。这组迁移只能通过已审核的具名脚本和部署门禁执行，不授权其他结构调整。
+  用户于 2026-08-24 批准 `scripts/migrations/20260824_video_shot_render_p0.sql` 只对服务器端
+  `novelwriterdev` 开发库新增逐镜 Seedance 耐久任务、不可变候选 Take、Take head 与确认命令；同日进一步
+  批准 `scripts/migrations/20260824_video_post_production_p1_p3.sql` 只对该开发库新增受控 Take 抽帧来源事实、
+  逐镜关键帧版本、分集非破坏性粗剪版本、声音/字幕版本及耐久整集导出任务，并为现有
+  `VideoAsset.duty` 增加 `sfx` 与 `episode_export`。这两个 20260824 视频迁移不得对 `novelwriter` 正式库
+  执行，不迁移开发数据、不启用生产功能，也不授权图片生成、TTS 或旧
+  `VideoScene`/`VideoGenerationTask` 公共语义复活。所有迁移必须先备份、受控执行并验证幂等；开发库迁移后
+  必须从真实库只读导出 `schema-contract.json`。任何其他持久化改动必须先更新 spec 和本文件、
+  核对 `apps/core-api/src/inkforge_core/db/schema-contract.json`，应用启动仍不得自动建表、删表或执行迁移。
 
 ## 当前架构
 

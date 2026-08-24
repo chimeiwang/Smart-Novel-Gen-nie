@@ -169,6 +169,8 @@ class BillingService:
                     cached_tokens=request.cachedTokens,
                     completion_tokens=request.completionTokens,
                     total_tokens=request.totalTokens,
+                    prompt_cache_miss_tokens=request.promptCacheMissTokens,
+                    reasoning_tokens=request.reasoningTokens,
                 )
             )
         except InsufficientCreditsError:
@@ -227,12 +229,33 @@ class BillingService:
                 code="WRITING_TASK_NOT_FOUND",
                 message="写作任务不存在或无权访问",
             )
+        details_complete = bool(calls) and all(
+            item.prompt_cache_miss_tokens is not None
+            and item.reasoning_tokens is not None
+            for item in calls
+        )
         return TaskModelUsageResponse(
             taskId=task_id,
             requestCount=len(calls),
             promptTokens=sum(item.prompt_tokens for item in calls),
             cachedTokens=sum(item.cached_tokens for item in calls),
+            promptCacheMissTokens=(
+                sum(item.prompt_cache_miss_tokens or 0 for item in calls)
+                if details_complete
+                else None
+            ),
             completionTokens=sum(item.completion_tokens for item in calls),
+            reasoningTokens=(
+                sum(item.reasoning_tokens or 0 for item in calls)
+                if details_complete
+                else None
+            ),
+            visibleCompletionTokens=(
+                sum(item.completion_tokens - (item.reasoning_tokens or 0) for item in calls)
+                if details_complete
+                else None
+            ),
+            tokenDetailsComplete=details_complete,
             totalTokens=sum(item.total_tokens for item in calls),
             calls=[_task_usage_call_response(item) for item in calls],
         )
@@ -270,7 +293,19 @@ def _task_usage_call_response(snapshot: TaskUsageCallSnapshot) -> TaskModelUsage
         model=snapshot.model,
         promptTokens=snapshot.prompt_tokens,
         cachedTokens=snapshot.cached_tokens,
+        promptCacheMissTokens=snapshot.prompt_cache_miss_tokens,
         completionTokens=snapshot.completion_tokens,
+        reasoningTokens=snapshot.reasoning_tokens,
+        visibleCompletionTokens=(
+            snapshot.completion_tokens - snapshot.reasoning_tokens
+            if snapshot.prompt_cache_miss_tokens is not None
+            and snapshot.reasoning_tokens is not None
+            else None
+        ),
+        tokenDetailsComplete=(
+            snapshot.prompt_cache_miss_tokens is not None
+            and snapshot.reasoning_tokens is not None
+        ),
         totalTokens=snapshot.total_tokens,
         createdAt=snapshot.created_at,
     )

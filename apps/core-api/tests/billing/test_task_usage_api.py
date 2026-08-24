@@ -48,6 +48,7 @@ async def _create_database(path: Path) -> tuple[AsyncEngine, async_sessionmaker]
                 '"id" TEXT PRIMARY KEY, "userId" TEXT NOT NULL, "model" TEXT NOT NULL, '
                 '"promptTokens" INTEGER NOT NULL, "cachedTokens" INTEGER NOT NULL, '
                 '"completionTokens" INTEGER NOT NULL, "totalTokens" INTEGER NOT NULL, '
+                '"promptCacheMissTokens" INTEGER, "reasoningTokens" INTEGER, '
                 '"agentId" TEXT, "novelId" TEXT, "requestId" TEXT, "taskId" TEXT, '
                 '"runId" TEXT, "createdAt" TIMESTAMP NOT NULL)'
             )
@@ -80,21 +81,22 @@ async def _create_database(path: Path) -> tuple[AsyncEngine, async_sessionmaker]
                 'INSERT INTO "TokenUsage" ('
                 '"id", "userId", "model", "promptTokens", "cachedTokens", '
                 '"completionTokens", "totalTokens", "agentId", "novelId", '
-                '"requestId", "taskId", "runId", "createdAt") VALUES '
+                '"requestId", "taskId", "runId", "createdAt", '
+                '"promptCacheMissTokens", "reasoningTokens") VALUES '
                 "('usage-b', 'user-owner', 'deepseek-v4-flash', 100, 40, 20, 120, "
                 "'写作', 'novel-owned', 'request-b', 'task-owned', 'run-2', "
-                "'2026-08-21 01:00:00'), "
+                "'2026-08-21 01:00:00', 60, 5), "
                 "('usage-a', 'user-owner', 'deepseek-v4-flash', 50, 10, 30, 80, "
                 "'规划', 'novel-owned', 'request-a', 'task-owned', 'run-1', "
-                "'2026-08-21 01:00:00'), "
+                "'2026-08-21 01:00:00', 40, 10), "
                 "('usage-later', 'user-owner', 'deepseek-v4-flash', 25, 5, 5, 30, "
                 "'复审', 'novel-owned', 'request-later', 'task-owned', 'run-2', "
-                "'2026-08-21 02:00:00'), "
+                "'2026-08-21 02:00:00', NULL, NULL), "
                 "('usage-foreign', 'user-other', 'deepseek-v4-flash', 999, 0, 1, 1000, "
                 "'写作', 'novel-other', 'request-foreign', 'task-other', 'run-other', "
-                "'2026-08-21 03:00:00'), "
+                "'2026-08-21 03:00:00', NULL, NULL), "
                 "('usage-legacy', 'user-owner', 'legacy', 777, 0, 0, 777, NULL, "
-                "'novel-owned', NULL, NULL, NULL, '2026-08-20 00:00:00')"
+                "'novel-owned', NULL, NULL, NULL, '2026-08-20 00:00:00', NULL, NULL)"
             )
         )
     return engine, async_sessionmaker(engine, expire_on_commit=False)
@@ -133,6 +135,10 @@ async def test_owned_task_returns_exact_usage_summary_and_stable_calls(tmp_path:
         "cachedTokens": 55,
         "completionTokens": 55,
         "totalTokens": 230,
+        "promptCacheMissTokens": None,
+        "reasoningTokens": None,
+        "visibleCompletionTokens": None,
+        "tokenDetailsComplete": False,
         "calls": [
             {
                 "requestId": "request-a",
@@ -143,6 +149,10 @@ async def test_owned_task_returns_exact_usage_summary_and_stable_calls(tmp_path:
                 "cachedTokens": 10,
                 "completionTokens": 30,
                 "totalTokens": 80,
+                "promptCacheMissTokens": 40,
+                "reasoningTokens": 10,
+                "visibleCompletionTokens": 20,
+                "tokenDetailsComplete": True,
                 "createdAt": "2026-08-21T01:00:00Z",
             },
             {
@@ -154,6 +164,10 @@ async def test_owned_task_returns_exact_usage_summary_and_stable_calls(tmp_path:
                 "cachedTokens": 40,
                 "completionTokens": 20,
                 "totalTokens": 120,
+                "promptCacheMissTokens": 60,
+                "reasoningTokens": 5,
+                "visibleCompletionTokens": 15,
+                "tokenDetailsComplete": True,
                 "createdAt": "2026-08-21T01:00:00Z",
             },
             {
@@ -165,6 +179,10 @@ async def test_owned_task_returns_exact_usage_summary_and_stable_calls(tmp_path:
                 "cachedTokens": 5,
                 "completionTokens": 5,
                 "totalTokens": 30,
+                "promptCacheMissTokens": None,
+                "reasoningTokens": None,
+                "visibleCompletionTokens": None,
+                "tokenDetailsComplete": False,
                 "createdAt": "2026-08-21T02:00:00Z",
             },
         ],
@@ -188,6 +206,10 @@ async def test_owned_task_without_usage_returns_zero_summary(tmp_path: Path) -> 
         "cachedTokens": 0,
         "completionTokens": 0,
         "totalTokens": 0,
+        "promptCacheMissTokens": None,
+        "reasoningTokens": None,
+        "visibleCompletionTokens": None,
+        "tokenDetailsComplete": False,
         "calls": [],
     }
 
@@ -228,6 +250,31 @@ async def test_repository_checks_writing_task_ownership_before_reading_usage(
         "request-b",
         "request-later",
     ]
+
+
+@pytest.mark.asyncio
+async def test_owned_task_sums_details_only_when_every_call_is_complete(
+    tmp_path: Path,
+) -> None:
+    engine, factory = await _create_database(tmp_path / "完整任务用量.db")
+    try:
+        async with factory() as session, session.begin():
+            await session.execute(
+                update(TokenUsage)
+                .where(TokenUsage.requestId == "request-later")
+                .values(promptCacheMissTokens=20, reasoningTokens=1)
+            )
+        async with _owned_client(factory) as client:
+            response = await client.get("/api/v1/billing/usage/tasks/task-owned")
+    finally:
+        await engine.dispose()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["promptCacheMissTokens"] == 120
+    assert body["reasoningTokens"] == 16
+    assert body["visibleCompletionTokens"] == 39
+    assert body["tokenDetailsComplete"] is True
 
 
 @pytest.mark.asyncio

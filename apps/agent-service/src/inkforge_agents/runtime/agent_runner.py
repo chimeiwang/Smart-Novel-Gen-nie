@@ -15,6 +15,7 @@ from .execution import (
     validate_execution_agent,
 )
 from .messages import build_agent_messages
+from .model_policy import resolve_agent_model_policy
 from .model_runtime import ModelCallContext
 from .turn_result import AgentTurnResult
 
@@ -69,6 +70,10 @@ class AgentRunner:
             request.operationKind,
         )
         validate_execution_agent(execution, request.agentId)
+        policy = resolve_agent_model_policy(
+            request.executionMode,
+            request.operationKind,
+        )
         messages = build_agent_messages(
             agent_system_prompt=definition.systemPrompt,
             execution_brief=build_execution_brief(
@@ -89,12 +94,25 @@ class AgentRunner:
             capabilities=definition.toolCapabilities,
             allowed_tool_names=execution.allowedToolNames,
         )
+        if policy.requiredToolName is not None:
+            exposed_tool_names = {tool.name for tool in tools}
+            if policy.requiredToolName not in exposed_tool_names:
+                raise ValueError(
+                    "模型策略要求的终止工具未暴露："
+                    f"{policy.requiredToolName}"
+                )
+            if policy.requiredToolName not in execution.terminalControlTools:
+                raise ValueError(
+                    "模型策略要求的终止工具不是执行契约终止工具："
+                    f"{policy.requiredToolName}"
+                )
         result = await self._runtime.run(
             messages=messages,
             exposed_tools=tools,
             context=request.toolContext,
             max_iterations=definition.maxIterations,
             terminal_control_tools=execution.terminalControlTools,
+            policy=policy,
             model_context=ModelCallContext(
                 userId=request.toolContext.userId,
                 novelId=request.toolContext.novelId,

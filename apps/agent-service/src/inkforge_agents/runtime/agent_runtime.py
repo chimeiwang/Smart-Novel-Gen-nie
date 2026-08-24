@@ -7,7 +7,13 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from ..providers.base import ModelMessage, ModelToolCall, ModelTurnRequest, ModelTurnResult
+from ..providers.base import (
+    ModelExecutionPolicy,
+    ModelMessage,
+    ModelToolCall,
+    ModelTurnRequest,
+    ModelTurnResult,
+)
 from ..queue.cancellation import JobCancelledError, RunCancellationPort
 from ..tools.registry import ToolContext, ToolDefinition, ToolRegistry
 from .model_runtime import ModelCallContext, ModelRuntime
@@ -52,6 +58,7 @@ class AgentRuntime:
         context: ToolContext,
         max_iterations: int = 10,
         terminal_control_tools: set[str] | frozenset[str] = frozenset(),
+        policy: ModelExecutionPolicy,
         model_context: ModelCallContext | None = None,
     ) -> AgentTurnResult:
         conversation = [
@@ -77,6 +84,7 @@ class AgentRuntime:
                     messages=conversation,
                     tools=[tool.as_model_tool() for tool in available_tools],
                     maxOutputTokens=self._max_output_tokens,
+                    policy=policy,
                 ),
                 context=model_context,
             )
@@ -104,6 +112,7 @@ class AgentRuntime:
                 ModelMessage(
                     role="assistant",
                     content=response.content,
+                    reasoning_content=response.reasoningContent,
                     toolCalls=response.toolCalls,
                 )
             )
@@ -275,6 +284,11 @@ class AgentRuntime:
         if response.finishReason == "content_filter":
             raise RuntimeError(
                 "MODEL_OUTPUT_FILTERED：供应商报告模型输出被内容过滤"
+                f"（原始原因：{raw_finish_reason}）"
+            )
+        if response.finishReason == "insufficient_system_resource":
+            raise RuntimeError(
+                "MODEL_INSUFFICIENT_SYSTEM_RESOURCE：供应商报告系统资源不足"
                 f"（原始原因：{raw_finish_reason}）"
             )
 

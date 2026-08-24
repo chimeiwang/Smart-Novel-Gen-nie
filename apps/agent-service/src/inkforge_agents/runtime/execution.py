@@ -94,14 +94,22 @@ def build_execution_brief(
                 (
                     "只评审只读资料中的 Core 权威草案，并使用随附的冻结作品事实核对"
                     "名称、时间、数值和剧情边界；不得调用读取工具、猜测或替换审核对象。",
-                    "完成后只调用一次 submit_evaluation；需要修改时统一提出完整 rewrite 意见。",
+                    "完成后只调用一次 submit_evaluation；若审核对象是章节正文，"
+                    "小范围、可唯一定位的章节文本修改优先使用 revisionMode=patch "
+                    "并提交严格 patches，结构性、大范围或无法安全定位的修改使用 "
+                    "revisionMode=rewrite；当前非章节结构化草案仍按其契约选择 rewrite。"
+                    "pass/block 组合仍按协议，"
+                    "不得携带 revisionMode 或 patches。",
                 )
             )
         else:
             lines.extend(
                 (
                     "只评审只读资料中的 Core 权威草案，不得重新读取、猜测或替换审核对象。",
-                    "完成后只调用一次 submit_evaluation；需要修改时统一提出完整 rewrite 意见。",
+                    "完成后只调用一次 submit_evaluation；对小范围、可唯一定位的章节文本修改，"
+                    "优先使用 revisionMode=patch 并提交严格 patches；"
+                    "结构性、大范围或无法安全定位的修改使用 revisionMode=rewrite；"
+                    "pass/block 组合仍按协议，不得携带 revisionMode 或 patches。",
                 )
             )
     elif mode == "quality":

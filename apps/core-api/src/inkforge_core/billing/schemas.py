@@ -67,13 +67,25 @@ class ReportModelUsageRequest(BillingSchema):
     grantToken: str = Field(min_length=1, max_length=8192)
     promptTokens: StrictInt = Field(ge=0)
     cachedTokens: StrictInt = Field(ge=0)
+    promptCacheMissTokens: StrictInt | None = Field(default=None, ge=0)
     completionTokens: StrictInt = Field(ge=0)
+    reasoningTokens: StrictInt | None = Field(default=None, ge=0)
     totalTokens: StrictInt = Field(ge=0)
 
     @model_validator(mode="after")
     def validate_usage(self) -> Self:
         if self.cachedTokens > self.promptTokens:
             raise ValueError("缓存输入 token 不能超过提示词 token")
+        if (
+            self.promptCacheMissTokens is not None
+            and self.cachedTokens + self.promptCacheMissTokens != self.promptTokens
+        ):
+            raise ValueError("缓存命中与未命中 token 之和必须等于提示词 token")
+        if (
+            self.reasoningTokens is not None
+            and self.reasoningTokens > self.completionTokens
+        ):
+            raise ValueError("推理 token 不能超过输出 token")
         if self.totalTokens != self.promptTokens + self.completionTokens:
             raise ValueError("总 token 必须等于提示词与输出 token 之和")
         return self
@@ -122,7 +134,11 @@ class TaskModelUsageCall(BillingSchema):
     model: str
     promptTokens: int
     cachedTokens: int
+    promptCacheMissTokens: int | None
     completionTokens: int
+    reasoningTokens: int | None
+    visibleCompletionTokens: int | None
+    tokenDetailsComplete: bool
     totalTokens: int
     createdAt: datetime
 
@@ -132,6 +148,10 @@ class TaskModelUsageResponse(BillingSchema):
     requestCount: int
     promptTokens: int
     cachedTokens: int
+    promptCacheMissTokens: int | None
     completionTokens: int
+    reasoningTokens: int | None
+    visibleCompletionTokens: int | None
+    tokenDetailsComplete: bool
     totalTokens: int
     calls: list[TaskModelUsageCall]

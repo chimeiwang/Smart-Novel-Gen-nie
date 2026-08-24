@@ -10,6 +10,7 @@ from .base import (
     ModelTurnRequest,
     ModelTurnResult,
     ModelUsage,
+    ModelUsageDiagnostics,
 )
 
 
@@ -33,6 +34,7 @@ class FakeModelProvider:
                 completionTokens=completion_tokens,
                 totalTokens=prompt_tokens + completion_tokens,
             ),
+            diagnostics=ModelUsageDiagnostics(),
         )
 
 

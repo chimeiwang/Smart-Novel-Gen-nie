@@ -159,12 +159,41 @@ class HumanWorkflowLog:
             sequence = _next_sequence(frames, "model")
             billing_request_id = record.billingRequestId or "无"
             usage = record.usage
+            visible_completion_tokens = (
+                usage.completionTokens - record.reasoningTokens
+                if record.reasoningTokens is not None
+                else None
+            )
             sections = [
                 f"\nA{sequence:02d} 智能体：{record.context.agentId}",
                 f"任务标识：{record.context.taskId}",
                 f"运行标识：{record.context.runId}",
                 f"计费请求标识：{billing_request_id}",
                 f"模型：{record.provider}/{record.model}",
+                f"policyId：{record.policyId}",
+                f"思考模式：{record.thinkingMode}",
+                "推理强度："
+                + (record.reasoningEffort if record.reasoningEffort is not None else "未设置"),
+                "推理 Token："
+                + (str(record.reasoningTokens) if record.reasoningTokens is not None else "未提供"),
+                "缓存未命中 Token："
+                + (
+                    str(record.promptCacheMissTokens)
+                    if record.promptCacheMissTokens is not None
+                    else "未提供"
+                ),
+                "可见输出 Token："
+                + (
+                    str(visible_completion_tokens)
+                    if visible_completion_tokens is not None
+                    else "未提供"
+                ),
+                "供应商响应标识："
+                + (
+                    record.providerResponseId
+                    if record.providerResponseId is not None
+                    else "未提供"
+                ),
                 "Token 消耗："
                 f"输入 {usage.promptTokens} | "
                 f"缓存 {usage.cachedTokens} | "
@@ -193,7 +222,17 @@ class HumanWorkflowLog:
             _append_frame(
                 path,
                 _LogFrame(
-                    header={"type": "model", "sequence": sequence},
+                    header={
+                        "type": "model",
+                        "sequence": sequence,
+                        "policyId": record.policyId,
+                        "thinkingMode": record.thinkingMode,
+                        "reasoningEffort": record.reasoningEffort,
+                        "reasoningTokens": record.reasoningTokens,
+                        "visibleCompletionTokens": visible_completion_tokens,
+                        "promptCacheMissTokens": record.promptCacheMissTokens,
+                        "providerResponseId": record.providerResponseId,
+                    },
                     content="\n".join(sections),
                 ),
             )

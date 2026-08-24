@@ -36,6 +36,9 @@ class GraphState(TypedDict, total=False):
     artifactStatus: str
     reviewResults: Annotated[list[dict[str, Any]], operator.add]
     pendingRevision: dict[str, Any] | None
+    patchFailureCode: str | None
+    patchFailureMessage: str | None
+    skipArtifactPersistence: bool
     artifactIteration: int
     maxArtifactIterations: int
     userDecision: str | None
@@ -74,6 +77,9 @@ def create_initial_state(
         artifactStatus="none",
         reviewResults=[],
         pendingRevision=None,
+        patchFailureCode=None,
+        patchFailureMessage=None,
+        skipArtifactPersistence=False,
         artifactIteration=0,
         maxArtifactIterations=5,
         userDecision=None,

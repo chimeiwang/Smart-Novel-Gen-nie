@@ -70,6 +70,7 @@ from ..providers.base import (
 )
 from ..queue.consumer import NonRetryableJobError
 from ..queue.repository import QueueJob
+from ..runtime.model_policy import VIDEO_SCENE_PLAN_NO_THINKING
 from ..runtime.model_runtime import ModelCallContext, ModelRuntime
 from .workflow_log import WorkflowLogPort
 
@@ -1731,6 +1732,7 @@ class ModelVideoScenePlanner:
                 maxOutputTokens=self._max_output_tokens,
                 # 结构化草案与本地门禁已经承担输出约束，不启用长链路思考。
                 thinkingMode="disabled",
+                policy=VIDEO_SCENE_PLAN_NO_THINKING,
                 structuredOutput=ModelStructuredOutputRequest(
                     route=_structured_planning_route(payload),
                     name=_SCENE_ASSETS_FORMAT_NAME,
@@ -1807,6 +1809,7 @@ class ModelVideoScenePlanner:
                 tools=[],
                 maxOutputTokens=self._max_output_tokens,
                 thinkingMode="disabled",
+                policy=VIDEO_SCENE_PLAN_NO_THINKING,
                 structuredOutput=ModelStructuredOutputRequest(
                     route=_structured_planning_route(payload),
                     name=_STORY_BEATS_FORMAT_NAME,
@@ -1895,6 +1898,7 @@ class ModelVideoScenePlanner:
                 maxOutputTokens=self._max_output_tokens,
                 # 摄影草案同样关闭思考模式，避免 reasoning token 挤占结构输出。
                 thinkingMode="disabled",
+                policy=VIDEO_SCENE_PLAN_NO_THINKING,
                 structuredOutput=ModelStructuredOutputRequest(
                     route=_structured_planning_route(payload),
                     name=_CINEMATOGRAPHY_FORMAT_NAME,

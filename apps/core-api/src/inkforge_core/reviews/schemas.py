@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal
 
 from inkforge_contracts.long_serial import SourceBinding
-from pydantic import BaseModel, ConfigDict, Field, JsonValue, model_validator
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, StrictInt, model_validator
 
 ArtifactStatus = Literal["draft", "under_review", "awaiting_user", "applying", "applied"]
 ArtifactKind = Literal[
@@ -86,7 +86,7 @@ class ArtifactSelectionRef(ReviewSchema):
 
 class ReviewArtifactDecisionRequest(ReviewSchema):
     clientRequestId: str = Field(min_length=16, max_length=128)
-    expectedRevision: int = Field(ge=1)
+    expectedRevision: StrictInt = Field(ge=1)
     decision: Literal["approve", "discard", "revise"]
     editedContent: str | None = None
     editedReplacement: str | None = None
@@ -111,6 +111,19 @@ class ArtifactDecisionAcceptedResponse(ReviewSchema):
     deleted: bool = False
 
 
+class ArtifactConflictQuarantineRequest(ReviewSchema):
+    runId: str = Field(min_length=1, max_length=256)
+    taskId: str = Field(min_length=1, max_length=256)
+    novelId: str = Field(min_length=1, max_length=256)
+    jobId: str = Field(min_length=1, max_length=256)
+
+
+class ArtifactConflictQuarantineResponse(ReviewSchema):
+    artifactId: str
+    status: Literal["awaiting_user"]
+    revision: StrictInt = Field(ge=1)
+
+
 class CreateArtifactRequest(ReviewSchema):
     runId: str = Field(min_length=1, max_length=256)
     taskId: str = Field(min_length=1, max_length=256)
@@ -127,6 +140,7 @@ class CreateArtifactRequest(ReviewSchema):
     diff: JsonValue | None = None
     createdByAgent: Literal["设定", "剧情", "写作", "校验", "编辑"]
     reviewerAgent: Literal["设定", "剧情", "写作", "校验", "编辑"] | None = None
+    expectedRevision: StrictInt | None = Field(default=None, ge=1)
 
     @model_validator(mode="after")
     def validate_payload_kind(self) -> CreateArtifactRequest:

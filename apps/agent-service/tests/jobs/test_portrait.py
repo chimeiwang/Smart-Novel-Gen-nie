@@ -8,6 +8,7 @@ from inkforge_agents.clients.core import RunResource
 from inkforge_agents.jobs.portrait import ModelPortraitGenerator, PortraitJobHandler
 from inkforge_agents.providers.base import ModelTurnResult, ModelUsage
 from inkforge_agents.queue.repository import QueueJob
+from inkforge_agents.runtime.model_policy import REPORT_NO_THINKING
 from inkforge_agents.runtime.model_runtime import ModelRuntime
 
 
@@ -164,6 +165,29 @@ async def test_model_portrait_generator_calls_only_requested_section() -> None:
     assert len(provider.requests) == 1
     assert "独特标记" in provider.requests[0].messages[1].content
     assert provider.requests[0].maxOutputTokens == 384_000
+    assert provider.requests[0].policy == REPORT_NO_THINKING
+
+
+@pytest.mark.asyncio
+async def test_model_portrait_generator_reuses_no_thinking_policy_for_all_sections() -> None:
+    provider = Provider()
+    generator = ModelPortraitGenerator(
+        ModelRuntime(provider),
+        max_output_tokens=384_000,
+    )
+
+    await generator.generate(
+        RunResource(
+            userId="user-1",
+            novelId="style:style-1",
+            taskId="task-1",
+            runId="task-1",
+        ),
+        "完整参考正文",
+    )
+
+    assert len(provider.requests) == len(ModelPortraitGenerator._SECTIONS)
+    assert all(request.policy == REPORT_NO_THINKING for request in provider.requests)
 
 
 @pytest.mark.asyncio

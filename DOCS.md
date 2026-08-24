@@ -25,18 +25,22 @@
 - PostgreSQL schema 默认冻结并由只读 `schema-contract.json` 守卫。当前具名例外包括视频控制面与章节
   改编域迁移 `20260807_video_production_control_plane.sql`、`20260817_video_review_decision_command.sql`、
   `20260817_video_domain_ownership_chain.sql`、`20260818_video_chapter_adaptation_domain.sql`，它们只允许对
-  服务器端 `novelwriterdev` 开发库执行视频控制面、批准命令、章节改编域以及该域内视觉设定版本和
-  逐镜参考绑定，不授权生产或完整 production_v2 schema。用户于 2026-08-23 另行批准
-  `20260823_production_video_adaptation_domain.sql` 只向服务器端 `novelwriter` 正式库晋升这套已验证
-  结构，不迁开发数据、不启用视频功能，也不授权完整 production_v2 schema；另有
-  `20260821_token_usage_task_run.sql`，只允许增加 `TokenUsage` 模型调用归集字段、约束和必要索引。用户于
-  2026-08-24 批准先实现逐镜视频生成 P0，因此 `20260824_video_shot_render_p0.sql` 只允许对服务器端
-  `novelwriterdev` 开发库增加逐镜 Seedance 耐久任务、不可变候选 Take、Take head 与确认命令；它不授权
-  生产 DDL、开发数据晋升、生产视频开关或旧 `VideoScene`/`VideoGenerationTask` 公共语义复活。同日用户
-  进一步批准一次性实现 P1–P3，因此 `20260824_video_post_production_p1_p3.sql` 只允许对服务器端
-  `novelwriterdev` 开发库增加受控 Take 抽帧来源事实、关键帧版本、分集非破坏性粗剪、声音/字幕版本和耐久整集导出任务；它不授权
-  正式库 DDL、开发数据晋升、生产开关、图片生成或 TTS 供应商接入；仅允许为开发库现有
-  `VideoAsset.duty` 同步增加 `sfx` 与 `episode_export` 两个后期制作职责。
+  服务器端 `novelwriterdev` 开发库执行视频控制面、批准命令、章节改编域以及该域内视觉设定版本和逐镜参考绑定，
+  不授权生产或完整 production_v2 schema。用户于 2026-08-23 另行批准
+  `20260823_production_video_adaptation_domain.sql` 只向服务器端 `novelwriter` 正式库晋升这套已验证结构，
+  不迁开发数据、不启用视频功能，也不授权完整 production_v2 schema。正式库当前保留视频结构，但
+  `VIDEO_PREVIEW_ENABLED` 仍关闭，结构晋升不等同于功能开放。另有用户于 2026-08-21 明确批准的
+  `20260821_token_usage_task_run.sql`，以及用户于 2026-08-23 明确批准的第二个迁移
+  `20260823_token_usage_details.sql`；后者只能为 `TokenUsage` 增加可空 `INTEGER`
+  `promptCacheMissTokens`/`reasoningTokens` 和三个 CHECK；无默认值、无回填、无索引，旧行保持 `NULL`。
+  开发迁移只在服务器 dev PostgreSQL 受控执行并重复验证，随后从真实库只读导出
+  `schema-contract.json`；生产 forward/rollback 只能由已审核部署门禁调用。它们不构成以后任意迁移的授权。
+- `TokenUsage` 两个新增可空诊断字段已完成开发库迁移和真实库契约导出；生产迁移仍只允许使用固定
+  forward/rollback、备份和自动回滚流程，不能改写为任意 SQL。
+- 用户于 2026-08-24 批准的 `20260824_video_shot_render_p0.sql` 与
+  `20260824_video_post_production_p1_p3.sql` 只允许对服务器端 `novelwriterdev` 开发库增加逐镜生成、
+  Take、关键帧、粗剪、声音字幕和整集导出结构，并允许开发库 `VideoAsset.duty` 增加 `sfx` 与
+  `episode_export`；它们不授权正式库 DDL、开发数据晋升、生产视频开关、图片生成或 TTS。
 
 ## 文档类型
 

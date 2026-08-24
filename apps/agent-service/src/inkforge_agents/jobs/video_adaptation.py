@@ -52,6 +52,11 @@ from ..clients.core import RunResource
 from ..providers.base import ModelMessage, ModelStructuredOutputRequest, ModelTurnRequest
 from ..queue.consumer import NonRetryableJobError
 from ..queue.repository import QueueJob
+from ..runtime.model_policy import (
+    VIDEO_ADAPTATION_PLAN_NO_THINKING,
+    VIDEO_ADAPTATION_PROMPT_NO_THINKING,
+    VIDEO_ADAPTATION_REVIEW_NO_THINKING,
+)
 from ..runtime.model_runtime import ModelCallContext, ModelRuntime
 from .video_adaptation_quality import collect_cinematic_findings
 from .workflow_log import WorkflowLogPort
@@ -247,6 +252,7 @@ class ModelVideoAdaptationPlanner:
                     tools=[],
                     maxOutputTokens=self._max_output_tokens,
                     thinkingMode="disabled",
+                    policy=VIDEO_ADAPTATION_PLAN_NO_THINKING,
                     structuredOutput=ModelStructuredOutputRequest(
                         route="responses_json_schema_v1",
                         name=_DRAMATIC_STRUCTURE_FORMAT,
@@ -349,6 +355,7 @@ class ModelVideoAdaptationPlanner:
                     tools=[],
                     maxOutputTokens=self._max_output_tokens,
                     thinkingMode="disabled",
+                    policy=VIDEO_ADAPTATION_PLAN_NO_THINKING,
                     structuredOutput=ModelStructuredOutputRequest(
                         route="responses_json_schema_v1",
                         name=_SHOT_DESIGN_FORMAT,
@@ -467,6 +474,7 @@ class ModelVideoAdaptationPlanner:
                 tools=[],
                 maxOutputTokens=min(self._max_output_tokens, 16_000),
                 thinkingMode="disabled",
+                policy=VIDEO_ADAPTATION_PLAN_NO_THINKING,
                 structuredOutput=ModelStructuredOutputRequest(
                     route="responses_json_schema_v1",
                     name="chapter_missing_beat_shots_v3",
@@ -534,6 +542,7 @@ class ModelVideoAdaptationPlanner:
                 tools=[],
                 maxOutputTokens=min(self._max_output_tokens, 12_000),
                 thinkingMode="disabled",
+                policy=VIDEO_ADAPTATION_REVIEW_NO_THINKING,
                 structuredOutput=ModelStructuredOutputRequest(
                     route="responses_json_schema_v1",
                     name=_CINEMATIC_REVIEW_FORMAT,
@@ -610,6 +619,7 @@ class ModelVideoAdaptationPlanner:
                     tools=[],
                     maxOutputTokens=self._max_output_tokens,
                     thinkingMode="disabled",
+                    policy=VIDEO_ADAPTATION_PROMPT_NO_THINKING,
                     structuredOutput=ModelStructuredOutputRequest(
                         route="responses_json_schema_v1",
                         name=_SHOT_PROMPT_FORMAT,
