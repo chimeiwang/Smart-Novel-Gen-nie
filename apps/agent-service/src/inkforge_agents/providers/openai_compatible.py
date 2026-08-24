@@ -353,8 +353,7 @@ def _refine_any_of_validation_error(
         if not branch_errors:
             continue
         deepest_path = max(
-            len(list(getattr(branch_error, "instance_path", [])))
-            for branch_error in branch_errors
+            len(list(getattr(branch_error, "instance_path", []))) for branch_error in branch_errors
         )
         root_type_mismatch = any(
             _validation_error_keyword(branch_error) == "type"
@@ -487,10 +486,7 @@ def _normalize_scene_asset_source_redundancy(
             continue
         normalized_asset = dict(raw_asset)
         asset_changed = False
-        if (
-            raw_asset.get("sourceAlias") is not None
-            and raw_asset.get("targetEntity") is not None
-        ):
+        if raw_asset.get("sourceAlias") is not None and raw_asset.get("targetEntity") is not None:
             normalized_asset["targetEntity"] = None
             asset_changed = True
         for field in _SCENE_ASSET_SERVER_OWNED_FIELDS.intersection(raw_asset):
@@ -605,8 +601,7 @@ def _normalize_cinematography_lighting_inheritance(
             continue
         raw_lighting = raw_beat.get("lightingCue")
         uses_legacy_inheritance = raw_lighting == "__INHERIT__" or (
-            isinstance(raw_lighting, Mapping)
-            and raw_lighting.get("continuityMode") == "inherit"
+            isinstance(raw_lighting, Mapping) and raw_lighting.get("continuityMode") == "inherit"
         )
         if not uses_legacy_inheritance:
             continue
@@ -921,12 +916,10 @@ def _parse_and_validate_structured_output(
     )
     if magnitude_recovery:
         recovery_code = magnitude_recovery
-    parsed, progression_recovery = (
-        _normalize_cinematography_infeasible_continuous_cut(
-            parsed,
-            format_name=structured_output.name,
-            validator=validator,
-        )
+    parsed, progression_recovery = _normalize_cinematography_infeasible_continuous_cut(
+        parsed,
+        format_name=structured_output.name,
+        validator=validator,
     )
     if progression_recovery:
         recovery_code = progression_recovery
@@ -1918,10 +1911,22 @@ class OpenAICompatibleProvider:
             invocation_options["max_tokens"] = request.maxOutputTokens
             if request.thinkingMode == "disabled":
                 invocation_options["extra_body"] = {"thinking": {"type": "disabled"}}
-        response = cast(
-            AIMessage,
-            await model.ainvoke(messages, **invocation_options),
-        )
+        response: AIMessage | None = None
+        transport_error: ProviderTransportError | None = None
+        try:
+            response = cast(
+                AIMessage,
+                await model.ainvoke(messages, **invocation_options),
+            )
+        except APITimeoutError as exc:
+            transport_error = _provider_transport_error(exc)
+        except (APIStatusError, APIConnectionError) as exc:
+            transport_error = _provider_transport_error(exc)
+        # 普通工具通道同样在捕获块外抛出，避免 SDK 响应正文留在异常上下文中。
+        if transport_error is not None:
+            raise transport_error
+        if response is None:
+            raise RuntimeError("供应商 Chat SDK 未返回响应")
         if not isinstance(response.content, str):
             raise ValueError("模型返回了不支持的非文本可见内容")
 

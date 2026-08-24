@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ..runtime.model_runtime import ModelCallLogRecord
+from ..runtime.model_runtime import ModelCallFailureLogRecord, ModelCallLogRecord
 from .human_workflow_log import HumanWorkflowLog
 
 
@@ -10,3 +10,6 @@ class WorkflowModelObserver:
 
     def record_model_call(self, record: ModelCallLogRecord) -> None:
         self._workflow_log.record_model_call(record)
+
+    def record_model_failure(self, record: ModelCallFailureLogRecord) -> None:
+        self._workflow_log.record_model_failure(record)
