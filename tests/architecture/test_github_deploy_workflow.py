@@ -130,6 +130,11 @@ def test_inspect_derives_and_verifies_the_fixed_dev_database() -> None:
     assert "DATABASE_URL" in inspect
     assert "uv" not in inspect
     assert "cat " not in inspect
+    assert "for backup_root in /srv/backups/inkforge-dev /srv/backups/inkforge" in inspect
+    assert '"$app_dir/.token-usage-dev-backups"' in inspect
+    assert "backup-root:%s:writable" in inspect
+    assert "backup-root:%s:missing-parent-writable" in inspect
+    assert "backup-root:%s:not-writable" in inspect
 
 
 def test_env_parser_is_pure_text_and_never_sources_production_env() -> None:
@@ -287,7 +292,7 @@ def test_migrate_dev_backs_up_double_runs_and_verifies_read_only_contract() -> N
     migrate = source.split("if: inputs.action == 'migrate_dev'", maxsplit=1)[1]
 
     for value in (
-        "BACKUP_ROOT=/srv/backups/inkforge-dev sh scripts/backup.sh",
+        'BACKUP_ROOT="$app_dir/.token-usage-dev-backups" sh scripts/backup.sh',
         "pg_restore",
         "sha256sum --check SHA256SUMS",
         "psql -v ON_ERROR_STOP=1",
@@ -338,7 +343,9 @@ def test_secrets_are_scoped_to_ssh_steps_and_contract_is_only_artifact() -> None
 
     migrate = source.split("if: inputs.action == 'migrate_dev'", maxsplit=1)[1]
     database_guard_index = migrate.index('"$database_name" = "novelwriterdev"')
-    backup_index = migrate.index("BACKUP_ROOT=/srv/backups/inkforge-dev sh scripts/backup.sh")
+    backup_index = migrate.index(
+        'BACKUP_ROOT="$app_dir/.token-usage-dev-backups" sh scripts/backup.sh'
+    )
     double_run_index = migrate.index("for attempt in 1 2")
     assert database_guard_index < backup_index
     assert backup_index < double_run_index
@@ -403,7 +410,10 @@ def test_remote_transports_have_uniform_timeouts_and_fixed_numeric_temp_paths() 
     ):
         assert source.count(option) >= len(transport_commands)
 
-    assert "timeout 600 env BACKUP_ROOT=/srv/backups/inkforge-dev sh scripts/backup.sh" in source
+    assert (
+        'timeout 600 env BACKUP_ROOT="$app_dir/.token-usage-dev-backups" '
+        "sh scripts/backup.sh"
+    ) in source
     assert "timeout 180 psql" in source
     assert "PGOPTIONS='-c statement_timeout=120000 -c lock_timeout=30000'" in source
     assert "timeout 180 docker exec" in source

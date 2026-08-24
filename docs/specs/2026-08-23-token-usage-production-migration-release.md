@@ -28,7 +28,9 @@
   `.pgpass`；Core 容器只通过标准输入读取完整 dev URL。临时凭据不得进入命令行、日志或 Artifact，并由
   远端和 runner 两层 trap 精确清理。
 - 迁移 SQL 自身必须拒绝 `current_database() <> 'novelwriterdev'`，避免工作流配置错误触及生产库。
-- dev 与生产迁移前必须生成 PostgreSQL custom-format 备份和 `SHA256SUMS`，迁移必须连续执行两次。
+- dev 与生产迁移前必须生成 PostgreSQL custom-format 备份和 `SHA256SUMS`，迁移必须连续执行两次。服务器
+  部署用户对 `/srv/backups/inkforge-dev` 和 `/srv/backups/inkforge` 均无写权限；dev 备份固定写入应用目录下
+  的私有 `.token-usage-dev-backups`，不得因此提权或复用生产备份目录。
 - dev 迁移后从真实数据库只读导出结构契约；提交前人工/自动核对差异只能包含两个 nullable INTEGER 列和三个 CHECK。
 - 生产迁移由部署脚本在新容器启动前执行。部署失败且本次部署首次增加这些字段时，先运行固定 down
   脚本删除三个约束与两个纯诊断列，再恢复旧镜像；正式正文、用户数据和旧 TokenUsage 字段不得变更。
@@ -45,7 +47,9 @@
 
 1. 手工触发工作流 `inspect`，确认服务器存在 `psql`、`pg_dump`、Docker，并能从 `.env` 安全派生、经宿主机
    回环地址只读连接 `novelwriterdev`。诊断分支已于 2026-08-24 完成该只读检查；main 最终版本仍需再次确认。
-2. 手工触发 `migrate_dev`：备份、校验 SQL 哈希、执行两次、验证旧行明细保持 NULL。
+2. 手工触发 `migrate_dev`：在应用私有 `.token-usage-dev-backups` 目录备份、校验 SQL 哈希、执行两次、验证
+   旧行明细保持 NULL。2026-08-24 首次执行在 DDL 前因 `/srv/backups/inkforge-dev` 不可写而停止，只读诊断已
+   同时确认应用私有目录可创建。
 3. 使用当前 Core 容器的只读 schema 导出能力生成 contract，并通过 Actions Artifact 下载。
 4. 将真实 contract 写回功能分支，删除 `test_model_metadata.py` 的临时内存兼容层，运行 schema/全量验证。
 
