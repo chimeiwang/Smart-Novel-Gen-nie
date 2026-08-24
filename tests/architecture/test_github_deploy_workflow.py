@@ -85,6 +85,8 @@ def test_workflow_accepts_only_the_fixed_dispatch_choice() -> None:
     )
     assert "type: choice" in source
     assert "- inspect" in source
+    assert "- inspect_production_access" in source
+    assert "- repair_production_access" in source
     assert "- migrate_dev" in source
     assert "push:" not in source
     assert "pull_request:" not in source
@@ -136,6 +138,51 @@ def test_inspect_derives_and_verifies_the_fixed_dev_database() -> None:
     assert "backup-root:%s:writable" in inspect
     assert "backup-root:%s:missing-parent-writable" in inspect
     assert "backup-root:%s:not-writable" in inspect
+
+
+def test_production_access_inspect_uploads_and_runs_fixed_helper_read_only() -> None:
+    source = _source()
+    inspect = source.split(
+        "if: inputs.action == 'inspect_production_access'", maxsplit=1
+    )[1]
+    inspect = inspect.split(
+        "if: inputs.action == 'repair_production_access'", maxsplit=1
+    )[0]
+
+    assert "scripts/token-usage-production-migration.sh" in inspect
+    assert "sha256sum --check --status" in inspect
+    assert 'APP_DIR="$app_dir" sh "$remote_helper" access' in inspect
+    assert "scp" in inspect
+    assert "DATABASE_URL" not in inspect
+    assert "current_user" not in inspect
+
+
+def test_production_access_repair_uses_root_for_fixed_select_grant_only() -> None:
+    source = _source()
+    repair = source.split(
+        "if: inputs.action == 'repair_production_access'", maxsplit=1
+    )[1]
+    repair = repair.split("if: inputs.action == 'migrate_dev'", maxsplit=1)[0]
+
+    assert "for candidate in root ubuntu debian admin" in repair
+    assert "sudo -n true" in repair
+    assert "sudo -n bash -s" in repair
+    assert 'runuser -u postgres -- psql -d novelwriter' in repair
+    assert "current_database() <> 'novelwriter'" in repair
+    assert "SET LOCAL search_path = pg_catalog, public" in repair
+    assert "statement_timeout=30000" in repair
+    assert "lock_timeout=5000" in repair
+    assert "timeout 60 runuser" in repair
+    assert "GRANT SELECT ON TABLE" in repair
+    assert "VideoProject" in repair
+    assert "TO %I" in repair
+    assert 'APP_DIR="$app_dir" sh "$remote_helper" access' in repair
+    assert 'APP_DIR="$app_dir" sh "$remote_helper" backup' in repair
+    assert "GRANT ALL" not in repair
+    assert "GRANT INSERT" not in repair
+    assert "GRANT UPDATE" not in repair
+    assert "GRANT DELETE" not in repair
+    assert "ALTER TABLE" not in repair
 
 
 def test_env_parser_is_pure_text_and_never_sources_production_env() -> None:
@@ -400,10 +447,15 @@ def test_workflow_semantics_concurrency_timeout_and_all_shell_blocks() -> None:
         "workflow_dispatch": {
             "inputs": {
                 "action": {
-                    "description": "选择只读检查或执行 dev 迁移",
+                    "description": "选择 dev 检查、生产权限检查修复或执行 dev 迁移",
                     "required": True,
                     "type": "choice",
-                    "options": ["inspect", "migrate_dev"],
+                    "options": [
+                        "inspect",
+                        "inspect_production_access",
+                        "repair_production_access",
+                        "migrate_dev",
+                    ],
                 }
             }
         }

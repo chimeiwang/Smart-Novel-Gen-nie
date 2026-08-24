@@ -38,8 +38,8 @@ def _write_executable(path: Path, content: str) -> None:
     path.chmod(0o755)
 
 
-def _run_helper_status(
-    tmp_path: Path, database_url: str
+def _run_helper(
+    tmp_path: Path, database_url: str, *, action: str = "status"
 ) -> tuple[subprocess.CompletedProcess[str], str, str, list[Path]]:
     app_dir = tmp_path / "app"
     migration_dir = app_dir / "scripts" / "migrations"
@@ -61,14 +61,23 @@ def _run_helper_status(
         "#!/bin/sh\n"
         "printf 'psql %s\\n' \"$*\" >> \"$HELPER_COMMAND_LOG\"\n"
         "cp \"$PGPASSFILE\" \"$HELPER_PGPASS_CAPTURE\"\n"
+        "case \"$*\" in\n"
+        "  *'SELECT CASE WHEN count(DISTINCT relation.relowner)'*) "
+        "printf 'video_owner\\n'; exit 0 ;;\n"
+        "esac\n"
         "query=$(sed -n '1,$p')\n"
         "case \"$query\" in\n"
         "  *'CREATE TEMP TABLE token_usage_details_constraint_contract'*"
         "'expected_constraints'*'pg_get_constraintdef(actual_constraint.oid)'*"
-        "'constraint_state.constraints_valid'*) ;;\n"
+        "'constraint_state.constraints_valid'*) "
+        "printf '%s\\n' \"${FAKE_HELPER_SCHEMA_STATE:-migrated}\"; exit 0 ;;\n"
+        "  *'has_table_privilege(current_user'*'has_sequence_privilege(current_user'*) "
+        "printf '%s\\n' 'schema-usage:true' 'table-count:69' "
+        "'table-select-missing:25' 'table-missing-owner-count:1' "
+        "'table-missing-owner-membership:false' 'table:VideoProject:owner=false' "
+        "'sequence-count:0' 'sequence-select-missing:0'; exit 0 ;;\n"
         "  *) printf 'schema query contract mismatch\\n' >&2; exit 42 ;;\n"
-        "esac\n"
-        "printf '%s\\n' \"${FAKE_HELPER_SCHEMA_STATE:-migrated}\"\n",
+        "esac\n",
     )
     for command_name in ("pg_dump", "pg_restore", "sha256sum"):
         _write_executable(bin_dir / command_name, "#!/bin/sh\nexit 0\n")
@@ -84,10 +93,11 @@ def _run_helper_status(
         [
             POSIX_SHELL,
             "-c",
-            'PATH="$1:$PATH"; export PATH; exec /bin/sh "$2" status',
+            'PATH="$1:$PATH"; export PATH; exec /bin/sh "$2" "$3"',
             "migration-helper-test",
             _posix_path(bin_dir),
             _posix_path(HELPER),
+            action,
         ],
         cwd=ROOT,
         env=env,
@@ -203,7 +213,7 @@ def test_helper_uses_encoded_password_only_through_pgpass_and_cleans_temp(
     tmp_path: Path,
 ) -> None:
     secret = "pa@ss:word"  # noqa: S105 - 仅用于验证测试凭据不会进入命令行
-    result, log, pgpass, remaining = _run_helper_status(
+    result, log, pgpass, remaining = _run_helper(
         tmp_path,
         "postgresql+asyncpg://writer:pa%40ss%3Aword@host.docker.internal:5432/novelwriter",
     )
@@ -229,10 +239,33 @@ def test_helper_uses_encoded_password_only_through_pgpass_and_cleans_temp(
 def test_helper_rejects_nonproduction_urls_before_psql(
     tmp_path: Path, database_url: str
 ) -> None:
-    result, log, _pgpass, remaining = _run_helper_status(tmp_path, database_url)
+    result, log, _pgpass, remaining = _run_helper(tmp_path, database_url)
 
     assert result.returncode != 0
     assert log == ""
     assert "secret" not in result.stderr
     assert "database-url-check:" in result.stderr
+    assert remaining == []
+
+
+def test_helper_access_reports_only_missing_read_privileges(tmp_path: Path) -> None:
+    result, log, _pgpass, remaining = _run_helper(
+        tmp_path,
+        "postgresql://writer:secret@host.docker.internal:5432/novelwriter",
+        action="access",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.splitlines() == [
+        "schema-usage:true",
+        "table-count:69",
+        "table-select-missing:25",
+        "table-missing-owner-count:1",
+        "table-missing-owner-membership:false",
+        "table:VideoProject:owner=false",
+        "sequence-count:0",
+        "sequence-select-missing:0",
+        "database-admin-path:unavailable",
+    ]
+    assert "secret" not in log
     assert remaining == []

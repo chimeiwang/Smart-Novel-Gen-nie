@@ -4,11 +4,13 @@ name: TokenUsage dev 迁移
   workflow_dispatch:
     inputs:
       action:
-        description: 选择只读检查或执行 dev 迁移
+        description: 选择 dev 检查、生产权限检查修复或执行 dev 迁移
         required: true
         type: choice
         options:
           - inspect
+          - inspect_production_access
+          - repair_production_access
           - migrate_dev
 
 permissions:
@@ -249,6 +251,325 @@ jobs:
           printf '.env: present\n'
           printf 'novelwriterdev: verified\n'
           REMOTE
+
+      - name: inspect_production_access
+        if: inputs.action == 'inspect_production_access'
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          set -eu
+          ssh_dir="$RUNNER_TEMP/inkforge-token-usage-ssh"
+          helper="scripts/token-usage-production-migration.sh"
+          helper_sha="$(sha256sum "$helper" | awk '{print $1}')"
+          remote_helper="/tmp/inkforge-token-usage-production-access-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.sh"
+          scp -q \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            -o TCPKeepAlive=yes \
+            -i "$ssh_dir/deploy_key" \
+            "$helper" "$SERVER_USER@$SERVER_HOST:$remote_helper"
+
+          printf -v remote_command 'bash -s -- %q %q %q %q' \
+            "$APP_DIR" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$helper_sha"
+          ssh \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            -o TCPKeepAlive=yes \
+            -i "$ssh_dir/deploy_key" \
+            "$SERVER_USER@$SERVER_HOST" \
+            "$remote_command" <<'REMOTE'
+          set -eu
+          umask 077
+          app_dir=$1
+          run_id=$2
+          run_attempt=$3
+          helper_sha=$4
+          case "$run_id" in
+            ''|*[!0-9]*) echo "运行编号不符合固定临时路径约定" >&2; exit 1 ;;
+          esac
+          case "$run_attempt" in
+            ''|*[!0-9]*) echo "尝试编号不符合固定临时路径约定" >&2; exit 1 ;;
+          esac
+          case "$helper_sha" in
+            ''|*[!0-9a-f]*) echo "诊断脚本哈希无效" >&2; exit 1 ;;
+          esac
+          remote_helper="/tmp/inkforge-token-usage-production-access-$run_id-$run_attempt.sh"
+          trap 'rm -f -- "$remote_helper"' EXIT
+          [ -n "$app_dir" ] || { echo "APP_DIR 未配置" >&2; exit 1; }
+          [ -f "$remote_helper" ] || { echo "生产权限诊断脚本不存在" >&2; exit 1; }
+          printf '%s  %s\n' "$helper_sha" "$remote_helper" | sha256sum --check --status -
+          APP_DIR="$app_dir" sh "$remote_helper" access
+          REMOTE
+
+      - name: repair_production_access
+        if: inputs.action == 'repair_production_access'
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          set -eu
+          ssh_dir="$RUNNER_TEMP/inkforge-token-usage-ssh"
+          helper="scripts/token-usage-production-migration.sh"
+          helper_sha="$(sha256sum "$helper" | awk '{print $1}')"
+          remote_helper="/tmp/inkforge-token-usage-production-repair-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.sh"
+          scp -q \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            -o TCPKeepAlive=yes \
+            -i "$ssh_dir/deploy_key" \
+            "$helper" "$SERVER_USER@$SERVER_HOST:$remote_helper"
+
+          admin_user=""
+          admin_mode=""
+          for candidate in root ubuntu debian admin; do
+            probe="$(ssh \
+              -o BatchMode=yes \
+              -o ConnectTimeout=8 \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+              -o ServerAliveInterval=15 \
+              -o ServerAliveCountMax=2 \
+              -o TCPKeepAlive=yes \
+              -i "$ssh_dir/deploy_key" \
+              "$candidate@$SERVER_HOST" \
+              'if [ "$(id -u)" = "0" ]; then printf root; elif command -v sudo >/dev/null 2>&1 && sudo -n true; then printf sudo; fi' \
+              2>/dev/null || true)"
+            case "$probe" in
+              root|sudo) admin_user="$candidate"; admin_mode="$probe"; break ;;
+            esac
+          done
+          [ -n "$admin_user" ] || { echo "现有部署密钥没有可用的服务器管理员通道" >&2; exit 1; }
+          case "$admin_mode" in
+            root) printf -v root_command 'bash -s -- %q' "$APP_DIR" ;;
+            sudo) printf -v root_command 'sudo -n bash -s -- %q' "$APP_DIR" ;;
+            *) echo "服务器管理员通道状态无效" >&2; exit 1 ;;
+          esac
+          ssh \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            -o TCPKeepAlive=yes \
+            -i "$ssh_dir/deploy_key" \
+            "$admin_user@$SERVER_HOST" \
+            "$root_command" <<'REMOTE_ROOT'
+          set -eu
+          umask 077
+          app_dir=$1
+          [ "$(id -u)" = "0" ] || { echo "生产权限修复必须使用 root 通道" >&2; exit 1; }
+          command -v runuser >/dev/null 2>&1 || { echo "缺少 postgres 管理通道" >&2; exit 1; }
+          command -v python3 >/dev/null 2>&1 || { echo "缺少安全配置解析器" >&2; exit 1; }
+          env_file="$app_dir/.env"
+          [ -r "$env_file" ] || { echo "生产环境文件不可读" >&2; exit 1; }
+          set +x
+          app_role="$(python3 - "$env_file" <<'PY'
+          import sys
+          from pathlib import Path
+          from urllib.parse import parse_qsl, unquote, urlsplit
+
+          matches = []
+          for raw_line in Path(sys.argv[1]).read_text(encoding="utf-8").splitlines():
+              line = raw_line.strip()
+              if not line or line.startswith("#"):
+                  continue
+              if line.startswith("DATABASE_URL="):
+                  value = line[len("DATABASE_URL=") :].strip()
+                  if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+                      value = value[1:-1].strip()
+                  matches.append(value)
+          if len(matches) != 1:
+              raise SystemExit("database-role-check:database_url_count")
+          normalized = matches[0].replace("postgresql+asyncpg://", "postgresql://", 1)
+          parts = urlsplit(normalized)
+          role = unquote(parts.username or "")
+          query_pairs = parse_qsl(parts.query, keep_blank_values=True)
+          query_keys = [key for key, _value in query_pairs]
+          if (
+              parts.scheme != "postgresql"
+              or parts.hostname != "host.docker.internal"
+              or parts.path != "/novelwriter"
+              or parts.fragment
+              or len(query_keys) != len(set(query_keys))
+              or any(key not in {"application_name", "sslmode"} for key in query_keys)
+              or not role
+              or any(character in role for character in "\r\n")
+          ):
+              raise SystemExit("database-role-check:invalid")
+          print(role, end="")
+          PY
+          )" || { echo "生产数据库角色解析失败" >&2; exit 1; }
+
+          PGOPTIONS='-c statement_timeout=30000 -c lock_timeout=5000' \
+            timeout 60 runuser -u postgres -- psql -d novelwriter -v ON_ERROR_STOP=1 \
+            -v app_role="$app_role" <<'SQL'
+          \set QUIET 1
+          BEGIN;
+          SET LOCAL search_path = pg_catalog, public;
+
+          DO $guard$
+          BEGIN
+            IF pg_catalog.current_database() <> 'novelwriter' THEN
+              RAISE EXCEPTION '生产权限修复只允许在 novelwriter 执行';
+            END IF;
+            IF NOT (SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user) THEN
+              RAISE EXCEPTION '生产权限修复要求数据库超级用户通道';
+            END IF;
+          END
+          $guard$;
+
+          CREATE TEMP TABLE video_backup_select_targets (name TEXT PRIMARY KEY) ON COMMIT DROP;
+          INSERT INTO video_backup_select_targets (name) VALUES
+            ('VideoAdaptationDecisionCommand'),
+            ('VideoAdaptationTask'),
+            ('VideoAsset'),
+            ('VideoAssetBinding'),
+            ('VideoChapterAdaptation'),
+            ('VideoChapterAdaptationHead'),
+            ('VideoCinematicScene'),
+            ('VideoDramaticBeat'),
+            ('VideoDramaticBeatSourceAnchor'),
+            ('VideoEpisodeBoundary'),
+            ('VideoEpisodePlanVersion'),
+            ('VideoGenerationTask'),
+            ('VideoProject'),
+            ('VideoReviewDecisionCommand'),
+            ('VideoScene'),
+            ('VideoShot'),
+            ('VideoShotPlanVersion'),
+            ('VideoShotPromptHead'),
+            ('VideoShotPromptVersion'),
+            ('VideoShotPromptVisualReference'),
+            ('VideoShotSourceAnchor'),
+            ('VideoShotVisualReferenceBinding'),
+            ('VideoShotVisualReferenceSet'),
+            ('VideoVisualCanon'),
+            ('VideoVisualCanonVersion');
+
+          SELECT count(*) = 1 AND bool_and(rolcanlogin AND NOT rolsuper) AS role_ok
+          FROM pg_catalog.pg_roles
+          WHERE rolname = :'app_role'
+          \gset
+          \if :role_ok
+          \else
+            \echo '生产应用角色不存在、不可登录或意外拥有超级用户权限'
+            \quit 4
+          \endif
+
+          SELECT count(*) = 25 AS tables_ok
+          FROM video_backup_select_targets AS target
+          JOIN pg_catalog.pg_class AS relation ON relation.relname = target.name
+          JOIN pg_catalog.pg_namespace AS namespace
+            ON namespace.oid = relation.relnamespace
+           AND namespace.nspname = 'public'
+          WHERE relation.relkind IN ('r', 'p')
+          \gset
+          \if :tables_ok
+          \else
+            \echo '生产视频表集合与固定权限修复范围不一致'
+            \quit 4
+          \endif
+
+          SELECT
+            count(*) FILTER (
+              WHERE NOT pg_catalog.has_table_privilege(:'app_role', relation.oid, 'SELECT')
+            ) = 25 AS all_missing,
+            pg_catalog.bool_and(
+              pg_catalog.has_table_privilege(:'app_role', relation.oid, 'SELECT')
+            ) AS none_missing
+          FROM video_backup_select_targets AS target
+          JOIN pg_catalog.pg_class AS relation ON relation.relname = target.name
+          JOIN pg_catalog.pg_namespace AS namespace
+            ON namespace.oid = relation.relnamespace
+           AND namespace.nspname = 'public'
+          \gset
+          \if :all_missing
+            SELECT pg_catalog.format(
+              'GRANT SELECT ON TABLE %s TO %I',
+              pg_catalog.string_agg(
+                pg_catalog.format('%I.%I', 'public', name),
+                ', ' ORDER BY name
+              ),
+              :'app_role'
+            )
+            FROM video_backup_select_targets
+            \gexec
+          \else
+            \if :none_missing
+            \else
+              \echo '生产视频表读取权限处于未知的部分修复状态'
+              \quit 4
+            \endif
+          \endif
+
+          SELECT pg_catalog.bool_and(
+            pg_catalog.has_table_privilege(:'app_role', relation.oid, 'SELECT')
+          ) AS grant_ok
+          FROM video_backup_select_targets AS target
+          JOIN pg_catalog.pg_class AS relation ON relation.relname = target.name
+          JOIN pg_catalog.pg_namespace AS namespace
+            ON namespace.oid = relation.relnamespace
+           AND namespace.nspname = 'public'
+          \gset
+          \if :grant_ok
+          \else
+            \echo '生产视频表读取权限修复后校验失败'
+            \quit 4
+          \endif
+          COMMIT;
+          \echo 'video-select-grant:ok'
+          SQL
+          REMOTE_ROOT
+
+          printf -v verify_command 'bash -s -- %q %q %q %q' \
+            "$APP_DIR" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$helper_sha"
+          ssh \
+            -o BatchMode=yes \
+            -o ConnectTimeout=15 \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=4 \
+            -o TCPKeepAlive=yes \
+            -i "$ssh_dir/deploy_key" \
+            "$SERVER_USER@$SERVER_HOST" \
+            "$verify_command" <<'REMOTE_VERIFY'
+          set -eu
+          umask 077
+          app_dir=$1
+          run_id=$2
+          run_attempt=$3
+          helper_sha=$4
+          case "$run_id" in
+            ''|*[!0-9]*) echo "运行编号不符合固定临时路径约定" >&2; exit 1 ;;
+          esac
+          case "$run_attempt" in
+            ''|*[!0-9]*) echo "尝试编号不符合固定临时路径约定" >&2; exit 1 ;;
+          esac
+          remote_helper="/tmp/inkforge-token-usage-production-repair-$run_id-$run_attempt.sh"
+          trap 'rm -f -- "$remote_helper"' EXIT
+          printf '%s  %s\n' "$helper_sha" "$remote_helper" | sha256sum --check --status -
+          access_report="$(APP_DIR="$app_dir" sh "$remote_helper" access)"
+          printf '%s\n' "$access_report"
+          printf '%s\n' "$access_report" | grep -qx 'table-select-missing:0'
+          APP_DIR="$app_dir" sh "$remote_helper" backup
+          REMOTE_VERIFY
 
       - name: migrate_dev
         if: inputs.action == 'migrate_dev'

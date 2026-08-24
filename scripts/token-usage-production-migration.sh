@@ -11,7 +11,7 @@ forward_sha="BC5D7B708E5DBA4EE81E31D21C9E2087AFB87D0582C916A0FA9E3C529994FAF5"
 rollback_sha="D00EF3B1FD299BEBAB644C758678ACF0FF7C3C6F0855199D56FA10B9008A19FE"
 
 case "$action" in
-  status|backup|up|down) ;;
+  status|access|backup|up|down) ;;
   *) echo "生产 TokenUsage 迁移动作无效" >&2; exit 2 ;;
 esac
 
@@ -231,9 +231,123 @@ verify_sql_hash() {
   printf '%s  %s\n' "$expected_sha" "$sql_path" | sha256sum --check --status -
 }
 
+inspect_read_access() {
+  PGOPTIONS='-c statement_timeout=30000 -c lock_timeout=5000' \
+    timeout 45 psql -v ON_ERROR_STOP=1 -Atq "$database_url" <<'SQL'
+WITH public_tables AS (
+    SELECT
+        relation.relname AS name,
+        relation.relowner = role.oid AS owned_by_current_role,
+        has_table_privilege(current_user, relation.oid, 'SELECT') AS can_select
+    FROM pg_class AS relation
+    JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+    JOIN pg_roles AS role ON role.rolname = current_user
+    WHERE namespace.nspname = 'public'
+      AND relation.relkind IN ('r', 'p', 'm', 'f')
+), public_sequences AS (
+    SELECT
+        relation.relname AS name,
+        relation.relowner = role.oid AS owned_by_current_role,
+        has_sequence_privilege(current_user, relation.oid, 'SELECT') AS can_select
+    FROM pg_class AS relation
+    JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+    JOIN pg_roles AS role ON role.rolname = current_user
+    WHERE namespace.nspname = 'public'
+      AND relation.relkind = 'S'
+), report AS (
+    SELECT 10 AS report_order, 'schema-usage:' || CASE
+        WHEN has_schema_privilege(current_user, 'public', 'USAGE') THEN 'true'
+        ELSE 'false'
+    END AS line
+    UNION ALL
+    SELECT 20, 'table-count:' || count(*)::text FROM public_tables
+    UNION ALL
+    SELECT 30, 'table-select-missing:' || count(*)::text
+    FROM public_tables WHERE NOT can_select
+    UNION ALL
+    SELECT 31, 'table-missing-owner-count:' || count(DISTINCT relation.relowner)::text
+    FROM pg_class AS relation
+    JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+    WHERE namespace.nspname = 'public'
+      AND relation.relkind IN ('r', 'p', 'm', 'f')
+      AND NOT has_table_privilege(current_user, relation.oid, 'SELECT')
+    UNION ALL
+    SELECT 32, 'table-missing-owner-membership:' || CASE
+        WHEN count(*) = 0 THEN 'not-applicable'
+        WHEN bool_and(pg_has_role(current_user, relation.relowner, 'USAGE')) THEN 'true'
+        ELSE 'false'
+    END
+    FROM pg_class AS relation
+    JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+    WHERE namespace.nspname = 'public'
+      AND relation.relkind IN ('r', 'p', 'm', 'f')
+      AND NOT has_table_privilege(current_user, relation.oid, 'SELECT')
+    UNION ALL
+    SELECT
+        40,
+        'table:' || name || ':owner=' || CASE
+            WHEN owned_by_current_role THEN 'true'
+            ELSE 'false'
+        END
+    FROM public_tables
+    WHERE NOT can_select
+    UNION ALL
+    SELECT 50, 'sequence-count:' || count(*)::text FROM public_sequences
+    UNION ALL
+    SELECT 60, 'sequence-select-missing:' || count(*)::text
+    FROM public_sequences WHERE NOT can_select
+    UNION ALL
+    SELECT
+        70,
+        'sequence:' || name || ':owner=' || CASE
+            WHEN owned_by_current_role THEN 'true'
+            ELSE 'false'
+        END
+    FROM public_sequences
+    WHERE NOT can_select
+)
+SELECT line
+FROM report
+ORDER BY report_order, line;
+SQL
+
+  database_admin_path="unavailable"
+  video_owner="$(PGOPTIONS='-c statement_timeout=30000 -c lock_timeout=5000' \
+    timeout 45 psql -v ON_ERROR_STOP=1 -Atq "$database_url" \
+      -c "SELECT CASE WHEN count(DISTINCT relation.relowner) = 1 THEN min(pg_get_userbyid(relation.relowner)) ELSE '' END FROM pg_class AS relation JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname = 'public' AND relation.relkind IN ('r', 'p') AND relation.relname LIKE 'Video%'" \
+  )"
+  case "$video_owner" in
+    ''|*[!a-zA-Z0-9_.-]*) video_owner="" ;;
+  esac
+  if PGCONNECT_TIMEOUT=5 timeout 10 psql -w -d novelwriter -v ON_ERROR_STOP=1 -Atq \
+      -c "SELECT count(*) = 25 AND bool_and(relation.relowner = role.oid) FROM pg_class AS relation JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace JOIN pg_roles AS role ON role.rolname = current_user WHERE namespace.nspname = 'public' AND relation.relkind IN ('r', 'p') AND relation.relname LIKE 'Video%'" \
+      2>/dev/null | grep -qx t; then
+    database_admin_path="default-video-owner"
+  elif [ -n "$video_owner" ] \
+    && PGCONNECT_TIMEOUT=5 timeout 10 psql -w -U "$video_owner" -d novelwriter \
+      -v ON_ERROR_STOP=1 -Atq \
+      -c "SELECT count(*) = 25 AND bool_and(relation.relowner = role.oid) FROM pg_class AS relation JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace JOIN pg_roles AS role ON role.rolname = current_user WHERE namespace.nspname = 'public' AND relation.relkind IN ('r', 'p') AND relation.relname LIKE 'Video%'" \
+      2>/dev/null | grep -qx t; then
+    database_admin_path="local-video-owner"
+  elif command -v sudo >/dev/null 2>&1 \
+    && timeout 10 sudo -n -u postgres psql -d novelwriter -v ON_ERROR_STOP=1 -Atq \
+      -c "SELECT current_database() = 'novelwriter'" 2>/dev/null | grep -qx t; then
+    database_admin_path="sudo-postgres"
+  elif [ "$(id -u)" = "0" ] \
+    && command -v runuser >/dev/null 2>&1 \
+    && timeout 10 runuser -u postgres -- psql -d novelwriter -v ON_ERROR_STOP=1 -Atq \
+      -c "SELECT current_database() = 'novelwriter'" 2>/dev/null | grep -qx t; then
+    database_admin_path="runuser-postgres"
+  fi
+  printf 'database-admin-path:%s\n' "$database_admin_path"
+}
+
 case "$action" in
   status)
     query_schema_state
+    ;;
+  access)
+    inspect_read_access
     ;;
   backup)
     [ "$(query_schema_state)" = "unmigrated" ] || {
