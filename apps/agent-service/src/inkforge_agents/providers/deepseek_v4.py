@@ -38,7 +38,9 @@ class DeepSeekV4Provider:
         self.model_name = settings.openai_model
         self._endpoint = _completion_endpoint(settings.openai_base_url)
         self._api_key = settings.openai_api_key.get_secret_value()
-        self._client = client or httpx.AsyncClient(timeout=httpx.Timeout(60, connect=10))
+        self._client = client or httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=10, read=300, write=60, pool=60)
+        )
         self._owns_client = client is None
 
     async def aclose(self) -> None:

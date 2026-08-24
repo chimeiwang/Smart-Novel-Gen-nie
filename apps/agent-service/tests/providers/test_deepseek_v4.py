@@ -98,6 +98,19 @@ def _provider(
 
 
 @pytest.mark.asyncio
+async def test_default_client_waits_up_to_300_seconds_for_response() -> None:
+    provider = DeepSeekV4Provider(_settings())
+    try:
+        timeout = provider._client.timeout
+        assert timeout.connect == 10
+        assert timeout.read == 300
+        assert timeout.write == 60
+        assert timeout.pool == 60
+    finally:
+        await provider.aclose()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("base_url", "expected"),
     [
