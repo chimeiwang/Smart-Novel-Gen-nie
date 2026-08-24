@@ -25,7 +25,7 @@ jobs:
     env:
       APP_DIR: ${{ vars.APP_DIR }}
       SQL_PATH: scripts/migrations/20260823_token_usage_details.sql
-      SQL_SHA256: E5D7D5946828CA3E516666607104353ADE4C034F681544B83AD45E639E549760
+      SQL_SHA256: BF6817A82F74E76B8F98D356749795A1EC04BCFCED090DB3F8B463F62ABCAB93
 
     steps:
       - name: Checkout
@@ -400,6 +400,7 @@ jobs:
           expected_contract="/tmp/inkforge-token-usage-details-$run_id-$run_attempt.json"
           pgpass_file="/tmp/inkforge-token-usage-details-$run_id-$run_attempt.pgpass"
           database_url_file="/tmp/inkforge-token-usage-details-$run_id-$run_attempt.database-url"
+          migration_error_file="/tmp/inkforge-token-usage-details-$run_id-$run_attempt.migration-error"
           [ "$sql_temp" = "$expected_sql" ] || {
             echo "SQL 临时文件路径不符合固定约定" >&2
             exit 1
@@ -416,8 +417,12 @@ jobs:
             /tmp/inkforge-token-usage-details-[0-9]*-[0-9]*.database-url) ;;
             *) echo "数据库 URL 临时文件路径不符合固定约定" >&2; exit 1 ;;
           esac
-          rm -f -- "$pgpass_file" "$database_url_file"
-          trap 'rm -f -- "$pgpass_file" "$database_url_file"' EXIT
+          case "$migration_error_file" in
+            /tmp/inkforge-token-usage-details-[0-9]*-[0-9]*.migration-error) ;;
+            *) echo "迁移错误临时文件路径不符合固定约定" >&2; exit 1 ;;
+          esac
+          rm -f -- "$pgpass_file" "$database_url_file" "$migration_error_file"
+          trap 'rm -f -- "$pgpass_file" "$database_url_file" "$migration_error_file"' EXIT
           [ -n "$app_dir" ] || { echo "APP_DIR 未配置" >&2; exit 1; }
           cd -- "$app_dir"
 
@@ -582,15 +587,35 @@ jobs:
           }
 
           printf '%s  %s\n' \
-            'E5D7D5946828CA3E516666607104353ADE4C034F681544B83AD45E639E549760' \
+            'BF6817A82F74E76B8F98D356749795A1EC04BCFCED090DB3F8B463F62ABCAB93' \
             "$sql_temp" | sha256sum --check --status -
           for attempt in 1 2; do
             if ! PGOPTIONS='-c statement_timeout=120000 -c lock_timeout=30000' \
-              timeout 180 psql -v ON_ERROR_STOP=1 "$database_url" -f "$sql_temp" >/dev/null 2>&1; then
+              timeout 180 psql -v ON_ERROR_STOP=1 "$database_url" -f "$sql_temp" \
+                >/dev/null 2>"$migration_error_file"; then
+              python3 - "$migration_error_file" <<'PY'
+          import sys
+          from pathlib import Path
+
+          text = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")
+          checks = (
+              ("TokenUsage 明细迁移只允许", "database-guard"),
+              ("permission denied", "permission"),
+              ("must be owner", "permission"),
+              ("does not exist", "missing-object"),
+              ("检查约束定义不符合迁移契约", "constraint-definition"),
+              ("violates check constraint", "constraint-validation"),
+              ("syntax error", "syntax"),
+          )
+          reason = next((code for marker, code in checks if marker in text), "unexpected")
+          print(f"migration-error:{reason}", file=sys.stderr)
+          PY
               echo "固定迁移执行失败" >&2
               exit 1
             fi
+            : > "$migration_error_file"
           done
+          rm -f -- "$migration_error_file"
 
           verification="$(PGOPTIONS='-c statement_timeout=120000 -c lock_timeout=30000' \
             timeout 180 psql -v ON_ERROR_STOP=1 -Atq "$database_url" <<'SQL'
@@ -691,9 +716,11 @@ jobs:
             echo "schema_guard 只读 contract 导出失败" >&2
             exit 1
           fi
-          rm -f "$contract_temp"
-          if ! timeout 180 docker cp "$core_container:$container_contract" "$contract_temp" >/dev/null 2>&1; then
-            echo "无法复制 schema contract" >&2
+          : > "$contract_temp"
+          if ! timeout 180 docker exec -i "$core_container" python3 -c \
+            'import sys; from pathlib import Path; sys.stdout.buffer.write(Path(sys.argv[1]).read_bytes())' \
+            "$container_contract" </dev/null >"$contract_temp" 2>/dev/null; then
+            echo "无法传输 schema contract" >&2
             exit 1
           fi
           [ -s "$contract_temp" ] || { echo "schema contract 为空" >&2; exit 1; }
