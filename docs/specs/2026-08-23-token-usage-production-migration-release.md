@@ -32,6 +32,8 @@
   部署用户对 `/srv/backups/inkforge-dev` 和 `/srv/backups/inkforge` 均无写权限；dev 备份固定写入应用目录下
   的私有 `.token-usage-dev-backups`，不得因此提权或复用生产备份目录。
 - dev 迁移后从真实数据库只读导出结构契约；提交前人工/自动核对差异只能包含两个 nullable INTEGER 列和三个 CHECK。
+- 固定 SQL 失败时，工作流只允许读取本次运行私有错误文件并输出预定义原因码；不得回显 PostgreSQL 异常正文、
+  SQL、连接串或凭据。错误文件必须绑定运行编号并由 trap 清理。
 - 生产迁移由部署脚本在新容器启动前执行。部署失败且本次部署首次增加这些字段时，先运行固定 down
   脚本删除三个约束与两个纯诊断列，再恢复旧镜像；正式正文、用户数据和旧 TokenUsage 字段不得变更。
 - `reasoning_content` 正文不进入数据库、构建产物或工作流 Artifact。工作流 Artifact 只允许包含结构契约和非敏感校验元数据。

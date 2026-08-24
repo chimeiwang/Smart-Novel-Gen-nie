@@ -287,6 +287,26 @@ def test_migration_itself_refuses_every_database_except_novelwriterdev() -> None
     assert "TokenUsage 明细迁移只允许在 novelwriterdev 执行" in migration
 
 
+def test_migration_failure_only_emits_fixed_reason_codes() -> None:
+    source = _source()
+    migrate = source.split("if: inputs.action == 'migrate_dev'", maxsplit=1)[1]
+
+    assert '2>"$migration_error_file"' in migrate
+    for reason in (
+        "database-guard",
+        "permission",
+        "missing-object",
+        "constraint-definition",
+        "constraint-validation",
+        "syntax",
+        "unexpected",
+    ):
+        assert f'"{reason}"' in migrate
+    assert 'print(f"migration-error:{reason}", file=sys.stderr)' in migrate
+    assert 'Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace")' in migrate
+    assert 'print(text)' not in migrate
+
+
 def test_migrate_dev_backs_up_double_runs_and_verifies_read_only_contract() -> None:
     source = _source()
     migrate = source.split("if: inputs.action == 'migrate_dev'", maxsplit=1)[1]
