@@ -25,6 +25,23 @@ AssetDuty = Literal[
     "camera",
     "voice",
     "ambience",
+    "sfx",
+    "music",
+    "episode_export",
+]
+UploadAssetDuty = Literal[
+    "identity",
+    "costume",
+    "scene",
+    "prop",
+    "style",
+    "storyboard",
+    "keyframe",
+    "motion",
+    "camera",
+    "voice",
+    "ambience",
+    "sfx",
     "music",
 ]
 PlannedAssetDuty = Literal[
@@ -510,9 +527,27 @@ _ALLOWED_MODALITIES_BY_DUTY: dict[str, tuple[AssetModality, ...]] = {
     "camera": ("video",),
     "voice": ("audio",),
     "ambience": ("audio",),
+    "sfx": ("audio",),
     "music": ("audio",),
+    "episode_export": ("video",),
     "relation_interaction": ("image", "video"),
 }
+
+
+def validate_asset_duty_modality(modality: AssetModality, duty: str) -> None:
+    """统一校验真实素材和规划素材的职责/模态组合。"""
+
+    allowed = _ALLOWED_MODALITIES_BY_DUTY.get(duty)
+    if allowed is None or modality not in allowed:
+        raise ValueError(f"素材职责 {duty} 不支持 {modality} 模态")
+
+
+def validate_uploaded_asset_duty_modality(modality: AssetModality, duty: str) -> None:
+    """客户端只能上传输入素材；整集成片必须由受控导出器创建。"""
+
+    if duty == "episode_export":
+        raise ValueError("episode_export 只能由整集导出任务创建")
+    validate_asset_duty_modality(modality, duty)
 # 轻量草案不让模型选择可由职责唯一固化的媒介，避免制造无意义组合分支。
 _DEFAULT_DRAFT_MODALITY_BY_DUTY: dict[PlannerAssetDuty, AssetModality] = {
     "identity": "image",
@@ -736,8 +771,7 @@ class PlannedAsset(VideoContractModel):
     def validate_duty_modality(self) -> PlannedAsset:
         """阻止音频承担运镜、图片承担音色等不可能的职责。"""
 
-        if self.modality not in _ALLOWED_MODALITIES_BY_DUTY[self.duty]:
-            raise ValueError(f"素材职责 {self.duty} 不支持 {self.modality} 模态")
+        validate_asset_duty_modality(self.modality, self.duty)
         if self.bindingScope == "canon_slot" and self.settingReference is None:
             raise ValueError("canon_slot 素材必须引用冻结设定")
         if self.bindingScope == "scene_direct" and self.settingReference is not None:

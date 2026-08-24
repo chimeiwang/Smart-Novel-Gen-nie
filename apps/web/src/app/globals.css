@@ -5595,3 +5595,964 @@ body:has(.marketing-page) .user-info-bar {
   color: var(--muted);
   font-size: 9px;
 }
+
+/* 逐镜生成延续章节工作台的左侧导航 + 主编辑区结构；候选卡只承载可播放媒体。 */
+.adaptation-take-layout {
+  display: grid;
+  grid-template-columns: minmax(230px, 290px) minmax(0, 1fr);
+  min-height: 640px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.adaptation-take-shots {
+  min-width: 0;
+  border-right: 1px solid var(--border);
+  background: var(--bg-subtle);
+}
+
+.adaptation-take-shots > header,
+.adaptation-take-candidates > header,
+.adaptation-take-compare > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.adaptation-take-shots > header span,
+.adaptation-take-candidates > header span,
+.adaptation-take-compare > header span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.adaptation-take-shots > div {
+  max-height: 760px;
+  overflow: auto;
+  padding: 6px;
+}
+
+.adaptation-take-episode + .adaptation-take-episode {
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.adaptation-take-episode > header {
+  display: flex;
+  justify-content: space-between;
+  padding: 9px 8px 5px;
+  font-size: 12px;
+}
+
+.adaptation-take-episode > header span,
+.adaptation-take-scene > header span,
+.adaptation-take-beat > span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.adaptation-take-scene > header {
+  display: flex;
+  gap: 6px;
+  padding: 7px 8px 3px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.adaptation-take-beat > span {
+  display: block;
+  padding: 6px 10px 2px;
+}
+
+.adaptation-take-shots button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  width: 100%;
+  gap: 10px;
+  padding: 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.adaptation-take-shots button:hover,
+.adaptation-take-shots button.selected {
+  background: var(--panel-soft);
+}
+
+.adaptation-take-shots button.selected {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.adaptation-take-shots button > span:first-child,
+.adaptation-take-shots button small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.adaptation-take-shots button > span:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.adaptation-take-shots button strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.adaptation-take-main {
+  min-width: 0;
+  padding: 18px;
+}
+
+.adaptation-take-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 16px;
+}
+
+.adaptation-take-header h3 {
+  margin: 0 0 5px;
+}
+
+.adaptation-take-header > div:first-child > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.adaptation-take-generate {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.adaptation-take-generate label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.adaptation-render-progress,
+.adaptation-render-failure {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.adaptation-render-progress {
+  justify-content: flex-start;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  background: var(--bg-subtle);
+}
+
+.adaptation-render-progress > div,
+.adaptation-render-failure > div {
+  display: grid;
+  gap: 3px;
+}
+
+.adaptation-render-progress small,
+.adaptation-render-failure span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.adaptation-take-compare,
+.adaptation-take-candidates {
+  margin-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.adaptation-take-compare > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px 0;
+}
+
+.adaptation-take-compare.count-1 > div {
+  grid-template-columns: minmax(0, 720px);
+}
+
+.adaptation-take-compare article {
+  min-width: 0;
+  background: #0d0f12;
+}
+
+.adaptation-take-compare video,
+.adaptation-take-candidates video {
+  display: block;
+  width: 100%;
+  aspect-ratio: 9 / 16;
+  max-height: 560px;
+  background: #08090b;
+  object-fit: contain;
+}
+
+.adaptation-take-compare article > footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  background: var(--bg-subtle);
+}
+
+.adaptation-take-compare footer > div {
+  display: grid;
+  gap: 2px;
+}
+
+.adaptation-take-compare footer span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.adaptation-take-candidates > div {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 12px;
+  padding: 14px 0;
+}
+
+.adaptation-take-candidates > div.empty {
+  display: block;
+}
+
+.adaptation-take-candidates article {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.adaptation-take-candidates article.current {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* P1–P3 后期制作：关键帧、粗剪和声音输出共享同一安静桌面工作区。 */
+.chapter-adaptation-steps {
+  grid-template-columns: repeat(8, minmax(112px, 1fr));
+  overflow-x: auto;
+}
+
+.post-production-layout {
+  display: grid;
+  grid-template-columns: minmax(230px, 280px) minmax(0, 1fr);
+  flex: 1;
+  min-height: 640px;
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.post-production-shot-list {
+  min-height: 0;
+  overflow: auto;
+  border-right: 1px solid var(--divider);
+  background: var(--bg-subtle);
+}
+
+.post-production-section-title,
+.post-production-context-header,
+.post-production-toolbar,
+.audio-track-editor > header,
+.subtitle-editor > header,
+.episode-export-panel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.post-production-section-title {
+  min-height: 44px;
+  padding: 8px 11px;
+  border-bottom: 1px solid var(--divider);
+  font-size: 11px;
+}
+
+.post-production-section-title span,
+.post-production-context-header p,
+.post-production-toolbar span,
+.audio-track-editor header span,
+.subtitle-editor header span,
+.episode-export-panel header span {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.post-production-shot-list > button {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 3px 8px;
+  width: 100%;
+  padding: 9px 11px;
+  border: 0;
+  border-bottom: 1px solid var(--divider);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.post-production-shot-list > button:hover,
+.post-production-shot-list > button.active {
+  background: var(--panel);
+}
+
+.post-production-shot-list > button.active {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.post-production-shot-list > button span,
+.post-production-shot-list > button small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.post-production-shot-list > button strong {
+  overflow: hidden;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.post-production-shot-list > button small {
+  grid-column: 2;
+}
+
+.keyframe-main {
+  min-width: 0;
+  padding: 14px;
+  overflow: auto;
+}
+
+.post-production-context-header {
+  align-items: flex-start;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.post-production-context-header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.post-production-context-header h3,
+.audio-track-editor h3,
+.subtitle-editor h3,
+.episode-export-panel h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.post-production-context-header > div > span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.post-production-context-header p {
+  max-width: 620px;
+  margin: 0;
+  text-align: right;
+}
+
+.continuity-issues {
+  display: grid;
+  gap: 4px;
+  margin: 10px 0;
+}
+
+.continuity-issue {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 8px;
+  padding: 7px 9px;
+  border-left: 3px solid var(--border-strong);
+  background: var(--bg-subtle);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.continuity-issue.warning {
+  border-left-color: var(--warning);
+  background: var(--warning-soft);
+}
+
+.continuity-issue.blocking {
+  border-left-color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.keyframe-role-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(260px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.keyframe-role {
+  display: grid;
+  align-content: start;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.keyframe-role > header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+}
+
+.keyframe-role > header span,
+.keyframe-role label,
+.keyframe-extract-controls {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.keyframe-history {
+  display: grid;
+  gap: 8px;
+}
+
+.keyframe-history > div:first-child {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+}
+
+.keyframe-history > div:first-child span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.keyframe-history-list {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.keyframe-history-list button {
+  background: var(--bg-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  color: inherit;
+  display: grid;
+  flex: 0 0 92px;
+  gap: 4px;
+  padding: 6px;
+  text-align: left;
+}
+
+.keyframe-history-list button.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
+.keyframe-history-list button:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.keyframe-history-list small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.3;
+}
+
+.keyframe-history-thumb {
+  background: var(--panel-soft);
+  border-radius: 7px;
+  display: grid;
+  height: 54px;
+  overflow: hidden;
+  place-items: center;
+  position: relative;
+}
+
+.keyframe-history-thumb img {
+  object-fit: cover;
+}
+
+.keyframe-history-thumb i {
+  color: var(--subtle);
+  font-size: 10px;
+  font-style: normal;
+}
+
+.version-history-panel {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid var(--divider);
+  background: var(--bg-subtle);
+}
+
+.version-history-panel > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.version-history-panel h3 {
+  margin: 0;
+  font-size: 12px;
+}
+
+.version-history-panel header span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.version-history-list {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  padding-bottom: 3px;
+}
+
+.version-history-list > button {
+  display: grid;
+  flex: 0 0 148px;
+  gap: 2px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  color: var(--text);
+  text-align: left;
+}
+
+.version-history-list > button.active {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.version-history-list > button:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.version-history-list span,
+.version-history-list small,
+.version-history-list i {
+  color: var(--muted);
+  font-size: 9px;
+  font-style: normal;
+}
+
+.keyframe-role label,
+.keyframe-extract-controls {
+  display: grid;
+  gap: 4px;
+}
+
+.keyframe-preview {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 9 / 16;
+  max-height: 390px;
+  overflow: hidden;
+  background: #11141a;
+  color: #9199a8;
+  font-size: 11px;
+}
+
+.keyframe-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.keyframe-extract-controls {
+  padding-top: 8px;
+  border-top: 1px solid var(--divider);
+}
+
+.file-button {
+  position: relative;
+  overflow: hidden;
+}
+
+.file-button input[type="file"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.rough-cut-workspace,
+.finish-workspace {
+  flex: 1;
+  min-height: 0;
+  padding: 12px;
+  overflow: auto;
+  background: var(--bg-subtle);
+}
+
+.post-production-toolbar {
+  min-height: 48px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.post-production-toolbar > label,
+.post-production-toolbar > div {
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.post-production-toolbar > div {
+  flex: 1;
+}
+
+.post-production-toolbar strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.rough-cut-preview {
+  display: grid;
+  grid-template-columns: minmax(520px, 1fr) minmax(260px, 340px);
+  min-height: 500px;
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.rough-cut-player {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+  padding: 12px;
+  background: #11141a;
+}
+
+.rough-cut-player video,
+.rough-cut-placeholder {
+  width: 100%;
+  height: 440px;
+  background: #090b0f;
+  object-fit: contain;
+}
+
+.rough-cut-placeholder {
+  display: grid;
+  place-content: center;
+  gap: 5px;
+  color: #aab2c0;
+  text-align: center;
+}
+
+.rough-cut-player-caption {
+  display: flex;
+  justify-content: space-between;
+  padding: 9px 2px 0;
+  color: #d8dde7;
+  font-size: 11px;
+}
+
+.rough-cut-inspector {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 14px;
+  border-left: 1px solid var(--divider);
+}
+
+.rough-cut-inspector h3 {
+  margin: 0;
+  font-size: 13px;
+}
+
+.rough-cut-inspector label,
+.time-pair label,
+.audio-clip-row label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.time-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.rough-cut-timeline {
+  display: flex;
+  gap: 3px;
+  min-height: 88px;
+  margin-top: 8px;
+  padding: 6px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.rough-cut-timeline > button {
+  display: grid;
+  align-content: center;
+  min-width: 120px;
+  max-width: 300px;
+  padding: 7px;
+  border: 1px solid var(--divider);
+  background: var(--bg-subtle);
+  color: var(--text);
+  text-align: left;
+}
+
+.rough-cut-timeline > button.active {
+  border-color: var(--accent);
+  box-shadow: inset 0 -3px 0 var(--accent);
+}
+
+.rough-cut-timeline span,
+.rough-cut-timeline small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.rough-cut-timeline strong {
+  overflow: hidden;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.finish-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.8fr);
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.audio-track-editor,
+.subtitle-editor,
+.episode-export-panel {
+  padding: 11px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.audio-track-editor > header > div:first-child,
+.subtitle-editor > header > div:first-child,
+.episode-export-panel > header > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.audio-clip-row {
+  display: grid;
+  grid-template-columns: 90px minmax(150px, 1fr) repeat(6, 74px) auto;
+  gap: 6px;
+  align-items: end;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--divider);
+}
+
+.audio-upload-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.subtitle-cue-row {
+  display: grid;
+  grid-template-columns: 150px 110px minmax(180px, 1fr) auto;
+  gap: 7px;
+  align-items: start;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--divider);
+}
+
+.subtitle-cue-row .textarea {
+  min-height: 56px;
+}
+
+.episode-export-panel {
+  margin-top: 10px;
+}
+
+.export-controls {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.export-controls label:not(.checkbox-label) {
+  display: grid;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.export-controls .select {
+  min-width: 92px;
+}
+
+.export-history {
+  display: grid;
+  margin-top: 8px;
+}
+
+.export-history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--divider);
+}
+
+.export-history-row > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.export-history-row strong {
+  font-size: 11px;
+}
+
+.export-history-row span,
+.export-history-row small,
+.post-production-empty-row {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.post-production-empty-row {
+  padding: 12px 0;
+}
+
+@media (max-width: 1180px) {
+  .keyframe-role-grid,
+  .finish-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .rough-cut-preview {
+    grid-template-columns: minmax(0, 1fr) 280px;
+  }
+
+  .audio-clip-row,
+  .subtitle-cue-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.adaptation-take-candidates article > header,
+.adaptation-take-candidates article > dl,
+.adaptation-take-candidates article > details,
+.adaptation-take-candidates article > button {
+  margin-right: 12px;
+  margin-left: 12px;
+}
+
+.adaptation-take-candidates article > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 0;
+}
+
+.adaptation-take-candidates article > header > div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.adaptation-take-candidates article > header span,
+.adaptation-take-candidates article > header label {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.adaptation-take-candidates dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 5px 9px;
+  padding: 9px 0;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.adaptation-take-candidates dt,
+.adaptation-take-candidates dd {
+  margin: 0;
+}
+
+.adaptation-take-candidates dd {
+  overflow-wrap: anywhere;
+  color: var(--text);
+}
+
+.adaptation-take-candidates details {
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.adaptation-take-candidates details p {
+  max-height: 140px;
+  overflow: auto;
+  color: var(--muted);
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.adaptation-take-candidates article > button {
+  margin-top: 4px;
+  margin-bottom: 12px;
+}
+
+@media (max-width: 1100px) {
+  .adaptation-take-layout {
+    grid-template-columns: 220px minmax(0, 1fr);
+  }
+
+  .adaptation-take-header,
+  .adaptation-take-generate {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}

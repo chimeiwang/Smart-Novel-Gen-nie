@@ -6,7 +6,7 @@ from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, File, Form, Request, UploadFile, status
 from fastapi.responses import FileResponse
-from inkforge_contracts.video import AssetDuty, AssetModality
+from inkforge_contracts.video import AssetModality, UploadAssetDuty
 
 from ..auth.dependencies import get_current_user
 from ..auth.repository import AuthUser
@@ -91,7 +91,7 @@ async def upload_asset(
     file: Annotated[UploadFile, File()],
     name: Annotated[str, Form(min_length=1, max_length=200)],
     modality: Annotated[AssetModality, Form()],
-    duty: Annotated[AssetDuty, Form()],
+    duty: Annotated[UploadAssetDuty, Form()],
     source_kind: Annotated[
         Literal["user_upload", "authorized_real", "virtual", "model_generated"],
         Form(alias="sourceKind"),

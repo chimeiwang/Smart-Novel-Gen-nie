@@ -10,11 +10,17 @@ import httpx
 import pytest
 from inkforge_contracts.jobs import AgentJobAccepted, AgentJobCancelRequest, AgentJobRequest
 from inkforge_contracts.jwt_claims import ServiceScope
+from inkforge_contracts.video_render import (
+    SeedanceRenderQueryRequest,
+    SeedanceRenderSubmitRequest,
+)
 from inkforge_core.agent_client import (
     AgentClient,
     PortraitAgentSubmitter,
     QualityAgentSubmitter,
     RagAgentSubmitter,
+    SeedanceGatewayRejectedError,
+    SeedanceSubmissionUnknownError,
     WritingTaskAgentSubmitter,
     command_job_payload,
 )
@@ -441,4 +447,121 @@ async def test_agent_debug_query_signs_exact_path_and_query() -> None:
     assert signer.calls[0]["scope"] == (ServiceScope.AGENT_DEBUG_READ,)
     assert signer.calls[0]["query_string"] == b"userId=user-1"
     assert signer.calls[0]["task_id"] == "debug"
+    await http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_seedance_short_calls_use_dedicated_scope_and_poll_identity() -> None:
+    signer = Signer()
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/internal/v1/video/seedance/tasks":
+            return httpx.Response(
+                202,
+                json={"taskId": "render-1", "providerTaskId": "provider-1"},
+            )
+        assert request.url.path == (
+            "/internal/v1/video/seedance/tasks/provider-1/query"
+        )
+        return httpx.Response(
+            200,
+            json={
+                "taskId": "render-1",
+                "providerTaskId": "provider-1",
+                "status": "running",
+                "output": None,
+                "error": None,
+            },
+        )
+
+    http = httpx.AsyncClient(
+        base_url="https://agent.example",
+        transport=httpx.MockTransport(handler),
+    )
+    client = AgentClient(http, signer)
+    submitted = await client.submit_seedance_render(
+        SeedanceRenderSubmitRequest(
+            taskId="render-1",
+            novelId="novel-1",
+            inputHash="a" * 64,
+            model="seedance-test",
+            promptText="完整提示词",
+            ratio="9:16",
+            durationSeconds=5,
+            resolution="720p",
+            generateAudio=True,
+            watermark=False,
+            references=[],
+        )
+    )
+    queried = await client.query_seedance_render(
+        SeedanceRenderQueryRequest(
+            taskId="render-1",
+            novelId="novel-1",
+            providerTaskId=submitted.providerTaskId,
+            pollCount=3,
+        )
+    )
+
+    assert queried.status == "running"
+    assert [call["scope"] for call in signer.calls] == [
+        (ServiceScope.VIDEO_RENDER,),
+        (ServiceScope.VIDEO_RENDER,),
+    ]
+    assert signer.calls[0]["idempotency_key"] == "render-submit-render-1"
+    assert signer.calls[1]["idempotency_key"] == "render-query-render-1-3"
+    assert all(call["task_id"] == "render-1" for call in signer.calls)
+    assert all(call["novel_id"] == "novel-1" for call in signer.calls)
+    await http.aclose()
+
+
+def _seedance_submit_request() -> SeedanceRenderSubmitRequest:
+    return SeedanceRenderSubmitRequest(
+        taskId="render-1",
+        novelId="novel-1",
+        inputHash="a" * 64,
+        model="seedance-test",
+        promptText="完整提示词",
+        ratio="9:16",
+        durationSeconds=5,
+        resolution="720p",
+        generateAudio=True,
+        watermark=False,
+        references=[],
+    )
+
+
+@pytest.mark.asyncio
+async def test_seedance_submit_treats_agent_5xx_as_unknown_to_avoid_double_charge() -> None:
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"detail": "供应商响应回传失败"})
+
+    http = httpx.AsyncClient(
+        base_url="https://agent.example",
+        transport=httpx.MockTransport(handler),
+    )
+    client = AgentClient(http, Signer())
+
+    with pytest.raises(SeedanceSubmissionUnknownError):
+        await client.submit_seedance_render(_seedance_submit_request())
+
+    await http.aclose()
+
+
+@pytest.mark.asyncio
+async def test_seedance_submit_preserves_definite_agent_4xx_rejection() -> None:
+    async def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(422, json={"detail": "输入参数无效"})
+
+    http = httpx.AsyncClient(
+        base_url="https://agent.example",
+        transport=httpx.MockTransport(handler),
+    )
+    client = AgentClient(http, Signer())
+
+    with pytest.raises(SeedanceGatewayRejectedError) as captured:
+        await client.submit_seedance_render(_seedance_submit_request())
+
+    assert captured.value.status_code == 422
+    assert captured.value.detail == "输入参数无效"
     await http.aclose()

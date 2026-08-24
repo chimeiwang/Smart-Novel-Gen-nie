@@ -289,6 +289,7 @@ def emit_command_result(
             if spec.name not in {
                 "long.task.watch",
                 "long.video.adaptation.watch",
+                "long.video.render.watch",
             } or not isinstance(result, Generator):
                 raise
             try:

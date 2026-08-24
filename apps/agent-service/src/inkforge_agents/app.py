@@ -35,6 +35,7 @@ from .operations.definitions import validate_public_operation_definitions
 from .operations.graph import OperationDependencies, build_operation_graph
 from .providers.base import ModelProvider
 from .providers.seedance import SeedanceProvider
+from .providers.seedance_router import router as seedance_router
 from .providers.selector import create_model_provider
 from .queue.cancellation import RedisRunCancellation
 from .queue.consumer import JobHandler, QueueConsumer
@@ -208,6 +209,7 @@ def create_app(
 
     install_service_auth_error_handler(app)
     app.include_router(runs_router)
+    app.include_router(seedance_router)
     app.include_router(debug_router)
     return app
 

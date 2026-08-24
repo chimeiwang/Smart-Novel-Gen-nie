@@ -12,6 +12,10 @@ from inkforge_agents.providers.seedance import (
     SeedanceReference,
 )
 from inkforge_contracts.video import SeedancePromptPackage
+from inkforge_contracts.video_render import (
+    SeedanceRenderSubmitRequest,
+    SeedanceRuntimeReference,
+)
 from pydantic import SecretStr
 
 
@@ -90,6 +94,120 @@ async def test_submit_keeps_preview_gate_ahead_of_profile_gate() -> None:
 
     with pytest.raises(ValueError, match="SEEDANCE_PREVIEW_ONLY"):
         await provider.submit(package, [_image_reference()])
+
+
+@pytest.mark.asyncio
+async def test_submit_render_uses_frozen_prompt_and_runtime_references(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[dict[str, Any]] = []
+
+    async def handle_request(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(200, json={"id": "provider-task-2"})
+
+    def client(_provider: SeedanceProvider) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            base_url="https://ark.example.test/api/v3",
+            transport=httpx.MockTransport(handle_request),
+        )
+
+    monkeypatch.setattr(SeedanceProvider, "_client", client)
+    response = await _configured_provider().submit_render(
+        SeedanceRenderSubmitRequest(
+            taskId="render-task-1",
+            novelId="novel-1",
+            inputHash="a" * 64,
+            model="doubao-seedance-2-5-260628",
+            promptText="冻结后的逐镜提示词",
+            ratio="9:16",
+            durationSeconds=5,
+            resolution="720p",
+            generateAudio=True,
+            watermark=False,
+            references=[
+                SeedanceRuntimeReference(
+                    ordinal=1,
+                    assetId="asset-1",
+                    mimeType="image/png",
+                    url="https://media.example.test/reference-token",
+                )
+            ],
+        )
+    )
+
+    assert response.providerTaskId == "provider-task-2"
+    assert requests == [
+        {
+            "model": "doubao-seedance-2-5-260628",
+            "content": [
+                {"type": "text", "text": "冻结后的逐镜提示词"},
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "https://media.example.test/reference-token"},
+                    "role": "reference_image",
+                },
+            ],
+            "generate_audio": True,
+            "ratio": "9:16",
+            "duration": 5,
+            "resolution": "720p",
+            "watermark": False,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_query_render_normalizes_success_and_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    responses = iter(
+        [
+            {
+                "status": "succeeded",
+                "content": {"video_url": "https://result.volces.com/take.mp4"},
+                "duration": "5",
+                "resolution": "720p",
+                "ratio": "9:16",
+                "framespersecond": 24,
+                "generate_audio": True,
+                "usage": {"total_tokens": 12},
+            },
+            {
+                "status": "failed",
+                "error": {"code": "OutputRejected", "message": "结果被拒绝"},
+            },
+        ]
+    )
+
+    async def handle_request(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=next(responses))
+
+    def client(_provider: SeedanceProvider) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            base_url="https://ark.example.test/api/v3",
+            transport=httpx.MockTransport(handle_request),
+        )
+
+    monkeypatch.setattr(SeedanceProvider, "_client", client)
+    provider = _configured_provider()
+
+    succeeded = await provider.query_render(
+        task_id="render-task-1",
+        provider_task_id="provider-task-1",
+    )
+    failed = await provider.query_render(
+        task_id="render-task-2",
+        provider_task_id="provider-task-2",
+    )
+
+    assert succeeded.status == "succeeded"
+    assert succeeded.output is not None
+    assert succeeded.output.videoUrl.endswith("take.mp4")
+    assert succeeded.output.durationSeconds == 5
+    assert failed.status == "failed"
+    assert failed.error is not None
+    assert failed.error.code == "OutputRejected"
 
 
 def _configured_provider() -> SeedanceProvider:

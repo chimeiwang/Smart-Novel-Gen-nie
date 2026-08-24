@@ -25,6 +25,19 @@ export type CharacterSetting = components["schemas"]["CharacterResponse"];
 export type LocationSetting = components["schemas"]["LocationResponse"];
 export type ItemSetting = components["schemas"]["ItemResponse"];
 export type VideoProject = components["schemas"]["VideoProjectResponse"];
+export type RenderWorkspace = components["schemas"]["ChapterRenderWorkspaceResponse"];
+export type RenderTask = components["schemas"]["ShotRenderTaskResponse"];
+export type ShotTake = components["schemas"]["ShotTakeResponse"];
+export type ShotTakeHead = components["schemas"]["ShotTakeHeadResponse"];
+export type PostProductionWorkspace = components["schemas"]["ChapterPostProductionWorkspaceResponse"];
+export type PostProductionEpisode = components["schemas"]["EpisodePostProductionResponse"];
+export type KeyframeRole = components["schemas"]["SaveShotKeyframeVersionRequest"]["role"];
+export type EpisodeEditClip = components["schemas"]["EpisodeEditClipInput"];
+export type EpisodeEditVersion = components["schemas"]["EpisodeEditVersionResponse"];
+export type EpisodeAudioClip = components["schemas"]["EpisodeAudioClipInput"];
+export type EpisodeSubtitleCue = components["schemas"]["EpisodeSubtitleCueInput"];
+export type EpisodeMixVersion = components["schemas"]["EpisodeMixVersionResponse"];
+export type AudioTrackKind = components["schemas"]["EpisodeAudioClipInput"]["trackKind"];
 
 export type ChapterAdaptationWorkspaceProps = {
   novelId: string;

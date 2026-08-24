@@ -13,6 +13,12 @@ from inkforge_contracts.jobs import (
     AgentJobStatus,
 )
 from inkforge_contracts.jwt_claims import ServiceScope
+from inkforge_contracts.video_render import (
+    SeedanceRenderQueryRequest,
+    SeedanceRenderQueryResponse,
+    SeedanceRenderSubmitRequest,
+    SeedanceRenderSubmitResponse,
+)
 from inkforge_service_auth import ServiceTokenSigner, canonical_json_body
 from pydantic import JsonValue
 
@@ -23,11 +29,28 @@ from .writing.idempotency import parse_command_envelope
 from .writing.job_identity import build_writing_job_id
 from .writing.records import TaskRecord
 
+_SEEDANCE_GATEWAY_TIMEOUT = httpx.Timeout(40, connect=2)
+
 
 class AgentJobClient(Protocol):
     async def submit(self, request: AgentJobRequest) -> AgentJobAccepted: ...
 
     async def cancel(self, job_id: str, request: AgentJobCancelRequest) -> None: ...
+
+
+class SeedanceSubmissionUnknownError(RuntimeError):
+    """创建请求可能已经到达供应商，调用方不得自动重提。"""
+
+
+class SeedanceGatewayRejectedError(RuntimeError):
+    def __init__(self, *, status_code: int, detail: str) -> None:
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
+
+class SeedanceGatewayQueryError(RuntimeError):
+    """短查询失败，可由耐久任务稍后再次查询同一 providerTaskId。"""
 
 
 class AgentClient:
@@ -135,6 +158,80 @@ class AgentClient:
                 code="AGENT_DEBUG_READ_FAILED",
                 message="读取智能体工作流日志失败",
             ) from exc
+
+    async def submit_seedance_render(
+        self,
+        request: SeedanceRenderSubmitRequest,
+    ) -> SeedanceRenderSubmitResponse:
+        """执行一次不可自动重放的 Seedance 创建短调用。"""
+
+        path = "/internal/v1/video/seedance/tasks"
+        body = canonical_json_body(request.model_dump(mode="json"))
+        signed = self._signer.sign_request(
+            body=body,
+            http_method="POST",
+            http_path=path,
+            query_string=b"",
+            idempotency_key=f"render-submit-{request.taskId}",
+            scope=(ServiceScope.VIDEO_RENDER,),
+            task_id=request.taskId,
+            run_id=request.taskId,
+            novel_id=request.novelId,
+        )
+        try:
+            response = await self._http.post(
+                path,
+                content=body,
+                headers={**signed.headers, "Content-Type": "application/json"},
+                timeout=_SEEDANCE_GATEWAY_TIMEOUT,
+            )
+        except httpx.HTTPError as exc:
+            # 创建请求可能已经被供应商接收，网络错误时禁止 Core 自动重提。
+            raise SeedanceSubmissionUnknownError() from exc
+        if response.status_code >= 500:
+            # Agent 可能已把创建请求送达供应商，只是在回传前失败；此时不能判定为
+            # 明确拒绝，否则用户重试可能造成供应商重复计费。
+            raise SeedanceSubmissionUnknownError()
+        if response.status_code >= 400:
+            raise SeedanceGatewayRejectedError(
+                status_code=response.status_code,
+                detail=_internal_error_detail(response),
+            )
+        try:
+            return SeedanceRenderSubmitResponse.model_validate(response.json())
+        except ValueError as exc:
+            raise SeedanceSubmissionUnknownError() from exc
+
+    async def query_seedance_render(
+        self,
+        request: SeedanceRenderQueryRequest,
+    ) -> SeedanceRenderQueryResponse:
+        path = (
+            f"/internal/v1/video/seedance/tasks/{request.providerTaskId}/query"
+        )
+        body = canonical_json_body(request.model_dump(mode="json"))
+        signed = self._signer.sign_request(
+            body=body,
+            http_method="POST",
+            http_path=path,
+            query_string=b"",
+            idempotency_key=f"render-query-{request.taskId}-{request.pollCount}",
+            scope=(ServiceScope.VIDEO_RENDER,),
+            task_id=request.taskId,
+            run_id=request.taskId,
+            novel_id=request.novelId,
+        )
+        try:
+            response = await self._http.post(
+                path,
+                content=body,
+                headers={**signed.headers, "Content-Type": "application/json"},
+                timeout=_SEEDANCE_GATEWAY_TIMEOUT,
+            )
+            response.raise_for_status()
+            return SeedanceRenderQueryResponse.model_validate(response.json())
+        except (httpx.HTTPError, ValueError) as exc:
+            raise SeedanceGatewayQueryError() from exc
 
 
 class WritingTaskAgentSubmitter:
@@ -372,3 +469,15 @@ class VideoAgentSubmitter:
             )
         )
         return accepted.status
+
+
+def _internal_error_detail(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return "Seedance 内部网关拒绝请求"
+    if isinstance(payload, dict):
+        detail = payload.get("detail")
+        if isinstance(detail, str) and detail:
+            return detail[:2_000]
+    return "Seedance 内部网关拒绝请求"

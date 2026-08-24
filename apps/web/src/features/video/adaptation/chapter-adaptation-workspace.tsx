@@ -22,25 +22,37 @@ import {
   type DiscardedShot,
 } from "./adaptation-state";
 import { EpisodeEditor } from "./episode-editor";
+import { FinishWorkspace } from "./finish-workspace";
+import { KeyframeWorkspace } from "./keyframe-workspace";
 import { PromptEditor } from "./prompt-editor";
+import { RoughCutWorkspace } from "./rough-cut-workspace";
 import { ShotInspector } from "./shot-inspector";
 import { ShotPlanAudit } from "./shot-plan-audit";
 import { ShotTimeline, type TimelineScene } from "./shot-timeline";
 import { SourcePanel } from "./source-panel";
+import { TakeWorkspace } from "./take-workspace";
 import { VisualCanonPanel } from "./visual-canon-panel";
 import type {
   AdaptationCandidate,
   ChapterAdaptation,
   ChapterAdaptationWorkspaceProps,
   CandidateShot,
+  AudioTrackKind,
+  EpisodeAudioClip,
+  EpisodeEditClip,
+  EpisodeSubtitleCue,
   FormalShot,
+  KeyframeRole,
+  PostProductionWorkspace,
+  RenderWorkspace,
   SourceSelection,
   VisualCanon,
   VideoProject,
 } from "./types";
 
-type Stage = "review" | "episodes" | "visuals" | "prompts";
+type Stage = "review" | "episodes" | "visuals" | "prompts" | "keyframes" | "takes" | "edit" | "finish";
 const ACTIVE_TASKS = new Set(["pending", "submitted", "processing"]);
+const ACTIVE_RENDER_TASKS = new Set(["pending", "submitting", "queued", "running", "archiving"]);
 
 export function ChapterAdaptationWorkspace({
   novelId,
@@ -62,6 +74,11 @@ export function ChapterAdaptationWorkspace({
   const [pacingPreset, setPacingPreset] = useState<"short_drama" | "cinematic" | "dialogue_driven">("short_drama");
   const [targetEpisodeSeconds, setTargetEpisodeSeconds] = useState<60 | 90 | 120>(90);
   const [promptText, setPromptText] = useState("");
+  const [renderWorkspace, setRenderWorkspace] = useState<RenderWorkspace | null>(null);
+  const [postProductionWorkspace, setPostProductionWorkspace] = useState<PostProductionWorkspace | null>(null);
+  const [renderDurationSeconds, setRenderDurationSeconds] = useState(5);
+  const [renderResolution, setRenderResolution] = useState<"480p" | "720p" | "1080p">("720p");
+  const [compareTakeIds, setCompareTakeIds] = useState<string[]>([]);
   const [revisionBrief, setRevisionBrief] = useState("");
   const [draftEdited, setDraftEdited] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -97,6 +114,7 @@ export function ChapterAdaptationWorkspace({
       ?? chapterAdaptations[0]
       ?? null;
     setActiveProjectId(projectId);
+    setPostProductionWorkspace(null);
     if (selected) {
       replaceAdaptation(selected);
       setStage(initialStage(selected));
@@ -133,6 +151,26 @@ export function ChapterAdaptationWorkspace({
     }
   }, [loadAdaptations, novelId]);
 
+  const loadRenderWorkspace = useCallback(async (adaptationId: string) => {
+    const response = await browserApi.GET(
+      "/api/v1/video/chapter-adaptations/{adaptation_id}/renders",
+      { params: { path: { adaptation_id: adaptationId } } },
+    );
+    const result = requireApiData(response);
+    setRenderWorkspace(result);
+    return result;
+  }, []);
+
+  const loadPostProductionWorkspace = useCallback(async (adaptationId: string) => {
+    const response = await browserApi.GET(
+      "/api/v1/video/chapter-adaptations/{adaptation_id}/post-production",
+      { params: { path: { adaptation_id: adaptationId } } },
+    );
+    const result = requireApiData(response);
+    setPostProductionWorkspace(result);
+    return result;
+  }, []);
+
   useEffect(() => {
     const timer = window.setTimeout(() => void loadWorkspace(), 0);
     return () => window.clearTimeout(timer);
@@ -158,8 +196,57 @@ export function ChapterAdaptationWorkspace({
     return () => window.clearTimeout(timer);
   }, [adaptation, replaceAdaptation, taskActive]);
 
+  useEffect(() => {
+    if (stage !== "takes" || !adaptation?.currentPlan) return;
+    const timer = window.setTimeout(() => {
+      void loadRenderWorkspace(adaptation.id).catch((loadError) => {
+        setError(errorMessage(loadError, "加载候选 Take 失败"));
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [adaptation?.currentPlan, adaptation?.id, loadRenderWorkspace, stage]);
+
+  useEffect(() => {
+    if (!adaptation?.currentPlan || !adaptation.episodePlan || !["keyframes", "edit", "finish"].includes(stage)) return;
+    const timer = window.setTimeout(() => {
+      void loadPostProductionWorkspace(adaptation.id).catch((loadError) => {
+        setError(errorMessage(loadError, "加载后期制作工作区失败"));
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [adaptation?.currentPlan, adaptation?.episodePlan, adaptation?.id, loadPostProductionWorkspace, stage]);
+
+  const exportTaskActive = Boolean(
+    postProductionWorkspace?.episodes.some((episode) => (
+      episode.exportTasks.some((task) => task.status === "pending" || task.status === "rendering")
+    )),
+  );
+  useEffect(() => {
+    if (stage !== "finish" || !adaptation || !exportTaskActive) return;
+    const timer = window.setTimeout(() => {
+      void loadPostProductionWorkspace(adaptation.id).catch((pollError) => {
+        setError(errorMessage(pollError, "刷新整集导出任务失败"));
+      });
+    }, 1800);
+    return () => window.clearTimeout(timer);
+  }, [adaptation, exportTaskActive, loadPostProductionWorkspace, stage]);
+
+  const renderTaskActive = Boolean(
+    renderWorkspace?.tasks.some((task) => ACTIVE_RENDER_TASKS.has(task.status)),
+  );
+  useEffect(() => {
+    if (stage !== "takes" || !adaptation || !renderTaskActive) return;
+    const timer = window.setTimeout(() => {
+      void loadRenderWorkspace(adaptation.id).catch((pollError) => {
+        setError(errorMessage(pollError, "刷新逐镜视频任务失败"));
+      });
+    }, 1800);
+    return () => window.clearTimeout(timer);
+  }, [adaptation, loadRenderWorkspace, renderTaskActive, stage]);
+
   const candidatePlan = draftPlan ?? adaptation?.candidatePlan ?? null;
   const formalPlan = adaptation?.currentPlan ?? null;
+  const episodePlanReady = Boolean(adaptation?.episodePlan);
   const editable = Boolean(adaptation?.candidatePlan && candidatePlan);
   // 审镜只操作待审候选；分集、视觉设定和提示词必须始终固定到当前正式版本。
   const activePlan = stage === "review"
@@ -227,6 +314,20 @@ export function ChapterAdaptationWorkspace({
     ), 0);
     return () => window.clearTimeout(timer);
   }, [selectedPromptCandidate?.compiledPrompt, selectedPromptVersion?.currentText, selectedFormalShot?.id]);
+
+  useEffect(() => {
+    if (!selectedFormalShot) return;
+    // 生成时长是显式供应商参数；切镜时只给出最接近剪辑目标的 2–12 秒默认值。
+    const nearestSupportedDuration = Math.max(
+      2,
+      Math.min(12, Math.round(selectedFormalShot.timelineDurationMs / 1000)),
+    );
+    const timer = window.setTimeout(() => {
+      setRenderDurationSeconds(nearestSupportedDuration);
+      setCompareTakeIds([]);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [selectedFormalShot]);
 
   const ensureProject = async (): Promise<string> => {
     if (activeProjectId) return activeProjectId;
@@ -418,6 +519,361 @@ export function ChapterAdaptationWorkspace({
     }
   };
 
+  const startRender = async () => {
+    if (!adaptation || !selectedFormalShot || !selectedPromptVersion) return;
+    setWorking("render-start");
+    setError(null);
+    try {
+      await browserApi.POST(
+        "/api/v1/video/chapter-adaptations/{adaptation_id}/shots/{shot_id}/render-tasks",
+        {
+          params: {
+            path: {
+              adaptation_id: adaptation.id,
+              shot_id: selectedFormalShot.id,
+            },
+          },
+          body: {
+            clientRequestId: createClientRequestId(),
+            expectedPromptRevision: selectedPromptVersion.headRevision,
+            durationSeconds: renderDurationSeconds,
+            resolution: renderResolution,
+            generateAudio: true,
+            watermark: false,
+          },
+        },
+      ).then(requireApiData);
+      await loadRenderWorkspace(adaptation.id);
+    } catch (renderError) {
+      setError(errorMessage(renderError, "提交逐镜视频生成失败"));
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const retryRender = async (taskId: string) => {
+    if (!adaptation) return;
+    setWorking(`render-retry:${taskId}`);
+    setError(null);
+    try {
+      await browserApi.POST(
+        "/api/v1/video/render-tasks/{task_id}/retry",
+        {
+          params: { path: { task_id: taskId } },
+          body: { clientRequestId: createClientRequestId() },
+        },
+      ).then(requireApiData);
+      await loadRenderWorkspace(adaptation.id);
+    } catch (retryError) {
+      setError(errorMessage(retryError, "重试逐镜视频生成失败"));
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const confirmTake = async (takeId: string) => {
+    if (!adaptation || !selectedFormalShot || !renderWorkspace) return;
+    const head = renderWorkspace.takeHeads.find((item) => item.shotId === selectedFormalShot.id);
+    if (!head) return;
+    setWorking(`take-confirm:${takeId}`);
+    setError(null);
+    try {
+      await browserApi.POST(
+        "/api/v1/video/chapter-adaptations/{adaptation_id}/shots/{shot_id}/takes/{take_id}/confirm",
+        {
+          params: {
+            path: {
+              adaptation_id: adaptation.id,
+              shot_id: selectedFormalShot.id,
+              take_id: takeId,
+            },
+          },
+          body: {
+            clientRequestId: createClientRequestId(),
+            expectedTakeRevision: head.revision,
+          },
+        },
+      ).then(requireApiData);
+      await loadRenderWorkspace(adaptation.id);
+    } catch (confirmError) {
+      setError(errorMessage(confirmError, "确认当前 Take 失败"));
+      await loadRenderWorkspace(adaptation.id).catch(() => undefined);
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const uploadControlledAsset = async (
+    file: File,
+    modality: "image" | "audio",
+    duty: "keyframe" | "voice" | "ambience" | "sfx" | "music",
+    name: string,
+  ) => {
+    if (!activeProjectId) throw new Error("当前没有视频项目");
+    const asset = requireApiData(await browserApi.POST(
+      "/api/v1/video/projects/{project_id}/assets",
+      {
+        params: { path: { project_id: activeProjectId } },
+        body: {
+          file: file as unknown as string,
+          name,
+          modality,
+          duty,
+          sourceKind: "user_upload",
+        },
+        bodySerializer: () => {
+          const body = new FormData();
+          body.append("file", file);
+          body.append("name", name);
+          body.append("modality", modality);
+          body.append("duty", duty);
+          body.append("sourceKind", "user_upload");
+          return body;
+        },
+      },
+    ));
+    requireApiData(await browserApi.PATCH(
+      "/api/v1/video/assets/{asset_id}/rights",
+      {
+        params: { path: { asset_id: asset.id } },
+        body: { rightsStatus: "confirmed" },
+      },
+    ));
+    return asset;
+  };
+
+  const saveKeyframeVersion = async (
+    role: KeyframeRole,
+    assetId: string | null,
+    sourceTakeId: string | null = null,
+    sourceTimeMs: number | null = null,
+  ) => {
+    if (!adaptation || !selectedFormalShot || !postProductionWorkspace) return;
+    const head = postProductionWorkspace.shots
+      .find((shot) => shot.shotId === selectedFormalShot.id)
+      ?.heads.find((item) => item.role === role);
+    if (!head) return;
+    requireApiData(await browserApi.POST(
+      "/api/v1/video/chapter-adaptations/{adaptation_id}/shots/{shot_id}/keyframe-versions",
+      {
+        params: { path: { adaptation_id: adaptation.id, shot_id: selectedFormalShot.id } },
+        body: {
+          clientRequestId: createClientRequestId(),
+          expectedRevision: head.revision,
+          role,
+          assetId,
+          sourceTakeId,
+          sourceTimeMs,
+        },
+      },
+    ));
+    await loadPostProductionWorkspace(adaptation.id);
+  };
+
+  const bindKeyframe = async (role: KeyframeRole, assetId: string | null) => {
+    setWorking(`keyframe:${role}`);
+    setError(null);
+    try {
+      await saveKeyframeVersion(role, assetId);
+    } catch (saveError) {
+      setError(errorMessage(saveError, "确认关键帧失败"));
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const uploadKeyframe = async (role: KeyframeRole, file: File) => {
+    if (!selectedFormalShot) return;
+    setWorking(`keyframe-upload:${role}`);
+    setError(null);
+    try {
+      const asset = await uploadControlledAsset(
+        file,
+        "image",
+        "keyframe",
+        `${selectedFormalShot.shotKey} · ${file.name}`,
+      );
+      await saveKeyframeVersion(role, asset.id);
+    } catch (uploadError) {
+      setError(errorMessage(uploadError, "上传并确认关键帧失败"));
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const extractKeyframe = async (
+    role: KeyframeRole,
+    takeId: string,
+    timestampMs: number,
+  ) => {
+    if (!selectedFormalShot) return;
+    setWorking(`keyframe-extract:${role}`);
+    setError(null);
+    try {
+      const asset = requireApiData(await browserApi.POST(
+        "/api/v1/video/takes/{take_id}/frames",
+        {
+          params: { path: { take_id: takeId } },
+          body: {
+            clientRequestId: createClientRequestId(),
+            timestampMs,
+            name: `${selectedFormalShot.shotKey} · ${role} · ${(timestampMs / 1000).toFixed(1)}s`,
+          },
+        },
+      ));
+      await saveKeyframeVersion(role, asset.id, takeId, timestampMs);
+    } catch (extractError) {
+      setError(errorMessage(extractError, "从 Take 抽取关键帧失败"));
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const loadEditVersion = async (versionId: string) => requireApiData(await browserApi.GET(
+    "/api/v1/video/edit-versions/{version_id}",
+    { params: { path: { version_id: versionId } } },
+  ));
+
+  const saveEditVersion = async (
+    episodeNo: number,
+    clips: EpisodeEditClip[],
+    basedOnVersionId: string | null,
+  ) => {
+    if (!adaptation || !postProductionWorkspace) return;
+    const episode = postProductionWorkspace.episodes.find((item) => item.episodeNo === episodeNo);
+    if (!episode) return;
+    setWorking("edit-save");
+    setError(null);
+    try {
+      requireApiData(await browserApi.POST(
+        "/api/v1/video/chapter-adaptations/{adaptation_id}/episodes/{episode_no}/edit-versions",
+        {
+          params: { path: { adaptation_id: adaptation.id, episode_no: episodeNo } },
+          body: {
+            clientRequestId: createClientRequestId(),
+            expectedRevision: episode.editHead.revision,
+            basedOnVersionId,
+            clips,
+          },
+        },
+      ));
+      await loadPostProductionWorkspace(adaptation.id);
+    } catch (saveError) {
+      setError(errorMessage(saveError, "保存粗剪版本失败"));
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const loadMixVersion = async (versionId: string) => requireApiData(await browserApi.GET(
+    "/api/v1/video/mix-versions/{version_id}",
+    { params: { path: { version_id: versionId } } },
+  ));
+
+  const saveMixVersion = async (
+    episodeNo: number,
+    editVersionId: string,
+    audioClips: EpisodeAudioClip[],
+    subtitleCues: EpisodeSubtitleCue[],
+    basedOnVersionId: string | null,
+  ) => {
+    if (!adaptation || !postProductionWorkspace) return;
+    const episode = postProductionWorkspace.episodes.find((item) => item.episodeNo === episodeNo);
+    if (!episode) return;
+    setWorking("mix-save");
+    setError(null);
+    try {
+      requireApiData(await browserApi.POST(
+        "/api/v1/video/chapter-adaptations/{adaptation_id}/episodes/{episode_no}/mix-versions",
+        {
+          params: { path: { adaptation_id: adaptation.id, episode_no: episodeNo } },
+          body: {
+            clientRequestId: createClientRequestId(),
+            expectedRevision: episode.mixHead.revision,
+            basedOnVersionId,
+            editVersionId,
+            audioClips,
+            subtitleCues,
+          },
+        },
+      ));
+      await loadPostProductionWorkspace(adaptation.id);
+    } catch (saveError) {
+      setError(errorMessage(saveError, "保存声音字幕版本失败"));
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const uploadAudio = async (trackKind: AudioTrackKind, file: File) => {
+    if (!adaptation) return;
+    setWorking(`audio-upload:${trackKind}`);
+    setError(null);
+    try {
+      const duty = trackKind === "dialogue" || trackKind === "narration" ? "voice" : trackKind;
+      await uploadControlledAsset(file, "audio", duty, `${trackKind} · ${file.name}`);
+      await loadPostProductionWorkspace(adaptation.id);
+    } catch (uploadError) {
+      setError(errorMessage(uploadError, "上传音频素材失败"));
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const startEpisodeExport = async (
+    episodeNo: number,
+    editVersionId: string,
+    mixVersionId: string,
+    resolution: "720p" | "1080p",
+    framesPerSecond: 24 | 25 | 30,
+    burnSubtitles: boolean,
+  ) => {
+    if (!adaptation) return;
+    setWorking("export-start");
+    setError(null);
+    try {
+      requireApiData(await browserApi.POST(
+        "/api/v1/video/chapter-adaptations/{adaptation_id}/episodes/{episode_no}/export-tasks",
+        {
+          params: { path: { adaptation_id: adaptation.id, episode_no: episodeNo } },
+          body: {
+            clientRequestId: createClientRequestId(),
+            editVersionId,
+            mixVersionId,
+            resolution,
+            framesPerSecond,
+            burnSubtitles,
+          },
+        },
+      ));
+      await loadPostProductionWorkspace(adaptation.id);
+    } catch (exportError) {
+      setError(errorMessage(exportError, "提交整集导出失败"));
+    } finally {
+      setWorking(null);
+    }
+  };
+
+  const retryEpisodeExport = async (taskId: string) => {
+    if (!adaptation) return;
+    setWorking(`export-retry:${taskId}`);
+    setError(null);
+    try {
+      requireApiData(await browserApi.POST(
+        "/api/v1/video/export-tasks/{task_id}/retry",
+        {
+          params: { path: { task_id: taskId } },
+          body: { clientRequestId: createClientRequestId() },
+        },
+      ));
+      await loadPostProductionWorkspace(adaptation.id);
+    } catch (retryError) {
+      setError(errorMessage(retryError, "重试整集导出失败"));
+    } finally {
+      setWorking(null);
+    }
+  };
+
   const rewriteSelection = async () => {
     if (!sourceSelection || !selectionBridge || !currentChapter || adaptation?.sourceText !== currentChapter.content) return;
     await selectionBridge.captureSelection({
@@ -470,8 +926,25 @@ export function ChapterAdaptationWorkspace({
             <button className="button primary" type="button" disabled={!formalPlan || working !== null} onClick={() => void saveEpisodes()}>{working === "episodes" ? "保存中..." : "保存分集并进入视觉设定"}</button>
           ) : stage === "visuals" ? (
             <button className="button primary" type="button" disabled={!formalPlan} onClick={() => setStage("prompts")}>进入逐镜提示词</button>
-          ) : (
+          ) : stage === "prompts" ? (
+            <>
               <button className="button secondary" type="button" disabled={!formalPlan || taskActive || working !== null} onClick={() => void generatePrompts([])}>{taskActive ? "提示词生成中..." : "批量生成未完成提示词"}</button>
+              <button className="button primary" type="button" disabled={!formalPlan || !episodePlanReady} onClick={() => setStage("keyframes")}>进入关键帧</button>
+            </>
+          ) : stage === "keyframes" ? (
+            <>
+              <button className="button secondary" type="button" disabled={!adaptation || working !== null} onClick={() => adaptation && void loadPostProductionWorkspace(adaptation.id)}>刷新视觉锚点</button>
+              <button className="button primary" type="button" disabled={!formalPlan} onClick={() => setStage("takes")}>进入生成与选片</button>
+            </>
+          ) : stage === "takes" ? (
+            <>
+              <button className="button secondary" type="button" disabled={!formalPlan || renderTaskActive} onClick={() => adaptation && void loadRenderWorkspace(adaptation.id)}>{renderTaskActive ? "候选生成中..." : "刷新候选"}</button>
+              <button className="button primary" type="button" disabled={!formalPlan || !episodePlanReady} onClick={() => setStage("edit")}>进入分集粗剪</button>
+            </>
+          ) : stage === "edit" ? (
+            <button className="button primary" type="button" disabled={!formalPlan} onClick={() => setStage("finish")}>进入声音与输出</button>
+          ) : (
+            <button className="button secondary" type="button" disabled={!adaptation} onClick={() => adaptation && void loadPostProductionWorkspace(adaptation.id)}>{exportTaskActive ? "导出中..." : "刷新后期状态"}</button>
           )}
         </div>
       </header>
@@ -480,6 +953,10 @@ export function ChapterAdaptationWorkspace({
         <StageButton value="episodes" current={stage} label="在镜头间分集" disabled={!formalPlan} onSelect={setStage} />
         <StageButton value="visuals" current={stage} label="角色与场景稳定" disabled={!formalPlan} onSelect={setStage} />
         <StageButton value="prompts" current={stage} label="逐镜提示词" disabled={!formalPlan} onSelect={setStage} />
+        <StageButton value="keyframes" current={stage} label="关键帧" disabled={!formalPlan || !episodePlanReady} onSelect={setStage} />
+        <StageButton value="takes" current={stage} label="生成与选片" disabled={!formalPlan} onSelect={setStage} />
+        <StageButton value="edit" current={stage} label="分集粗剪" disabled={!formalPlan || !episodePlanReady} onSelect={setStage} />
+        <StageButton value="finish" current={stage} label="声音与输出" disabled={!formalPlan || !episodePlanReady} onSelect={setStage} />
       </nav>
       {error ? <div className="notice notice-danger" role="alert">{error}</div> : null}
       {adaptation?.latestTask?.status === "failed" ? (
@@ -664,6 +1141,52 @@ export function ChapterAdaptationWorkspace({
         onGenerate={() => selectedFormalShot && void generatePrompts([selectedFormalShot.id])}
         onSave={() => void savePrompt()}
       /> : null}
+      {stage === "keyframes" && formalPlan ? <KeyframeWorkspace
+        plan={formalPlan}
+        selectedShot={selectedFormalShot}
+        workspace={postProductionWorkspace}
+        working={working}
+        onSelectShot={setSelectedShotKey}
+        onBind={(role, assetId) => void bindKeyframe(role, assetId)}
+        onExtract={(role, takeId, timestampMs) => void extractKeyframe(role, takeId, timestampMs)}
+        onUpload={(role, file) => void uploadKeyframe(role, file)}
+      /> : null}
+      {stage === "takes" && formalPlan ? <TakeWorkspace
+        plan={formalPlan}
+        selectedShot={selectedFormalShot}
+        promptVersion={selectedPromptVersion}
+        workspace={renderWorkspace}
+        breakAfterShotIds={adaptation?.episodePlan?.breakAfterShotIds ?? []}
+        durationSeconds={renderDurationSeconds}
+        resolution={renderResolution}
+        compareTakeIds={compareTakeIds}
+        working={working}
+        onSelectShot={setSelectedShotKey}
+        onDurationChange={setRenderDurationSeconds}
+        onResolutionChange={setRenderResolution}
+        onGenerate={() => void startRender()}
+        onRetry={(taskId) => void retryRender(taskId)}
+        onConfirm={(takeId) => void confirmTake(takeId)}
+        onToggleCompare={(takeId) => setCompareTakeIds((current) => {
+          if (current.includes(takeId)) return current.filter((item) => item !== takeId);
+          return current.length < 2 ? [...current, takeId] : [current[1], takeId];
+        })}
+      /> : null}
+      {stage === "edit" && formalPlan ? <RoughCutWorkspace
+        workspace={postProductionWorkspace}
+        working={working}
+        onLoadVersion={loadEditVersion}
+        onSave={(episodeNo, clips, basedOnVersionId) => void saveEditVersion(episodeNo, clips, basedOnVersionId)}
+      /> : null}
+      {stage === "finish" && formalPlan ? <FinishWorkspace
+        workspace={postProductionWorkspace}
+        working={working}
+        onLoadMixVersion={loadMixVersion}
+        onSaveMix={(episodeNo, editVersionId, audioClips, subtitleCues, basedOnVersionId) => void saveMixVersion(episodeNo, editVersionId, audioClips, subtitleCues, basedOnVersionId)}
+        onUploadAudio={(trackKind, file) => void uploadAudio(trackKind, file)}
+        onStartExport={(episodeNo, editVersionId, mixVersionId, resolution, framesPerSecond, burnSubtitles) => void startEpisodeExport(episodeNo, editVersionId, mixVersionId, resolution, framesPerSecond, burnSubtitles)}
+        onRetryExport={(taskId) => void retryEpisodeExport(taskId)}
+      /> : null}
     </section>
   );
 }
@@ -675,6 +1198,10 @@ function StageButton({ value, current, label, disabled = false, onSelect }: { va
 function statusLabel(adaptation: ChapterAdaptation | null, taskActive: boolean, stage: Stage): string {
   if (taskActive && adaptation?.latestTask?.kind === "shot_prompt") return "正在生成逐镜即梦提示词";
   if (taskActive) return adaptation?.latestTask?.checkpointStage === "dramatic_structure" ? "已完成戏剧分析，正在设计镜头" : "正在分析章节";
+  if (stage === "keyframes") return "逐镜关键帧与连续性复核";
+  if (stage === "takes") return "逐镜生成与候选选片";
+  if (stage === "edit") return "分集非破坏性粗剪";
+  if (stage === "finish") return "声音、字幕与可追溯整集输出";
   if (stage !== "review" && adaptation?.currentPlan) return `正在处理正式镜头方案 v${adaptation.currentPlan.versionNo}`;
   if (adaptation?.state === "awaiting_review") return "电影化镜头候选等待确认";
   if (adaptation?.state === "approved") return `正式镜头方案 v${adaptation.currentPlan?.versionNo ?? 1}`;

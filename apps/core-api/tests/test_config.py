@@ -92,6 +92,63 @@ def test_video_dispatch_requires_preview_and_safe_namespace() -> None:
         )
 
 
+def test_seedance_enablement_requires_configured_provider() -> None:
+    with pytest.raises(ValidationError, match="开启 Seedance 前必须先确认供应商已配置"):
+        Settings(environment="dev", seedance_enabled=True)
+
+
+def test_seedance_runtime_configuration_is_normalized_and_guarded() -> None:
+    settings = Settings(
+        environment="dev",
+        seedance_configured=True,
+        seedance_enabled=True,
+        seedance_model="  seedance-test  ",
+        video_provider_media_base_url="https://media.example.com/inkforge/",
+        video_provider_media_token_secret=(  # noqa: S106
+            "安全随机密钥-0123456789-abcdefghijklmnopqrstuvwxyz"
+        ),
+        seedance_result_allowed_host_suffixes=".volces.com,.example.com",
+    )
+
+    assert settings.seedance_model == "seedance-test"
+    assert settings.video_provider_media_base_url == "https://media.example.com/inkforge"
+    assert settings.seedance_result_allowed_host_suffixes == (
+        ".volces.com",
+        ".example.com",
+    )
+
+
+@pytest.mark.parametrize(
+    "overrides, message",
+    [
+        ({"seedance_model": "   "}, "模型标识不能为空"),
+        (
+            {"video_provider_media_base_url": "https://user:secret@media.example.com"},
+            "公网基址必须",
+        ),
+        (
+            {"video_provider_media_token_secret": "过短"},
+            "短时令牌密钥至少需要 32",
+        ),
+        (
+            {"seedance_result_allowed_host_suffixes": "volces.com"},
+            "结果域名后缀格式无效",
+        ),
+    ],
+)
+def test_seedance_runtime_rejects_unsafe_configuration(
+    overrides: dict[str, object],
+    message: str,
+) -> None:
+    with pytest.raises(ValidationError, match=message):
+        Settings.model_validate({"environment": "dev", **overrides})
+
+
+def test_production_rejects_real_seedance_rendering() -> None:
+    with pytest.raises(ValidationError, match="禁止开启尚未获授权的真实视频渲染"):
+        production_settings(seedance_configured=True, seedance_enabled=True)
+
+
 def test_session_cookie_secure_requires_explicit_insecure_http_override() -> None:
     assert production_settings().session_cookie_secure is True
     assert production_settings(allow_insecure_http_auth=False).session_cookie_secure is True

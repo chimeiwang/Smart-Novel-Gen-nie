@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import stat
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -16,12 +17,15 @@ from fastapi import UploadFile
 from ..errors import ApiError
 
 _CHUNK_BYTES = 1024 * 1024
+_MEDIA_SNIFF_BYTES = 12
 _ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 _MAX_BYTES = {
     "image": 30 * 1024 * 1024,
     "video": 200 * 1024 * 1024,
-    "audio": 15 * 1024 * 1024,
+    # 两到三分钟的无损 WAV 会明显超过 15 MiB；后期音轨保留 100 MiB 上限。
+    "audio": 100 * 1024 * 1024,
 }
+_MAX_INTERNAL_STREAM_BYTES = 2 * 1024 * 1024 * 1024
 logger = logging.getLogger(__name__)
 
 
@@ -88,6 +92,84 @@ class VideoAssetStorage:
                 digest.update(chunk)
                 await asyncio.to_thread(self._write_all, descriptor, chunk)
                 chunk = await upload.read(_CHUNK_BYTES)
+        except Exception:
+            if descriptor is not None:
+                os.close(descriptor)
+                descriptor = None
+            if created:
+                self.delete(PurePosixPath(project_id, target.name).as_posix())
+            raise
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+        return StoredVideoAsset(
+            storage_key=PurePosixPath(project_id, target.name).as_posix(),
+            absolute_path=target,
+            mime_type=mime_type,
+            byte_size=byte_size,
+            sha256=digest.hexdigest(),
+        )
+
+    async def save_stream(
+        self,
+        project_id: str,
+        asset_id: str,
+        modality: str,
+        chunks: AsyncIterator[bytes],
+        *,
+        max_bytes: int | None = None,
+    ) -> StoredVideoAsset:
+        """流式归档供应商结果；与用户上传使用相同魔数、大小和路径护栏。"""
+
+        self._validate_id(project_id)
+        self._validate_id(asset_id)
+        if modality not in _MAX_BYTES:
+            raise self._error(422, "VIDEO_ASSET_MODALITY_INVALID", "素材模态无效")
+        byte_limit = _MAX_BYTES[modality] if max_bytes is None else max_bytes
+        if byte_limit < _MEDIA_SNIFF_BYTES or byte_limit > _MAX_INTERNAL_STREAM_BYTES:
+            raise ValueError("内部媒体流大小上限无效")
+        iterator = chunks.__aiter__()
+        initial = bytearray()
+        while len(initial) < _MEDIA_SNIFF_BYTES:
+            try:
+                payload = await anext(iterator)
+            except StopAsyncIteration:
+                break
+            if payload:
+                initial.extend(payload)
+        first_chunk = bytes(initial)
+        if not first_chunk:
+            raise self._error(422, "VIDEO_ASSET_EMPTY", "素材文件不能为空")
+        detected_modality, mime_type, suffix = self._detect_media(first_chunk)
+        if detected_modality != modality:
+            raise self._error(
+                422,
+                "VIDEO_ASSET_TYPE_MISMATCH",
+                "供应商结果内容与声明模态不一致",
+            )
+
+        parent = self._root / project_id
+        self._secure_mkdir(parent)
+        target = parent / f"{asset_id}{suffix}"
+        descriptor: int | None = None
+        created = False
+        digest = hashlib.sha256()
+        byte_size = 0
+        try:
+            descriptor = self._open_exclusive(target)
+            created = True
+            async for payload in _with_first(first_chunk, iterator):
+                if not payload:
+                    continue
+                byte_size += len(payload)
+                if byte_size > byte_limit:
+                    raise self._error(
+                        413,
+                        "VIDEO_ASSET_TOO_LARGE",
+                        f"{modality} 素材超过允许大小",
+                    )
+                digest.update(payload)
+                await asyncio.to_thread(self._write_all, descriptor, payload)
         except Exception:
             if descriptor is not None:
                 os.close(descriptor)
@@ -238,3 +320,12 @@ class VideoAssetStorage:
     @staticmethod
     def _error(status_code: int, code: str, message: str) -> ApiError:
         return ApiError(status_code=status_code, code=code, message=message)
+
+
+async def _with_first(
+    first: bytes,
+    remaining: AsyncIterator[bytes],
+) -> AsyncIterator[bytes]:
+    yield first
+    async for chunk in remaining:
+        yield chunk

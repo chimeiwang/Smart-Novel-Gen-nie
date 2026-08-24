@@ -439,7 +439,7 @@ def test_without_video_preview_projection_removes_every_checked_in_video_table()
     projected = project_schema_contract(contract, "without_video_preview")
     projected_table_names = {table["name"] for table in projected["tables"]}
 
-    assert len(contract["tables"]) == 69
+    assert len(contract["tables"]) == 85
     assert len(projected_table_names) == 44
     assert not any(name.startswith("Video") for name in projected_table_names)
 
@@ -524,6 +524,24 @@ def test_checked_in_contract_preserves_all_live_public_tables_without_secrets() 
         "VideoShotVisualReferenceBinding",
         "VideoShotPromptVisualReference",
         "VideoAdaptationDecisionCommand",
+        # P0 逐镜生成使用独立任务、不可变 Take、当前选片 Head 与冲突命令。
+        "VideoShotRenderTask",
+        "VideoShotTake",
+        "VideoShotTakeHead",
+        "VideoShotTakeDecisionCommand",
+        "VideoTakeFrameExtraction",
+        # P1–P3 后期制作继续属于开发视频预览投影。
+        "VideoShotKeyframeVersion",
+        "VideoShotKeyframeHead",
+        "VideoEpisodeEditVersion",
+        "VideoEpisodeEditClip",
+        "VideoEpisodeEditHead",
+        "VideoEpisodeMixVersion",
+        "VideoEpisodeAudioClip",
+        "VideoEpisodeSubtitleCue",
+        "VideoEpisodeMixHead",
+        "VideoEpisodeExportTask",
+        "VideoEpisodeExport",
         "_FactionTerritories",
         "_prisma_migrations",
     }

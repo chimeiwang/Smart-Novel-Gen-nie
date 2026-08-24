@@ -6,9 +6,8 @@ from pathlib import Path
 
 from fastapi import UploadFile
 from inkforge_contracts.video import (
-    AssetDuty,
     AssetModality,
-    PlannedAsset,
+    UploadAssetDuty,
     VideoPlanCallReservationRequest,
     VideoPlanCallReservationResponse,
     VideoPlanCompletionCallback,
@@ -16,10 +15,12 @@ from inkforge_contracts.video import (
     VideoPlanProgressQuery,
     VideoPlanProgressResponse,
     VideoStoryPlanCheckpointCallback,
+    validate_uploaded_asset_duty_modality,
 )
 
 from ..db.base import generate_id
 from ..errors import ApiError
+from .media_probe import VideoMediaProbe, VideoMediaProbeError
 from .repository import VideoRepository
 from .schemas import (
     CreateVideoProjectRequest,
@@ -42,12 +43,14 @@ class VideoService:
         video_preview_enabled: bool = False,
         seedance_configured: bool = False,
         seedance_enabled: bool = False,
+        duration_probe: VideoMediaProbe | None = None,
     ) -> None:
         self._repository = repository
         self._storage = storage
         self._video_preview_enabled = video_preview_enabled
         self._seedance_configured = seedance_configured
         self._seedance_enabled = seedance_enabled
+        self._duration_probe = duration_probe
 
     async def create_project(
         self,
@@ -123,7 +126,7 @@ class VideoService:
         upload: UploadFile,
         name: str,
         modality: AssetModality,
-        duty: AssetDuty,
+        duty: UploadAssetDuty,
         source_kind: str,
     ) -> VideoAssetResponse:
         """安全保存真实媒体，数据库失败时补偿删除已写文件。"""
@@ -147,21 +150,37 @@ class VideoService:
                 code="VIDEO_ASSET_SOURCE_INVALID",
                 message="素材来源类型无效",
             )
-        # 复用共享契约执行职责与模态的交叉校验。
-        PlannedAsset(
-            assetId="upload-validation",
-            modality=modality,
-            duty=duty,
-            bindingScope="scene_direct",
-            settingReference=None,
-            targetEntity="待绑定实体",
-            includeFeatures=["待用户填写"],
-            excludeFeatures=[],
-        )
+        # 复用共享契约执行职责与模态的交叉校验；最终成片只能由受控导出器创建。
+        try:
+            validate_uploaded_asset_duty_modality(modality, duty)
+        except ValueError as exc:
+            raise ApiError(
+                status_code=422,
+                code="VIDEO_ASSET_DUTY_MODALITY_INVALID",
+                message=str(exc),
+            ) from exc
         await self._repository.require_project(user_id, project_id)
         asset_id = generate_id()
         stored = await self._storage.save(project_id, asset_id, modality, upload)
         try:
+            duration_ms: int | None = None
+            if modality in {"audio", "video"}:
+                if self._duration_probe is None or not self._duration_probe.available:
+                    raise ApiError(
+                        status_code=503,
+                        code="VIDEO_MEDIA_PROBE_UNAVAILABLE",
+                        message="当前环境缺少 ffprobe，不能登记音视频素材的真实时长",
+                    )
+                try:
+                    duration_ms = await self._duration_probe.probe_duration_ms(
+                        stored.absolute_path
+                    )
+                except VideoMediaProbeError as exc:
+                    raise ApiError(
+                        status_code=422,
+                        code="VIDEO_ASSET_DURATION_INVALID",
+                        message="无法读取上传音视频的有效时长",
+                    ) from exc
             return await self._repository.create_asset(
                 user_id,
                 project_id,
@@ -170,6 +189,7 @@ class VideoService:
                 modality=modality,
                 duty=duty,
                 source_kind=source_kind,
+                duration_ms=duration_ms,
                 stored=stored,
             )
         except Exception:

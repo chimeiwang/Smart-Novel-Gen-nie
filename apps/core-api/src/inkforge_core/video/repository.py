@@ -267,6 +267,7 @@ class VideoRepository:
         modality: str,
         duty: str,
         source_kind: str,
+        duration_ms: int | None,
         stored: StoredVideoAsset,
     ) -> VideoAssetResponse:
         """把已安全落盘的媒体事实写入数据库。"""
@@ -289,7 +290,7 @@ class VideoRepository:
                     storageKey=stored.storage_key,
                     mimeType=stored.mime_type,
                     byteSize=stored.byte_size,
-                    durationMs=None,
+                    durationMs=duration_ms,
                     sha256=stored.sha256,
                     sourceKind=source_kind,
                     rightsStatus="unconfirmed",

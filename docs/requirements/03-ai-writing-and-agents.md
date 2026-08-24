@@ -65,6 +65,17 @@ G 绑定剔除并进入 finding；跨 Beat U 不能进入候选，无法保留�
 场景/节拍 checkpoint 成功后，at-least-once 重试必须从该阶段继续，不能重复消费第一阶段模型调用。所有模型调用
 继续经过 `ModelRuntime` 的计费授权、全局并发门和结构化输出日志脱敏。
 
+逐镜真实视频生成不进入上述模型规划 workflow，也不复用旧 `VideoGenerationTask`。Core 使用
+`VideoShotRenderTask` 保存冻结 prompt/ref/output manifest 和供应商状态，并由 PostgreSQL due index 恢复短轮询；
+Agent 仅通过受签名内部接口执行一次 Seedance `submit/query`，不得重编译提示词、重排参考图或长期占用队列 worker。
+创建响应不确定时任务进入 `submission_unknown`，Core 禁止自动重提；每次用户显式重试都创建可能再次计费的新任务。
+供应商成功 URL 只用于当次受控归档，不持久化为播放事实；归档完成后才允许创建不可变 `VideoShotTake`。
+
+关键帧、粗剪、声音、字幕与整集导出继续由 Core 持有，不新增“AI 导演”或媒体 Agent。Core 在创建
+逐镜任务时把当前关键帧按首帧、过渡锚点、尾帧顺序冻结进 manifest，并生成不可变的供应商提示文本；
+Agent 只能保持该顺序透传。FFmpeg 抽帧、剪辑和导出不经过模型运行时，也不允许 Agent 读取受控素材目录。
+未来图片生成或 TTS 只能作为新的素材生产器接入，不能绕过素材权利、锁定、版本和人工确认链。
+
 ## 长篇选区改写契约
 
 `rewrite_chapter_selection` 与 `rewrite_outline_selection` 必须提交 `selectionTarget`：资源类型与资源 ID、`baseUpdatedAt`、完整正文 `baseContentHash`、Unicode 码点范围 `selectionStart/selectionEnd` 以及 `selectedTextHash`。请求不得提交 `selectedText`；选区正文由 Core 根据权威来源和 hash 冻结，客户端字段只承担身份与范围绑定。章节正文选区只能指向对应 `chapterId`，大纲总纲/节点选区分别使用 `novel`/`outline_node` scope。

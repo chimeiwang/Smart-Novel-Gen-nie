@@ -15,7 +15,11 @@ COPY apps/core-api/src apps/core-api/src
 RUN uv sync --frozen --no-dev --no-editable --package inkforge-core-api
 
 FROM python:3.12-slim AS runtime
-RUN groupadd --gid 10001 inkforge && useradd --uid 10001 --gid 10001 --no-create-home inkforge
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes ffmpeg fonts-noto-cjk \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --gid 10001 inkforge \
+    && useradd --uid 10001 --gid 10001 --no-create-home inkforge
 WORKDIR /app
 ENV PATH="/app/.venv/bin:$PATH" PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 COPY --from=builder --chown=10001:10001 /app/.venv /app/.venv

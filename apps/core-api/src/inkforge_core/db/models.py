@@ -15,6 +15,7 @@ from sqlalchemy import (
     PrimaryKeyConstraint,
     Table,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.dialects.postgresql import ENUM as PG_ENUM
@@ -4342,6 +4343,1323 @@ class VideoShotPromptVisualReference(Base):
             "promptVersionId",
             "canonVersionId",
             unique=True,
+        ),
+        {"schema": "public"},
+    )
+
+
+class VideoShotRenderTask(Base):
+    """一次显式、可能计费的逐镜 Seedance 请求；输入清单创建后不可改写。"""
+
+    __tablename__ = "VideoShotRenderTask"
+    id: Mapped[str] = mapped_column(Text, nullable=False, default=generate_id)
+    adaptationId: Mapped[str] = mapped_column(Text, nullable=False)
+    projectId: Mapped[str] = mapped_column(Text, nullable=False)
+    novelId: Mapped[str] = mapped_column(Text, nullable=False)
+    shotId: Mapped[str] = mapped_column(Text, nullable=False)
+    shotPlanVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    promptVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    retryOfTaskId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'seedance'::text")
+    )
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'pending'::text")
+    )
+    clientRequestId: Mapped[str] = mapped_column(Text, nullable=False)
+    inputHash: Mapped[str] = mapped_column(Text, nullable=False)
+    requestManifestJson: Mapped[str] = mapped_column(Text, nullable=False)
+    providerTaskId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pollCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    attemptCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    nextAttemptAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    lastErrorCode: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lastErrorMessage: Mapped[str | None] = mapped_column(Text, nullable=True)
+    createdAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    updatedAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+    submittedAt: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=True
+    )
+    completedAt: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=True
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="VideoShotRenderTask_pkey"),
+        ForeignKeyConstraint(
+            ("adaptationId", "projectId"),
+            ("public.VideoChapterAdaptation.id", "public.VideoChapterAdaptation.projectId"),
+            name="VideoShotRenderTask_adaptation_project_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("adaptationId", "novelId"),
+            ("public.VideoChapterAdaptation.id", "public.VideoChapterAdaptation.novelId"),
+            name="VideoShotRenderTask_adaptation_novel_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("projectId", "novelId"),
+            ("public.VideoProject.id", "public.VideoProject.novelId"),
+            name="VideoShotRenderTask_project_novel_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("shotPlanVersionId", "adaptationId"),
+            ("public.VideoShotPlanVersion.id", "public.VideoShotPlanVersion.adaptationId"),
+            name="VideoShotRenderTask_plan_adaptation_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("shotId", "shotPlanVersionId"),
+            ("public.VideoShot.id", "public.VideoShot.planVersionId"),
+            name="VideoShotRenderTask_shot_plan_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("promptVersionId", "shotId", "shotPlanVersionId"),
+            (
+                "public.VideoShotPromptVersion.id",
+                "public.VideoShotPromptVersion.shotId",
+                "public.VideoShotPromptVersion.shotPlanVersionId",
+            ),
+            name="VideoShotRenderTask_prompt_scope_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("retryOfTaskId", "shotId"),
+            ("public.VideoShotRenderTask.id", "public.VideoShotRenderTask.shotId"),
+            name="VideoShotRenderTask_retry_shot_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        Index("VideoShotRenderTask_id_shot_key", "id", "shotId", unique=True),
+        Index(
+            "VideoShotRenderTask_id_scope_key",
+            "id",
+            "adaptationId",
+            "projectId",
+            "novelId",
+            "shotId",
+            "shotPlanVersionId",
+            "promptVersionId",
+            unique=True,
+        ),
+        Index(
+            "VideoShotRenderTask_shot_client_request_key",
+            "shotId",
+            "clientRequestId",
+            unique=True,
+        ),
+        Index(
+            "VideoShotRenderTask_active_shot_key",
+            "shotId",
+            unique=True,
+            postgresql_where=text(
+                '"status" IN (\'pending\', \'submitting\', \'queued\', \'running\', '
+                "'archiving')"
+            ),
+        ),
+        Index(
+            "VideoShotRenderTask_provider_task_key",
+            "provider",
+            "providerTaskId",
+            unique=True,
+            postgresql_where=text('"providerTaskId" IS NOT NULL'),
+        ),
+        Index(
+            "VideoShotRenderTask_due_idx",
+            "nextAttemptAt",
+            "createdAt",
+            postgresql_where=text(
+                '"status" IN (\'pending\', \'queued\', \'running\', \'archiving\')'
+            ),
+        ),
+        Index("VideoShotRenderTask_shot_created_idx", "shotId", "createdAt"),
+        {"schema": "public"},
+    )
+
+
+class VideoShotTake(Base):
+    """已经归档到受控存储的不可变逐镜候选视频。"""
+
+    __tablename__ = "VideoShotTake"
+    id: Mapped[str] = mapped_column(Text, nullable=False, default=generate_id)
+    taskId: Mapped[str] = mapped_column(Text, nullable=False)
+    adaptationId: Mapped[str] = mapped_column(Text, nullable=False)
+    projectId: Mapped[str] = mapped_column(Text, nullable=False)
+    novelId: Mapped[str] = mapped_column(Text, nullable=False)
+    shotId: Mapped[str] = mapped_column(Text, nullable=False)
+    shotPlanVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    promptVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    assetId: Mapped[str] = mapped_column(Text, nullable=False)
+    takeNo: Mapped[int] = mapped_column(Integer, nullable=False)
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    model: Mapped[str] = mapped_column(Text, nullable=False)
+    providerTaskId: Mapped[str] = mapped_column(Text, nullable=False)
+    inputHash: Mapped[str] = mapped_column(Text, nullable=False)
+    providerMetadataJson: Mapped[str] = mapped_column(Text, nullable=False)
+    createdAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="VideoShotTake_pkey"),
+        ForeignKeyConstraint(
+            (
+                "taskId",
+                "adaptationId",
+                "projectId",
+                "novelId",
+                "shotId",
+                "shotPlanVersionId",
+                "promptVersionId",
+            ),
+            (
+                "public.VideoShotRenderTask.id",
+                "public.VideoShotRenderTask.adaptationId",
+                "public.VideoShotRenderTask.projectId",
+                "public.VideoShotRenderTask.novelId",
+                "public.VideoShotRenderTask.shotId",
+                "public.VideoShotRenderTask.shotPlanVersionId",
+                "public.VideoShotRenderTask.promptVersionId",
+            ),
+            name="VideoShotTake_task_scope_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("assetId", "projectId"),
+            ("public.VideoAsset.id", "public.VideoAsset.projectId"),
+            name="VideoShotTake_asset_project_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        Index("VideoShotTake_taskId_key", "taskId", unique=True),
+        Index("VideoShotTake_assetId_key", "assetId", unique=True),
+        Index("VideoShotTake_shot_take_no_key", "shotId", "takeNo", unique=True),
+        Index(
+            "VideoShotTake_id_shot_plan_key",
+            "id",
+            "shotId",
+            "shotPlanVersionId",
+            unique=True,
+        ),
+        Index(
+            "VideoShotTake_id_shot_adaptation_key",
+            "id",
+            "shotId",
+            "adaptationId",
+            unique=True,
+        ),
+        Index("VideoShotTake_shot_created_idx", "shotId", "createdAt"),
+        {"schema": "public"},
+    )
+
+
+class VideoShotTakeHead(Base):
+    """一个正式镜头当前采用的候选 Take 指针。"""
+
+    __tablename__ = "VideoShotTakeHead"
+    shotId: Mapped[str] = mapped_column(Text, nullable=False)
+    shotPlanVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    currentTakeId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    updatedAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("shotId", name="VideoShotTakeHead_pkey"),
+        ForeignKeyConstraint(
+            ("shotId", "shotPlanVersionId"),
+            ("public.VideoShot.id", "public.VideoShot.planVersionId"),
+            name="VideoShotTakeHead_shot_plan_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("currentTakeId", "shotId", "shotPlanVersionId"),
+            (
+                "public.VideoShotTake.id",
+                "public.VideoShotTake.shotId",
+                "public.VideoShotTake.shotPlanVersionId",
+            ),
+            name="VideoShotTakeHead_current_take_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        {"schema": "public"},
+    )
+
+
+class VideoShotTakeDecisionCommand(Base):
+    """确认当前 Take 的耐久幂等命令，冲突结果同样保留。"""
+
+    __tablename__ = "VideoShotTakeDecisionCommand"
+    id: Mapped[str] = mapped_column(Text, nullable=False, default=generate_id)
+    requestedByUserId: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.User.id",
+            name="VideoShotTakeDecisionCommand_user_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        nullable=False,
+    )
+    novelId: Mapped[str] = mapped_column(Text, nullable=False)
+    projectId: Mapped[str] = mapped_column(Text, nullable=False)
+    adaptationId: Mapped[str] = mapped_column(Text, nullable=False)
+    shotId: Mapped[str] = mapped_column(Text, nullable=False)
+    takeId: Mapped[str] = mapped_column(Text, nullable=False)
+    clientRequestId: Mapped[str] = mapped_column(Text, nullable=False)
+    expectedRevision: Mapped[int] = mapped_column(Integer, nullable=False)
+    requestHash: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    observedCurrentTakeId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resultingRevision: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    errorCode: Mapped[str | None] = mapped_column(Text, nullable=True)
+    createdAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="VideoShotTakeDecisionCommand_pkey"),
+        ForeignKeyConstraint(
+            ("novelId", "requestedByUserId"),
+            ("public.Novel.id", "public.Novel.userId"),
+            name="VideoShotTakeDecisionCommand_novel_owner_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("adaptationId", "projectId"),
+            ("public.VideoChapterAdaptation.id", "public.VideoChapterAdaptation.projectId"),
+            name="VideoShotTakeDecisionCommand_adaptation_project_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("adaptationId", "novelId"),
+            ("public.VideoChapterAdaptation.id", "public.VideoChapterAdaptation.novelId"),
+            name="VideoShotTakeDecisionCommand_adaptation_novel_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("takeId", "shotId", "adaptationId"),
+            (
+                "public.VideoShotTake.id",
+                "public.VideoShotTake.shotId",
+                "public.VideoShotTake.adaptationId",
+            ),
+            name="VideoShotTakeDecisionCommand_take_scope_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        Index(
+            "VideoShotTakeDecisionCommand_user_request_key",
+            "requestedByUserId",
+            "clientRequestId",
+            unique=True,
+        ),
+        Index(
+            "VideoShotTakeDecisionCommand_shot_created_idx",
+            "shotId",
+            "createdAt",
+        ),
+        {"schema": "public"},
+    )
+
+
+class VideoTakeFrameExtraction(Base):
+    """从受控 Take 抽取关键帧图片的不可变来源事实。"""
+
+    __tablename__ = "VideoTakeFrameExtraction"
+    assetId: Mapped[str] = mapped_column(Text, nullable=False)
+    takeId: Mapped[str] = mapped_column(Text, nullable=False)
+    shotId: Mapped[str] = mapped_column(Text, nullable=False)
+    adaptationId: Mapped[str] = mapped_column(Text, nullable=False)
+    projectId: Mapped[str] = mapped_column(Text, nullable=False)
+    novelId: Mapped[str] = mapped_column(Text, nullable=False)
+    timestampMs: Mapped[int] = mapped_column(Integer, nullable=False)
+    clientRequestId: Mapped[str] = mapped_column(Text, nullable=False)
+    requestHash: Mapped[str] = mapped_column(Text, nullable=False)
+    requestedByUserId: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.User.id",
+            name="VideoTakeFrameExtraction_user_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        nullable=False,
+    )
+    createdAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("assetId", name="VideoTakeFrameExtraction_pkey"),
+        ForeignKeyConstraint(
+            ("assetId", "projectId"),
+            ("public.VideoAsset.id", "public.VideoAsset.projectId"),
+            name="VideoTakeFrameExtraction_asset_project_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("takeId", "shotId", "adaptationId"),
+            (
+                "public.VideoShotTake.id",
+                "public.VideoShotTake.shotId",
+                "public.VideoShotTake.adaptationId",
+            ),
+            name="VideoTakeFrameExtraction_take_scope_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("adaptationId", "projectId"),
+            ("public.VideoChapterAdaptation.id", "public.VideoChapterAdaptation.projectId"),
+            name="VideoTakeFrameExtraction_adaptation_project_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("adaptationId", "novelId"),
+            ("public.VideoChapterAdaptation.id", "public.VideoChapterAdaptation.novelId"),
+            name="VideoTakeFrameExtraction_adaptation_novel_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("novelId", "requestedByUserId"),
+            ("public.Novel.id", "public.Novel.userId"),
+            name="VideoTakeFrameExtraction_novel_owner_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        UniqueConstraint(
+            "assetId",
+            "takeId",
+            "timestampMs",
+            name="VideoTakeFrameExtraction_asset_take_time_key",
+        ),
+        Index(
+            "VideoTakeFrameExtraction_user_request_key",
+            "requestedByUserId",
+            "clientRequestId",
+            unique=True,
+        ),
+        Index("VideoTakeFrameExtraction_take_created_idx", "takeId", "createdAt"),
+        {"schema": "public"},
+    )
+
+
+class VideoShotKeyframeVersion(Base):
+    """正式镜头一个关键帧角色的不可变确认或清除版本。"""
+
+    __tablename__ = "VideoShotKeyframeVersion"
+    id: Mapped[str] = mapped_column(Text, nullable=False, default=generate_id)
+    adaptationId: Mapped[str] = mapped_column(Text, nullable=False)
+    projectId: Mapped[str] = mapped_column(Text, nullable=False)
+    novelId: Mapped[str] = mapped_column(Text, nullable=False)
+    shotId: Mapped[str] = mapped_column(Text, nullable=False)
+    shotPlanVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    role: Mapped[str] = mapped_column(Text, nullable=False)
+    versionNo: Mapped[int] = mapped_column(Integer, nullable=False)
+    basedOnVersionId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    assetId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sourceKind: Mapped[str] = mapped_column(Text, nullable=False)
+    sourceTakeId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sourceTimeMs: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    clientRequestId: Mapped[str] = mapped_column(Text, nullable=False)
+    requestHash: Mapped[str] = mapped_column(Text, nullable=False)
+    contentHash: Mapped[str] = mapped_column(Text, nullable=False)
+    createdByUserId: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.User.id",
+            name="VideoShotKeyframeVersion_user_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        nullable=False,
+    )
+    createdAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="VideoShotKeyframeVersion_pkey"),
+        ForeignKeyConstraint(
+            ("adaptationId", "projectId"),
+            ("public.VideoChapterAdaptation.id", "public.VideoChapterAdaptation.projectId"),
+            name="VideoShotKeyframeVersion_adaptation_project_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("adaptationId", "novelId"),
+            ("public.VideoChapterAdaptation.id", "public.VideoChapterAdaptation.novelId"),
+            name="VideoShotKeyframeVersion_adaptation_novel_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("projectId", "novelId"),
+            ("public.VideoProject.id", "public.VideoProject.novelId"),
+            name="VideoShotKeyframeVersion_project_novel_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("shotPlanVersionId", "adaptationId"),
+            ("public.VideoShotPlanVersion.id", "public.VideoShotPlanVersion.adaptationId"),
+            name="VideoShotKeyframeVersion_plan_adaptation_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("shotId", "shotPlanVersionId"),
+            ("public.VideoShot.id", "public.VideoShot.planVersionId"),
+            name="VideoShotKeyframeVersion_shot_plan_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("assetId", "projectId"),
+            ("public.VideoAsset.id", "public.VideoAsset.projectId"),
+            name="VideoShotKeyframeVersion_asset_project_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("sourceTakeId", "shotId", "adaptationId"),
+            (
+                "public.VideoShotTake.id",
+                "public.VideoShotTake.shotId",
+                "public.VideoShotTake.adaptationId",
+            ),
+            name="VideoShotKeyframeVersion_source_take_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("assetId", "sourceTakeId", "sourceTimeMs"),
+            (
+                "public.VideoTakeFrameExtraction.assetId",
+                "public.VideoTakeFrameExtraction.takeId",
+                "public.VideoTakeFrameExtraction.timestampMs",
+            ),
+            name="VideoShotKeyframeVersion_extraction_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("basedOnVersionId", "shotId", "role"),
+            (
+                "public.VideoShotKeyframeVersion.id",
+                "public.VideoShotKeyframeVersion.shotId",
+                "public.VideoShotKeyframeVersion.role",
+            ),
+            name="VideoShotKeyframeVersion_based_on_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        UniqueConstraint(
+            "id",
+            "shotId",
+            "role",
+            name="VideoShotKeyframeVersion_id_shot_role_key",
+        ),
+        Index(
+            "VideoShotKeyframeVersion_shot_role_version_key",
+            "shotId",
+            "role",
+            "versionNo",
+            unique=True,
+        ),
+        Index(
+            "VideoShotKeyframeVersion_user_request_key",
+            "createdByUserId",
+            "clientRequestId",
+            unique=True,
+        ),
+        Index("VideoShotKeyframeVersion_shot_created_idx", "shotId", "createdAt"),
+        {"schema": "public"},
+    )
+
+
+class VideoShotKeyframeHead(Base):
+    """一个镜头关键帧角色当前采用版本的 CAS 指针。"""
+
+    __tablename__ = "VideoShotKeyframeHead"
+    shotId: Mapped[str] = mapped_column(Text, nullable=False)
+    shotPlanVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    role: Mapped[str] = mapped_column(Text, nullable=False)
+    currentVersionId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    updatedAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("shotId", "role", name="VideoShotKeyframeHead_pkey"),
+        ForeignKeyConstraint(
+            ("shotId", "shotPlanVersionId"),
+            ("public.VideoShot.id", "public.VideoShot.planVersionId"),
+            name="VideoShotKeyframeHead_shot_plan_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("currentVersionId", "shotId", "role"),
+            (
+                "public.VideoShotKeyframeVersion.id",
+                "public.VideoShotKeyframeVersion.shotId",
+                "public.VideoShotKeyframeVersion.role",
+            ),
+            name="VideoShotKeyframeHead_current_version_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        {"schema": "public"},
+    )
+
+
+class VideoEpisodeEditVersion(Base):
+    """某一正式分集的不可变非破坏性粗剪版本。"""
+
+    __tablename__ = "VideoEpisodeEditVersion"
+    id: Mapped[str] = mapped_column(Text, nullable=False, default=generate_id)
+    adaptationId: Mapped[str] = mapped_column(Text, nullable=False)
+    projectId: Mapped[str] = mapped_column(Text, nullable=False)
+    novelId: Mapped[str] = mapped_column(Text, nullable=False)
+    episodePlanVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    shotPlanVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    episodeNo: Mapped[int] = mapped_column(Integer, nullable=False)
+    versionNo: Mapped[int] = mapped_column(Integer, nullable=False)
+    basedOnVersionId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    totalDurationMs: Mapped[int] = mapped_column(Integer, nullable=False)
+    clientRequestId: Mapped[str] = mapped_column(Text, nullable=False)
+    requestHash: Mapped[str] = mapped_column(Text, nullable=False)
+    contentHash: Mapped[str] = mapped_column(Text, nullable=False)
+    createdByUserId: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.User.id",
+            name="VideoEpisodeEditVersion_user_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        nullable=False,
+    )
+    createdAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="VideoEpisodeEditVersion_pkey"),
+        ForeignKeyConstraint(
+            ("adaptationId", "projectId"),
+            ("public.VideoChapterAdaptation.id", "public.VideoChapterAdaptation.projectId"),
+            name="VideoEpisodeEditVersion_adaptation_project_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("adaptationId", "novelId"),
+            ("public.VideoChapterAdaptation.id", "public.VideoChapterAdaptation.novelId"),
+            name="VideoEpisodeEditVersion_adaptation_novel_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("projectId", "novelId"),
+            ("public.VideoProject.id", "public.VideoProject.novelId"),
+            name="VideoEpisodeEditVersion_project_novel_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("episodePlanVersionId", "shotPlanVersionId", "adaptationId"),
+            (
+                "public.VideoEpisodePlanVersion.id",
+                "public.VideoEpisodePlanVersion.shotPlanVersionId",
+                "public.VideoEpisodePlanVersion.adaptationId",
+            ),
+            name="VideoEpisodeEditVersion_episode_plan_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("basedOnVersionId", "episodePlanVersionId", "episodeNo"),
+            (
+                "public.VideoEpisodeEditVersion.id",
+                "public.VideoEpisodeEditVersion.episodePlanVersionId",
+                "public.VideoEpisodeEditVersion.episodeNo",
+            ),
+            name="VideoEpisodeEditVersion_based_on_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        UniqueConstraint(
+            "id",
+            "episodePlanVersionId",
+            "episodeNo",
+            name="VideoEpisodeEditVersion_id_episode_key",
+        ),
+        Index(
+            "VideoEpisodeEditVersion_id_plan_key",
+            "id",
+            "shotPlanVersionId",
+            unique=True,
+        ),
+        Index(
+            "VideoEpisodeEditVersion_episode_version_key",
+            "episodePlanVersionId",
+            "episodeNo",
+            "versionNo",
+            unique=True,
+        ),
+        Index(
+            "VideoEpisodeEditVersion_user_request_key",
+            "createdByUserId",
+            "clientRequestId",
+            unique=True,
+        ),
+        {"schema": "public"},
+    )
+
+
+class VideoEpisodeEditClip(Base):
+    """粗剪版本中的一个镜头决定；Take 文件本身不被裁切。"""
+
+    __tablename__ = "VideoEpisodeEditClip"
+    editVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    shotPlanVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    shotId: Mapped[str] = mapped_column(Text, nullable=False)
+    takeId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    sourceInMs: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sourceOutMs: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    timelineStartMs: Mapped[int] = mapped_column(Integer, nullable=False)
+    outputDurationMs: Mapped[int] = mapped_column(Integer, nullable=False)
+    transitionAfter: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'cut'::text")
+    )
+    transitionDurationMs: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("editVersionId", "ordinal", name="VideoEpisodeEditClip_pkey"),
+        ForeignKeyConstraint(
+            ("editVersionId", "shotPlanVersionId"),
+            (
+                "public.VideoEpisodeEditVersion.id",
+                "public.VideoEpisodeEditVersion.shotPlanVersionId",
+            ),
+            name="VideoEpisodeEditClip_edit_plan_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("shotId", "shotPlanVersionId"),
+            ("public.VideoShot.id", "public.VideoShot.planVersionId"),
+            name="VideoEpisodeEditClip_shot_plan_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("takeId", "shotId", "shotPlanVersionId"),
+            (
+                "public.VideoShotTake.id",
+                "public.VideoShotTake.shotId",
+                "public.VideoShotTake.shotPlanVersionId",
+            ),
+            name="VideoEpisodeEditClip_take_scope_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        Index("VideoEpisodeEditClip_version_shot_key", "editVersionId", "shotId", unique=True),
+        {"schema": "public"},
+    )
+
+
+class VideoEpisodeEditHead(Base):
+    """正式分集当前粗剪版本的 CAS 指针。"""
+
+    __tablename__ = "VideoEpisodeEditHead"
+    episodePlanVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    shotPlanVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    adaptationId: Mapped[str] = mapped_column(Text, nullable=False)
+    episodeNo: Mapped[int] = mapped_column(Integer, nullable=False)
+    currentVersionId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    updatedAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "episodePlanVersionId", "episodeNo", name="VideoEpisodeEditHead_pkey"
+        ),
+        ForeignKeyConstraint(
+            ("episodePlanVersionId", "shotPlanVersionId", "adaptationId"),
+            (
+                "public.VideoEpisodePlanVersion.id",
+                "public.VideoEpisodePlanVersion.shotPlanVersionId",
+                "public.VideoEpisodePlanVersion.adaptationId",
+            ),
+            name="VideoEpisodeEditHead_episode_plan_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("currentVersionId", "episodePlanVersionId", "episodeNo"),
+            (
+                "public.VideoEpisodeEditVersion.id",
+                "public.VideoEpisodeEditVersion.episodePlanVersionId",
+                "public.VideoEpisodeEditVersion.episodeNo",
+            ),
+            name="VideoEpisodeEditHead_current_version_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        {"schema": "public"},
+    )
+
+
+class VideoEpisodeMixVersion(Base):
+    """固定在一个粗剪版本上的不可变声音与字幕版本。"""
+
+    __tablename__ = "VideoEpisodeMixVersion"
+    id: Mapped[str] = mapped_column(Text, nullable=False, default=generate_id)
+    adaptationId: Mapped[str] = mapped_column(Text, nullable=False)
+    projectId: Mapped[str] = mapped_column(Text, nullable=False)
+    novelId: Mapped[str] = mapped_column(Text, nullable=False)
+    episodePlanVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    shotPlanVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    episodeNo: Mapped[int] = mapped_column(Integer, nullable=False)
+    editVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    versionNo: Mapped[int] = mapped_column(Integer, nullable=False)
+    basedOnVersionId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    clientRequestId: Mapped[str] = mapped_column(Text, nullable=False)
+    requestHash: Mapped[str] = mapped_column(Text, nullable=False)
+    contentHash: Mapped[str] = mapped_column(Text, nullable=False)
+    createdByUserId: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.User.id",
+            name="VideoEpisodeMixVersion_user_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        nullable=False,
+    )
+    createdAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="VideoEpisodeMixVersion_pkey"),
+        ForeignKeyConstraint(
+            ("adaptationId", "projectId"),
+            ("public.VideoChapterAdaptation.id", "public.VideoChapterAdaptation.projectId"),
+            name="VideoEpisodeMixVersion_adaptation_project_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("adaptationId", "novelId"),
+            ("public.VideoChapterAdaptation.id", "public.VideoChapterAdaptation.novelId"),
+            name="VideoEpisodeMixVersion_adaptation_novel_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("projectId", "novelId"),
+            ("public.VideoProject.id", "public.VideoProject.novelId"),
+            name="VideoEpisodeMixVersion_project_novel_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("episodePlanVersionId", "shotPlanVersionId", "adaptationId"),
+            (
+                "public.VideoEpisodePlanVersion.id",
+                "public.VideoEpisodePlanVersion.shotPlanVersionId",
+                "public.VideoEpisodePlanVersion.adaptationId",
+            ),
+            name="VideoEpisodeMixVersion_episode_plan_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("editVersionId", "episodePlanVersionId", "episodeNo"),
+            (
+                "public.VideoEpisodeEditVersion.id",
+                "public.VideoEpisodeEditVersion.episodePlanVersionId",
+                "public.VideoEpisodeEditVersion.episodeNo",
+            ),
+            name="VideoEpisodeMixVersion_edit_version_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("basedOnVersionId", "episodePlanVersionId", "episodeNo"),
+            (
+                "public.VideoEpisodeMixVersion.id",
+                "public.VideoEpisodeMixVersion.episodePlanVersionId",
+                "public.VideoEpisodeMixVersion.episodeNo",
+            ),
+            name="VideoEpisodeMixVersion_based_on_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        UniqueConstraint(
+            "id",
+            "episodePlanVersionId",
+            "episodeNo",
+            name="VideoEpisodeMixVersion_id_episode_key",
+        ),
+        Index(
+            "VideoEpisodeMixVersion_id_project_key", "id", "projectId", unique=True
+        ),
+        Index(
+            "VideoEpisodeMixVersion_id_project_plan_key",
+            "id",
+            "projectId",
+            "shotPlanVersionId",
+            unique=True,
+        ),
+        Index(
+            "VideoEpisodeMixVersion_id_plan_key", "id", "shotPlanVersionId", unique=True
+        ),
+        Index(
+            "VideoEpisodeMixVersion_episode_version_key",
+            "episodePlanVersionId",
+            "episodeNo",
+            "versionNo",
+            unique=True,
+        ),
+        Index(
+            "VideoEpisodeMixVersion_user_request_key",
+            "createdByUserId",
+            "clientRequestId",
+            unique=True,
+        ),
+        {"schema": "public"},
+    )
+
+
+class VideoEpisodeAudioClip(Base):
+    """声音版本中的一个可独立替换音频片段。"""
+
+    __tablename__ = "VideoEpisodeAudioClip"
+    mixVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    projectId: Mapped[str] = mapped_column(Text, nullable=False)
+    shotPlanVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    trackKind: Mapped[str] = mapped_column(Text, nullable=False)
+    assetId: Mapped[str] = mapped_column(Text, nullable=False)
+    shotId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    timelineStartMs: Mapped[int] = mapped_column(Integer, nullable=False)
+    sourceInMs: Mapped[int] = mapped_column(Integer, nullable=False)
+    sourceOutMs: Mapped[int] = mapped_column(Integer, nullable=False)
+    gainMillibels: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    fadeInMs: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    fadeOutMs: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+
+    __table_args__ = (
+        PrimaryKeyConstraint("mixVersionId", "ordinal", name="VideoEpisodeAudioClip_pkey"),
+        ForeignKeyConstraint(
+            ("mixVersionId", "projectId", "shotPlanVersionId"),
+            (
+                "public.VideoEpisodeMixVersion.id",
+                "public.VideoEpisodeMixVersion.projectId",
+                "public.VideoEpisodeMixVersion.shotPlanVersionId",
+            ),
+            name="VideoEpisodeAudioClip_mix_project_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("assetId", "projectId"),
+            ("public.VideoAsset.id", "public.VideoAsset.projectId"),
+            name="VideoEpisodeAudioClip_asset_project_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("shotId", "shotPlanVersionId"),
+            ("public.VideoShot.id", "public.VideoShot.planVersionId"),
+            name="VideoEpisodeAudioClip_shot_plan_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        {"schema": "public"},
+    )
+
+
+class VideoEpisodeSubtitleCue(Base):
+    """声音版本中的一个完整字幕 cue。"""
+
+    __tablename__ = "VideoEpisodeSubtitleCue"
+    mixVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    shotPlanVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
+    shotId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    startMs: Mapped[int] = mapped_column(Integer, nullable=False)
+    endMs: Mapped[int] = mapped_column(Integer, nullable=False)
+    speaker: Mapped[str | None] = mapped_column(Text, nullable=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+
+    __table_args__ = (
+        PrimaryKeyConstraint("mixVersionId", "ordinal", name="VideoEpisodeSubtitleCue_pkey"),
+        ForeignKeyConstraint(
+            ("mixVersionId", "shotPlanVersionId"),
+            ("public.VideoEpisodeMixVersion.id", "public.VideoEpisodeMixVersion.shotPlanVersionId"),
+            name="VideoEpisodeSubtitleCue_mix_plan_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("shotId", "shotPlanVersionId"),
+            ("public.VideoShot.id", "public.VideoShot.planVersionId"),
+            name="VideoEpisodeSubtitleCue_shot_plan_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        {"schema": "public"},
+    )
+
+
+class VideoEpisodeMixHead(Base):
+    """正式分集当前声音与字幕版本的 CAS 指针。"""
+
+    __tablename__ = "VideoEpisodeMixHead"
+    episodePlanVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    shotPlanVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    adaptationId: Mapped[str] = mapped_column(Text, nullable=False)
+    episodeNo: Mapped[int] = mapped_column(Integer, nullable=False)
+    currentVersionId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    updatedAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=False, default=utc_now, onupdate=utc_now
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "episodePlanVersionId", "episodeNo", name="VideoEpisodeMixHead_pkey"
+        ),
+        ForeignKeyConstraint(
+            ("episodePlanVersionId", "shotPlanVersionId", "adaptationId"),
+            (
+                "public.VideoEpisodePlanVersion.id",
+                "public.VideoEpisodePlanVersion.shotPlanVersionId",
+                "public.VideoEpisodePlanVersion.adaptationId",
+            ),
+            name="VideoEpisodeMixHead_episode_plan_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("currentVersionId", "episodePlanVersionId", "episodeNo"),
+            (
+                "public.VideoEpisodeMixVersion.id",
+                "public.VideoEpisodeMixVersion.episodePlanVersionId",
+                "public.VideoEpisodeMixVersion.episodeNo",
+            ),
+            name="VideoEpisodeMixHead_current_version_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        {"schema": "public"},
+    )
+
+
+class VideoEpisodeExportTask(Base):
+    """冻结粗剪与混音清单后，由 Core 媒体执行器处理的耐久任务。"""
+
+    __tablename__ = "VideoEpisodeExportTask"
+    id: Mapped[str] = mapped_column(Text, nullable=False, default=generate_id)
+    requestedByUserId: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.User.id",
+            name="VideoEpisodeExportTask_user_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        nullable=False,
+    )
+    adaptationId: Mapped[str] = mapped_column(Text, nullable=False)
+    projectId: Mapped[str] = mapped_column(Text, nullable=False)
+    novelId: Mapped[str] = mapped_column(Text, nullable=False)
+    episodePlanVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    shotPlanVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    episodeNo: Mapped[int] = mapped_column(Integer, nullable=False)
+    editVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    mixVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    retryOfTaskId: Mapped[str | None] = mapped_column(Text, nullable=True)
+    clientRequestId: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'pending'::text")
+    )
+    inputHash: Mapped[str] = mapped_column(Text, nullable=False)
+    requestManifestJson: Mapped[str] = mapped_column(Text, nullable=False)
+    resolution: Mapped[str] = mapped_column(Text, nullable=False)
+    framesPerSecond: Mapped[int] = mapped_column(Integer, nullable=False)
+    burnSubtitles: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    attemptCount: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    nextAttemptAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    lastErrorCode: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lastErrorMessage: Mapped[str | None] = mapped_column(Text, nullable=True)
+    createdAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    updatedAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=False, default=utc_now, onupdate=utc_now
+    )
+    startedAt: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=True
+    )
+    completedAt: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=True
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="VideoEpisodeExportTask_pkey"),
+        ForeignKeyConstraint(
+            ("novelId", "requestedByUserId"),
+            ("public.Novel.id", "public.Novel.userId"),
+            name="VideoEpisodeExportTask_novel_owner_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("adaptationId", "projectId"),
+            ("public.VideoChapterAdaptation.id", "public.VideoChapterAdaptation.projectId"),
+            name="VideoEpisodeExportTask_adaptation_project_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("adaptationId", "novelId"),
+            ("public.VideoChapterAdaptation.id", "public.VideoChapterAdaptation.novelId"),
+            name="VideoEpisodeExportTask_adaptation_novel_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("episodePlanVersionId", "shotPlanVersionId", "adaptationId"),
+            (
+                "public.VideoEpisodePlanVersion.id",
+                "public.VideoEpisodePlanVersion.shotPlanVersionId",
+                "public.VideoEpisodePlanVersion.adaptationId",
+            ),
+            name="VideoEpisodeExportTask_episode_plan_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("editVersionId", "episodePlanVersionId", "episodeNo"),
+            (
+                "public.VideoEpisodeEditVersion.id",
+                "public.VideoEpisodeEditVersion.episodePlanVersionId",
+                "public.VideoEpisodeEditVersion.episodeNo",
+            ),
+            name="VideoEpisodeExportTask_edit_version_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("mixVersionId", "episodePlanVersionId", "episodeNo"),
+            (
+                "public.VideoEpisodeMixVersion.id",
+                "public.VideoEpisodeMixVersion.episodePlanVersionId",
+                "public.VideoEpisodeMixVersion.episodeNo",
+            ),
+            name="VideoEpisodeExportTask_mix_version_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("retryOfTaskId", "adaptationId", "episodeNo"),
+            (
+                "public.VideoEpisodeExportTask.id",
+                "public.VideoEpisodeExportTask.adaptationId",
+                "public.VideoEpisodeExportTask.episodeNo",
+            ),
+            name="VideoEpisodeExportTask_retry_scope_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        UniqueConstraint(
+            "id",
+            "adaptationId",
+            "episodeNo",
+            name="VideoEpisodeExportTask_id_scope_key",
+        ),
+        Index(
+            "VideoEpisodeExportTask_user_request_key",
+            "requestedByUserId",
+            "clientRequestId",
+            unique=True,
+        ),
+        Index(
+            "VideoEpisodeExportTask_active_episode_key",
+            "episodePlanVersionId",
+            "episodeNo",
+            unique=True,
+            postgresql_where=text('"status" IN (\'pending\', \'rendering\')'),
+        ),
+        Index(
+            "VideoEpisodeExportTask_due_idx",
+            "nextAttemptAt",
+            "createdAt",
+            postgresql_where=text('"status" IN (\'pending\', \'rendering\')'),
+        ),
+        {"schema": "public"},
+    )
+
+
+class VideoEpisodeExport(Base):
+    """已经归档到受控存储的不可变整集成片。"""
+
+    __tablename__ = "VideoEpisodeExport"
+    id: Mapped[str] = mapped_column(Text, nullable=False, default=generate_id)
+    taskId: Mapped[str] = mapped_column(Text, nullable=False)
+    adaptationId: Mapped[str] = mapped_column(Text, nullable=False)
+    projectId: Mapped[str] = mapped_column(Text, nullable=False)
+    episodePlanVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    episodeNo: Mapped[int] = mapped_column(Integer, nullable=False)
+    editVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    mixVersionId: Mapped[str] = mapped_column(Text, nullable=False)
+    assetId: Mapped[str] = mapped_column(Text, nullable=False)
+    versionNo: Mapped[int] = mapped_column(Integer, nullable=False)
+    inputHash: Mapped[str] = mapped_column(Text, nullable=False)
+    createdAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint("id", name="VideoEpisodeExport_pkey"),
+        ForeignKeyConstraint(
+            ("taskId", "adaptationId", "episodeNo"),
+            (
+                "public.VideoEpisodeExportTask.id",
+                "public.VideoEpisodeExportTask.adaptationId",
+                "public.VideoEpisodeExportTask.episodeNo",
+            ),
+            name="VideoEpisodeExport_task_scope_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("assetId", "projectId"),
+            ("public.VideoAsset.id", "public.VideoAsset.projectId"),
+            name="VideoEpisodeExport_asset_project_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("editVersionId", "episodePlanVersionId", "episodeNo"),
+            (
+                "public.VideoEpisodeEditVersion.id",
+                "public.VideoEpisodeEditVersion.episodePlanVersionId",
+                "public.VideoEpisodeEditVersion.episodeNo",
+            ),
+            name="VideoEpisodeExport_edit_version_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ("mixVersionId", "episodePlanVersionId", "episodeNo"),
+            (
+                "public.VideoEpisodeMixVersion.id",
+                "public.VideoEpisodeMixVersion.episodePlanVersionId",
+                "public.VideoEpisodeMixVersion.episodeNo",
+            ),
+            name="VideoEpisodeExport_mix_version_fkey",
+            ondelete="RESTRICT",
+            onupdate="CASCADE",
+        ),
+        Index("VideoEpisodeExport_taskId_key", "taskId", unique=True),
+        Index("VideoEpisodeExport_assetId_key", "assetId", unique=True),
+        Index(
+            "VideoEpisodeExport_episode_version_key",
+            "episodePlanVersionId",
+            "episodeNo",
+            "versionNo",
+            unique=True,
+        ),
+        Index(
+            "VideoEpisodeExport_episode_created_idx",
+            "episodePlanVersionId",
+            "episodeNo",
+            "createdAt",
         ),
         {"schema": "public"},
     )

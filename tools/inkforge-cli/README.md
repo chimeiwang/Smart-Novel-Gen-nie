@@ -72,7 +72,8 @@ Codex 的完整操作规程位于用户 Skill：
 
 ## 长篇章节影视化边界
 
-`long.video.*` 覆盖当前“章节 → 镜头候选 → 人工编辑确认 → 分集 → 视觉设定 → 逐镜提示词”主链，
+`long.video.*` 覆盖当前“章节 → 镜头候选 → 人工编辑确认 → 分集 → 视觉设定 → 逐镜提示词 →
+关键帧 → 逐镜生成 → 候选 Take → 选片确认 → 分集粗剪 → 声音字幕 → 整集导出”主链，
 不暴露已经被当前产品方案替代的旧 `VideoScene` 选区规划命令。所有命令只调用 Core
 `/api/v1/video/**`，不连接 PostgreSQL、Agent Service 或内部接口。
 
@@ -94,6 +95,22 @@ long.video.reference.save
 long.video.prompt.start
 long.video.adaptation.watch
 long.video.prompt.save
+long.video.render.list
+long.video.render.start
+long.video.render.get
+long.video.render.watch
+long.video.render.retry
+long.video.take.confirm
+long.video.take.download
+long.video.post.show
+long.video.keyframe.set
+long.video.edit.save
+long.video.edit.get
+long.video.mix.save
+long.video.mix.get
+long.video.export.start
+long.video.export.watch
+long.video.export.download
 ```
 
 - `long.video.plan.confirm` 用 `plan` 或 `planFile` 提交完整编辑后候选；命令先回读 Artifact 与改编
@@ -103,6 +120,14 @@ long.video.prompt.save
   `outputFile`，二进制不会写入 stdout。
 - `long.video.asset.preview` 调用浏览器内联预览接口，但在 CLI 中仍把完整字节写入显式文件。
 - `long.video.adaptation.watch` 轮询公共改编聚合，输出 JSONL；停止 watcher 不取消服务端任务。
+- `long.video.render.watch` 轮询一条逐镜耐久任务，输出 JSONL；停止 watcher 不取消供应商任务。
+- `long.video.render.retry` 精确复用旧任务的冻结输入，不自动采用后来修改的提示词或参考图。
+- `long.video.take.download` 必须显式指定 `outputFile`，完整视频字节不会写入终端。
+- `long.video.edit.save` 与 `long.video.mix.save` 分别用内联 `edit`/`mix` 或
+  `editFile`/`mixFile` 读取完整 JSON，不能同时提供两种来源；可选 `basedOnVersionId`
+  从历史版本创建可追溯分支，省略时默认基于当前 head。
+- `long.video.export.watch` 轮询 Core 的耐久整集导出任务；停止 watcher 不取消服务端任务。
+- `long.video.export.download` 必须显式指定 `outputFile`，MP4 二进制不会写入 stdout。
 - 项目创建和素材上传的现有 API 没有幂等键。网络结果不确定时先 list/get 核对，不能盲目重试。
 - 正式镜头、视觉设定版本和提示词仍分别需要用户显式确认。CLI 不提供自动批准整条流水线的命令。
 - 生产环境当前关闭视频预览写入；CLI 不会绕过 `VIDEO_PREVIEW_ENABLED`。
@@ -132,6 +157,26 @@ long.video.prompt.save
 | `long.video.canon.candidate.set` | `projectId`, `clientRequestId`, `settingKind`, `settingId`, `duty`, `variantKey`, `label`, `candidateAssetId` | `includeFeatures`, `excludeFeatures`, `defaultStrength` |
 | `long.video.canon.approve` | `canonId`, `clientRequestId`, `expectedRevision`, `candidateAssetId` | 无 |
 | `long.video.reference.save` | `adaptationId`, `shotId`, `expectedRevision`, `references` | 无 |
+| `long.video.render.list` | `adaptationId` | `outputFile` |
+| `long.video.render.start` | `adaptationId`, `shotId`, `clientRequestId`, `expectedPromptRevision`, `durationSeconds` | `resolution`, `generateAudio`, `watermark` |
+| `long.video.render.get` | `taskId` | `outputFile` |
+| `long.video.render.retry` | `taskId`, `clientRequestId` | 无 |
+| `long.video.render.watch` | `taskId` | 无 |
+| `long.video.take.confirm` | `adaptationId`, `shotId`, `takeId`, `clientRequestId`, `expectedTakeRevision` | 无 |
+| `long.video.take.download` | `takeId`, `outputFile` | 无 |
+| `long.video.post.show` | `adaptationId` | `outputFile` |
+| `long.video.keyframe.set` | `adaptationId`, `shotId`, `role`, `assetId`, `clientRequestId`, `expectedRevision` | `sourceTakeId` 与 `sourceTimeMs` 同时提供 |
+| `long.video.keyframe.clear` | `adaptationId`, `shotId`, `role`, `clientRequestId`, `expectedRevision` | 无 |
+| `long.video.keyframe.extract` | `takeId`, `timestampMs`, `name`, `clientRequestId` | 无 |
+| `long.video.edit.save` | `adaptationId`, `episodeNo`, `clientRequestId`, `expectedRevision`, `edit`/`editFile` 二选一 | `basedOnVersionId` |
+| `long.video.edit.get` | `versionId` | `outputFile` |
+| `long.video.mix.save` | `adaptationId`, `episodeNo`, `editVersionId`, `clientRequestId`, `expectedRevision`, `mix`/`mixFile` 二选一 | `basedOnVersionId` |
+| `long.video.mix.get` | `versionId` | `outputFile` |
+| `long.video.export.start` | `adaptationId`, `episodeNo`, `editVersionId`, `mixVersionId`, `clientRequestId` | `resolution`, `framesPerSecond`, `burnSubtitles` |
+| `long.video.export.get` | `taskId` | `outputFile` |
+| `long.video.export.retry` | `taskId`, `clientRequestId` | 无 |
+| `long.video.export.watch` | `taskId` | 无 |
+| `long.video.export.download` | `exportId`, `outputFile` | 无 |
 
 ## 命令清单
 
@@ -254,5 +299,25 @@ long.video.canon.list
 long.video.canon.candidate.set
 long.video.canon.approve
 long.video.reference.save
+long.video.render.list
+long.video.render.start
+long.video.render.get
+long.video.render.retry
+long.video.render.watch
+long.video.take.confirm
+long.video.take.download
+long.video.post.show
+long.video.keyframe.set
+long.video.keyframe.clear
+long.video.keyframe.extract
+long.video.edit.save
+long.video.edit.get
+long.video.mix.save
+long.video.mix.get
+long.video.export.start
+long.video.export.get
+long.video.export.retry
+long.video.export.watch
+long.video.export.download
 ```
 <!-- command-list:end -->

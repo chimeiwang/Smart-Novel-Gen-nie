@@ -33,6 +33,26 @@ COMMAND_NAMES = {
     "long.video.canon.candidate.set",
     "long.video.canon.approve",
     "long.video.reference.save",
+    "long.video.render.list",
+    "long.video.render.start",
+    "long.video.render.get",
+    "long.video.render.retry",
+    "long.video.render.watch",
+    "long.video.take.confirm",
+    "long.video.take.download",
+    "long.video.post.show",
+    "long.video.keyframe.set",
+    "long.video.keyframe.clear",
+    "long.video.keyframe.extract",
+    "long.video.edit.save",
+    "long.video.edit.get",
+    "long.video.mix.save",
+    "long.video.mix.get",
+    "long.video.export.start",
+    "long.video.export.get",
+    "long.video.export.retry",
+    "long.video.export.watch",
+    "long.video.export.download",
 }
 
 MUTATION_NAMES = {
@@ -49,6 +69,16 @@ MUTATION_NAMES = {
     "long.video.canon.candidate.set",
     "long.video.canon.approve",
     "long.video.reference.save",
+    "long.video.render.start",
+    "long.video.render.retry",
+    "long.video.take.confirm",
+    "long.video.keyframe.set",
+    "long.video.keyframe.clear",
+    "long.video.keyframe.extract",
+    "long.video.edit.save",
+    "long.video.mix.save",
+    "long.video.export.start",
+    "long.video.export.retry",
 }
 
 REQUEST_ID_NAMES = {
@@ -60,6 +90,16 @@ REQUEST_ID_NAMES = {
     "long.video.prompt.start",
     "long.video.canon.candidate.set",
     "long.video.canon.approve",
+    "long.video.render.start",
+    "long.video.render.retry",
+    "long.video.take.confirm",
+    "long.video.keyframe.set",
+    "long.video.keyframe.clear",
+    "long.video.keyframe.extract",
+    "long.video.edit.save",
+    "long.video.mix.save",
+    "long.video.export.start",
+    "long.video.export.retry",
 }
 
 
@@ -136,7 +176,11 @@ def test_video_command_specs_are_complete_and_capabilities_are_exact() -> None:
         name for name, spec in specs.items() if spec.requiresClientRequestId
     } == REQUEST_ID_NAMES
     assert specs["long.video.adaptation.watch"].outputMode == "jsonl"
+    assert specs["long.video.render.watch"].outputMode == "jsonl"
+    assert specs["long.video.export.watch"].outputMode == "jsonl"
     assert specs["long.video.asset.download"].fileOutput.kind == "none"
+    assert specs["long.video.take.download"].fileOutput.kind == "none"
+    assert specs["long.video.export.download"].fileOutput.kind == "none"
 
 
 @pytest.mark.parametrize(
@@ -167,6 +211,26 @@ def test_video_command_specs_are_complete_and_capabilities_are_exact() -> None:
             {"projectId": "project /?#"},
             "/api/v1/video/projects/project%20%2F%3F%23/visual-canons",
         ),
+        (
+            "long.video.render.list",
+            {"adaptationId": "adaptation /?#"},
+            "/api/v1/video/chapter-adaptations/adaptation%20%2F%3F%23/renders",
+        ),
+        (
+            "long.video.render.get",
+            {"taskId": "task /?#"},
+            "/api/v1/video/render-tasks/task%20%2F%3F%23",
+        ),
+        (
+            "long.video.edit.get",
+            {"versionId": "edit /?#"},
+            "/api/v1/video/edit-versions/edit%20%2F%3F%23",
+        ),
+        (
+            "long.video.mix.get",
+            {"versionId": "mix /?#"},
+            "/api/v1/video/mix-versions/mix%20%2F%3F%23",
+        ),
     ],
 )
 def test_video_read_commands_use_exact_encoded_public_paths(
@@ -180,6 +244,204 @@ def test_video_read_commands_use_exact_encoded_public_paths(
 
     assert result == {"尾部": "完整😀"}
     assert api.calls == [("GET", path, {})]
+
+
+def test_render_start_retry_confirm_and_download_use_public_contract(tmp_path: Path) -> None:
+    api = RecordingApi(responses=[{"id": "task-1"}, {"id": "task-2"}, {"status": "succeeded"}])
+    start_result = _spec("long.video.render.start").handler(
+        _runtime("long.video.render.start", api),
+        {
+            "adaptationId": "adaptation /?#",
+            "shotId": "shot /?#",
+            "clientRequestId": "request-render-0001",
+            "expectedPromptRevision": 3,
+            "durationSeconds": 5,
+            "resolution": "1080p",
+            "generateAudio": False,
+            "watermark": True,
+        },
+    )
+    retry_result = _spec("long.video.render.retry").handler(
+        _runtime("long.video.render.retry", api),
+        {"taskId": "task /?#", "clientRequestId": "request-render-0002"},
+    )
+    confirm_result = _spec("long.video.take.confirm").handler(
+        _runtime("long.video.take.confirm", api),
+        {
+            "adaptationId": "adaptation /?#",
+            "shotId": "shot /?#",
+            "takeId": "take /?#",
+            "clientRequestId": "request-render-0003",
+            "expectedTakeRevision": 2,
+        },
+    )
+    output = tmp_path / "候选.mp4"
+    download_result = _spec("long.video.take.download").handler(
+        _runtime("long.video.take.download", api),
+        {"takeId": "take /?#", "outputFile": str(output)},
+    )
+
+    assert start_result == {"id": "task-1"}
+    assert retry_result == {"id": "task-2"}
+    assert confirm_result == {"status": "succeeded"}
+    assert api.calls[0] == (
+        "POST",
+        "/api/v1/video/chapter-adaptations/adaptation%20%2F%3F%23/shots/shot%20%2F%3F%23/render-tasks",
+        {
+            "json": {
+                "clientRequestId": "request-render-0001",
+                "expectedPromptRevision": 3,
+                "durationSeconds": 5,
+                "resolution": "1080p",
+                "generateAudio": False,
+                "watermark": True,
+            }
+        },
+    )
+    assert api.calls[1][1] == "/api/v1/video/render-tasks/task%20%2F%3F%23/retry"
+    assert api.calls[2][1].endswith(
+        "/adaptation%20%2F%3F%23/shots/shot%20%2F%3F%23/takes/take%20%2F%3F%23/confirm"
+    )
+    assert api.calls[3][1] == "/api/v1/video/takes/take%20%2F%3F%23/content"
+    assert output.read_bytes() == api.binary_response.content
+    assert download_result["takeId"] == "take /?#"
+
+
+def test_post_production_keyframe_commands_preserve_source_fact() -> None:
+    api = RecordingApi(responses=[{"revision": 2}, {"id": "frame-1"}, {"revision": 3}])
+
+    _spec("long.video.keyframe.set").handler(
+        _runtime("long.video.keyframe.set", api),
+        {
+            "adaptationId": "adaptation /?#",
+            "shotId": "shot /?#",
+            "role": "initial_state",
+            "assetId": "asset-1",
+            "sourceTakeId": "take-1",
+            "sourceTimeMs": 1200,
+            "clientRequestId": "keyframe-request-0001",
+            "expectedRevision": 1,
+        },
+    )
+    _spec("long.video.keyframe.extract").handler(
+        _runtime("long.video.keyframe.extract", api),
+        {
+            "takeId": "take /?#",
+            "timestampMs": 1200,
+            "name": "第一镜首帧",
+            "clientRequestId": "keyframe-request-0002",
+        },
+    )
+    _spec("long.video.keyframe.clear").handler(
+        _runtime("long.video.keyframe.clear", api),
+        {
+            "adaptationId": "adaptation /?#",
+            "shotId": "shot /?#",
+            "role": "initial_state",
+            "clientRequestId": "keyframe-request-0003",
+            "expectedRevision": 2,
+        },
+    )
+
+    assert api.calls[0][1].endswith(
+        "/adaptation%20%2F%3F%23/shots/shot%20%2F%3F%23/keyframe-versions"
+    )
+    assert api.calls[0][2]["json"]["sourceTakeId"] == "take-1"
+    assert api.calls[1][1] == "/api/v1/video/takes/take%20%2F%3F%23/frames"
+    assert api.calls[2][2]["json"]["assetId"] is None
+
+
+def test_edit_and_mix_save_accept_external_json_files(tmp_path: Path) -> None:
+    api = RecordingApi(responses=[{"revision": 2}, {"revision": 2}])
+    edit_file = tmp_path / "edit.json"
+    edit_file.write_text(
+        '{"clips":[{"shotId":"shot-1","takeId":null,"sourceInMs":null,'
+        '"sourceOutMs":null,"outputDurationMs":1500,"transitionAfter":"cut",'
+        '"transitionDurationMs":0}]}',
+        encoding="utf-8",
+    )
+    mix_file = tmp_path / "mix.json"
+    mix_file.write_text(
+        '{"audioClips":[],"subtitleCues":[{"shotId":"shot-1",'
+        '"startMs":0,"endMs":1000,"speaker":null,"text":"完整对白"}]}',
+        encoding="utf-8",
+    )
+
+    _spec("long.video.edit.save").handler(
+        _runtime("long.video.edit.save", api),
+        {
+            "adaptationId": "adaptation-1",
+            "episodeNo": 1,
+            "clientRequestId": "edit-request-000001",
+            "expectedRevision": 1,
+            "basedOnVersionId": "edit-base",
+            "editFile": str(edit_file),
+        },
+    )
+    _spec("long.video.mix.save").handler(
+        _runtime("long.video.mix.save", api),
+        {
+            "adaptationId": "adaptation-1",
+            "episodeNo": 1,
+            "clientRequestId": "mix-request-0000001",
+            "expectedRevision": 1,
+            "basedOnVersionId": "mix-base",
+            "editVersionId": "edit-v1",
+            "mixFile": str(mix_file),
+        },
+    )
+
+    assert api.calls[0][2]["json"]["clips"][0]["outputDurationMs"] == 1500
+    assert api.calls[0][2]["json"]["basedOnVersionId"] == "edit-base"
+    assert api.calls[1][2]["json"]["subtitleCues"][0]["text"] == "完整对白"
+    assert api.calls[1][2]["json"]["basedOnVersionId"] == "mix-base"
+
+
+def test_export_start_retry_watch_and_download_use_public_contract(tmp_path: Path) -> None:
+    api = RecordingApi(
+        responses=[
+            {"id": "export-task-1"},
+            {"id": "export-task-2"},
+            {"id": "export-task-1", "status": "pending", "attemptCount": 0},
+            {"id": "export-task-1", "status": "succeeded", "attemptCount": 1},
+        ]
+    )
+    _spec("long.video.export.start").handler(
+        _runtime("long.video.export.start", api),
+        {
+            "adaptationId": "adaptation /?#",
+            "episodeNo": 2,
+            "editVersionId": "edit-1",
+            "mixVersionId": "mix-1",
+            "clientRequestId": "export-request-0001",
+            "resolution": "1080p",
+            "framesPerSecond": 25,
+            "burnSubtitles": False,
+        },
+    )
+    _spec("long.video.export.retry").handler(
+        _runtime("long.video.export.retry", api),
+        {"taskId": "task /?#", "clientRequestId": "export-request-0002"},
+    )
+    watcher = _spec("long.video.export.watch").handler(
+        _runtime("long.video.export.watch", api),
+        {"taskId": "export-task-1"},
+    )
+    frames = list(watcher)
+    output = tmp_path / "第一集.mp4"
+    result = _spec("long.video.export.download").handler(
+        _runtime("long.video.export.download", api),
+        {"exportId": "export /?#", "outputFile": str(output)},
+    )
+
+    assert api.calls[0][1].endswith(
+        "/adaptation%20%2F%3F%23/episodes/2/export-tasks"
+    )
+    assert api.calls[0][2]["json"]["framesPerSecond"] == 25
+    assert api.calls[1][1] == "/api/v1/video/export-tasks/task%20%2F%3F%23/retry"
+    assert [frame["type"] for frame in frames] == ["snapshot", "progress", "terminal"]
+    assert output.read_bytes() == api.binary_response.content
+    assert result["exportId"] == "export /?#"
 
 
 def test_project_create_sends_explicit_defaults() -> None:

@@ -4,6 +4,7 @@ import re
 from ipaddress import ip_network
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Annotated, Literal, Self
+from urllib.parse import urlsplit
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -55,6 +56,13 @@ class Settings(BaseSettings):
     video_dispatch_namespace: str | None = None
     seedance_configured: bool = False
     seedance_enabled: bool = False
+    seedance_model: str = "doubao-seedance-2-5-260628"
+    # 参考图短时地址必须从公网 Nginx 访问；密钥只用于 HMAC，不发送给 Agent/供应商。
+    video_provider_media_base_url: str | None = None
+    video_provider_media_token_secret: SecretStr | None = None
+    seedance_result_allowed_host_suffixes: Annotated[tuple[str, ...], NoDecode] = (
+        ".volces.com",
+    )
 
     @property
     def session_cookie_secure(self) -> bool:
@@ -109,12 +117,81 @@ class Settings(BaseSettings):
             raise ValueError("视频调度命名空间只能包含小写字母、数字和短横线，且最长 32 位")
         return normalized
 
+    @field_validator("video_provider_media_base_url", mode="before")
+    @classmethod
+    def validate_video_provider_media_base_url(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        normalized = str(value).strip().rstrip("/")
+        if not normalized:
+            return None
+        parsed = urlsplit(normalized)
+        if (
+            parsed.scheme not in {"http", "https"}
+            or not parsed.netloc
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError("供应商素材公网基址必须是无查询参数的 HTTP(S) URL")
+        return normalized
+
+    @field_validator("seedance_model", mode="before")
+    @classmethod
+    def validate_seedance_model(cls, value: object) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("Seedance 模型标识不能为空")
+        return value.strip()
+
+    @field_validator("video_provider_media_token_secret", mode="before")
+    @classmethod
+    def normalize_video_provider_media_token_secret(
+        cls,
+        value: object,
+    ) -> object | None:
+        if value is None:
+            return None
+        if isinstance(value, SecretStr):
+            return value if value.get_secret_value().strip() else None
+        return value if str(value).strip() else None
+
+    @field_validator("seedance_result_allowed_host_suffixes", mode="before")
+    @classmethod
+    def validate_seedance_result_allowed_host_suffixes(
+        cls,
+        value: object,
+    ) -> tuple[str, ...]:
+        if isinstance(value, str):
+            candidates = tuple(item.strip().lower() for item in value.split(",") if item.strip())
+        elif isinstance(value, (list, tuple)):
+            candidates = tuple(str(item).strip().lower() for item in value if str(item).strip())
+        else:
+            raise ValueError("Seedance 结果域名后缀必须是列表或逗号分隔文本")
+        if not candidates or any(
+            not item.startswith(".")
+            or "/" in item
+            or ":" in item
+            or item.count(".") < 2
+            for item in candidates
+        ):
+            raise ValueError("Seedance 结果域名后缀格式无效")
+        return candidates
+
     @model_validator(mode="after")
     def validate_production_configuration(self) -> Self:
         if self.video_dispatch_enabled and not self.video_preview_enabled:
             raise ValueError("开启视频后台调度前必须先开启视频预览")
         if self.video_dispatch_enabled and self.video_dispatch_namespace is None:
             raise ValueError("开启视频后台调度必须配置稳定的视频调度命名空间")
+        if self.seedance_enabled and not self.seedance_configured:
+            raise ValueError("开启 Seedance 前必须先确认供应商已配置")
+        if (
+            self.video_provider_media_token_secret is not None
+            and len(self.video_provider_media_token_secret.get_secret_value().encode()) < 32
+        ):
+            raise ValueError("供应商素材短时令牌密钥至少需要 32 个 UTF-8 字节")
         if self.environment != "production":
             return self
 
@@ -122,6 +199,8 @@ class Settings(BaseSettings):
             raise ValueError("生产环境禁止开启仅获开发库授权的视频预览")
         if self.video_dispatch_enabled:
             raise ValueError("生产环境禁止开启开发视频后台调度")
+        if self.seedance_enabled:
+            raise ValueError("生产环境禁止开启尚未获授权的真实视频渲染")
 
         missing_fields = [
             field_name
@@ -176,6 +255,10 @@ def create_testing_settings() -> Settings:
             "video_preview_enabled": False,
             "video_dispatch_enabled": False,
             "video_dispatch_namespace": None,
+            "seedance_configured": False,
+            "seedance_enabled": False,
+            "video_provider_media_base_url": None,
+            "video_provider_media_token_secret": None,
         }
     )
 

@@ -19,6 +19,7 @@ from sqlalchemy import (
     CheckConstraint,
     Integer,
     Text,
+    UniqueConstraint,
     create_engine,
     event,
     inspect,
@@ -98,8 +99,28 @@ EXPECTED_MODEL_TABLES = {
     "VideoShotVisualReferenceBinding",
     "VideoShotPromptVisualReference",
     "VideoAdaptationDecisionCommand",
+    "VideoShotRenderTask",
+    "VideoShotTake",
+    "VideoShotTakeHead",
+    "VideoShotTakeDecisionCommand",
+    "VideoTakeFrameExtraction",
+    "VideoShotKeyframeVersion",
+    "VideoShotKeyframeHead",
+    "VideoEpisodeEditVersion",
+    "VideoEpisodeEditClip",
+    "VideoEpisodeEditHead",
+    "VideoEpisodeMixVersion",
+    "VideoEpisodeAudioClip",
+    "VideoEpisodeSubtitleCue",
+    "VideoEpisodeMixHead",
+    "VideoEpisodeExportTask",
+    "VideoEpisodeExport",
 }
 EXPECTED_TABLES = EXPECTED_MODEL_TABLES | {"_FactionTerritories"}
+DEV_ONLY_UNMAPPED_TOKEN_USAGE_COLUMNS = {
+    "promptCacheMissTokens",
+    "reasoningTokens",
+}
 
 
 def _contract() -> dict[str, Any]:
@@ -202,6 +223,12 @@ def test_every_column_matches_the_frozen_contract() -> None:
     for table_name, expected_table in _business_contract_tables().items():
         actual_table = _mapped_tables()[table_name]
         expected_columns = {column["name"]: column for column in expected_table["columns"]}
+        if table_name == "TokenUsage":
+            expected_columns = {
+                name: column
+                for name, column in expected_columns.items()
+                if name not in DEV_ONLY_UNMAPPED_TOKEN_USAGE_COLUMNS
+            }
         actual_columns = {column.name: column for column in actual_table.columns}
 
         assert set(actual_columns) == set(expected_columns), table_name
@@ -244,7 +271,7 @@ def test_timestamp_text_bigint_and_vector_types_preserve_existing_storage() -> N
     ]
     bigint_columns = [column for column in columns if isinstance(column.type, BigInteger)]
 
-    assert len(timestamp_columns) == 117
+    assert len(timestamp_columns) == 138
     assert all(column.type.precision == 3 for column in timestamp_columns)
     assert all(column.type.timezone is False for column in timestamp_columns)
     assert {(column.table.name, column.name) for column in bigint_columns} == {
@@ -308,6 +335,13 @@ def test_primary_keys_foreign_keys_and_indexes_match_the_frozen_contract() -> No
             if index["name"] != expected_primary_key["name"]
         }
         actual_indexes = {index.name: index for index in table.indexes}
+        # PostgreSQL 会为表内 UNIQUE 约束建立同名唯一索引；同表版本链必须在
+        # CREATE TABLE 时先拥有该约束，不能退化为稍后创建的普通 Index。
+        unique_constraints = {
+            constraint.name: constraint
+            for constraint in table.constraints
+            if isinstance(constraint, UniqueConstraint)
+        }
         if table_name == "TokenUsage":
             # 隔离迁移阶段先由专项测试锁定新增索引；数据库演练后再刷新冻结契约。
             for name in (
@@ -317,8 +351,20 @@ def test_primary_keys_foreign_keys_and_indexes_match_the_frozen_contract() -> No
             ):
                 if name not in expected_indexes:
                     actual_indexes.pop(name, None)
-        assert set(actual_indexes) == set(expected_indexes), table_name
+        actual_index_names = set(actual_indexes) | (
+            set(unique_constraints) & set(expected_indexes)
+        )
+        assert actual_index_names == set(expected_indexes), table_name
         for name, expected in expected_indexes.items():
+            if name not in actual_indexes:
+                constraint = unique_constraints[name]
+                assert expected["unique"] is True
+                assert [column.name for column in constraint.columns] == [
+                    item["column"] for item in expected["keyItems"]
+                ]
+                assert expected["method"] == "btree"
+                assert expected["predicate"] is None
+                continue
             actual = actual_indexes[name]
             assert actual.unique is expected["unique"]
             actual_columns = list(actual.columns)
@@ -366,12 +412,41 @@ def test_primary_keys_foreign_keys_and_indexes_match_the_frozen_contract() -> No
                         "submitted",
                         "processing",
                     ),
-                    "VideoChapterAdaptation_project_chapter_source_key": (
+                        "VideoChapterAdaptation_project_chapter_source_key": (
                         '"chapterId"',
                         "IS NOT NULL",
                         '"lifecycleStatus"',
-                        "active",
-                    ),
+                            "active",
+                        ),
+                        "VideoShotRenderTask_due_idx": (
+                            '"status"',
+                            "pending",
+                            "queued",
+                            "running",
+                            "archiving",
+                        ),
+                        "VideoShotRenderTask_provider_task_key": (
+                            '"providerTaskId"',
+                            "IS NOT NULL",
+                        ),
+                            "VideoShotRenderTask_active_shot_key": (
+                                '"status"',
+                                "pending",
+                            "submitting",
+                            "queued",
+                            "running",
+                                "archiving",
+                            ),
+                            "VideoEpisodeExportTask_active_episode_key": (
+                                '"status"',
+                                "pending",
+                                "rendering",
+                            ),
+                            "VideoEpisodeExportTask_due_idx": (
+                                '"status"',
+                                "pending",
+                                "rendering",
+                            ),
                 }
                 assert name in expected_predicate_tokens
                 assert all(token in predicate for token in expected_predicate_tokens[name])
@@ -404,7 +479,15 @@ def test_primary_keys_foreign_keys_and_indexes_match_the_frozen_contract() -> No
                 constraint.name for constraint in other_constraints
             } == {"TokenUsage_requestId_check"}
         else:
-            assert not other_constraints
+            expected_unique_names = {
+                constraint["name"]
+                for constraint in expected_table["uniqueConstraints"]
+            }
+            assert all(
+                isinstance(constraint, UniqueConstraint)
+                and constraint.name in expected_unique_names
+                for constraint in other_constraints
+            )
 
 
 def test_token_usage_attribution_metadata_is_exact() -> None:
@@ -498,6 +581,14 @@ def test_application_defaults_generate_compatible_ids_and_utc_naive_milliseconds
                     "VideoShotVisualReferenceSet",
                     "VideoShotVisualReferenceBinding",
                     "VideoShotPromptVisualReference",
+                    "VideoShotTakeHead",
+                    "VideoTakeFrameExtraction",
+                    "VideoShotKeyframeHead",
+                    "VideoEpisodeEditClip",
+                    "VideoEpisodeEditHead",
+                    "VideoEpisodeAudioClip",
+                    "VideoEpisodeSubtitleCue",
+                    "VideoEpisodeMixHead",
                 }
         if "updatedAt" in table.c:
             assert table.c.updatedAt.default is not None
@@ -832,6 +923,8 @@ def test_all_model_columns_are_static_mapped_attributes() -> None:
             "metadata_" if column["name"] == "metadata" else column["name"]
             for column in contract["columns"]
         }
+        if table_name == "TokenUsage":
+            expected_attributes -= DEV_ONLY_UNMAPPED_TOKEN_USAGE_COLUMNS
         assert expected_attributes <= set(annotations), table_name
         assert all(get_origin(annotations[name]) is Mapped for name in expected_attributes)
 

@@ -2,11 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, cast
 
 import httpx
 from inkforge_contracts.video import SeedancePromptPackage, VideoContractModel
-from pydantic import Field, SecretStr
+from inkforge_contracts.video_render import (
+    SeedanceProviderStatus,
+    SeedanceRenderError,
+    SeedanceRenderOutput,
+    SeedanceRenderQueryResponse,
+    SeedanceRenderSubmitRequest,
+    SeedanceRenderSubmitResponse,
+)
+from pydantic import Field, JsonValue, SecretStr
 
 
 class SeedanceReference(VideoContractModel):
@@ -31,7 +39,7 @@ class SeedanceTaskStatus(VideoContractModel):
 
 
 class SeedanceProvider:
-    """只负责短提交和短查询；长轮询由耐久 VideoGenerationTask 调度。"""
+    """只负责短提交和短查询；长轮询由 Core 的耐久任务调度。"""
 
     def __init__(
         self,
@@ -121,6 +129,120 @@ class SeedanceProvider:
             raise RuntimeError("SEEDANCE_RESPONSE_INVALID：查询接口缺少状态")
         return SeedanceTaskStatus(taskId=task_id, status=status, raw=payload)
 
+    async def submit_render(
+        self,
+        request: SeedanceRenderSubmitRequest,
+    ) -> SeedanceRenderSubmitResponse:
+        """提交当前章节改编域的一次冻结逐镜请求，不在 Agent 内重编译输入。"""
+
+        self._require_available()
+        content: list[dict[str, object]] = [
+            {"type": "text", "text": request.promptText}
+        ]
+        for reference in sorted(request.references, key=lambda item: item.ordinal):
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": reference.url},
+                    "role": "reference_image",
+                }
+            )
+        body = {
+            "model": request.model,
+            "content": content,
+            "generate_audio": request.generateAudio,
+            "ratio": request.ratio,
+            "duration": request.durationSeconds,
+            "resolution": request.resolution,
+            "watermark": request.watermark,
+        }
+        async with self._client() as client:
+            response = await client.post("/contents/generations/tasks", json=body)
+            response.raise_for_status()
+            payload = response.json()
+        provider_task_id = payload.get("id") if isinstance(payload, dict) else None
+        if not isinstance(provider_task_id, str) or not provider_task_id:
+            raise RuntimeError("SEEDANCE_RESPONSE_INVALID：创建接口缺少任务标识")
+        return SeedanceRenderSubmitResponse(
+            taskId=request.taskId,
+            providerTaskId=provider_task_id,
+        )
+
+    async def query_render(
+        self,
+        *,
+        task_id: str,
+        provider_task_id: str,
+    ) -> SeedanceRenderQueryResponse:
+        """查询并规范化一次供应商状态；临时结果 URL 只在成功响应中返回。"""
+
+        self._require_available()
+        async with self._client() as client:
+            response = await client.get(
+                f"/contents/generations/tasks/{provider_task_id}"
+            )
+            response.raise_for_status()
+            payload = response.json()
+        if not isinstance(payload, dict):
+            raise RuntimeError("SEEDANCE_RESPONSE_INVALID：查询接口返回格式无效")
+        raw_status = payload.get("status")
+        allowed_statuses = {
+            "queued",
+            "running",
+            "succeeded",
+            "failed",
+            "expired",
+            "cancelled",
+        }
+        if not isinstance(raw_status, str) or raw_status not in allowed_statuses:
+            raise RuntimeError("SEEDANCE_STATUS_UNKNOWN：查询接口返回未知状态")
+        status = cast(SeedanceProviderStatus, raw_status)
+        output: SeedanceRenderOutput | None = None
+        error: SeedanceRenderError | None = None
+        if status == "succeeded":
+            content = payload.get("content")
+            video_url = content.get("video_url") if isinstance(content, dict) else None
+            if not isinstance(video_url, str) or not video_url:
+                raise RuntimeError("SEEDANCE_RESPONSE_INVALID：成功任务缺少视频地址")
+            output = SeedanceRenderOutput(
+                videoUrl=video_url,
+                durationSeconds=_optional_float(payload.get("duration")),
+                resolution=_optional_text(payload.get("resolution")),
+                ratio=_optional_text(payload.get("ratio")),
+                framesPerSecond=_optional_int(payload.get("framespersecond")),
+                generateAudio=(
+                    payload.get("generate_audio")
+                    if isinstance(payload.get("generate_audio"), bool)
+                    else None
+                ),
+                usage=_json_object(payload.get("usage")),
+            )
+        elif status in {"failed", "expired", "cancelled"}:
+            raw_error = payload.get("error")
+            code = raw_error.get("code") if isinstance(raw_error, dict) else None
+            message = raw_error.get("message") if isinstance(raw_error, dict) else None
+            error = SeedanceRenderError(
+                code=code if isinstance(code, str) and code else f"SEEDANCE_{status.upper()}",
+                message=(
+                    message
+                    if isinstance(message, str) and message
+                    else f"Seedance 任务状态为 {status}"
+                ),
+            )
+        return SeedanceRenderQueryResponse(
+            taskId=task_id,
+            providerTaskId=provider_task_id,
+            status=status,
+            output=output,
+            error=error,
+        )
+
+    def _require_available(self) -> None:
+        if not self._enabled:
+            raise RuntimeError("SEEDANCE_DISABLED：真实视频渲染尚未启用")
+        if not self.configured:
+            raise RuntimeError("SEEDANCE_NOT_CONFIGURED：缺少火山方舟 API Key")
+
     def _client(self) -> httpx.AsyncClient:
         """每次短操作使用有界连接，避免把签名或密钥持久化到任务。"""
 
@@ -132,3 +254,36 @@ class SeedanceProvider:
             timeout=httpx.Timeout(30, connect=5),
             limits=httpx.Limits(max_connections=2, max_keepalive_connections=1),
         )
+
+
+def _optional_text(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
+
+
+def _optional_float(value: object) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float, str)):
+        try:
+            parsed = float(value)
+        except ValueError:
+            return None
+        return parsed if parsed > 0 else None
+    return None
+
+
+def _optional_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value > 0:
+        return value
+    if isinstance(value, str) and value.isdigit() and int(value) > 0:
+        return int(value)
+    return None
+
+
+def _json_object(value: object) -> dict[str, JsonValue]:
+    if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
+        return {}
+    # 方舟 usage 只应包含 JSON 值；契约校验负责拒绝意外对象。
+    return cast(dict[str, JsonValue], value)

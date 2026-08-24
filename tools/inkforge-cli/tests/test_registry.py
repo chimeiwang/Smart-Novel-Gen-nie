@@ -37,6 +37,26 @@ VIDEO_COMMANDS = {
     "long.video.canon.candidate.set",
     "long.video.canon.approve",
     "long.video.reference.save",
+    "long.video.render.list",
+    "long.video.render.start",
+    "long.video.render.get",
+    "long.video.render.retry",
+    "long.video.render.watch",
+    "long.video.take.confirm",
+    "long.video.take.download",
+    "long.video.post.show",
+    "long.video.keyframe.set",
+    "long.video.keyframe.clear",
+    "long.video.keyframe.extract",
+    "long.video.edit.save",
+    "long.video.edit.get",
+    "long.video.mix.save",
+    "long.video.mix.get",
+    "long.video.export.start",
+    "long.video.export.get",
+    "long.video.export.retry",
+    "long.video.export.watch",
+    "long.video.export.download",
 }
 
 VIDEO_MUTATIONS = {
@@ -53,6 +73,16 @@ VIDEO_MUTATIONS = {
     "long.video.canon.candidate.set",
     "long.video.canon.approve",
     "long.video.reference.save",
+    "long.video.render.start",
+    "long.video.render.retry",
+    "long.video.take.confirm",
+    "long.video.keyframe.set",
+    "long.video.keyframe.clear",
+    "long.video.keyframe.extract",
+    "long.video.edit.save",
+    "long.video.mix.save",
+    "long.video.export.start",
+    "long.video.export.retry",
 }
 
 VIDEO_REQUEST_ID_MUTATIONS = {
@@ -64,6 +94,16 @@ VIDEO_REQUEST_ID_MUTATIONS = {
     "long.video.prompt.start",
     "long.video.canon.candidate.set",
     "long.video.canon.approve",
+    "long.video.render.start",
+    "long.video.render.retry",
+    "long.video.take.confirm",
+    "long.video.keyframe.set",
+    "long.video.keyframe.clear",
+    "long.video.keyframe.extract",
+    "long.video.edit.save",
+    "long.video.mix.save",
+    "long.video.export.start",
+    "long.video.export.retry",
 }
 
 EXPECTED_COMMANDS = {
@@ -297,11 +337,11 @@ def test_long_mutation_and_watcher_capabilities_are_exact() -> None:
 def test_structured_mutation_capabilities_are_exact() -> None:
     registry = get_command_registry()
 
-    assert len(registry) == 105
+    assert len(registry) == 125
     assert sum(
         name.startswith("long.") and spec.mutation
         for name, spec in registry.items()
-    ) == 64
+    ) == 74
     assert len(EXPECTED_STRUCTURED_WRITES) == 36
     assert "long.novel.create" not in EXPECTED_STRUCTURED_WRITES
     assert "long.novel.summary.save" not in EXPECTED_STRUCTURED_WRITES

@@ -107,10 +107,35 @@ production_v2 schema 授权。执行前必须完成完整可恢复备份，在�
 `schema-contract.json` 精确一致。原有四个视频开发迁移继续只允许 `novelwriterdev`，不能改写其
 数据库名保护来执行正式迁移。正式 DDL 前必须先发布同时兼容迁移前基线和迁移后视频域的 Core
 版本：镜像内必须包含当前 full contract 和 `without_video_preview` profile，并先在迁移前结构上通过
-readiness；该 profile 必须覆盖全部 25 张视频表，不能遗漏视觉设定和逐镜参考表。旧 44 表 contract
+readiness；P0 开发 contract 中该 profile 必须覆盖全部 29 张视频表，不能遗漏视觉设定、逐镜参考、渲染任务和
+Take 表。旧 44 表 contract
 镜像不能直接面对迁移后结构。2026-08-23 首次正式执行因现网旧镜像缺少该能力已精确回滚；修正
 profile 后，兼容镜像已先行发布，同一具名迁移已再次执行并通过 full contract 与生产 readiness
 验收。正式库当前保留视频结构，但 `VIDEO_PREVIEW_ENABLED` 仍关闭，结构晋升不等同于功能开放。
+
+用户于 2026-08-24 批准先实现逐镜视频生成 P0，并允许
+`scripts/migrations/20260824_video_shot_render_p0.sql` 只在服务器端 `novelwriterdev` 新增
+`VideoShotRenderTask`、`VideoShotTake`、`VideoShotTakeHead` 和
+`VideoShotTakeDecisionCommand`。脚本必须断言数据库名、事务执行且可重复；执行前完成可恢复备份，执行后重新导出
+完整 schema contract。该授权不包括 `novelwriter` 生产 DDL、开发数据晋升、生产视频开关、API Key 注入 Core，
+也不允许应用启动自动迁移。Seedance 密钥只进入 Agent；Core 只持有 configured/enabled 状态、冻结 manifest、
+短时参考图 HMAC 密钥和供应商结果域名 allowlist。
+
+本次迁移后只读导出同时发现共享开发库已有未写入 main 的可空
+`TokenUsage.promptCacheMissTokens/reasoningTokens` 及三个检查约束，2781 条历史行中两列均无非空值，正式库也没有
+这些字段。P0 不删除、不写入也不把它们晋升生产；full contract 如实记录开发库事实，
+`without_video_preview` 兼容投影同时移除这两列及其检查约束，避免生产 readiness 被无关开发实验破坏。
+
+用户于 2026-08-24 进一步批准 `scripts/migrations/20260824_video_post_production_p1_p3.sql`
+只在服务器端 `novelwriterdev` 增加 12 张 P1–P3 表：受控 Take 抽帧来源、关键帧版本/head、粗剪版本/clip/head、
+声音版本/音频/字幕/head、导出任务与不可变成片，并扩展开发库 `VideoAsset.duty` 的 `sfx`、
+`episode_export`。迁移必须拒绝其他数据库、可重复执行，迁移前完成可恢复备份；应用启动仍不执行 DDL。
+正式库只使用 `without_video_preview` 投影做只读兼容校验，不获得本迁移授权。
+
+Core 运行镜像包含发行版 FFmpeg、ffprobe 和中文字体；命令只能以参数数组读取数据库冻结的受控
+`storageKey`，不得执行 shell 或接受客户端服务器路径。单进程内的耐久导出领取并发固定为 1，缺少媒体工具时
+readiness 只阻断抽帧和导出，不能阻断历史版本读取。成片必须先流式归档为受控 `VideoAsset`，随后才能把导出任务
+标记成功；中断或失败不得留下伪成功记录。Agent Service 仍不接收数据库地址或素材卷。
 
 ## 人工日志
 

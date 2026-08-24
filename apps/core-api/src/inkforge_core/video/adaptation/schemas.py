@@ -14,6 +14,10 @@ from inkforge_contracts.video_adaptation import (
     VisualCanonDuty,
     VisualSettingKind,
 )
+from inkforge_contracts.video_render import (
+    RenderResolution,
+    VideoShotRenderManifest,
+)
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 from ..schemas import VideoAssetResponse
@@ -21,6 +25,18 @@ from ..schemas import VideoAssetResponse
 ClientRequestId = Annotated[
     str,
     StringConstraints(strip_whitespace=True, min_length=16, max_length=128),
+]
+ShotRenderTaskStatus = Literal[
+    "pending",
+    "submitting",
+    "submission_unknown",
+    "queued",
+    "running",
+    "archiving",
+    "succeeded",
+    "failed",
+    "expired",
+    "cancelled",
 ]
 
 
@@ -157,6 +173,28 @@ class SaveShotVisualReferencesRequest(VideoAdaptationApiModel):
         return self
 
 
+class StartShotRenderRequest(VideoAdaptationApiModel):
+    """从镜头当前正式提示词创建一次显式、可能计费的视频任务。"""
+
+    clientRequestId: ClientRequestId
+    expectedPromptRevision: int = Field(ge=1)
+    durationSeconds: int = Field(ge=2, le=12)
+    resolution: RenderResolution = "720p"
+    generateAudio: bool = True
+    watermark: bool = False
+
+
+class RetryShotRenderRequest(VideoAdaptationApiModel):
+    """精确复制旧任务 manifest；不会自动采用后来修改的提示词或参考图。"""
+
+    clientRequestId: ClientRequestId
+
+
+class ConfirmShotTakeRequest(VideoAdaptationApiModel):
+    clientRequestId: ClientRequestId
+    expectedTakeRevision: int = Field(ge=1)
+
+
 class ChapterAdaptationTaskResponse(VideoAdaptationApiModel):
     id: str
     jobId: str
@@ -253,6 +291,79 @@ class ShotPromptCandidateResponse(VideoAdaptationApiModel):
     compiledPrompt: str
     visualReferences: list[ShotVisualReferenceSnapshot]
     qualityWarnings: list[str] = Field(default_factory=list, max_length=12)
+
+
+class VideoRenderReadinessResponse(VideoAdaptationApiModel):
+    configured: bool
+    enabled: bool
+    referenceTransportConfigured: bool
+    model: str
+    blockers: list[str] = Field(default_factory=list)
+
+
+class ShotRenderTaskResponse(VideoAdaptationApiModel):
+    id: str
+    adaptationId: str
+    shotId: str
+    shotPlanVersionId: str
+    promptVersionId: str
+    retryOfTaskId: str | None
+    provider: Literal["seedance"]
+    model: str
+    status: ShotRenderTaskStatus
+    inputHash: str
+    manifest: VideoShotRenderManifest
+    providerTaskId: str | None
+    pollCount: int
+    attemptCount: int
+    lastErrorCode: str | None
+    lastErrorMessage: str | None
+    createdAt: datetime
+    updatedAt: datetime
+    submittedAt: datetime | None
+    completedAt: datetime | None
+
+
+class ShotTakeResponse(VideoAdaptationApiModel):
+    id: str
+    taskId: str
+    adaptationId: str
+    shotId: str
+    shotPlanVersionId: str
+    promptVersionId: str
+    takeNo: int
+    provider: Literal["seedance"]
+    model: str
+    providerTaskId: str
+    inputHash: str
+    providerMetadata: dict[str, object]
+    asset: VideoAssetResponse
+    createdAt: datetime
+
+
+class ShotTakeHeadResponse(VideoAdaptationApiModel):
+    shotId: str
+    currentTakeId: str | None
+    revision: int
+    updatedAt: datetime
+
+
+class ChapterRenderWorkspaceResponse(VideoAdaptationApiModel):
+    adaptationId: str
+    readiness: VideoRenderReadinessResponse
+    tasks: list[ShotRenderTaskResponse]
+    takes: list[ShotTakeResponse]
+    takeHeads: list[ShotTakeHeadResponse]
+
+
+class ShotTakeDecisionResponse(VideoAdaptationApiModel):
+    commandId: str
+    status: Literal["succeeded", "conflict", "rejected"]
+    shotId: str
+    takeId: str
+    currentTakeId: str | None
+    resultingRevision: int | None
+    errorCode: str | None
 
 
 class ChapterAdaptationResponse(VideoAdaptationApiModel):

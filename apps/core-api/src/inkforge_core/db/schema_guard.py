@@ -47,10 +47,36 @@ _VIDEO_PREVIEW_TABLES = frozenset(
         "VideoShotVisualReferenceSet",
         "VideoShotVisualReferenceBinding",
         "VideoShotPromptVisualReference",
+        "VideoShotRenderTask",
+        "VideoShotTake",
+        "VideoShotTakeHead",
+        "VideoShotTakeDecisionCommand",
+        "VideoTakeFrameExtraction",
+        "VideoShotKeyframeVersion",
+        "VideoShotKeyframeHead",
+        "VideoEpisodeEditVersion",
+        "VideoEpisodeEditClip",
+        "VideoEpisodeEditHead",
+        "VideoEpisodeMixVersion",
+        "VideoEpisodeAudioClip",
+        "VideoEpisodeSubtitleCue",
+        "VideoEpisodeMixHead",
+        "VideoEpisodeExportTask",
+        "VideoEpisodeExport",
     }
 )
 _VIDEO_PREVIEW_NOVEL_OBJECTS = frozenset({"Novel_id_userId_key"})
 _VIDEO_PREVIEW_CHAPTER_OBJECTS = frozenset({"Chapter_id_novelId_key"})
+_DEV_ONLY_TOKEN_USAGE_COLUMNS = frozenset(
+    {"promptCacheMissTokens", "reasoningTokens"}
+)
+_DEV_ONLY_TOKEN_USAGE_CHECKS = frozenset(
+    {
+        "TokenUsage_prompt_cache_details_check",
+        "TokenUsage_reasoning_details_check",
+        "TokenUsage_token_details_nonnegative_check",
+    }
+)
 
 
 class ContractIntegrityError(ValueError):
@@ -394,6 +420,15 @@ def project_schema_contract(
             if table_name == "Chapter":
                 _remove_named_objects(item, "uniqueConstraints", _VIDEO_PREVIEW_CHAPTER_OBJECTS)
                 _remove_named_objects(item, "indexes", _VIDEO_PREVIEW_CHAPTER_OBJECTS)
+            if table_name == "TokenUsage":
+                # 共享开发库已有另一条尚未晋升生产的可空 token 明细实验列；
+                # Core 不读写这些列，生产投影必须继续严格匹配现网结构。
+                _remove_named_objects(item, "columns", _DEV_ONLY_TOKEN_USAGE_COLUMNS)
+                _remove_named_objects(
+                    item,
+                    "checkConstraints",
+                    _DEV_ONLY_TOKEN_USAGE_CHECKS,
+                )
             if table_name == "ReviewArtifact":
                 _project_review_artifact_without_video(item)
             remaining_tables.append(item)

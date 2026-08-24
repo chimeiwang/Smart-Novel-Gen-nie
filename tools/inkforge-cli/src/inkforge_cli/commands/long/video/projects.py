@@ -36,6 +36,7 @@ _ASSET_DUTIES = frozenset(
         "camera",
         "voice",
         "ambience",
+        "sfx",
         "music",
     }
 )

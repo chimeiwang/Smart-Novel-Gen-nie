@@ -168,6 +168,7 @@ class _RecordingRepository:
         modality: str,
         duty: str,
         source_kind: str,
+        duration_ms: int | None,
         stored: Any,
     ) -> VideoAssetResponse:
         assert user_id == "user-1"
@@ -181,7 +182,7 @@ class _RecordingRepository:
             duty=duty,
             mimeType=stored.mime_type,
             byteSize=stored.byte_size,
-            durationMs=None,
+            durationMs=duration_ms,
             sha256=stored.sha256,
             sourceKind=source_kind,
             rightsStatus="unconfirmed",
@@ -354,11 +355,13 @@ def _video_service(
     repository: object,
     *,
     enabled: bool,
+    duration_probe: object | None = None,
 ) -> VideoService:
     return VideoService(
         repository,  # type: ignore[arg-type]
         storage=VideoAssetStorage(tmp_path),
         video_preview_enabled=enabled,
+        duration_probe=duration_probe,  # type: ignore[arg-type]
     )
 
 
@@ -637,6 +640,91 @@ async def test_upload_uses_planned_asset_validation_without_fake_materialization
     assert response.modality == "image"
     assert response.duty == "identity"
     assert repository.upload_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_upload_accepts_sfx_but_rejects_internal_episode_export_duty(
+    tmp_path: Path,
+) -> None:
+    class DurationProbe:
+        available = True
+
+        async def probe_duration_ms(self, _path: Path) -> int:
+            return 2_000
+
+    repository = _RecordingRepository()
+    service = _video_service(
+        tmp_path,
+        repository,
+        enabled=True,
+        duration_probe=DurationProbe(),
+    )
+    sfx_upload = UploadFile(
+        BytesIO(b"RIFF\x10\x00\x00\x00WAVEfixture"),
+        filename="door.wav",
+        headers=Headers({"content-type": "audio/wav"}),
+    )
+
+    response = await service.upload_asset(
+        "user-1",
+        "project-1",
+        upload=sfx_upload,
+        name="关门音效",
+        modality="audio",
+        duty="sfx",
+        source_kind="user_upload",
+    )
+
+    assert response.duty == "sfx"
+    assert response.durationMs == 2_000
+    assert repository.upload_calls == 1
+
+    export_upload = UploadFile(
+        BytesIO(b"\x00\x00\x00\x18ftypisomfixture"),
+        filename="fake-export.mp4",
+        headers=Headers({"content-type": "video/mp4"}),
+    )
+    with pytest.raises(ApiError) as caught:
+        await service.upload_asset(
+            "user-1",
+            "project-1",
+            upload=export_upload,
+            name="伪造整集成片",
+            modality="video",
+            duty="episode_export",  # type: ignore[arg-type] - 验证服务层纵深防御
+            source_kind="user_upload",
+        )
+
+    assert caught.value.code == "VIDEO_ASSET_DUTY_MODALITY_INVALID"
+    assert repository.upload_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_audio_upload_without_ffprobe_fails_before_database_and_cleans_file(
+    tmp_path: Path,
+) -> None:
+    repository = _RecordingRepository()
+    service = _video_service(tmp_path, repository, enabled=True)
+    upload = UploadFile(
+        BytesIO(b"RIFF\x10\x00\x00\x00WAVEfixture"),
+        filename="voice.wav",
+        headers=Headers({"content-type": "audio/wav"}),
+    )
+
+    with pytest.raises(ApiError) as caught:
+        await service.upload_asset(
+            "user-1",
+            "project-1",
+            upload=upload,
+            name="旁白",
+            modality="audio",
+            duty="voice",
+            source_kind="user_upload",
+        )
+
+    assert caught.value.code == "VIDEO_MEDIA_PROBE_UNAVAILABLE"
+    assert repository.upload_calls == 0
+    assert list((tmp_path / "video-assets" / "project-1").glob("*")) == []
 
 
 def test_callback_novel_id_must_match_task_project() -> None:

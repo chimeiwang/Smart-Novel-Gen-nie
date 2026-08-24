@@ -29,7 +29,14 @@
   逐镜参考绑定，不授权生产或完整 production_v2 schema。用户于 2026-08-23 另行批准
   `20260823_production_video_adaptation_domain.sql` 只向服务器端 `novelwriter` 正式库晋升这套已验证
   结构，不迁开发数据、不启用视频功能，也不授权完整 production_v2 schema；另有
-  `20260821_token_usage_task_run.sql`，只允许增加 `TokenUsage` 模型调用归集字段、约束和必要索引。
+  `20260821_token_usage_task_run.sql`，只允许增加 `TokenUsage` 模型调用归集字段、约束和必要索引。用户于
+  2026-08-24 批准先实现逐镜视频生成 P0，因此 `20260824_video_shot_render_p0.sql` 只允许对服务器端
+  `novelwriterdev` 开发库增加逐镜 Seedance 耐久任务、不可变候选 Take、Take head 与确认命令；它不授权
+  生产 DDL、开发数据晋升、生产视频开关或旧 `VideoScene`/`VideoGenerationTask` 公共语义复活。同日用户
+  进一步批准一次性实现 P1–P3，因此 `20260824_video_post_production_p1_p3.sql` 只允许对服务器端
+  `novelwriterdev` 开发库增加受控 Take 抽帧来源事实、关键帧版本、分集非破坏性粗剪、声音/字幕版本和耐久整集导出任务；它不授权
+  正式库 DDL、开发数据晋升、生产开关、图片生成或 TTS 供应商接入；仅允许为开发库现有
+  `VideoAsset.duty` 同步增加 `sfx` 与 `episode_export` 两个后期制作职责。
 
 ## 文档类型
 

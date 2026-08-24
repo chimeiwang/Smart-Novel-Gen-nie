@@ -28,6 +28,7 @@ class ServiceScope(StrEnum):
     PORTRAIT_WRITE = "portrait:write"
     QUALITY_WRITE = "quality:write"
     VIDEO_WRITE = "video:write"
+    VIDEO_RENDER = "video:render"
     BILLING_AUTHORIZE = "billing:authorize"
     BILLING_USAGE_WRITE = "billing:usage:write"
 
@@ -45,6 +46,7 @@ WRITE_SERVICE_SCOPES = frozenset(
         ServiceScope.PORTRAIT_WRITE,
         ServiceScope.QUALITY_WRITE,
         ServiceScope.VIDEO_WRITE,
+        ServiceScope.VIDEO_RENDER,
         ServiceScope.BILLING_USAGE_WRITE,
     }
 )

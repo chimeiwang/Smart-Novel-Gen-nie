@@ -23,6 +23,41 @@ EXPECTED_VIDEO_PATHS = {
         "/api/v1/video/chapter-adaptations/{adaptation_id}/shots/"
         "{shot_id}/visual-references"
     ),
+    "/api/v1/video/chapter-adaptations/{adaptation_id}/renders",
+    (
+        "/api/v1/video/chapter-adaptations/{adaptation_id}/shots/"
+        "{shot_id}/render-tasks"
+    ),
+    "/api/v1/video/render-tasks/{task_id}",
+    "/api/v1/video/render-tasks/{task_id}/retry",
+    (
+        "/api/v1/video/chapter-adaptations/{adaptation_id}/shots/"
+        "{shot_id}/takes/{take_id}/confirm"
+    ),
+    "/api/v1/video/takes/{take_id}/content",
+    "/api/v1/video/takes/{take_id}/frames",
+    "/api/v1/video/chapter-adaptations/{adaptation_id}/post-production",
+    (
+        "/api/v1/video/chapter-adaptations/{adaptation_id}/shots/"
+        "{shot_id}/keyframe-versions"
+    ),
+    (
+        "/api/v1/video/chapter-adaptations/{adaptation_id}/episodes/"
+        "{episode_no}/edit-versions"
+    ),
+    "/api/v1/video/edit-versions/{version_id}",
+    (
+        "/api/v1/video/chapter-adaptations/{adaptation_id}/episodes/"
+        "{episode_no}/mix-versions"
+    ),
+    "/api/v1/video/mix-versions/{version_id}",
+    (
+        "/api/v1/video/chapter-adaptations/{adaptation_id}/episodes/"
+        "{episode_no}/export-tasks"
+    ),
+    "/api/v1/video/export-tasks/{task_id}",
+    "/api/v1/video/export-tasks/{task_id}/retry",
+    "/api/v1/video/exports/{export_id}/content",
 }
 
 
@@ -43,7 +78,7 @@ def test_remaining_public_video_paths_are_exact() -> None:
     )
 
     assert paths == EXPECTED_VIDEO_PATHS
-    assert operation_count == 20
+    assert operation_count == 37
     assert not any("/scenes" in path for path in paths)
 
 
@@ -65,3 +100,17 @@ def test_legacy_video_scene_contracts_are_absent_from_openapi() -> None:
     assert forbidden.isdisjoint(schemas)
     assert "sceneCount" not in schemas["VideoProjectResponse"]["properties"]
     assert "scenes" not in schemas["VideoProjectDetailResponse"]["properties"]
+
+
+def test_episode_export_duty_is_output_only_in_public_contract() -> None:
+    """浏览器可读成片职责，但不能把任意上传视频伪装成受控整集导出。"""
+
+    schemas = create_app(testing=True).openapi()["components"]["schemas"]
+    upload_duties = schemas[
+        "Body_upload_asset_api_v1_video_projects__project_id__assets_post"
+    ]["properties"]["duty"]["enum"]
+    response_duties = schemas["VideoAssetResponse"]["properties"]["duty"]["enum"]
+
+    assert "sfx" in upload_duties
+    assert "episode_export" not in upload_duties
+    assert "episode_export" in response_duties
