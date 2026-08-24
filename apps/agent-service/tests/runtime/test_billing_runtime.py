@@ -13,6 +13,7 @@ from inkforge_agents.providers.base import (
 from inkforge_agents.runtime.model_policy import LEGACY_PROVIDER_DEFAULT, REPORT_NO_THINKING
 from inkforge_agents.runtime.model_runtime import (
     ModelCallContext,
+    ModelCallFailureLogRecord,
     ModelCallLogRecord,
     ModelRuntime,
 )
@@ -78,9 +79,13 @@ class Billing:
 class ModelObserver:
     def __init__(self) -> None:
         self.calls: list[ModelCallLogRecord] = []
+        self.failures: list[ModelCallFailureLogRecord] = []
 
     def record_model_call(self, record: ModelCallLogRecord) -> None:
         self.calls.append(record)
+
+    def record_model_failure(self, record: ModelCallFailureLogRecord) -> None:
+        self.failures.append(record)
 
 
 @pytest.mark.asyncio
@@ -205,6 +210,7 @@ async def test_model_runtime_limits_billable_authorizations() -> None:
     assert len(billing.authorizations) == 4
     assert billing.maximum == 3
 
+
 @pytest.mark.asyncio
 async def test_billable_runtime_authorizes_then_reports_exact_usage() -> None:
     billing = Billing()
@@ -304,13 +310,21 @@ async def test_billable_runtime_classifies_authorization_failure() -> None:
 
 
 @pytest.mark.asyncio
-async def test_billable_runtime_classifies_provider_failure() -> None:
+async def test_billable_runtime_classifies_provider_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     class FailingProvider(Provider):
         async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
             del request
             raise RuntimeError("供应商拒绝请求")
 
-    runtime = ModelRuntime(FailingProvider(), billing=Billing())  # type: ignore[arg-type]
+    observer = ModelObserver()
+    caplog.set_level("WARNING", logger="inkforge_agents.runtime.model_runtime")
+    runtime = ModelRuntime(  # type: ignore[arg-type]
+        FailingProvider(),
+        billing=Billing(),
+        observer=observer,
+    )
 
     with pytest.raises(RuntimeError, match="^MODEL_PROVIDER_FAILED："):
         await runtime.run_turn(
@@ -328,6 +342,22 @@ async def test_billable_runtime_classifies_provider_failure() -> None:
                 agentId="写作",
             ),
         )
+
+    assert len(observer.failures) == 1
+    failure = observer.failures[0]
+    assert failure.context.taskId == "task-1"
+    assert failure.provider == "openai_compatible"
+    assert failure.model == "deepseek-v4-flash"
+    assert failure.failureCode == "unexpected_error"
+    assert failure.exceptionType == "RuntimeError"
+    assert failure.messageCount == 1
+    assert failure.toolCount == 0
+    assert failure.requestedMaxOutputTokens == 128
+    assert failure.elapsedMs >= 0
+    assert "task_id=task-1" in caplog.text
+    assert "run_id=run-1" in caplog.text
+    assert "failure_code=unexpected_error" in caplog.text
+    assert "供应商拒绝请求" not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -371,6 +401,7 @@ async def test_billable_runtime_classifies_usage_report_failure_without_logging(
     assert len(provider.requests) == 1
     assert len(billing.usages) == 1
     assert observer.calls == []
+
 
 @pytest.mark.asyncio
 async def test_结构化输出模式把响应_schema_纳入预授权估算() -> None:

@@ -36,7 +36,7 @@ from inkforge_contracts.video import (
 )
 from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
-from openai import AsyncOpenAI, InternalServerError
+from openai import APITimeoutError, AsyncOpenAI
 
 
 class ModelTurnRequest(BaseModelTurnRequest):
@@ -98,12 +98,41 @@ class StubModel:
         return self._response
 
 
+class TimeoutStubModel(StubModel):
+    async def ainvoke(self, messages: object, **kwargs: object) -> AIMessage:
+        del messages, kwargs
+        raise APITimeoutError(request=httpx.Request("POST", "https://api.deepseek.com/chat"))
+
+
 def provider_with_response(response: AIMessage) -> OpenAICompatibleProvider:
     provider = OpenAICompatibleProvider.__new__(OpenAICompatibleProvider)
     provider._model = StubModel(response)  # type: ignore[attr-defined]
     provider._strict_model = provider._model  # type: ignore[attr-defined]
     provider.model_name = "deepseek-v4-flash"
     return provider
+
+
+@pytest.mark.asyncio
+async def test_normal_chat_timeout_is_sanitized_transport_error() -> None:
+    """普通工具通道的超时也必须脱敏归一化，不能只覆盖结构化输出。"""
+
+    provider = provider_with_response(AIMessage(content="不会返回"))
+    provider._model = TimeoutStubModel(AIMessage(content="不会返回"))  # type: ignore[attr-defined]
+
+    with pytest.raises(ProviderTransportError) as caught:
+        await provider.complete_turn(
+            ModelTurnRequest(
+                messages=[{"role": "user", "content": "不能进入异常链的提示词"}],
+                tools=[],
+                maxOutputTokens=128,
+            )
+        )
+
+    assert caught.value.code == "timeout_error"
+    assert caught.value.statusCode is None
+    assert caught.value.requestId is None
+    assert caught.value.__cause__ is None
+    assert caught.value.__context__ is None
 
 
 def strict_recovery_request(parameters: dict[str, Any]) -> ModelTurnRequest:
@@ -768,7 +797,7 @@ async def test_deepseek_strict_http_failure_is_not_retried(
             )
         )
 
-        with pytest.raises(InternalServerError):
+        with pytest.raises(ProviderTransportError) as caught:
             await provider.complete_turn(
                 strict_recovery_request(
                     {
@@ -781,6 +810,8 @@ async def test_deepseek_strict_http_failure_is_not_retried(
             )
 
     assert request_count == 1
+    assert caught.value.code == "http_error"
+    assert caught.value.statusCode == 500
 
 
 @pytest.mark.asyncio
@@ -906,11 +937,9 @@ def test_cinematography_v2_normalizes_only_later_explicit_lighting_inheritance(
     }
     original = json.loads(json.dumps(parsed))
 
-    normalized, recovery = (
-        provider_module._normalize_cinematography_lighting_inheritance(
-            parsed,
-            format_name="video_cinematography_draft_v2",
-        )
+    normalized, recovery = provider_module._normalize_cinematography_lighting_inheritance(
+        parsed,
+        format_name="video_cinematography_draft_v2",
     )
 
     assert recovery == "normalize_cinematography_lighting_inheritance"
@@ -935,11 +964,9 @@ def test_cinematography_v2_does_not_guess_other_invalid_lighting(
 
     parsed = {"beatsByAlias": {"B02": {"lightingCue": lighting}}}
 
-    normalized, recovery = (
-        provider_module._normalize_cinematography_lighting_inheritance(
-            parsed,
-            format_name="video_cinematography_draft_v2",
-        )
+    normalized, recovery = provider_module._normalize_cinematography_lighting_inheritance(
+        parsed,
+        format_name="video_cinematography_draft_v2",
     )
 
     assert normalized is parsed
@@ -975,11 +1002,9 @@ def test_cinematography_v2_normalizes_closed_no_fill_placeholder_direction(
     }
     original = json.loads(json.dumps(parsed))
 
-    normalized, recovery = (
-        provider_module._normalize_cinematography_no_fill_direction(
-            parsed,
-            format_name="video_cinematography_draft_v2",
-        )
+    normalized, recovery = provider_module._normalize_cinematography_no_fill_direction(
+        parsed,
+        format_name="video_cinematography_draft_v2",
     )
 
     assert recovery == "normalize_cinematography_no_fill_direction"
@@ -992,16 +1017,26 @@ def test_cinematography_v2_normalizes_closed_no_fill_placeholder_direction(
 @pytest.mark.parametrize(
     ("lighting", "format_name"),
     [
-        ({"fillStrategy": "soft_fill", "fillDirection": "none", "fillRelativeStops": -8},
-         "video_cinematography_draft_v2"),
-        ({"fillStrategy": "none", "fillDirection": "none", "fillRelativeStops": -9},
-         "video_cinematography_draft_v2"),
-        ({"fillStrategy": "none", "fillDirection": None, "fillRelativeStops": -8},
-         "video_cinematography_draft_v2"),
-        ({"fillStrategy": "none", "fillDirection": 0, "fillRelativeStops": -8},
-         "video_cinematography_draft_v2"),
-        ({"fillStrategy": "none", "fillDirection": "none", "fillRelativeStops": -8},
-         "video_cinematography_draft_v1"),
+        (
+            {"fillStrategy": "soft_fill", "fillDirection": "none", "fillRelativeStops": -8},
+            "video_cinematography_draft_v2",
+        ),
+        (
+            {"fillStrategy": "none", "fillDirection": "none", "fillRelativeStops": -9},
+            "video_cinematography_draft_v2",
+        ),
+        (
+            {"fillStrategy": "none", "fillDirection": None, "fillRelativeStops": -8},
+            "video_cinematography_draft_v2",
+        ),
+        (
+            {"fillStrategy": "none", "fillDirection": 0, "fillRelativeStops": -8},
+            "video_cinematography_draft_v2",
+        ),
+        (
+            {"fillStrategy": "none", "fillDirection": "none", "fillRelativeStops": -8},
+            "video_cinematography_draft_v1",
+        ),
     ],
 )
 def test_cinematography_no_fill_direction_does_not_guess_other_shapes(
@@ -1012,11 +1047,9 @@ def test_cinematography_no_fill_direction_does_not_guess_other_shapes(
 
     parsed = {"beatsByAlias": {"B01": {"lightingCue": lighting}}}
 
-    normalized, recovery = (
-        provider_module._normalize_cinematography_no_fill_direction(
-            parsed,
-            format_name=format_name,
-        )
+    normalized, recovery = provider_module._normalize_cinematography_no_fill_direction(
+        parsed,
+        format_name=format_name,
     )
 
     assert normalized is parsed
@@ -1047,11 +1080,9 @@ def test_cinematography_v2_normalizes_known_active_fill_direction_alias(
     }
     original = json.loads(json.dumps(parsed))
 
-    normalized, recovery = (
-        provider_module._normalize_cinematography_fill_direction_alias(
-            parsed,
-            format_name="video_cinematography_draft_v2",
-        )
+    normalized, recovery = provider_module._normalize_cinematography_fill_direction_alias(
+        parsed,
+        format_name="video_cinematography_draft_v2",
     )
 
     assert recovery == "normalize_cinematography_fill_direction_alias"
@@ -1063,14 +1094,13 @@ def test_cinematography_v2_normalizes_known_active_fill_direction_alias(
 @pytest.mark.parametrize(
     ("lighting", "format_name"),
     [
-        ({"fillStrategy": "none", "fillDirection": "camera_left"},
-         "video_cinematography_draft_v2"),
-        ({"fillStrategy": "soft_fill", "fillDirection": "none"},
-         "video_cinematography_draft_v2"),
-        ({"fillStrategy": "soft_fill", "fillDirection": "both"},
-         "video_cinematography_draft_v2"),
-        ({"fillStrategy": "soft_fill", "fillDirection": "camera_left"},
-         "video_cinematography_draft_v1"),
+        ({"fillStrategy": "none", "fillDirection": "camera_left"}, "video_cinematography_draft_v2"),
+        ({"fillStrategy": "soft_fill", "fillDirection": "none"}, "video_cinematography_draft_v2"),
+        ({"fillStrategy": "soft_fill", "fillDirection": "both"}, "video_cinematography_draft_v2"),
+        (
+            {"fillStrategy": "soft_fill", "fillDirection": "camera_left"},
+            "video_cinematography_draft_v1",
+        ),
     ],
 )
 def test_cinematography_fill_direction_alias_does_not_guess_other_shapes(
@@ -1081,11 +1111,9 @@ def test_cinematography_fill_direction_alias_does_not_guess_other_shapes(
 
     parsed = {"beatsByAlias": {"B01": {"lightingCue": lighting}}}
 
-    normalized, recovery = (
-        provider_module._normalize_cinematography_fill_direction_alias(
-            parsed,
-            format_name=format_name,
-        )
+    normalized, recovery = provider_module._normalize_cinematography_fill_direction_alias(
+        parsed,
+        format_name=format_name,
     )
 
     assert normalized is parsed
@@ -1109,11 +1137,9 @@ def test_cinematography_v2_normalizes_only_bounded_unsigned_magnitudes() -> None
     }
     original = json.loads(json.dumps(parsed))
 
-    normalized, recovery = (
-        provider_module._normalize_cinematography_unsigned_magnitudes(
-            parsed,
-            format_name="video_cinematography_draft_v2",
-        )
+    normalized, recovery = provider_module._normalize_cinematography_unsigned_magnitudes(
+        parsed,
+        format_name="video_cinematography_draft_v2",
     )
 
     assert recovery == "normalize_cinematography_unsigned_magnitudes"
@@ -1121,9 +1147,7 @@ def test_cinematography_v2_normalizes_only_bounded_unsigned_magnitudes() -> None
     assert normalized["lightingSetup"]["keyToFillStops"] == 3.5
     movement = normalized["beatsByAlias"]["B01"]["cameraSpec"]["movement"]
     assert movement == {"travelDistanceMeters": 1.25, "rotationDegrees": 45}
-    assert normalized["beatsByAlias"]["B01"]["cameraSpec"]["position"] == {
-        "azimuthDegrees": -30
-    }
+    assert normalized["beatsByAlias"]["B01"]["cameraSpec"]["position"] == {"azimuthDegrees": -30}
 
 
 @pytest.mark.parametrize(
@@ -1157,11 +1181,9 @@ def test_cinematography_unsigned_magnitude_recovery_rejects_other_values(
     else:
         parsed["beatsByAlias"]["B01"]["cameraSpec"]["movement"][field] = value
 
-    normalized, recovery = (
-        provider_module._normalize_cinematography_unsigned_magnitudes(
-            parsed,
-            format_name="video_cinematography_draft_v2",
-        )
+    normalized, recovery = provider_module._normalize_cinematography_unsigned_magnitudes(
+        parsed,
+        format_name="video_cinematography_draft_v2",
     )
 
     assert normalized is parsed
@@ -1242,12 +1264,10 @@ def test_cinematography_v2_recovers_unique_infeasible_continuous_as_cut() -> Non
     }
     original = json.loads(json.dumps(parsed))
 
-    normalized, recovery = (
-        provider_module._normalize_cinematography_infeasible_continuous_cut(
-            parsed,
-            format_name="video_cinematography_draft_v2",
-            validator=_shot_progression_recovery_validator(),
-        )
+    normalized, recovery = provider_module._normalize_cinematography_infeasible_continuous_cut(
+        parsed,
+        format_name="video_cinematography_draft_v2",
+        validator=_shot_progression_recovery_validator(),
     )
 
     assert recovery == "normalize_cinematography_infeasible_continuous_cut"
@@ -1279,12 +1299,10 @@ def test_cinematography_progression_recovery_does_not_guess_other_shapes(
         }
     }
 
-    normalized, recovery = (
-        provider_module._normalize_cinematography_infeasible_continuous_cut(
-            parsed,
-            format_name=format_name,
-            validator=_shot_progression_recovery_validator(),
-        )
+    normalized, recovery = provider_module._normalize_cinematography_infeasible_continuous_cut(
+        parsed,
+        format_name=format_name,
+        validator=_shot_progression_recovery_validator(),
     )
 
     assert normalized is parsed
@@ -1762,11 +1780,9 @@ def test_scene_asset_recovery_discards_only_server_owned_fields() -> None:
 
     with_unknown = deepcopy(raw)
     with_unknown["assets"]["asset01"]["privateField"] = "仍须拒绝"
-    normalized_unknown, _recovery = (
-        provider_module._normalize_scene_asset_source_redundancy(
-            with_unknown,
-            format_name="video_scene_assets_draft_v1",
-        )
+    normalized_unknown, _recovery = provider_module._normalize_scene_asset_source_redundancy(
+        with_unknown,
+        format_name="video_scene_assets_draft_v1",
     )
     assert "privateField" in normalized_unknown["assets"]["asset01"]
     with pytest.raises(jsonschema_rs.ValidationError):
