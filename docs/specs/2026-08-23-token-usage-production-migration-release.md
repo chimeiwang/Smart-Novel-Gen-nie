@@ -19,6 +19,11 @@
   `novelwriter`，只把数据库路径派生为 `novelwriterdev`；query 只允许宿主机 libpq 与 Core asyncpg 都支持的
   `sslmode` 和 `application_name`，拒绝任何可覆盖数据库、主机或身份的参数。派生后以只读查询再次确认数据库名，不能
   输出连接串。
+- `.env` 的主机必须是生产 Compose 使用的 `host.docker.internal`。宿主机上的 `psql`/`pg_dump` 只把这个
+  固定主机映射为 `127.0.0.1`，Core 容器接收的完整 dev URL 继续保留 `host.docker.internal`；其他源主机一律
+  拒绝。解析失败只允许输出固定原因码，不能回显 URL 或异常正文。
+- 根目录 `.env.example` 是 README 指定的生产配置起点，数据库名必须与现网正式库一致为 `novelwriter`；开发
+  配置仍由 `.env.local.example` 指向 `novelwriterdev`。
 - 宿主机 `psql`、`pg_dump` 只接收不含密码的连接 URL，密码只写入运行编号绑定、权限为 `0600` 的临时
   `.pgpass`；Core 容器只通过标准输入读取完整 dev URL。临时凭据不得进入命令行、日志或 Artifact，并由
   远端和 runner 两层 trap 精确清理。
@@ -38,8 +43,8 @@
 
 ### 3.2 Dev 迁移与 contract
 
-1. 手工触发工作流 `inspect`，确认服务器存在 `psql`、`pg_dump`、Docker，并能从 `.env` 安全派生、只读连接
-   `novelwriterdev`。
+1. 手工触发工作流 `inspect`，确认服务器存在 `psql`、`pg_dump`、Docker，并能从 `.env` 安全派生、经宿主机
+   回环地址只读连接 `novelwriterdev`。诊断分支已于 2026-08-24 完成该只读检查；main 最终版本仍需再次确认。
 2. 手工触发 `migrate_dev`：备份、校验 SQL 哈希、执行两次、验证旧行明细保持 NULL。
 3. 使用当前 Core 容器的只读 schema 导出能力生成 contract，并通过 Actions Artifact 下载。
 4. 将真实 contract 写回功能分支，删除 `test_model_metadata.py` 的临时内存兼容层，运行 schema/全量验证。
