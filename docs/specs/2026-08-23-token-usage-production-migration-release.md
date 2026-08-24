@@ -28,6 +28,8 @@
   `.pgpass`；Core 容器只通过标准输入读取完整 dev URL。临时凭据不得进入命令行、日志或 Artifact，并由
   远端和 runner 两层 trap 精确清理。
 - 迁移 SQL 自身必须拒绝 `current_database() <> 'novelwriterdev'`，避免工作流配置错误触及生产库。
+- dev SQL 不得在部署时动态替换数据库名。生产使用独立固定 forward SQL，SQL 自身只允许 `novelwriter`，并
+  维护独立 SHA；固定 rollback SQL同样只允许 `novelwriter`。
 - dev 与生产迁移前必须生成 PostgreSQL custom-format 备份和 `SHA256SUMS`，迁移必须连续执行两次。服务器
   部署用户对 `/srv/backups/inkforge-dev` 和 `/srv/backups/inkforge` 均无写权限；dev 备份固定写入应用目录下
   的私有 `.token-usage-dev-backups`，不得因此提权或复用生产备份目录。
@@ -40,6 +42,10 @@
   约束，以数据库解析后的规范定义作为比较基准，仍需逐个 `VALIDATE CONSTRAINT`。
 - 生产迁移由部署脚本在新容器启动前执行。部署失败且本次部署首次增加这些字段时，先运行固定 down
   脚本删除三个约束与两个纯诊断列，再恢复旧镜像；正式正文、用户数据和旧 TokenUsage 字段不得变更。
+- 生产部署通过固定 helper 安全解析 `.env`：密码只进入 `0600` 临时 `.pgpass`，宿主机命令只接收映射到
+  `127.0.0.1` 的无密码 URL。生产备份写入应用私有 `.token-usage-production-backups` 并校验。
+- 生产 schema 只接受 `unmigrated` 或完整 `migrated`；任意缺列、缺约束、未验证或定义漂移均视为 `partial`，
+  必须在备份、迁移和切换镜像前停止。
 - `reasoning_content` 正文不进入数据库、构建产物或工作流 Artifact。工作流 Artifact 只允许包含结构契约和非敏感校验元数据。
 
 ## 3. 分阶段流程
@@ -62,9 +68,12 @@
 ### 3.3 生产迁移与发布
 
 1. 功能分支经 PR 合入 main；CI 完整通过后进入 production environment。
-2. 部署脚本确认旧镜像可回滚，再备份生产数据库并运行固定迁移两次。
+2. 部署脚本确认旧镜像可回滚，再判定生产 schema；仅 `unmigrated` 时备份并运行固定生产 forward 两次。
+   备份成功后、第一次 forward 前即记录本次部署的回退责任；若 SQL 尚未提交，down 对 `unmigrated` 安全空操作，
+   从而消除 SQL 已提交与 shell 标志赋值之间的空窗。
 3. 启动新镜像，执行 Compose、只读 schema 指纹和 HTTPS smoke。
-4. 任一部署验收失败时，只在确认迁移由本次部署首次应用后执行固定 down，再恢复旧镜像和旧 schema 就绪状态。
+4. 任一部署验收失败时，只在确认迁移由本次部署首次应用后执行固定 down；down 失败则禁止恢复旧镜像，
+   down 成功且本次已经开始镜像切换时才恢复旧镜像和旧 schema 就绪状态。
 
 ## 4. 验收
 

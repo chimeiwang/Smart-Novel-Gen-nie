@@ -232,6 +232,9 @@ def _run_deploy(
     schema_verify_status: int = 0,
     agent_ready_sequence: str = "",
     agent_log_init_status: int = 0,
+    migration_state: str = "migrated",
+    migration_up_fail_attempt: int = 0,
+    migration_down_status: int = 0,
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     app_dir = tmp_path / "app"
     bin_dir = tmp_path / "bin"
@@ -240,7 +243,7 @@ def _run_deploy(
     (app_dir / "scripts").mkdir(parents=True)
     bin_dir.mkdir()
     (app_dir / ".env").write_text(
-        "DATABASE_URL=postgresql+asyncpg://user:pass@host.docker.internal:5432/inkforge\n",
+        "DATABASE_URL=postgresql+asyncpg://user:pass@host.docker.internal:5432/novelwriter\n",
         encoding="utf-8",
     )
     (app_dir / "infra" / "compose.yaml").write_text(
@@ -257,6 +260,29 @@ def _run_deploy(
     shutil.copy2(ROOT / "scripts" / "compose_smoke.sh", app_dir / "scripts")
     (app_dir / "scripts" / "compose_smoke.sh").chmod(0o755)
     shutil.copy2(ROOT / "scripts" / "agent_readiness_probe.py", app_dir / "scripts")
+    _write_executable(
+        app_dir / "scripts" / "token-usage-production-migration.sh",
+        "#!/bin/sh\n"
+        "action=$1\n"
+        "printf 'migration %s\\n' \"$action\" >> \"$FAKE_DOCKER_LOG\"\n"
+        "state_file=$FAKE_MIGRATION_STATE_FILE\n"
+        "case \"$action\" in\n"
+        "  status)\n"
+        "    if [ -f \"$state_file\" ]; then sed -n '1p' \"$state_file\"; "
+        "else printf '%s\\n' \"$FAKE_MIGRATION_STATE\"; fi ;;\n"
+        "  backup) exit 0 ;;\n"
+        "  up)\n"
+        "    count=0; [ ! -f \"$FAKE_MIGRATION_UP_COUNT\" ] || "
+        "count=$(sed -n '1p' \"$FAKE_MIGRATION_UP_COUNT\")\n"
+        "    count=$((count + 1)); printf '%s\\n' \"$count\" > \"$FAKE_MIGRATION_UP_COUNT\"\n"
+        "    [ \"$count\" -ne \"$FAKE_MIGRATION_UP_FAIL_ATTEMPT\" ] || exit 31\n"
+        "    printf 'migrated\\n' > \"$state_file\" ;;\n"
+        "  down)\n"
+        "    [ \"$FAKE_MIGRATION_DOWN_STATUS\" -eq 0 ] || exit \"$FAKE_MIGRATION_DOWN_STATUS\"\n"
+        "    printf 'unmigrated\\n' > \"$state_file\" ;;\n"
+        "  *) exit 2 ;;\n"
+        "esac\n",
+    )
     shutil.copy2(FAKE_DOCKER, bin_dir / "docker")
     (bin_dir / "docker").chmod(0o755)
     _write_executable(
@@ -281,6 +307,8 @@ def _run_deploy(
     )
     log_path = tmp_path / "docker.log"
     agent_counter_path = tmp_path / "agent-ready-counter"
+    migration_state_path = tmp_path / "migration-state"
+    migration_up_count_path = tmp_path / "migration-up-count"
     env = {
         **os.environ,
         "APP_DIR": _posix_path(app_dir),
@@ -295,6 +323,11 @@ def _run_deploy(
         "FAKE_AGENT_READY_COUNTER": _posix_path(agent_counter_path),
         "FAKE_AGENT_READY_SEQUENCE": agent_ready_sequence,
         "FAKE_AGENT_LOG_INIT_STATUS": str(agent_log_init_status),
+        "FAKE_MIGRATION_STATE": migration_state,
+        "FAKE_MIGRATION_STATE_FILE": _posix_path(migration_state_path),
+        "FAKE_MIGRATION_UP_COUNT": _posix_path(migration_up_count_path),
+        "FAKE_MIGRATION_UP_FAIL_ATTEMPT": str(migration_up_fail_attempt),
+        "FAKE_MIGRATION_DOWN_STATUS": str(migration_down_status),
         "SMOKE_AGENT_MAX_ATTEMPTS": "1",
         "SMOKE_AGENT_REQUIRED_SUCCESSES": "1",
         "SMOKE_AGENT_POLL_SECONDS": "0",
@@ -521,3 +554,111 @@ def test_smoke_failure_refreshes_nginx_for_new_and_rollback_tags(
         ("tag=previous-tag", "Nginx"),
     ]
     assert "新版本部署失败，旧版本已恢复" in result.stdout
+
+
+def test_unmigrated_schema_is_backed_up_and_migrated_twice_before_switch(
+    tmp_path: Path,
+) -> None:
+    result, log = _run_deploy(tmp_path, previous_state="valid", migration_state="unmigrated")
+
+    assert result.returncode == 0, result.stderr
+    lines = log.splitlines()
+    assert [line for line in lines if line.startswith("migration ")] == [
+        "migration status",
+        "migration backup",
+        "migration up",
+        "migration status",
+        "migration up",
+        "migration status",
+    ]
+    assert lines.index("migration up", lines.index("migration up") + 1) < next(
+        index for index, line in enumerate(lines) if line.endswith(" up --no-build -d --wait")
+    )
+
+
+def test_partial_schema_stops_before_backup_or_version_switch(tmp_path: Path) -> None:
+    result, log = _run_deploy(tmp_path, previous_state="valid", migration_state="partial")
+
+    assert result.returncode != 0
+    assert [line for line in log.splitlines() if line.startswith("migration ")] == [
+        "migration status"
+    ]
+    assert _full_stack_up_lines(log) == []
+
+
+def test_second_forward_failure_runs_down_without_switching_images(tmp_path: Path) -> None:
+    result, log = _run_deploy(
+        tmp_path,
+        previous_state="valid",
+        migration_state="unmigrated",
+        migration_up_fail_attempt=2,
+    )
+
+    assert result.returncode == 31
+    assert [line for line in log.splitlines() if line.startswith("migration ")] == [
+        "migration status",
+        "migration backup",
+        "migration up",
+        "migration status",
+        "migration up",
+        "migration down",
+    ]
+    assert _full_stack_up_lines(log) == []
+
+
+def test_first_forward_failure_runs_safe_down_without_switching_images(
+    tmp_path: Path,
+) -> None:
+    result, log = _run_deploy(
+        tmp_path,
+        previous_state="valid",
+        migration_state="unmigrated",
+        migration_up_fail_attempt=1,
+    )
+
+    assert result.returncode == 31
+    assert [line for line in log.splitlines() if line.startswith("migration ")] == [
+        "migration status",
+        "migration backup",
+        "migration up",
+        "migration down",
+    ]
+    assert _full_stack_up_lines(log) == []
+
+
+def test_failed_new_version_downs_schema_before_restoring_previous_image(
+    tmp_path: Path,
+) -> None:
+    result, log = _run_deploy(
+        tmp_path,
+        previous_state="valid",
+        migration_state="unmigrated",
+        new_status=23,
+    )
+
+    assert result.returncode == 23
+    lines = log.splitlines()
+    down_index = lines.index("migration down")
+    previous_up_index = next(
+        index
+        for index, line in enumerate(lines)
+        if line.startswith("tag=previous-tag|") and line.endswith(" up --no-build -d --wait")
+    )
+    assert down_index < previous_up_index
+
+
+def test_failed_schema_down_does_not_restore_previous_image(tmp_path: Path) -> None:
+    result, log = _run_deploy(
+        tmp_path,
+        previous_state="valid",
+        migration_state="unmigrated",
+        new_status=23,
+        migration_down_status=32,
+    )
+
+    assert result.returncode == 23
+    assert "migration down" in log
+    assert not any(
+        line.startswith("tag=previous-tag|") for line in _full_stack_up_lines(log)
+    )
+    assert "数据库结构回退失败" in result.stderr

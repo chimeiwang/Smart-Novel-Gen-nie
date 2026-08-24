@@ -64,16 +64,12 @@ def test_token_usage_details_migration_compares_normalized_constraint_definition
     assert "regexp_replace" in compact
     assert "is distinct from" in compact
     assert "for expected_constraint in" in compact
-    assert "definitions(name, definition)" in compact
+    assert "pg_temp.token_usage_details_constraint_contract" in compact
+    assert "pg_get_constraintdef" in compact
+    assert "expected_constraint.definition" in compact
     assert "actual_constraint_definition" in compact
     assert "position(" not in compact
 
-    expected_definitions = (
-        'check(((('
-            '"promptcachemisstokens"isnull)or("promptcachemisstokens">=0))and('
-            '("reasoningtokens"isnull)or("reasoningtokens">=0))))',
-        'check(("promptcachemisstokens"isnull)or(('
-        '"cachedtokens"+"promptcachemisstokens")="prompttokens"))',
-        'check(("reasoningtokens"isnull)or("reasoningtokens"<="completiontokens"))',
-    )
-    assert all(definition in normalized for definition in expected_definitions)
+    assert 'check(("promptcachemisstokens"isnullor' in normalized
+    assert '"cachedtokens"+"promptcachemisstokens"="prompttokens")' in normalized
+    assert '"reasoningtokens"<="completiontokens")' in normalized

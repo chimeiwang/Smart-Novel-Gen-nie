@@ -68,9 +68,11 @@ Run: `uv run pytest -q`、Ruff、Mypy、API check、typecheck、lint、build。
 ### Task 3：接入生产迁移与可恢复发布
 
 **Files:**
+- Create: `scripts/migrations/20260823_token_usage_details.production.sql`
 - Create: `scripts/migrations/rollback_20260823_token_usage_details.sql`
+- Create: `scripts/token-usage-production-migration.sh`
 - Modify: `scripts/deploy-production.sh`
-- Modify: `tests/architecture/test_deploy_script.py`
+- Modify: `tests/architecture/test_deploy_scripts.py`
 - Modify: `tests/architecture/test_github_deploy_workflow.py`
 
 - [ ] **Step 1: 写生产迁移顺序与 rollback 失败测试**
@@ -80,7 +82,9 @@ down；down 成功后才恢复旧镜像；未知/部分 schema 必须停止。
 
 - [ ] **Step 2: 实现固定 down 与部署编排**
 
-down 先精确核验两个列和三个约束，再删除约束与列；部署记录 `migration_applied_by_deploy`，失败 trap 依据该标志回退，
+生产 forward 与 down 均使用独立固定 SQL 和生产库 guard。helper 只向宿主机命令传无密码 URL，密码写入临时
+`PGPASSFILE`；down 先精确核验两个列和三个约束，再删除约束与列。部署在首次 forward 前记录
+`migration_applied_by_deploy` 所代表的回退责任，down 对尚未迁移状态安全空操作；失败 trap 依据该标志回退，
 禁止对预先存在的已迁移 schema 执行 down。
 
 - [ ] **Step 3: 全量验证、PR 合入与监控**
