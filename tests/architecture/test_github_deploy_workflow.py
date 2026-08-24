@@ -145,45 +145,58 @@ def test_env_parser_is_pure_text_and_never_sources_production_env() -> None:
 
 def test_embedded_database_parser_preserves_safe_url_fields_and_writes_private_pgpass() -> None:
     result = _run_embedded_database_parser(
-        "DATABASE_URL='postgresql://app_user:p%40ss%25word@db.example:55432/novelwriter?sslmode=require&application_name=token-migration'\n"
+        "DATABASE_URL='postgresql://app_user:p%40ss%25word@host.docker.internal:55432/novelwriter?sslmode=require&application_name=token-migration'\n"
     )
 
     assert result.returncode == 0, result.stderr.decode()
     assert result.stdout.decode() == (
-        "postgresql://app_user@db.example:55432/novelwriterdev?"
+        "postgresql://app_user@127.0.0.1:55432/novelwriterdev?"
         "sslmode=require&application_name=token-migration"
     )
-    assert result.pgpass == "db.example:55432:novelwriterdev:app_user:p@ss%word\n"  # type: ignore[attr-defined]
+    assert result.pgpass == "127.0.0.1:55432:novelwriterdev:app_user:p@ss%word\n"  # type: ignore[attr-defined]
     if os.name != "nt":
         assert result.pgpass_mode == 0o600  # type: ignore[attr-defined]
 
 
 def test_migrate_parser_writes_full_dev_url_only_to_private_stdin_file() -> None:
     result = _run_embedded_database_parser(
-        "DATABASE_URL=postgresql+asyncpg://app_user:p%40ss@db.example:55432/novelwriter?sslmode=require\n",
+        "DATABASE_URL=postgresql+asyncpg://app_user:p%40ss@host.docker.internal:55432/novelwriter?sslmode=require\n",
         parser_index=1,
     )
 
     assert result.returncode == 0, result.stderr.decode()
     assert result.stdout.decode() == (
-        "postgresql://app_user@db.example:55432/novelwriterdev?sslmode=require"
+        "postgresql://app_user@127.0.0.1:55432/novelwriterdev?sslmode=require"
     )
     assert result.database_url == (  # type: ignore[attr-defined]
-        "postgresql://app_user:p%40ss@db.example:55432/novelwriterdev?sslmode=require"
+        "postgresql://app_user:p%40ss@host.docker.internal:55432/novelwriterdev?sslmode=require"
     )
     if os.name != "nt":
         assert result.database_url_mode == 0o600  # type: ignore[attr-defined]
 
 
 @pytest.mark.parametrize("parser_index", (0, 1))
+def test_embedded_database_parser_accepts_safe_query_with_trailing_separator(
+    parser_index: int,
+) -> None:
+    result = _run_embedded_database_parser(
+        "DATABASE_URL=postgresql://app:secret@host.docker.internal/novelwriter?sslmode=require&\n",
+        parser_index=parser_index,
+    )
+
+    assert result.returncode == 0, result.stderr.decode()
+
+
+@pytest.mark.parametrize("parser_index", (0, 1))
 def test_embedded_database_parser_rejects_duplicate_database_url(parser_index: int) -> None:
     result = _run_embedded_database_parser(
-        "DATABASE_URL=postgresql://one:secret@db.example/novelwriter\n"
-        "DATABASE_URL=postgresql://two:secret@db.example/novelwriter\n",
+        "DATABASE_URL=postgresql://one:secret@host.docker.internal/novelwriter\n"
+        "DATABASE_URL=postgresql://two:secret@host.docker.internal/novelwriter\n",
         parser_index=parser_index,
     )
 
     assert result.returncode != 0
+    assert result.stderr.decode().strip() == "database-url-check:database_url_count"
 
 
 @pytest.mark.parametrize(
@@ -206,11 +219,12 @@ def test_embedded_database_parser_rejects_target_changing_query_parameters(
     parser_index: int,
 ) -> None:
     result = _run_embedded_database_parser(
-        f"DATABASE_URL=postgresql://app:secret@db.example/novelwriter?{query_key}=unsafe\n",
+        f"DATABASE_URL=postgresql://app:secret@host.docker.internal/novelwriter?{query_key}=unsafe\n",
         parser_index=parser_index,
     )
 
     assert result.returncode != 0
+    assert result.stderr.decode().strip() == "database-url-check:query"
 
 
 @pytest.mark.parametrize("query_key", ("sslmode", "application_name"))
@@ -220,12 +234,28 @@ def test_embedded_database_parser_rejects_duplicate_safe_query_parameters(
     parser_index: int,
 ) -> None:
     result = _run_embedded_database_parser(
-        "DATABASE_URL=postgresql://app:secret@db.example/novelwriter?"
+        "DATABASE_URL=postgresql://app:secret@host.docker.internal/novelwriter?"
         f"{query_key}=first&{query_key}=second\n",
         parser_index=parser_index,
     )
 
     assert result.returncode != 0
+    assert result.stderr.decode().strip() == "database-url-check:query"
+
+
+@pytest.mark.parametrize("source_host", ("db.example", "localhost", "127.0.0.1"))
+@pytest.mark.parametrize("parser_index", (0, 1))
+def test_embedded_database_parser_rejects_non_compose_source_host(
+    source_host: str,
+    parser_index: int,
+) -> None:
+    result = _run_embedded_database_parser(
+        f"DATABASE_URL=postgresql://app:secret@{source_host}/novelwriter\n",
+        parser_index=parser_index,
+    )
+
+    assert result.returncode != 0
+    assert result.stderr.decode().strip() == "database-url-check:source_host"
 
 
 def test_migration_checks_database_before_ddl_and_never_argvs_password_url() -> None:

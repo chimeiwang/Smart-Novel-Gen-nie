@@ -301,7 +301,7 @@ def test_production_env_example_targets_host_gateway() -> None:
     assert "INKFORGE_PORT=43120" in source
     assert "宿主机 Nginx" in source
     assert "回环" in source
-    assert "@host.docker.internal:5432/" in source
+    assert "@host.docker.internal:5432/novelwriter" in source
     for obsolete in (
         "POSTGRES_USER=",
         "POSTGRES_PASSWORD=",
