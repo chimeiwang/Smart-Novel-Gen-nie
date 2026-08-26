@@ -1,0 +1,18 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/read_tools/LocationNameArgs/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "location_name": {
+      "minLength": 1,
+      "title": "Location Name",
+      "type": "string"
+    }
+  },
+  "required": [
+    "location_name"
+  ],
+  "title": "LocationNameArgs",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.read_tools.LocationNameArgs"
+}

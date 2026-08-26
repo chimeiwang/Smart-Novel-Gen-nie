@@ -1,0 +1,40 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video/DirectorBeatAliasV1/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "服务器锁定的节拍短别名与时间骨架。",
+  "properties": {
+    "alias": {
+      "pattern": "^B[0-9]{2}$",
+      "title": "Alias",
+      "type": "string"
+    },
+    "endSecond": {
+      "exclusiveMinimum": 0,
+      "maximum": 30,
+      "title": "Endsecond",
+      "type": "integer"
+    },
+    "ordinal": {
+      "maximum": 5,
+      "minimum": 1,
+      "title": "Ordinal",
+      "type": "integer"
+    },
+    "startSecond": {
+      "maximum": 29,
+      "minimum": 0,
+      "title": "Startsecond",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "alias",
+    "ordinal",
+    "startSecond",
+    "endSecond"
+  ],
+  "title": "DirectorBeatAliasV1",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.DirectorBeatAliasV1"
+}

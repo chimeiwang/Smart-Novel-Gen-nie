@@ -1,0 +1,23 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_render/SeedanceRenderSubmitResponse/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "providerTaskId": {
+      "minLength": 1,
+      "title": "Providertaskid",
+      "type": "string"
+    },
+    "taskId": {
+      "title": "Taskid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "taskId",
+    "providerTaskId"
+  ],
+  "title": "SeedanceRenderSubmitResponse",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_render.SeedanceRenderSubmitResponse"
+}

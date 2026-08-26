@@ -1,0 +1,79 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video/VideoPlanFailureCallback/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Agent 将稳定错误码回传 Core 的失败契约。",
+  "properties": {
+    "code": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Code",
+      "type": "string"
+    },
+    "eventId": {
+      "minLength": 1,
+      "title": "Eventid",
+      "type": "string"
+    },
+    "jobId": {
+      "minLength": 1,
+      "title": "Jobid",
+      "type": "string"
+    },
+    "message": {
+      "minLength": 1,
+      "title": "Message",
+      "type": "string"
+    },
+    "novelId": {
+      "minLength": 1,
+      "title": "Novelid",
+      "type": "string"
+    },
+    "projectId": {
+      "minLength": 1,
+      "title": "Projectid",
+      "type": "string"
+    },
+    "protocolVersion": {
+      "const": "1.0",
+      "title": "Protocolversion",
+      "type": "string"
+    },
+    "recoverable": {
+      "title": "Recoverable",
+      "type": "boolean"
+    },
+    "runId": {
+      "minLength": 1,
+      "title": "Runid",
+      "type": "string"
+    },
+    "sceneId": {
+      "minLength": 1,
+      "title": "Sceneid",
+      "type": "string"
+    },
+    "taskId": {
+      "minLength": 1,
+      "title": "Taskid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocolVersion",
+    "eventId",
+    "jobId",
+    "runId",
+    "taskId",
+    "novelId",
+    "projectId",
+    "sceneId",
+    "code",
+    "message",
+    "recoverable"
+  ],
+  "title": "VideoPlanFailureCallback",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.VideoPlanFailureCallback"
+}

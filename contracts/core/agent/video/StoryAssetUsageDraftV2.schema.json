@@ -1,0 +1,39 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video/StoryAssetUsageDraftV2/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "模型为一项既有素材选择至少一个故事节拍，服务器再反向生成逐拍引用。",
+  "properties": {
+    "additionalBeatAliases": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 4,
+      "title": "Additionalbeataliases",
+      "type": "array"
+    },
+    "anchorAssetAlias": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Anchorassetalias"
+    },
+    "primaryBeatAlias": {
+      "title": "Primarybeatalias",
+      "type": "string"
+    }
+  },
+  "required": [
+    "primaryBeatAlias",
+    "additionalBeatAliases",
+    "anchorAssetAlias"
+  ],
+  "title": "StoryAssetUsageDraftV2",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.StoryAssetUsageDraftV2"
+}

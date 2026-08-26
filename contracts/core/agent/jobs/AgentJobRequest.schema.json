@@ -1,0 +1,83 @@
+{
+  "$defs": {
+    "JsonValue": {}
+  },
+  "$id": "https://inkforge.local/contracts/agent/jobs/AgentJobRequest/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "force": {
+      "default": false,
+      "title": "Force",
+      "type": "boolean"
+    },
+    "jobId": {
+      "minLength": 1,
+      "title": "Jobid",
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "writing",
+        "portrait",
+        "rag",
+        "quality",
+        "video"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "novelId": {
+      "minLength": 1,
+      "title": "Novelid",
+      "type": "string"
+    },
+    "payload": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "title": "Payload",
+      "type": "object"
+    },
+    "priority": {
+      "maximum": 99,
+      "minimum": 0,
+      "title": "Priority",
+      "type": "integer"
+    },
+    "protocolVersion": {
+      "const": "1.0",
+      "title": "Protocolversion",
+      "type": "string"
+    },
+    "runId": {
+      "minLength": 1,
+      "title": "Runid",
+      "type": "string"
+    },
+    "taskId": {
+      "minLength": 1,
+      "title": "Taskid",
+      "type": "string"
+    },
+    "userId": {
+      "minLength": 1,
+      "title": "Userid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocolVersion",
+    "jobId",
+    "kind",
+    "runId",
+    "taskId",
+    "novelId",
+    "userId",
+    "priority",
+    "payload"
+  ],
+  "title": "AgentJobRequest",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.jobs.AgentJobRequest"
+}

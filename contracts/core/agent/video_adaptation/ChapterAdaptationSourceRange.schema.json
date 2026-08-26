@@ -1,0 +1,32 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_adaptation/ChapterAdaptationSourceRange/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "相对于不可变章节全文的 Unicode code point 左闭右开范围。",
+  "properties": {
+    "end": {
+      "minimum": 1,
+      "title": "End",
+      "type": "integer"
+    },
+    "sourceText": {
+      "maxLength": 120000,
+      "minLength": 1,
+      "title": "Sourcetext",
+      "type": "string"
+    },
+    "start": {
+      "minimum": 0,
+      "title": "Start",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "start",
+    "end",
+    "sourceText"
+  ],
+  "title": "ChapterAdaptationSourceRange",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_adaptation.ChapterAdaptationSourceRange"
+}

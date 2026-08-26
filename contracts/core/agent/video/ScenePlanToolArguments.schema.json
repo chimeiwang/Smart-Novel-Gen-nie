@@ -1,0 +1,1147 @@
+{
+  "$defs": {
+    "CameraActionUnit": {
+      "additionalProperties": false,
+      "description": "一个主体动作及其唯一可见结果。",
+      "properties": {
+        "action": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        },
+        "subject": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Subject",
+          "type": "string"
+        },
+        "visibleResult": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Visibleresult",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject",
+        "action",
+        "visibleResult"
+      ],
+      "title": "CameraActionUnit",
+      "type": "object"
+    },
+    "CameraBeatPlanArguments": {
+      "additionalProperties": false,
+      "description": "strict 工具只提交导演事实，不重复提交由服务器生成的兼容镜像。",
+      "properties": {
+        "actionComplexity": {
+          "enum": [
+            "simple",
+            "mechanical_sequence",
+            "transformation",
+            "impact_transition"
+          ],
+          "title": "Actioncomplexity",
+          "type": "string"
+        },
+        "actionUnits": {
+          "items": {
+            "$ref": "#/$defs/CameraActionUnit"
+          },
+          "maxItems": 3,
+          "minItems": 1,
+          "title": "Actionunits",
+          "type": "array"
+        },
+        "axisTransition": {
+          "enum": [
+            "hold",
+            "continuous_cross",
+            "neutral_reset",
+            "cutaway_reset"
+          ],
+          "title": "Axistransition",
+          "type": "string"
+        },
+        "beatId": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Beatid",
+          "type": "string"
+        },
+        "blocking": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Blocking",
+          "type": "string"
+        },
+        "cameraAngle": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Cameraangle",
+          "type": "string"
+        },
+        "cameraMotivation": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Cameramotivation",
+          "type": "string"
+        },
+        "cameraMovement": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Cameramovement",
+          "type": "string"
+        },
+        "cameraSpec": {
+          "$ref": "#/$defs/ShotCameraSpec"
+        },
+        "dramaticPurpose": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Dramaticpurpose",
+          "type": "string"
+        },
+        "endSecond": {
+          "exclusiveMinimum": 0,
+          "maximum": 30,
+          "title": "Endsecond",
+          "type": "integer"
+        },
+        "lightingCue": {
+          "$ref": "#/$defs/ShotLightingCue"
+        },
+        "performanceDirection": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Performancedirection",
+          "type": "string"
+        },
+        "referencedAssetIds": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Referencedassetids",
+          "type": "array"
+        },
+        "shotProgression": {
+          "$ref": "#/$defs/CameraShotProgression"
+        },
+        "sound": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Sound",
+          "type": "string"
+        },
+        "startSecond": {
+          "maximum": 29,
+          "minimum": 0,
+          "title": "Startsecond",
+          "type": "integer"
+        },
+        "transition": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Transition"
+        }
+      },
+      "required": [
+        "beatId",
+        "startSecond",
+        "endSecond",
+        "cameraAngle",
+        "cameraMovement",
+        "dramaticPurpose",
+        "performanceDirection",
+        "blocking",
+        "cameraMotivation",
+        "axisTransition",
+        "actionUnits",
+        "actionComplexity",
+        "shotProgression",
+        "cameraSpec",
+        "lightingCue",
+        "sound",
+        "transition"
+      ],
+      "title": "CameraBeatPlanArguments",
+      "type": "object"
+    },
+    "CameraCompositionSpec": {
+      "additionalProperties": false,
+      "description": "镜头构图和画面层次。",
+      "properties": {
+        "backgroundLayer": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Backgroundlayer",
+          "type": "string"
+        },
+        "foregroundLayer": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Foregroundlayer",
+          "type": "string"
+        },
+        "headroom": {
+          "enum": [
+            "tight",
+            "standard",
+            "generous",
+            "not_applicable"
+          ],
+          "title": "Headroom",
+          "type": "string"
+        },
+        "rule": {
+          "enum": [
+            "centered",
+            "rule_of_thirds",
+            "symmetrical",
+            "leading_lines",
+            "frame_within_frame",
+            "negative_space"
+          ],
+          "title": "Rule",
+          "type": "string"
+        },
+        "subjectFramePercent": {
+          "maximum": 100,
+          "minimum": 5,
+          "title": "Subjectframepercent",
+          "type": "integer"
+        },
+        "subjectPlacement": {
+          "enum": [
+            "left_third",
+            "center",
+            "right_third",
+            "lower_center",
+            "upper_center"
+          ],
+          "title": "Subjectplacement",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rule",
+        "subjectPlacement",
+        "subjectFramePercent",
+        "headroom",
+        "foregroundLayer",
+        "backgroundLayer"
+      ],
+      "title": "CameraCompositionSpec",
+      "type": "object"
+    },
+    "CameraFocusSpec": {
+      "additionalProperties": false,
+      "description": "景深和焦点迁移计划。",
+      "properties": {
+        "depthOfField": {
+          "enum": [
+            "shallow",
+            "medium",
+            "deep"
+          ],
+          "title": "Depthoffield",
+          "type": "string"
+        },
+        "endTarget": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Endtarget",
+          "type": "string"
+        },
+        "rackDurationSeconds": {
+          "maximum": 30,
+          "minimum": 0,
+          "title": "Rackdurationseconds",
+          "type": "number"
+        },
+        "startTarget": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Starttarget",
+          "type": "string"
+        },
+        "transition": {
+          "enum": [
+            "locked",
+            "rack_focus"
+          ],
+          "title": "Transition",
+          "type": "string"
+        }
+      },
+      "required": [
+        "depthOfField",
+        "startTarget",
+        "endTarget",
+        "transition",
+        "rackDurationSeconds"
+      ],
+      "title": "CameraFocusSpec",
+      "type": "object"
+    },
+    "CameraMovementSpec": {
+      "additionalProperties": false,
+      "description": "单一主运镜；位移与旋转量用于本地可执行性校验。",
+      "properties": {
+        "easing": {
+          "enum": [
+            "none",
+            "ease_in",
+            "ease_out",
+            "ease_in_out"
+          ],
+          "title": "Easing",
+          "type": "string"
+        },
+        "movementType": {
+          "enum": [
+            "locked_off",
+            "dolly_in",
+            "dolly_out",
+            "truck_left",
+            "truck_right",
+            "pan_left",
+            "pan_right",
+            "tilt_up",
+            "tilt_down",
+            "pedestal_up",
+            "pedestal_down",
+            "arc_left",
+            "arc_right",
+            "boom_up",
+            "boom_down",
+            "zoom_in",
+            "zoom_out",
+            "handheld_follow"
+          ],
+          "title": "Movementtype",
+          "type": "string"
+        },
+        "rotationDegrees": {
+          "maximum": 360,
+          "minimum": 0,
+          "title": "Rotationdegrees",
+          "type": "number"
+        },
+        "speed": {
+          "enum": [
+            "static",
+            "very_slow",
+            "slow",
+            "medium",
+            "fast"
+          ],
+          "title": "Speed",
+          "type": "string"
+        },
+        "support": {
+          "enum": [
+            "tripod",
+            "slider",
+            "dolly",
+            "gimbal",
+            "steadicam",
+            "handheld",
+            "shoulder",
+            "jib",
+            "crane"
+          ],
+          "title": "Support",
+          "type": "string"
+        },
+        "travelDistanceMeters": {
+          "maximum": 50,
+          "minimum": 0,
+          "title": "Traveldistancemeters",
+          "type": "number"
+        }
+      },
+      "required": [
+        "support",
+        "movementType",
+        "travelDistanceMeters",
+        "rotationDegrees",
+        "speed",
+        "easing"
+      ],
+      "title": "CameraMovementSpec",
+      "type": "object"
+    },
+    "CameraPositionSpec": {
+      "additionalProperties": false,
+      "description": "相对主体的可复核机位，不把“低机位”等模糊词当成唯一事实。",
+      "properties": {
+        "axisSide": {
+          "enum": [
+            "screen_left",
+            "screen_right",
+            "on_axis"
+          ],
+          "title": "Axisside",
+          "type": "string"
+        },
+        "azimuthDegrees": {
+          "maximum": 180,
+          "minimum": -180,
+          "title": "Azimuthdegrees",
+          "type": "integer"
+        },
+        "elevationDegrees": {
+          "maximum": 90,
+          "minimum": -90,
+          "title": "Elevationdegrees",
+          "type": "integer"
+        },
+        "heightCm": {
+          "maximum": 1000,
+          "minimum": 0,
+          "title": "Heightcm",
+          "type": "integer"
+        },
+        "rollDegrees": {
+          "maximum": 45,
+          "minimum": -45,
+          "title": "Rolldegrees",
+          "type": "integer"
+        },
+        "subjectDistanceMeters": {
+          "exclusiveMinimum": 0,
+          "maximum": 100,
+          "title": "Subjectdistancemeters",
+          "type": "number"
+        }
+      },
+      "required": [
+        "heightCm",
+        "azimuthDegrees",
+        "elevationDegrees",
+        "rollDegrees",
+        "subjectDistanceMeters",
+        "axisSide"
+      ],
+      "title": "CameraPositionSpec",
+      "type": "object"
+    },
+    "CameraShotProgression": {
+      "additionalProperties": false,
+      "description": "单个镜头节拍内的起止景别及其变化方式。",
+      "properties": {
+        "changeMode": {
+          "enum": [
+            "continuous",
+            "cut",
+            "match_cut",
+            "impact_cut"
+          ],
+          "title": "Changemode",
+          "type": "string"
+        },
+        "endShotSize": {
+          "enum": [
+            "大全景",
+            "全景",
+            "中景",
+            "近景",
+            "特写"
+          ],
+          "title": "Endshotsize",
+          "type": "string"
+        },
+        "startShotSize": {
+          "enum": [
+            "大全景",
+            "全景",
+            "中景",
+            "近景",
+            "特写"
+          ],
+          "title": "Startshotsize",
+          "type": "string"
+        }
+      },
+      "required": [
+        "startShotSize",
+        "endShotSize",
+        "changeMode"
+      ],
+      "title": "CameraShotProgression",
+      "type": "object"
+    },
+    "CinematographyBase": {
+      "additionalProperties": false,
+      "description": "全场共享的摄影机成像与轴线基线。",
+      "properties": {
+        "axisRule": {
+          "enum": [
+            "maintain_180",
+            "intentional_cross",
+            "not_applicable"
+          ],
+          "title": "Axisrule",
+          "type": "string"
+        },
+        "captureFormat": {
+          "enum": [
+            "super_35",
+            "full_frame"
+          ],
+          "title": "Captureformat",
+          "type": "string"
+        },
+        "frameRateFps": {
+          "enum": [
+            24,
+            25,
+            30
+          ],
+          "title": "Frameratefps",
+          "type": "integer"
+        },
+        "lensProjection": {
+          "enum": [
+            "spherical",
+            "anamorphic"
+          ],
+          "title": "Lensprojection",
+          "type": "string"
+        },
+        "screenDirection": {
+          "enum": [
+            "left_to_right",
+            "right_to_left",
+            "neutral"
+          ],
+          "title": "Screendirection",
+          "type": "string"
+        },
+        "shutterAngleDegrees": {
+          "enum": [
+            90,
+            144,
+            180,
+            270,
+            360
+          ],
+          "title": "Shutterangledegrees",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "captureFormat",
+        "lensProjection",
+        "frameRateFps",
+        "shutterAngleDegrees",
+        "axisRule",
+        "screenDirection"
+      ],
+      "title": "CinematographyBase",
+      "type": "object"
+    },
+    "LightSourceSpec": {
+      "additionalProperties": false,
+      "description": "一盏有动机、有方向并能描述画面结果的灯。",
+      "properties": {
+        "azimuthDegrees": {
+          "maximum": 180,
+          "minimum": -180,
+          "title": "Azimuthdegrees",
+          "type": "integer"
+        },
+        "beamAngleDegrees": {
+          "maximum": 180,
+          "minimum": 1,
+          "title": "Beamangledegrees",
+          "type": "integer"
+        },
+        "colorTemperatureK": {
+          "maximum": 20000,
+          "minimum": 1500,
+          "title": "Colortemperaturek",
+          "type": "integer"
+        },
+        "delivery": {
+          "enum": [
+            "direct",
+            "diffused",
+            "bounced"
+          ],
+          "title": "Delivery",
+          "type": "string"
+        },
+        "direction": {
+          "enum": [
+            "front",
+            "front_left",
+            "front_right",
+            "side_left",
+            "side_right",
+            "back_left",
+            "back_right",
+            "back",
+            "top",
+            "bottom"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "elevationDegrees": {
+          "maximum": 90,
+          "minimum": -90,
+          "title": "Elevationdegrees",
+          "type": "integer"
+        },
+        "falloff": {
+          "enum": [
+            "fast",
+            "medium",
+            "slow"
+          ],
+          "title": "Falloff",
+          "type": "string"
+        },
+        "motivatedBy": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Motivatedby",
+          "type": "string"
+        },
+        "quality": {
+          "enum": [
+            "hard",
+            "soft"
+          ],
+          "title": "Quality",
+          "type": "string"
+        },
+        "relativeExposureStops": {
+          "maximum": 8,
+          "minimum": -8,
+          "title": "Relativeexposurestops",
+          "type": "number"
+        },
+        "role": {
+          "enum": [
+            "key",
+            "fill",
+            "rim",
+            "background",
+            "practical"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "spillControl": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Spillcontrol",
+          "type": "string"
+        },
+        "visibleResult": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Visibleresult",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "motivatedBy",
+        "direction",
+        "azimuthDegrees",
+        "elevationDegrees",
+        "quality",
+        "delivery",
+        "colorTemperatureK",
+        "relativeExposureStops",
+        "beamAngleDegrees",
+        "falloff",
+        "spillControl",
+        "visibleResult"
+      ],
+      "title": "LightSourceSpec",
+      "type": "object"
+    },
+    "LightingSetup": {
+      "additionalProperties": false,
+      "description": "全场环境曝光与灯光连续性基线。",
+      "properties": {
+        "ambientColorTemperatureK": {
+          "maximum": 20000,
+          "minimum": 1500,
+          "title": "Ambientcolortemperaturek",
+          "type": "integer"
+        },
+        "ambientSource": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Ambientsource",
+          "type": "string"
+        },
+        "atmosphere": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Atmosphere",
+          "type": "string"
+        },
+        "cameraWhiteBalanceK": {
+          "anyOf": [
+            {
+              "maximum": 20000,
+              "minimum": 1500,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Camerawhitebalancek"
+        },
+        "exposureStyle": {
+          "enum": [
+            "low_key",
+            "balanced",
+            "high_key"
+          ],
+          "title": "Exposurestyle",
+          "type": "string"
+        },
+        "keyToFillStops": {
+          "maximum": 8,
+          "minimum": 0,
+          "title": "Keytofillstops",
+          "type": "number"
+        },
+        "negativeFillSide": {
+          "enum": [
+            "none",
+            "camera_left",
+            "camera_right",
+            "both"
+          ],
+          "title": "Negativefillside",
+          "type": "string"
+        }
+      },
+      "required": [
+        "exposureStyle",
+        "ambientSource",
+        "ambientColorTemperatureK",
+        "keyToFillStops",
+        "negativeFillSide",
+        "atmosphere"
+      ],
+      "title": "LightingSetup",
+      "type": "object"
+    },
+    "PlannedAssetArguments": {
+      "additionalProperties": false,
+      "description": "导演 strict 工具的素材需求；排除本流程禁止或仅供旧数据使用的值。",
+      "properties": {
+        "assetId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Assetid",
+          "type": "string"
+        },
+        "bindingScope": {
+          "enum": [
+            "canon_slot",
+            "scene_direct"
+          ],
+          "title": "Bindingscope",
+          "type": "string"
+        },
+        "duty": {
+          "enum": [
+            "identity",
+            "costume",
+            "scene",
+            "prop",
+            "style",
+            "storyboard",
+            "keyframe",
+            "motion",
+            "camera",
+            "voice",
+            "ambience",
+            "relation_interaction"
+          ],
+          "title": "Duty",
+          "type": "string"
+        },
+        "excludeFeatures": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 12,
+          "title": "Excludefeatures",
+          "type": "array"
+        },
+        "featureDomain": {
+          "enum": [
+            "character_identity",
+            "character_costume",
+            "location",
+            "prop",
+            "style",
+            "storyboard",
+            "keyframe",
+            "motion",
+            "camera",
+            "voice",
+            "ambience",
+            "music",
+            "relationship_interaction"
+          ],
+          "title": "Featuredomain",
+          "type": "string"
+        },
+        "includeFeatures": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 12,
+          "minItems": 1,
+          "title": "Includefeatures",
+          "type": "array"
+        },
+        "keyframeRole": {
+          "anyOf": [
+            {
+              "enum": [
+                "initial_state",
+                "end_state",
+                "transition_anchor"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Keyframerole"
+        },
+        "modality": {
+          "enum": [
+            "image",
+            "video",
+            "audio"
+          ],
+          "title": "Modality",
+          "type": "string"
+        },
+        "settingReference": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SettingReference"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "targetEntity": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Targetentity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "assetId",
+        "modality",
+        "duty",
+        "bindingScope",
+        "settingReference",
+        "featureDomain",
+        "keyframeRole",
+        "targetEntity",
+        "includeFeatures",
+        "excludeFeatures"
+      ],
+      "title": "PlannedAssetArguments",
+      "type": "object"
+    },
+    "SettingReference": {
+      "additionalProperties": false,
+      "description": "指向长篇冻结设定快照中的一个类型化条目。",
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "character",
+            "relationship",
+            "location",
+            "item",
+            "world_setting"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "title": "SettingReference",
+      "type": "object"
+    },
+    "ShotCameraSpec": {
+      "additionalProperties": false,
+      "description": "单拍专业摄影规格；所有数值都以生成意图而非硬件遥测解释。",
+      "properties": {
+        "composition": {
+          "$ref": "#/$defs/CameraCompositionSpec"
+        },
+        "endFocalLengthMm": {
+          "maximum": 200,
+          "minimum": 12,
+          "title": "Endfocallengthmm",
+          "type": "integer"
+        },
+        "focalLengthMm": {
+          "maximum": 200,
+          "minimum": 12,
+          "title": "Focallengthmm",
+          "type": "integer"
+        },
+        "focus": {
+          "$ref": "#/$defs/CameraFocusSpec"
+        },
+        "lensType": {
+          "enum": [
+            "prime",
+            "zoom",
+            "macro_prime"
+          ],
+          "title": "Lenstype",
+          "type": "string"
+        },
+        "movement": {
+          "$ref": "#/$defs/CameraMovementSpec"
+        },
+        "position": {
+          "$ref": "#/$defs/CameraPositionSpec"
+        },
+        "tStop": {
+          "maximum": 22,
+          "minimum": 1.0,
+          "title": "Tstop",
+          "type": "number"
+        }
+      },
+      "required": [
+        "lensType",
+        "focalLengthMm",
+        "endFocalLengthMm",
+        "tStop",
+        "position",
+        "composition",
+        "movement",
+        "focus"
+      ],
+      "title": "ShotCameraSpec",
+      "type": "object"
+    },
+    "ShotLightingCue": {
+      "additionalProperties": false,
+      "description": "逐拍灯光：主光必填，边缘/背景/实景光按需启用。",
+      "properties": {
+        "atmosphere": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Atmosphere",
+          "type": "string"
+        },
+        "continuityMode": {
+          "enum": [
+            "establish",
+            "inherit",
+            "motivated_change"
+          ],
+          "title": "Continuitymode",
+          "type": "string"
+        },
+        "edgeLight": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LightSourceSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "fillDirection": {
+          "anyOf": [
+            {
+              "enum": [
+                "front",
+                "front_left",
+                "front_right",
+                "side_left",
+                "side_right",
+                "back_left",
+                "back_right",
+                "back",
+                "top",
+                "bottom"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Filldirection"
+        },
+        "fillRelativeStops": {
+          "maximum": 8,
+          "minimum": -8,
+          "title": "Fillrelativestops",
+          "type": "number"
+        },
+        "fillStrategy": {
+          "enum": [
+            "none",
+            "soft_fill",
+            "bounce_fill",
+            "negative_fill"
+          ],
+          "title": "Fillstrategy",
+          "type": "string"
+        },
+        "keyLight": {
+          "$ref": "#/$defs/LightSourceSpec"
+        },
+        "motivatedChange": {
+          "maxLength": 160,
+          "title": "Motivatedchange",
+          "type": "string"
+        },
+        "visibleResult": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Visibleresult",
+          "type": "string"
+        }
+      },
+      "required": [
+        "continuityMode",
+        "motivatedChange",
+        "keyLight",
+        "fillStrategy",
+        "fillDirection",
+        "fillRelativeStops",
+        "atmosphere",
+        "visibleResult"
+      ],
+      "title": "ShotLightingCue",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video/ScenePlanToolArguments/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "DeepSeek strict 工具必须提交的完整单场景结构。",
+  "properties": {
+    "assets": {
+      "items": {
+        "$ref": "#/$defs/PlannedAssetArguments"
+      },
+      "maxItems": 12,
+      "minItems": 1,
+      "title": "Assets",
+      "type": "array"
+    },
+    "beats": {
+      "items": {
+        "$ref": "#/$defs/CameraBeatPlanArguments"
+      },
+      "maxItems": 5,
+      "minItems": 1,
+      "title": "Beats",
+      "type": "array"
+    },
+    "cinematographyBase": {
+      "$ref": "#/$defs/CinematographyBase"
+    },
+    "dramaticArc": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Dramaticarc",
+      "type": "string"
+    },
+    "globalDirection": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Globaldirection",
+      "type": "string"
+    },
+    "lightingSetup": {
+      "$ref": "#/$defs/LightingSetup"
+    },
+    "negativeConstraints": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 18,
+      "minItems": 1,
+      "title": "Negativeconstraints",
+      "type": "array"
+    },
+    "summary": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Summary",
+      "type": "string"
+    },
+    "title": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "visualStyle": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Visualstyle",
+      "type": "string"
+    }
+  },
+  "required": [
+    "title",
+    "summary",
+    "dramaticArc",
+    "visualStyle",
+    "globalDirection",
+    "cinematographyBase",
+    "lightingSetup",
+    "assets",
+    "beats",
+    "negativeConstraints"
+  ],
+  "title": "ScenePlanToolArguments",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.ScenePlanToolArguments"
+}

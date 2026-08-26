@@ -9,6 +9,9 @@
 - 接到新需求后，先在 `docs/specs/` 新增或更新 spec，再修改实现。
 - 修改前端 UI 前先读 `DESIGN.md`。
 - 修改 Agent、写作流程或草案审核前先读 `apps/agent-service/AGENTS.md`、`docs/requirements/03-ai-writing-and-agents.md` 和 `docs/requirements/04-review-quality-and-workflow.md`。
+- 修改 Java Core、CLI 迁移、兼容基线或部署切换前先读
+  `docs/specs/2026-08-24-core-java-replacement.md`、`docs/plans/2026-08-24-core-java-tdd-replacement.md` 和
+  `docs/architecture-decisions/001-core-java-stack.md` 到 `003-core-java-single-cutover.md`。
 - PostgreSQL schema 默认冻结。已批准例外包括
   `scripts/migrations/20260807_video_production_control_plane.sql`、
   `scripts/migrations/20260817_video_review_decision_command.sql`、
@@ -31,6 +34,31 @@
   `VideoScene`/`VideoGenerationTask` 公共语义复活。所有迁移必须先备份、受控执行并验证幂等；开发库迁移后
   必须从真实库只读导出 `schema-contract.json`。任何其他持久化改动必须先更新 spec 和本文件、
   核对 `apps/core-api/src/inkforge_core/db/schema-contract.json`，应用启动仍不得自动建表、删表或执行迁移。
+
+## 产品基线
+
+- `docs/requirements/00-overview.md` 是当前产品功能、可用状态、限制和 Java 重写验收基线。修改产品、
+  公共/内部接口、CLI、视频或迁移方案前必须先读；详细规则继续以 `requirements/01-05` 和当前代码为准。
+- 产品是桌面优先的中文小说创作工作台，当前有三条主链：中短篇双文档写作、长篇章节与多 Agent
+  写作、长篇章节影视化。代码实现、开发环境可用、生产开放、内部能力和历史兼容必须明确区分，
+  不得把“表存在”或“代码已写”宣传为线上已开放。
+- `short_medium` 硬限制 6,000～80,000 字，创建时必须保存完整起始素材；只使用蓝图和正文两份
+  工作稿，自动保存不创建版本，Agent 文档生成只产生待采用候选，全文检查只产生报告；中短篇不开放视频。
+- `long_serial` 使用多章节、创作资料、三层结构化大纲、写作会话、5 个核心 Agent、ReviewArtifact
+  和一致性终检。前端显示的 30 万～100 万字、80～300 章属于规划建议，不是 Core 硬上限。
+- 当前商业化缺口包括手机号/邮箱、账号找回、在线支付、管理员后台、团队协作、移动端、内容发布
+  分发；它们不是现有功能，也不得在 Java 等价迁移中顺带加入。
+- 章节影视化完整开发链为“章节快照 → Scene/Beat/Shot 人工审镜 → 分集 → 视觉设定版本 → 逐镜
+  提示词 → 关键帧 → Seedance Take → 粗剪 → 声音字幕 → 整集导出”。生产必须保持
+  `VIDEO_PREVIEW_ENABLED=false`，并拒绝视频调度和真实 Seedance；P0-P3 只获开发库授权，不支持
+  图片生成、TTS 或旧 `VideoScene`/`VideoGenerationTask` 公共语义复活。
+- 基线提交 `c9afc95` 有 148 个公共 Core 操作、30 个内部 Core 操作和 125 个 CLI 命令。CLI 不是公共
+  API 全量镜像；现行生产 Python CLI 仅支持 Windows Credential Manager，尚未切换的 Java CLI 候选支持
+  macOS Keychain 与 Windows Credential Manager，均禁止明文回退。若接口、命令或结构发生获批变化，
+  必须重新计算并同步产品基线，不能机械维护旧数字。
+- Java 迁移先做行为等价：生产始终只有一个 Core，不双 Core、不双写；Python Agent 保留，Web 继续
+  遵守 Next.js 现有边界，Core 后台职责和 CLI 按已批准计划迁移。手机号、支付等新功能只能在切换完成后
+  另立 spec。Java 通过契约、差异和端到端验收前不得删除 Python Core 或宣称迁移完成。
 
 ## 当前架构
 
@@ -69,14 +97,32 @@ uv run mypy apps/core-api/src apps/agent-service/src packages/service-contracts/
 docker compose -f infra/compose.yaml up --build -d
 ```
 
+Java 迁移工程建立后统一使用：
+
+```bash
+./mvnw verify
+```
+
 ## 不可突破的边界
 
 - 禁止静默截断正文、草案、工具结果、Agent 回复、日志或持久化数据。
 - 正式内容变更必须遵循 `proposal -> ReviewArtifact -> 复审/返工 -> 用户确认 -> Core API 应用`。
+- 正文、章节进展、故事进展、设定、大纲、伏笔、Beat Plan、视频方案和后期决定是不同数据层，
+  不得为方便实现互相覆盖或混写。
+- 选区、章节改编、提示词、渲染和导出必须冻结可重建的来源版本、哈希或不可变清单；历史版本只读，
+  恢复和修改必须创建新版本。
+- 写入口优先使用稳定 `clientRequestId` 幂等，状态 head 使用时间戳或 revision CAS；异步 202、SSE 或
+  JSONL 只表示受理/观察，完成状态必须回读 PostgreSQL 权威结果。
+- 节奏、景别、空镜、平均时长和风格等软质量建议不得无证据升级为硬门禁或替代作者确认。
 - Agent Service 只能通过 Core 内部工具网关读写业务数据，不得连接 PostgreSQL。
 - 内部接口统一位于 `/internal/v1/**`，同时校验直接对端网段和 Ed25519 服务令牌；不得信任转发头决定内部身份。
 - 浏览器只访问 `/api/v1/**`，不得访问内部接口。
 - 新增或修改公共接口时，先改 FastAPI/Pydantic 契约，再运行 `npm run api:generate`，禁止手写重复 TypeScript DTO。
+- Java 迁移期间公共接口以版本化 Python OpenAPI 基线为准；Java 不得依赖注解默认输出碰巧兼容，
+  必须通过契约差异测试。获批切换前不得删除 Python 契约或基线测试。
+- Java 业务模块拥有自身 Agent 出站应用端口，`agentgateway` 只能单向依赖并实现这些端口；视频、写作、
+  质量等业务模块不得反向导入 `AgentServiceClient` 或网关异常。`operations` 只托管后台生命周期，受数据库、
+  Redis 或供应商配置门禁的协作者缺失时不得让最小健康上下文装配失败。
 - 新增 Agent 工具必须注册到 `apps/agent-service/src/inkforge_agents/tools/registry.py`，同时声明权限和并发属性。
 - 模型工具循环只能位于 `AgentRuntime`，LangGraph 编排只能使用现有 `StateGraph`、`Send`、`Command` 和 `interrupt()` 扩展。
 - 2 核 2 GB 部署默认每个 Python 服务一个 worker；Agent 在单进程内最多并行三个不同项目的队列任务，
@@ -94,6 +140,8 @@ docker compose -f infra/compose.yaml up --build -d
 
 - 前端修改至少运行相关测试、`npm run typecheck` 和 `npm run lint`。
 - Python 修改至少运行相关 pytest、Ruff；共享协议、鉴权或工作流修改还要运行 Mypy。
+- Java 修改至少运行相关 JUnit；提交前运行 `./mvnw verify`。数据库行为必须使用 PostgreSQL
+  Testcontainers 或获准的 dev 数据库，不得用 H2 证明兼容。
 - 部署修改运行 `tests/architecture/test_compose_security.py`，有 Docker 的环境再运行 Compose 健康检查。
 - 除用户明确批准的版本化迁移外，数据库结构只能做只读指纹校验，不能为了让测试通过修改数据库；
   已批准迁移完成后必须重新导出 contract，并保持实际结构与 contract 精确一致。

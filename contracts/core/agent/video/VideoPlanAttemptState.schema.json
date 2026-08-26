@@ -1,0 +1,44 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video/VideoPlanAttemptState/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "不依赖新表、随任务结果耐久保存的模型调用预留账本。",
+  "properties": {
+    "inheritedCalls": {
+      "default": 0,
+      "maximum": 2,
+      "minimum": 0,
+      "title": "Inheritedcalls",
+      "type": "integer"
+    },
+    "pendingStage": {
+      "anyOf": [
+        {
+          "enum": [
+            "scene_assets",
+            "story_beats",
+            "cinematography"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Pendingstage"
+    },
+    "reservedCalls": {
+      "maximum": 5,
+      "minimum": 0,
+      "title": "Reservedcalls",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "reservedCalls",
+    "pendingStage"
+  ],
+  "title": "VideoPlanAttemptState",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.VideoPlanAttemptState"
+}

@@ -2,7 +2,6 @@ services:
   core-api:
     environment:
       DATABASE_URL: ${TEST_DATABASE_URL:?必须配置测试数据库地址}
-      JWT_SECRET: ${TEST_JWT_SECRET:-test-only-session-secret-at-least-32-bytes}
     depends_on:
       postgres:
         condition: service_healthy
@@ -11,7 +10,7 @@ services:
       MODEL_PROVIDER: fake
       OPENAI_API_KEY: ""
   postgres:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector:0.8.0-pg16
     user: "999:999"
     restart: unless-stopped
     read_only: true
@@ -22,6 +21,9 @@ services:
       POSTGRES_PASSWORD: ${TEST_POSTGRES_PASSWORD:?必须配置测试数据库密码}
       POSTGRES_DB: ${TEST_POSTGRES_DB:?必须配置测试数据库名}
       PGDATA: /var/lib/postgresql/data/pgdata
+    # 只供宿主机 Playwright 辅助脚本访问同一个隔离测试库；生产编排不包含 PostgreSQL。
+    ports:
+      - "127.0.0.1:${TEST_POSTGRES_PORT:-0}:5432"
     volumes:
       - postgres_test_data:/var/lib/postgresql/data
     tmpfs:
@@ -29,6 +31,8 @@ services:
       - /var/run/postgresql:size=8m,uid=999,gid=999
     networks:
       - data_net
+      # internal 网络在 Docker Desktop 上不会实际发布宿主机端口；该独占桥接只服务测试辅助脚本。
+      - test_host_net
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
@@ -41,3 +45,6 @@ volumes:
   postgres_test_data:
     external: true
     name: ${TEST_POSTGRES_DATA_VOLUME:?必须配置已有测试数据库卷名称}
+
+networks:
+  test_host_net:

@@ -1,0 +1,38 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/read_tools/OutlineSummaryArgs/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "include_full_summary": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Include Full Summary"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "enum": [
+            "current_chapter",
+            "tree_index"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Scope"
+    }
+  },
+  "title": "OutlineSummaryArgs",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.read_tools.OutlineSummaryArgs"
+}

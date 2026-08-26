@@ -1,0 +1,8 @@
+{
+  "canonicalPath": "/api/v1/novels",
+  "locationTemplate": "{scheme}://{host}/api/v1/novels",
+  "preserveRequestIdHeader": true,
+  "requestPath": "/api/v1/novels/",
+  "schemaVersion": "trailing-slash-redirect-fixture/1.0",
+  "statusCode": 307
+}

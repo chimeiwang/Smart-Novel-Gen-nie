@@ -1,0 +1,24 @@
+spring:
+  application:
+    name: inkforge-core-api
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+  servlet:
+    multipart:
+      # 视频输入最多 200 MiB；各领域存储层仍分别执行 50/30/100/200 MiB 精确上限。
+      max-file-size: 200MB
+      max-request-size: 201MB
+
+server:
+  port: ${PORT:8000}
+  error:
+    include-exception: false
+    include-message: never
+    include-stacktrace: never
+    whitelabel:
+      enabled: false
+
+management:
+  endpoints:
+    enabled-by-default: false

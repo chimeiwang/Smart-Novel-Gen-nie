@@ -40,6 +40,7 @@ def _run_compose_smoke(
     ready_sequence: str = "",
     nginx_binding: str = "0.0.0.0:43120",
     log_write_status: int = 0,
+    upload_write_status: int = 0,
 ) -> tuple[subprocess.CompletedProcess[str], int, list[str]]:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -72,6 +73,7 @@ def _run_compose_smoke(
         "FAKE_AGENT_READY_AFTER": str(ready_after),
         "FAKE_AGENT_READY_SEQUENCE": ready_sequence,
         "FAKE_AGENT_LOG_WRITE_STATUS": str(log_write_status),
+        "FAKE_CORE_UPLOAD_WRITE_STATUS": str(upload_write_status),
         "SMOKE_AGENT_REQUIRED_SUCCESSES": str(required_successes),
         "SMOKE_AGENT_MAX_ATTEMPTS": str(max_attempts),
         "SMOKE_AGENT_POLL_SECONDS": "0",
@@ -112,6 +114,11 @@ def test_production_smoke_does_not_enable_test_compose_by_default() -> None:
     assert unsafe_default not in shell_source
 
 
+def test_user_facing_rollback_and_smoke_scripts_are_executable() -> None:
+    assert os.access(ROLLBACK, os.X_OK)
+    assert os.access(SMOKE_SH, os.X_OK)
+
+
 def test_compose_smoke_executes_standalone_agent_readiness_probe() -> None:
     smoke_source = SMOKE_SH.read_text(encoding="utf-8")
     probe_source = AGENT_PROBE.read_text(encoding="utf-8")
@@ -122,12 +129,16 @@ def test_compose_smoke_executes_standalone_agent_readiness_probe() -> None:
     assert "with error:" in probe_source
 
 
-def test_compose_smoke_checks_agent_log_directory_with_real_write_probe() -> None:
+def test_compose_smoke_checks_both_persistent_directories_with_real_write_probes() -> None:
     smoke_source = SMOKE_SH.read_text(encoding="utf-8")
+    powershell_source = SMOKE_PS1.read_text(encoding="utf-8")
 
     assert "WORKFLOW_HUMAN_LOG_DIR" in smoke_source
-    assert 'mkdir "$probe_dir"' in smoke_source
-    assert 'rmdir "$probe_dir"' in smoke_source
+    assert "UPLOADS_ROOT" in smoke_source
+    assert smoke_source.count('mkdir "$probe_dir"') == 2
+    assert smoke_source.count('rmdir "$probe_dir"') == 2
+    assert "WORKFLOW_HUMAN_LOG_DIR" in powershell_source
+    assert "UPLOADS_ROOT" in powershell_source
 
 
 def test_compose_smoke_fails_when_agent_log_directory_is_not_writable(
@@ -146,12 +157,30 @@ def test_compose_smoke_fails_when_agent_log_directory_is_not_writable(
     assert urls == []
 
 
-def test_rollback_requires_distinct_current_and_previous_python_tags() -> None:
+def test_compose_smoke_fails_when_core_upload_directory_is_not_writable(
+    tmp_path: Path,
+) -> None:
+    result, call_count, urls = _run_compose_smoke(
+        tmp_path,
+        ready_after=1,
+        required_successes=1,
+        max_attempts=1,
+        upload_write_status=23,
+    )
+
+    assert result.returncode != 0
+    assert call_count == 0
+    assert urls == []
+
+
+def test_rollback_requires_distinct_current_java_and_previous_tags() -> None:
     source = ROLLBACK.read_text(encoding="utf-8")
 
     assert "CURRENT_IMAGE_TAG" in source
     assert "ROLLBACK_IMAGE_TAG" in source
     assert '"$CURRENT_IMAGE_TAG" != "$ROLLBACK_IMAGE_TAG"' in source
+    assert "cn.inkforge.core.runtime" in source
+    assert "当前 Core 镜像必须是 Java runtime" in source
     for image in ("inkforge-web", "inkforge-core-api", "inkforge-agent-service"):
         assert f"{image}:$ROLLBACK_IMAGE_TAG" in source
         assert f"{image}:$CURRENT_IMAGE_TAG" in source
@@ -162,8 +191,12 @@ def test_rollback_restores_current_stack_when_verification_fails() -> None:
 
     assert "restore_current" in source
     assert "trap" in source
-    assert "scripts/compose_smoke.sh" in source
+    assert "sh scripts/compose_smoke.sh" in source
+    assert "/usr/local/bin/inkforge-schema-guard" in source
+    assert "--compatibility-fingerprint-v1" in source
     assert "inkforge_core.db.schema_guard" in source
+    assert "compose.python-core-rollback.yaml" in source
+    assert "COMPOSE_ADDITIONAL_OVERRIDE_FILE" in source
     assert "--no-build" in source
     assert "down -v" not in source
     assert "restore_verify.sh" not in source

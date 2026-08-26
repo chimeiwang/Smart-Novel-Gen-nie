@@ -15,7 +15,9 @@ if [ "${1:-}" = "compose" ]; then
       ;;
     *" ps "*) exit 0 ;;
     *" port nginx 8080 "*) printf '%s\n' "${FAKE_NGINX_BINDING:-0.0.0.0:80}"; exit 0 ;;
+    *" exec -T core-api /usr/local/bin/inkforge-schema-guard "*) exit "${FAKE_SCHEMA_VERIFY_STATUS:-0}" ;;
     *" exec -T core-api python -c "*) exit "${FAKE_SCHEMA_VERIFY_STATUS:-0}" ;;
+    *" exec -T core-api sh -c "*) exit "${FAKE_CORE_UPLOAD_WRITE_STATUS:-0}" ;;
     *" exec -T agent-service sh -c "*) exit "${FAKE_AGENT_LOG_WRITE_STATUS:-0}" ;;
     *" exec -T agent-service "*)
       if [ -n "${FAKE_AGENT_READY_COUNTER:-}" ]; then
@@ -89,18 +91,35 @@ if [ "${1:-}" = "inspect" ]; then
 fi
 
 if [ "${1:-}" = "image" ] && [ "${2:-}" = "inspect" ]; then
-  image="${3:-}"
+  image=""
+  for argument in "$@"; do image="$argument"; done
   if [ "${FAKE_PREVIOUS_STATE:-valid}" = "missing_image" ]; then
     case "$image" in
       inkforge-core-api:previous-tag) exit 1 ;;
     esac
   fi
+  case " $* " in
+    *"cn.inkforge.core.runtime"*)
+      case "$image" in
+        inkforge-core-api:${FAKE_NEW_TAG:-new-tag})
+          printf '%s\n' "${FAKE_NEW_CORE_RUNTIME-java}"
+          ;;
+        inkforge-core-api:previous-tag)
+          printf '%s\n' "${FAKE_PREVIOUS_CORE_RUNTIME-}"
+          ;;
+        *)
+          printf '%s\n' "${FAKE_OTHER_CORE_RUNTIME-}"
+          ;;
+      esac
+      ;;
+  esac
   exit 0
 fi
 
 if [ "${1:-}" = "run" ]; then
   case " $* " in
-    *" --cap-add CHOWN "*) exit "${FAKE_AGENT_LOG_INIT_STATUS:-0}" ;;
+    *"source=inkforge_uploads,target=/data/uploads"*) exit "${FAKE_UPLOAD_INIT_STATUS:-0}" ;;
+    *"source=inkforge_agent_logs,target=/data/agent-logs"*) exit "${FAKE_AGENT_LOG_INIT_STATUS:-0}" ;;
   esac
 fi
 

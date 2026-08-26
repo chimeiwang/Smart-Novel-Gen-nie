@@ -1,0 +1,62 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/runs/RunStatusResponse/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "error": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Error"
+    },
+    "lastSequence": {
+      "minimum": 0,
+      "title": "Lastsequence",
+      "type": "integer"
+    },
+    "protocolVersion": {
+      "const": "1.0",
+      "title": "Protocolversion",
+      "type": "string"
+    },
+    "runId": {
+      "minLength": 1,
+      "title": "Runid",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "queued",
+        "running",
+        "awaiting_user",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "taskId": {
+      "minLength": 1,
+      "title": "Taskid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocolVersion",
+    "runId",
+    "taskId",
+    "status",
+    "lastSequence",
+    "error"
+  ],
+  "title": "RunStatusResponse",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.runs.RunStatusResponse"
+}

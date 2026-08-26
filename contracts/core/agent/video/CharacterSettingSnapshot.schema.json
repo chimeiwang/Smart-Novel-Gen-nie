@@ -1,0 +1,70 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video/CharacterSettingSnapshot/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "规划任务冻结的人物设定最小投影。",
+  "properties": {
+    "aliases": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Aliases",
+      "type": "array"
+    },
+    "appearance": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Appearance"
+    },
+    "contentHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Contenthash",
+      "type": "string"
+    },
+    "id": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Id",
+      "type": "string"
+    },
+    "identity": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Identity"
+    },
+    "kind": {
+      "const": "character",
+      "default": "character",
+      "title": "Kind",
+      "type": "string"
+    },
+    "name": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "contentHash",
+    "name"
+  ],
+  "title": "CharacterSettingSnapshot",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.CharacterSettingSnapshot"
+}

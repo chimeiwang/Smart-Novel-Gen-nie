@@ -4,6 +4,20 @@
 
 提供账号认证、资源归属校验、模型计费、服务间互信、可恢复运行和适合 2 核 2 GB 单机的生产部署。
 
+## Java Core 替换状态
+
+用户于 2026-08-24 批准把 Core 及其后台职责和 CLI 迁移到 Java 21 + Spring Boot，保留 Python Agent
+与 Next.js Web。迁移规格为 `docs/specs/2026-08-24-core-java-replacement.md`，架构决策位于
+`docs/architecture-decisions/001-core-java-stack.md` 到 `003-core-java-single-cutover.md`。
+
+迁移期间 FastAPI Core 仍是当前生产实现。生产始终只允许一个 `core-api`，不得让 Python 与 Java
+同时写同一数据库，也不得按路由渐进切流。开发差异测试只能使用隔离数据库；Java 全量通过本地、
+`novelwriterdev`、Web、Agent、CLI、Compose 和回滚验收后，才可在用户批准的窗口替换同名容器。
+
+本次迁移冻结现有产品和 PostgreSQL 业务结构，不增加手机号、短信、邮箱、支付、订单、订阅或新表，
+不启用生产视频。Java 应用不得使用 JPA、Flyway、Liquibase 或启动 SQL 自动修改结构；schema guard
+继续只读。切换失败恢复上一 Python 镜像，不执行数据库反向迁移。
+
 ## 浏览器认证
 
 - 首页和登录页公开，其余页面由 Next.js `proxy.ts` 检查 `inkforge-token` Cookie。
@@ -225,7 +239,11 @@ readiness 只阻断抽帧和导出，不能阻断历史版本读取。成片必�
 - Agent 队列完成、失败或取消的 job 只在 Redis 保留默认 7 天、最少 24 小时的终态 tombstone；终态时间 ZSET 驱动有界清理，过期后删除 status 和索引，PostgreSQL 继续作为长期幂等事实来源。
 - 升级前缺少终态 ZSET 的旧 status 使用 HSCAN 游标分批回填 tombstone，并清除 ready、processing、payload、lease、attempt 和 score 残留；过期租约缺少 payload 或 score 时原子收敛为 failed，不能留下 running 孤儿。
 - ready ZSET 按优先级分别查询已经到期的成员，未来才可重试的高优先级 job 不得阻塞当前已到期的低优先级 job；同优先级仍按 readyAt 排序。
-- 所有常驻容器使用非 root 用户、只读根文件系统、健康检查和资源上限。唯一 root 例外是部署期间的日志卷一次性初始化容器；它不得加入网络、不得接收密钥或业务环境变量，只挂载 `agent_logs`，删除全部 capability 后仅加回 `CHOWN`，成功退出后才能切换版本。
+- 所有常驻容器使用非 root 用户、只读根文件系统、健康检查和资源上限。唯一 root 例外是部署期间分别处理
+  `uploads` 与 `agent_logs` 卷根目录的一次性初始化容器；它不得加入网络、不得接收密钥或业务环境变量，
+  每次只挂载一个目标卷，删除全部 capability 后仅加回 `CHOWN`，且只能对卷根目录做非递归
+  `chown 10001:10001`，成功退出后才能切换版本。Core 与 Agent 镜像还必须预建归属该用户的挂载点，保证
+  首次创建空卷时无需额外手工修权。
 
 运维必须监控 Redis `used_memory`、`evicted_keys` 和写入被拒绝数量。`evicted_keys` 应持续为 0；内存接近上限或出现写入拒绝时先停止接收新的模型任务并扩容或清理可确认过期的数据，不能临时切回淘汰策略。
 

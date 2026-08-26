@@ -8,7 +8,7 @@
 
 | 领域 | 文档 | 状态 |
 | --- | --- | --- |
-| 总览 | `docs/requirements/00-overview.md` | 当前事实 |
+| 产品功能基线 | `docs/requirements/00-overview.md` | 当前事实 |
 | 项目与章节 | `docs/requirements/01-projects-and-chapters.md` | 当前事实 |
 | 创作资料库 | `docs/requirements/02-creative-knowledge-base.md` | 当前事实 |
 | AI 写作与 Agent | `docs/requirements/03-ai-writing-and-agents.md` | 当前事实 |

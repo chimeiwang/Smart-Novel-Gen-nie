@@ -1,0 +1,26 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_render/SeedanceRenderError/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "code": {
+      "maxLength": 240,
+      "minLength": 1,
+      "title": "Code",
+      "type": "string"
+    },
+    "message": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Message",
+      "type": "string"
+    }
+  },
+  "required": [
+    "code",
+    "message"
+  ],
+  "title": "SeedanceRenderError",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_render.SeedanceRenderError"
+}

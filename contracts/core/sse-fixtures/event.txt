@@ -1,0 +1,4 @@
+id: 1735123456789-0
+event: artifact_awaiting_user_approval
+data: {"artifactId":"artifact-fixture","revision":2}
+

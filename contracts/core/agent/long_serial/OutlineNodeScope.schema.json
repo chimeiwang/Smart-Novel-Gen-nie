@@ -1,0 +1,24 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/long_serial/OutlineNodeScope/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "const": "outline_node",
+      "title": "Kind",
+      "type": "string"
+    },
+    "outlineNodeId": {
+      "minLength": 1,
+      "title": "Outlinenodeid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "outlineNodeId"
+  ],
+  "title": "OutlineNodeScope",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.long_serial.OutlineNodeScope"
+}

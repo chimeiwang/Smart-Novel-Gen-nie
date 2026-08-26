@@ -1,0 +1,91 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video/CameraMovementSpec/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "单一主运镜；位移与旋转量用于本地可执行性校验。",
+  "properties": {
+    "easing": {
+      "enum": [
+        "none",
+        "ease_in",
+        "ease_out",
+        "ease_in_out"
+      ],
+      "title": "Easing",
+      "type": "string"
+    },
+    "movementType": {
+      "enum": [
+        "locked_off",
+        "dolly_in",
+        "dolly_out",
+        "truck_left",
+        "truck_right",
+        "pan_left",
+        "pan_right",
+        "tilt_up",
+        "tilt_down",
+        "pedestal_up",
+        "pedestal_down",
+        "arc_left",
+        "arc_right",
+        "boom_up",
+        "boom_down",
+        "zoom_in",
+        "zoom_out",
+        "handheld_follow"
+      ],
+      "title": "Movementtype",
+      "type": "string"
+    },
+    "rotationDegrees": {
+      "maximum": 360,
+      "minimum": 0,
+      "title": "Rotationdegrees",
+      "type": "number"
+    },
+    "speed": {
+      "enum": [
+        "static",
+        "very_slow",
+        "slow",
+        "medium",
+        "fast"
+      ],
+      "title": "Speed",
+      "type": "string"
+    },
+    "support": {
+      "enum": [
+        "tripod",
+        "slider",
+        "dolly",
+        "gimbal",
+        "steadicam",
+        "handheld",
+        "shoulder",
+        "jib",
+        "crane"
+      ],
+      "title": "Support",
+      "type": "string"
+    },
+    "travelDistanceMeters": {
+      "maximum": 50,
+      "minimum": 0,
+      "title": "Traveldistancemeters",
+      "type": "number"
+    }
+  },
+  "required": [
+    "support",
+    "movementType",
+    "travelDistanceMeters",
+    "rotationDegrees",
+    "speed",
+    "easing"
+  ],
+  "title": "CameraMovementSpec",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.CameraMovementSpec"
+}

@@ -1,5 +1,8 @@
 # Python 后端生产切换手册
 
+> 历史说明：本文件记录 2026 年 7 月从旧 Next.js 单体切换到 Python 三服务的过程，不再是当前 Core
+> 发布手册。Java Core 原位替换与回退请使用 `docs/JAVA_CORE_CUTOVER.md`。
+
 ## 前置条件
 
 - 已把现有 PostgreSQL 备份恢复到独立验证库，并确认结构守卫通过。

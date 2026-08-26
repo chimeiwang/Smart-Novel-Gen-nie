@@ -1,0 +1,173 @@
+{
+  "$defs": {
+    "CinematicShotDesignDraft": {
+      "additionalProperties": false,
+      "description": "模型第二阶段在服务器指定的 Beat 槽内，只引用 sourceUnitIds 和 Goal Key。",
+      "properties": {
+        "audienceGain": {
+          "maxLength": 800,
+          "minLength": 1,
+          "title": "Audiencegain",
+          "type": "string"
+        },
+        "cameraAngle": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Cameraangle",
+          "type": "string"
+        },
+        "cameraMovement": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Cameramovement",
+          "type": "string"
+        },
+        "coveredGoalKeys": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 12,
+          "minItems": 1,
+          "title": "Coveredgoalkeys",
+          "type": "array"
+        },
+        "cutReason": {
+          "maxLength": 600,
+          "minLength": 1,
+          "title": "Cutreason",
+          "type": "string"
+        },
+        "narrativePurpose": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Narrativepurpose",
+          "type": "string"
+        },
+        "shotScale": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Shotscale",
+          "type": "string"
+        },
+        "soundDesign": {
+          "maxLength": 600,
+          "minLength": 1,
+          "title": "Sounddesign",
+          "type": "string"
+        },
+        "sourceRelation": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Sourcerelation",
+          "type": "string"
+        },
+        "sourceUnitIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Sourceunitids",
+          "type": "array"
+        },
+        "speechMode": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Speechmode",
+          "type": "string"
+        },
+        "spokenText": {
+          "anyOf": [
+            {
+              "maxLength": 800,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Spokentext"
+        },
+        "storyFunction": {
+          "maxLength": 800,
+          "minLength": 1,
+          "title": "Storyfunction",
+          "type": "string"
+        },
+        "timelineDurationMs": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Timelinedurationms"
+        },
+        "title": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "visualIntent": {
+          "maxLength": 1200,
+          "minLength": 1,
+          "title": "Visualintent",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "narrativePurpose",
+        "storyFunction",
+        "audienceGain",
+        "coveredGoalKeys",
+        "sourceRelation",
+        "shotScale",
+        "cameraAngle",
+        "cameraMovement",
+        "visualIntent",
+        "speechMode",
+        "soundDesign",
+        "cutReason",
+        "timelineDurationMs",
+        "sourceUnitIds"
+      ],
+      "title": "CinematicShotDesignDraft",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video_adaptation/CinematicShotDesignResult/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "beatsByKey": {
+      "additionalProperties": {
+        "items": {
+          "$ref": "#/$defs/CinematicShotDesignDraft"
+        },
+        "type": "array"
+      },
+      "title": "Beatsbykey",
+      "type": "object"
+    },
+    "suggestedEpisodeBreakAfterShotNumbers": {
+      "items": {
+        "type": "integer"
+      },
+      "title": "Suggestedepisodebreakaftershotnumbers",
+      "type": "array"
+    }
+  },
+  "required": [
+    "beatsByKey"
+  ],
+  "title": "CinematicShotDesignResult",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_adaptation.CinematicShotDesignResult"
+}

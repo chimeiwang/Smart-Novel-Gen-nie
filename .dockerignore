@@ -1,5 +1,10 @@
 node_modules
 .next
+**/target
+.git
+.venv
+.data
+.codex
 prisma/dev.db
 prisma/migrations
 .env

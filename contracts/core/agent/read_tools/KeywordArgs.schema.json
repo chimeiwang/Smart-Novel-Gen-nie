@@ -1,0 +1,18 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/read_tools/KeywordArgs/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "keyword": {
+      "minLength": 1,
+      "title": "Keyword",
+      "type": "string"
+    }
+  },
+  "required": [
+    "keyword"
+  ],
+  "title": "KeywordArgs",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.read_tools.KeywordArgs"
+}

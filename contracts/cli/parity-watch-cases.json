@@ -1,0 +1,79 @@
+{
+  "schemaVersion": "inkforge-cli-parity-watch/1.0",
+  "cases": [
+    {
+      "command": "short.agent.watch",
+      "payload": {"taskId": "t/1"},
+      "responses": [
+        {"taskId": "t/1", "phase": "completed", "commandStatus": "succeeded"}
+      ],
+      "streams": [
+        [
+          {"id": "e1", "event": "progress", "data": {"step": 1}}
+        ]
+      ],
+      "fakeClock": true
+    },
+    {
+      "command": "long.task.watch",
+      "payload": {"taskId": "t/1"},
+      "responses": [
+        {
+          "taskId": "t/1",
+          "outcome": {
+            "state": "waiting_user",
+            "result": {"kind": "review_artifact", "ready": true, "id": "artifact-1"}
+          }
+        }
+      ],
+      "fakeClock": true
+    },
+    {
+      "command": "long.video.adaptation.watch",
+      "payload": {"adaptationId": "ad1", "taskId": "task-1"},
+      "responses": [
+        {
+          "id": "ad1",
+          "latestTask": {
+            "id": "task-1",
+            "status": "pending",
+            "checkpointStage": "none",
+            "updatedAt": "v1",
+            "lastErrorCode": null,
+            "lastErrorMessage": null
+          }
+        },
+        {
+          "id": "ad1",
+          "latestTask": {
+            "id": "task-1",
+            "status": "completed",
+            "checkpointStage": "completed",
+            "updatedAt": "v2",
+            "lastErrorCode": null,
+            "lastErrorMessage": null
+          }
+        }
+      ],
+      "fakeClock": true
+    },
+    {
+      "command": "long.video.render.watch",
+      "payload": {"taskId": "r1"},
+      "responses": [
+        {"id": "r1", "status": "queued", "pollCount": 0, "updatedAt": "v1"},
+        {"id": "r1", "status": "succeeded", "pollCount": 1, "updatedAt": "v2"}
+      ],
+      "fakeClock": true
+    },
+    {
+      "command": "long.video.export.watch",
+      "payload": {"taskId": "e1"},
+      "responses": [
+        {"id": "e1", "status": "pending", "attemptCount": 0, "updatedAt": "v1"},
+        {"id": "e1", "status": "failed", "attemptCount": 1, "updatedAt": "v2"}
+      ],
+      "fakeClock": true
+    }
+  ]
+}

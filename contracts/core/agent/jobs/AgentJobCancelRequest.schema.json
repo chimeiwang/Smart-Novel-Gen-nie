@@ -1,0 +1,36 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/jobs/AgentJobCancelRequest/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "novelId": {
+      "minLength": 1,
+      "title": "Novelid",
+      "type": "string"
+    },
+    "protocolVersion": {
+      "const": "1.0",
+      "title": "Protocolversion",
+      "type": "string"
+    },
+    "runId": {
+      "minLength": 1,
+      "title": "Runid",
+      "type": "string"
+    },
+    "taskId": {
+      "minLength": 1,
+      "title": "Taskid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocolVersion",
+    "runId",
+    "taskId",
+    "novelId"
+  ],
+  "title": "AgentJobCancelRequest",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.jobs.AgentJobCancelRequest"
+}

@@ -1,0 +1,39 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/runs/RunAccepted/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "protocolVersion": {
+      "const": "1.0",
+      "title": "Protocolversion",
+      "type": "string"
+    },
+    "runId": {
+      "minLength": 1,
+      "title": "Runid",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "accepted",
+        "queued"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "taskId": {
+      "minLength": 1,
+      "title": "Taskid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocolVersion",
+    "runId",
+    "taskId",
+    "status"
+  ],
+  "title": "RunAccepted",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.runs.RunAccepted"
+}

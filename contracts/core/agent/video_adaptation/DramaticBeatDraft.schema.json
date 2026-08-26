@@ -1,0 +1,95 @@
+{
+  "$defs": {
+    "CoverageGoalDraft": {
+      "additionalProperties": false,
+      "description": "模型只描述目标，稳定 G 编号由 Agent 按时间线物化。",
+      "properties": {
+        "description": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "story_information",
+            "action",
+            "emotion",
+            "space",
+            "relationship",
+            "motif",
+            "transition"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "priority": {
+          "enum": [
+            "essential",
+            "supporting"
+          ],
+          "title": "Priority",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "priority",
+        "description"
+      ],
+      "title": "CoverageGoalDraft",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video_adaptation/DramaticBeatDraft/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "模型第一阶段只提交戏剧分析，不提交镜头或字符下标。",
+  "properties": {
+    "coverageGoals": {
+      "items": {
+        "$ref": "#/$defs/CoverageGoalDraft"
+      },
+      "maxItems": 12,
+      "minItems": 1,
+      "title": "Coveragegoals",
+      "type": "array"
+    },
+    "dramaticTurn": {
+      "maxLength": 800,
+      "minLength": 1,
+      "title": "Dramaticturn",
+      "type": "string"
+    },
+    "sourceUnitIds": {
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Sourceunitids",
+      "type": "array"
+    },
+    "title": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "visualStrategy": {
+      "maxLength": 800,
+      "minLength": 1,
+      "title": "Visualstrategy",
+      "type": "string"
+    }
+  },
+  "required": [
+    "title",
+    "sourceUnitIds",
+    "dramaticTurn",
+    "visualStrategy",
+    "coverageGoals"
+  ],
+  "title": "DramaticBeatDraft",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_adaptation.DramaticBeatDraft"
+}

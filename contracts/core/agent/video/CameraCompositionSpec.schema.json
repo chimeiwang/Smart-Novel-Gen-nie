@@ -1,0 +1,70 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video/CameraCompositionSpec/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "镜头构图和画面层次。",
+  "properties": {
+    "backgroundLayer": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Backgroundlayer",
+      "type": "string"
+    },
+    "foregroundLayer": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Foregroundlayer",
+      "type": "string"
+    },
+    "headroom": {
+      "enum": [
+        "tight",
+        "standard",
+        "generous",
+        "not_applicable"
+      ],
+      "title": "Headroom",
+      "type": "string"
+    },
+    "rule": {
+      "enum": [
+        "centered",
+        "rule_of_thirds",
+        "symmetrical",
+        "leading_lines",
+        "frame_within_frame",
+        "negative_space"
+      ],
+      "title": "Rule",
+      "type": "string"
+    },
+    "subjectFramePercent": {
+      "maximum": 100,
+      "minimum": 5,
+      "title": "Subjectframepercent",
+      "type": "integer"
+    },
+    "subjectPlacement": {
+      "enum": [
+        "left_third",
+        "center",
+        "right_third",
+        "lower_center",
+        "upper_center"
+      ],
+      "title": "Subjectplacement",
+      "type": "string"
+    }
+  },
+  "required": [
+    "rule",
+    "subjectPlacement",
+    "subjectFramePercent",
+    "headroom",
+    "foregroundLayer",
+    "backgroundLayer"
+  ],
+  "title": "CameraCompositionSpec",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.CameraCompositionSpec"
+}

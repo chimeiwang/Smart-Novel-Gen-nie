@@ -1,0 +1,18 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/read_tools/ForeshadowingNameArgs/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "foreshadowing_name": {
+      "minLength": 1,
+      "title": "Foreshadowing Name",
+      "type": "string"
+    }
+  },
+  "required": [
+    "foreshadowing_name"
+  ],
+  "title": "ForeshadowingNameArgs",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.read_tools.ForeshadowingNameArgs"
+}

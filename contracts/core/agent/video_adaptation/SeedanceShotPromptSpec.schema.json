@@ -1,0 +1,93 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_adaptation/SeedanceShotPromptSpec/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "模型只填结构化内容，最终即梦文本由纯函数按固定顺序编译。",
+  "properties": {
+    "audio": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Audio",
+      "type": "string"
+    },
+    "camera": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Camera",
+      "type": "string"
+    },
+    "continuity": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Continuity"
+    },
+    "expressionAndGaze": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expressionandgaze"
+    },
+    "negativeConstraints": {
+      "items": {
+        "maxLength": 240,
+        "minLength": 1,
+        "type": "string"
+      },
+      "maxItems": 12,
+      "title": "Negativeconstraints",
+      "type": "array"
+    },
+    "performance": {
+      "anyOf": [
+        {
+          "maxLength": 500,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Performance"
+    },
+    "subjectAndScene": {
+      "maxLength": 600,
+      "minLength": 1,
+      "title": "Subjectandscene",
+      "type": "string"
+    },
+    "visibleAction": {
+      "maxLength": 600,
+      "minLength": 1,
+      "title": "Visibleaction",
+      "type": "string"
+    }
+  },
+  "required": [
+    "subjectAndScene",
+    "visibleAction",
+    "camera",
+    "audio"
+  ],
+  "title": "SeedanceShotPromptSpec",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_adaptation.SeedanceShotPromptSpec"
+}

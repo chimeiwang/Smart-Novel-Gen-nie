@@ -39,6 +39,7 @@ validate_timeout REMOTE_DOCKER_SAFETY_BYTES "$REMOTE_DOCKER_SAFETY_BYTES" 107374
   exit 1
 }
 
+# 生产传输只信任 CI 提供的 known_hosts；禁止首次连接自动接受未知主机密钥。
 ssh_options=(
   -o StrictHostKeyChecking=yes
   -o "UserKnownHostsFile=$SSH_KNOWN_HOSTS_FILE"
@@ -122,6 +123,7 @@ server_require_capacity() {
   local image_size="$2"
   local required_bytes=$((image_size * 2 + REMOTE_DOCKER_SAFETY_BYTES))
 
+  # docker load 期间旧层与新层可能并存，按两倍镜像大小加安全余量预检，避免导入到一半耗尽磁盘。
   printf '%s\n%s\n' "$image" "$required_bytes" | remote_ssh '
     set -eu
     read -r image
@@ -149,6 +151,7 @@ build_inputs_unchanged() {
   local base_sha="$2"
   local paths=()
 
+  # 复用只看该服务的完整构建输入集合；共享契约或 Dockerfile 变化同样会强制上传新镜像。
   case "$service" in
     web)
       paths=(
@@ -161,13 +164,18 @@ build_inputs_unchanged() {
       ;;
     core-api)
       paths=(
-        pyproject.toml
-        uv.lock
-        .python-version
-        packages/service-auth
-        packages/service-contracts
-        apps/core-api
+        .mvn
+        mvnw
+        pom.xml
+        apps/core-api-java
+        packages/service-auth-java
+        packages/service-contracts-java
+        contracts/core
+        contracts/agent-service
+        apps/core-api/src/inkforge_core/db/schema-contract.json
+        tools/inkforge-cli-java/pom.xml
         infra/docker/core-api.Dockerfile
+        infra/docker/inkforge-schema-guard
       )
       ;;
     agent-service)
@@ -231,6 +239,7 @@ for index in "${!images[@]}"; do
     fi
   fi
   image_id="$(docker image inspect --format='{{.Id}}' "$image")"
+  # 标签不同但内容 ID 相同则只在服务器打标，避免重复传输相同镜像层。
   if server_has_image "$image_id"; then
     server_tag_image "$image_id" "$image"
     echo "复用服务器已有镜像内容：$image"
@@ -258,6 +267,7 @@ cleanup_upload_archives() {
     rm -rf -- "$upload_temp_dir"
   fi
 }
+# 无论归档、网络还是 docker load 在哪一步失败，都只清理本次 mktemp 目录。
 trap cleanup_upload_archives EXIT
 
 read_archive_size() {

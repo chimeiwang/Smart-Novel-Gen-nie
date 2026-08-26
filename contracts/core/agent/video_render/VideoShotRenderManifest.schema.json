@@ -1,0 +1,292 @@
+{
+  "$defs": {
+    "ShotRenderKeyframeManifest": {
+      "additionalProperties": false,
+      "description": "进入一次渲染清单的已确认关键帧事实。",
+      "properties": {
+        "assetId": {
+          "minLength": 1,
+          "title": "Assetid",
+          "type": "string"
+        },
+        "duty": {
+          "enum": [
+            "storyboard",
+            "keyframe"
+          ],
+          "title": "Duty",
+          "type": "string"
+        },
+        "keyframeVersionId": {
+          "minLength": 1,
+          "title": "Keyframeversionid",
+          "type": "string"
+        },
+        "mimeType": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Mimetype",
+          "type": "string"
+        },
+        "ordinal": {
+          "maximum": 3,
+          "minimum": 1,
+          "title": "Ordinal",
+          "type": "integer"
+        },
+        "role": {
+          "enum": [
+            "initial_state",
+            "transition_anchor",
+            "end_state"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ordinal",
+        "keyframeVersionId",
+        "role",
+        "assetId",
+        "sha256",
+        "mimeType",
+        "duty"
+      ],
+      "title": "ShotRenderKeyframeManifest",
+      "type": "object"
+    },
+    "ShotRenderReferenceManifest": {
+      "additionalProperties": false,
+      "description": "持久化到任务中的视觉参考事实，不含任何短时 URL。",
+      "properties": {
+        "assetId": {
+          "minLength": 1,
+          "title": "Assetid",
+          "type": "string"
+        },
+        "canonVersionId": {
+          "minLength": 1,
+          "title": "Canonversionid",
+          "type": "string"
+        },
+        "duty": {
+          "enum": [
+            "identity",
+            "costume",
+            "scene",
+            "prop"
+          ],
+          "title": "Duty",
+          "type": "string"
+        },
+        "mimeType": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Mimetype",
+          "type": "string"
+        },
+        "ordinal": {
+          "maximum": 20,
+          "minimum": 1,
+          "title": "Ordinal",
+          "type": "integer"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "strength": {
+          "maximum": 100,
+          "minimum": 1,
+          "title": "Strength",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "ordinal",
+        "canonVersionId",
+        "assetId",
+        "sha256",
+        "mimeType",
+        "duty",
+        "strength"
+      ],
+      "title": "ShotRenderReferenceManifest",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video_render/VideoShotRenderManifest/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Core 创建任务时冻结的完整、可哈希供应商中立输入。",
+  "properties": {
+    "adaptationId": {
+      "minLength": 1,
+      "title": "Adaptationid",
+      "type": "string"
+    },
+    "durationSeconds": {
+      "maximum": 12,
+      "minimum": 2,
+      "title": "Durationseconds",
+      "type": "integer"
+    },
+    "generateAudio": {
+      "default": true,
+      "title": "Generateaudio",
+      "type": "boolean"
+    },
+    "keyframes": {
+      "items": {
+        "$ref": "#/$defs/ShotRenderKeyframeManifest"
+      },
+      "maxItems": 3,
+      "title": "Keyframes",
+      "type": "array"
+    },
+    "model": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Model",
+      "type": "string"
+    },
+    "novelId": {
+      "minLength": 1,
+      "title": "Novelid",
+      "type": "string"
+    },
+    "projectId": {
+      "minLength": 1,
+      "title": "Projectid",
+      "type": "string"
+    },
+    "promptContentHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Promptcontenthash",
+      "type": "string"
+    },
+    "promptText": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Prompttext",
+      "type": "string"
+    },
+    "promptVersionId": {
+      "minLength": 1,
+      "title": "Promptversionid",
+      "type": "string"
+    },
+    "provider": {
+      "const": "seedance",
+      "default": "seedance",
+      "title": "Provider",
+      "type": "string"
+    },
+    "providerPromptText": {
+      "anyOf": [
+        {
+          "maxLength": 2500,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Providerprompttext"
+    },
+    "ratio": {
+      "enum": [
+        "16:9",
+        "4:3",
+        "1:1",
+        "3:4",
+        "9:16",
+        "21:9",
+        "adaptive"
+      ],
+      "title": "Ratio",
+      "type": "string"
+    },
+    "references": {
+      "items": {
+        "$ref": "#/$defs/ShotRenderReferenceManifest"
+      },
+      "maxItems": 20,
+      "title": "References",
+      "type": "array"
+    },
+    "resolution": {
+      "default": "720p",
+      "enum": [
+        "480p",
+        "720p",
+        "1080p"
+      ],
+      "title": "Resolution",
+      "type": "string"
+    },
+    "schemaVersion": {
+      "default": "video-shot-render-manifest/1.1",
+      "enum": [
+        "video-shot-render-manifest/1.0",
+        "video-shot-render-manifest/1.1"
+      ],
+      "title": "Schemaversion",
+      "type": "string"
+    },
+    "shotId": {
+      "minLength": 1,
+      "title": "Shotid",
+      "type": "string"
+    },
+    "shotKey": {
+      "maxLength": 80,
+      "minLength": 1,
+      "title": "Shotkey",
+      "type": "string"
+    },
+    "shotPlanVersionId": {
+      "minLength": 1,
+      "title": "Shotplanversionid",
+      "type": "string"
+    },
+    "sourceTimelineDurationMs": {
+      "maximum": 15000,
+      "minimum": 500,
+      "title": "Sourcetimelinedurationms",
+      "type": "integer"
+    },
+    "watermark": {
+      "default": false,
+      "title": "Watermark",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "adaptationId",
+    "projectId",
+    "novelId",
+    "shotId",
+    "shotKey",
+    "shotPlanVersionId",
+    "promptVersionId",
+    "promptContentHash",
+    "promptText",
+    "sourceTimelineDurationMs",
+    "model",
+    "ratio",
+    "durationSeconds"
+  ],
+  "title": "VideoShotRenderManifest",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_render.VideoShotRenderManifest"
+}

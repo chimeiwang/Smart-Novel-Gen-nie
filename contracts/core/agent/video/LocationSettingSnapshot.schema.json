@@ -1,0 +1,106 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video/LocationSettingSnapshot/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "规划任务冻结的地点设定投影。",
+  "properties": {
+    "aliases": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Aliases",
+      "type": "array"
+    },
+    "climate": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Climate"
+    },
+    "contentHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Contenthash",
+      "type": "string"
+    },
+    "culture": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Culture"
+    },
+    "description": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Description"
+    },
+    "id": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Id",
+      "type": "string"
+    },
+    "kind": {
+      "const": "location",
+      "default": "location",
+      "title": "Kind",
+      "type": "string"
+    },
+    "locationType": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Locationtype"
+    },
+    "name": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "parentLocationId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Parentlocationid"
+    }
+  },
+  "required": [
+    "id",
+    "contentHash",
+    "name"
+  ],
+  "title": "LocationSettingSnapshot",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.LocationSettingSnapshot"
+}

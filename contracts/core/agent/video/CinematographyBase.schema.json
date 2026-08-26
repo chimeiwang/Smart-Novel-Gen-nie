@@ -1,0 +1,73 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video/CinematographyBase/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "全场共享的摄影机成像与轴线基线。",
+  "properties": {
+    "axisRule": {
+      "enum": [
+        "maintain_180",
+        "intentional_cross",
+        "not_applicable"
+      ],
+      "title": "Axisrule",
+      "type": "string"
+    },
+    "captureFormat": {
+      "enum": [
+        "super_35",
+        "full_frame"
+      ],
+      "title": "Captureformat",
+      "type": "string"
+    },
+    "frameRateFps": {
+      "enum": [
+        24,
+        25,
+        30
+      ],
+      "title": "Frameratefps",
+      "type": "integer"
+    },
+    "lensProjection": {
+      "enum": [
+        "spherical",
+        "anamorphic"
+      ],
+      "title": "Lensprojection",
+      "type": "string"
+    },
+    "screenDirection": {
+      "enum": [
+        "left_to_right",
+        "right_to_left",
+        "neutral"
+      ],
+      "title": "Screendirection",
+      "type": "string"
+    },
+    "shutterAngleDegrees": {
+      "enum": [
+        90,
+        144,
+        180,
+        270,
+        360
+      ],
+      "title": "Shutterangledegrees",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "captureFormat",
+    "lensProjection",
+    "frameRateFps",
+    "shutterAngleDegrees",
+    "axisRule",
+    "screenDirection"
+  ],
+  "title": "CinematographyBase",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.CinematographyBase"
+}

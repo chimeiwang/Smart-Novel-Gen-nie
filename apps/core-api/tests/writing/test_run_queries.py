@@ -353,6 +353,36 @@ def test_plan_projection_waits_only_on_an_authoritative_awaiting_artifact() -> N
     assert status.outcome.result.id == "artifact-1"
 
 
+def test_natural_long_projection_uses_persisted_classified_operation() -> None:
+    command = _command("start-1")
+    # 自然语言入口在启动时尚未分类；操作身份随后由受信 Agent 回调写入任务快照。
+    command.payloadJson = json.dumps(
+        {
+            "version": 1,
+            "chapterId": "chapter-1",
+            "writingSessionId": "session-1",
+            "sourceBindings": [],
+            "resume": False,
+            "resumeInput": None,
+        }
+    )
+    status = project_run_status(
+        _task(
+            phase="awaiting_user_review",
+            graph={
+                "currentOperation": {"kind": "write_chapter"},
+                "activeArtifactId": "artifact-1",
+            },
+        ),
+        commands=[command],
+        artifacts=[_artifact(kind="chapter_draft")],
+    )
+
+    assert status.operation == "write_chapter"
+    assert status.outcome.state == "waiting_user"
+    assert status.activeArtifactId == "artifact-1"
+
+
 @pytest.mark.parametrize(
     ("operation", "artifact_kind"),
     [

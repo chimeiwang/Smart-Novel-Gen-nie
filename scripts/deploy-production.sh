@@ -7,13 +7,24 @@ BRANCH="${BRANCH:-main}"
 DEPLOY_SHA="${DEPLOY_SHA:?必须设置部署提交}"
 INKFORGE_IMAGE_TAG="${INKFORGE_IMAGE_TAG:?必须设置镜像标签}"
 compose_file="infra/compose.yaml"
+python_rollback_file="infra/compose.python-core-rollback.yaml"
 
+# Java 与历史 Python Core 使用不同的回滚覆盖层；运行时分类必须来自镜像标签，不能靠版本号猜测。
 compose() {
   docker compose --env-file .env -f "$compose_file" "$@"
 }
 
-initialize_agent_log_volume() {
-  docker volume create inkforge_agent_logs >/dev/null
+compose_python_rollback() {
+  docker compose --env-file .env \
+    -f "$compose_file" -f "$python_rollback_file" "$@"
+}
+
+initialize_persistent_volume() {
+  volume_name="$1"
+  mount_path="$2"
+  image="$3"
+
+  docker volume create "$volume_name" >/dev/null
   docker run \
     --rm \
     --network none \
@@ -21,9 +32,18 @@ initialize_agent_log_volume() {
     --cap-drop ALL \
     --cap-add CHOWN \
     --user 0:0 \
-    --mount type=volume,source=inkforge_agent_logs,target=/data/agent-logs \
-    "inkforge-agent-service:$INKFORGE_IMAGE_TAG" \
-    chown 10001:10001 /data/agent-logs
+    --mount "type=volume,source=$volume_name,target=$mount_path" \
+    --entrypoint /usr/bin/chown \
+    "$image" \
+    10001:10001 "$mount_path"
+}
+
+initialize_persistent_volumes() {
+  # 只调整卷根目录，不递归触碰已有上传文件或人工日志。
+  initialize_persistent_volume \
+    inkforge_uploads /data/uploads "inkforge-core-api:$INKFORGE_IMAGE_TAG"
+  initialize_persistent_volume \
+    inkforge_agent_logs /data/agent-logs "inkforge-agent-service:$INKFORGE_IMAGE_TAG"
 }
 
 refresh_nginx() {
@@ -42,16 +62,36 @@ safe_git() {
   git -c safe.directory="$APP_DIR" "$@"
 }
 
-verify_stack() {
+verify_java_stack() {
   compose ps &&
-  compose exec -T core-api python -c \
-    'import asyncio, os; from inkforge_core.config import Settings; from inkforge_core.db.schema_guard import verify_live_schema; from inkforge_core.db.session import SCHEMA_CONTRACT_PATH, schema_profile_for_settings; settings = Settings(); result = asyncio.run(verify_live_schema(os.environ["DATABASE_URL"], SCHEMA_CONTRACT_PATH, profile=schema_profile_for_settings(settings))); print(result.fingerprint); raise SystemExit(0 if result.ready else 1)' &&
+  compose exec -T core-api /usr/local/bin/inkforge-schema-guard &&
   COMPOSE_ENV_FILE=.env COMPOSE_OVERRIDE_FILE= sh scripts/compose_smoke.sh
+}
+
+verify_python_rollback_stack() {
+  compose_python_rollback ps &&
+  compose_python_rollback exec -T core-api python -c \
+    'import asyncio, os; from inkforge_core.config import Settings; from inkforge_core.db.schema_guard import verify_live_schema; from inkforge_core.db.session import SCHEMA_CONTRACT_PATH, schema_profile_for_settings; settings = Settings(); result = asyncio.run(verify_live_schema(os.environ["DATABASE_URL"], SCHEMA_CONTRACT_PATH, profile=schema_profile_for_settings(settings))); print(result.fingerprint); raise SystemExit(0 if result.ready else 1)' &&
+  COMPOSE_ENV_FILE=.env COMPOSE_OVERRIDE_FILE="$python_rollback_file" sh scripts/compose_smoke.sh
+}
+
+core_image_runtime_label() {
+  docker image inspect \
+    --format '{{ index .Config.Labels "cn.inkforge.core.runtime" }}' "$1"
+}
+
+classify_core_runtime() {
+  case "$1" in
+    java) printf '%s\n' java ;;
+    ""|"<no value>") printf '%s\n' python ;;
+    *) printf '%s\n' unknown ;;
+  esac
 }
 
 command -v docker >/dev/null 2>&1 || { echo "缺少 docker 命令" >&2; exit 1; }
 command -v git >/dev/null 2>&1 || { echo "缺少 git 命令" >&2; exit 1; }
 
+# APP_DIR 是服务器专用部署检出目录；DEPLOY_SHA 将实际代码固定到 CI 已构建镜像对应的提交。
 mkdir -p "$APP_DIR"
 cd "$APP_DIR"
 
@@ -85,6 +125,7 @@ safe_git reset --hard "$DEPLOY_SHA"
 
 [ -f .env ] || { echo "缺少 .env" >&2; exit 1; }
 [ -r .env ] || { echo "部署用户无法读取 .env" >&2; exit 1; }
+# 以下检查都在启动新容器前完成，失败时不得触碰现有生产进程。
 grep -q 'host.docker.internal' "$compose_file" || {
   echo "生产编排未配置宿主机数据库网关" >&2
   exit 1
@@ -121,6 +162,17 @@ do
   docker image inspect "$image" >/dev/null 2>&1 || { echo "缺少预构建镜像：$image" >&2; exit 1; }
 done
 
+if new_core_runtime_label="$(core_image_runtime_label "inkforge-core-api:$INKFORGE_IMAGE_TAG")"; then
+  :
+else
+  echo "无法读取新 Core 镜像 runtime 标签" >&2
+  exit 1
+fi
+[ "$(classify_core_runtime "$new_core_runtime_label")" = "java" ] || {
+  echo "新 Core 镜像不是 Java runtime" >&2
+  exit 1
+}
+
 web_container="$(find_service_container web)"
 core_container="$(find_service_container core-api)"
 agent_container="$(find_service_container agent-service)"
@@ -131,6 +183,8 @@ existing_service_count="0"
 [ -n "$agent_container" ] && existing_service_count=$((existing_service_count + 1))
 
 previous_tag=""
+previous_core_runtime=""
+# 自动回滚的前提是三服务来自同一标签且旧镜像仍在本机；不满足时宁可停止，也不拼接混合版本。
 if [ "$existing_service_count" -eq 0 ]; then
   echo "未发现现有生产容器，本次按首次部署处理"
 elif [ "$existing_service_count" -ne 3 ]; then
@@ -165,17 +219,28 @@ else
       exit 1
     }
   done
+  if previous_core_runtime_label="$(core_image_runtime_label "$core_image")"; then
+    previous_core_runtime="$(classify_core_runtime "$previous_core_runtime_label")"
+  else
+    echo "无法读取上一 Core 镜像 runtime 标签" >&2
+    exit 1
+  fi
+  [ "$previous_core_runtime" != "unknown" ] || {
+    echo "上一 Core 镜像 runtime 标签无法识别" >&2
+    exit 1
+  }
   previous_tag="$web_tag"
-  echo "已确认可回滚的上一生产镜像标签：$previous_tag"
+  echo "已确认可回滚的上一生产镜像标签：${previous_tag}（${previous_core_runtime}）"
 fi
 
 docker compose version >/dev/null 2>&1 || { echo "缺少 docker compose" >&2; exit 1; }
 export INKFORGE_IMAGE_TAG
 compose config >/dev/null
-initialize_agent_log_volume
+initialize_persistent_volumes
 
 migration_helper="$APP_DIR/scripts/token-usage-production-migration.sh"
 [ -r "$migration_helper" ] || { echo "缺少固定生产数据库迁移 helper" >&2; exit 1; }
+# 部署只获准调用这一个具名迁移 helper；partial 状态不能自动推断修复方向。
 migration_state="$(sh "$migration_helper" status)" || {
   echo "无法读取生产 TokenUsage schema 状态" >&2
   exit 1
@@ -204,6 +269,7 @@ rollback() {
   set +e
   echo "新版本部署失败（退出码：${original_status}）" >&2
 
+  # 若本次改变过 schema，必须先恢复旧 schema，再启动可能不认识新字段的旧 Core。
   if [ "$migration_applied_by_deploy" = "1" ]; then
     if sh "$migration_helper" down; then
       migration_applied_by_deploy="0"
@@ -226,14 +292,22 @@ rollback() {
 
   INKFORGE_IMAGE_TAG="$previous_tag"
   export INKFORGE_IMAGE_TAG
-  compose up --no-build -d --wait
+  if [ "$previous_core_runtime" = "python" ]; then
+    compose_python_rollback up --no-build -d --wait
+  else
+    compose up --no-build -d --wait
+  fi
   rollback_status="$?"
   if [ "$rollback_status" -eq 0 ]; then
     refresh_nginx
     rollback_status="$?"
   fi
   if [ "$rollback_status" -eq 0 ]; then
-    verify_stack
+    if [ "$previous_core_runtime" = "python" ]; then
+      verify_python_rollback_stack
+    else
+      verify_java_stack
+    fi
     rollback_status="$?"
   fi
 
@@ -263,9 +337,10 @@ if [ "$migration_state" = "unmigrated" ]; then
   }
 fi
 
+# 到此数据库已达到目标状态且幂等复验通过，才允许承担切换生产容器的回滚责任。
 version_switch_started="1"
 compose up --no-build -d --wait
 refresh_nginx
-verify_stack
+verify_java_stack
 trap - EXIT
 echo "生产编排已启动"

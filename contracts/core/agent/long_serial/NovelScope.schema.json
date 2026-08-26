@@ -1,0 +1,18 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/long_serial/NovelScope/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "const": "novel",
+      "title": "Kind",
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind"
+  ],
+  "title": "NovelScope",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.long_serial.NovelScope"
+}

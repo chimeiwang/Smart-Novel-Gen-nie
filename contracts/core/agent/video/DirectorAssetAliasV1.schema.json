@@ -1,0 +1,52 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video/DirectorAssetAliasV1/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "服务器为已物化素材分配的短别名，不向模型暴露正式 assetId。",
+  "properties": {
+    "alias": {
+      "pattern": "^A[0-9]{2}$",
+      "title": "Alias",
+      "type": "string"
+    },
+    "duty": {
+      "enum": [
+        "identity",
+        "costume",
+        "scene",
+        "prop",
+        "style",
+        "storyboard",
+        "keyframe",
+        "motion",
+        "camera",
+        "voice",
+        "ambience",
+        "relation_interaction"
+      ],
+      "title": "Duty",
+      "type": "string"
+    },
+    "ordinal": {
+      "maximum": 11,
+      "minimum": 1,
+      "title": "Ordinal",
+      "type": "integer"
+    },
+    "targetEntity": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Targetentity",
+      "type": "string"
+    }
+  },
+  "required": [
+    "alias",
+    "ordinal",
+    "targetEntity",
+    "duty"
+  ],
+  "title": "DirectorAssetAliasV1",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.DirectorAssetAliasV1"
+}

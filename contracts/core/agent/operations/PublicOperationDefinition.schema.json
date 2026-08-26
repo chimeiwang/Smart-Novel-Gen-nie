@@ -1,0 +1,106 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/operations/PublicOperationDefinition/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "allowedScopeKinds": {
+      "items": {
+        "enum": [
+          "chapter",
+          "chapter_range",
+          "outline_node",
+          "novel"
+        ],
+        "type": "string"
+      },
+      "title": "Allowedscopekinds",
+      "type": "array"
+    },
+    "artifactKind": {
+      "anyOf": [
+        {
+          "enum": [
+            "beat_plan",
+            "chapter_draft",
+            "outline_draft"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Artifactkind"
+    },
+    "mutating": {
+      "title": "Mutating",
+      "type": "boolean"
+    },
+    "operation": {
+      "enum": [
+        "answer_question",
+        "create_lore",
+        "revise_lore",
+        "create_outline",
+        "revise_outline",
+        "plan_chapter",
+        "write_chapter",
+        "rewrite_scene",
+        "rewrite_chapter_selection",
+        "rewrite_outline_selection",
+        "review_chapter",
+        "manage_foreshadowing"
+      ],
+      "title": "Operation",
+      "type": "string"
+    },
+    "principalAgent": {
+      "enum": [
+        "设定",
+        "剧情",
+        "写作",
+        "校验",
+        "编辑"
+      ],
+      "title": "Principalagent",
+      "type": "string"
+    },
+    "reviewers": {
+      "items": {
+        "enum": [
+          "设定",
+          "剧情",
+          "写作",
+          "校验",
+          "编辑"
+        ],
+        "type": "string"
+      },
+      "title": "Reviewers",
+      "type": "array"
+    },
+    "targetKind": {
+      "const": "chapter",
+      "title": "Targetkind",
+      "type": "string"
+    },
+    "workflow": {
+      "const": "long_serial",
+      "title": "Workflow",
+      "type": "string"
+    }
+  },
+  "required": [
+    "operation",
+    "workflow",
+    "targetKind",
+    "allowedScopeKinds",
+    "mutating",
+    "principalAgent",
+    "reviewers",
+    "artifactKind"
+  ],
+  "title": "PublicOperationDefinition",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.operations.PublicOperationDefinition"
+}

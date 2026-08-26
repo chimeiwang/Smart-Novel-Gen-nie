@@ -1,0 +1,76 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video/LightingSetup/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "全场环境曝光与灯光连续性基线。",
+  "properties": {
+    "ambientColorTemperatureK": {
+      "maximum": 20000,
+      "minimum": 1500,
+      "title": "Ambientcolortemperaturek",
+      "type": "integer"
+    },
+    "ambientSource": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Ambientsource",
+      "type": "string"
+    },
+    "atmosphere": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Atmosphere",
+      "type": "string"
+    },
+    "cameraWhiteBalanceK": {
+      "anyOf": [
+        {
+          "maximum": 20000,
+          "minimum": 1500,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Camerawhitebalancek"
+    },
+    "exposureStyle": {
+      "enum": [
+        "low_key",
+        "balanced",
+        "high_key"
+      ],
+      "title": "Exposurestyle",
+      "type": "string"
+    },
+    "keyToFillStops": {
+      "maximum": 8,
+      "minimum": 0,
+      "title": "Keytofillstops",
+      "type": "number"
+    },
+    "negativeFillSide": {
+      "enum": [
+        "none",
+        "camera_left",
+        "camera_right",
+        "both"
+      ],
+      "title": "Negativefillside",
+      "type": "string"
+    }
+  },
+  "required": [
+    "exposureStyle",
+    "ambientSource",
+    "ambientColorTemperatureK",
+    "keyToFillStops",
+    "negativeFillSide",
+    "atmosphere"
+  ],
+  "title": "LightingSetup",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.LightingSetup"
+}

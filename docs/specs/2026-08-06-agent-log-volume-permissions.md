@@ -19,11 +19,19 @@
 
 ## 设计
 
-`scripts/deploy-production.sh` 在版本切换和回滚 trap 注册前确保固定命名卷 `inkforge_agent_logs` 存在，再用当前 Agent 镜像运行一次隔离初始化容器。该容器只挂载日志卷，不接收模型密钥、服务私钥或业务环境变量，不加入任何网络。它以 root 启动，但删除全部 Linux capabilities 后只加回 `CHOWN`，执行一次非递归 `chown 10001:10001 /data/agent-logs` 后退出。
+Agent 镜像在切换到非 root 用户前预建归属 `10001:10001` 的 `/data/agent-logs`，因此首次挂载空命名卷时
+即可继承正确所有权。`scripts/deploy-production.sh` 在版本切换和回滚 trap 注册前仍确保固定命名卷
+`inkforge_agent_logs` 存在，再用当前 Agent 镜像运行一次隔离初始化容器，以兼容已经存在且所有权未知的
+卷。该容器只挂载日志卷，不接收模型密钥、服务私钥或业务环境变量，不加入任何网络。它以 root 启动，
+但删除全部 Linux capabilities 后只加回 `CHOWN`，执行一次非递归
+`chown 10001:10001 /data/agent-logs` 后退出。Java Core 替换同时以同一安全模型处理 `inkforge_uploads`，
+但不改变本 spec 的日志域边界。
 
 初始化失败时部署在任何 `compose up` 之前停止，现有生产容器保持不变。不能把初始化器建模为 `service_completed_successfully` 的 Compose 服务，因为生产使用的 `docker compose up -d --wait` 会把成功退出的一次性服务视为未处于运行状态并返回非零。
 
-`scripts/compose_smoke.sh` 在 HTTP 和队列就绪检查前，以正式 Agent 容器身份在 `WORKFLOW_HUMAN_LOG_DIR` 下创建并删除唯一探针目录。探针失败必须使 smoke 非零退出。
+`scripts/compose_smoke.sh` 在 HTTP 和队列就绪检查前，以正式 Agent 容器身份在
+`WORKFLOW_HUMAN_LOG_DIR` 下创建并删除唯一探针目录；Java Core 替换后还以正式 Core 身份对
+`UPLOADS_ROOT` 做同等探针。任一探针失败必须使 smoke 非零退出。
 
 现有生产卷执行一次精确 `chown 10001:10001`；不递归处理其他目录，也不删除或重建卷。
 

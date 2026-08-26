@@ -1,0 +1,111 @@
+{
+  "schemaVersion": "inkforge-core-behavior/1.0",
+  "scenario": "认证、长篇创建、摘要 CAS、章节正文与进展",
+  "steps": [
+    {
+      "name": "注册并领取初始积分",
+      "method": "POST",
+      "path": "/api/v1/auth/register",
+      "body": {
+        "username": "parity_user_01",
+        "password": "密码1234",
+        "confirmPassword": "密码1234"
+      },
+      "expectedStatus": 201,
+      "capture": {"userId": "/id"},
+      "expectCookie": true
+    },
+    {
+      "name": "读取当前用户",
+      "method": "GET",
+      "path": "/api/v1/auth/me",
+      "expectedStatus": 200
+    },
+    {
+      "name": "创建长篇与首章",
+      "method": "POST",
+      "path": "/api/v1/novels",
+      "body": {
+        "name": "  差分长篇  ",
+        "summary": "初始简介",
+        "storyLengthProfile": "long_serial",
+        "firstChapterGoal": "建立冲突"
+      },
+      "expectedStatus": 201,
+      "capture": {
+        "novelId": "/novelId",
+        "chapterId": "/chapterId"
+      }
+    },
+    {
+      "name": "读取小说并捕获 CAS 版本",
+      "method": "GET",
+      "path": "/api/v1/novels/${novelId}",
+      "expectedStatus": 200,
+      "capture": {"novelUpdatedAt": "/updatedAt"},
+      "normalizePointers": ["/createdAt"]
+    },
+    {
+      "name": "按 CAS 更新小说简介",
+      "method": "PUT",
+      "path": "/api/v1/novels/${novelId}/summary",
+      "body": {
+        "summary": "  更新简介  ",
+        "expectedUpdatedAt": "${novelUpdatedAt}"
+      },
+      "expectedStatus": 200,
+      "normalizePointers": ["/createdAt", "/updatedAt"]
+    },
+    {
+      "name": "读取首章并捕获 CAS 版本",
+      "method": "GET",
+      "path": "/api/v1/chapters/${chapterId}",
+      "expectedStatus": 200,
+      "capture": {"chapterUpdatedAt": "/updatedAt"},
+      "normalizePointers": ["/createdAt"]
+    },
+    {
+      "name": "按 CAS 保存完整章节正文",
+      "method": "PATCH",
+      "path": "/api/v1/chapters/${chapterId}",
+      "body": {
+        "title": "   ",
+        "content": "  第一行\r\n\n最后一行😀  ",
+        "expectedUpdatedAt": "${chapterUpdatedAt}"
+      },
+      "expectedStatus": 200,
+      "capture": {"chapterSavedAt": "/updatedAt"}
+    },
+    {
+      "name": "保存章节进展",
+      "method": "PUT",
+      "path": "/api/v1/chapters/${chapterId}/progress",
+      "body": {
+        "content": "完整进展\r\n尾部😀",
+        "expectedUpdatedAt": null
+      },
+      "expectedStatus": 200,
+      "capture": {"progressSavedAt": "/updatedAt"}
+    },
+    {
+      "name": "读取最终章节聚合",
+      "method": "GET",
+      "path": "/api/v1/chapters/${chapterId}",
+      "expectedStatus": 200,
+      "capture": {"progressId": "/progress/id"},
+      "normalizePointers": [
+        "/createdAt",
+        "/updatedAt",
+        "/progress/createdAt",
+        "/progress/updatedAt"
+      ]
+    }
+  ],
+  "snapshotQueries": [
+    {
+      "name": "认证小说章节最终业务事实",
+      "expectedRows": 1,
+      "sql": "SELECT u.username AS \"username\", u.\"creditBalanceMicros\"::text AS \"creditBalanceMicros\", (SELECT count(*)::integer FROM \"CreditLedger\" ledger WHERE ledger.\"userId\" = u.id) AS \"ledgerCount\", n.name AS \"novelName\", n.summary AS \"novelSummary\", n.\"storyProgress\" AS \"storyProgress\", bible.\"storyLengthProfile\"::text AS \"storyLengthProfile\", bible.\"targetTotalWordCount\" AS \"targetTotalWordCount\", c.title AS \"chapterTitle\", c.content AS \"chapterContent\", c.\"order\" AS \"chapterOrder\", c.status::text AS \"chapterStatus\", progress.content AS \"chapterProgress\", outline.content AS \"outlineContent\" FROM \"User\" u JOIN \"Novel\" n ON n.\"userId\" = u.id JOIN \"WritingBible\" bible ON bible.\"novelId\" = n.id JOIN \"Chapter\" c ON c.\"novelId\" = n.id JOIN \"Outline\" outline ON outline.\"novelId\" = n.id LEFT JOIN \"ChapterProgress\" progress ON progress.\"chapterId\" = c.id WHERE u.username = 'parity_user_01' ORDER BY c.\"order\""
+    }
+  ]
+}

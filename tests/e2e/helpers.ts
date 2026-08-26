@@ -28,8 +28,9 @@ export async function createNovelWithApi(
     data: {
       name,
       summary: "端到端测试项目",
-      storyLengthProfile: "short_medium",
-      targetTotalWordCount: 50_000,
+      // 通用 E2E 会验证多章节、结构化大纲和长篇写作流程，必须创建长篇作品。
+      storyLengthProfile: "long_serial",
+      targetTotalWordCount: 1_000_000,
       genre: "测试",
       protagonist: "测试主角",
       coreSellingPoint: "验证完整迁移链路",
@@ -51,10 +52,17 @@ export async function prepareWritingOutlineWithApi(
   page: Page,
   identity: NovelIdentity,
 ): Promise<void> {
+  let requestIndex = 0;
   const createNode = async (data: Record<string, unknown>): Promise<OutlineNodeIdentity> => {
+    requestIndex += 1;
     const response = await page.request.post(
       `/api/v1/novels/${identity.novelId}/outline-nodes`,
-      { data },
+      {
+        data: {
+          ...data,
+          clientRequestId: `e2e-outline-${Date.now()}-${requestIndex}`,
+        },
+      },
     );
     await expectApiOk(response, "创建结构化大纲节点");
     return (await response.json()) as OutlineNodeIdentity;
@@ -100,10 +108,11 @@ export async function expectApiOk(
 
 export async function openWorkspace(page: Page, identity: NovelIdentity): Promise<void> {
   await page.goto(`/workspace/${identity.novelId}?chapterId=${identity.chapterId}`);
-  await expect(page.getByRole("button", { name: "AI 创作", exact: true })).toHaveAttribute(
+  await expect(page.getByRole("button", { name: "章节", exact: true })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
+  await expect(page.getByPlaceholder("章节标题")).toBeVisible();
   await expect(
     page.getByPlaceholder("描述要完成的创作任务，系统会自动分配合适的 Agent"),
   ).toBeVisible();
@@ -116,25 +125,4 @@ export async function seedInvalidQualityCheck(checkId: string): Promise<void> {
     ["run", "python", "tests/e2e/seed_invalid_quality_check.py", checkId],
     { cwd: process.cwd(), env: process.env },
   );
-}
-
-export async function openReadingWorkspace(
-  page: Page,
-  identity: NovelIdentity,
-): Promise<void> {
-  await page.goto(
-    `/workspace/${identity.novelId}?chapterId=${identity.chapterId}&view=reading`,
-  );
-  await expect(page.getByRole("button", { name: "阅读与小修", exact: true })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
-  await expect(page.getByRole("button", { name: "进入小修", exact: true })).toBeVisible();
-  await expect(page.getByPlaceholder("正文内容")).toHaveCount(0);
-}
-
-export async function enterMinorEdit(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "进入小修", exact: true }).click();
-  await expect(page.getByPlaceholder("章节标题")).toBeVisible();
-  await expect(page.getByPlaceholder("正文内容")).toBeEditable();
 }

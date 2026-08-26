@@ -1,0 +1,71 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/events/RunFailureCallback/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "code": {
+      "minLength": 1,
+      "title": "Code",
+      "type": "string"
+    },
+    "eventId": {
+      "minLength": 1,
+      "title": "Eventid",
+      "type": "string"
+    },
+    "jobId": {
+      "minLength": 1,
+      "title": "Jobid",
+      "type": "string"
+    },
+    "message": {
+      "minLength": 1,
+      "title": "Message",
+      "type": "string"
+    },
+    "occurredAt": {
+      "format": "date-time",
+      "title": "Occurredat",
+      "type": "string"
+    },
+    "protocolVersion": {
+      "const": "1.1",
+      "title": "Protocolversion",
+      "type": "string"
+    },
+    "recoverable": {
+      "title": "Recoverable",
+      "type": "boolean"
+    },
+    "runId": {
+      "minLength": 1,
+      "title": "Runid",
+      "type": "string"
+    },
+    "sequence": {
+      "exclusiveMinimum": 0,
+      "title": "Sequence",
+      "type": "integer"
+    },
+    "taskId": {
+      "minLength": 1,
+      "title": "Taskid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocolVersion",
+    "eventId",
+    "jobId",
+    "runId",
+    "taskId",
+    "sequence",
+    "code",
+    "message",
+    "recoverable",
+    "occurredAt"
+  ],
+  "title": "RunFailureCallback",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.events.RunFailureCallback"
+}

@@ -1,0 +1,30 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/long_serial/ChapterRangeScope/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "chapterEndOrder": {
+      "minimum": 0,
+      "title": "Chapterendorder",
+      "type": "integer"
+    },
+    "chapterStartOrder": {
+      "minimum": 0,
+      "title": "Chapterstartorder",
+      "type": "integer"
+    },
+    "kind": {
+      "const": "chapter_range",
+      "title": "Kind",
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "chapterStartOrder",
+    "chapterEndOrder"
+  ],
+  "title": "ChapterRangeScope",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.long_serial.ChapterRangeScope"
+}

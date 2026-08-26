@@ -16,6 +16,8 @@ RUN uv sync --frozen --no-dev --no-editable --package inkforge-agent-service
 
 FROM python:3.12-slim AS runtime
 RUN groupadd --gid 10001 inkforge && useradd --uid 10001 --gid 10001 --no-create-home inkforge
+# 首次挂载空日志卷时，卷根目录必须能由正式 Agent 用户写入。
+RUN install -d -o 10001 -g 10001 /data/agent-logs
 WORKDIR /app
 ENV PATH="/app/.venv/bin:$PATH" PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 COPY --from=builder --chown=10001:10001 /app/.venv /app/.venv

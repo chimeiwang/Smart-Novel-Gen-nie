@@ -7,7 +7,7 @@
 | 文档 | 用途 |
 | --- | --- |
 | `REQUIREMENTS.md` | 当前需求入口索引 |
-| `requirements/00-overview.md` | 项目需求总览 |
+| `requirements/00-overview.md` | 当前产品功能、可用状态、限制与 Java 重写验收基线 |
 | `requirements/01-projects-and-chapters.md` | 项目与章节 |
 | `requirements/02-creative-knowledge-base.md` | 创作资料库 |
 | `requirements/03-ai-writing-and-agents.md` | AI 写作与 Agent |
@@ -16,6 +16,9 @@
 | `LANGGRAPH_STUDIO.md` | Python LangGraph Studio 调试边界 |
 | `WORKFLOW_EVENT_LOG_FORMAT.md` | 人工工作流日志格式 |
 | `BACKLOG.md` | 后续能力备忘，不代表当前承诺 |
+| `specs/2026-08-24-core-java-replacement.md` | Java Core 单体替换范围、TDD、dev 数据库与部署验收规格 |
+| `JAVA_CORE_CUTOVER.md` | Java Core 单服务生产切换、验证和历史 Python 回退手册 |
+| `architecture-decisions/001-003` | Java 技术栈、契约优先和生产单 Core 切换决策 |
 | `specs/2026-08-08-novel-to-video-product-architecture.md` | 长篇小说视频制作系统的产品与架构基线 |
 | `specs/2026-08-08-novel-to-video-detailed-design.md` | 长篇小说视频制作系统的数据、接口、工作台与迁移详细设计 |
 | `specs/2026-08-17-video-preview-hardening.md` | 视频开发预览的数据库约束、结构守卫、生产关闭与真实并发验收 |

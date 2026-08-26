@@ -1,0 +1,188 @@
+{
+  "$defs": {
+    "SettingReference": {
+      "additionalProperties": false,
+      "description": "指向长篇冻结设定快照中的一个类型化条目。",
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "character",
+            "relationship",
+            "location",
+            "item",
+            "world_setting"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "title": "SettingReference",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video/AssetBinding/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "编译阶段的素材绑定；fixture 明确表示它仍是待补齐素材。",
+  "properties": {
+    "assetId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Assetid",
+      "type": "string"
+    },
+    "bindingScope": {
+      "default": "scene_direct",
+      "enum": [
+        "canon_slot",
+        "scene_direct"
+      ],
+      "title": "Bindingscope",
+      "type": "string"
+    },
+    "duty": {
+      "enum": [
+        "identity",
+        "costume",
+        "scene",
+        "prop",
+        "style",
+        "storyboard",
+        "keyframe",
+        "motion",
+        "camera",
+        "voice",
+        "ambience",
+        "music",
+        "relation_interaction"
+      ],
+      "title": "Duty",
+      "type": "string"
+    },
+    "excludeFeatures": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 12,
+      "title": "Excludefeatures",
+      "type": "array"
+    },
+    "featureDomain": {
+      "anyOf": [
+        {
+          "enum": [
+            "character_identity",
+            "character_costume",
+            "location",
+            "prop",
+            "style",
+            "storyboard",
+            "keyframe",
+            "motion",
+            "camera",
+            "voice",
+            "ambience",
+            "music",
+            "relationship_interaction"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Featuredomain"
+    },
+    "includeFeatures": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 12,
+      "minItems": 1,
+      "title": "Includefeatures",
+      "type": "array"
+    },
+    "isFixture": {
+      "default": true,
+      "title": "Isfixture",
+      "type": "boolean"
+    },
+    "keyframeRole": {
+      "anyOf": [
+        {
+          "enum": [
+            "initial_state",
+            "end_state",
+            "transition_anchor"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Keyframerole"
+    },
+    "mediaAssetId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Mediaassetid"
+    },
+    "modality": {
+      "enum": [
+        "image",
+        "video",
+        "audio"
+      ],
+      "title": "Modality",
+      "type": "string"
+    },
+    "settingReference": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SettingReference"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "targetEntity": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Targetentity",
+      "type": "string"
+    }
+  },
+  "required": [
+    "assetId",
+    "modality",
+    "duty",
+    "targetEntity",
+    "includeFeatures",
+    "excludeFeatures"
+  ],
+  "title": "AssetBinding",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.AssetBinding"
+}

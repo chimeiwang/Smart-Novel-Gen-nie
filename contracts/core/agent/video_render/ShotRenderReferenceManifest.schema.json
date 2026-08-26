@@ -1,0 +1,63 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_render/ShotRenderReferenceManifest/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "持久化到任务中的视觉参考事实，不含任何短时 URL。",
+  "properties": {
+    "assetId": {
+      "minLength": 1,
+      "title": "Assetid",
+      "type": "string"
+    },
+    "canonVersionId": {
+      "minLength": 1,
+      "title": "Canonversionid",
+      "type": "string"
+    },
+    "duty": {
+      "enum": [
+        "identity",
+        "costume",
+        "scene",
+        "prop"
+      ],
+      "title": "Duty",
+      "type": "string"
+    },
+    "mimeType": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Mimetype",
+      "type": "string"
+    },
+    "ordinal": {
+      "maximum": 20,
+      "minimum": 1,
+      "title": "Ordinal",
+      "type": "integer"
+    },
+    "sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Sha256",
+      "type": "string"
+    },
+    "strength": {
+      "maximum": 100,
+      "minimum": 1,
+      "title": "Strength",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "ordinal",
+    "canonVersionId",
+    "assetId",
+    "sha256",
+    "mimeType",
+    "duty",
+    "strength"
+  ],
+  "title": "ShotRenderReferenceManifest",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_render.ShotRenderReferenceManifest"
+}

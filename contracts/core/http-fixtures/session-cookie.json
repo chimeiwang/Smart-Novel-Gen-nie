@@ -1,0 +1,21 @@
+{
+  "cookieName": "inkforge-token",
+  "httpOnly": true,
+  "jwt": {
+    "algorithm": "HS256",
+    "requiredClaims": [
+      "sub",
+      "iat",
+      "exp"
+    ]
+  },
+  "maxAgeSeconds": 2592000,
+  "path": "/",
+  "sameSite": "lax",
+  "schemaVersion": "session-cookie-fixture/1.0",
+  "secure": {
+    "dev": false,
+    "production": true,
+    "test": false
+  }
+}

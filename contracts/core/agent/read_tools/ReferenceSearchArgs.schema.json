@@ -1,0 +1,32 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/read_tools/ReferenceSearchArgs/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "query": {
+      "minLength": 1,
+      "title": "Query",
+      "type": "string"
+    },
+    "topK": {
+      "anyOf": [
+        {
+          "maximum": 20,
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Topk"
+    }
+  },
+  "required": [
+    "query"
+  ],
+  "title": "ReferenceSearchArgs",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.read_tools.ReferenceSearchArgs"
+}

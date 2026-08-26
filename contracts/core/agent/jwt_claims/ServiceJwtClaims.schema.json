@@ -1,0 +1,144 @@
+{
+  "$defs": {
+    "ServiceScope": {
+      "enum": [
+        "agent:run",
+        "agent:cancel",
+        "agent:debug:read",
+        "callback:event",
+        "callback:checkpoint",
+        "callback:complete",
+        "callback:fail",
+        "tool:read",
+        "tool:write",
+        "rag:index:write",
+        "portrait:write",
+        "quality:write",
+        "video:write",
+        "video:render",
+        "billing:authorize",
+        "billing:usage:write"
+      ],
+      "title": "ServiceScope",
+      "type": "string"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/jwt_claims/ServiceJwtClaims/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "aud": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Aud",
+      "type": "string"
+    },
+    "body_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Body Sha256",
+      "type": "string"
+    },
+    "exp": {
+      "title": "Exp",
+      "type": "integer"
+    },
+    "http_method": {
+      "maxLength": 16,
+      "minLength": 3,
+      "pattern": "^[A-Z]+$",
+      "title": "Http Method",
+      "type": "string"
+    },
+    "http_path": {
+      "maxLength": 2048,
+      "minLength": 1,
+      "pattern": "^/",
+      "title": "Http Path",
+      "type": "string"
+    },
+    "iat": {
+      "title": "Iat",
+      "type": "integer"
+    },
+    "idempotency_key": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Idempotency Key",
+      "type": "string"
+    },
+    "iss": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Iss",
+      "type": "string"
+    },
+    "jti": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Jti",
+      "type": "string"
+    },
+    "novel_id": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Novel Id",
+      "type": "string"
+    },
+    "query_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Query Sha256",
+      "type": "string"
+    },
+    "request_timestamp": {
+      "title": "Request Timestamp",
+      "type": "integer"
+    },
+    "run_id": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Run Id",
+      "type": "string"
+    },
+    "scope": {
+      "items": {
+        "$ref": "#/$defs/ServiceScope"
+      },
+      "minItems": 1,
+      "title": "Scope",
+      "type": "array"
+    },
+    "sub": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Sub",
+      "type": "string"
+    },
+    "task_id": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Task Id",
+      "type": "string"
+    }
+  },
+  "required": [
+    "iss",
+    "sub",
+    "aud",
+    "scope",
+    "task_id",
+    "run_id",
+    "novel_id",
+    "jti",
+    "iat",
+    "exp",
+    "body_sha256",
+    "query_sha256",
+    "idempotency_key",
+    "request_timestamp",
+    "http_method",
+    "http_path"
+  ],
+  "title": "ServiceJwtClaims",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.jwt_claims.ServiceJwtClaims"
+}

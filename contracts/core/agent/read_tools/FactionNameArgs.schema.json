@@ -1,0 +1,18 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/read_tools/FactionNameArgs/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "faction_name": {
+      "minLength": 1,
+      "title": "Faction Name",
+      "type": "string"
+    }
+  },
+  "required": [
+    "faction_name"
+  ],
+  "title": "FactionNameArgs",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.read_tools.FactionNameArgs"
+}

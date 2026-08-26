@@ -1,0 +1,4286 @@
+{
+  "baselineCommit": "c9afc95",
+  "routes": [
+    {
+      "authentication": "public",
+      "deprecated": false,
+      "endpointFunction": "login",
+      "endpointModule": "inkforge_core.auth.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "login_api_v1_auth_login_post",
+      "path": "/api/v1/auth/login",
+      "productModule": "identity",
+      "pythonTests": [
+        "apps/core-api/tests/identity/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/auth/router.py",
+      "sourceLine": 34,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "public",
+      "deprecated": false,
+      "endpointFunction": "logout",
+      "endpointModule": "inkforge_core.auth.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "logout_api_v1_auth_logout_post",
+      "path": "/api/v1/auth/logout",
+      "productModule": "identity",
+      "pythonTests": [
+        "apps/core-api/tests/identity/**/test_*.py"
+      ],
+      "responseKind": "empty",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/auth/router.py",
+      "sourceLine": 50,
+      "statusCode": 204,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "me",
+      "endpointModule": "inkforge_core.auth.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "me_api_v1_auth_me_get",
+      "path": "/api/v1/auth/me",
+      "productModule": "identity",
+      "pythonTests": [
+        "apps/core-api/tests/identity/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/auth/router.py",
+      "sourceLine": 64,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "public",
+      "deprecated": false,
+      "endpointFunction": "register",
+      "endpointModule": "inkforge_core.auth.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "register_api_v1_auth_register_post",
+      "path": "/api/v1/auth/register",
+      "productModule": "identity",
+      "pythonTests": [
+        "apps/core-api/tests/identity/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/auth/router.py",
+      "sourceLine": 17,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_summary",
+      "endpointModule": "inkforge_core.billing.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_summary_api_v1_billing_summary_get",
+      "path": "/api/v1/billing/summary",
+      "productModule": "billing",
+      "pythonTests": [
+        "apps/core-api/tests/billing/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/billing/router.py",
+      "sourceLine": 42,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_usage",
+      "endpointModule": "inkforge_core.billing.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_usage_api_v1_billing_usage_get",
+      "path": "/api/v1/billing/usage",
+      "productModule": "billing",
+      "pythonTests": [
+        "apps/core-api/tests/billing/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/billing/router.py",
+      "sourceLine": 49,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_task_usage",
+      "endpointModule": "inkforge_core.billing.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_task_usage_api_v1_billing_usage_tasks__task_id__get",
+      "path": "/api/v1/billing/usage/tasks/{task_id}",
+      "productModule": "billing",
+      "pythonTests": [
+        "apps/core-api/tests/billing/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/billing/router.py",
+      "sourceLine": 56,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_chapter",
+      "endpointModule": "inkforge_core.chapters.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_chapter_api_v1_chapters__chapter_id__get",
+      "path": "/api/v1/chapters/{chapter_id}",
+      "productModule": "chapters",
+      "pythonTests": [
+        "apps/core-api/tests/chapters/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/chapters/router.py",
+      "sourceLine": 57,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "update_chapter",
+      "endpointModule": "inkforge_core.chapters.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PATCH",
+      "mutation": true,
+      "operationId": "update_chapter_api_v1_chapters__chapter_id__patch",
+      "path": "/api/v1/chapters/{chapter_id}",
+      "productModule": "chapters",
+      "pythonTests": [
+        "apps/core-api/tests/chapters/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/chapters/router.py",
+      "sourceLine": 66,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "update_chapter_progress",
+      "endpointModule": "inkforge_core.chapters.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": "update_chapter_progress_api_v1_chapters__chapter_id__progress_put",
+      "path": "/api/v1/chapters/{chapter_id}/progress",
+      "productModule": "chapters",
+      "pythonTests": [
+        "apps/core-api/tests/chapters/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/chapters/router.py",
+      "sourceLine": 86,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "update_chapter_status",
+      "endpointModule": "inkforge_core.chapters.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PATCH",
+      "mutation": true,
+      "operationId": "update_chapter_status_api_v1_chapters__chapter_id__status_patch",
+      "path": "/api/v1/chapters/{chapter_id}/status",
+      "productModule": "chapters",
+      "pythonTests": [
+        "apps/core-api/tests/chapters/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/chapters/router.py",
+      "sourceLine": 76,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_dashboard",
+      "endpointModule": "inkforge_core.novels.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_dashboard_api_v1_dashboard_get",
+      "path": "/api/v1/dashboard",
+      "productModule": "novels",
+      "pythonTests": [
+        "apps/core-api/tests/novels/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/novels/router.py",
+      "sourceLine": 37,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_workflow_runs",
+      "endpointModule": "inkforge_core.debug.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_workflow_runs_api_v1_debug_workflow_runs_get",
+      "path": "/api/v1/debug/workflow-runs",
+      "productModule": "debug",
+      "pythonTests": [
+        "apps/core-api/tests/debug/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/debug/router.py",
+      "sourceLine": 44,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_workflow_run",
+      "endpointModule": "inkforge_core.debug.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_workflow_run_api_v1_debug_workflow_runs__run_id__get",
+      "path": "/api/v1/debug/workflow-runs/{run_id}",
+      "productModule": "debug",
+      "pythonTests": [
+        "apps/core-api/tests/debug/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/debug/router.py",
+      "sourceLine": 49,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "public",
+      "deprecated": false,
+      "endpointFunction": "live",
+      "endpointModule": "inkforge_core.operations.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "live_api_v1_health_live_get",
+      "path": "/api/v1/health/live",
+      "productModule": "operations",
+      "pythonTests": [
+        "apps/core-api/tests/operations/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/operations/router.py",
+      "sourceLine": 36,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "public",
+      "deprecated": false,
+      "endpointFunction": "ready",
+      "endpointModule": "inkforge_core.operations.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "ready_api_v1_health_ready_get",
+      "path": "/api/v1/health/ready",
+      "productModule": "operations",
+      "pythonTests": [
+        "apps/core-api/tests/operations/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/operations/router.py",
+      "sourceLine": 41,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_novels",
+      "endpointModule": "inkforge_core.novels.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_novels_api_v1_novels_get",
+      "path": "/api/v1/novels",
+      "productModule": "novels",
+      "pythonTests": [
+        "apps/core-api/tests/novels/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/novels/router.py",
+      "sourceLine": 45,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_novel",
+      "endpointModule": "inkforge_core.novels.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_novel_api_v1_novels_post",
+      "path": "/api/v1/novels",
+      "productModule": "novels",
+      "pythonTests": [
+        "apps/core-api/tests/novels/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/novels/router.py",
+      "sourceLine": 56,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_novel",
+      "endpointModule": "inkforge_core.novels.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_novel_api_v1_novels__novel_id__get",
+      "path": "/api/v1/novels/{novel_id}",
+      "productModule": "novels",
+      "pythonTests": [
+        "apps/core-api/tests/novels/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/novels/router.py",
+      "sourceLine": 65,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "apply_style",
+      "endpointModule": "inkforge_core.styles.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PATCH",
+      "mutation": true,
+      "operationId": "apply_style_api_v1_novels__novel_id__applied_style_patch",
+      "path": "/api/v1/novels/{novel_id}/applied-style",
+      "productModule": "styles",
+      "pythonTests": [
+        "apps/core-api/tests/styles/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/styles/router.py",
+      "sourceLine": 127,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_chapters",
+      "endpointModule": "inkforge_core.chapters.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_chapters_api_v1_novels__novel_id__chapters_get",
+      "path": "/api/v1/novels/{novel_id}/chapters",
+      "productModule": "chapters",
+      "pythonTests": [
+        "apps/core-api/tests/chapters/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/chapters/router.py",
+      "sourceLine": 34,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_chapter",
+      "endpointModule": "inkforge_core.chapters.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_chapter_api_v1_novels__novel_id__chapters_post",
+      "path": "/api/v1/novels/{novel_id}/chapters",
+      "productModule": "chapters",
+      "pythonTests": [
+        "apps/core-api/tests/chapters/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/chapters/router.py",
+      "sourceLine": 43,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_characters",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_characters_api_v1_novels__novel_id__characters_get",
+      "path": "/api/v1/novels/{novel_id}/characters",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 90,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_character",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_character_api_v1_novels__novel_id__characters_post",
+      "path": "/api/v1/novels/{novel_id}/characters",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 95,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_experiences",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_experiences_api_v1_novels__novel_id__characters__character_id__experiences_get",
+      "path": "/api/v1/novels/{novel_id}/characters/{character_id}/experiences",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 263,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_experience",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_experience_api_v1_novels__novel_id__characters__character_id__experiences_post",
+      "path": "/api/v1/novels/{novel_id}/characters/{character_id}/experiences",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 248,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "delete_character",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "DELETE",
+      "mutation": true,
+      "operationId": "delete_character_api_v1_novels__novel_id__characters__entity_id__delete",
+      "path": "/api/v1/novels/{novel_id}/characters/{entity_id}",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 111,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "update_character",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PATCH",
+      "mutation": true,
+      "operationId": "update_character_api_v1_novels__novel_id__characters__entity_id__patch",
+      "path": "/api/v1/novels/{novel_id}/characters/{entity_id}",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 104,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "delete_experience",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "DELETE",
+      "mutation": true,
+      "operationId": "delete_experience_api_v1_novels__novel_id__experiences__experience_id__delete",
+      "path": "/api/v1/novels/{novel_id}/experiences/{experience_id}",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 282,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "update_experience",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PATCH",
+      "mutation": true,
+      "operationId": "update_experience_api_v1_novels__novel_id__experiences__experience_id__patch",
+      "path": "/api/v1/novels/{novel_id}/experiences/{experience_id}",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 271,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_factions",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_factions_api_v1_novels__novel_id__factions_get",
+      "path": "/api/v1/novels/{novel_id}/factions",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 184,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_faction",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_faction_api_v1_novels__novel_id__factions_post",
+      "path": "/api/v1/novels/{novel_id}/factions",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 189,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "delete_faction",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "DELETE",
+      "mutation": true,
+      "operationId": "delete_faction_api_v1_novels__novel_id__factions__entity_id__delete",
+      "path": "/api/v1/novels/{novel_id}/factions/{entity_id}",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 203,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "update_faction",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PATCH",
+      "mutation": true,
+      "operationId": "update_faction_api_v1_novels__novel_id__factions__entity_id__patch",
+      "path": "/api/v1/novels/{novel_id}/factions/{entity_id}",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 196,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_foreshadowings",
+      "endpointModule": "inkforge_core.outlines.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_foreshadowings_api_v1_novels__novel_id__foreshadowings_get",
+      "path": "/api/v1/novels/{novel_id}/foreshadowings",
+      "productModule": "outlines",
+      "pythonTests": [
+        "apps/core-api/tests/outlines/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/outlines/router.py",
+      "sourceLine": 92,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_foreshadowing",
+      "endpointModule": "inkforge_core.outlines.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_foreshadowing_api_v1_novels__novel_id__foreshadowings_post",
+      "path": "/api/v1/novels/{novel_id}/foreshadowings",
+      "productModule": "outlines",
+      "pythonTests": [
+        "apps/core-api/tests/outlines/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/outlines/router.py",
+      "sourceLine": 97,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "delete_foreshadowing",
+      "endpointModule": "inkforge_core.outlines.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "DELETE",
+      "mutation": true,
+      "operationId": "delete_foreshadowing_api_v1_novels__novel_id__foreshadowings__foreshadowing_id__delete",
+      "path": "/api/v1/novels/{novel_id}/foreshadowings/{foreshadowing_id}",
+      "productModule": "outlines",
+      "pythonTests": [
+        "apps/core-api/tests/outlines/**/test_*.py"
+      ],
+      "responseKind": "empty",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/outlines/router.py",
+      "sourceLine": 122,
+      "statusCode": 204,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "update_foreshadowing",
+      "endpointModule": "inkforge_core.outlines.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PATCH",
+      "mutation": true,
+      "operationId": "update_foreshadowing_api_v1_novels__novel_id__foreshadowings__foreshadowing_id__patch",
+      "path": "/api/v1/novels/{novel_id}/foreshadowings/{foreshadowing_id}",
+      "productModule": "outlines",
+      "pythonTests": [
+        "apps/core-api/tests/outlines/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/outlines/router.py",
+      "sourceLine": 108,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_glossary",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_glossary_api_v1_novels__novel_id__glossary_get",
+      "path": "/api/v1/novels/{novel_id}/glossary",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 216,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_glossary",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_glossary_api_v1_novels__novel_id__glossary_post",
+      "path": "/api/v1/novels/{novel_id}/glossary",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 221,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "delete_glossary",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "DELETE",
+      "mutation": true,
+      "operationId": "delete_glossary_api_v1_novels__novel_id__glossary__entity_id__delete",
+      "path": "/api/v1/novels/{novel_id}/glossary/{entity_id}",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 235,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "update_glossary",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PATCH",
+      "mutation": true,
+      "operationId": "update_glossary_api_v1_novels__novel_id__glossary__entity_id__patch",
+      "path": "/api/v1/novels/{novel_id}/glossary/{entity_id}",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 228,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_items",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_items_api_v1_novels__novel_id__items_get",
+      "path": "/api/v1/novels/{novel_id}/items",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 124,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_item",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_item_api_v1_novels__novel_id__items_post",
+      "path": "/api/v1/novels/{novel_id}/items",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 129,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "delete_item",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "DELETE",
+      "mutation": true,
+      "operationId": "delete_item_api_v1_novels__novel_id__items__entity_id__delete",
+      "path": "/api/v1/novels/{novel_id}/items/{entity_id}",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 141,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "update_item",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PATCH",
+      "mutation": true,
+      "operationId": "update_item_api_v1_novels__novel_id__items__entity_id__patch",
+      "path": "/api/v1/novels/{novel_id}/items/{entity_id}",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 134,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_locations",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_locations_api_v1_novels__novel_id__locations_get",
+      "path": "/api/v1/novels/{novel_id}/locations",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 152,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_location",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_location_api_v1_novels__novel_id__locations_post",
+      "path": "/api/v1/novels/{novel_id}/locations",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 157,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "delete_location",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "DELETE",
+      "mutation": true,
+      "operationId": "delete_location_api_v1_novels__novel_id__locations__entity_id__delete",
+      "path": "/api/v1/novels/{novel_id}/locations/{entity_id}",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 171,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "update_location",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PATCH",
+      "mutation": true,
+      "operationId": "update_location_api_v1_novels__novel_id__locations__entity_id__patch",
+      "path": "/api/v1/novels/{novel_id}/locations/{entity_id}",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 164,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "save_outline",
+      "endpointModule": "inkforge_core.outlines.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": "save_outline_api_v1_novels__novel_id__outline_put",
+      "path": "/api/v1/novels/{novel_id}/outline",
+      "productModule": "outlines",
+      "pythonTests": [
+        "apps/core-api/tests/outlines/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/outlines/router.py",
+      "sourceLine": 44,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_nodes",
+      "endpointModule": "inkforge_core.outlines.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_nodes_api_v1_novels__novel_id__outline_nodes_get",
+      "path": "/api/v1/novels/{novel_id}/outline-nodes",
+      "productModule": "outlines",
+      "pythonTests": [
+        "apps/core-api/tests/outlines/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/outlines/router.py",
+      "sourceLine": 54,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_node",
+      "endpointModule": "inkforge_core.outlines.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_node_api_v1_novels__novel_id__outline_nodes_post",
+      "path": "/api/v1/novels/{novel_id}/outline-nodes",
+      "productModule": "outlines",
+      "pythonTests": [
+        "apps/core-api/tests/outlines/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/outlines/router.py",
+      "sourceLine": 59,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "delete_node",
+      "endpointModule": "inkforge_core.outlines.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "DELETE",
+      "mutation": true,
+      "operationId": "delete_node_api_v1_novels__novel_id__outline_nodes__node_id__delete",
+      "path": "/api/v1/novels/{novel_id}/outline-nodes/{node_id}",
+      "productModule": "outlines",
+      "pythonTests": [
+        "apps/core-api/tests/outlines/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/outlines/router.py",
+      "sourceLine": 78,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "update_node",
+      "endpointModule": "inkforge_core.outlines.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PATCH",
+      "mutation": true,
+      "operationId": "update_node_api_v1_novels__novel_id__outline_nodes__node_id__patch",
+      "path": "/api/v1/novels/{novel_id}/outline-nodes/{node_id}",
+      "productModule": "outlines",
+      "pythonTests": [
+        "apps/core-api/tests/outlines/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/outlines/router.py",
+      "sourceLine": 68,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "save_plot",
+      "endpointModule": "inkforge_core.outlines.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": "save_plot_api_v1_novels__novel_id__plot_progress_put",
+      "path": "/api/v1/novels/{novel_id}/plot-progress",
+      "productModule": "outlines",
+      "pythonTests": [
+        "apps/core-api/tests/outlines/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/outlines/router.py",
+      "sourceLine": 49,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_references",
+      "endpointModule": "inkforge_core.references.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_references_api_v1_novels__novel_id__references_get",
+      "path": "/api/v1/novels/{novel_id}/references",
+      "productModule": "references",
+      "pythonTests": [
+        "apps/core-api/tests/references/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/references/router.py",
+      "sourceLine": 43,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_reference",
+      "endpointModule": "inkforge_core.references.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_reference_api_v1_novels__novel_id__references_post",
+      "path": "/api/v1/novels/{novel_id}/references",
+      "productModule": "references",
+      "pythonTests": [
+        "apps/core-api/tests/references/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/references/router.py",
+      "sourceLine": 48,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "search_references",
+      "endpointModule": "inkforge_core.references.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "search_references_api_v1_novels__novel_id__references_search_post",
+      "path": "/api/v1/novels/{novel_id}/references/search",
+      "productModule": "references",
+      "pythonTests": [
+        "apps/core-api/tests/references/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/references/router.py",
+      "sourceLine": 100,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "delete_reference",
+      "endpointModule": "inkforge_core.references.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "DELETE",
+      "mutation": true,
+      "operationId": "delete_reference_api_v1_novels__novel_id__references__reference_id__delete",
+      "path": "/api/v1/novels/{novel_id}/references/{reference_id}",
+      "productModule": "references",
+      "pythonTests": [
+        "apps/core-api/tests/references/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/references/router.py",
+      "sourceLine": 70,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "update_reference",
+      "endpointModule": "inkforge_core.references.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PATCH",
+      "mutation": true,
+      "operationId": "update_reference_api_v1_novels__novel_id__references__reference_id__patch",
+      "path": "/api/v1/novels/{novel_id}/references/{reference_id}",
+      "productModule": "references",
+      "pythonTests": [
+        "apps/core-api/tests/references/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/references/router.py",
+      "sourceLine": 57,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "reindex_reference",
+      "endpointModule": "inkforge_core.references.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "reindex_reference_api_v1_novels__novel_id__references__reference_id__reindex_post",
+      "path": "/api/v1/novels/{novel_id}/references/{reference_id}/reindex",
+      "productModule": "references",
+      "pythonTests": [
+        "apps/core-api/tests/references/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/references/router.py",
+      "sourceLine": 84,
+      "statusCode": 202,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_relations",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_relations_api_v1_novels__novel_id__relations_get",
+      "path": "/api/v1/novels/{novel_id}/relations",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 307,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_relation",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_relation_api_v1_novels__novel_id__relations_post",
+      "path": "/api/v1/novels/{novel_id}/relations",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 296,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "delete_relation",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "DELETE",
+      "mutation": true,
+      "operationId": "delete_relation_api_v1_novels__novel_id__relations__relation_id__delete",
+      "path": "/api/v1/novels/{novel_id}/relations/{relation_id}",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 319,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "update_relation",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PATCH",
+      "mutation": true,
+      "operationId": "update_relation_api_v1_novels__novel_id__relations__relation_id__patch",
+      "path": "/api/v1/novels/{novel_id}/relations/{relation_id}",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 312,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "save_story_background",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": "save_story_background_api_v1_novels__novel_id__story_background_put",
+      "path": "/api/v1/novels/{novel_id}/story-background",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 333,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "save_story_progress",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": "save_story_progress_api_v1_novels__novel_id__story_progress_put",
+      "path": "/api/v1/novels/{novel_id}/story-progress",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 350,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "update_novel_summary",
+      "endpointModule": "inkforge_core.novels.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": "update_novel_summary_api_v1_novels__novel_id__summary_put",
+      "path": "/api/v1/novels/{novel_id}/summary",
+      "productModule": "novels",
+      "pythonTests": [
+        "apps/core-api/tests/novels/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/novels/router.py",
+      "sourceLine": 74,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_version_diff",
+      "endpointModule": "inkforge_core.short_medium.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_version_diff_api_v1_novels__novel_id__version_diff_get",
+      "path": "/api/v1/novels/{novel_id}/version-diff",
+      "productModule": "shortmedium",
+      "pythonTests": [
+        "apps/core-api/tests/short_medium/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/short_medium/router.py",
+      "sourceLine": 74,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_versions",
+      "endpointModule": "inkforge_core.short_medium.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_versions_api_v1_novels__novel_id__versions_get",
+      "path": "/api/v1/novels/{novel_id}/versions",
+      "productModule": "shortmedium",
+      "pythonTests": [
+        "apps/core-api/tests/short_medium/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/short_medium/router.py",
+      "sourceLine": 45,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "submit_manual_version",
+      "endpointModule": "inkforge_core.short_medium.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "submit_manual_version_api_v1_novels__novel_id__versions_post",
+      "path": "/api/v1/novels/{novel_id}/versions",
+      "productModule": "shortmedium",
+      "pythonTests": [
+        "apps/core-api/tests/short_medium/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/short_medium/router.py",
+      "sourceLine": 103,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "preview_version",
+      "endpointModule": "inkforge_core.short_medium.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "preview_version_api_v1_novels__novel_id__versions_preview_post",
+      "path": "/api/v1/novels/{novel_id}/versions/preview",
+      "productModule": "shortmedium",
+      "pythonTests": [
+        "apps/core-api/tests/short_medium/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/short_medium/router.py",
+      "sourceLine": 90,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_version",
+      "endpointModule": "inkforge_core.short_medium.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_version_api_v1_novels__novel_id__versions__version_id__get",
+      "path": "/api/v1/novels/{novel_id}/versions/{version_id}",
+      "productModule": "shortmedium",
+      "pythonTests": [
+        "apps/core-api/tests/short_medium/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/short_medium/router.py",
+      "sourceLine": 61,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "adopt_candidate_version",
+      "endpointModule": "inkforge_core.short_medium.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "adopt_candidate_version_api_v1_novels__novel_id__versions__version_id__adopt_post",
+      "path": "/api/v1/novels/{novel_id}/versions/{version_id}/adopt",
+      "productModule": "shortmedium",
+      "pythonTests": [
+        "apps/core-api/tests/short_medium/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/short_medium/router.py",
+      "sourceLine": 116,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "restore_historical_version",
+      "endpointModule": "inkforge_core.short_medium.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "restore_historical_version_api_v1_novels__novel_id__versions__version_id__restore_post",
+      "path": "/api/v1/novels/{novel_id}/versions/{version_id}/restore",
+      "productModule": "shortmedium",
+      "pythonTests": [
+        "apps/core-api/tests/short_medium/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/short_medium/router.py",
+      "sourceLine": 130,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_workspace",
+      "endpointModule": "inkforge_core.novels.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_workspace_api_v1_novels__novel_id__workspace_get",
+      "path": "/api/v1/novels/{novel_id}/workspace",
+      "productModule": "novels",
+      "pythonTests": [
+        "apps/core-api/tests/novels/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/novels/router.py",
+      "sourceLine": 84,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_workspace_bootstrap",
+      "endpointModule": "inkforge_core.novels.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_workspace_bootstrap_api_v1_novels__novel_id__workspace_bootstrap_get",
+      "path": "/api/v1/novels/{novel_id}/workspace/bootstrap",
+      "productModule": "novels",
+      "pythonTests": [
+        "apps/core-api/tests/novels/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/novels/router.py",
+      "sourceLine": 94,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_workspace_lore",
+      "endpointModule": "inkforge_core.novels.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_workspace_lore_api_v1_novels__novel_id__workspace_lore_get",
+      "path": "/api/v1/novels/{novel_id}/workspace/lore",
+      "productModule": "novels",
+      "pythonTests": [
+        "apps/core-api/tests/novels/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/novels/router.py",
+      "sourceLine": 107,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_workspace_planning",
+      "endpointModule": "inkforge_core.novels.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_workspace_planning_api_v1_novels__novel_id__workspace_planning_get",
+      "path": "/api/v1/novels/{novel_id}/workspace/planning",
+      "productModule": "novels",
+      "pythonTests": [
+        "apps/core-api/tests/novels/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/novels/router.py",
+      "sourceLine": 116,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_workspace_resources",
+      "endpointModule": "inkforge_core.novels.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_workspace_resources_api_v1_novels__novel_id__workspace_resources_get",
+      "path": "/api/v1/novels/{novel_id}/workspace/resources",
+      "productModule": "novels",
+      "pythonTests": [
+        "apps/core-api/tests/novels/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/novels/router.py",
+      "sourceLine": 128,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "save_world_setting",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": "save_world_setting_api_v1_novels__novel_id__world_setting_put",
+      "path": "/api/v1/novels/{novel_id}/world-setting",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 338,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "save_writing_bible",
+      "endpointModule": "inkforge_core.lore.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": "save_writing_bible_api_v1_novels__novel_id__writing_bible_put",
+      "path": "/api/v1/novels/{novel_id}/writing-bible",
+      "productModule": "lore",
+      "pythonTests": [
+        "apps/core-api/tests/lore/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/lore/router.py",
+      "sourceLine": 343,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_portrait_task",
+      "endpointModule": "inkforge_core.styles.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_portrait_task_api_v1_portrait_tasks__task_id__get",
+      "path": "/api/v1/portrait-tasks/{task_id}",
+      "productModule": "styles",
+      "pythonTests": [
+        "apps/core-api/tests/styles/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/styles/router.py",
+      "sourceLine": 108,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_quality_check",
+      "endpointModule": "inkforge_core.quality.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_quality_check_api_v1_quality_checks__check_id__get",
+      "path": "/api/v1/quality-checks/{check_id}",
+      "productModule": "quality",
+      "pythonTests": [
+        "apps/core-api/tests/quality/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/quality/router.py",
+      "sourceLine": 26,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "update_quality_check",
+      "endpointModule": "inkforge_core.quality.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PATCH",
+      "mutation": true,
+      "operationId": "update_quality_check_api_v1_quality_checks__check_id__patch",
+      "path": "/api/v1/quality-checks/{check_id}",
+      "productModule": "quality",
+      "pythonTests": [
+        "apps/core-api/tests/quality/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction",
+        "redis_event_or_queue"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/quality/router.py",
+      "sourceLine": 35,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "run_quality_check",
+      "endpointModule": "inkforge_core.quality.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "run_quality_check_api_v1_quality_checks__check_id__run_post",
+      "path": "/api/v1/quality-checks/{check_id}/run",
+      "productModule": "quality",
+      "pythonTests": [
+        "apps/core-api/tests/quality/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction",
+        "redis_event_or_queue"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/quality/router.py",
+      "sourceLine": 45,
+      "statusCode": 202,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_review_artifacts",
+      "endpointModule": "inkforge_core.reviews.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_review_artifacts_api_v1_review_artifacts_get",
+      "path": "/api/v1/review-artifacts",
+      "productModule": "reviews",
+      "pythonTests": [
+        "apps/core-api/tests/reviews/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/reviews/router.py",
+      "sourceLine": 57,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_review_artifact",
+      "endpointModule": "inkforge_core.reviews.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_review_artifact_api_v1_review_artifacts__artifact_id__get",
+      "path": "/api/v1/review-artifacts/{artifact_id}",
+      "productModule": "reviews",
+      "pythonTests": [
+        "apps/core-api/tests/reviews/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/reviews/router.py",
+      "sourceLine": 82,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "decide_review_artifact",
+      "endpointModule": "inkforge_core.reviews.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "decide_review_artifact_api_v1_review_artifacts__artifact_id__decision_post",
+      "path": "/api/v1/review-artifacts/{artifact_id}/decision",
+      "productModule": "reviews",
+      "pythonTests": [
+        "apps/core-api/tests/reviews/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction",
+        "redis_event_or_queue"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/reviews/router.py",
+      "sourceLine": 99,
+      "statusCode": 202,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_styles",
+      "endpointModule": "inkforge_core.styles.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_styles_api_v1_styles_get",
+      "path": "/api/v1/styles",
+      "productModule": "styles",
+      "pythonTests": [
+        "apps/core-api/tests/styles/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/styles/router.py",
+      "sourceLine": 41,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_style",
+      "endpointModule": "inkforge_core.styles.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_style_api_v1_styles_post",
+      "path": "/api/v1/styles",
+      "productModule": "styles",
+      "pythonTests": [
+        "apps/core-api/tests/styles/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/styles/router.py",
+      "sourceLine": 46,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "delete_style",
+      "endpointModule": "inkforge_core.styles.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "DELETE",
+      "mutation": true,
+      "operationId": "delete_style_api_v1_styles__style_id__delete",
+      "path": "/api/v1/styles/{style_id}",
+      "productModule": "styles",
+      "pythonTests": [
+        "apps/core-api/tests/styles/**/test_*.py"
+      ],
+      "responseKind": "empty",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/styles/router.py",
+      "sourceLine": 51,
+      "statusCode": 204,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_portrait",
+      "endpointModule": "inkforge_core.styles.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_portrait_api_v1_styles__style_id__portrait_post",
+      "path": "/api/v1/styles/{style_id}/portrait",
+      "productModule": "styles",
+      "pythonTests": [
+        "apps/core-api/tests/styles/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/styles/router.py",
+      "sourceLine": 85,
+      "statusCode": 202,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "upload_reference",
+      "endpointModule": "inkforge_core.styles.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "upload_reference_api_v1_styles__style_id__references_post",
+      "path": "/api/v1/styles/{style_id}/references",
+      "productModule": "styles",
+      "pythonTests": [
+        "apps/core-api/tests/styles/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "controlled_file_storage",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/styles/router.py",
+      "sourceLine": 57,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "delete_reference",
+      "endpointModule": "inkforge_core.styles.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "DELETE",
+      "mutation": true,
+      "operationId": "delete_reference_api_v1_styles__style_id__references__reference_id__delete",
+      "path": "/api/v1/styles/{style_id}/references/{reference_id}",
+      "productModule": "styles",
+      "pythonTests": [
+        "apps/core-api/tests/styles/**/test_*.py"
+      ],
+      "responseKind": "empty",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "controlled_file_storage",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/styles/router.py",
+      "sourceLine": 71,
+      "statusCode": 204,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "update_section",
+      "endpointModule": "inkforge_core.styles.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PATCH",
+      "mutation": true,
+      "operationId": "update_section_api_v1_styles__style_id__sections__section__patch",
+      "path": "/api/v1/styles/{style_id}/sections/{section}",
+      "productModule": "styles",
+      "pythonTests": [
+        "apps/core-api/tests/styles/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/styles/router.py",
+      "sourceLine": 113,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_section_portrait",
+      "endpointModule": "inkforge_core.styles.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_section_portrait_api_v1_styles__style_id__sections__section__portrait_post",
+      "path": "/api/v1/styles/{style_id}/sections/{section}/portrait",
+      "productModule": "styles",
+      "pythonTests": [
+        "apps/core-api/tests/styles/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/styles/router.py",
+      "sourceLine": 94,
+      "statusCode": 202,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "download_asset",
+      "endpointModule": "inkforge_core.video.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "download_asset_api_v1_video_assets__asset_id__content_get",
+      "path": "/api/v1/video/assets/{asset_id}/content",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "file",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/router.py",
+      "sourceLine": 125,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "preview_asset",
+      "endpointModule": "inkforge_core.video.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "preview_asset_api_v1_video_assets__asset_id__preview_get",
+      "path": "/api/v1/video/assets/{asset_id}/preview",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "file",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/router.py",
+      "sourceLine": 137,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "confirm_asset",
+      "endpointModule": "inkforge_core.video.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PATCH",
+      "mutation": true,
+      "operationId": "confirm_asset_api_v1_video_assets__asset_id__rights_patch",
+      "path": "/api/v1/video/assets/{asset_id}/rights",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "controlled_file_storage",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/router.py",
+      "sourceLine": 113,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_adaptation",
+      "endpointModule": "inkforge_core.video.adaptation.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_adaptation_api_v1_video_chapter_adaptations__adaptation_id__get",
+      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
+      "sourceLine": 118,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "discard_candidate",
+      "endpointModule": "inkforge_core.video.adaptation.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "discard_candidate_api_v1_video_chapter_adaptations__adaptation_id__candidate_discard_post",
+      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/candidate/discard",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
+      "sourceLine": 157,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "save_episode_plan",
+      "endpointModule": "inkforge_core.video.adaptation.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": "save_episode_plan_api_v1_video_chapter_adaptations__adaptation_id__episode_plan_put",
+      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/episode-plan",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
+      "sourceLine": 170,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "save_episode_edit_version",
+      "endpointModule": "inkforge_core.video.adaptation.post_production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "save_episode_edit_version_api_v1_video_chapter_adaptations__adaptation_id__episodes__episode_no__edit_versions_post",
+      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/episodes/{episode_no}/edit-versions",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py",
+      "sourceLine": 93,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_episode_export_task",
+      "endpointModule": "inkforge_core.video.adaptation.post_production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_episode_export_task_api_v1_video_chapter_adaptations__adaptation_id__episodes__episode_no__export_tasks_post",
+      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/episodes/{episode_no}/export-tasks",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py",
+      "sourceLine": 147,
+      "statusCode": 202,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "save_episode_mix_version",
+      "endpointModule": "inkforge_core.video.adaptation.post_production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "save_episode_mix_version_api_v1_video_chapter_adaptations__adaptation_id__episodes__episode_no__mix_versions_post",
+      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/episodes/{episode_no}/mix-versions",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py",
+      "sourceLine": 120,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_post_production_workspace",
+      "endpointModule": "inkforge_core.video.adaptation.post_production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_post_production_workspace_api_v1_video_chapter_adaptations__adaptation_id__post_production_get",
+      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/post-production",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py",
+      "sourceLine": 52,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "start_prompt_run",
+      "endpointModule": "inkforge_core.video.adaptation.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "start_prompt_run_api_v1_video_chapter_adaptations__adaptation_id__prompt_runs_post",
+      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/prompt-runs",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
+      "sourceLine": 183,
+      "statusCode": 202,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_render_workspace",
+      "endpointModule": "inkforge_core.video.adaptation.render_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_render_workspace_api_v1_video_chapter_adaptations__adaptation_id__renders_get",
+      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/renders",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/render_router.py",
+      "sourceLine": 44,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "start_shot_plan",
+      "endpointModule": "inkforge_core.video.adaptation.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "start_shot_plan_api_v1_video_chapter_adaptations__adaptation_id__shot_plan_runs_post",
+      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/shot-plan-runs",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
+      "sourceLine": 130,
+      "statusCode": 202,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "confirm_shot_plan",
+      "endpointModule": "inkforge_core.video.adaptation.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "confirm_shot_plan_api_v1_video_chapter_adaptations__adaptation_id__shot_plan_confirm_post",
+      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/shot-plan/confirm",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
+      "sourceLine": 144,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "save_shot_keyframe_version",
+      "endpointModule": "inkforge_core.video.adaptation.post_production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "save_shot_keyframe_version_api_v1_video_chapter_adaptations__adaptation_id__shots__shot_id__keyframe_versions_post",
+      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/shots/{shot_id}/keyframe-versions",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py",
+      "sourceLine": 64,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "save_shot_prompt",
+      "endpointModule": "inkforge_core.video.adaptation.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": "save_shot_prompt_api_v1_video_chapter_adaptations__adaptation_id__shots__shot_id__prompt_put",
+      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/shots/{shot_id}/prompt",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
+      "sourceLine": 197,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_render_task",
+      "endpointModule": "inkforge_core.video.adaptation.render_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_render_task_api_v1_video_chapter_adaptations__adaptation_id__shots__shot_id__render_tasks_post",
+      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/shots/{shot_id}/render-tasks",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/render_router.py",
+      "sourceLine": 56,
+      "statusCode": 202,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "confirm_shot_take",
+      "endpointModule": "inkforge_core.video.adaptation.render_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "confirm_shot_take_api_v1_video_chapter_adaptations__adaptation_id__shots__shot_id__takes__take_id__confirm_post",
+      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/shots/{shot_id}/takes/{take_id}/confirm",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/render_router.py",
+      "sourceLine": 97,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "save_shot_visual_references",
+      "endpointModule": "inkforge_core.video.adaptation.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": "save_shot_visual_references_api_v1_video_chapter_adaptations__adaptation_id__shots__shot_id__visual_references_put",
+      "path": "/api/v1/video/chapter-adaptations/{adaptation_id}/shots/{shot_id}/visual-references",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "controlled_file_storage",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
+      "sourceLine": 211,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_episode_edit_version",
+      "endpointModule": "inkforge_core.video.adaptation.post_production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_episode_edit_version_api_v1_video_edit_versions__version_id__get",
+      "path": "/api/v1/video/edit-versions/{version_id}",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py",
+      "sourceLine": 108,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_episode_export_task",
+      "endpointModule": "inkforge_core.video.adaptation.post_production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_episode_export_task_api_v1_video_export_tasks__task_id__get",
+      "path": "/api/v1/video/export-tasks/{task_id}",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py",
+      "sourceLine": 162,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "retry_episode_export_task",
+      "endpointModule": "inkforge_core.video.adaptation.post_production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "retry_episode_export_task_api_v1_video_export_tasks__task_id__retry_post",
+      "path": "/api/v1/video/export-tasks/{task_id}/retry",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py",
+      "sourceLine": 174,
+      "statusCode": 202,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_episode_export_content",
+      "endpointModule": "inkforge_core.video.adaptation.post_production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_episode_export_content_api_v1_video_exports__export_id__content_get",
+      "path": "/api/v1/video/exports/{export_id}/content",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "file",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py",
+      "sourceLine": 188,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_episode_mix_version",
+      "endpointModule": "inkforge_core.video.adaptation.post_production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_episode_mix_version_api_v1_video_mix_versions__version_id__get",
+      "path": "/api/v1/video/mix-versions/{version_id}",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py",
+      "sourceLine": 135,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_projects",
+      "endpointModule": "inkforge_core.video.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_projects_api_v1_video_novels__novel_id__projects_get",
+      "path": "/api/v1/video/novels/{novel_id}/projects",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/router.py",
+      "sourceLine": 60,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_project",
+      "endpointModule": "inkforge_core.video.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_project_api_v1_video_novels__novel_id__projects_post",
+      "path": "/api/v1/video/novels/{novel_id}/projects",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/router.py",
+      "sourceLine": 44,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_project",
+      "endpointModule": "inkforge_core.video.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_project_api_v1_video_projects__project_id__get",
+      "path": "/api/v1/video/projects/{project_id}",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/router.py",
+      "sourceLine": 71,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "upload_asset",
+      "endpointModule": "inkforge_core.video.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "upload_asset_api_v1_video_projects__project_id__assets_post",
+      "path": "/api/v1/video/projects/{project_id}/assets",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "controlled_file_storage",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/router.py",
+      "sourceLine": 82,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_adaptations",
+      "endpointModule": "inkforge_core.video.adaptation.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_adaptations_api_v1_video_projects__project_id__chapter_adaptations_get",
+      "path": "/api/v1/video/projects/{project_id}/chapter-adaptations",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
+      "sourceLine": 67,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_adaptation",
+      "endpointModule": "inkforge_core.video.adaptation.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_adaptation_api_v1_video_projects__project_id__chapter_adaptations_post",
+      "path": "/api/v1/video/projects/{project_id}/chapter-adaptations",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
+      "sourceLine": 53,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_visual_canons",
+      "endpointModule": "inkforge_core.video.adaptation.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_visual_canons_api_v1_video_projects__project_id__visual_canons_get",
+      "path": "/api/v1/video/projects/{project_id}/visual-canons",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
+      "sourceLine": 79,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "set_visual_canon_candidate",
+      "endpointModule": "inkforge_core.video.adaptation.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "set_visual_canon_candidate_api_v1_video_projects__project_id__visual_canons_post",
+      "path": "/api/v1/video/projects/{project_id}/visual-canons",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
+      "sourceLine": 91,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "provider_media_hmac_token",
+      "deprecated": false,
+      "endpointFunction": "get_provider_asset",
+      "endpointModule": "inkforge_core.video.adaptation.render_router",
+      "exposure": "provider_media",
+      "includeInOpenApi": false,
+      "method": "GET",
+      "mutation": false,
+      "operationId": null,
+      "path": "/api/v1/video/provider-assets/{token}",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "file",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/render_router.py",
+      "sourceLine": 133,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_render_task",
+      "endpointModule": "inkforge_core.video.adaptation.render_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_render_task_api_v1_video_render_tasks__task_id__get",
+      "path": "/api/v1/video/render-tasks/{task_id}",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/render_router.py",
+      "sourceLine": 71,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "retry_render_task",
+      "endpointModule": "inkforge_core.video.adaptation.render_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "retry_render_task_api_v1_video_render_tasks__task_id__retry_post",
+      "path": "/api/v1/video/render-tasks/{task_id}/retry",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/render_router.py",
+      "sourceLine": 83,
+      "statusCode": 202,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_take_content",
+      "endpointModule": "inkforge_core.video.adaptation.render_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_take_content_api_v1_video_takes__take_id__content_get",
+      "path": "/api/v1/video/takes/{take_id}/content",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "file",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/render_router.py",
+      "sourceLine": 118,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "extract_take_frame",
+      "endpointModule": "inkforge_core.video.adaptation.post_production_router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "extract_take_frame_api_v1_video_takes__take_id__frames_post",
+      "path": "/api/v1/video/takes/{take_id}/frames",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "controlled_file_storage",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/post_production_router.py",
+      "sourceLine": 79,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "approve_visual_canon",
+      "endpointModule": "inkforge_core.video.adaptation.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "approve_visual_canon_api_v1_video_visual_canons__canon_id__approve_post",
+      "path": "/api/v1/video/visual-canons/{canon_id}/approve",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/router.py",
+      "sourceLine": 105,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_writing_runs",
+      "endpointModule": "inkforge_core.writing.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_writing_runs_api_v1_writing_runs_get",
+      "path": "/api/v1/writing/runs",
+      "productModule": "writing",
+      "pythonTests": [
+        "apps/core-api/tests/writing/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
+      "sourceLine": 216,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "start_writing_run",
+      "endpointModule": "inkforge_core.writing.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "start_writing_run_api_v1_writing_runs_post",
+      "path": "/api/v1/writing/runs",
+      "productModule": "writing",
+      "pythonTests": [
+        "apps/core-api/tests/writing/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction",
+        "redis_event_or_queue"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
+      "sourceLine": 203,
+      "statusCode": 202,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_writing_run_status",
+      "endpointModule": "inkforge_core.writing.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_writing_run_status_api_v1_writing_runs__task_id__get",
+      "path": "/api/v1/writing/runs/{task_id}",
+      "productModule": "writing",
+      "pythonTests": [
+        "apps/core-api/tests/writing/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
+      "sourceLine": 254,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "cancel_writing_run",
+      "endpointModule": "inkforge_core.writing.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "cancel_writing_run_api_v1_writing_runs__task_id__cancel_post",
+      "path": "/api/v1/writing/runs/{task_id}/cancel",
+      "productModule": "writing",
+      "pythonTests": [
+        "apps/core-api/tests/writing/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction",
+        "redis_event_or_queue"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
+      "sourceLine": 277,
+      "statusCode": 202,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "stream_writing_run_events",
+      "endpointModule": "inkforge_core.writing.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "stream_writing_run_events_api_v1_writing_runs__task_id__events_get",
+      "path": "/api/v1/writing/runs/{task_id}/events",
+      "productModule": "writing",
+      "pythonTests": [
+        "apps/core-api/tests/writing/**/test_*.py"
+      ],
+      "responseKind": "sse",
+      "sideEffects": [
+        "redis_stream_subscription"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
+      "sourceLine": 291,
+      "statusCode": null,
+      "transaction": "stream"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "resume_writing_run",
+      "endpointModule": "inkforge_core.writing.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "resume_writing_run_api_v1_writing_runs__task_id__resume_post",
+      "path": "/api/v1/writing/runs/{task_id}/resume",
+      "productModule": "writing",
+      "pythonTests": [
+        "apps/core-api/tests/writing/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction",
+        "redis_event_or_queue"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
+      "sourceLine": 263,
+      "statusCode": 202,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "list_writing_sessions",
+      "endpointModule": "inkforge_core.writing.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_writing_sessions_api_v1_writing_sessions_get",
+      "path": "/api/v1/writing/sessions",
+      "productModule": "writing",
+      "pythonTests": [
+        "apps/core-api/tests/writing/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
+      "sourceLine": 145,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "create_writing_session",
+      "endpointModule": "inkforge_core.writing.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_writing_session_api_v1_writing_sessions_post",
+      "path": "/api/v1/writing/sessions",
+      "productModule": "writing",
+      "pythonTests": [
+        "apps/core-api/tests/writing/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction",
+        "redis_event_or_queue"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
+      "sourceLine": 155,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "delete_writing_session",
+      "endpointModule": "inkforge_core.writing.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "DELETE",
+      "mutation": true,
+      "operationId": "delete_writing_session_api_v1_writing_sessions__session_id__delete",
+      "path": "/api/v1/writing/sessions/{session_id}",
+      "productModule": "writing",
+      "pythonTests": [
+        "apps/core-api/tests/writing/**/test_*.py"
+      ],
+      "responseKind": "empty",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction",
+        "redis_event_or_queue"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
+      "sourceLine": 183,
+      "statusCode": 204,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_writing_session",
+      "endpointModule": "inkforge_core.writing.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_writing_session_api_v1_writing_sessions__session_id__get",
+      "path": "/api/v1/writing/sessions/{session_id}",
+      "productModule": "writing",
+      "pythonTests": [
+        "apps/core-api/tests/writing/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
+      "sourceLine": 166,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "update_writing_session",
+      "endpointModule": "inkforge_core.writing.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "PATCH",
+      "mutation": true,
+      "operationId": "update_writing_session_api_v1_writing_sessions__session_id__patch",
+      "path": "/api/v1/writing/sessions/{session_id}",
+      "productModule": "writing",
+      "pythonTests": [
+        "apps/core-api/tests/writing/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction",
+        "redis_event_or_queue"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
+      "sourceLine": 173,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "add_writing_message",
+      "endpointModule": "inkforge_core.writing.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "add_writing_message_api_v1_writing_sessions__session_id__messages_post",
+      "path": "/api/v1/writing/sessions/{session_id}/messages",
+      "productModule": "writing",
+      "pythonTests": [
+        "apps/core-api/tests/writing/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction",
+        "redis_event_or_queue"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
+      "sourceLine": 189,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
+      "endpointFunction": "get_task_review_artifact",
+      "endpointModule": "inkforge_core.reviews.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "get_task_review_artifact_api_v1_writing_tasks__task_id__artifact_get",
+      "path": "/api/v1/writing/tasks/{task_id}/artifact",
+      "productModule": "reviews",
+      "pythonTests": [
+        "apps/core-api/tests/reviews/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/reviews/router.py",
+      "sourceLine": 89,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "authorize_model_call",
+      "endpointModule": "inkforge_core.billing.router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "POST",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/billing/authorize",
+      "productModule": "billing",
+      "pythonTests": [
+        "apps/core-api/tests/billing/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "credit_ledger_or_usage",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/billing/router.py",
+      "sourceLine": 95,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "report_model_usage",
+      "endpointModule": "inkforge_core.billing.router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "POST",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/billing/usage",
+      "productModule": "billing",
+      "pythonTests": [
+        "apps/core-api/tests/billing/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "credit_ledger_or_usage",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/billing/router.py",
+      "sourceLine": 113,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "get_reference_index_context",
+      "endpointModule": "inkforge_core.references.internal_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "POST",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/novels/{novel_id}/references/{reference_id}/index-context",
+      "productModule": "references",
+      "pythonTests": [
+        "apps/core-api/tests/references/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/references/internal_router.py",
+      "sourceLine": 130,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "fail_reference_index",
+      "endpointModule": "inkforge_core.references.internal_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/novels/{novel_id}/references/{reference_id}/index-failure",
+      "productModule": "references",
+      "pythonTests": [
+        "apps/core-api/tests/references/**/test_*.py"
+      ],
+      "responseKind": "empty",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/references/internal_router.py",
+      "sourceLine": 160,
+      "statusCode": 204,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "complete_reference_index",
+      "endpointModule": "inkforge_core.references.internal_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/novels/{novel_id}/references/{reference_id}/index-success",
+      "productModule": "references",
+      "pythonTests": [
+        "apps/core-api/tests/references/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/references/internal_router.py",
+      "sourceLine": 101,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "get_quality_context",
+      "endpointModule": "inkforge_core.quality.internal_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "POST",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/quality-checks/{check_id}/context",
+      "productModule": "quality",
+      "pythonTests": [
+        "apps/core-api/tests/quality/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction",
+        "redis_event_or_queue"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/quality/internal_router.py",
+      "sourceLine": 71,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "fail_quality",
+      "endpointModule": "inkforge_core.quality.internal_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/quality-checks/{check_id}/failure",
+      "productModule": "quality",
+      "pythonTests": [
+        "apps/core-api/tests/quality/**/test_*.py"
+      ],
+      "responseKind": "empty",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction",
+        "redis_event_or_queue"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/quality/internal_router.py",
+      "sourceLine": 124,
+      "statusCode": 204,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "complete_quality",
+      "endpointModule": "inkforge_core.quality.internal_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/quality-checks/{check_id}/success",
+      "productModule": "quality",
+      "pythonTests": [
+        "apps/core-api/tests/quality/**/test_*.py"
+      ],
+      "responseKind": "empty",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction",
+        "redis_event_or_queue"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/quality/internal_router.py",
+      "sourceLine": 98,
+      "statusCode": 204,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "create_or_revise_artifact",
+      "endpointModule": "inkforge_core.reviews.internal_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "POST",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/review-artifacts",
+      "productModule": "reviews",
+      "pythonTests": [
+        "apps/core-api/tests/reviews/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction",
+        "redis_event_or_queue"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/reviews/internal_router.py",
+      "sourceLine": 68,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "quarantine_artifact_after_revision_conflict",
+      "endpointModule": "inkforge_core.reviews.internal_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "POST",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/review-artifacts/{artifact_id}/awaiting-user-after-conflict",
+      "productModule": "reviews",
+      "pythonTests": [
+        "apps/core-api/tests/reviews/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction",
+        "redis_event_or_queue"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/reviews/internal_router.py",
+      "sourceLine": 94,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "submit_artifact_evaluation",
+      "endpointModule": "inkforge_core.reviews.internal_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "POST",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/review-artifacts/{artifact_id}/evaluations",
+      "productModule": "reviews",
+      "pythonTests": [
+        "apps/core-api/tests/reviews/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction",
+        "redis_event_or_queue"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/reviews/internal_router.py",
+      "sourceLine": 127,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "fail_portrait",
+      "endpointModule": "inkforge_core.styles.internal_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/styles/{style_id}/portrait-tasks/{task_id}/failure",
+      "productModule": "styles",
+      "pythonTests": [
+        "apps/core-api/tests/styles/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/styles/internal_router.py",
+      "sourceLine": 130,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "get_portrait_context",
+      "endpointModule": "inkforge_core.styles.internal_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "POST",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/styles/{style_id}/portrait-tasks/{task_id}/portrait-context",
+      "productModule": "styles",
+      "pythonTests": [
+        "apps/core-api/tests/styles/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/styles/internal_router.py",
+      "sourceLine": 84,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "mark_processing",
+      "endpointModule": "inkforge_core.styles.internal_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/styles/{style_id}/portrait-tasks/{task_id}/processing",
+      "productModule": "styles",
+      "pythonTests": [
+        "apps/core-api/tests/styles/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/styles/internal_router.py",
+      "sourceLine": 62,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "complete_portrait",
+      "endpointModule": "inkforge_core.styles.internal_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/styles/{style_id}/portrait-tasks/{task_id}/success",
+      "productModule": "styles",
+      "pythonTests": [
+        "apps/core-api/tests/styles/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/styles/internal_router.py",
+      "sourceLine": 108,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "execute_internal_tool",
+      "endpointModule": "inkforge_core.writing.tool_gateway",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "POST",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/tools/{tool_name}",
+      "productModule": "writing",
+      "pythonTests": [
+        "apps/core-api/tests/writing/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction",
+        "redis_event_or_queue"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/writing/tool_gateway.py",
+      "sourceLine": 148,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "save_checkpoint",
+      "endpointModule": "inkforge_core.video.adaptation.internal_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "POST",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/video/adaptations/{adaptation_id}/checkpoint",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "empty",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/internal_router.py",
+      "sourceLine": 95,
+      "statusCode": 204,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "fail_task",
+      "endpointModule": "inkforge_core.video.adaptation.internal_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "POST",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/video/adaptations/{adaptation_id}/fail",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "empty",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/internal_router.py",
+      "sourceLine": 164,
+      "statusCode": 204,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "complete_plan",
+      "endpointModule": "inkforge_core.video.adaptation.internal_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "POST",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/video/adaptations/{adaptation_id}/plan/complete",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "empty",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/internal_router.py",
+      "sourceLine": 118,
+      "statusCode": 204,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "get_progress",
+      "endpointModule": "inkforge_core.video.adaptation.internal_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "POST",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/video/adaptations/{adaptation_id}/progress",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/internal_router.py",
+      "sourceLine": 73,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "complete_prompts",
+      "endpointModule": "inkforge_core.video.adaptation.internal_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "POST",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/video/adaptations/{adaptation_id}/prompts/complete",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "empty",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/adaptation/internal_router.py",
+      "sourceLine": 141,
+      "statusCode": 204,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "reserve_plan_call",
+      "endpointModule": "inkforge_core.video.internal_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "POST",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/video/scenes/{scene_id}/call-reservations",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/internal_router.py",
+      "sourceLine": 165,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "complete_plan",
+      "endpointModule": "inkforge_core.video.internal_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "POST",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/video/scenes/{scene_id}/complete",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "empty",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/internal_router.py",
+      "sourceLine": 78,
+      "statusCode": 204,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "fail_plan",
+      "endpointModule": "inkforge_core.video.internal_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "POST",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/video/scenes/{scene_id}/fail",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "empty",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/internal_router.py",
+      "sourceLine": 100,
+      "statusCode": 204,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "get_plan_progress",
+      "endpointModule": "inkforge_core.video.internal_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "POST",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/video/scenes/{scene_id}/progress",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/internal_router.py",
+      "sourceLine": 122,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "save_story_plan_checkpoint",
+      "endpointModule": "inkforge_core.video.internal_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "POST",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/video/scenes/{scene_id}/story-checkpoint",
+      "productModule": "video",
+      "pythonTests": [
+        "apps/core-api/tests/video/**/test_*.py"
+      ],
+      "responseKind": "empty",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/video/internal_router.py",
+      "sourceLine": 143,
+      "statusCode": 204,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "save_checkpoint",
+      "endpointModule": "inkforge_core.writing.callbacks",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/writing/runs/{run_id}/checkpoint",
+      "productModule": "writing",
+      "pythonTests": [
+        "apps/core-api/tests/writing/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction",
+        "redis_event_or_queue"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/writing/callbacks.py",
+      "sourceLine": 121,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "complete_run",
+      "endpointModule": "inkforge_core.writing.callbacks",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/writing/runs/{run_id}/complete",
+      "productModule": "writing",
+      "pythonTests": [
+        "apps/core-api/tests/writing/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction",
+        "redis_event_or_queue"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/writing/callbacks.py",
+      "sourceLine": 142,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "accept_event",
+      "endpointModule": "inkforge_core.writing.callbacks",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "POST",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/writing/runs/{run_id}/events",
+      "productModule": "writing",
+      "pythonTests": [
+        "apps/core-api/tests/writing/**/test_*.py"
+      ],
+      "responseKind": "sse",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction",
+        "redis_event_or_queue"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/writing/callbacks.py",
+      "sourceLine": 100,
+      "statusCode": null,
+      "transaction": "stream"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "fail_run",
+      "endpointModule": "inkforge_core.writing.callbacks",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/writing/runs/{run_id}/fail",
+      "productModule": "writing",
+      "pythonTests": [
+        "apps/core-api/tests/writing/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "background_dispatch_or_reconciliation",
+        "postgresql_transaction",
+        "redis_event_or_queue"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/writing/callbacks.py",
+      "sourceLine": 163,
+      "statusCode": null,
+      "transaction": "write"
+    }
+  ],
+  "schemaVersion": "core-route-inventory/1.0"
+}

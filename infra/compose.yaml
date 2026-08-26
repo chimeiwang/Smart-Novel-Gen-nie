@@ -74,6 +74,10 @@ services:
       - no-new-privileges:true
     environment:
       ENVIRONMENT: production
+      JAVA_TOOL_OPTIONS: >-
+        -Xms64m -Xmx176m -XX:MaxMetaspaceSize=112m
+        -XX:ReservedCodeCacheSize=32m -XX:MaxDirectMemorySize=24m
+        -Xss512k -XX:+ExitOnOutOfMemoryError -Djava.io.tmpdir=/tmp
       ALLOW_INSECURE_HTTP_AUTH: ${ALLOW_INSECURE_HTTP_AUTH:-false}
       DATABASE_URL: ${DATABASE_URL:?必须配置现有 PostgreSQL 数据库地址}
       REDIS_URL: redis://redis:6379/0
@@ -114,7 +118,7 @@ services:
       agent-service:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/health/ready', timeout=3)"]
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "--max-time", "3", "http://127.0.0.1:8000/api/v1/health/ready"]
       interval: 15s
       timeout: 5s
       retries: 8

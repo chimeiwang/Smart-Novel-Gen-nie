@@ -1,0 +1,258 @@
+{
+  "$defs": {
+    "DirectorAssetAliasV1": {
+      "additionalProperties": false,
+      "description": "服务器为已物化素材分配的短别名，不向模型暴露正式 assetId。",
+      "properties": {
+        "alias": {
+          "pattern": "^A[0-9]{2}$",
+          "title": "Alias",
+          "type": "string"
+        },
+        "duty": {
+          "enum": [
+            "identity",
+            "costume",
+            "scene",
+            "prop",
+            "style",
+            "storyboard",
+            "keyframe",
+            "motion",
+            "camera",
+            "voice",
+            "ambience",
+            "relation_interaction"
+          ],
+          "title": "Duty",
+          "type": "string"
+        },
+        "ordinal": {
+          "maximum": 11,
+          "minimum": 1,
+          "title": "Ordinal",
+          "type": "integer"
+        },
+        "targetEntity": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Targetentity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "alias",
+        "ordinal",
+        "targetEntity",
+        "duty"
+      ],
+      "title": "DirectorAssetAliasV1",
+      "type": "object"
+    },
+    "DirectorBeatAliasV1": {
+      "additionalProperties": false,
+      "description": "服务器锁定的节拍短别名与时间骨架。",
+      "properties": {
+        "alias": {
+          "pattern": "^B[0-9]{2}$",
+          "title": "Alias",
+          "type": "string"
+        },
+        "endSecond": {
+          "exclusiveMinimum": 0,
+          "maximum": 30,
+          "title": "Endsecond",
+          "type": "integer"
+        },
+        "ordinal": {
+          "maximum": 5,
+          "minimum": 1,
+          "title": "Ordinal",
+          "type": "integer"
+        },
+        "startSecond": {
+          "maximum": 29,
+          "minimum": 0,
+          "title": "Startsecond",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "alias",
+        "ordinal",
+        "startSecond",
+        "endSecond"
+      ],
+      "title": "DirectorBeatAliasV1",
+      "type": "object"
+    },
+    "DirectorSourceAliasV1": {
+      "additionalProperties": false,
+      "description": "服务器为冻结设定分配的短别名，模型只能回传 alias。",
+      "properties": {
+        "alias": {
+          "pattern": "^[CRLIW][0-9]{2}$",
+          "title": "Alias",
+          "type": "string"
+        },
+        "allowedDuties": {
+          "items": {
+            "enum": [
+              "identity",
+              "costume",
+              "scene",
+              "prop",
+              "style",
+              "storyboard",
+              "keyframe",
+              "motion",
+              "camera",
+              "voice",
+              "ambience",
+              "relation_interaction"
+            ],
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Allowedduties",
+          "type": "array"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "settingReference": {
+          "$ref": "#/$defs/SettingReference"
+        }
+      },
+      "required": [
+        "alias",
+        "settingReference",
+        "name",
+        "allowedDuties"
+      ],
+      "title": "DirectorSourceAliasV1",
+      "type": "object"
+    },
+    "DirectorSourceEventAliasV1": {
+      "additionalProperties": false,
+      "description": "服务器从冻结原文提取的事件族短别名；标签只来自静态白名单。",
+      "properties": {
+        "alias": {
+          "pattern": "^E[0-9]{2}$",
+          "title": "Alias",
+          "type": "string"
+        },
+        "family": {
+          "enum": [
+            "insert",
+            "crush",
+            "open",
+            "touch",
+            "accelerate",
+            "raise",
+            "fall",
+            "smash"
+          ],
+          "title": "Family",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 16,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "ordinal": {
+          "maximum": 99,
+          "minimum": 1,
+          "title": "Ordinal",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "alias",
+        "ordinal",
+        "family",
+        "label"
+      ],
+      "title": "DirectorSourceEventAliasV1",
+      "type": "object"
+    },
+    "SettingReference": {
+      "additionalProperties": false,
+      "description": "指向长篇冻结设定快照中的一个类型化条目。",
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "character",
+            "relationship",
+            "location",
+            "item",
+            "world_setting"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "title": "SettingReference",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video/VideoDirectorDraftSkeletonV1/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "由服务器生成、供三阶段共享的冻结别名骨架。",
+  "properties": {
+    "assetAliases": {
+      "items": {
+        "$ref": "#/$defs/DirectorAssetAliasV1"
+      },
+      "title": "Assetaliases",
+      "type": "array"
+    },
+    "beatAliases": {
+      "items": {
+        "$ref": "#/$defs/DirectorBeatAliasV1"
+      },
+      "maxItems": 5,
+      "minItems": 1,
+      "title": "Beataliases",
+      "type": "array"
+    },
+    "sourceAliases": {
+      "items": {
+        "$ref": "#/$defs/DirectorSourceAliasV1"
+      },
+      "title": "Sourcealiases",
+      "type": "array"
+    },
+    "sourceEventAliases": {
+      "items": {
+        "$ref": "#/$defs/DirectorSourceEventAliasV1"
+      },
+      "title": "Sourceeventaliases",
+      "type": "array"
+    }
+  },
+  "required": [
+    "sourceAliases",
+    "assetAliases",
+    "beatAliases"
+  ],
+  "title": "VideoDirectorDraftSkeletonV1",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.VideoDirectorDraftSkeletonV1"
+}

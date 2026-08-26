@@ -1,0 +1,10 @@
+{
+  "headers": {
+    "accept-ranges": "bytes",
+    "content-disposition": "attachment; filename*=utf-8''%E6%88%90%E7%89%87%20v1.mp4",
+    "content-type": "video/mp4"
+  },
+  "inputFilename": "成片 v1.mp4",
+  "mediaType": "video/mp4",
+  "schemaVersion": "file-download-fixture/1.0"
+}

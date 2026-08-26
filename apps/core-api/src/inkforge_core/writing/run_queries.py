@@ -258,8 +258,14 @@ def project_run_status(
         else "long_serial"
     )
     operation_value = start_payload.get("operation")
-    if operation_value is None and workflow == "short_medium":
-        operation_value = snapshot_payload.get("operation")
+    if operation_value is None:
+        if workflow == "short_medium":
+            operation_value = snapshot_payload.get("operation")
+        else:
+            # 自然语言入口由受信 Agent 回调分类；快照是该任务唯一持久化的分类事实。
+            classified_operation = snapshot_payload.get("currentOperation")
+            if isinstance(classified_operation, dict):
+                operation_value = classified_operation.get("kind")
     operation = (
         operation_value
         if isinstance(operation_value, str) and operation_value in _PUBLIC_OPERATIONS

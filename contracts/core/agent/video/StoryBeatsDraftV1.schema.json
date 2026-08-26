@@ -1,0 +1,129 @@
+{
+  "$defs": {
+    "CameraActionUnit": {
+      "additionalProperties": false,
+      "description": "一个主体动作及其唯一可见结果。",
+      "properties": {
+        "action": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        },
+        "subject": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Subject",
+          "type": "string"
+        },
+        "visibleResult": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Visibleresult",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject",
+        "action",
+        "visibleResult"
+      ],
+      "title": "CameraActionUnit",
+      "type": "object"
+    },
+    "StoryBeatDraftItemV1": {
+      "additionalProperties": false,
+      "description": "历史 v1 单拍草案；素材引用仍分散在每拍数组中，仅保留读取兼容。",
+      "properties": {
+        "actionComplexity": {
+          "enum": [
+            "simple",
+            "mechanical_sequence",
+            "transformation",
+            "impact_transition"
+          ],
+          "title": "Actioncomplexity",
+          "type": "string"
+        },
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/CameraActionUnit"
+          },
+          "maxItems": 2,
+          "minItems": 1,
+          "title": "Actions",
+          "type": "array"
+        },
+        "assetAliases": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 11,
+          "title": "Assetaliases",
+          "type": "array"
+        },
+        "beatAlias": {
+          "title": "Beatalias",
+          "type": "string"
+        },
+        "blocking": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Blocking",
+          "type": "string"
+        },
+        "dramaticPurpose": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Dramaticpurpose",
+          "type": "string"
+        },
+        "performanceDirection": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Performancedirection",
+          "type": "string"
+        },
+        "sound": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Sound",
+          "type": "string"
+        }
+      },
+      "required": [
+        "beatAlias",
+        "dramaticPurpose",
+        "performanceDirection",
+        "blocking",
+        "actions",
+        "actionComplexity",
+        "sound",
+        "assetAliases"
+      ],
+      "title": "StoryBeatDraftItemV1",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video/StoryBeatsDraftV1/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "历史 Responses v1 故事草案；新任务必须改用 v2。",
+  "properties": {
+    "beats": {
+      "items": {
+        "$ref": "#/$defs/StoryBeatDraftItemV1"
+      },
+      "maxItems": 5,
+      "minItems": 1,
+      "title": "Beats",
+      "type": "array"
+    }
+  },
+  "required": [
+    "beats"
+  ],
+  "title": "StoryBeatsDraftV1",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.StoryBeatsDraftV1"
+}

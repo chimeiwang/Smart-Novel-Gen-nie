@@ -1,0 +1,58 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video/CameraPositionSpec/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "相对主体的可复核机位，不把“低机位”等模糊词当成唯一事实。",
+  "properties": {
+    "axisSide": {
+      "enum": [
+        "screen_left",
+        "screen_right",
+        "on_axis"
+      ],
+      "title": "Axisside",
+      "type": "string"
+    },
+    "azimuthDegrees": {
+      "maximum": 180,
+      "minimum": -180,
+      "title": "Azimuthdegrees",
+      "type": "integer"
+    },
+    "elevationDegrees": {
+      "maximum": 90,
+      "minimum": -90,
+      "title": "Elevationdegrees",
+      "type": "integer"
+    },
+    "heightCm": {
+      "maximum": 1000,
+      "minimum": 0,
+      "title": "Heightcm",
+      "type": "integer"
+    },
+    "rollDegrees": {
+      "maximum": 45,
+      "minimum": -45,
+      "title": "Rolldegrees",
+      "type": "integer"
+    },
+    "subjectDistanceMeters": {
+      "exclusiveMinimum": 0,
+      "maximum": 100,
+      "title": "Subjectdistancemeters",
+      "type": "number"
+    }
+  },
+  "required": [
+    "heightCm",
+    "azimuthDegrees",
+    "elevationDegrees",
+    "rollDegrees",
+    "subjectDistanceMeters",
+    "axisSide"
+  ],
+  "title": "CameraPositionSpec",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.CameraPositionSpec"
+}

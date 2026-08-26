@@ -1,0 +1,18 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/read_tools/ItemNameArgs/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "item_name": {
+      "minLength": 1,
+      "title": "Item Name",
+      "type": "string"
+    }
+  },
+  "required": [
+    "item_name"
+  ],
+  "title": "ItemNameArgs",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.read_tools.ItemNameArgs"
+}

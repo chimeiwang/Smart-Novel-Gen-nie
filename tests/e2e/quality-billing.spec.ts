@@ -2,8 +2,7 @@ import { expect, test } from "@playwright/test";
 
 import {
   createNovelWithApi,
-  enterMinorEdit,
-  openReadingWorkspace,
+  openWorkspace,
   readWorkspace,
   seedInvalidQualityCheck,
 } from "./helpers";
@@ -17,8 +16,7 @@ test("用户可以运行质量检查并查看模拟模型零扣费摘要", async
     totalUsage: { totalTokens: number | string };
   };
   const identity = await createNovelWithApi(page);
-  await openReadingWorkspace(page, identity);
-  await enterMinorEdit(page);
+  await openWorkspace(page, identity);
 
   await page.getByPlaceholder("正文内容").fill("用于一致性终检的完整章节正文。");
   await expect(page.getByText("已保存", { exact: true })).toBeVisible({ timeout: 20_000 });
@@ -51,10 +49,9 @@ test("用户可以运行质量检查并查看模拟模型零扣费摘要", async
   ).toBe(0);
 });
 
-test("无效终检在阅读与 AI 创作中都保持待处理并阻止完成", async ({ page }) => {
+test("无效终检在统一工作区保持待处理并阻止完成", async ({ page }) => {
   const identity = await createNovelWithApi(page);
-  await openReadingWorkspace(page, identity);
-  await enterMinorEdit(page);
+  await openWorkspace(page, identity);
 
   await page.getByPlaceholder("正文内容").fill("用于验证历史无效终检门禁的完整章节正文。");
   await expect(page.getByText("已保存", { exact: true })).toBeVisible({ timeout: 20_000 });
@@ -75,15 +72,12 @@ test("无效终检在阅读与 AI 创作中都保持待处理并阻止完成", a
   }).not.toBeUndefined();
   await seedInvalidQualityCheck(checkId!);
 
-  await page.goto(
-    `/workspace/${identity.novelId}?chapterId=${identity.chapterId}&view=reading`,
-  );
+  await page.goto(`/workspace/${identity.novelId}?chapterId=${identity.chapterId}`);
   await page.getByRole("button", { name: /^一致性终检/ }).click();
   await expect(page.locator(".chapter-check-status.invalid")).toHaveText("结果无效");
   await expect(page.getByRole("button", { name: "标记完成", exact: true })).toBeDisabled();
   await page.getByRole("button", { name: "关闭", exact: true }).click();
 
-  await page.getByRole("button", { name: "AI 创作", exact: true }).click();
-  await expect(page.getByText("待处理终检：1", { exact: true })).toBeVisible();
+  await expect(page.getByText("一致性终检待处理", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /预检一致性/ })).toBeVisible();
 });

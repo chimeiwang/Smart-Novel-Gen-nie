@@ -1,0 +1,47 @@
+{
+  "$defs": {
+    "JsonValue": {}
+  },
+  "$id": "https://inkforge.local/contracts/agent/short_medium/ShortMediumCheckResult/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "baseVersionId": {
+      "minLength": 1,
+      "title": "Baseversionid",
+      "type": "string"
+    },
+    "documentType": {
+      "const": "manuscript",
+      "title": "Documenttype",
+      "type": "string"
+    },
+    "operation": {
+      "const": "full_check",
+      "title": "Operation",
+      "type": "string"
+    },
+    "report": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "title": "Report",
+      "type": "object"
+    },
+    "resultType": {
+      "const": "short_medium_check",
+      "title": "Resulttype",
+      "type": "string"
+    }
+  },
+  "required": [
+    "resultType",
+    "operation",
+    "documentType",
+    "baseVersionId",
+    "report"
+  ],
+  "title": "ShortMediumCheckResult",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.short_medium.ShortMediumCheckResult"
+}

@@ -1,2 +1,5 @@
 *.sh text eol=lf
 scripts/migrations/*.sql text eol=lf
+mvnw.cmd text eol=crlf whitespace=cr-at-eol
+# SSE 事件以空行结束；这是协议帧边界，不是多余尾空行。
+contracts/core/sse-fixtures/*.txt text eol=lf whitespace=-blank-at-eof

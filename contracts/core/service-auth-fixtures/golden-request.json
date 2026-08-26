@@ -1,0 +1,42 @@
+{
+  "bodyBase64": "eyJtZXNzYWdlIjoi5byA5aeLIiwiY291bnQiOjJ9",
+  "claims": {
+    "aud": "inkforge-agent-fixture",
+    "body_sha256": "521c108b1f759e3365f6d8e2fafcf023744518513be93bb237139fbbdaf8f412",
+    "exp": 1800000120,
+    "http_method": "POST",
+    "http_path": "/internal/v1/tools/get_novel_summary",
+    "iat": 1800000000,
+    "idempotency_key": "migration-fixture-request-0001",
+    "iss": "inkforge-core-fixture",
+    "jti": "jti-migration-fixture-0001",
+    "novel_id": "novel-fixture",
+    "query_sha256": "3f13c2eb60ab43a8a084cbfeae9f97a88875d9b41ccfd34da863f04c4af963da",
+    "request_timestamp": 1800000000,
+    "run_id": "run-fixture",
+    "scope": [
+      "tool:read"
+    ],
+    "sub": "core-api",
+    "task_id": "task-fixture"
+  },
+  "expectedFailures": {
+    "expired": "SERVICE_AUTHENTICATION_FAILED",
+    "replay": "SERVICE_TOKEN_REPLAYED",
+    "wrongAudience": "SERVICE_AUTHENTICATION_FAILED",
+    "wrongBody": "SERVICE_REQUEST_BINDING_INVALID",
+    "wrongScope": "SERVICE_SCOPE_FORBIDDEN"
+  },
+  "headers": {
+    "Authorization": "Bearer eyJhbGciOiJFZERTQSIsImtpZCI6Im1pZ3JhdGlvbi1maXh0dXJlLXYxIiwidHlwIjoiSldUIn0.eyJpc3MiOiJpbmtmb3JnZS1jb3JlLWZpeHR1cmUiLCJzdWIiOiJjb3JlLWFwaSIsImF1ZCI6Imlua2ZvcmdlLWFnZW50LWZpeHR1cmUiLCJzY29wZSI6WyJ0b29sOnJlYWQiXSwidGFza19pZCI6InRhc2stZml4dHVyZSIsInJ1bl9pZCI6InJ1bi1maXh0dXJlIiwibm92ZWxfaWQiOiJub3ZlbC1maXh0dXJlIiwianRpIjoianRpLW1pZ3JhdGlvbi1maXh0dXJlLTAwMDEiLCJpYXQiOjE4MDAwMDAwMDAsImV4cCI6MTgwMDAwMDEyMCwiYm9keV9zaGEyNTYiOiI1MjFjMTA4YjFmNzU5ZTMzNjVmNmQ4ZTJmYWZjZjAyMzc0NDUxODUxM2JlOTNiYjIzNzEzOWZiYmRhZjhmNDEyIiwicXVlcnlfc2hhMjU2IjoiM2YxM2MyZWI2MGFiNDNhOGEwODRjYmZlYWU5Zjk3YTg4ODc1ZDliNDFjY2ZkMzRkYTg2M2YwNGM0YWY5NjNkYSIsImlkZW1wb3RlbmN5X2tleSI6Im1pZ3JhdGlvbi1maXh0dXJlLXJlcXVlc3QtMDAwMSIsInJlcXVlc3RfdGltZXN0YW1wIjoxODAwMDAwMDAwLCJodHRwX21ldGhvZCI6IlBPU1QiLCJodHRwX3BhdGgiOiIvaW50ZXJuYWwvdjEvdG9vbHMvZ2V0X25vdmVsX3N1bW1hcnkifQ.KShyMMdtZQJPjsEUYl_yct9uLJPrV0I_Zrmt0FBD_KFfKy7oLdPDYqr4KDXS6sOsoOYteE8XlV88OdFjs8s4Bg",
+    "Idempotency-Key": "migration-fixture-request-0001",
+    "X-InkForge-Body-SHA256": "521c108b1f759e3365f6d8e2fafcf023744518513be93bb237139fbbdaf8f412",
+    "X-InkForge-Timestamp": "1800000000"
+  },
+  "httpMethod": "POST",
+  "httpPath": "/internal/v1/tools/get_novel_summary",
+  "queryStringBase64": "Y3Vyc29yPWFiYyUyRjE=",
+  "schemaVersion": "service-auth-golden-request/1.0",
+  "testOnlyPrivateKeySeedHex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+  "token": "eyJhbGciOiJFZERTQSIsImtpZCI6Im1pZ3JhdGlvbi1maXh0dXJlLXYxIiwidHlwIjoiSldUIn0.eyJpc3MiOiJpbmtmb3JnZS1jb3JlLWZpeHR1cmUiLCJzdWIiOiJjb3JlLWFwaSIsImF1ZCI6Imlua2ZvcmdlLWFnZW50LWZpeHR1cmUiLCJzY29wZSI6WyJ0b29sOnJlYWQiXSwidGFza19pZCI6InRhc2stZml4dHVyZSIsInJ1bl9pZCI6InJ1bi1maXh0dXJlIiwibm92ZWxfaWQiOiJub3ZlbC1maXh0dXJlIiwianRpIjoianRpLW1pZ3JhdGlvbi1maXh0dXJlLTAwMDEiLCJpYXQiOjE4MDAwMDAwMDAsImV4cCI6MTgwMDAwMDEyMCwiYm9keV9zaGEyNTYiOiI1MjFjMTA4YjFmNzU5ZTMzNjVmNmQ4ZTJmYWZjZjAyMzc0NDUxODUxM2JlOTNiYjIzNzEzOWZiYmRhZjhmNDEyIiwicXVlcnlfc2hhMjU2IjoiM2YxM2MyZWI2MGFiNDNhOGEwODRjYmZlYWU5Zjk3YTg4ODc1ZDliNDFjY2ZkMzRkYTg2M2YwNGM0YWY5NjNkYSIsImlkZW1wb3RlbmN5X2tleSI6Im1pZ3JhdGlvbi1maXh0dXJlLXJlcXVlc3QtMDAwMSIsInJlcXVlc3RfdGltZXN0YW1wIjoxODAwMDAwMDAwLCJodHRwX21ldGhvZCI6IlBPU1QiLCJodHRwX3BhdGgiOiIvaW50ZXJuYWwvdjEvdG9vbHMvZ2V0X25vdmVsX3N1bW1hcnkifQ.KShyMMdtZQJPjsEUYl_yct9uLJPrV0I_Zrmt0FBD_KFfKy7oLdPDYqr4KDXS6sOsoOYteE8XlV88OdFjs8s4Bg"
+}

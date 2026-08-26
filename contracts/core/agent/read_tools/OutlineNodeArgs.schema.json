@@ -1,0 +1,36 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/read_tools/OutlineNodeArgs/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "node_id": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Node Id"
+    },
+    "node_title": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Node Title"
+    }
+  },
+  "title": "OutlineNodeArgs",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.read_tools.OutlineNodeArgs"
+}

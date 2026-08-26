@@ -19,6 +19,8 @@
 - Next.js 只负责页面、SSR/SEO 和浏览器交互。
 - FastAPI Core API 独占 PostgreSQL、认证、业务规则、计费、草案和 SSE。
 - FastAPI Agent Service 负责 LangGraph、模型和工具执行，不连接数据库。
+- Java Core 单体替换已获批准并在 `codex/java-core-migration` 实施；完成全量契约、dev 数据库、部署和
+  回滚验收前，FastAPI Core 仍是当前运行事实，生产不得双 Core 或双写。
 - Core 与 Agent 使用版本化 Pydantic 契约和 Ed25519 服务身份通信。
 - 生产由 `infra/compose.yaml` 编排，Nginx 是唯一公网入口。
 - 生产 SSH 只信任管理员离线核验的主机公钥；部署串行排队，新版本失败时由 `scripts/deploy-production.sh` 尝试恢复经验证的上一镜像。
@@ -49,6 +51,7 @@
 | authority | 根目录 | 当前、简短、可执行 |
 | current-requirement | `docs/requirements/` | 只描述当前产品事实 |
 | architecture | `apps/agent-service/AGENTS.md`、`docs/*.md` | 必须与当前代码路径一致 |
+| architecture-decision | `docs/architecture-decisions/` | 记录已接受且仍生效的关键架构取舍；改变决策必须新增或取代 ADR |
 | spec | `docs/specs/` | 实现前写明目标、非目标、设计、影响和验收 |
 | plan | `docs/plans/` | 一次性执行步骤，完成后归档 |
 | audit | `docs/audits/` | 标明日期、状态和直接证据 |
@@ -73,5 +76,9 @@
 - 文档索引：`docs/README.md`
 - Agent 架构：`apps/agent-service/AGENTS.md`
 - 当前需求：`docs/requirements/00-overview.md`
+- Java Core 替换规格：`docs/specs/2026-08-24-core-java-replacement.md`
+- Java Core 架构决策：`docs/architecture-decisions/001-core-java-stack.md` 到
+  `003-core-java-single-cutover.md`
+- Java Core 生产切换：`docs/JAVA_CORE_CUTOVER.md`
 - 生产部署：`infra/compose.yaml`
 - 生产发布入口：`.github/workflows/build.yml`、`scripts/deploy-production.sh`

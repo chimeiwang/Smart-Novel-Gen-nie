@@ -1,0 +1,67 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/quality/ConsistencyIssue/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "dimension": {
+      "enum": [
+        "character",
+        "world_rule",
+        "timeline",
+        "causality",
+        "foreshadowing"
+      ],
+      "title": "Dimension",
+      "type": "string"
+    },
+    "evidence": {
+      "maxLength": 1000,
+      "minLength": 1,
+      "title": "Evidence",
+      "type": "string"
+    },
+    "location": {
+      "anyOf": [
+        {
+          "maxLength": 200,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Location"
+    },
+    "message": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Message",
+      "type": "string"
+    },
+    "severity": {
+      "enum": [
+        "warning",
+        "error"
+      ],
+      "title": "Severity",
+      "type": "string"
+    },
+    "suggestion": {
+      "maxLength": 1000,
+      "minLength": 1,
+      "title": "Suggestion",
+      "type": "string"
+    }
+  },
+  "required": [
+    "dimension",
+    "severity",
+    "message",
+    "evidence",
+    "suggestion"
+  ],
+  "title": "ConsistencyIssue",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.quality.ConsistencyIssue"
+}

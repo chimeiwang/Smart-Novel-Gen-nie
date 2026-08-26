@@ -1,0 +1,73 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/long_serial/SelectionAttachmentMetadata/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "选区来源快照的 UI 元数据；不包含也不承载权威正文。",
+  "properties": {
+    "baseContentHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Basecontenthash",
+      "type": "string"
+    },
+    "baseUpdatedAt": {
+      "format": "date-time",
+      "title": "Baseupdatedat",
+      "type": "string"
+    },
+    "resourceId": {
+      "minLength": 1,
+      "title": "Resourceid",
+      "type": "string"
+    },
+    "resourceType": {
+      "enum": [
+        "chapter_content",
+        "outline_content",
+        "outline_node_content"
+      ],
+      "title": "Resourcetype",
+      "type": "string"
+    },
+    "selectedTextHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Selectedtexthash",
+      "type": "string"
+    },
+    "selectionEnd": {
+      "minimum": 0,
+      "title": "Selectionend",
+      "type": "integer"
+    },
+    "selectionPreview": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Selectionpreview",
+      "type": "string"
+    },
+    "selectionStart": {
+      "minimum": 0,
+      "title": "Selectionstart",
+      "type": "integer"
+    },
+    "sourceLabel": {
+      "maxLength": 256,
+      "minLength": 1,
+      "title": "Sourcelabel",
+      "type": "string"
+    }
+  },
+  "required": [
+    "resourceType",
+    "resourceId",
+    "sourceLabel",
+    "baseUpdatedAt",
+    "baseContentHash",
+    "selectionStart",
+    "selectionEnd",
+    "selectedTextHash",
+    "selectionPreview"
+  ],
+  "title": "SelectionAttachmentMetadata",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.long_serial.SelectionAttachmentMetadata"
+}

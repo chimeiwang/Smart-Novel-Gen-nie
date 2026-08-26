@@ -1,0 +1,84 @@
+{
+  "$defs": {
+    "JsonValue": {}
+  },
+  "$id": "https://inkforge.local/contracts/agent/tools/ToolCallRequest/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "agentId": {
+      "enum": [
+        "设定",
+        "剧情",
+        "写作",
+        "校验",
+        "编辑"
+      ],
+      "title": "Agentid",
+      "type": "string"
+    },
+    "arguments": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "title": "Arguments",
+      "type": "object"
+    },
+    "callId": {
+      "minLength": 1,
+      "title": "Callid",
+      "type": "string"
+    },
+    "jobId": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Jobid"
+    },
+    "novelId": {
+      "minLength": 1,
+      "title": "Novelid",
+      "type": "string"
+    },
+    "protocolVersion": {
+      "const": "1.0",
+      "title": "Protocolversion",
+      "type": "string"
+    },
+    "runId": {
+      "minLength": 1,
+      "title": "Runid",
+      "type": "string"
+    },
+    "taskId": {
+      "minLength": 1,
+      "title": "Taskid",
+      "type": "string"
+    },
+    "toolName": {
+      "minLength": 1,
+      "title": "Toolname",
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocolVersion",
+    "callId",
+    "runId",
+    "taskId",
+    "novelId",
+    "agentId",
+    "toolName",
+    "arguments"
+  ],
+  "title": "ToolCallRequest",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.tools.ToolCallRequest"
+}

@@ -1,0 +1,572 @@
+{
+  "$defs": {
+    "AbsenceSentinel": {
+      "additionalProperties": false,
+      "properties": {
+        "resourceId": {
+          "minLength": 1,
+          "title": "Resourceid",
+          "type": "string"
+        },
+        "resourceType": {
+          "minLength": 1,
+          "title": "Resourcetype",
+          "type": "string"
+        }
+      },
+      "required": [
+        "resourceType",
+        "resourceId"
+      ],
+      "title": "AbsenceSentinel",
+      "type": "object"
+    },
+    "ChapterRangeScope": {
+      "additionalProperties": false,
+      "properties": {
+        "chapterEndOrder": {
+          "minimum": 0,
+          "title": "Chapterendorder",
+          "type": "integer"
+        },
+        "chapterStartOrder": {
+          "minimum": 0,
+          "title": "Chapterstartorder",
+          "type": "integer"
+        },
+        "kind": {
+          "const": "chapter_range",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "chapterStartOrder",
+        "chapterEndOrder"
+      ],
+      "title": "ChapterRangeScope",
+      "type": "object"
+    },
+    "ChapterScope": {
+      "additionalProperties": false,
+      "properties": {
+        "chapterId": {
+          "minLength": 1,
+          "title": "Chapterid",
+          "type": "string"
+        },
+        "kind": {
+          "const": "chapter",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "chapterId"
+      ],
+      "title": "ChapterScope",
+      "type": "object"
+    },
+    "ChapterTarget": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "chapter",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id"
+      ],
+      "title": "ChapterTarget",
+      "type": "object"
+    },
+    "LongSerialResumeInput": {
+      "additionalProperties": false,
+      "properties": {
+        "artifactId": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifactid"
+        },
+        "decision": {
+          "anyOf": [
+            {
+              "enum": [
+                "approve",
+                "discard",
+                "revise"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decision"
+        },
+        "userMessage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Usermessage"
+        }
+      },
+      "title": "LongSerialResumeInput",
+      "type": "object"
+    },
+    "NovelScope": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "novel",
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "title": "NovelScope",
+      "type": "object"
+    },
+    "OutlineNodeScope": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "const": "outline_node",
+          "title": "Kind",
+          "type": "string"
+        },
+        "outlineNodeId": {
+          "minLength": 1,
+          "title": "Outlinenodeid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "outlineNodeId"
+      ],
+      "title": "OutlineNodeScope",
+      "type": "object"
+    },
+    "SelectionSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "baseContentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Basecontenthash",
+          "type": "string"
+        },
+        "baseUpdatedAt": {
+          "format": "date-time",
+          "title": "Baseupdatedat",
+          "type": "string"
+        },
+        "contextAfter": {
+          "title": "Contextafter",
+          "type": "string"
+        },
+        "contextBefore": {
+          "title": "Contextbefore",
+          "type": "string"
+        },
+        "resourceId": {
+          "minLength": 1,
+          "title": "Resourceid",
+          "type": "string"
+        },
+        "resourceType": {
+          "enum": [
+            "chapter_content",
+            "outline_content",
+            "outline_node_content"
+          ],
+          "title": "Resourcetype",
+          "type": "string"
+        },
+        "selectedText": {
+          "title": "Selectedtext",
+          "type": "string"
+        },
+        "selectedTextHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Selectedtexthash",
+          "type": "string"
+        },
+        "selectionEnd": {
+          "minimum": 0,
+          "title": "Selectionend",
+          "type": "integer"
+        },
+        "selectionStart": {
+          "minimum": 0,
+          "title": "Selectionstart",
+          "type": "integer"
+        },
+        "sourceSnapshot": {
+          "$ref": "#/$defs/SelectionSourceSnapshot"
+        }
+      },
+      "required": [
+        "resourceType",
+        "resourceId",
+        "baseUpdatedAt",
+        "baseContentHash",
+        "selectionStart",
+        "selectionEnd",
+        "selectedTextHash",
+        "selectedText",
+        "contextBefore",
+        "contextAfter",
+        "sourceSnapshot"
+      ],
+      "title": "SelectionSnapshot",
+      "type": "object"
+    },
+    "SelectionSourceSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "contentSha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Contentsha256",
+          "type": "string"
+        },
+        "resourceId": {
+          "minLength": 1,
+          "title": "Resourceid",
+          "type": "string"
+        },
+        "resourceType": {
+          "enum": [
+            "chapter_content",
+            "outline_content",
+            "outline_node_content"
+          ],
+          "title": "Resourcetype",
+          "type": "string"
+        },
+        "updatedAt": {
+          "format": "date-time",
+          "title": "Updatedat",
+          "type": "string"
+        }
+      },
+      "required": [
+        "resourceType",
+        "resourceId",
+        "content",
+        "updatedAt",
+        "contentSha256"
+      ],
+      "title": "SelectionSourceSnapshot",
+      "type": "object"
+    },
+    "SelectionTarget": {
+      "additionalProperties": false,
+      "description": "客户端提交的不可变选区身份；正文由 Core 从权威源派生。",
+      "properties": {
+        "baseContentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Basecontenthash",
+          "type": "string"
+        },
+        "baseUpdatedAt": {
+          "format": "date-time",
+          "title": "Baseupdatedat",
+          "type": "string"
+        },
+        "resourceId": {
+          "minLength": 1,
+          "title": "Resourceid",
+          "type": "string"
+        },
+        "resourceType": {
+          "enum": [
+            "chapter_content",
+            "outline_content",
+            "outline_node_content"
+          ],
+          "title": "Resourcetype",
+          "type": "string"
+        },
+        "selectedTextHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Selectedtexthash",
+          "type": "string"
+        },
+        "selectionEnd": {
+          "minimum": 0,
+          "title": "Selectionend",
+          "type": "integer"
+        },
+        "selectionStart": {
+          "minimum": 0,
+          "title": "Selectionstart",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "resourceType",
+        "resourceId",
+        "baseUpdatedAt",
+        "baseContentHash",
+        "selectionStart",
+        "selectionEnd",
+        "selectedTextHash"
+      ],
+      "title": "SelectionTarget",
+      "type": "object"
+    },
+    "SourceBinding": {
+      "additionalProperties": false,
+      "properties": {
+        "absenceSentinel": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AbsenceSentinel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contentSha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Contentsha256"
+        },
+        "exists": {
+          "title": "Exists",
+          "type": "boolean"
+        },
+        "resourceId": {
+          "minLength": 1,
+          "title": "Resourceid",
+          "type": "string"
+        },
+        "resourceType": {
+          "minLength": 1,
+          "title": "Resourcetype",
+          "type": "string"
+        },
+        "revision": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Revision"
+        },
+        "updatedAt": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Updatedat"
+        }
+      },
+      "required": [
+        "resourceType",
+        "resourceId",
+        "exists",
+        "updatedAt",
+        "contentSha256",
+        "revision",
+        "absenceSentinel"
+      ],
+      "title": "SourceBinding",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/long_serial/ResumeLongSerialRunPayload/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "chapterId": {
+      "minLength": 1,
+      "title": "Chapterid",
+      "type": "string"
+    },
+    "operation": {
+      "enum": [
+        "answer_question",
+        "create_lore",
+        "revise_lore",
+        "create_outline",
+        "revise_outline",
+        "plan_chapter",
+        "write_chapter",
+        "rewrite_scene",
+        "rewrite_chapter_selection",
+        "rewrite_outline_selection",
+        "review_chapter",
+        "manage_foreshadowing"
+      ],
+      "title": "Operation",
+      "type": "string"
+    },
+    "resume": {
+      "const": true,
+      "title": "Resume",
+      "type": "boolean"
+    },
+    "resumeInput": {
+      "$ref": "#/$defs/LongSerialResumeInput"
+    },
+    "scope": {
+      "discriminator": {
+        "mapping": {
+          "chapter": "#/$defs/ChapterScope",
+          "chapter_range": "#/$defs/ChapterRangeScope",
+          "novel": "#/$defs/NovelScope",
+          "outline_node": "#/$defs/OutlineNodeScope"
+        },
+        "propertyName": "kind"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ChapterScope"
+        },
+        {
+          "$ref": "#/$defs/ChapterRangeScope"
+        },
+        {
+          "$ref": "#/$defs/OutlineNodeScope"
+        },
+        {
+          "$ref": "#/$defs/NovelScope"
+        }
+      ],
+      "title": "Scope"
+    },
+    "selectionSnapshot": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SelectionSnapshot"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "selectionTarget": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SelectionTarget"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "sourceBindings": {
+      "items": {
+        "$ref": "#/$defs/SourceBinding"
+      },
+      "minItems": 1,
+      "title": "Sourcebindings",
+      "type": "array"
+    },
+    "target": {
+      "$ref": "#/$defs/ChapterTarget"
+    },
+    "targetWordCount": {
+      "maximum": 10000000,
+      "minimum": 1,
+      "title": "Targetwordcount",
+      "type": "integer"
+    },
+    "userInstruction": {
+      "minLength": 1,
+      "title": "Userinstruction",
+      "type": "string"
+    },
+    "version": {
+      "const": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "workflow": {
+      "const": "long_serial",
+      "title": "Workflow",
+      "type": "string"
+    },
+    "writingSessionId": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Writingsessionid"
+    }
+  },
+  "required": [
+    "version",
+    "workflow",
+    "chapterId",
+    "writingSessionId",
+    "operation",
+    "target",
+    "scope",
+    "sourceBindings",
+    "targetWordCount",
+    "userInstruction",
+    "resume",
+    "resumeInput"
+  ],
+  "title": "ResumeLongSerialRunPayload",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.long_serial.ResumeLongSerialRunPayload"
+}

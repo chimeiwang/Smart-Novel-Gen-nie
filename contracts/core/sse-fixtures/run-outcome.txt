@@ -1,0 +1,3 @@
+event: run_outcome
+data: {"state":"waiting_user","code":"ARTIFACT_AWAITING_USER","taskTerminal":false,"streamShouldClose":true,"reconciliationRequired":false,"currentCommand":{"id":"command-fixture","kind":"start","status":"succeeded","updatedAt":"2026-08-24T12:00:00Z"},"result":{"kind":"review_artifact","ready":true,"id":"artifact-fixture"},"observedAt":"2026-08-24T12:00:00Z"}
+

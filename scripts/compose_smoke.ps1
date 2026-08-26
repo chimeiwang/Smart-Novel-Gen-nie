@@ -4,10 +4,35 @@ $compose = @("compose", "--env-file", $envFile, "-f", "infra/compose.yaml")
 if ($env:COMPOSE_OVERRIDE_FILE) {
     $compose += @("-f", $env:COMPOSE_OVERRIDE_FILE)
 }
+if ($env:COMPOSE_ADDITIONAL_OVERRIDE_FILE) {
+    $compose += @("-f", $env:COMPOSE_ADDITIONAL_OVERRIDE_FILE)
+}
 $port = if ($env:INKFORGE_PORT) { $env:INKFORGE_PORT } else { "80" }
 $baseUrl = "http://127.0.0.1:$port"
 
 docker @compose ps
+$coreWriteProbe = @'
+set -eu
+upload_root="${UPLOADS_ROOT:?缺少 UPLOADS_ROOT}"
+test -d "$upload_root"
+probe_dir="$upload_root/.inkforge-write-probe-$$"
+mkdir "$probe_dir"
+rmdir "$probe_dir"
+'@
+docker @compose exec -T core-api sh -c $coreWriteProbe
+if ($LASTEXITCODE -ne 0) { throw "Core 上传目录不可写" }
+
+$agentWriteProbe = @'
+set -eu
+log_dir="${WORKFLOW_HUMAN_LOG_DIR:?缺少 WORKFLOW_HUMAN_LOG_DIR}"
+test -d "$log_dir"
+probe_dir="$log_dir/.inkforge-write-probe-$$"
+mkdir "$probe_dir"
+rmdir "$probe_dir"
+'@
+docker @compose exec -T agent-service sh -c $agentWriteProbe
+if ($LASTEXITCODE -ne 0) { throw "Agent 人工日志目录不可写" }
+
 $page = Invoke-WebRequest -UseBasicParsing "$baseUrl/login"
 if ($page.StatusCode -ne 200) { throw "登录页面不可用" }
 

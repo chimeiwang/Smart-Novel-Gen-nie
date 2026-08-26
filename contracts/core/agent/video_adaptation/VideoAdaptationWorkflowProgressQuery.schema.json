@@ -1,0 +1,57 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_adaptation/VideoAdaptationWorkflowProgressQuery/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "adaptationId": {
+      "title": "Adaptationid",
+      "type": "string"
+    },
+    "jobId": {
+      "title": "Jobid",
+      "type": "string"
+    },
+    "novelId": {
+      "title": "Novelid",
+      "type": "string"
+    },
+    "projectId": {
+      "title": "Projectid",
+      "type": "string"
+    },
+    "protocolVersion": {
+      "const": "1.0",
+      "title": "Protocolversion",
+      "type": "string"
+    },
+    "runId": {
+      "title": "Runid",
+      "type": "string"
+    },
+    "taskId": {
+      "title": "Taskid",
+      "type": "string"
+    },
+    "workflow": {
+      "enum": [
+        "chapter_cinematic_adaptation_v2",
+        "chapter_shot_prompt_v2"
+      ],
+      "title": "Workflow",
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocolVersion",
+    "jobId",
+    "runId",
+    "taskId",
+    "novelId",
+    "projectId",
+    "adaptationId",
+    "workflow"
+  ],
+  "title": "VideoAdaptationWorkflowProgressQuery",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_adaptation.VideoAdaptationWorkflowProgressQuery"
+}

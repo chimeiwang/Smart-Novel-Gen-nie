@@ -1,0 +1,71 @@
+{
+  "$defs": {
+    "JsonValue": {}
+  },
+  "$id": "https://inkforge.local/contracts/agent/events/AgentEvent/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "data": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "title": "Data",
+      "type": "object"
+    },
+    "event": {
+      "minLength": 1,
+      "title": "Event",
+      "type": "string"
+    },
+    "eventId": {
+      "minLength": 1,
+      "title": "Eventid",
+      "type": "string"
+    },
+    "jobId": {
+      "minLength": 1,
+      "title": "Jobid",
+      "type": "string"
+    },
+    "occurredAt": {
+      "format": "date-time",
+      "title": "Occurredat",
+      "type": "string"
+    },
+    "protocolVersion": {
+      "const": "1.1",
+      "title": "Protocolversion",
+      "type": "string"
+    },
+    "runId": {
+      "minLength": 1,
+      "title": "Runid",
+      "type": "string"
+    },
+    "sequence": {
+      "exclusiveMinimum": 0,
+      "title": "Sequence",
+      "type": "integer"
+    },
+    "taskId": {
+      "minLength": 1,
+      "title": "Taskid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocolVersion",
+    "eventId",
+    "jobId",
+    "runId",
+    "taskId",
+    "sequence",
+    "event",
+    "data",
+    "occurredAt"
+  ],
+  "title": "AgentEvent",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.events.AgentEvent"
+}

@@ -2,35 +2,33 @@ import { expect, test } from "@playwright/test";
 
 import {
   createNovelWithApi,
-  enterMinorEdit,
   expectApiOk,
-  openReadingWorkspace,
+  openWorkspace,
   readWorkspace,
 } from "./helpers";
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
-test("新建小说默认进入创作工作室，阅读模式显式进入小修后自动保存", async ({ page }) => {
+test("新建长篇小说进入统一创作工作区并自动保存", async ({ page }) => {
   await page.goto("/dashboard");
   await page.getByRole("button", { name: "新建小说", exact: true }).click();
 
   const novelName = `浏览器创建-${Date.now()}`;
   await page.getByLabel("小说名称").fill(novelName);
-  await page.getByRole("button", { name: /中短篇/ }).click();
-  await page.getByLabel("作品简介").fill("浏览器端到端创建流程");
-  await page.locator("form").getByRole("button", { name: "新建小说", exact: true }).click();
-  await expect(page).toHaveURL(/\/workspace\/[^?]+/);
-  await expect(page.getByRole("button", { name: "AI 创作", exact: true })).toHaveAttribute(
+  await expect(page.getByRole("button", { name: /长篇连载/ })).toHaveAttribute(
     "aria-pressed",
     "true",
   );
-  await expect(page.getByPlaceholder("章节标题")).not.toBeVisible();
-
-  await page.getByRole("button", { name: "阅读与小修", exact: true }).click();
-  await expect(page).toHaveURL(/view=reading/);
-  await expect(page.getByRole("button", { name: "进入小修", exact: true })).toBeVisible();
-  await expect(page.getByPlaceholder("正文内容")).toHaveCount(0);
-  await enterMinorEdit(page);
+  await page.getByLabel("作品简介").fill("浏览器端到端创建流程：主角必须在黎明前作出选择。");
+  await page.locator("form").getByRole("button", { name: "新建小说", exact: true }).click();
+  await expect(page).toHaveURL(/\/workspace\/[^?]+/);
+  await expect(page.getByRole("button", { name: "章节", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(
+    page.getByPlaceholder("描述要完成的创作任务，系统会自动分配合适的 Agent"),
+  ).toBeVisible();
 
   await page.getByPlaceholder("章节标题").fill("端到端第一章");
   await page.getByPlaceholder("正文内容").fill("这是通过浏览器输入并自动保存的完整章节正文。");
@@ -46,7 +44,7 @@ test("新建小说默认进入创作工作室，阅读模式显式进入小修�
   });
 });
 
-test("小修中快速输入后切换章节会先保存最新正文", async ({ page }) => {
+test("统一工作区快速输入后切换章节会先保存最新正文", async ({ page }) => {
   const identity = await createNovelWithApi(page);
   const createResponse = await page.request.post(
     `/api/v1/novels/${identity.novelId}/chapters`,
@@ -56,8 +54,7 @@ test("小修中快速输入后切换章节会先保存最新正文", async ({ pa
   const secondChapter = (await createResponse.json()) as {
     chapter: { id: string; title: string };
   };
-  await openReadingWorkspace(page, identity);
-  await enterMinorEdit(page);
+  await openWorkspace(page, identity);
 
   await page.getByPlaceholder("章节标题").fill("切章前标题");
   await page.getByPlaceholder("正文内容").fill("切章前必须保存的最新正文");
@@ -81,20 +78,16 @@ test("小修中快速输入后切换章节会先保存最新正文", async ({ pa
   });
 });
 
-test("小修中切换到创作工作室会先保存最新正文", async ({ page }) => {
+test("编辑中打开创作资料详情会先保存最新正文", async ({ page }) => {
   const identity = await createNovelWithApi(page);
-  await openReadingWorkspace(page, identity);
-  await enterMinorEdit(page);
+  await openWorkspace(page, identity);
 
-  await page.getByPlaceholder("章节标题").fill("切模式前标题");
-  await page.getByPlaceholder("正文内容").fill("切模式前必须保存的最新正文");
-  await page.getByRole("button", { name: "AI 创作", exact: true }).click();
+  await page.getByPlaceholder("章节标题").fill("打开资料前标题");
+  await page.getByPlaceholder("正文内容").fill("打开资料前必须保存的最新正文");
+  await page.getByRole("button", { name: "创作资料", exact: true }).click();
+  await page.getByRole("button", { name: "角色", exact: true }).click();
 
-  await expect(page).toHaveURL(/view=studio/);
-  await expect(page.getByRole("button", { name: "AI 创作", exact: true })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  );
+  await expect(page.getByRole("dialog", { name: "角色" })).toBeVisible();
   await expect.poll(async () => {
     const workspace = await readWorkspace(page, identity.novelId);
     const chapters = workspace.chapters as Array<{
@@ -104,24 +97,22 @@ test("小修中切换到创作工作室会先保存最新正文", async ({ page 
     }>;
     return chapters.find((chapter) => chapter.id === identity.chapterId);
   }).toMatchObject({
-    title: "切模式前标题",
-    content: "切模式前必须保存的最新正文",
+    title: "打开资料前标题",
+    content: "打开资料前必须保存的最新正文",
   });
 });
 
-test("送审会先保存最新正文并回到阅读只读态", async ({ page }) => {
+test("送审会先保存最新正文并把统一编辑器切为只读态", async ({ page }) => {
   const identity = await createNovelWithApi(page);
-  await openReadingWorkspace(page, identity);
-  await enterMinorEdit(page);
+  await openWorkspace(page, identity);
 
   await page.getByPlaceholder("正文内容").fill("送审按钮点击前刚输入的正文");
   await page.getByRole("button", { name: "送审", exact: true }).click();
 
-  await expect(page.getByPlaceholder("章节标题")).toHaveCount(0);
-  await expect(page.getByPlaceholder("正文内容")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "退出小修", exact: true })).toHaveCount(0);
+  await expect(page.getByPlaceholder("章节标题")).not.toBeEditable();
+  await expect(page.getByPlaceholder("正文内容")).not.toBeEditable();
   await expect(page.getByText("章节正在审核中，请先退回草稿后再编辑。")).toBeVisible();
-  await expect(page.getByText("送审按钮点击前刚输入的正文", { exact: true })).toBeVisible();
+  await expect(page.getByPlaceholder("正文内容")).toHaveValue("送审按钮点击前刚输入的正文");
   await expect.poll(async () => {
     const workspace = await readWorkspace(page, identity.novelId);
     const chapters = workspace.chapters as Array<{
@@ -138,8 +129,7 @@ test("送审会先保存最新正文并回到阅读只读态", async ({ page }) 
 
 test("自动保存失败会保留正文并显示可重试状态", async ({ page }) => {
   const identity = await createNovelWithApi(page);
-  await openReadingWorkspace(page, identity);
-  await enterMinorEdit(page);
+  await openWorkspace(page, identity);
   await page.route(`**/api/v1/chapters/${identity.chapterId}`, async (route) => {
     if (route.request().method() !== "PATCH") {
       await route.continue();

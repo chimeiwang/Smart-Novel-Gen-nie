@@ -1,0 +1,82 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video/ItemSettingSnapshot/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "规划任务冻结的道具设定投影。",
+  "properties": {
+    "aliases": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Aliases",
+      "type": "array"
+    },
+    "contentHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Contenthash",
+      "type": "string"
+    },
+    "description": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Description"
+    },
+    "id": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Id",
+      "type": "string"
+    },
+    "itemType": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Itemtype"
+    },
+    "kind": {
+      "const": "item",
+      "default": "item",
+      "title": "Kind",
+      "type": "string"
+    },
+    "name": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "ownerCharacterId": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ownercharacterid"
+    }
+  },
+  "required": [
+    "id",
+    "contentHash",
+    "name"
+  ],
+  "title": "ItemSettingSnapshot",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.ItemSettingSnapshot"
+}

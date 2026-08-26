@@ -1,0 +1,144 @@
+{
+  "$defs": {
+    "SeedanceRuntimeReference": {
+      "additionalProperties": false,
+      "description": "仅存在于受签名内部请求中的短时参考图地址。",
+      "properties": {
+        "assetId": {
+          "minLength": 1,
+          "title": "Assetid",
+          "type": "string"
+        },
+        "mimeType": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Mimetype",
+          "type": "string"
+        },
+        "ordinal": {
+          "maximum": 20,
+          "minimum": 1,
+          "title": "Ordinal",
+          "type": "integer"
+        },
+        "url": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        },
+        "usageRole": {
+          "default": "visual_reference",
+          "enum": [
+            "visual_reference",
+            "initial_state",
+            "transition_anchor",
+            "end_state"
+          ],
+          "title": "Usagerole",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ordinal",
+        "assetId",
+        "mimeType",
+        "url"
+      ],
+      "title": "SeedanceRuntimeReference",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video_render/SeedanceRenderSubmitRequest/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Core 从冻结清单投影出的单次 Seedance 创建请求。",
+  "properties": {
+    "durationSeconds": {
+      "maximum": 12,
+      "minimum": 2,
+      "title": "Durationseconds",
+      "type": "integer"
+    },
+    "generateAudio": {
+      "title": "Generateaudio",
+      "type": "boolean"
+    },
+    "inputHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Inputhash",
+      "type": "string"
+    },
+    "model": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Model",
+      "type": "string"
+    },
+    "novelId": {
+      "minLength": 1,
+      "title": "Novelid",
+      "type": "string"
+    },
+    "promptText": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Prompttext",
+      "type": "string"
+    },
+    "ratio": {
+      "enum": [
+        "16:9",
+        "4:3",
+        "1:1",
+        "3:4",
+        "9:16",
+        "21:9",
+        "adaptive"
+      ],
+      "title": "Ratio",
+      "type": "string"
+    },
+    "references": {
+      "items": {
+        "$ref": "#/$defs/SeedanceRuntimeReference"
+      },
+      "maxItems": 20,
+      "title": "References",
+      "type": "array"
+    },
+    "resolution": {
+      "enum": [
+        "480p",
+        "720p",
+        "1080p"
+      ],
+      "title": "Resolution",
+      "type": "string"
+    },
+    "taskId": {
+      "minLength": 1,
+      "title": "Taskid",
+      "type": "string"
+    },
+    "watermark": {
+      "title": "Watermark",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "taskId",
+    "novelId",
+    "inputHash",
+    "model",
+    "promptText",
+    "ratio",
+    "durationSeconds",
+    "resolution",
+    "generateAudio",
+    "watermark"
+  ],
+  "title": "SeedanceRenderSubmitRequest",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_render.SeedanceRenderSubmitRequest"
+}

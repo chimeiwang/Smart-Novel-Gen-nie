@@ -1,0 +1,84 @@
+{
+  "$defs": {
+    "SettingReference": {
+      "additionalProperties": false,
+      "description": "指向长篇冻结设定快照中的一个类型化条目。",
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "character",
+            "relationship",
+            "location",
+            "item",
+            "world_setting"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "title": "SettingReference",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video/DirectorSourceAliasV1/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "服务器为冻结设定分配的短别名，模型只能回传 alias。",
+  "properties": {
+    "alias": {
+      "pattern": "^[CRLIW][0-9]{2}$",
+      "title": "Alias",
+      "type": "string"
+    },
+    "allowedDuties": {
+      "items": {
+        "enum": [
+          "identity",
+          "costume",
+          "scene",
+          "prop",
+          "style",
+          "storyboard",
+          "keyframe",
+          "motion",
+          "camera",
+          "voice",
+          "ambience",
+          "relation_interaction"
+        ],
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Allowedduties",
+      "type": "array"
+    },
+    "name": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "settingReference": {
+      "$ref": "#/$defs/SettingReference"
+    }
+  },
+  "required": [
+    "alias",
+    "settingReference",
+    "name",
+    "allowedDuties"
+  ],
+  "title": "DirectorSourceAliasV1",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.DirectorSourceAliasV1"
+}

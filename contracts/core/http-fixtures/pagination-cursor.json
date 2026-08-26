@@ -1,0 +1,7 @@
+{
+  "createdAt": "2026-08-24T12:34:56.789000+00:00",
+  "decodedTaskId": "task-cursor-fixture",
+  "encoded": "eyJjcmVhdGVkQXQiOiIyMDI2LTA4LTI0VDEyOjM0OjU2Ljc4OTAwMCswMDowMCIsImlkIjoidGFzay1jdXJzb3ItZml4dHVyZSJ9",
+  "paddingAllowed": false,
+  "schemaVersion": "run-cursor-fixture/1.0"
+}

@@ -1,0 +1,135 @@
+{
+  "$defs": {
+    "VideoPlanAttemptState": {
+      "additionalProperties": false,
+      "description": "不依赖新表、随任务结果耐久保存的模型调用预留账本。",
+      "properties": {
+        "inheritedCalls": {
+          "default": 0,
+          "maximum": 2,
+          "minimum": 0,
+          "title": "Inheritedcalls",
+          "type": "integer"
+        },
+        "pendingStage": {
+          "anyOf": [
+            {
+              "enum": [
+                "scene_assets",
+                "story_beats",
+                "cinematography"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Pendingstage"
+        },
+        "reservedCalls": {
+          "maximum": 5,
+          "minimum": 0,
+          "title": "Reservedcalls",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "reservedCalls",
+        "pendingStage"
+      ],
+      "title": "VideoPlanAttemptState",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video/VideoPlanCallReservationResponse/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Core 完成幂等预留后回显资源绑定与新的耐久账本。",
+  "properties": {
+    "attemptState": {
+      "$ref": "#/$defs/VideoPlanAttemptState"
+    },
+    "checkpointStage": {
+      "enum": [
+        "empty",
+        "scene_assets",
+        "story"
+      ],
+      "title": "Checkpointstage",
+      "type": "string"
+    },
+    "eventId": {
+      "minLength": 1,
+      "title": "Eventid",
+      "type": "string"
+    },
+    "jobId": {
+      "minLength": 1,
+      "title": "Jobid",
+      "type": "string"
+    },
+    "novelId": {
+      "minLength": 1,
+      "title": "Novelid",
+      "type": "string"
+    },
+    "projectId": {
+      "minLength": 1,
+      "title": "Projectid",
+      "type": "string"
+    },
+    "protocolVersion": {
+      "const": "1.0",
+      "title": "Protocolversion",
+      "type": "string"
+    },
+    "reservedCallsBefore": {
+      "maximum": 4,
+      "minimum": 0,
+      "title": "Reservedcallsbefore",
+      "type": "integer"
+    },
+    "runId": {
+      "minLength": 1,
+      "title": "Runid",
+      "type": "string"
+    },
+    "sceneId": {
+      "minLength": 1,
+      "title": "Sceneid",
+      "type": "string"
+    },
+    "stage": {
+      "enum": [
+        "scene_assets",
+        "story_beats",
+        "cinematography"
+      ],
+      "title": "Stage",
+      "type": "string"
+    },
+    "taskId": {
+      "minLength": 1,
+      "title": "Taskid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocolVersion",
+    "eventId",
+    "jobId",
+    "runId",
+    "taskId",
+    "novelId",
+    "projectId",
+    "sceneId",
+    "checkpointStage",
+    "stage",
+    "reservedCallsBefore",
+    "attemptState"
+  ],
+  "title": "VideoPlanCallReservationResponse",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.VideoPlanCallReservationResponse"
+}

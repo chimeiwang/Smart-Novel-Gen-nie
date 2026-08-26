@@ -1,0 +1,67 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/runs/RunRequest/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "novelId": {
+      "minLength": 1,
+      "title": "Novelid",
+      "type": "string"
+    },
+    "operation": {
+      "enum": [
+        "answer_question",
+        "create_lore",
+        "revise_lore",
+        "create_outline",
+        "revise_outline",
+        "plan_chapter",
+        "write_chapter",
+        "rewrite_scene",
+        "rewrite_chapter_selection",
+        "rewrite_outline_selection",
+        "review_chapter",
+        "sync_lore",
+        "manage_foreshadowing"
+      ],
+      "title": "Operation",
+      "type": "string"
+    },
+    "protocolVersion": {
+      "const": "1.0",
+      "title": "Protocolversion",
+      "type": "string"
+    },
+    "resume": {
+      "default": false,
+      "title": "Resume",
+      "type": "boolean"
+    },
+    "runId": {
+      "minLength": 1,
+      "title": "Runid",
+      "type": "string"
+    },
+    "taskId": {
+      "minLength": 1,
+      "title": "Taskid",
+      "type": "string"
+    },
+    "userId": {
+      "minLength": 1,
+      "title": "Userid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocolVersion",
+    "runId",
+    "taskId",
+    "novelId",
+    "userId",
+    "operation"
+  ],
+  "title": "RunRequest",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.runs.RunRequest"
+}

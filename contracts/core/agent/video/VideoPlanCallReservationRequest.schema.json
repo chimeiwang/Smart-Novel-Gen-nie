@@ -1,0 +1,95 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video/VideoPlanCallReservationRequest/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Agent 在每次供应商调用前请求 Core 原子预留一次调用。",
+  "properties": {
+    "checkpointStage": {
+      "enum": [
+        "empty",
+        "scene_assets",
+        "story"
+      ],
+      "title": "Checkpointstage",
+      "type": "string"
+    },
+    "eventId": {
+      "minLength": 1,
+      "title": "Eventid",
+      "type": "string"
+    },
+    "expectedReservedCalls": {
+      "maximum": 4,
+      "minimum": 0,
+      "title": "Expectedreservedcalls",
+      "type": "integer"
+    },
+    "inheritedCalls": {
+      "default": 0,
+      "maximum": 2,
+      "minimum": 0,
+      "title": "Inheritedcalls",
+      "type": "integer"
+    },
+    "jobId": {
+      "minLength": 1,
+      "title": "Jobid",
+      "type": "string"
+    },
+    "novelId": {
+      "minLength": 1,
+      "title": "Novelid",
+      "type": "string"
+    },
+    "projectId": {
+      "minLength": 1,
+      "title": "Projectid",
+      "type": "string"
+    },
+    "protocolVersion": {
+      "const": "1.0",
+      "title": "Protocolversion",
+      "type": "string"
+    },
+    "runId": {
+      "minLength": 1,
+      "title": "Runid",
+      "type": "string"
+    },
+    "sceneId": {
+      "minLength": 1,
+      "title": "Sceneid",
+      "type": "string"
+    },
+    "stage": {
+      "enum": [
+        "scene_assets",
+        "story_beats",
+        "cinematography"
+      ],
+      "title": "Stage",
+      "type": "string"
+    },
+    "taskId": {
+      "minLength": 1,
+      "title": "Taskid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocolVersion",
+    "eventId",
+    "jobId",
+    "runId",
+    "taskId",
+    "novelId",
+    "projectId",
+    "sceneId",
+    "checkpointStage",
+    "stage",
+    "expectedReservedCalls"
+  ],
+  "title": "VideoPlanCallReservationRequest",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.VideoPlanCallReservationRequest"
+}

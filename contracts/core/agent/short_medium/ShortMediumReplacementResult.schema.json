@@ -1,0 +1,68 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/short_medium/ShortMediumReplacementResult/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "baseContentHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Basecontenthash",
+      "type": "string"
+    },
+    "baseVersionId": {
+      "minLength": 1,
+      "title": "Baseversionid",
+      "type": "string"
+    },
+    "documentType": {
+      "enum": [
+        "outline",
+        "manuscript"
+      ],
+      "title": "Documenttype",
+      "type": "string"
+    },
+    "operation": {
+      "const": "replace_selection",
+      "title": "Operation",
+      "type": "string"
+    },
+    "replacement": {
+      "title": "Replacement",
+      "type": "string"
+    },
+    "resultType": {
+      "const": "short_medium_replacement",
+      "title": "Resulttype",
+      "type": "string"
+    },
+    "selectedTextHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Selectedtexthash",
+      "type": "string"
+    },
+    "selectionEnd": {
+      "minimum": 0,
+      "title": "Selectionend",
+      "type": "integer"
+    },
+    "selectionStart": {
+      "minimum": 0,
+      "title": "Selectionstart",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "resultType",
+    "operation",
+    "documentType",
+    "replacement",
+    "baseVersionId",
+    "baseContentHash",
+    "selectionStart",
+    "selectionEnd",
+    "selectedTextHash"
+  ],
+  "title": "ShortMediumReplacementResult",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.short_medium.ShortMediumReplacementResult"
+}

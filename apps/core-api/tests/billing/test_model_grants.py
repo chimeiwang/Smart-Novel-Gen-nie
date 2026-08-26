@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -178,3 +179,20 @@ def test_billing_scopes_have_correct_direction_and_replay_policy() -> None:
     assert ServiceScope.BILLING_USAGE_WRITE.value == "billing:usage:write"
     assert ServiceScope.BILLING_AUTHORIZE not in WRITE_SERVICE_SCOPES
     assert ServiceScope.BILLING_USAGE_WRITE in WRITE_SERVICE_SCOPES
+
+
+def test_python_must_accept_java_model_grant_golden_fixture() -> None:
+    fixture_path = (
+        Path(__file__).resolve().parents[4]
+        / "contracts/core/model-grant-fixtures/golden-grant.json"
+    )
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    private_key = Ed25519PrivateKey.from_private_bytes(
+        bytes.fromhex(fixture["testOnlyPrivateKeySeedHex"])
+    )
+    verified = ModelGrantCodec(private_key).verify(
+        fixture["javaToken"],
+        now=datetime.fromtimestamp(fixture["claims"]["iat"], UTC),
+    )
+
+    assert verified.model_dump(mode="json") == fixture["claims"]

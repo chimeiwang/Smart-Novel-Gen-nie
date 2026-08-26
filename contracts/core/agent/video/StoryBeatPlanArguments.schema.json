@@ -1,0 +1,136 @@
+{
+  "$defs": {
+    "CameraActionUnit": {
+      "additionalProperties": false,
+      "description": "一个主体动作及其唯一可见结果。",
+      "properties": {
+        "action": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        },
+        "subject": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Subject",
+          "type": "string"
+        },
+        "visibleResult": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Visibleresult",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject",
+        "action",
+        "visibleResult"
+      ],
+      "title": "CameraActionUnit",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video/StoryBeatPlanArguments/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "第一阶段完成业务归一化后的单拍叙事与调度事实。",
+  "properties": {
+    "actionComplexity": {
+      "enum": [
+        "simple",
+        "mechanical_sequence",
+        "transformation",
+        "impact_transition"
+      ],
+      "title": "Actioncomplexity",
+      "type": "string"
+    },
+    "actionUnits": {
+      "items": {
+        "$ref": "#/$defs/CameraActionUnit"
+      },
+      "maxItems": 2,
+      "minItems": 1,
+      "title": "Actionunits",
+      "type": "array"
+    },
+    "beatId": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Beatid",
+      "type": "string"
+    },
+    "blocking": {
+      "maxLength": 300,
+      "minLength": 1,
+      "title": "Blocking",
+      "type": "string"
+    },
+    "dramaticPurpose": {
+      "maxLength": 240,
+      "minLength": 1,
+      "title": "Dramaticpurpose",
+      "type": "string"
+    },
+    "endSecond": {
+      "exclusiveMinimum": 0,
+      "maximum": 30,
+      "title": "Endsecond",
+      "type": "integer"
+    },
+    "performanceDirection": {
+      "maxLength": 300,
+      "minLength": 1,
+      "title": "Performancedirection",
+      "type": "string"
+    },
+    "referencedAssetIds": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 11,
+      "title": "Referencedassetids",
+      "type": "array"
+    },
+    "sound": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Sound",
+      "type": "string"
+    },
+    "sourceEventAliasesByAction": {
+      "items": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "maxItems": 2,
+      "title": "Sourceeventaliasesbyaction",
+      "type": "array"
+    },
+    "startSecond": {
+      "maximum": 29,
+      "minimum": 0,
+      "title": "Startsecond",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "beatId",
+    "startSecond",
+    "endSecond",
+    "dramaticPurpose",
+    "performanceDirection",
+    "blocking",
+    "actionUnits",
+    "actionComplexity",
+    "sound",
+    "referencedAssetIds"
+  ],
+  "title": "StoryBeatPlanArguments",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.StoryBeatPlanArguments"
+}

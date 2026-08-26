@@ -1,0 +1,142 @@
+{
+  "schemaVersion": "inkforge-core-behavior/1.0",
+  "scenario": "中短篇来源、设定、大纲节点、资料与手工版本",
+  "steps": [
+    {
+      "name": "注册内容差分用户",
+      "method": "POST",
+      "path": "/api/v1/auth/register",
+      "body": {
+        "username": "parity_content_01",
+        "password": "密码1234",
+        "confirmPassword": "密码1234"
+      },
+      "expectedStatus": 201,
+      "capture": {"userId": "/id"},
+      "expectCookie": true
+    },
+    {
+      "name": "用完整来源创建中短篇",
+      "method": "POST",
+      "path": "/api/v1/novels",
+      "body": {
+        "name": "差分中短篇",
+        "storyLengthProfile": "short_medium",
+        "targetTotalWordCount": 12000,
+        "clientRequestId": "parity-short-create-0001",
+        "sourceKind": "outline",
+        "sourceText": "第一段😀\n\n完整大纲尾部"
+      },
+      "expectedStatus": 201,
+      "capture": {
+        "novelId": "/novelId",
+        "chapterId": "/chapterId"
+      }
+    },
+    {
+      "name": "创建角色设定",
+      "method": "POST",
+      "path": "/api/v1/novels/${novelId}/characters",
+      "body": {
+        "clientRequestId": "parity-character-create-0001",
+        "name": "  角色甲  ",
+        "appearance": "  黑衣😀  "
+      },
+      "expectedStatus": 201,
+      "capture": {
+        "characterId": "/id",
+        "characterUpdatedAt": "/updatedAt"
+      },
+      "normalizePointers": ["/createdAt"]
+    },
+    {
+      "name": "创建大纲节点",
+      "method": "POST",
+      "path": "/api/v1/novels/${novelId}/outline-nodes",
+      "body": {
+        "clientRequestId": "parity-outline-node-0001",
+        "title": "  第一幕  ",
+        "kind": "stage",
+        "content": "建立人物与冲突"
+      },
+      "expectedStatus": 201,
+      "capture": {
+        "outlineNodeId": "/id",
+        "outlineNodeUpdatedAt": "/updatedAt"
+      },
+      "normalizePointers": ["/createdAt"]
+    },
+    {
+      "name": "创建完整参考资料",
+      "method": "POST",
+      "path": "/api/v1/novels/${novelId}/references",
+      "body": {
+        "clientRequestId": "parity-reference-create-0001",
+        "title": "  资料标题  ",
+        "type": "note",
+        "content": "  资料第一行\r\n尾部😀  ",
+        "sourceUrl": null
+      },
+      "expectedStatus": 201,
+      "capture": {
+        "referenceId": "/id",
+        "referenceUpdatedAt": "/updatedAt"
+      },
+      "normalizePointers": ["/createdAt"]
+    },
+    {
+      "name": "预览首个手工版本",
+      "method": "POST",
+      "path": "/api/v1/novels/${novelId}/versions/preview",
+      "body": {"documentType": "outline"},
+      "expectedStatus": 200,
+      "capture": {
+        "versionExpectedAt": "/expectedUpdatedAt",
+        "versionContentHash": "/contentHash",
+        "versionConfirmationHash": "/confirmationHash"
+      }
+    },
+    {
+      "name": "提交首个手工版本",
+      "method": "POST",
+      "path": "/api/v1/novels/${novelId}/versions",
+      "body": {
+        "clientRequestId": "parity-manual-version-0001",
+        "documentType": "outline",
+        "baseVersionId": null,
+        "expectedUpdatedAt": "${versionExpectedAt}",
+        "contentHash": "${versionContentHash}",
+        "confirmationHash": "${versionConfirmationHash}"
+      },
+      "expectedStatus": 200,
+      "capture": {"versionId": "/id"},
+      "normalizePointers": ["/createdAt", "/updatedAt", "/appliedAt"]
+    },
+    {
+      "name": "读取不可变版本详情",
+      "method": "GET",
+      "path": "/api/v1/novels/${novelId}/versions/${versionId}",
+      "expectedStatus": 200,
+      "derivedNormalizations": [
+        {
+          "algorithm": "shortMediumConfirmationHash",
+          "pointer": "/diff/confirmationHash",
+          "documentTypePointer": "/documentType",
+          "chapterIdPointer": "/chapterId",
+          "baseVersionIdPointer": "/baseVersionId",
+          "currentDraftHash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "targetVersionIdPointer": "/id",
+          "diffPointer": "/diff"
+        }
+      ],
+      "normalizePointers": ["/createdAt", "/updatedAt", "/appliedAt"]
+    }
+  ],
+  "snapshotQueries": [
+    {
+      "name": "内容与版本最终业务事实",
+      "expectedRows": 1,
+      "sql": "SELECT u.username AS \"username\", n.name AS \"novelName\", bible.\"storyLengthProfile\"::text AS \"storyLengthProfile\", bible.\"targetTotalWordCount\" AS \"targetTotalWordCount\", outline.content AS \"outlineContent\", character.name AS \"characterName\", character.appearance AS \"characterAppearance\", node.title AS \"outlineNodeTitle\", node.content AS \"outlineNodeContent\", node.kind::text AS \"outlineNodeKind\", reference.title AS \"referenceTitle\", reference.content AS \"referenceContent\", rag.status::text AS \"ragStatus\", rag.\"contentHash\" AS \"referenceContentHash\", artifact.status::text AS \"versionStatus\", replace(artifact.\"artifactKey\", n.id, '${novelId}') AS \"artifactKey\", artifact.\"payloadJson\"::jsonb::text AS \"versionPayload\", replace(artifact.\"diffJson\", artifact.id, '${versionId}')::jsonb::text AS \"versionDiff\" FROM \"User\" u JOIN \"Novel\" n ON n.\"userId\" = u.id JOIN \"WritingBible\" bible ON bible.\"novelId\" = n.id JOIN \"Outline\" outline ON outline.\"novelId\" = n.id JOIN \"Character\" character ON character.\"novelId\" = n.id JOIN \"OutlineNode\" node ON node.\"novelId\" = n.id JOIN \"ReferenceMaterial\" reference ON reference.\"novelId\" = n.id JOIN \"RagDocument\" rag ON rag.\"sourceId\" = reference.id JOIN \"ReviewArtifact\" artifact ON artifact.\"novelId\" = n.id AND artifact.\"artifactKey\" LIKE 'short-medium:outline:%' WHERE u.username = 'parity_content_01'"
+    }
+  ]
+}

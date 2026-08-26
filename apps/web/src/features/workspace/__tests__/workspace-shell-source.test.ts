@@ -93,6 +93,10 @@ test("审核与确认只使用共享弹窗，不再挂载右侧审核栏", async
   assert.match(source, /title="审核与确认"/);
   assert.doesNotMatch(source, /workspace-review-rail/);
   assert.doesNotMatch(source, /getReviewRailHostSnapshot|reviewRailHost|useSyncExternalStore/);
+  const openTrayBody = source.match(/const openArtifactTray[\s\S]*?\n  };/)?.[0] ?? "";
+  const inspectBody = source.match(/const inspectReviewArtifactFromTray[\s\S]*?\n  }, \[/)?.[0] ?? "";
+  assert.doesNotMatch(openTrayBody, /activeReviewArtifactRef|openReviewArtifactModal/);
+  assert.match(inspectBody, /setShowArtifactTray\(false\)[\s\S]*openReviewArtifactModal/);
 });
 
 test("资料详情与审核弹窗复用同一 WorkspaceDialog 基础壳", async () => {
@@ -132,13 +136,28 @@ test("会话恢复完成前不会把临时 idle 阶段写回服务端", async ()
   assert.match(source, /requireApiData\(await browserApi\.PATCH/);
 });
 
-test("审核栏汇总多个会话产物并隔离并发失败与旧响应", async () => {
+test("当前会话收到权威终态后重新读取持久化消息但不覆盖终态界面", async () => {
+  const conversationUrl = new URL("../../writing/writing-conversation.tsx", import.meta.url);
+  const source = await readFile(conversationUrl, "utf8");
+
+  assert.match(source, /preserveWorkspaceState/);
+  assert.match(
+    source,
+    /decision\.kind === "waiting_user"[\s\S]*loadSessionMessages\(scope\.sessionId,\s*\{ preserveWorkspaceState: true \}\)/,
+  );
+  assert.match(
+    source,
+    /decision\.kind === "succeeded"[\s\S]*loadSessionMessages\(scope\.sessionId,\s*\{ preserveWorkspaceState: true \}\)/,
+  );
+});
+
+test("审核托盘汇总多个会话产物并隔离并发失败与旧响应", async () => {
   const conversationUrl = new URL("../../writing/writing-conversation.tsx", import.meta.url);
   const source = await readFile(conversationUrl, "utf8");
 
   assert.match(source, /Promise\.allSettled/);
   assert.match(source, /artifactCollectionVersionRef/);
-  assert.match(source, /reviewRailArtifacts\.map/);
+  assert.match(source, /artifactTrayArtifacts\.map/);
   assert.match(source, /mergeActionableReviewArtifacts/);
 });
 
@@ -150,7 +169,7 @@ test("开始新对话不会清空其他会话待审核产物", async () => {
   assert.doesNotMatch(resetBody, /setReviewArtifacts\(\[\]\)/);
 });
 
-test("审核栏中的非当前会话产物也能进入返工流程", async () => {
+test("审核托盘中的非当前会话产物也能进入返工流程", async () => {
   const conversationUrl = new URL("../../writing/writing-conversation.tsx", import.meta.url);
   const source = await readFile(conversationUrl, "utf8");
   const cardBody = source.match(/const renderArtifactReviewCard[\s\S]*?const renderArtifactReviewDialog/)?.[0] ?? "";

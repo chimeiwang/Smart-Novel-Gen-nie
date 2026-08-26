@@ -1,0 +1,217 @@
+{
+  "schemaVersion": "inkforge-cli-parity-success/1.0",
+  "cases": [
+    {
+      "command": "auth.login",
+      "arguments": ["--origin", "http://127.0.0.1:8000", "--username", "parity-user"],
+      "payload": {},
+      "tty": true
+    },
+    {"command": "auth.logout", "payload": {}},
+    {"command": "auth.whoami", "payload": {}},
+    {"command": "short.list", "payload": {}},
+    {
+      "command": "short.create",
+      "payload": {
+        "clientRequestId": "short-create-0001",
+        "name": "短篇",
+        "storyLengthProfile": "short_medium",
+        "targetTotalWordCount": 20000,
+        "sourceKind": "idea",
+        "sourceText": "完整灵感"
+      }
+    },
+    {"command": "long.novel.list", "payload": {}},
+    {"command": "long.novel.get", "payload": {"novelId": "作品 /😀"}},
+    {
+      "command": "long.novel.create",
+      "payload": {"name": "  长篇  ", "summary": null, "targetTotalWordCount": 1000000}
+    },
+    {"command": "long.chapter.create", "payload": {"novelId": "n/1"}},
+    {
+      "command": "long.chapter.save",
+      "payload": {
+        "chapterId": "c/1",
+        "title": "第一章",
+        "content": "正文\r\n尾部😀",
+        "expectedUpdatedAt": "v1"
+      }
+    },
+    {
+      "command": "long.chapter.status",
+      "payload": {"chapterId": "c1", "status": "reviewing", "expectedUpdatedAt": "v2"}
+    },
+    {
+      "command": "long.agent.start",
+      "payload": {
+        "novelId": "n1",
+        "chapterId": "c1",
+        "clientRequestId": "agent-start-000001",
+        "operation": "write_chapter",
+        "target": {"type": "chapter", "id": "c1"},
+        "scope": {"kind": "chapter", "chapterId": "c1"},
+        "writingSessionId": null,
+        "targetWordCount": 3000,
+        "userInstruction": "  保持悬念  "
+      }
+    },
+    {
+      "command": "long.task.resume",
+      "payload": {
+        "taskId": "t/1",
+        "clientRequestId": "agent-resume-00001",
+        "writingSessionId": "s1",
+        "userMessage": null
+      }
+    },
+    {
+      "command": "long.artifact.discard",
+      "payload": {"artifactId": "a/1", "clientRequestId": "artifact-discard-01", "expectedRevision": 1}
+    },
+    {
+      "command": "long.quality.run",
+      "payload": {"checkId": "q/1", "clientRequestId": "quality-run-00001", "taskId": null, "message": "重跑"}
+    },
+    {
+      "command": "long.quality.skip",
+      "payload": {"checkId": "q1", "expectedUpdatedAt": "v1"}
+    },
+    {
+      "command": "long.outline-node.create",
+      "payload": {
+        "novelId": "n1",
+        "clientRequestId": "outline-create-0001",
+        "data": {"title": "第一幕", "kind": "stage", "chapterStartOrder": 1, "chapterEndOrder": 3}
+      }
+    },
+    {
+      "command": "long.lore.character.create",
+      "payload": {
+        "novelId": "n1",
+        "clientRequestId": "character-create-01",
+        "data": {"name": "沈砚", "currentStatus": "active"}
+      }
+    },
+    {
+      "command": "long.lore.relation.create",
+      "payload": {
+        "novelId": "n1",
+        "clientRequestId": "relation-create-0001",
+        "data": {"characterId": "c1", "targetId": "c2", "relationType": "friend", "intimacy": 80, "description": null}
+      }
+    },
+    {
+      "command": "long.reference.update",
+      "payload": {
+        "novelId": "n1",
+        "referenceId": "ref/1",
+        "expectedUpdatedAt": "v1",
+        "title": "新标题",
+        "sourceUrl": null
+      }
+    },
+    {
+      "command": "long.style.apply",
+      "payload": {"novelId": "n1", "styleId": "s/1", "expectedStyleId": null}
+    },
+    {
+      "command": "long.video.project.create",
+      "payload": {"novelId": "n1", "title": "第一章影视化"}
+    },
+    {
+      "command": "long.video.adaptation.create",
+      "payload": {
+        "projectId": "p1",
+        "chapterId": "c1",
+        "expectedChapterUpdatedAt": "v1",
+        "clientRequestId": "video-adapt-00001"
+      }
+    },
+    {
+      "command": "long.video.plan.start",
+      "payload": {
+        "adaptationId": "ad1",
+        "clientRequestId": "video-plan-start01",
+        "pacingPreset": "cinematic",
+        "targetEpisodeSeconds": 120,
+        "baseShotPlanVersionId": "pv1",
+        "revisionBrief": "减少机械对白"
+      }
+    },
+    {
+      "command": "long.video.prompt.save",
+      "payload": {
+        "adaptationId": "ad1",
+        "shotId": "s/1",
+        "expectedPromptRevision": 2,
+        "candidateTaskId": null,
+        "currentPrompt": "第一行\r\n尾部😀"
+      }
+    },
+    {
+      "command": "long.video.canon.candidate.set",
+      "payload": {
+        "projectId": "p1",
+        "clientRequestId": "video-canon-set-01",
+        "settingKind": "character",
+        "settingId": "c1",
+        "duty": "identity",
+        "variantKey": "default",
+        "label": "林默身份",
+        "candidateAssetId": "a1",
+        "includeFeatures": ["黑发"],
+        "excludeFeatures": [],
+        "defaultStrength": 72
+      }
+    },
+    {
+      "command": "long.video.render.start",
+      "payload": {
+        "adaptationId": "ad/1",
+        "shotId": "s/1",
+        "clientRequestId": "video-render-00001",
+        "expectedPromptRevision": 3,
+        "durationSeconds": 5,
+        "resolution": "1080p",
+        "generateAudio": false,
+        "watermark": true
+      }
+    },
+    {
+      "command": "long.video.take.confirm",
+      "payload": {
+        "adaptationId": "ad/1",
+        "shotId": "s/1",
+        "takeId": "tk/1",
+        "clientRequestId": "video-take-ok-0001",
+        "expectedTakeRevision": 2
+      }
+    },
+    {
+      "command": "long.video.keyframe.set",
+      "payload": {
+        "adaptationId": "ad1",
+        "shotId": "s1",
+        "role": "initial_state",
+        "assetId": "a1",
+        "sourceTakeId": "tk1",
+        "sourceTimeMs": 1200,
+        "clientRequestId": "video-keyframe-001",
+        "expectedRevision": 1
+      }
+    },
+    {
+      "command": "long.video.export.start",
+      "payload": {
+        "adaptationId": "ad/1",
+        "episodeNo": 2,
+        "editVersionId": "ev1",
+        "mixVersionId": "mv1",
+        "clientRequestId": "video-export-0001",
+        "resolution": "1080p",
+        "framesPerSecond": 25,
+        "burnSubtitles": false
+      }
+    }
+  ]
+}

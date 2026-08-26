@@ -1,0 +1,55 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video/VideoPlanProgressQuery/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Agent 在 at-least-once 重放前查询视频规划耐久进度。",
+  "properties": {
+    "jobId": {
+      "minLength": 1,
+      "title": "Jobid",
+      "type": "string"
+    },
+    "novelId": {
+      "minLength": 1,
+      "title": "Novelid",
+      "type": "string"
+    },
+    "projectId": {
+      "minLength": 1,
+      "title": "Projectid",
+      "type": "string"
+    },
+    "protocolVersion": {
+      "const": "1.0",
+      "title": "Protocolversion",
+      "type": "string"
+    },
+    "runId": {
+      "minLength": 1,
+      "title": "Runid",
+      "type": "string"
+    },
+    "sceneId": {
+      "minLength": 1,
+      "title": "Sceneid",
+      "type": "string"
+    },
+    "taskId": {
+      "minLength": 1,
+      "title": "Taskid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocolVersion",
+    "jobId",
+    "runId",
+    "taskId",
+    "novelId",
+    "projectId",
+    "sceneId"
+  ],
+  "title": "VideoPlanProgressQuery",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.VideoPlanProgressQuery"
+}

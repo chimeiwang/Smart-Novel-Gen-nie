@@ -5,6 +5,8 @@ import yaml
 
 ROOT = Path(__file__).parents[2]
 COMPOSE = ROOT / "infra" / "compose.yaml"
+CORE_DOCKERFILE = ROOT / "infra" / "docker" / "core-api.Dockerfile"
+PYTHON_ROLLBACK_COMPOSE = ROOT / "infra" / "compose.python-core-rollback.yaml"
 DEPLOYMENT_FILES = (
     ROOT / ".github" / "workflows" / "build.yml",
     ROOT / "scripts" / "deploy-production.sh",
@@ -186,6 +188,72 @@ def test_every_container_has_health_resource_and_filesystem_limits() -> None:
     assert total_memory_mib <= 2048
 
 
+def test_core_image_is_single_java21_runtime_without_python() -> None:
+    source = CORE_DOCKERFILE.read_text(encoding="utf-8")
+
+    assert "eclipse-temurin:21-jdk" in source
+    assert "eclipse-temurin:21-jre" in source
+    assert "./mvnw" in source
+    assert "unzip" in source
+    assert "-pl apps/core-api-java" in source
+    assert "-am" in source
+    assert "inkforge-core-api-0.1.0-SNAPSHOT.jar" in source
+    assert 'LABEL cn.inkforge.core.runtime="java"' in source
+    assert 'ENTRYPOINT ["java", "-jar", "/app/inkforge-core-api.jar"]' in source
+    assert "ffmpeg" in source
+    assert "fonts-noto-cjk" in source
+    assert "curl" in source
+    for forbidden in ("FROM python:", "ghcr.io/astral-sh/uv", "uv sync", "uvicorn"):
+        assert forbidden not in source
+
+
+def test_core_and_agent_images_prepare_non_root_persistent_mountpoints() -> None:
+    core = CORE_DOCKERFILE.read_text(encoding="utf-8")
+    agent = (ROOT / "infra" / "docker" / "agent-service.Dockerfile").read_text(
+        encoding="utf-8"
+    )
+
+    assert "install -d -o 10001 -g 10001 /data/uploads" in core
+    assert "install -d -o 10001 -g 10001 /data/agent-logs" in agent
+    assert core.index("install -d -o 10001 -g 10001 /data/uploads") < core.index(
+        "USER 10001:10001"
+    )
+    assert agent.index(
+        "install -d -o 10001 -g 10001 /data/agent-logs"
+    ) < agent.index("USER 10001:10001")
+
+
+def test_java_core_compose_has_bounded_jvm_and_python_free_healthcheck() -> None:
+    core = _service_block(COMPOSE.read_text(encoding="utf-8"), "core-api")
+
+    assert "JAVA_TOOL_OPTIONS:" in core
+    for option in (
+        "-Xms64m",
+        "-Xmx176m",
+        "-XX:MaxMetaspaceSize=112m",
+        "-XX:ReservedCodeCacheSize=32m",
+        "-XX:MaxDirectMemorySize=24m",
+        "-Xss512k",
+        "-XX:+ExitOnOutOfMemoryError",
+    ):
+        assert option in core
+    health = core.split("healthcheck:", maxsplit=1)[1]
+    assert 'test: ["CMD", "curl"' in health
+    assert "python" not in health
+    assert "mem_limit: 448m" in core
+
+
+def test_python_core_rollback_override_is_explicit_and_only_changes_healthcheck() -> None:
+    document = yaml.safe_load(PYTHON_ROLLBACK_COMPOSE.read_text(encoding="utf-8"))
+
+    assert set(document) == {"services"}
+    assert set(document["services"]) == {"core-api"}
+    core = document["services"]["core-api"]
+    assert set(core) == {"healthcheck"}
+    assert "python" in " ".join(core["healthcheck"]["test"])
+    assert "inkforge_core" not in " ".join(core["healthcheck"]["test"])
+
+
 def test_redis_is_bounded() -> None:
     redis_config = (ROOT / "infra" / "redis" / "redis.conf").read_text(encoding="utf-8")
 
@@ -275,6 +343,14 @@ def test_web_and_core_require_the_same_production_jwt_secret() -> None:
     assert expected in _service_block(source, "core-api")
 
 
+def test_test_compose_does_not_fork_core_and_web_session_secrets() -> None:
+    source = (ROOT / "infra" / "compose.test.yaml").read_text(encoding="utf-8")
+    core = _service_block(source, "core-api")
+
+    assert "TEST_JWT_SECRET" not in source
+    assert "JWT_SECRET" not in core
+
+
 def test_production_compose_uses_existing_host_postgres() -> None:
     source = COMPOSE.read_text(encoding="utf-8")
     core = _service_block(source, "core-api")
@@ -287,12 +363,25 @@ def test_production_compose_uses_existing_host_postgres() -> None:
 
 
 def test_test_compose_owns_isolated_postgres() -> None:
-    source = (ROOT / "infra" / "compose.test.yaml").read_text(encoding="utf-8")
+    compose_path = ROOT / "infra" / "compose.test.yaml"
+    source = compose_path.read_text(encoding="utf-8")
+    document = yaml.safe_load(source)
+    assert isinstance(document, dict)
+    services = document["services"]
+    networks = document["networks"]
 
     assert re.search(r"(?m)^  postgres:$", source)
     assert "TEST_POSTGRES_DATA_VOLUME" in source
-    assert "pgvector/pgvector:pg16" in source
+    assert "pgvector/pgvector:0.8.0-pg16" in source
+    assert '"127.0.0.1:${TEST_POSTGRES_PORT:-0}:5432"' in source
     assert "condition: service_healthy" in source
+    assert services["postgres"]["networks"] == ["data_net", "test_host_net"]
+    assert networks["test_host_net"] is None
+    assert all(
+        "test_host_net" not in (service.get("networks") or [])
+        for name, service in services.items()
+        if name != "postgres"
+    )
 
 
 def test_production_env_example_targets_host_gateway() -> None:

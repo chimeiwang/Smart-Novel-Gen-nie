@@ -1,0 +1,32 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video/SettingReference/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "指向长篇冻结设定快照中的一个类型化条目。",
+  "properties": {
+    "id": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Id",
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "character",
+        "relationship",
+        "location",
+        "item",
+        "world_setting"
+      ],
+      "title": "Kind",
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "id"
+  ],
+  "title": "SettingReference",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.SettingReference"
+}

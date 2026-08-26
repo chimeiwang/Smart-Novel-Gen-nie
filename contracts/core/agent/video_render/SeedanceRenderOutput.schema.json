@@ -1,0 +1,93 @@
+{
+  "$defs": {
+    "JsonValue": {}
+  },
+  "$id": "https://inkforge.local/contracts/agent/video_render/SeedanceRenderOutput/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "durationSeconds": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Durationseconds"
+    },
+    "framesPerSecond": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Framespersecond"
+    },
+    "generateAudio": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Generateaudio"
+    },
+    "ratio": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ratio"
+    },
+    "resolution": {
+      "anyOf": [
+        {
+          "maxLength": 80,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Resolution"
+    },
+    "usage": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "title": "Usage",
+      "type": "object"
+    },
+    "videoUrl": {
+      "maxLength": 8192,
+      "minLength": 1,
+      "title": "Videourl",
+      "type": "string"
+    }
+  },
+  "required": [
+    "videoUrl"
+  ],
+  "title": "SeedanceRenderOutput",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_render.SeedanceRenderOutput"
+}

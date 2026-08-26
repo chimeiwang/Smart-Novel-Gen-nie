@@ -1,0 +1,72 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video/RelationshipSettingSnapshot/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "规划任务冻结的有向人物关系投影。",
+  "properties": {
+    "contentHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Contenthash",
+      "type": "string"
+    },
+    "description": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Description"
+    },
+    "id": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Id",
+      "type": "string"
+    },
+    "kind": {
+      "const": "relationship",
+      "default": "relationship",
+      "title": "Kind",
+      "type": "string"
+    },
+    "name": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Name",
+      "type": "string"
+    },
+    "relationType": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Relationtype",
+      "type": "string"
+    },
+    "sourceCharacterId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Sourcecharacterid",
+      "type": "string"
+    },
+    "targetCharacterId": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Targetcharacterid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "contentHash",
+    "name",
+    "sourceCharacterId",
+    "targetCharacterId",
+    "relationType"
+  ],
+  "title": "RelationshipSettingSnapshot",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.RelationshipSettingSnapshot"
+}

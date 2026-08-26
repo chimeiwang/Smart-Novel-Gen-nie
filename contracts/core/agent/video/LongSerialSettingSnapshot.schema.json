@@ -1,0 +1,421 @@
+{
+  "$defs": {
+    "CharacterSettingSnapshot": {
+      "additionalProperties": false,
+      "description": "规划任务冻结的人物设定最小投影。",
+      "properties": {
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "appearance": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Appearance"
+        },
+        "contentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Contenthash",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "identity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Identity"
+        },
+        "kind": {
+          "const": "character",
+          "default": "character",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "contentHash",
+        "name"
+      ],
+      "title": "CharacterSettingSnapshot",
+      "type": "object"
+    },
+    "ItemSettingSnapshot": {
+      "additionalProperties": false,
+      "description": "规划任务冻结的道具设定投影。",
+      "properties": {
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "contentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Contenthash",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "itemType": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Itemtype"
+        },
+        "kind": {
+          "const": "item",
+          "default": "item",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "ownerCharacterId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ownercharacterid"
+        }
+      },
+      "required": [
+        "id",
+        "contentHash",
+        "name"
+      ],
+      "title": "ItemSettingSnapshot",
+      "type": "object"
+    },
+    "LocationSettingSnapshot": {
+      "additionalProperties": false,
+      "description": "规划任务冻结的地点设定投影。",
+      "properties": {
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "climate": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Climate"
+        },
+        "contentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Contenthash",
+          "type": "string"
+        },
+        "culture": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Culture"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "location",
+          "default": "location",
+          "title": "Kind",
+          "type": "string"
+        },
+        "locationType": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Locationtype"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "parentLocationId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parentlocationid"
+        }
+      },
+      "required": [
+        "id",
+        "contentHash",
+        "name"
+      ],
+      "title": "LocationSettingSnapshot",
+      "type": "object"
+    },
+    "RelationshipSettingSnapshot": {
+      "additionalProperties": false,
+      "description": "规划任务冻结的有向人物关系投影。",
+      "properties": {
+        "contentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Contenthash",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "relationship",
+          "default": "relationship",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "relationType": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Relationtype",
+          "type": "string"
+        },
+        "sourceCharacterId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Sourcecharacterid",
+          "type": "string"
+        },
+        "targetCharacterId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Targetcharacterid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "contentHash",
+        "name",
+        "sourceCharacterId",
+        "targetCharacterId",
+        "relationType"
+      ],
+      "title": "RelationshipSettingSnapshot",
+      "type": "object"
+    },
+    "WorldSettingSnapshot": {
+      "additionalProperties": false,
+      "description": "规划任务冻结的世界视觉设定来源。",
+      "properties": {
+        "content": {
+          "minLength": 1,
+          "title": "Content",
+          "type": "string"
+        },
+        "contentHash": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Contenthash",
+          "type": "string"
+        },
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "const": "world_setting",
+          "default": "world_setting",
+          "title": "Kind",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "contentHash",
+        "name",
+        "content"
+      ],
+      "title": "WorldSettingSnapshot",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video/LongSerialSettingSnapshot/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Core 冻结后随长篇视频任务发送的完整设定投影。",
+  "properties": {
+    "entries": {
+      "items": {
+        "discriminator": {
+          "mapping": {
+            "character": "#/$defs/CharacterSettingSnapshot",
+            "item": "#/$defs/ItemSettingSnapshot",
+            "location": "#/$defs/LocationSettingSnapshot",
+            "relationship": "#/$defs/RelationshipSettingSnapshot",
+            "world_setting": "#/$defs/WorldSettingSnapshot"
+          },
+          "propertyName": "kind"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/CharacterSettingSnapshot"
+          },
+          {
+            "$ref": "#/$defs/RelationshipSettingSnapshot"
+          },
+          {
+            "$ref": "#/$defs/LocationSettingSnapshot"
+          },
+          {
+            "$ref": "#/$defs/ItemSettingSnapshot"
+          },
+          {
+            "$ref": "#/$defs/WorldSettingSnapshot"
+          }
+        ]
+      },
+      "title": "Entries",
+      "type": "array"
+    },
+    "fingerprint": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Fingerprint",
+      "type": "string"
+    },
+    "schemaVersion": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schemaversion",
+      "type": "string"
+    }
+  },
+  "required": [
+    "fingerprint",
+    "entries"
+  ],
+  "title": "LongSerialSettingSnapshot",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.LongSerialSettingSnapshot"
+}

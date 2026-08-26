@@ -1,0 +1,170 @@
+{
+  "$defs": {
+    "JsonValue": {},
+    "SeedanceRenderError": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "SeedanceRenderError",
+      "type": "object"
+    },
+    "SeedanceRenderOutput": {
+      "additionalProperties": false,
+      "properties": {
+        "durationSeconds": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Durationseconds"
+        },
+        "framesPerSecond": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Framespersecond"
+        },
+        "generateAudio": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Generateaudio"
+        },
+        "ratio": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ratio"
+        },
+        "resolution": {
+          "anyOf": [
+            {
+              "maxLength": 80,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolution"
+        },
+        "usage": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Usage",
+          "type": "object"
+        },
+        "videoUrl": {
+          "maxLength": 8192,
+          "minLength": 1,
+          "title": "Videourl",
+          "type": "string"
+        }
+      },
+      "required": [
+        "videoUrl"
+      ],
+      "title": "SeedanceRenderOutput",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video_render/SeedanceRenderQueryResponse/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "error": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SeedanceRenderError"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "output": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SeedanceRenderOutput"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "providerTaskId": {
+      "title": "Providertaskid",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "queued",
+        "running",
+        "succeeded",
+        "failed",
+        "expired",
+        "cancelled"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "taskId": {
+      "title": "Taskid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "taskId",
+    "providerTaskId",
+    "status"
+  ],
+  "title": "SeedanceRenderQueryResponse",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_render.SeedanceRenderQueryResponse"
+}

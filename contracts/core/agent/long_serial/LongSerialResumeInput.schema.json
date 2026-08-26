@@ -1,0 +1,52 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/long_serial/LongSerialResumeInput/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifactId": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Artifactid"
+    },
+    "decision": {
+      "anyOf": [
+        {
+          "enum": [
+            "approve",
+            "discard",
+            "revise"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Decision"
+    },
+    "userMessage": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Usermessage"
+    }
+  },
+  "title": "LongSerialResumeInput",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.long_serial.LongSerialResumeInput"
+}

@@ -1,0 +1,81 @@
+{
+  "$defs": {
+    "JsonValue": {}
+  },
+  "$id": "https://inkforge.local/contracts/agent/video/PlannerToolEnvelopeV2/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "DeepSeek strict 工具的固定节拍与有界数组原始包络。\n\n节拍键集合由任务时长决定，素材和负约束数量由本地归一化器裁决；\n``normalize_strict_tool_arguments`` 会按生成该 schema 的同一输入完成确定性校验与投影。",
+  "properties": {
+    "assets": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "title": "Assets",
+      "type": "object"
+    },
+    "beats": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "title": "Beats",
+      "type": "object"
+    },
+    "cinematographyBase": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "title": "Cinematographybase",
+      "type": "object"
+    },
+    "dramaticArc": {
+      "title": "Dramaticarc",
+      "type": "string"
+    },
+    "globalDirection": {
+      "title": "Globaldirection",
+      "type": "string"
+    },
+    "lightingSetup": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "title": "Lightingsetup",
+      "type": "object"
+    },
+    "negativeConstraints": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "title": "Negativeconstraints",
+      "type": "object"
+    },
+    "summary": {
+      "title": "Summary",
+      "type": "string"
+    },
+    "title": {
+      "title": "Title",
+      "type": "string"
+    },
+    "visualStyle": {
+      "title": "Visualstyle",
+      "type": "string"
+    }
+  },
+  "required": [
+    "title",
+    "summary",
+    "dramaticArc",
+    "visualStyle",
+    "globalDirection",
+    "cinematographyBase",
+    "lightingSetup",
+    "assets",
+    "beats",
+    "negativeConstraints"
+  ],
+  "title": "PlannerToolEnvelopeV2",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.PlannerToolEnvelopeV2"
+}

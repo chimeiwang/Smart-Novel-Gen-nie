@@ -1,0 +1,20 @@
+{
+  "generatedBy": "Python PyJWT 与 Java Jackson 独立序列化配置",
+  "testOnlyPrivateKeySeedHex": "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20",
+  "claims": {
+    "requestId": "model-grant-fixture-request-0001",
+    "taskId": "task-fixture",
+    "runId": "run-fixture",
+    "novelId": "novel-fixture",
+    "userId": "user-fixture",
+    "provider": "openai_compatible",
+    "model": "deepseek-v4-flash",
+    "agentId": "写作",
+    "maxOutputTokens": 4096,
+    "billable": true,
+    "iat": 1800000000,
+    "exp": 1800001200
+  },
+  "pythonToken": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJyZXF1ZXN0SWQiOiJtb2RlbC1ncmFudC1maXh0dXJlLXJlcXVlc3QtMDAwMSIsInRhc2tJZCI6InRhc2stZml4dHVyZSIsInJ1bklkIjoicnVuLWZpeHR1cmUiLCJub3ZlbElkIjoibm92ZWwtZml4dHVyZSIsInVzZXJJZCI6InVzZXItZml4dHVyZSIsInByb3ZpZGVyIjoib3BlbmFpX2NvbXBhdGlibGUiLCJtb2RlbCI6ImRlZXBzZWVrLXY0LWZsYXNoIiwiYWdlbnRJZCI6Ilx1NTE5OVx1NGY1YyIsIm1heE91dHB1dFRva2VucyI6NDA5NiwiYmlsbGFibGUiOnRydWUsImlhdCI6MTgwMDAwMDAwMCwiZXhwIjoxODAwMDAxMjAwLCJpc3MiOiJjb3JlLWFwaSIsImF1ZCI6ImFnZW50LXNlcnZpY2UifQ.N47GwaRD6_SFGqLoq3J3Znau_WsnIsqqZ4BnC7sYDLcJI1Rl6pIL1Sp8IiEZfhOLi1KISb43Xuf1cZmTnpCSAQ",
+  "javaToken": "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJyZXF1ZXN0SWQiOiJtb2RlbC1ncmFudC1maXh0dXJlLXJlcXVlc3QtMDAwMSIsInRhc2tJZCI6InRhc2stZml4dHVyZSIsInJ1bklkIjoicnVuLWZpeHR1cmUiLCJub3ZlbElkIjoibm92ZWwtZml4dHVyZSIsInVzZXJJZCI6InVzZXItZml4dHVyZSIsInByb3ZpZGVyIjoib3BlbmFpX2NvbXBhdGlibGUiLCJtb2RlbCI6ImRlZXBzZWVrLXY0LWZsYXNoIiwiYWdlbnRJZCI6IuWGmeS9nCIsIm1heE91dHB1dFRva2VucyI6NDA5NiwiYmlsbGFibGUiOnRydWUsImlhdCI6MTgwMDAwMDAwMCwiZXhwIjoxODAwMDAxMjAwLCJpc3MiOiJjb3JlLWFwaSIsImF1ZCI6ImFnZW50LXNlcnZpY2UifQ.jGlkBp5MfS13wRVXunPUi_I84a0tSAyvT7vP2vLWjKb-Tq4g67Z5vVyXKTWQCdl4MtzPcv02PfUYYYF2Lx25Aw"
+}

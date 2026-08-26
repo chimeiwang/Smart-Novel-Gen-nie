@@ -1,0 +1,967 @@
+{
+  "generator": "scripts/export_agent_contract_schemas.py",
+  "modelCount": 160,
+  "models": [
+    {
+      "model": "AgentEvent",
+      "module": "events",
+      "path": "events/AgentEvent.schema.json",
+      "sha256": "c9682bd430fbf6a26b79d1cbdd8a492cfd3e5f4dbfd757f7ae56f6e6c4ed24cb"
+    },
+    {
+      "model": "CallbackReceipt",
+      "module": "events",
+      "path": "events/CallbackReceipt.schema.json",
+      "sha256": "8b6a42e87318b70719a4d3801c7313f2f0d1ef984192b0b53e75564b3fa55da4"
+    },
+    {
+      "model": "CheckpointCallback",
+      "module": "events",
+      "path": "events/CheckpointCallback.schema.json",
+      "sha256": "6d939d40862f7d240116db924a237a805e59dba8ac33fa3a71db40663db2c824"
+    },
+    {
+      "model": "RunCompletionCallback",
+      "module": "events",
+      "path": "events/RunCompletionCallback.schema.json",
+      "sha256": "58d89942e872af6858c166c5bff68d09b1bf9fb3962704b11d765dc681b3b592"
+    },
+    {
+      "model": "RunFailureCallback",
+      "module": "events",
+      "path": "events/RunFailureCallback.schema.json",
+      "sha256": "91c56ce774e3c3309f66fbb16028692157ff45995162854478ac1dc17263b8d6"
+    },
+    {
+      "model": "AgentJobAccepted",
+      "module": "jobs",
+      "path": "jobs/AgentJobAccepted.schema.json",
+      "sha256": "8d7352e8ccccf11c50c4ef4822c0a37cdea0609759f78518f90978e587961d3a"
+    },
+    {
+      "model": "AgentJobCancelRequest",
+      "module": "jobs",
+      "path": "jobs/AgentJobCancelRequest.schema.json",
+      "sha256": "e5ab5fc030561fb6415e86c39e13540416bfc6ca7b096aeb973561a4ecf30441"
+    },
+    {
+      "model": "AgentJobRequest",
+      "module": "jobs",
+      "path": "jobs/AgentJobRequest.schema.json",
+      "sha256": "80e535b5e56331d79f729e710392dba9cbfaf343576dc087ede5c997a56b3c73"
+    },
+    {
+      "model": "ServiceJwtClaims",
+      "module": "jwt_claims",
+      "path": "jwt_claims/ServiceJwtClaims.schema.json",
+      "sha256": "45c18a95a8d7a890ff00436f65811351a391e35969be703014317745577057bf"
+    },
+    {
+      "model": "AbsenceSentinel",
+      "module": "long_serial",
+      "path": "long_serial/AbsenceSentinel.schema.json",
+      "sha256": "ba6d022059ac9fcc63ff0fe80ecc7afc0d1c4309d2ec6bf519e60da83f1fdc33"
+    },
+    {
+      "model": "ChapterRangeScope",
+      "module": "long_serial",
+      "path": "long_serial/ChapterRangeScope.schema.json",
+      "sha256": "247d1f68bd69dc80933f728ba669328d8ed6dcbddf165d8abf5adc4e209ae298"
+    },
+    {
+      "model": "ChapterScope",
+      "module": "long_serial",
+      "path": "long_serial/ChapterScope.schema.json",
+      "sha256": "f383ad3fe2864a1cfeebc1c70ccb500ddae9530620b179df06309ce7c0c76593"
+    },
+    {
+      "model": "ChapterTarget",
+      "module": "long_serial",
+      "path": "long_serial/ChapterTarget.schema.json",
+      "sha256": "1415073016327d1e9bfe7214c8e4b4cb54b59e35c65f21a35eaa73850c11a6be"
+    },
+    {
+      "model": "LongSerialResumeInput",
+      "module": "long_serial",
+      "path": "long_serial/LongSerialResumeInput.schema.json",
+      "sha256": "389b6f1e0cc53032d7531374be671f9e882128415e55825b4c74479bf99edca4"
+    },
+    {
+      "model": "LongSerialRunBase",
+      "module": "long_serial",
+      "path": "long_serial/LongSerialRunBase.schema.json",
+      "sha256": "9fba9de8e27dea6a090f4225d8553e0d4e06eed5e57ddf3d823e04c76a7da78e"
+    },
+    {
+      "model": "NovelScope",
+      "module": "long_serial",
+      "path": "long_serial/NovelScope.schema.json",
+      "sha256": "d5426b6447f4c7497579687163a0d30ca7ed4b268742832db8c75a4582496ba4"
+    },
+    {
+      "model": "OutlineNodeScope",
+      "module": "long_serial",
+      "path": "long_serial/OutlineNodeScope.schema.json",
+      "sha256": "1058c9eef39eafd22d7298fea7617c30567b2f475175879c3694d40bb3ebd6a6"
+    },
+    {
+      "model": "ResumeLongSerialRunPayload",
+      "module": "long_serial",
+      "path": "long_serial/ResumeLongSerialRunPayload.schema.json",
+      "sha256": "b104a7828cb6897d9e05136c16a673f73dd40bf00fb1a68f492c2630c11cc949"
+    },
+    {
+      "model": "SelectionAttachmentMetadata",
+      "module": "long_serial",
+      "path": "long_serial/SelectionAttachmentMetadata.schema.json",
+      "sha256": "fbae4a56b0c965b524a127ee60f841ab8846db693b797190fb0cf9745e19249f"
+    },
+    {
+      "model": "SelectionSnapshot",
+      "module": "long_serial",
+      "path": "long_serial/SelectionSnapshot.schema.json",
+      "sha256": "ede4d68b7401dcaf8b5b5f2d2fe93e9df7fcb863f1c481b572958c9f1bbbe0b8"
+    },
+    {
+      "model": "SelectionSourceSnapshot",
+      "module": "long_serial",
+      "path": "long_serial/SelectionSourceSnapshot.schema.json",
+      "sha256": "b55ff05204237087fdf0a544cf58779485ff33fd95577478ee4d341117ba8767"
+    },
+    {
+      "model": "SelectionTarget",
+      "module": "long_serial",
+      "path": "long_serial/SelectionTarget.schema.json",
+      "sha256": "58344bf523d7e65b19a726ffe829cc01894c7383f58dcac281323b5f7c8724e5"
+    },
+    {
+      "model": "SourceBinding",
+      "module": "long_serial",
+      "path": "long_serial/SourceBinding.schema.json",
+      "sha256": "4a99b2d8de324803320dfc32bc0d48080e0a6d639b0f5594757e1ff19bc53fab"
+    },
+    {
+      "model": "StartLongSerialRunPayload",
+      "module": "long_serial",
+      "path": "long_serial/StartLongSerialRunPayload.schema.json",
+      "sha256": "a72c47cfab1e53d1cb1aa05c39c1c08f67106a97df56f57aaf1e378399b298bd"
+    },
+    {
+      "model": "PublicOperationDefinition",
+      "module": "operations",
+      "path": "operations/PublicOperationDefinition.schema.json",
+      "sha256": "ad600fad2cac982c4cd14a725051e3543efba185e4e92ced83c9eca5738738b0"
+    },
+    {
+      "model": "ConsistencyIssue",
+      "module": "quality",
+      "path": "quality/ConsistencyIssue.schema.json",
+      "sha256": "4b0bfea2330373f8382875e59b7cd8fc21a9322d485ae6f63b932f7f0cee6fc1"
+    },
+    {
+      "model": "ConsistencyQualityReport",
+      "module": "quality",
+      "path": "quality/ConsistencyQualityReport.schema.json",
+      "sha256": "5ada13f2eb6523550811ec5654474db5c4e66e2cd63a8288ba89692f8448d673"
+    },
+    {
+      "model": "ConsistencyScores",
+      "module": "quality",
+      "path": "quality/ConsistencyScores.schema.json",
+      "sha256": "322d0164ed943af2f915333df329cdcb873dd4f27838d48f346c4aa7000f2513"
+    },
+    {
+      "model": "ArtifactIdArgs",
+      "module": "read_tools",
+      "path": "read_tools/ArtifactIdArgs.schema.json",
+      "sha256": "677035410265f2e7b4c358294c3fa452fcd062fa9e94b455990f883fb70ced5a"
+    },
+    {
+      "model": "ArtifactListArgs",
+      "module": "read_tools",
+      "path": "read_tools/ArtifactListArgs.schema.json",
+      "sha256": "c09aa3a128ae8fe8f3dd505bdffe987938957ff75ff3a96c5966fd05d4016514"
+    },
+    {
+      "model": "CharacterNameArgs",
+      "module": "read_tools",
+      "path": "read_tools/CharacterNameArgs.schema.json",
+      "sha256": "86499b7165d30911e673b0711089d610577ba78dc457faf003d8e7b1dcc858b0"
+    },
+    {
+      "model": "EmptyArgs",
+      "module": "read_tools",
+      "path": "read_tools/EmptyArgs.schema.json",
+      "sha256": "770c11c80d01394e209c24388e2fecb0bd733d4025678597a69cee98061b4529"
+    },
+    {
+      "model": "FactionNameArgs",
+      "module": "read_tools",
+      "path": "read_tools/FactionNameArgs.schema.json",
+      "sha256": "bb124ad116815ce4e6405459d71d9e5ea41c4101de39d3e2c88cdbe89a2a43b2"
+    },
+    {
+      "model": "ForeshadowingNameArgs",
+      "module": "read_tools",
+      "path": "read_tools/ForeshadowingNameArgs.schema.json",
+      "sha256": "79617a65001381a4b7579ae9f2c89e9e3970364ae9e56adcc9a4695c8ef88b53"
+    },
+    {
+      "model": "ItemNameArgs",
+      "module": "read_tools",
+      "path": "read_tools/ItemNameArgs.schema.json",
+      "sha256": "2c99b93dfce802d1f0490521e089fba5b5cdd54ee7ec302ce24e9035aa192561"
+    },
+    {
+      "model": "KeywordArgs",
+      "module": "read_tools",
+      "path": "read_tools/KeywordArgs.schema.json",
+      "sha256": "d0519dae5ead8f1c5cbdb8fcaa308fc89b0eb3a86569713e62a830a5d3e28479"
+    },
+    {
+      "model": "LocationNameArgs",
+      "module": "read_tools",
+      "path": "read_tools/LocationNameArgs.schema.json",
+      "sha256": "a3997f194208d4c27f030d39d532d41e3e7c575d14a7d49d5c18665b50378b7c"
+    },
+    {
+      "model": "NovelInfoArgs",
+      "module": "read_tools",
+      "path": "read_tools/NovelInfoArgs.schema.json",
+      "sha256": "ca84a78293dd5a77384747e8dfd2d6351cae06632e976a8f794f2c79669c1b12"
+    },
+    {
+      "model": "OutlineNodeArgs",
+      "module": "read_tools",
+      "path": "read_tools/OutlineNodeArgs.schema.json",
+      "sha256": "83803cc0ae08dbabb6da5140a2e0830796f174ec74b81b1d85defe801ae94cd1"
+    },
+    {
+      "model": "OutlineSummaryArgs",
+      "module": "read_tools",
+      "path": "read_tools/OutlineSummaryArgs.schema.json",
+      "sha256": "2f81edb52d9a6a922271b5ffe8b4ad568ef6a19ec3b469f4e5a77f32b2a0a197"
+    },
+    {
+      "model": "RecentChapterArgs",
+      "module": "read_tools",
+      "path": "read_tools/RecentChapterArgs.schema.json",
+      "sha256": "efcc10f3f4645c3ba64c9d50ef002dc2d57eb1c67722185ba3d3ceff8386ac06"
+    },
+    {
+      "model": "ReferenceSearchArgs",
+      "module": "read_tools",
+      "path": "read_tools/ReferenceSearchArgs.schema.json",
+      "sha256": "dbb3d195a539ea2d34b58eb215f31dfbef1642a441ea149e0c90e804d4b0cdd0"
+    },
+    {
+      "model": "SimilarLoreArgs",
+      "module": "read_tools",
+      "path": "read_tools/SimilarLoreArgs.schema.json",
+      "sha256": "d535a570429ccd019bc7514c2ee0f9c4582eb2a682d7c56160ce8eedbff98732"
+    },
+    {
+      "model": "StrictArgs",
+      "module": "read_tools",
+      "path": "read_tools/StrictArgs.schema.json",
+      "sha256": "52adc808505d244f398cd2c43ea8749ffc9c0e2f42a71f505f78865d9c79f155"
+    },
+    {
+      "model": "TermArgs",
+      "module": "read_tools",
+      "path": "read_tools/TermArgs.schema.json",
+      "sha256": "3b98cc43baec74e713df46d0e5eea5a858da10e5f8f645cc892c7ea7d8a211f8"
+    },
+    {
+      "model": "RunAccepted",
+      "module": "runs",
+      "path": "runs/RunAccepted.schema.json",
+      "sha256": "785698071634e1a2b67043dab260a4a94a8f67cda67e8cc66651e089ad68ad30"
+    },
+    {
+      "model": "RunRequest",
+      "module": "runs",
+      "path": "runs/RunRequest.schema.json",
+      "sha256": "0eb7a56b53efc9fa3120a01264289758abb7de7466f3e7012cc73bb89ca68ace"
+    },
+    {
+      "model": "RunStatusResponse",
+      "module": "runs",
+      "path": "runs/RunStatusResponse.schema.json",
+      "sha256": "6c4b1a22fd0f41776cc340fdcf2dd07d25eb355b5a9590bef5b75f4a9c3a5823"
+    },
+    {
+      "model": "ShortMediumCheckResult",
+      "module": "short_medium",
+      "path": "short_medium/ShortMediumCheckResult.schema.json",
+      "sha256": "d46b8edf4ed5a6d4febfe3aee901d2751dff38298ab96482070a72b5b46e463b"
+    },
+    {
+      "model": "ShortMediumDocumentResult",
+      "module": "short_medium",
+      "path": "short_medium/ShortMediumDocumentResult.schema.json",
+      "sha256": "9ce96dc02a5b6fc4074b7a952b7cab74754aaa7d73fea13590f49d02aa75e5c9"
+    },
+    {
+      "model": "ShortMediumReplacementResult",
+      "module": "short_medium",
+      "path": "short_medium/ShortMediumReplacementResult.schema.json",
+      "sha256": "f5f70633cfa3017b4131b1ae02ecef980e2c4dcf4f5236928e8f728edd1d4dae"
+    },
+    {
+      "model": "ShortMediumRunPayload",
+      "module": "short_medium",
+      "path": "short_medium/ShortMediumRunPayload.schema.json",
+      "sha256": "df8cfd31939b09da2d56b54fe539f25be50f0159ba24d7a9e4761c701604c4dc"
+    },
+    {
+      "model": "ToolCallRequest",
+      "module": "tools",
+      "path": "tools/ToolCallRequest.schema.json",
+      "sha256": "4f179fa6047b4d0445f9b7e8d12224820707bb42733b79c869d2c63ff5c86f55"
+    },
+    {
+      "model": "ToolCallResult",
+      "module": "tools",
+      "path": "tools/ToolCallResult.schema.json",
+      "sha256": "6615162df6a359bfb0bb61c6132d67497be3a82aebadce214694e721089cb28b"
+    },
+    {
+      "model": "AssetBinding",
+      "module": "video",
+      "path": "video/AssetBinding.schema.json",
+      "sha256": "b37a9b575353e7fdee2719d9c6cd853b9761474685b7464626f39481c51cfc89"
+    },
+    {
+      "model": "CameraActionUnit",
+      "module": "video",
+      "path": "video/CameraActionUnit.schema.json",
+      "sha256": "eaf164c4ed301e1a1785eaedd7f5c607e31364df6ccec14ccee7a784c1b52bd4"
+    },
+    {
+      "model": "CameraBeatPlanArguments",
+      "module": "video",
+      "path": "video/CameraBeatPlanArguments.schema.json",
+      "sha256": "dcf91922a90bd52c37acc4e0a960f8440eb158f070805aa6a920b3589ebfa895"
+    },
+    {
+      "model": "CameraBeatSpec",
+      "module": "video",
+      "path": "video/CameraBeatSpec.schema.json",
+      "sha256": "a4366b89d5a1f2c55aaeb5a379f48789692af6023dbe5d7086506e14e2b20c7d"
+    },
+    {
+      "model": "CameraCompositionSpec",
+      "module": "video",
+      "path": "video/CameraCompositionSpec.schema.json",
+      "sha256": "36bfae25c3b072798ff19a0552b51fbab6a349fd814b8237da3e5f734db51cb9"
+    },
+    {
+      "model": "CameraFocusSpec",
+      "module": "video",
+      "path": "video/CameraFocusSpec.schema.json",
+      "sha256": "a48d05355a92a0eefbab19e8a060b236689f7e3283f3d9b2bcdf578f812722b9"
+    },
+    {
+      "model": "CameraMovementSpec",
+      "module": "video",
+      "path": "video/CameraMovementSpec.schema.json",
+      "sha256": "eaa0ec4f80bcbcde23fb1b64f8527b1199a85d8f119551a0968d23c8332cc94d"
+    },
+    {
+      "model": "CameraPositionSpec",
+      "module": "video",
+      "path": "video/CameraPositionSpec.schema.json",
+      "sha256": "7d512abe26ee93742847e228971f931c36f032e4b1adb2ab585ed236d1f16842"
+    },
+    {
+      "model": "CameraShotProgression",
+      "module": "video",
+      "path": "video/CameraShotProgression.schema.json",
+      "sha256": "1acfeb28d22d5b3284079bdbc7757c31b5f1d7b6f7a9ef4af3041c0110fe49c7"
+    },
+    {
+      "model": "CharacterSettingSnapshot",
+      "module": "video",
+      "path": "video/CharacterSettingSnapshot.schema.json",
+      "sha256": "6537f4c4096b18bd537327fb563273a34a81efd682acb786292efad0027647e3"
+    },
+    {
+      "model": "CinematographyBase",
+      "module": "video",
+      "path": "video/CinematographyBase.schema.json",
+      "sha256": "d8d72b6076eaa16d6c60b58782ed129ed2a4a4fec452c812bc6ba55c30aa8ce6"
+    },
+    {
+      "model": "CinematographyBeatDraftItemV1",
+      "module": "video",
+      "path": "video/CinematographyBeatDraftItemV1.schema.json",
+      "sha256": "9de309be1fa7b9e686e4e835784dfd75fcb9660a2cd93f53439db98d05d19a3a"
+    },
+    {
+      "model": "CinematographyDraftV1",
+      "module": "video",
+      "path": "video/CinematographyDraftV1.schema.json",
+      "sha256": "5bfebe915d4ad0d4debe9f659ab5bc6ad4b45ad124915afd361e047aa5e53bd0"
+    },
+    {
+      "model": "CinematographyDraftV2",
+      "module": "video",
+      "path": "video/CinematographyDraftV2.schema.json",
+      "sha256": "bd18a6735929b3d422cf67e9eb1cf69fe6a4975106414bdcc43acd22102fe146"
+    },
+    {
+      "model": "CompiledAssetBinding",
+      "module": "video",
+      "path": "video/CompiledAssetBinding.schema.json",
+      "sha256": "e3d2a91913cc8023fcde2efd330aa16fc8cfebb30c586fa21a2783254f55180c"
+    },
+    {
+      "model": "DirectorAssetAliasV1",
+      "module": "video",
+      "path": "video/DirectorAssetAliasV1.schema.json",
+      "sha256": "125c5867d9beeb134cc13425163c62f51d3d35f7a573d3d4845d28686af9e668"
+    },
+    {
+      "model": "DirectorBeatAliasV1",
+      "module": "video",
+      "path": "video/DirectorBeatAliasV1.schema.json",
+      "sha256": "5764ab5b4cc7dd95672d51c5ada70df91ce2eea99d0cd785f773b206c2c2184e"
+    },
+    {
+      "model": "DirectorSourceAliasV1",
+      "module": "video",
+      "path": "video/DirectorSourceAliasV1.schema.json",
+      "sha256": "1c360a6ebc3f26788959f5bede847e70cec434326201885ac8f506aff30129f3"
+    },
+    {
+      "model": "DirectorSourceEventAliasV1",
+      "module": "video",
+      "path": "video/DirectorSourceEventAliasV1.schema.json",
+      "sha256": "5753113f0a5b672ca543b0a65d014fd4c2a968e468f9d8d311c220eee386dc4b"
+    },
+    {
+      "model": "ItemSettingSnapshot",
+      "module": "video",
+      "path": "video/ItemSettingSnapshot.schema.json",
+      "sha256": "31c26d64148562828c27d37c371942a515fa1528b119d0fee00e5eed967d2577"
+    },
+    {
+      "model": "LightSourceSpec",
+      "module": "video",
+      "path": "video/LightSourceSpec.schema.json",
+      "sha256": "d4db26a551ecfb0272e23eb630aa926e7eee504b415c60e2e59ed13bafc57233"
+    },
+    {
+      "model": "LightingSetup",
+      "module": "video",
+      "path": "video/LightingSetup.schema.json",
+      "sha256": "eeeb97ebc1186dcbbc330fd77e3228c1bb4f967367a463223cb37b1149d00d6d"
+    },
+    {
+      "model": "LocationSettingSnapshot",
+      "module": "video",
+      "path": "video/LocationSettingSnapshot.schema.json",
+      "sha256": "423d6e0e0d40884377beb56d11fc6c358b8d0e9d72ceaa081b0641063d49260d"
+    },
+    {
+      "model": "LongSerialSettingSnapshot",
+      "module": "video",
+      "path": "video/LongSerialSettingSnapshot.schema.json",
+      "sha256": "5f63b7906b188370805a66fc06e1fbe9db491115550acea320f31eb8ffc96fe0"
+    },
+    {
+      "model": "PlannedAsset",
+      "module": "video",
+      "path": "video/PlannedAsset.schema.json",
+      "sha256": "bb752fb5da0a33ce69f58560c45b54c6b2f04726041f9fcb6394fdc3c3a509d9"
+    },
+    {
+      "model": "PlannedAssetArguments",
+      "module": "video",
+      "path": "video/PlannedAssetArguments.schema.json",
+      "sha256": "ae4be7ac7f6cd9c57bb2ef0fcfacd7c90407e8ad6c63497bcb8d0e516888c324"
+    },
+    {
+      "model": "PlannerToolEnvelopeV2",
+      "module": "video",
+      "path": "video/PlannerToolEnvelopeV2.schema.json",
+      "sha256": "075fddcedf570fc102baca9b1afbc8efb61ab4637015c0408870b393e4d59e6b"
+    },
+    {
+      "model": "RelationshipSettingSnapshot",
+      "module": "video",
+      "path": "video/RelationshipSettingSnapshot.schema.json",
+      "sha256": "ebf325a3308805afe11506bee570b0d0bdd6afc1e3a4a77736a35522a670af60"
+    },
+    {
+      "model": "SceneAssetDraftItemV1",
+      "module": "video",
+      "path": "video/SceneAssetDraftItemV1.schema.json",
+      "sha256": "c390c27ff8b1a5de2cc67df234c6cc6c9f6df5419fc019717f92203b87613a65"
+    },
+    {
+      "model": "SceneAssetsDraftV1",
+      "module": "video",
+      "path": "video/SceneAssetsDraftV1.schema.json",
+      "sha256": "855422b1e52edb3966436a5ee4eba4f7469a9558b65f37706a5c0ffe941a6ab8"
+    },
+    {
+      "model": "SceneAssetsStageArguments",
+      "module": "video",
+      "path": "video/SceneAssetsStageArguments.schema.json",
+      "sha256": "0daabd0daec9bae112940efd2cae2054032d5c3910e0a792cba7ca008989b89d"
+    },
+    {
+      "model": "ScenePlanToolArguments",
+      "module": "video",
+      "path": "video/ScenePlanToolArguments.schema.json",
+      "sha256": "84111d97ab81a2133a727712fe330c6c5f94b770c7646ae546d1b8c167f21fdf"
+    },
+    {
+      "model": "ScenePromptSpec",
+      "module": "video",
+      "path": "video/ScenePromptSpec.schema.json",
+      "sha256": "e4748beacf2c5fec5c9d70edab3c1a2dfb26c6ab5746860e4356607050fd1ccd"
+    },
+    {
+      "model": "SeedanceOutputSpec",
+      "module": "video",
+      "path": "video/SeedanceOutputSpec.schema.json",
+      "sha256": "c85ce55d06b5b6970744926c82e61559537980837216b6c5e919d53e6a986825"
+    },
+    {
+      "model": "SeedancePromptPackage",
+      "module": "video",
+      "path": "video/SeedancePromptPackage.schema.json",
+      "sha256": "b1c079df47490336a3aeb737f95f0673fc1de4ced83d4a37735849b31d3e7b7f"
+    },
+    {
+      "model": "SettingReference",
+      "module": "video",
+      "path": "video/SettingReference.schema.json",
+      "sha256": "89aac6d4ab8b4759e468736fc6a323018950903c0711c8eb557be9afa228be51"
+    },
+    {
+      "model": "ShotCameraSpec",
+      "module": "video",
+      "path": "video/ShotCameraSpec.schema.json",
+      "sha256": "9fc41213766d0d8ca5109b31f357799218eef01d29d31da828b8092aae11ea02"
+    },
+    {
+      "model": "ShotLightingCue",
+      "module": "video",
+      "path": "video/ShotLightingCue.schema.json",
+      "sha256": "9e8a81f47754d6a3c00e82bae627d5f2a433c7b73e75fabeda577eaba2f80d28"
+    },
+    {
+      "model": "StoryAssetUsageDraftV2",
+      "module": "video",
+      "path": "video/StoryAssetUsageDraftV2.schema.json",
+      "sha256": "94253c2c5207d1af14ae8ba3766dd89610028f3aa2261cd368ee4a83577378a2"
+    },
+    {
+      "model": "StoryBeatDraftItemV1",
+      "module": "video",
+      "path": "video/StoryBeatDraftItemV1.schema.json",
+      "sha256": "3c73ce2248ae15b73dd847e40d4f4f851f334f080cfa16736c601e5220e6b1b5"
+    },
+    {
+      "model": "StoryBeatDraftItemV2",
+      "module": "video",
+      "path": "video/StoryBeatDraftItemV2.schema.json",
+      "sha256": "d7b415cbb498f82b8206707076cc3a6a7ca86a277fd251effcb4e6a286f54960"
+    },
+    {
+      "model": "StoryBeatDraftItemV3",
+      "module": "video",
+      "path": "video/StoryBeatDraftItemV3.schema.json",
+      "sha256": "01cfe6fc921787c9e9b338600ebc8dacc07dbd10ca49263cc44e5721fd52faae"
+    },
+    {
+      "model": "StoryBeatDraftItemV4",
+      "module": "video",
+      "path": "video/StoryBeatDraftItemV4.schema.json",
+      "sha256": "2ed04834dad59a90b4f836b591acf0b6ba76555d954c47021a777dfa842082c9"
+    },
+    {
+      "model": "StoryBeatPlanArguments",
+      "module": "video",
+      "path": "video/StoryBeatPlanArguments.schema.json",
+      "sha256": "bd43b1580ba4a19ca82da233d52d4c83028adcd0243484616df513c2fd24d1f2"
+    },
+    {
+      "model": "StoryBeatsDraftV1",
+      "module": "video",
+      "path": "video/StoryBeatsDraftV1.schema.json",
+      "sha256": "2812c2663074124b35b7ee26157f27a43d1ee223dc2d549909e0d729bb43e339"
+    },
+    {
+      "model": "StoryBeatsDraftV2",
+      "module": "video",
+      "path": "video/StoryBeatsDraftV2.schema.json",
+      "sha256": "7e5d9f54f393e39b867ed036783e7b2823f8641b91756c437f09da0220bd51ae"
+    },
+    {
+      "model": "StoryBeatsDraftV3",
+      "module": "video",
+      "path": "video/StoryBeatsDraftV3.schema.json",
+      "sha256": "8f758389f9539b3298c5ddd66246f7daaa3141171fe9d293180e3536b4db449a"
+    },
+    {
+      "model": "StoryBeatsDraftV4",
+      "module": "video",
+      "path": "video/StoryBeatsDraftV4.schema.json",
+      "sha256": "77bb6304a01bc9ed36b73e9450f1deba44852aeaeeee6ebfcb8669d7cfcaebed"
+    },
+    {
+      "model": "StoryBeatsStageArguments",
+      "module": "video",
+      "path": "video/StoryBeatsStageArguments.schema.json",
+      "sha256": "bb04ae0213be8b2574738f5a1d5032bc6a8a0543f9af1c78dd25c9f6e3dda690"
+    },
+    {
+      "model": "StoryPlanStageArguments",
+      "module": "video",
+      "path": "video/StoryPlanStageArguments.schema.json",
+      "sha256": "991002e17a5e80384ec93c1e01292e0709f73657c4f657c2461ee79512b5e1a1"
+    },
+    {
+      "model": "VideoDirectorDraftSkeletonV1",
+      "module": "video",
+      "path": "video/VideoDirectorDraftSkeletonV1.schema.json",
+      "sha256": "5183cd9ac111f87ca482e6092e67c1c9a335b7c11978ef39a821dc16c8125ba1"
+    },
+    {
+      "model": "VideoPlanAttemptState",
+      "module": "video",
+      "path": "video/VideoPlanAttemptState.schema.json",
+      "sha256": "640acf30b650189b13efb099f6a8ef9bc32f90b3f768d15cdeaa72fd7da59603"
+    },
+    {
+      "model": "VideoPlanCallReservationRequest",
+      "module": "video",
+      "path": "video/VideoPlanCallReservationRequest.schema.json",
+      "sha256": "18b87f3a086d6aed6b3814a684217e203018d6a48c6ff5747df6483e3526322b"
+    },
+    {
+      "model": "VideoPlanCallReservationResponse",
+      "module": "video",
+      "path": "video/VideoPlanCallReservationResponse.schema.json",
+      "sha256": "d958811b52b0473a3ff0564b3f6652fb689fe45842fd754d19c0c6521e073908"
+    },
+    {
+      "model": "VideoPlanCompletionCallback",
+      "module": "video",
+      "path": "video/VideoPlanCompletionCallback.schema.json",
+      "sha256": "6c7e9b4f3b187a6bde98b9c76ba5ee53e92732be4ad454ac18ce959435f2ea6b"
+    },
+    {
+      "model": "VideoPlanFailureCallback",
+      "module": "video",
+      "path": "video/VideoPlanFailureCallback.schema.json",
+      "sha256": "1fb7daf6a247834bef98082b3f672a69a1dff104e995cbfd1e9b61041add2c81"
+    },
+    {
+      "model": "VideoPlanJobPayload",
+      "module": "video",
+      "path": "video/VideoPlanJobPayload.schema.json",
+      "sha256": "9427f40d6e7c045018e33913aefc534e29fc71fe19c89989e1190ae00d56a715"
+    },
+    {
+      "model": "VideoPlanProgressQuery",
+      "module": "video",
+      "path": "video/VideoPlanProgressQuery.schema.json",
+      "sha256": "0bade9aca4e63973cffeb30e53cf7d08ac6a80d8e95af466de894b721868ca67"
+    },
+    {
+      "model": "VideoPlanProgressResponse",
+      "module": "video",
+      "path": "video/VideoPlanProgressResponse.schema.json",
+      "sha256": "1f2e2db4e872ecf42b6b8f6b55758b6d4d61976260d949bfec84639e3aeab4e5"
+    },
+    {
+      "model": "VideoStoryPlanCheckpointCallback",
+      "module": "video",
+      "path": "video/VideoStoryPlanCheckpointCallback.schema.json",
+      "sha256": "21073a28ef998ba3db4b7346e8a1a603b7d796f8a43071db41a7a9cd859d4411"
+    },
+    {
+      "model": "WorldSettingSnapshot",
+      "module": "video",
+      "path": "video/WorldSettingSnapshot.schema.json",
+      "sha256": "d7b66bd7c9239c3d47800d6017478adbb0ed8d93a1f7e672e1406038f0292982"
+    },
+    {
+      "model": "BeatCoverageGoal",
+      "module": "video_adaptation",
+      "path": "video_adaptation/BeatCoverageGoal.schema.json",
+      "sha256": "1d4236f940700115c31665d9dec57c46208b2c44969197a2956299d06780e5d6"
+    },
+    {
+      "model": "ChapterAdaptationPlanCandidate",
+      "module": "video_adaptation",
+      "path": "video_adaptation/ChapterAdaptationPlanCandidate.schema.json",
+      "sha256": "7be4a538d7cde1f1d43e726762d25472a2c0795b6ecec2aed02a2277c3279029"
+    },
+    {
+      "model": "ChapterAdaptationPlanJobPayload",
+      "module": "video_adaptation",
+      "path": "video_adaptation/ChapterAdaptationPlanJobPayload.schema.json",
+      "sha256": "3c88711a23c9b7173d5f81d89cd51f311bd6c169903a3ae972f7a1c0ca103703"
+    },
+    {
+      "model": "ChapterAdaptationPromptJobPayload",
+      "module": "video_adaptation",
+      "path": "video_adaptation/ChapterAdaptationPromptJobPayload.schema.json",
+      "sha256": "88e18db00f67f98d794a2250be6741134d916b73bff664080481508833578e00"
+    },
+    {
+      "model": "ChapterAdaptationSourceRange",
+      "module": "video_adaptation",
+      "path": "video_adaptation/ChapterAdaptationSourceRange.schema.json",
+      "sha256": "81cfcc04c1bb85362cb762299ea3b4445660b916b4ba0fbb5f997b9971c4270a"
+    },
+    {
+      "model": "CinematicReviewFinding",
+      "module": "video_adaptation",
+      "path": "video_adaptation/CinematicReviewFinding.schema.json",
+      "sha256": "96093ceca84d26e4303386391a102ae7039b37ea518c7175722572e21ee16da1"
+    },
+    {
+      "model": "CinematicReviewResult",
+      "module": "video_adaptation",
+      "path": "video_adaptation/CinematicReviewResult.schema.json",
+      "sha256": "87cf2afb5cb78cb1eaf429dfaea02290b07f466ca47664f122cf9a4a7909328b"
+    },
+    {
+      "model": "CinematicSceneCandidate",
+      "module": "video_adaptation",
+      "path": "video_adaptation/CinematicSceneCandidate.schema.json",
+      "sha256": "96c1317ab1d2cc0f982bbd27e813e39c4c35cc06d45667b0e2495e81eb91bfc1"
+    },
+    {
+      "model": "CinematicShotCandidate",
+      "module": "video_adaptation",
+      "path": "video_adaptation/CinematicShotCandidate.schema.json",
+      "sha256": "bc22bc82ad1b9e1c8cf28f31919ed19a8971fc741b2ef3cbdb319709620036e0"
+    },
+    {
+      "model": "CinematicShotDesignDraft",
+      "module": "video_adaptation",
+      "path": "video_adaptation/CinematicShotDesignDraft.schema.json",
+      "sha256": "6255821c6b19fcd00dc97855ef5953d67ef3f76bae0316dafea697494c48ff69"
+    },
+    {
+      "model": "CinematicShotDesignResult",
+      "module": "video_adaptation",
+      "path": "video_adaptation/CinematicShotDesignResult.schema.json",
+      "sha256": "d4e3dbace135671b0550d6d808d5645a17a8cc7a9a79232358b1b332f46a24dd"
+    },
+    {
+      "model": "CoverageGoalDraft",
+      "module": "video_adaptation",
+      "path": "video_adaptation/CoverageGoalDraft.schema.json",
+      "sha256": "f25a22e6a54d20a176b6cba0c137adacf4fbee2a2963285b00dfa8d2bea86808"
+    },
+    {
+      "model": "DramaticBeatCandidate",
+      "module": "video_adaptation",
+      "path": "video_adaptation/DramaticBeatCandidate.schema.json",
+      "sha256": "b8f66f8efc850aa71f4f29317e4cddf6bbbbcbfdb7900eb6f3f33fa9699f5f51"
+    },
+    {
+      "model": "DramaticBeatCheckpoint",
+      "module": "video_adaptation",
+      "path": "video_adaptation/DramaticBeatCheckpoint.schema.json",
+      "sha256": "bd6d393eb9514b497e0cd4df4b8d0ff605cb38a2d382e4e4437cfe630ec8a882"
+    },
+    {
+      "model": "DramaticBeatDraft",
+      "module": "video_adaptation",
+      "path": "video_adaptation/DramaticBeatDraft.schema.json",
+      "sha256": "3d04a4221fc031b100e280d67bc03e523fa530f3c2119db304902feebf97726c"
+    },
+    {
+      "model": "DramaticSceneCheckpoint",
+      "module": "video_adaptation",
+      "path": "video_adaptation/DramaticSceneCheckpoint.schema.json",
+      "sha256": "00d50fe9ccb6a08926e59d8b2ee8164d67ba0cf061d5c4bbce02fd9216e42bdd"
+    },
+    {
+      "model": "DramaticSceneDraft",
+      "module": "video_adaptation",
+      "path": "video_adaptation/DramaticSceneDraft.schema.json",
+      "sha256": "3f4533463ba6dad40f54ed9f09c41fe208ddf73939e061ef11a2bfb200b48b45"
+    },
+    {
+      "model": "DramaticStructureCheckpoint",
+      "module": "video_adaptation",
+      "path": "video_adaptation/DramaticStructureCheckpoint.schema.json",
+      "sha256": "31e6563a9a11fd264b915d15b20b89a43767b1f8454137c65a1d5b9b81ae2341"
+    },
+    {
+      "model": "DramaticStructureResult",
+      "module": "video_adaptation",
+      "path": "video_adaptation/DramaticStructureResult.schema.json",
+      "sha256": "a8775525fe76e50bdd0955dd2a786dc43651ee59482a648c1635953519f2ca41"
+    },
+    {
+      "model": "FormalChapterAdaptationPlan",
+      "module": "video_adaptation",
+      "path": "video_adaptation/FormalChapterAdaptationPlan.schema.json",
+      "sha256": "037ff03efc797d0e16e42987f4a26a47338d97557959051c47fd22fcec072d1a"
+    },
+    {
+      "model": "FormalCinematicScene",
+      "module": "video_adaptation",
+      "path": "video_adaptation/FormalCinematicScene.schema.json",
+      "sha256": "f47230bb394115ef5229159f71ec0929605389a871e04d3d298c79b94b25eefe"
+    },
+    {
+      "model": "FormalCinematicShot",
+      "module": "video_adaptation",
+      "path": "video_adaptation/FormalCinematicShot.schema.json",
+      "sha256": "ea6eea29e56175b5ed14f124eacb8503fe527d97cbcd420987467498de482515"
+    },
+    {
+      "model": "FormalDramaticBeat",
+      "module": "video_adaptation",
+      "path": "video_adaptation/FormalDramaticBeat.schema.json",
+      "sha256": "48d3a3a428aa737178aa79ec7d71350d237d54a9e37d2c4ef75fc07b92ae6b7d"
+    },
+    {
+      "model": "SeedanceShotPromptSpec",
+      "module": "video_adaptation",
+      "path": "video_adaptation/SeedanceShotPromptSpec.schema.json",
+      "sha256": "f3f2c8f4844dfd53866441a5a0c1e3f821b07837960f04d7ec2badb160eb9502"
+    },
+    {
+      "model": "ShotPromptSpecBatch",
+      "module": "video_adaptation",
+      "path": "video_adaptation/ShotPromptSpecBatch.schema.json",
+      "sha256": "4b304157f2c7067c9df965b961d0ffb248a0408588088f94a4514f984af7e661"
+    },
+    {
+      "model": "ShotPromptSpecCandidate",
+      "module": "video_adaptation",
+      "path": "video_adaptation/ShotPromptSpecCandidate.schema.json",
+      "sha256": "5f00478a74ad03ee99d59031bc1e6bafb5ae1a07a65164e55f8554d97e04be0b"
+    },
+    {
+      "model": "ShotPromptSpecResult",
+      "module": "video_adaptation",
+      "path": "video_adaptation/ShotPromptSpecResult.schema.json",
+      "sha256": "aab0260e87e40871a8cd10d05d24bf222ee838d0300a959e40436c2d438de090"
+    },
+    {
+      "model": "ShotVisualReferenceBundle",
+      "module": "video_adaptation",
+      "path": "video_adaptation/ShotVisualReferenceBundle.schema.json",
+      "sha256": "ba73f1fa2a9f5a671dc4d0c37532b7b9b1f5428f0606fdea7f93878c0f7fa714"
+    },
+    {
+      "model": "ShotVisualReferenceSnapshot",
+      "module": "video_adaptation",
+      "path": "video_adaptation/ShotVisualReferenceSnapshot.schema.json",
+      "sha256": "ef787d6d02e06500c3006ef1ad31a68ee662e2bb464f9cb1aaa83c0d6ed5ed67"
+    },
+    {
+      "model": "VideoAdaptationCheckpointCallback",
+      "module": "video_adaptation",
+      "path": "video_adaptation/VideoAdaptationCheckpointCallback.schema.json",
+      "sha256": "64671d295228e0348733e721513ff4e0b873dbe323a41d8bc7e164904f7dbeee"
+    },
+    {
+      "model": "VideoAdaptationFailureCallback",
+      "module": "video_adaptation",
+      "path": "video_adaptation/VideoAdaptationFailureCallback.schema.json",
+      "sha256": "a59a5dca9a454384e4e71574ca689aa76ad5311601199713c4359b6eeecd84db"
+    },
+    {
+      "model": "VideoAdaptationPlanCompletionCallback",
+      "module": "video_adaptation",
+      "path": "video_adaptation/VideoAdaptationPlanCompletionCallback.schema.json",
+      "sha256": "a88b363e6a7ca57129799569d065d47615ad52b361e27d528b94fdad825ba85d"
+    },
+    {
+      "model": "VideoAdaptationPromptCompletionCallback",
+      "module": "video_adaptation",
+      "path": "video_adaptation/VideoAdaptationPromptCompletionCallback.schema.json",
+      "sha256": "79980dfc0da3318f855eae08bcd77979d70fdb8fe19485e7e4c1cdd395166661"
+    },
+    {
+      "model": "VideoAdaptationWorkflowProgressQuery",
+      "module": "video_adaptation",
+      "path": "video_adaptation/VideoAdaptationWorkflowProgressQuery.schema.json",
+      "sha256": "e375e9996fb9b337e427f35e3a1ff07dc0031069ceec2a5846f9b2cacf1caf0e"
+    },
+    {
+      "model": "VideoAdaptationWorkflowProgressResponse",
+      "module": "video_adaptation",
+      "path": "video_adaptation/VideoAdaptationWorkflowProgressResponse.schema.json",
+      "sha256": "987a471478c5623ad6675e723cf01540f0f5c205c4d95293e9c82ff81901493e"
+    },
+    {
+      "model": "SeedanceRenderError",
+      "module": "video_render",
+      "path": "video_render/SeedanceRenderError.schema.json",
+      "sha256": "d51ee373f5b51c3d039ac755d90eeb8037327a77eb6904a833368ff4e1907b83"
+    },
+    {
+      "model": "SeedanceRenderOutput",
+      "module": "video_render",
+      "path": "video_render/SeedanceRenderOutput.schema.json",
+      "sha256": "d5bc5fa9dd16e65608c5ddac0dc6c0eefa2edc3c01b02bea363eba6e4061f58b"
+    },
+    {
+      "model": "SeedanceRenderQueryRequest",
+      "module": "video_render",
+      "path": "video_render/SeedanceRenderQueryRequest.schema.json",
+      "sha256": "9a1e9f4b6aadd8066d868b86e9ee984d21dc590734d3b233f97960a1afaacb49"
+    },
+    {
+      "model": "SeedanceRenderQueryResponse",
+      "module": "video_render",
+      "path": "video_render/SeedanceRenderQueryResponse.schema.json",
+      "sha256": "5d9e12a86e61dce5372e957b7354bd996bc3904936abbe44bbebfcc3e04e9878"
+    },
+    {
+      "model": "SeedanceRenderSubmitRequest",
+      "module": "video_render",
+      "path": "video_render/SeedanceRenderSubmitRequest.schema.json",
+      "sha256": "68915636e44bbdfca0e4596dbd548e14630b09af0662be9b6752635c069749c4"
+    },
+    {
+      "model": "SeedanceRenderSubmitResponse",
+      "module": "video_render",
+      "path": "video_render/SeedanceRenderSubmitResponse.schema.json",
+      "sha256": "4db838b8182f23a296728e14fccc5e5f642da365e222567047b64f16fdab2ed0"
+    },
+    {
+      "model": "SeedanceRuntimeReference",
+      "module": "video_render",
+      "path": "video_render/SeedanceRuntimeReference.schema.json",
+      "sha256": "727ce74ee3ac51468f935e416d7c82f7c98ce1ddd614750453b4e18c6b4c0593"
+    },
+    {
+      "model": "ShotRenderKeyframeManifest",
+      "module": "video_render",
+      "path": "video_render/ShotRenderKeyframeManifest.schema.json",
+      "sha256": "909484cc0e9e97040be8127bed208ef60566c1b37d337197f4696cb4e89ace66"
+    },
+    {
+      "model": "ShotRenderReferenceManifest",
+      "module": "video_render",
+      "path": "video_render/ShotRenderReferenceManifest.schema.json",
+      "sha256": "ea5ce6c7a75cf4bf1c27b0aa2b009cf531487b812f8dcaeaac469e4770e7940f"
+    },
+    {
+      "model": "VideoShotRenderManifest",
+      "module": "video_render",
+      "path": "video_render/VideoShotRenderManifest.schema.json",
+      "sha256": "0c89ab4fbee1979007b93c64cd085a60221b2020876a7dcd4a5ea462825e253a"
+    }
+  ],
+  "schemaVersion": "inkforge-agent-contract-manifest/1.0"
+}

@@ -1,0 +1,64 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_render/ShotRenderKeyframeManifest/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "进入一次渲染清单的已确认关键帧事实。",
+  "properties": {
+    "assetId": {
+      "minLength": 1,
+      "title": "Assetid",
+      "type": "string"
+    },
+    "duty": {
+      "enum": [
+        "storyboard",
+        "keyframe"
+      ],
+      "title": "Duty",
+      "type": "string"
+    },
+    "keyframeVersionId": {
+      "minLength": 1,
+      "title": "Keyframeversionid",
+      "type": "string"
+    },
+    "mimeType": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Mimetype",
+      "type": "string"
+    },
+    "ordinal": {
+      "maximum": 3,
+      "minimum": 1,
+      "title": "Ordinal",
+      "type": "integer"
+    },
+    "role": {
+      "enum": [
+        "initial_state",
+        "transition_anchor",
+        "end_state"
+      ],
+      "title": "Role",
+      "type": "string"
+    },
+    "sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Sha256",
+      "type": "string"
+    }
+  },
+  "required": [
+    "ordinal",
+    "keyframeVersionId",
+    "role",
+    "assetId",
+    "sha256",
+    "mimeType",
+    "duty"
+  ],
+  "title": "ShotRenderKeyframeManifest",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_render.ShotRenderKeyframeManifest"
+}

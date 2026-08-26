@@ -1,0 +1,595 @@
+{
+  "$defs": {
+    "CameraActionUnit": {
+      "additionalProperties": false,
+      "description": "一个主体动作及其唯一可见结果。",
+      "properties": {
+        "action": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        },
+        "subject": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Subject",
+          "type": "string"
+        },
+        "visibleResult": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Visibleresult",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject",
+        "action",
+        "visibleResult"
+      ],
+      "title": "CameraActionUnit",
+      "type": "object"
+    },
+    "PlannedAssetArguments": {
+      "additionalProperties": false,
+      "description": "导演 strict 工具的素材需求；排除本流程禁止或仅供旧数据使用的值。",
+      "properties": {
+        "assetId": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Assetid",
+          "type": "string"
+        },
+        "bindingScope": {
+          "enum": [
+            "canon_slot",
+            "scene_direct"
+          ],
+          "title": "Bindingscope",
+          "type": "string"
+        },
+        "duty": {
+          "enum": [
+            "identity",
+            "costume",
+            "scene",
+            "prop",
+            "style",
+            "storyboard",
+            "keyframe",
+            "motion",
+            "camera",
+            "voice",
+            "ambience",
+            "relation_interaction"
+          ],
+          "title": "Duty",
+          "type": "string"
+        },
+        "excludeFeatures": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 12,
+          "title": "Excludefeatures",
+          "type": "array"
+        },
+        "featureDomain": {
+          "enum": [
+            "character_identity",
+            "character_costume",
+            "location",
+            "prop",
+            "style",
+            "storyboard",
+            "keyframe",
+            "motion",
+            "camera",
+            "voice",
+            "ambience",
+            "music",
+            "relationship_interaction"
+          ],
+          "title": "Featuredomain",
+          "type": "string"
+        },
+        "includeFeatures": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 12,
+          "minItems": 1,
+          "title": "Includefeatures",
+          "type": "array"
+        },
+        "keyframeRole": {
+          "anyOf": [
+            {
+              "enum": [
+                "initial_state",
+                "end_state",
+                "transition_anchor"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Keyframerole"
+        },
+        "modality": {
+          "enum": [
+            "image",
+            "video",
+            "audio"
+          ],
+          "title": "Modality",
+          "type": "string"
+        },
+        "settingReference": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SettingReference"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "targetEntity": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Targetentity",
+          "type": "string"
+        }
+      },
+      "required": [
+        "assetId",
+        "modality",
+        "duty",
+        "bindingScope",
+        "settingReference",
+        "featureDomain",
+        "keyframeRole",
+        "targetEntity",
+        "includeFeatures",
+        "excludeFeatures"
+      ],
+      "title": "PlannedAssetArguments",
+      "type": "object"
+    },
+    "SceneAssetsStageArguments": {
+      "additionalProperties": false,
+      "description": "场景与素材阶段完成本地归一化后的耐久规范。",
+      "properties": {
+        "assets": {
+          "items": {
+            "$ref": "#/$defs/PlannedAssetArguments"
+          },
+          "maxItems": 11,
+          "minItems": 1,
+          "title": "Assets",
+          "type": "array"
+        },
+        "dramaticArc": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Dramaticarc",
+          "type": "string"
+        },
+        "globalDirection": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Globaldirection",
+          "type": "string"
+        },
+        "negativeConstraints": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 18,
+          "minItems": 1,
+          "title": "Negativeconstraints",
+          "type": "array"
+        },
+        "schemaVersion": {
+          "const": "1.0",
+          "default": "1.0",
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "summary": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "visualStyle": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Visualstyle",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "summary",
+        "dramaticArc",
+        "visualStyle",
+        "globalDirection",
+        "assets",
+        "negativeConstraints"
+      ],
+      "title": "SceneAssetsStageArguments",
+      "type": "object"
+    },
+    "SettingReference": {
+      "additionalProperties": false,
+      "description": "指向长篇冻结设定快照中的一个类型化条目。",
+      "properties": {
+        "id": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "character",
+            "relationship",
+            "location",
+            "item",
+            "world_setting"
+          ],
+          "title": "Kind",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "title": "SettingReference",
+      "type": "object"
+    },
+    "StoryBeatPlanArguments": {
+      "additionalProperties": false,
+      "description": "第一阶段完成业务归一化后的单拍叙事与调度事实。",
+      "properties": {
+        "actionComplexity": {
+          "enum": [
+            "simple",
+            "mechanical_sequence",
+            "transformation",
+            "impact_transition"
+          ],
+          "title": "Actioncomplexity",
+          "type": "string"
+        },
+        "actionUnits": {
+          "items": {
+            "$ref": "#/$defs/CameraActionUnit"
+          },
+          "maxItems": 2,
+          "minItems": 1,
+          "title": "Actionunits",
+          "type": "array"
+        },
+        "beatId": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Beatid",
+          "type": "string"
+        },
+        "blocking": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Blocking",
+          "type": "string"
+        },
+        "dramaticPurpose": {
+          "maxLength": 240,
+          "minLength": 1,
+          "title": "Dramaticpurpose",
+          "type": "string"
+        },
+        "endSecond": {
+          "exclusiveMinimum": 0,
+          "maximum": 30,
+          "title": "Endsecond",
+          "type": "integer"
+        },
+        "performanceDirection": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Performancedirection",
+          "type": "string"
+        },
+        "referencedAssetIds": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 11,
+          "title": "Referencedassetids",
+          "type": "array"
+        },
+        "sound": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Sound",
+          "type": "string"
+        },
+        "sourceEventAliasesByAction": {
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "maxItems": 2,
+          "title": "Sourceeventaliasesbyaction",
+          "type": "array"
+        },
+        "startSecond": {
+          "maximum": 29,
+          "minimum": 0,
+          "title": "Startsecond",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "beatId",
+        "startSecond",
+        "endSecond",
+        "dramaticPurpose",
+        "performanceDirection",
+        "blocking",
+        "actionUnits",
+        "actionComplexity",
+        "sound",
+        "referencedAssetIds"
+      ],
+      "title": "StoryBeatPlanArguments",
+      "type": "object"
+    },
+    "StoryPlanStageArguments": {
+      "additionalProperties": false,
+      "description": "可序列化并交给第二阶段只读的版本化叙事规范。",
+      "properties": {
+        "assets": {
+          "items": {
+            "$ref": "#/$defs/PlannedAssetArguments"
+          },
+          "maxItems": 11,
+          "minItems": 1,
+          "title": "Assets",
+          "type": "array"
+        },
+        "beats": {
+          "items": {
+            "$ref": "#/$defs/StoryBeatPlanArguments"
+          },
+          "maxItems": 5,
+          "minItems": 1,
+          "title": "Beats",
+          "type": "array"
+        },
+        "dramaticArc": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Dramaticarc",
+          "type": "string"
+        },
+        "globalDirection": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Globaldirection",
+          "type": "string"
+        },
+        "negativeConstraints": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 18,
+          "minItems": 1,
+          "title": "Negativeconstraints",
+          "type": "array"
+        },
+        "schemaVersion": {
+          "default": "1.0",
+          "enum": [
+            "1.0",
+            "2.0"
+          ],
+          "title": "Schemaversion",
+          "type": "string"
+        },
+        "summary": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Summary",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "visualStyle": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Visualstyle",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "summary",
+        "dramaticArc",
+        "visualStyle",
+        "globalDirection",
+        "assets",
+        "beats",
+        "negativeConstraints"
+      ],
+      "title": "StoryPlanStageArguments",
+      "type": "object"
+    },
+    "VideoPlanAttemptState": {
+      "additionalProperties": false,
+      "description": "不依赖新表、随任务结果耐久保存的模型调用预留账本。",
+      "properties": {
+        "inheritedCalls": {
+          "default": 0,
+          "maximum": 2,
+          "minimum": 0,
+          "title": "Inheritedcalls",
+          "type": "integer"
+        },
+        "pendingStage": {
+          "anyOf": [
+            {
+              "enum": [
+                "scene_assets",
+                "story_beats",
+                "cinematography"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Pendingstage"
+        },
+        "reservedCalls": {
+          "maximum": 5,
+          "minimum": 0,
+          "title": "Reservedcalls",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "reservedCalls",
+        "pendingStage"
+      ],
+      "title": "VideoPlanAttemptState",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video/VideoPlanProgressResponse/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Core 返回的视频规划任务状态与可恢复故事检查点。",
+  "properties": {
+    "attemptState": {
+      "$ref": "#/$defs/VideoPlanAttemptState"
+    },
+    "checkpointStage": {
+      "enum": [
+        "empty",
+        "scene_assets",
+        "story",
+        "terminal"
+      ],
+      "title": "Checkpointstage",
+      "type": "string"
+    },
+    "inputFingerprint": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Inputfingerprint",
+      "type": "string"
+    },
+    "jobId": {
+      "minLength": 1,
+      "title": "Jobid",
+      "type": "string"
+    },
+    "novelId": {
+      "minLength": 1,
+      "title": "Novelid",
+      "type": "string"
+    },
+    "projectId": {
+      "minLength": 1,
+      "title": "Projectid",
+      "type": "string"
+    },
+    "protocolVersion": {
+      "const": "1.0",
+      "title": "Protocolversion",
+      "type": "string"
+    },
+    "runId": {
+      "minLength": 1,
+      "title": "Runid",
+      "type": "string"
+    },
+    "sceneAssetsPlan": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SceneAssetsStageArguments"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "sceneId": {
+      "minLength": 1,
+      "title": "Sceneid",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "active",
+        "completed",
+        "failed"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "storyPlan": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/StoryPlanStageArguments"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "taskId": {
+      "minLength": 1,
+      "title": "Taskid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocolVersion",
+    "jobId",
+    "runId",
+    "taskId",
+    "novelId",
+    "projectId",
+    "sceneId",
+    "inputFingerprint",
+    "status",
+    "checkpointStage",
+    "attemptState"
+  ],
+  "title": "VideoPlanProgressResponse",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.VideoPlanProgressResponse"
+}

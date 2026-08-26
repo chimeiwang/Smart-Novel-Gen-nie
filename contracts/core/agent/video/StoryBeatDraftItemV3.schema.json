@@ -1,0 +1,123 @@
+{
+  "$defs": {
+    "CameraActionUnit": {
+      "additionalProperties": false,
+      "description": "一个主体动作及其唯一可见结果。",
+      "properties": {
+        "action": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Action",
+          "type": "string"
+        },
+        "subject": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Subject",
+          "type": "string"
+        },
+        "visibleResult": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Visibleresult",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject",
+        "action",
+        "visibleResult"
+      ],
+      "title": "CameraActionUnit",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video/StoryBeatDraftItemV3/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "v3 单拍在动作旁保存原文事件首次发生归属，避免自由文本顺序误判。",
+  "properties": {
+    "actionComplexity": {
+      "enum": [
+        "simple",
+        "mechanical_sequence",
+        "transformation",
+        "impact_transition"
+      ],
+      "title": "Actioncomplexity",
+      "type": "string"
+    },
+    "beatAlias": {
+      "title": "Beatalias",
+      "type": "string"
+    },
+    "blocking": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Blocking",
+      "type": "string"
+    },
+    "dramaticPurpose": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Dramaticpurpose",
+      "type": "string"
+    },
+    "performanceDirection": {
+      "maxLength": 200,
+      "minLength": 1,
+      "title": "Performancedirection",
+      "type": "string"
+    },
+    "primaryAction": {
+      "$ref": "#/$defs/CameraActionUnit"
+    },
+    "primarySourceEventAliases": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 8,
+      "title": "Primarysourceeventaliases",
+      "type": "array"
+    },
+    "secondaryAction": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/CameraActionUnit"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "secondarySourceEventAliases": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 8,
+      "title": "Secondarysourceeventaliases",
+      "type": "array"
+    },
+    "sound": {
+      "maxLength": 240,
+      "minLength": 1,
+      "title": "Sound",
+      "type": "string"
+    }
+  },
+  "required": [
+    "beatAlias",
+    "dramaticPurpose",
+    "performanceDirection",
+    "blocking",
+    "primaryAction",
+    "secondaryAction",
+    "actionComplexity",
+    "sound",
+    "primarySourceEventAliases",
+    "secondarySourceEventAliases"
+  ],
+  "title": "StoryBeatDraftItemV3",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.StoryBeatDraftItemV3"
+}

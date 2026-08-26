@@ -232,9 +232,12 @@ def _run_deploy(
     schema_verify_status: int = 0,
     agent_ready_sequence: str = "",
     agent_log_init_status: int = 0,
+    upload_init_status: int = 0,
     migration_state: str = "migrated",
     migration_up_fail_attempt: int = 0,
     migration_down_status: int = 0,
+    new_core_runtime: str = "java",
+    previous_core_runtime: str = "",
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     app_dir = tmp_path / "app"
     bin_dir = tmp_path / "bin"
@@ -249,6 +252,10 @@ def _run_deploy(
     (app_dir / "infra" / "compose.yaml").write_text(
         "services:\n  core-api:\n    extra_hosts:\n      - host.docker.internal:host-gateway\n",
         encoding="utf-8",
+    )
+    shutil.copy2(
+        ROOT / "infra" / "compose.python-core-rollback.yaml",
+        app_dir / "infra" / "compose.python-core-rollback.yaml",
     )
     for key_file in (
         "core-to-agent-private.pem",
@@ -316,6 +323,8 @@ def _run_deploy(
         "INKFORGE_IMAGE_TAG": "new-tag",
         "FAKE_DOCKER_LOG": _posix_path(log_path),
         "FAKE_NEW_TAG": "new-tag",
+        "FAKE_NEW_CORE_RUNTIME": new_core_runtime,
+        "FAKE_PREVIOUS_CORE_RUNTIME": previous_core_runtime,
         "FAKE_PREVIOUS_STATE": previous_state,
         "FAKE_NEW_UP_STATUS": str(new_status),
         "FAKE_ROLLBACK_UP_STATUS": str(rollback_status),
@@ -323,6 +332,7 @@ def _run_deploy(
         "FAKE_AGENT_READY_COUNTER": _posix_path(agent_counter_path),
         "FAKE_AGENT_READY_SEQUENCE": agent_ready_sequence,
         "FAKE_AGENT_LOG_INIT_STATUS": str(agent_log_init_status),
+        "FAKE_UPLOAD_INIT_STATUS": str(upload_init_status),
         "FAKE_MIGRATION_STATE": migration_state,
         "FAKE_MIGRATION_STATE_FILE": _posix_path(migration_state_path),
         "FAKE_MIGRATION_UP_COUNT": _posix_path(migration_up_count_path),
@@ -415,35 +425,79 @@ def test_successful_deployment_refreshes_nginx_with_new_tag(tmp_path: Path) -> N
         ("tag=new-tag", "全栈"),
         ("tag=new-tag", "Nginx"),
     ]
+    assert "exec -T core-api /usr/local/bin/inkforge-schema-guard" in log
+    assert "exec -T core-api python -c" not in log
 
 
-def test_deployment_initializes_agent_log_volume_before_version_switch(
+def test_deployment_initializes_persistent_volumes_before_version_switch(
     tmp_path: Path,
 ) -> None:
     result, log = _run_deploy(tmp_path, previous_state="valid")
 
     assert result.returncode == 0, result.stderr
     lines = log.splitlines()
-    create_index = next(
+    uploads_create_index = next(
+        index
+        for index, line in enumerate(lines)
+        if "docker volume create inkforge_uploads" in line
+    )
+    uploads_init_index = next(
+        index
+        for index, line in enumerate(lines)
+        if "source=inkforge_uploads,target=/data/uploads" in line
+    )
+    logs_create_index = next(
         index
         for index, line in enumerate(lines)
         if "docker volume create inkforge_agent_logs" in line
     )
-    init_index = next(
+    logs_init_index = next(
         index
         for index, line in enumerate(lines)
-        if "docker run --rm --network none --read-only --cap-drop ALL --cap-add CHOWN"
-        in line
+        if "source=inkforge_agent_logs,target=/data/agent-logs" in line
     )
     up_index = next(
         index
         for index, line in enumerate(lines)
         if line.endswith(" up --no-build -d --wait")
     )
-    assert create_index < init_index < up_index
-    assert "--user 0:0" in lines[init_index]
-    assert "source=inkforge_agent_logs,target=/data/agent-logs" in lines[init_index]
-    assert "inkforge-agent-service:new-tag chown 10001:10001 /data/agent-logs" in lines[init_index]
+    assert uploads_create_index < uploads_init_index < logs_create_index
+    assert logs_create_index < logs_init_index < up_index
+    for init_index in (uploads_init_index, logs_init_index):
+        assert (
+            "docker run --rm --network none --read-only --cap-drop ALL --cap-add CHOWN"
+            in lines[init_index]
+        )
+        assert "--user 0:0" in lines[init_index]
+        assert "--entrypoint /usr/bin/chown" in lines[init_index]
+    assert "inkforge-core-api:new-tag 10001:10001 /data/uploads" in lines[
+        uploads_init_index
+    ]
+    assert "inkforge-agent-service:new-tag 10001:10001 /data/agent-logs" in lines[
+        logs_init_index
+    ]
+
+
+def test_deployment_requires_java_core_label_and_uses_java_schema_guard() -> None:
+    source = DEPLOY.read_text(encoding="utf-8")
+
+    assert "cn.inkforge.core.runtime" in source
+    assert "新 Core 镜像不是 Java runtime" in source
+    assert "/usr/local/bin/inkforge-schema-guard" in source
+    assert "compose_python_rollback" in source
+    assert "compose.python-core-rollback.yaml" in source
+
+
+def test_non_java_new_core_is_rejected_before_version_switch(tmp_path: Path) -> None:
+    result, log = _run_deploy(
+        tmp_path,
+        previous_state="valid",
+        new_core_runtime="",
+    )
+
+    assert result.returncode != 0
+    assert "新 Core 镜像不是 Java runtime" in result.stderr
+    assert _full_stack_up_lines(log) == []
 
 
 def test_agent_log_volume_initialization_failure_stops_before_version_switch(
@@ -456,6 +510,19 @@ def test_agent_log_volume_initialization_failure_stops_before_version_switch(
     )
 
     assert result.returncode == 19
+    assert _full_stack_up_lines(log) == []
+
+
+def test_upload_volume_initialization_failure_stops_before_version_switch(
+    tmp_path: Path,
+) -> None:
+    result, log = _run_deploy(
+        tmp_path,
+        previous_state="valid",
+        upload_init_status=17,
+    )
+
+    assert result.returncode == 17
     assert _full_stack_up_lines(log) == []
 
 
@@ -475,10 +542,50 @@ def test_failed_new_version_restores_previous_version_and_keeps_failure(
         "tag=new-tag",
         "tag=previous-tag",
     ]
-    assert " compose --env-file .env -f infra/compose.yaml ps" in log
+    assert (
+        " compose --env-file .env -f infra/compose.yaml "
+        "-f infra/compose.python-core-rollback.yaml ps"
+    ) in log
+    assert "-f infra/compose.python-core-rollback.yaml" in up_lines[1]
     assert " exec -T core-api python -c" in log
     assert "新版本部署失败，旧版本已恢复" in result.stdout
     assert "生产编排已启动" not in result.stdout
+
+
+def test_failed_new_version_restores_previous_java_with_java_guard(
+    tmp_path: Path,
+) -> None:
+    result, log = _run_deploy(
+        tmp_path,
+        previous_state="valid",
+        previous_core_runtime="java",
+        new_status=23,
+    )
+
+    assert result.returncode == 23
+    up_lines = _full_stack_up_lines(log)
+    assert [line.split("|", 1)[0] for line in up_lines] == [
+        "tag=new-tag",
+        "tag=previous-tag",
+    ]
+    assert "compose.python-core-rollback.yaml" not in up_lines[1]
+    assert log.count("exec -T core-api /usr/local/bin/inkforge-schema-guard") == 1
+    assert "exec -T core-api python -c" not in log
+    assert "新版本部署失败，旧版本已恢复" in result.stdout
+
+
+def test_unknown_previous_core_runtime_stops_before_version_switch(
+    tmp_path: Path,
+) -> None:
+    result, log = _run_deploy(
+        tmp_path,
+        previous_state="valid",
+        previous_core_runtime="node",
+    )
+
+    assert result.returncode != 0
+    assert "上一 Core 镜像 runtime 标签无法识别" in result.stderr
+    assert _full_stack_up_lines(log) == []
 
 
 def test_failed_first_deployment_does_not_fabricate_rollback(tmp_path: Path) -> None:

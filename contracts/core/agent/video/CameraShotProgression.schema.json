@@ -1,0 +1,48 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video/CameraShotProgression/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "单个镜头节拍内的起止景别及其变化方式。",
+  "properties": {
+    "changeMode": {
+      "enum": [
+        "continuous",
+        "cut",
+        "match_cut",
+        "impact_cut"
+      ],
+      "title": "Changemode",
+      "type": "string"
+    },
+    "endShotSize": {
+      "enum": [
+        "大全景",
+        "全景",
+        "中景",
+        "近景",
+        "特写"
+      ],
+      "title": "Endshotsize",
+      "type": "string"
+    },
+    "startShotSize": {
+      "enum": [
+        "大全景",
+        "全景",
+        "中景",
+        "近景",
+        "特写"
+      ],
+      "title": "Startshotsize",
+      "type": "string"
+    }
+  },
+  "required": [
+    "startShotSize",
+    "endShotSize",
+    "changeMode"
+  ],
+  "title": "CameraShotProgression",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.CameraShotProgression"
+}

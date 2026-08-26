@@ -1,0 +1,45 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/long_serial/SelectionSourceSnapshot/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "content": {
+      "title": "Content",
+      "type": "string"
+    },
+    "contentSha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Contentsha256",
+      "type": "string"
+    },
+    "resourceId": {
+      "minLength": 1,
+      "title": "Resourceid",
+      "type": "string"
+    },
+    "resourceType": {
+      "enum": [
+        "chapter_content",
+        "outline_content",
+        "outline_node_content"
+      ],
+      "title": "Resourcetype",
+      "type": "string"
+    },
+    "updatedAt": {
+      "format": "date-time",
+      "title": "Updatedat",
+      "type": "string"
+    }
+  },
+  "required": [
+    "resourceType",
+    "resourceId",
+    "content",
+    "updatedAt",
+    "contentSha256"
+  ],
+  "title": "SelectionSourceSnapshot",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.long_serial.SelectionSourceSnapshot"
+}

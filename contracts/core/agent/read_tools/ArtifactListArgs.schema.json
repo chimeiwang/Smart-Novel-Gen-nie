@@ -1,0 +1,41 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/read_tools/ArtifactListArgs/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Kind"
+    },
+    "status": {
+      "anyOf": [
+        {
+          "enum": [
+            "draft",
+            "under_review",
+            "awaiting_user",
+            "applying",
+            "applied"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Status"
+    }
+  },
+  "title": "ArtifactListArgs",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.read_tools.ArtifactListArgs"
+}

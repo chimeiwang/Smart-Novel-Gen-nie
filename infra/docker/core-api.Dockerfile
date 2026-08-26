@@ -1,28 +1,49 @@
 # syntax=docker/dockerfile:1.7
-FROM ghcr.io/astral-sh/uv:0.8.15 AS uv
+FROM eclipse-temurin:21-jdk-jammy AS builder
 
-FROM python:3.12-slim AS builder
-WORKDIR /app
-ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy
-COPY --from=uv /uv /uvx /bin/
-COPY pyproject.toml uv.lock .python-version ./
-COPY packages/service-auth/pyproject.toml packages/service-auth/pyproject.toml
-COPY packages/service-auth/src packages/service-auth/src
-COPY packages/service-contracts/pyproject.toml packages/service-contracts/pyproject.toml
-COPY packages/service-contracts/src packages/service-contracts/src
-COPY apps/core-api/pyproject.toml apps/core-api/pyproject.toml
-COPY apps/core-api/src apps/core-api/src
-RUN uv sync --frozen --no-dev --no-editable --package inkforge-core-api
-
-FROM python:3.12-slim AS runtime
+WORKDIR /workspace
+# Temurin builder 默认没有 unzip；Maven Wrapper 否则会改下 tar.gz，导致 zip 锁定哈希失效。
 RUN apt-get update \
-    && apt-get install --no-install-recommends --yes ffmpeg fonts-noto-cjk \
+    && apt-get install --no-install-recommends --yes unzip \
+    && rm -rf /var/lib/apt/lists/*
+COPY .mvn .mvn
+COPY mvnw pom.xml ./
+COPY apps/core-api-java/pom.xml apps/core-api-java/pom.xml
+COPY packages/service-auth-java/pom.xml packages/service-auth-java/pom.xml
+COPY packages/service-contracts-java/pom.xml packages/service-contracts-java/pom.xml
+COPY tools/inkforge-cli-java/pom.xml tools/inkforge-cli-java/pom.xml
+COPY contracts contracts
+COPY packages/service-auth-java packages/service-auth-java
+COPY packages/service-contracts-java packages/service-contracts-java
+COPY apps/core-api-java apps/core-api-java
+COPY apps/core-api/src/inkforge_core/db/schema-contract.json \
+     apps/core-api/src/inkforge_core/db/schema-contract.json
+RUN --mount=type=cache,target=/root/.m2 \
+    chmod 0555 mvnw \
+    && ./mvnw --batch-mode --no-transfer-progress \
+       -pl apps/core-api-java -am -DskipTests clean package
+
+FROM eclipse-temurin:21-jre-jammy AS runtime
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes \
+       ca-certificates curl ffmpeg fonts-noto-cjk \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 inkforge \
     && useradd --uid 10001 --gid 10001 --no-create-home inkforge
+# 空命名卷会继承镜像挂载点的所有权；独立层避免权限调整重建 FFmpeg 与字体。
+RUN install -d -o 10001 -g 10001 /data/uploads
+
 WORKDIR /app
-ENV PATH="/app/.venv/bin:$PATH" PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
-COPY --from=builder --chown=10001:10001 /app/.venv /app/.venv
+COPY --from=builder --chown=10001:10001 \
+     /workspace/apps/core-api-java/target/inkforge-core-api-0.1.0-SNAPSHOT.jar \
+     /app/inkforge-core-api.jar
+COPY --chown=10001:10001 infra/docker/inkforge-schema-guard \
+     /usr/local/bin/inkforge-schema-guard
+RUN chmod 0555 /usr/local/bin/inkforge-schema-guard
+
+LABEL cn.inkforge.core.runtime="java"
+
 USER 10001:10001
 EXPOSE 8000
-CMD ["uvicorn", "inkforge_core.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--no-access-log"]
+ENTRYPOINT ["java", "-jar", "/app/inkforge-core-api.jar"]

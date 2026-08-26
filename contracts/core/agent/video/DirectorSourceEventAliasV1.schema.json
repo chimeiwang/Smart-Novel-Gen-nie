@@ -1,0 +1,48 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video/DirectorSourceEventAliasV1/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "服务器从冻结原文提取的事件族短别名；标签只来自静态白名单。",
+  "properties": {
+    "alias": {
+      "pattern": "^E[0-9]{2}$",
+      "title": "Alias",
+      "type": "string"
+    },
+    "family": {
+      "enum": [
+        "insert",
+        "crush",
+        "open",
+        "touch",
+        "accelerate",
+        "raise",
+        "fall",
+        "smash"
+      ],
+      "title": "Family",
+      "type": "string"
+    },
+    "label": {
+      "maxLength": 16,
+      "minLength": 1,
+      "title": "Label",
+      "type": "string"
+    },
+    "ordinal": {
+      "maximum": 99,
+      "minimum": 1,
+      "title": "Ordinal",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "alias",
+    "ordinal",
+    "family",
+    "label"
+  ],
+  "title": "DirectorSourceEventAliasV1",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.DirectorSourceEventAliasV1"
+}

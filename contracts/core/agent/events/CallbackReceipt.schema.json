@@ -1,0 +1,77 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/events/CallbackReceipt/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "commandStatus": {
+      "anyOf": [
+        {
+          "enum": [
+            "pending",
+            "submitted",
+            "processing",
+            "succeeded",
+            "failed"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Commandstatus"
+    },
+    "disposition": {
+      "enum": [
+        "applied",
+        "already_applied",
+        "rejected"
+      ],
+      "title": "Disposition",
+      "type": "string"
+    },
+    "outboxEventId": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Outboxeventid"
+    },
+    "protocolVersion": {
+      "const": "1.0",
+      "title": "Protocolversion",
+      "type": "string"
+    },
+    "reasonCode": {
+      "minLength": 1,
+      "title": "Reasoncode",
+      "type": "string"
+    },
+    "recoverable": {
+      "title": "Recoverable",
+      "type": "boolean"
+    },
+    "taskPhase": {
+      "minLength": 1,
+      "title": "Taskphase",
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocolVersion",
+    "disposition",
+    "reasonCode",
+    "recoverable",
+    "taskPhase",
+    "commandStatus"
+  ],
+  "title": "CallbackReceipt",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.events.CallbackReceipt"
+}

@@ -1,0 +1,51 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_render/SeedanceRuntimeReference/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "仅存在于受签名内部请求中的短时参考图地址。",
+  "properties": {
+    "assetId": {
+      "minLength": 1,
+      "title": "Assetid",
+      "type": "string"
+    },
+    "mimeType": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Mimetype",
+      "type": "string"
+    },
+    "ordinal": {
+      "maximum": 20,
+      "minimum": 1,
+      "title": "Ordinal",
+      "type": "integer"
+    },
+    "url": {
+      "maxLength": 4096,
+      "minLength": 1,
+      "title": "Url",
+      "type": "string"
+    },
+    "usageRole": {
+      "default": "visual_reference",
+      "enum": [
+        "visual_reference",
+        "initial_state",
+        "transition_anchor",
+        "end_state"
+      ],
+      "title": "Usagerole",
+      "type": "string"
+    }
+  },
+  "required": [
+    "ordinal",
+    "assetId",
+    "mimeType",
+    "url"
+  ],
+  "title": "SeedanceRuntimeReference",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_render.SeedanceRuntimeReference"
+}

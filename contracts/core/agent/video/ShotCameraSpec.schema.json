@@ -1,0 +1,322 @@
+{
+  "$defs": {
+    "CameraCompositionSpec": {
+      "additionalProperties": false,
+      "description": "镜头构图和画面层次。",
+      "properties": {
+        "backgroundLayer": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Backgroundlayer",
+          "type": "string"
+        },
+        "foregroundLayer": {
+          "maxLength": 160,
+          "minLength": 1,
+          "title": "Foregroundlayer",
+          "type": "string"
+        },
+        "headroom": {
+          "enum": [
+            "tight",
+            "standard",
+            "generous",
+            "not_applicable"
+          ],
+          "title": "Headroom",
+          "type": "string"
+        },
+        "rule": {
+          "enum": [
+            "centered",
+            "rule_of_thirds",
+            "symmetrical",
+            "leading_lines",
+            "frame_within_frame",
+            "negative_space"
+          ],
+          "title": "Rule",
+          "type": "string"
+        },
+        "subjectFramePercent": {
+          "maximum": 100,
+          "minimum": 5,
+          "title": "Subjectframepercent",
+          "type": "integer"
+        },
+        "subjectPlacement": {
+          "enum": [
+            "left_third",
+            "center",
+            "right_third",
+            "lower_center",
+            "upper_center"
+          ],
+          "title": "Subjectplacement",
+          "type": "string"
+        }
+      },
+      "required": [
+        "rule",
+        "subjectPlacement",
+        "subjectFramePercent",
+        "headroom",
+        "foregroundLayer",
+        "backgroundLayer"
+      ],
+      "title": "CameraCompositionSpec",
+      "type": "object"
+    },
+    "CameraFocusSpec": {
+      "additionalProperties": false,
+      "description": "景深和焦点迁移计划。",
+      "properties": {
+        "depthOfField": {
+          "enum": [
+            "shallow",
+            "medium",
+            "deep"
+          ],
+          "title": "Depthoffield",
+          "type": "string"
+        },
+        "endTarget": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Endtarget",
+          "type": "string"
+        },
+        "rackDurationSeconds": {
+          "maximum": 30,
+          "minimum": 0,
+          "title": "Rackdurationseconds",
+          "type": "number"
+        },
+        "startTarget": {
+          "maxLength": 120,
+          "minLength": 1,
+          "title": "Starttarget",
+          "type": "string"
+        },
+        "transition": {
+          "enum": [
+            "locked",
+            "rack_focus"
+          ],
+          "title": "Transition",
+          "type": "string"
+        }
+      },
+      "required": [
+        "depthOfField",
+        "startTarget",
+        "endTarget",
+        "transition",
+        "rackDurationSeconds"
+      ],
+      "title": "CameraFocusSpec",
+      "type": "object"
+    },
+    "CameraMovementSpec": {
+      "additionalProperties": false,
+      "description": "单一主运镜；位移与旋转量用于本地可执行性校验。",
+      "properties": {
+        "easing": {
+          "enum": [
+            "none",
+            "ease_in",
+            "ease_out",
+            "ease_in_out"
+          ],
+          "title": "Easing",
+          "type": "string"
+        },
+        "movementType": {
+          "enum": [
+            "locked_off",
+            "dolly_in",
+            "dolly_out",
+            "truck_left",
+            "truck_right",
+            "pan_left",
+            "pan_right",
+            "tilt_up",
+            "tilt_down",
+            "pedestal_up",
+            "pedestal_down",
+            "arc_left",
+            "arc_right",
+            "boom_up",
+            "boom_down",
+            "zoom_in",
+            "zoom_out",
+            "handheld_follow"
+          ],
+          "title": "Movementtype",
+          "type": "string"
+        },
+        "rotationDegrees": {
+          "maximum": 360,
+          "minimum": 0,
+          "title": "Rotationdegrees",
+          "type": "number"
+        },
+        "speed": {
+          "enum": [
+            "static",
+            "very_slow",
+            "slow",
+            "medium",
+            "fast"
+          ],
+          "title": "Speed",
+          "type": "string"
+        },
+        "support": {
+          "enum": [
+            "tripod",
+            "slider",
+            "dolly",
+            "gimbal",
+            "steadicam",
+            "handheld",
+            "shoulder",
+            "jib",
+            "crane"
+          ],
+          "title": "Support",
+          "type": "string"
+        },
+        "travelDistanceMeters": {
+          "maximum": 50,
+          "minimum": 0,
+          "title": "Traveldistancemeters",
+          "type": "number"
+        }
+      },
+      "required": [
+        "support",
+        "movementType",
+        "travelDistanceMeters",
+        "rotationDegrees",
+        "speed",
+        "easing"
+      ],
+      "title": "CameraMovementSpec",
+      "type": "object"
+    },
+    "CameraPositionSpec": {
+      "additionalProperties": false,
+      "description": "相对主体的可复核机位，不把“低机位”等模糊词当成唯一事实。",
+      "properties": {
+        "axisSide": {
+          "enum": [
+            "screen_left",
+            "screen_right",
+            "on_axis"
+          ],
+          "title": "Axisside",
+          "type": "string"
+        },
+        "azimuthDegrees": {
+          "maximum": 180,
+          "minimum": -180,
+          "title": "Azimuthdegrees",
+          "type": "integer"
+        },
+        "elevationDegrees": {
+          "maximum": 90,
+          "minimum": -90,
+          "title": "Elevationdegrees",
+          "type": "integer"
+        },
+        "heightCm": {
+          "maximum": 1000,
+          "minimum": 0,
+          "title": "Heightcm",
+          "type": "integer"
+        },
+        "rollDegrees": {
+          "maximum": 45,
+          "minimum": -45,
+          "title": "Rolldegrees",
+          "type": "integer"
+        },
+        "subjectDistanceMeters": {
+          "exclusiveMinimum": 0,
+          "maximum": 100,
+          "title": "Subjectdistancemeters",
+          "type": "number"
+        }
+      },
+      "required": [
+        "heightCm",
+        "azimuthDegrees",
+        "elevationDegrees",
+        "rollDegrees",
+        "subjectDistanceMeters",
+        "axisSide"
+      ],
+      "title": "CameraPositionSpec",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video/ShotCameraSpec/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "单拍专业摄影规格；所有数值都以生成意图而非硬件遥测解释。",
+  "properties": {
+    "composition": {
+      "$ref": "#/$defs/CameraCompositionSpec"
+    },
+    "endFocalLengthMm": {
+      "maximum": 200,
+      "minimum": 12,
+      "title": "Endfocallengthmm",
+      "type": "integer"
+    },
+    "focalLengthMm": {
+      "maximum": 200,
+      "minimum": 12,
+      "title": "Focallengthmm",
+      "type": "integer"
+    },
+    "focus": {
+      "$ref": "#/$defs/CameraFocusSpec"
+    },
+    "lensType": {
+      "enum": [
+        "prime",
+        "zoom",
+        "macro_prime"
+      ],
+      "title": "Lenstype",
+      "type": "string"
+    },
+    "movement": {
+      "$ref": "#/$defs/CameraMovementSpec"
+    },
+    "position": {
+      "$ref": "#/$defs/CameraPositionSpec"
+    },
+    "tStop": {
+      "maximum": 22,
+      "minimum": 1.0,
+      "title": "Tstop",
+      "type": "number"
+    }
+  },
+  "required": [
+    "lensType",
+    "focalLengthMm",
+    "endFocalLengthMm",
+    "tStop",
+    "position",
+    "composition",
+    "movement",
+    "focus"
+  ],
+  "title": "ShotCameraSpec",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.ShotCameraSpec"
+}

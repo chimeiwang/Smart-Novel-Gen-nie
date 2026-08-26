@@ -1,0 +1,24 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/long_serial/ChapterScope/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "chapterId": {
+      "minLength": 1,
+      "title": "Chapterid",
+      "type": "string"
+    },
+    "kind": {
+      "const": "chapter",
+      "title": "Kind",
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "chapterId"
+  ],
+  "title": "ChapterScope",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.long_serial.ChapterScope"
+}

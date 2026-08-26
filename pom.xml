@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>4.1.1</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>cn.inkforge</groupId>
+  <artifactId>inkforge-parent</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+  <name>InkForge Java 迁移父工程</name>
+
+  <modules>
+    <module>apps/core-api-java</module>
+    <module>packages/service-auth-java</module>
+    <module>packages/service-contracts-java</module>
+    <module>tools/inkforge-cli-java</module>
+  </modules>
+
+  <properties>
+    <java.version>21</java.version>
+    <maven.version>3.9.11</maven.version>
+    <maven.compiler.parameters>true</maven.compiler.parameters>
+    <project.build.outputTimestamp>2026-08-24T00:00:00Z</project.build.outputTimestamp>
+    <spring-modulith.version>2.1.0</spring-modulith.version>
+    <picocli.version>4.7.7</picocli.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>org.springframework.modulith</groupId>
+        <artifactId>spring-modulith-bom</artifactId>
+        <version>${spring-modulith.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <version>3.6.2</version>
+        <executions>
+          <execution>
+            <id>enforce-java-and-maven</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <requireJavaVersion>
+                  <version>[21,22)</version>
+                </requireJavaVersion>
+                <requireMavenVersion>
+                  <version>[${maven.version},4)</version>
+                </requireMavenVersion>
+                <bannedDependencies>
+                  <excludes>
+                    <exclude>com.h2database:h2</exclude>
+                    <exclude>org.flywaydb:*</exclude>
+                    <exclude>org.liquibase:*</exclude>
+                  </excludes>
+                  <searchTransitive>true</searchTransitive>
+                </bannedDependencies>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>0.8.13</version>
+        <executions>
+          <execution>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>report</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>report</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

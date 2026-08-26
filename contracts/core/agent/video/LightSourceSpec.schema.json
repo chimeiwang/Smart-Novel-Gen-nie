@@ -1,0 +1,127 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video/LightSourceSpec/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "一盏有动机、有方向并能描述画面结果的灯。",
+  "properties": {
+    "azimuthDegrees": {
+      "maximum": 180,
+      "minimum": -180,
+      "title": "Azimuthdegrees",
+      "type": "integer"
+    },
+    "beamAngleDegrees": {
+      "maximum": 180,
+      "minimum": 1,
+      "title": "Beamangledegrees",
+      "type": "integer"
+    },
+    "colorTemperatureK": {
+      "maximum": 20000,
+      "minimum": 1500,
+      "title": "Colortemperaturek",
+      "type": "integer"
+    },
+    "delivery": {
+      "enum": [
+        "direct",
+        "diffused",
+        "bounced"
+      ],
+      "title": "Delivery",
+      "type": "string"
+    },
+    "direction": {
+      "enum": [
+        "front",
+        "front_left",
+        "front_right",
+        "side_left",
+        "side_right",
+        "back_left",
+        "back_right",
+        "back",
+        "top",
+        "bottom"
+      ],
+      "title": "Direction",
+      "type": "string"
+    },
+    "elevationDegrees": {
+      "maximum": 90,
+      "minimum": -90,
+      "title": "Elevationdegrees",
+      "type": "integer"
+    },
+    "falloff": {
+      "enum": [
+        "fast",
+        "medium",
+        "slow"
+      ],
+      "title": "Falloff",
+      "type": "string"
+    },
+    "motivatedBy": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Motivatedby",
+      "type": "string"
+    },
+    "quality": {
+      "enum": [
+        "hard",
+        "soft"
+      ],
+      "title": "Quality",
+      "type": "string"
+    },
+    "relativeExposureStops": {
+      "maximum": 8,
+      "minimum": -8,
+      "title": "Relativeexposurestops",
+      "type": "number"
+    },
+    "role": {
+      "enum": [
+        "key",
+        "fill",
+        "rim",
+        "background",
+        "practical"
+      ],
+      "title": "Role",
+      "type": "string"
+    },
+    "spillControl": {
+      "maxLength": 160,
+      "minLength": 1,
+      "title": "Spillcontrol",
+      "type": "string"
+    },
+    "visibleResult": {
+      "maxLength": 240,
+      "minLength": 1,
+      "title": "Visibleresult",
+      "type": "string"
+    }
+  },
+  "required": [
+    "role",
+    "motivatedBy",
+    "direction",
+    "azimuthDegrees",
+    "elevationDegrees",
+    "quality",
+    "delivery",
+    "colorTemperatureK",
+    "relativeExposureStops",
+    "beamAngleDegrees",
+    "falloff",
+    "spillControl",
+    "visibleResult"
+  ],
+  "title": "LightSourceSpec",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.LightSourceSpec"
+}

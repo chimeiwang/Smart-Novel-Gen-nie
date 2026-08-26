@@ -1,0 +1,17 @@
+{
+  "acceptedExamples": [
+    "migration-request-1",
+    "甲-request-2"
+  ],
+  "generatedFormat": "uuid-v4",
+  "header": "X-Request-ID",
+  "maxLength": 128,
+  "minLength": 1,
+  "rejectedExamples": [
+    "",
+    "has\\ncontrol",
+    "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  ],
+  "schemaVersion": "request-id-fixture/1.0",
+  "trimBeforeValidation": true
+}

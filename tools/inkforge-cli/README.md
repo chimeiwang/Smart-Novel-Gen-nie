@@ -5,6 +5,8 @@
 
 ## 本地启动
 
+现行正式入口仍是 Python CLI。在 Java Core 切换验收完成前，不修改生产 Skill 的 executable：
+
 在仓库根目录执行：
 
 ```powershell
@@ -19,6 +21,22 @@ Manager，不写入仓库、普通配置、stdout 或日志。远程 Core 默认
 回环地址。已明确接受风险的受控 wrapper 可以把
 `INKFORGE_CLI_ALLOW_INSECURE_HTTP_ORIGIN` 设置为一个完整 HTTP origin；该放行只匹配这个地址，
 不得使用通配值。
+
+Java 等价候选已实现同一注册表中的 125 个命令。它从冻结公共 OpenAPI 生成并编译客户端契约，但发行包
+只携带独立 CLI 运行时，不依赖 Spring Core、数据库驱动或 Agent。构建和本地运行方式如下：
+
+```bash
+JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home \
+  ./mvnw -pl tools/inkforge-cli-java clean package
+java -jar tools/inkforge-cli-java/target/inkforge-cli.jar auth.login \
+  --origin http://127.0.0.1:8000 \
+  --username <用户名>
+printf '{}\n' | java -jar tools/inkforge-cli-java/target/inkforge-cli.jar auth.whoami
+```
+
+Java 候选在 macOS 只使用 Keychain，在 Windows 只使用 Credential Manager；其他系统明确失败，不会把
+Cookie 降级写入普通文件。其配置路径和命令 stdin/stdout 契约与现有 CLI 相同。逐命令 Python/Java
+差异矩阵、真实开发环境验收和生产 Skill 切换完成前，不得删除或替换上面的 Python 入口。
 
 除登录外，命令都从 stdin 读取一个 UTF-8 JSON 对象，stdout 返回 JSON；`short.agent.watch`、
 `long.task.watch` 和 `long.video.adaptation.watch` 返回 JSONL。例如：

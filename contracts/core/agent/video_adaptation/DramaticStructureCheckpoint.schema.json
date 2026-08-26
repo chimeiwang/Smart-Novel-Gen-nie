@@ -1,0 +1,168 @@
+{
+  "$defs": {
+    "BeatCoverageGoal": {
+      "additionalProperties": false,
+      "description": "一个节拍希望观众获得的内容，不预设必须使用哪类镜头完成。",
+      "properties": {
+        "description": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Description",
+          "type": "string"
+        },
+        "goalKey": {
+          "pattern": "^G[0-9]{2,3}$",
+          "title": "Goalkey",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "story_information",
+            "action",
+            "emotion",
+            "space",
+            "relationship",
+            "motif",
+            "transition"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "priority": {
+          "enum": [
+            "essential",
+            "supporting"
+          ],
+          "title": "Priority",
+          "type": "string"
+        }
+      },
+      "required": [
+        "goalKey",
+        "kind",
+        "priority",
+        "description"
+      ],
+      "title": "BeatCoverageGoal",
+      "type": "object"
+    },
+    "DramaticBeatCheckpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "beatKey": {
+          "pattern": "^B[0-9]{2,3}$",
+          "title": "Beatkey",
+          "type": "string"
+        },
+        "coverageGoals": {
+          "items": {
+            "$ref": "#/$defs/BeatCoverageGoal"
+          },
+          "title": "Coveragegoals",
+          "type": "array"
+        },
+        "dramaticTurn": {
+          "title": "Dramaticturn",
+          "type": "string"
+        },
+        "sourceUnitIds": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Sourceunitids",
+          "type": "array"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "visualStrategy": {
+          "title": "Visualstrategy",
+          "type": "string"
+        }
+      },
+      "required": [
+        "beatKey",
+        "title",
+        "sourceUnitIds",
+        "dramaticTurn",
+        "visualStrategy",
+        "coverageGoals"
+      ],
+      "title": "DramaticBeatCheckpoint",
+      "type": "object"
+    },
+    "DramaticSceneCheckpoint": {
+      "additionalProperties": false,
+      "properties": {
+        "beats": {
+          "items": {
+            "$ref": "#/$defs/DramaticBeatCheckpoint"
+          },
+          "title": "Beats",
+          "type": "array"
+        },
+        "changeSummary": {
+          "title": "Changesummary",
+          "type": "string"
+        },
+        "locationLabel": {
+          "title": "Locationlabel",
+          "type": "string"
+        },
+        "objective": {
+          "title": "Objective",
+          "type": "string"
+        },
+        "sceneKey": {
+          "pattern": "^SC[0-9]{2,3}$",
+          "title": "Scenekey",
+          "type": "string"
+        },
+        "timeLabel": {
+          "title": "Timelabel",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sceneKey",
+        "title",
+        "locationLabel",
+        "timeLabel",
+        "objective",
+        "changeSummary",
+        "beats"
+      ],
+      "title": "DramaticSceneCheckpoint",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/video_adaptation/DramaticStructureCheckpoint/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "scenes": {
+      "items": {
+        "$ref": "#/$defs/DramaticSceneCheckpoint"
+      },
+      "title": "Scenes",
+      "type": "array"
+    },
+    "schemaVersion": {
+      "const": "dramatic_structure_v3",
+      "default": "dramatic_structure_v3",
+      "title": "Schemaversion",
+      "type": "string"
+    }
+  },
+  "required": [
+    "scenes"
+  ],
+  "title": "DramaticStructureCheckpoint",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_adaptation.DramaticStructureCheckpoint"
+}

@@ -3,18 +3,28 @@ set -eu
 
 env_file="${COMPOSE_ENV_FILE:-.env}"
 override_file="${COMPOSE_OVERRIDE_FILE:-}"
+additional_override_file="${COMPOSE_ADDITIONAL_OVERRIDE_FILE:-}"
 agent_max_attempts="${SMOKE_AGENT_MAX_ATTEMPTS:-45}"
 agent_required_successes="${SMOKE_AGENT_REQUIRED_SUCCESSES:-5}"
 agent_poll_seconds="${SMOKE_AGENT_POLL_SECONDS:-2}"
 
 compose() {
   if [ -n "$override_file" ]; then
-    docker compose --env-file "$env_file" -f infra/compose.yaml -f "$override_file" "$@"
+    if [ -n "$additional_override_file" ]; then
+      docker compose --env-file "$env_file" -f infra/compose.yaml \
+        -f "$override_file" -f "$additional_override_file" "$@"
+    else
+      docker compose --env-file "$env_file" -f infra/compose.yaml -f "$override_file" "$@"
+    fi
+  elif [ -n "$additional_override_file" ]; then
+    docker compose --env-file "$env_file" -f infra/compose.yaml \
+      -f "$additional_override_file" "$@"
   else
     docker compose --env-file "$env_file" -f infra/compose.yaml "$@"
   fi
 }
 
+# 先验证轮询参数，避免容器已被探测后才因无效配置产生误导性结果。
 case "$agent_max_attempts" in
   ''|*[!0-9]*|0)
     echo "SMOKE_AGENT_MAX_ATTEMPTS 必须是正整数" >&2
@@ -42,6 +52,15 @@ if [ "$agent_required_successes" -gt "$agent_max_attempts" ]; then
 fi
 
 compose ps
+# 写探针只创建并删除专用空目录：同时验证卷权限，又不覆盖任何真实上传或日志。
+compose exec -T core-api sh -c '
+set -eu
+upload_root="${UPLOADS_ROOT:?缺少 UPLOADS_ROOT}"
+test -d "$upload_root"
+probe_dir="$upload_root/.inkforge-write-probe-$$"
+mkdir "$probe_dir"
+rmdir "$probe_dir"
+'
 compose exec -T agent-service sh -c '
 set -eu
 log_dir="${WORKFLOW_HUMAN_LOG_DIR:?缺少 WORKFLOW_HUMAN_LOG_DIR}"
@@ -60,6 +79,7 @@ case "$port" in
 esac
 base_url="http://127.0.0.1:${port}"
 
+# 从唯一公网入口同时验证页面与公共 API，并确认内部路由没有被 Nginx 暴露。
 curl --fail --silent --show-error "${base_url}/login" >/dev/null
 curl --fail --silent --show-error "${base_url}/api/v1/health/ready" | grep -q '"status":"ready"'
 status="$(curl --silent --output /dev/null --write-out '%{http_code}' "${base_url}/internal/v1/health/live")"
@@ -68,6 +88,7 @@ status="$(curl --silent --output /dev/null --write-out '%{http_code}' "${base_ur
 agent_attempts=0
 agent_consecutive_successes=0
 agent_stable=0
+# 连续成功用于识别“短暂 ready 后重启”的假健康，而不是一次探测成功就放行部署。
 while [ "$agent_attempts" -lt "$agent_max_attempts" ]; do
   agent_attempts=$((agent_attempts + 1))
   agent_output=""

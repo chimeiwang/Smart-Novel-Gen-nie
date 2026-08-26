@@ -1,0 +1,32 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/read_tools/SimilarLoreArgs/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "keyword": {
+      "minLength": 1,
+      "title": "Keyword",
+      "type": "string"
+    },
+    "threshold": {
+      "anyOf": [
+        {
+          "maximum": 1,
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Threshold"
+    }
+  },
+  "required": [
+    "keyword"
+  ],
+  "title": "SimilarLoreArgs",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.read_tools.SimilarLoreArgs"
+}

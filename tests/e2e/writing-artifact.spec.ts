@@ -9,7 +9,7 @@ import {
 
 test.use({ viewport: { width: 1440, height: 900 } });
 
-test("生成正文进入固定审核栏，刷新恢复主会话与待确认产物后可以应用", async ({ page }) => {
+test("生成正文进入共享审核弹窗，刷新恢复主会话与待确认产物后可以应用", async ({ page }) => {
   const reactKeyWarnings: string[] = [];
   page.on("console", (message) => {
     const text = message.text();
@@ -27,17 +27,22 @@ test("生成正文进入固定审核栏，刷新恢复主会话与待确认产�
 
   await page.getByRole("button", { name: /生成正文/ }).click();
 
-  await expect(page.getByRole("button", { name: "应用到项目" }).first()).toBeVisible({
+  const pendingTrigger = page.getByRole("button", { name: /待确认\s*1/ });
+  await expect(pendingTrigger).toBeVisible({
     timeout: 60_000,
   });
-  const reviewRail = page.getByRole("complementary", { name: "当前章节审核栏" });
-  await expect(reviewRail.getByText("本章待确认 1 项", { exact: true })).toBeVisible();
-  await expect(reviewRail.getByRole("button", { name: "应用到项目" })).toBeVisible();
+  await pendingTrigger.click();
+  const artifactTray = page.getByRole("dialog", { name: "审核与确认" });
+  await expect(artifactTray).toBeVisible();
+  await expect(artifactTray.getByRole("button", { name: "应用到项目" })).toBeVisible();
 
-  await reviewRail.getByRole("button", { name: "查看全文/编辑" }).click();
-  const reviewModal = page.locator(".writing-chat.modal-overlay");
-  await expect(reviewModal).toBeVisible();
-  const reviewLayer = await reviewModal.evaluate((element) => Number(getComputedStyle(element).zIndex));
+  await artifactTray.getByRole("button", { name: "查看全文/编辑" }).click();
+  await expect(artifactTray).toHaveCount(0);
+  const reviewDialog = page.getByRole("dialog", { name: "待你确认" });
+  await expect(reviewDialog).toBeVisible();
+  const reviewLayer = await page.locator(".workspace-dialog-overlay").evaluate(
+    (element) => Number(getComputedStyle(element).zIndex),
+  );
   const userLayer = await page.locator(".user-info-bar").evaluate(
     (element) => Number(getComputedStyle(element).zIndex),
   );
@@ -59,10 +64,11 @@ test("生成正文进入固定审核栏，刷新恢复主会话与待确认产�
 
   await page.reload();
   await expect(page.getByRole("button", { name: /历史对话\s*：生成正文/ })).toBeVisible();
-  await expect(reviewRail.getByText("本章待确认 1 项", { exact: true })).toBeVisible({
+  await expect(pendingTrigger).toBeVisible({
     timeout: 30_000,
   });
-  await expect(reviewRail.getByRole("button", { name: "应用到项目" })).toBeVisible({
+  await pendingTrigger.click();
+  await expect(artifactTray.getByRole("button", { name: "应用到项目" })).toBeVisible({
     timeout: 30_000,
   });
   const workspaceBeforeApply = await readWorkspace(page, identity.novelId);
@@ -74,7 +80,7 @@ test("生成正文进入固定审核栏，刷新恢复主会话与待确认产�
     chaptersBeforeApply.find((chapter) => chapter.id === identity.chapterId)?.content,
   ).toBe("");
 
-  await reviewRail.getByRole("button", { name: "应用到项目" }).click();
+  await artifactTray.getByRole("button", { name: "应用到项目" }).click();
   await expect.poll(async () => {
     const workspace = await readWorkspace(page, identity.novelId);
     const chapters = workspace.chapters as Array<{ id: string; content: string }>;
@@ -102,12 +108,15 @@ test("用户可以丢弃待确认草案", async ({ page }) => {
   await prepareWritingOutlineWithApi(page, identity);
   await openWorkspace(page, identity);
   await page.getByRole("button", { name: /生成正文/ }).click();
-  await expect(page.getByRole("button", { name: "丢弃变更" }).first()).toBeVisible({
+  const pendingTrigger = page.getByRole("button", { name: /待确认\s*1/ });
+  await expect(pendingTrigger).toBeVisible({
     timeout: 60_000,
   });
-  await page.getByRole("button", { name: "丢弃变更" }).first().click();
-  await expect(page.getByText("本章待确认 0 项", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("当前没有待确认变更", { exact: true })).toBeVisible();
+  await pendingTrigger.click();
+  const artifactTray = page.getByRole("dialog", { name: "审核与确认" });
+  await artifactTray.getByRole("button", { name: "丢弃变更" }).click();
+  await expect(pendingTrigger).toHaveCount(0);
+  await expect(artifactTray.getByText("暂无待确认变更。", { exact: true })).toBeVisible();
 
   await page.reload();
   const sessionsResponse = await page.request.get(

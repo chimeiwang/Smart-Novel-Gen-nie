@@ -1,0 +1,88 @@
+{
+  "schemaVersion": "inkforge-cli-parity-file/1.0",
+  "cases": [
+    {
+      "command": "short.version.diff",
+      "payload": {
+        "novelId": "n1",
+        "fromVersionId": "v/1",
+        "toVersionId": "v2",
+        "outputFile": "${TMP}/short-diff.json"
+      },
+      "responses": [{"blocks": [{"text": "尾部😀"}]}],
+      "captureFiles": ["short-diff.json"]
+    },
+    {
+      "command": "short.version.get",
+      "payload": {"novelId": "n1", "versionId": "v/1", "outputFile": "${TMP}/short-version.txt"},
+      "responses": [{"id": "v/1", "content": "正文\r\n尾部😀"}],
+      "captureFiles": ["short-version.txt"]
+    },
+    {
+      "command": "long.novel.list",
+      "payload": {"outputFile": "${TMP}/novels.json"},
+      "responses": [{"novels": [{"id": "n1", "name": "完整作品😀"}]}],
+      "captureFiles": ["novels.json"]
+    },
+    {
+      "command": "long.chapter.get",
+      "payload": {"chapterId": "c/1", "outputFile": "${TMP}/chapter.txt"},
+      "responses": [{"id": "c/1", "content": "完整正文\r\n尾部😀", "nullable": null}],
+      "captureFiles": ["chapter.txt"]
+    },
+    {
+      "command": "long.chapter.save",
+      "payload": {
+        "chapterId": "c1",
+        "title": "第一章",
+        "contentFile": "${TMP}/chapter-source.txt",
+        "expectedUpdatedAt": "v1"
+      },
+      "files": {
+        "chapter-source.txt": {"encoding": "utf8", "content": "文件正文\r\n尾部😀"}
+      }
+    },
+    {
+      "command": "long.reference.create",
+      "payload": {
+        "novelId": "n1",
+        "clientRequestId": "reference-create-01",
+        "title": "资料",
+        "type": "note",
+        "contentFile": "${TMP}/reference.txt",
+        "sourceUrl": null
+      },
+      "files": {
+        "reference.txt": {"encoding": "utf8", "content": "资料正文\r\n尾部😀"}
+      }
+    },
+    {
+      "command": "long.video.asset.upload",
+      "payload": {
+        "projectId": "p1",
+        "filePath": "${TMP}/角色.png",
+        "name": "角色身份图",
+        "modality": "image",
+        "duty": "identity"
+      },
+      "files": {
+        "角色.png": {"encoding": "base64", "content": "iVBORwD/8J+YgA=="}
+      }
+    },
+    {
+      "command": "long.video.asset.download",
+      "payload": {"assetId": "a/1", "outputFile": "${TMP}/asset.bin"},
+      "captureFiles": ["asset.bin"]
+    },
+    {
+      "command": "long.video.take.download",
+      "payload": {"takeId": "tk/1", "outputFile": "${TMP}/take.mp4"},
+      "captureFiles": ["take.mp4"]
+    },
+    {
+      "command": "long.video.export.download",
+      "payload": {"exportId": "ex/1", "outputFile": "${TMP}/episode.mp4"},
+      "captureFiles": ["episode.mp4"]
+    }
+  ]
+}

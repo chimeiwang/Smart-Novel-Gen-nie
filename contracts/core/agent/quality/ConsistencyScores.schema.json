@@ -1,0 +1,47 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/quality/ConsistencyScores/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "causalityConsistency": {
+      "maximum": 100,
+      "minimum": 0,
+      "title": "Causalityconsistency",
+      "type": "number"
+    },
+    "characterConsistency": {
+      "maximum": 100,
+      "minimum": 0,
+      "title": "Characterconsistency",
+      "type": "number"
+    },
+    "foreshadowingConsistency": {
+      "maximum": 100,
+      "minimum": 0,
+      "title": "Foreshadowingconsistency",
+      "type": "number"
+    },
+    "timelineConsistency": {
+      "maximum": 100,
+      "minimum": 0,
+      "title": "Timelineconsistency",
+      "type": "number"
+    },
+    "worldRuleConsistency": {
+      "maximum": 100,
+      "minimum": 0,
+      "title": "Worldruleconsistency",
+      "type": "number"
+    }
+  },
+  "required": [
+    "characterConsistency",
+    "worldRuleConsistency",
+    "timelineConsistency",
+    "causalityConsistency",
+    "foreshadowingConsistency"
+  ],
+  "title": "ConsistencyScores",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.quality.ConsistencyScores"
+}

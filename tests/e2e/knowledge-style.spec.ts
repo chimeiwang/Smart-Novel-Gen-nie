@@ -6,6 +6,12 @@ test.use({ viewport: { width: 1440, height: 900 } });
 
 test("创作资料按分组加载，失败可重试并可编辑设定、大纲和参考资料", async ({ page }) => {
   const identity = await createNovelWithApi(page);
+  const closeLibraryDialog = async (name: string) => {
+    await page
+      .getByRole("dialog", { name })
+      .getByRole("button", { name: "关闭", exact: true })
+      .click();
+  };
   let loreAttempts = 0;
   let planningRequests = 0;
   let resourceRequests = 0;
@@ -36,30 +42,44 @@ test("创作资料按分组加载，失败可重试并可编辑设定、大纲�
   expect(resourceRequests).toBe(0);
 
   await page.getByRole("button", { name: "创作资料", exact: true }).click();
+  // 一级入口只切换资料导航；选择具体资料后才按需加载并打开详情。
+  await page.getByRole("button", { name: "角色", exact: true }).click();
   await expect(page.getByRole("button", { name: "重试", exact: true })).toBeVisible();
   expect(loreAttempts).toBe(1);
   expect(planningRequests).toBe(0);
   expect(resourceRequests).toBe(0);
 
   await page.getByRole("button", { name: "重试", exact: true }).click();
-  await expect(page.getByRole("button", { name: "+ 新增设定" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "+ 新增角色" })).toBeVisible();
   expect(loreAttempts).toBe(2);
-  await page.getByRole("button", { name: "+ 新增设定" }).click();
+  await page.getByRole("button", { name: "+ 新增角色" }).click();
   await page.getByPlaceholder("姓名").fill("端到端角色");
   await page.getByRole("button", { name: "新增设定", exact: true }).click();
   await expect(page.getByText("端到端角色")).toBeVisible();
 
+  // 资料详情使用模态弹窗；先关闭当前详情，再从工作区导航选择另一项。
+  await closeLibraryDialog("角色");
   await page.getByRole("button", { name: "故事进展", exact: true }).click();
-  await page.locator(".library-long-textarea").fill("尚未保存的故事进展");
+  const storyProgressDialog = page.getByRole("dialog", { name: "故事进展" });
+  await storyProgressDialog.locator(".library-long-textarea").fill("尚未保存的故事进展");
+  await closeLibraryDialog("故事进展");
   await page.getByRole("button", { name: "故事背景", exact: true }).click();
-  await expect(page.locator(".library-long-textarea")).toHaveValue("");
-  await page.locator(".library-long-textarea").fill("尚未保存的故事背景");
+  const storyBackgroundDialog = page.getByRole("dialog", { name: "故事背景" });
+  await expect(storyBackgroundDialog.locator(".library-long-textarea")).toHaveValue("");
+  await storyBackgroundDialog.locator(".library-long-textarea").fill("尚未保存的故事背景");
+  await closeLibraryDialog("故事背景");
   await page.getByRole("button", { name: "世界设定", exact: true }).click();
-  await expect(page.locator(".library-long-textarea")).toHaveValue("");
+  await expect(
+    page.getByRole("dialog", { name: "世界设定" }).locator(".library-long-textarea"),
+  ).toHaveValue("");
 
+  await closeLibraryDialog("世界设定");
   await page.getByRole("button", { name: "大纲", exact: true }).click();
-  await page.getByPlaceholder(/主角从第一卷离开故乡/).fill("端到端总纲：主角完成一次关键选择。");
-  await page.getByRole("button", { name: "保存总纲" }).click();
+  const outlineDialog = page.getByRole("dialog", { name: "大纲" });
+  await outlineDialog
+    .getByPlaceholder(/主角从第一卷离开故乡/)
+    .fill("端到端总纲：主角完成一次关键选择。");
+  await outlineDialog.getByRole("button", { name: "保存总纲" }).click();
   await expect.poll(async () => {
     const response = await page.request.get(
       `/api/v1/novels/${identity.novelId}/workspace/planning`,
@@ -71,13 +91,16 @@ test("创作资料按分组加载，失败可重试并可编辑设定、大纲�
   expect(planningRequests).toBeGreaterThan(0);
   expect(resourceRequests).toBe(0);
 
+  await closeLibraryDialog("大纲");
   await page.getByRole("button", { name: "参考资料", exact: true }).click();
-  await page.getByPlaceholder("资料标题").fill("端到端资料");
-  await page.getByPlaceholder("资料内容").fill("完整参考资料内容，不允许静默截断。");
-  await page.getByRole("button", { name: "新增参考资料" }).click();
+  const referencesDialog = page.getByRole("dialog", { name: "参考资料" });
+  await referencesDialog.getByPlaceholder("资料标题").fill("端到端资料");
+  await referencesDialog.getByPlaceholder("资料内容").fill("完整参考资料内容，不允许静默截断。");
+  await referencesDialog.getByRole("button", { name: "新增参考资料" }).click();
   await expect(page.getByText("端到端资料")).toBeVisible();
   expect(resourceRequests).toBeGreaterThan(0);
 
+  await closeLibraryDialog("参考资料");
   await page.goto("/styles");
   const styleName = `端到端文风-${Date.now()}`;
   await page.getByPlaceholder("文风名称").fill(styleName);

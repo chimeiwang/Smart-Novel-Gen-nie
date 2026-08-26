@@ -694,6 +694,7 @@ export function WritingConversation({
     operationStage: currentOperationStage,
     activeReviewArtifact,
   } = workspace;
+  // React state负责渲染；对应 Ref 同步保存异步回调的“当前所有者”，防止旧请求读到闭包快照后改写新会话。
   const currentSessionIdRef = useRef<string | null>(null);
   const taskIdRef = useRef<string | null>(null);
   const activeReviewArtifactRef = useRef<ReviewArtifactData | null>(null);
@@ -957,6 +958,7 @@ export function WritingConversation({
   }, [novelId, chapterId]);
 
   const loadReviewArtifacts = useCallback(async (knownSessions?: readonly Session[]) => {
+    // version 淘汰同一会话内的旧请求，epoch 同时覆盖切换会话、应用/删除 Artifact 等语义边界。
     const requestVersion = ++artifactCollectionVersionRef.current;
     const requestEpoch = reviewStateEpochRef.current.capture();
     const isCurrentRequest = () => (
@@ -996,6 +998,7 @@ export function WritingConversation({
       const hasPartialFailure = sessionResults.some((result) => result.status === "rejected") ||
         artifactResults.some((result) => result.status === "rejected");
       const visibleCurrentArtifact = activeReviewArtifactRef.current;
+      // 部分请求失败时保留已知事实；全部成功时才允许权威快照清除已不存在的托盘项。
       setReviewArtifacts((previous) => mergeActionableReviewArtifacts(
         ...(hasPartialFailure ? [previous] : []),
         fetchedArtifacts,
@@ -1007,7 +1010,10 @@ export function WritingConversation({
   }, [chapterId, novelId]);
 
   // 加载会话消息
-  const loadSessionMessages = useCallback(async (sessionId: string) => {
+  const loadSessionMessages = useCallback(async (
+    sessionId: string,
+    options: { preserveWorkspaceState?: boolean } = {},
+  ) => {
     const requestVersion = sessionLoadVersionRef.current;
     try {
       const session = requireApiData(await browserApi.GET(
@@ -1031,13 +1037,16 @@ export function WritingConversation({
           timestamp: new Date(m.createdAt).getTime(),
         }));
 
+        setMessages(loadedMessages);
+        // 终态对账只替换权威消息；当前 SSE 已经收敛出的阶段和审核状态不能被旧快照覆盖。
+        if (options.preserveWorkspaceState) return;
+
         const sessionTaskState = resolveLoadedSessionRecoveryState(session.currentTask ?? null);
         setReviewDialogArtifact(null);
         updateReviewArtifactAction(null);
         setShowReviewArtifactModal(false);
         setReviewDraftSourceKey(null);
         setReviewDraftText("");
-        setMessages(loadedMessages);
         replaceSessionWorkspace({
           sessionId,
           taskId: sessionTaskState.taskId,
@@ -1308,6 +1317,7 @@ export function WritingConversation({
   }, []);
 
   const setWorkflowReviewArtifact = useCallback((artifact: ReviewArtifactData) => {
+    // SSE 只提示“有结果可读”；传入对象必须来自 Core 回读，不能把流事件自身当作 Artifact 权威数据。
     const nextTaskId = resolveReviewArtifactTaskId(taskIdRef.current ?? taskId, artifact);
     if (nextTaskId && nextTaskId !== taskIdRef.current) {
       setTaskId(nextTaskId);
@@ -1325,6 +1335,7 @@ export function WritingConversation({
 
   const inspectReviewArtifactFromTray = useCallback((artifact: ReviewArtifactData) => {
     setReviewArtifacts((prev) => mergeActionableReviewArtifacts(prev, [artifact]));
+    // 先关闭托盘再开详情，避免两个对话框叠放后焦点和 Esc 关闭顺序失控。
     setShowArtifactTray(false);
     openReviewArtifactModal(artifact);
   }, [openReviewArtifactModal]);
@@ -1343,6 +1354,7 @@ export function WritingConversation({
   }, [reviewDialogArtifact, setActiveReviewArtifact]);
 
   const clearTerminalReviewState = useCallback((streamTaskId: string) => {
+    // 先推进 epoch，使仍在途的 Artifact 拉取失效，避免终态清理后又被旧响应“复活”。
     reviewStateEpochRef.current.invalidate();
     const transientArtifactIds = new Set<string>();
     const activeArtifact = activeReviewArtifactRef.current;
@@ -1445,6 +1457,7 @@ export function WritingConversation({
         break;
 
       case "run_outcome": {
+        // 只有 Core 投影出的 run_outcome 才结算审核动作；legacy done/error 仅用于刷新或展示。
         const decision = mapLongRunOutcome(event);
         const pendingAction = (
           reviewArtifactActionRef.current?.artifactId === artifactId
@@ -1836,6 +1849,7 @@ export function WritingConversation({
         break;
 
       case "run_outcome": {
+        // 运行完成、失败和待确认均以 PostgreSQL 投影的 outcome 为准，流连接结束本身不代表业务终态。
         const decision = mapLongRunOutcome(event);
         if (decision.kind === "continue") break;
 
@@ -1860,6 +1874,7 @@ export function WritingConversation({
           void refreshAwaitingReviewArtifact("run_outcome_waiting_user");
           void loadReviewArtifacts();
           void loadSessions();
+          void loadSessionMessages(scope.sessionId, { preserveWorkspaceState: true });
           break;
         }
         clearTerminalReviewState(streamTaskId);
@@ -1882,6 +1897,7 @@ export function WritingConversation({
           addFlowLog({ type: "phase", content: "会话已按权威状态完成" });
           void loadSessions();
           void loadReviewArtifacts();
+          void loadSessionMessages(scope.sessionId, { preserveWorkspaceState: true });
           if (completionEffectGuardRef.current.claim(streamTaskId, event)) {
             onComplete?.();
           }
@@ -1930,7 +1946,7 @@ export function WritingConversation({
         console.debug("[SSE] 未处理的事件类型:", (event as { type: string }).type, event);
         break;
     }
-  }, [messages.length, addActivityEntry, addMessage, addFlowLog, applyAgentLiveAction, attachActivityRoundToMessage, clearAgentLiveRuns, clearTerminalReviewState, discardActivityRound, finishActivityRound, formatOperationLog, getAgentName, handleDetachedArtifactEvent, loadSessions, loadReviewArtifacts, onComplete, refreshAwaitingReviewArtifact, scheduleReviewArtifactModalClose, setCurrentOperation, setCurrentOperationStage, setPhase, setTaskId, startActivityRound, updateReviewArtifactAction]);
+  }, [messages.length, addActivityEntry, addMessage, addFlowLog, applyAgentLiveAction, attachActivityRoundToMessage, clearAgentLiveRuns, clearTerminalReviewState, discardActivityRound, finishActivityRound, formatOperationLog, getAgentName, handleDetachedArtifactEvent, loadSessionMessages, loadSessions, loadReviewArtifacts, onComplete, refreshAwaitingReviewArtifact, scheduleReviewArtifactModalClose, setCurrentOperation, setCurrentOperationStage, setPhase, setTaskId, startActivityRound, updateReviewArtifactAction]);
 
   const runSendAction = useCallback(<T,>(action: () => Promise<T>) => {
     return sendGuardRef.current.run(action);
@@ -2099,11 +2115,7 @@ export function WritingConversation({
   };
 
   const openArtifactTray = () => {
-    const currentArtifact = activeReviewArtifactRef.current;
-    if (currentArtifact?.status === "awaiting_user") {
-      openReviewArtifactModal(currentArtifact);
-      return;
-    }
+    // 所有待确认产物都先进入同一审核托盘，避免当前会话和历史会话出现两套入口语义。
     void loadReviewArtifacts();
     setShowArtifactTray(true);
   };
@@ -2130,6 +2142,7 @@ export function WritingConversation({
     signal?: AbortSignal,
   ): Promise<void> => {
     let lastOutcomeSignature: string | null = null;
+    // cursor 只负责断线续传和去重；每轮连接最终仍回读 /runs/{taskId}，校正漏帧与代理缓存。
     const sseState = eventCursorsRef.current.state(streamTaskId);
 
     const applyFrame = (frame: string): boolean => {
@@ -2203,6 +2216,7 @@ export function WritingConversation({
       },
       handleOutcome: (outcome) => {
         const signature = runOutcomeSignature(outcome);
+        // 若流中已处理相同 outcome，就跳过重复 UI 副作用；签名不同则以最后一次权威回读收敛。
         if (signature !== lastOutcomeSignature) {
           handleEvent(outcome, scope, streamTaskId);
         }
@@ -2669,7 +2683,7 @@ export function WritingConversation({
                 className="button ghost sm"
                 type="button"
                 disabled={isSending || isActing || actionLocked}
-                onClick={() => openReviewArtifactModal(artifact)}
+                onClick={() => inspectReviewArtifactFromTray(artifact)}
               >
                 查看全文/编辑
               </button>
@@ -2714,7 +2728,7 @@ export function WritingConversation({
               <button
                 className="button ghost sm"
                 type="button"
-                onClick={() => openReviewArtifactModal(artifact)}
+                onClick={() => inspectReviewArtifactFromTray(artifact)}
               >
                 查看变更
               </button>
@@ -3007,7 +3021,7 @@ export function WritingConversation({
 
   const currentSession = sessions.find(s => s.id === currentSessionId);
   const workflowReviewArtifact = resolveVisibleReviewArtifact(optimisticReviewArtifact, messages);
-  const reviewRailArtifacts = mergeActionableReviewArtifacts(
+  const artifactTrayArtifacts = mergeActionableReviewArtifacts(
     reviewArtifacts,
     workflowReviewArtifact ? [workflowReviewArtifact] : [],
   );
@@ -3023,7 +3037,7 @@ export function WritingConversation({
       : reviewDialogArtifact ?? workflowReviewArtifact;
   const modalReviewArtifactAction = modalReviewArtifact ? getReviewArtifactAction(modalReviewArtifact.id) : null;
   const isReviewArtifactModalLocked = isReviewArtifactActionLocked(modalReviewArtifactAction);
-  const effectiveAwaitingArtifactCount = reviewRailArtifacts.length;
+  const effectiveAwaitingArtifactCount = artifactTrayArtifacts.length;
   const nextActions = composeWritingTaskActions({
     chapterStatus: chapterContext?.status,
     wordCount: chapterContext?.wordCount ?? 0,
@@ -3382,14 +3396,14 @@ export function WritingConversation({
       <WorkspaceDialog
         open={showArtifactTray}
         title="审核与确认"
-        description={`当前章节共有 ${reviewRailArtifacts.length} 项待确认变更`}
+        description={`当前章节共有 ${artifactTrayArtifacts.length} 项待确认变更`}
         variant="compact"
         onClose={() => setShowArtifactTray(false)}
       >
         <div className="artifact-tray-body">
-          {reviewRailArtifacts.length === 0 ? (
+          {artifactTrayArtifacts.length === 0 ? (
             <div className="artifact-empty">暂无待确认变更。</div>
-          ) : reviewRailArtifacts.map((artifact) => (
+          ) : artifactTrayArtifacts.map((artifact) => (
             <div className="artifact-tray-review-card" key={artifact.id}>
               {renderArtifactReviewCard(artifact)}
             </div>

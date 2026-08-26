@@ -1,0 +1,53 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video/CameraFocusSpec/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "景深和焦点迁移计划。",
+  "properties": {
+    "depthOfField": {
+      "enum": [
+        "shallow",
+        "medium",
+        "deep"
+      ],
+      "title": "Depthoffield",
+      "type": "string"
+    },
+    "endTarget": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Endtarget",
+      "type": "string"
+    },
+    "rackDurationSeconds": {
+      "maximum": 30,
+      "minimum": 0,
+      "title": "Rackdurationseconds",
+      "type": "number"
+    },
+    "startTarget": {
+      "maxLength": 120,
+      "minLength": 1,
+      "title": "Starttarget",
+      "type": "string"
+    },
+    "transition": {
+      "enum": [
+        "locked",
+        "rack_focus"
+      ],
+      "title": "Transition",
+      "type": "string"
+    }
+  },
+  "required": [
+    "depthOfField",
+    "startTarget",
+    "endTarget",
+    "transition",
+    "rackDurationSeconds"
+  ],
+  "title": "CameraFocusSpec",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video.CameraFocusSpec"
+}

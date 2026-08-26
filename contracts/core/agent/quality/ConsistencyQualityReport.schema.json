@@ -1,0 +1,163 @@
+{
+  "$defs": {
+    "ConsistencyIssue": {
+      "additionalProperties": false,
+      "properties": {
+        "dimension": {
+          "enum": [
+            "character",
+            "world_rule",
+            "timeline",
+            "causality",
+            "foreshadowing"
+          ],
+          "title": "Dimension",
+          "type": "string"
+        },
+        "evidence": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Evidence",
+          "type": "string"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Location"
+        },
+        "message": {
+          "maxLength": 500,
+          "minLength": 1,
+          "title": "Message",
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "warning",
+            "error"
+          ],
+          "title": "Severity",
+          "type": "string"
+        },
+        "suggestion": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Suggestion",
+          "type": "string"
+        }
+      },
+      "required": [
+        "dimension",
+        "severity",
+        "message",
+        "evidence",
+        "suggestion"
+      ],
+      "title": "ConsistencyIssue",
+      "type": "object"
+    },
+    "ConsistencyScores": {
+      "additionalProperties": false,
+      "properties": {
+        "causalityConsistency": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Causalityconsistency",
+          "type": "number"
+        },
+        "characterConsistency": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Characterconsistency",
+          "type": "number"
+        },
+        "foreshadowingConsistency": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Foreshadowingconsistency",
+          "type": "number"
+        },
+        "timelineConsistency": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Timelineconsistency",
+          "type": "number"
+        },
+        "worldRuleConsistency": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Worldruleconsistency",
+          "type": "number"
+        }
+      },
+      "required": [
+        "characterConsistency",
+        "worldRuleConsistency",
+        "timelineConsistency",
+        "causalityConsistency",
+        "foreshadowingConsistency"
+      ],
+      "title": "ConsistencyScores",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/quality/ConsistencyQualityReport/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "issues": {
+      "items": {
+        "$ref": "#/$defs/ConsistencyIssue"
+      },
+      "maxItems": 100,
+      "title": "Issues",
+      "type": "array"
+    },
+    "qualityGate": {
+      "enum": [
+        "pass",
+        "revise"
+      ],
+      "title": "Qualitygate",
+      "type": "string"
+    },
+    "report": {
+      "minLength": 1,
+      "title": "Report",
+      "type": "string"
+    },
+    "rewriteBrief": {
+      "anyOf": [
+        {
+          "maxLength": 1000,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Rewritebrief"
+    },
+    "scores": {
+      "$ref": "#/$defs/ConsistencyScores"
+    }
+  },
+  "required": [
+    "scores",
+    "qualityGate",
+    "issues",
+    "report"
+  ],
+  "title": "ConsistencyQualityReport",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.quality.ConsistencyQualityReport"
+}

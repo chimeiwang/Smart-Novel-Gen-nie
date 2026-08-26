@@ -1,0 +1,48 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/jobs/AgentJobAccepted/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "jobId": {
+      "minLength": 1,
+      "title": "Jobid",
+      "type": "string"
+    },
+    "protocolVersion": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Protocolversion",
+      "type": "string"
+    },
+    "runId": {
+      "minLength": 1,
+      "title": "Runid",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "queued",
+        "running",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "taskId": {
+      "minLength": 1,
+      "title": "Taskid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "jobId",
+    "runId",
+    "taskId",
+    "status"
+  ],
+  "title": "AgentJobAccepted",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.jobs.AgentJobAccepted"
+}

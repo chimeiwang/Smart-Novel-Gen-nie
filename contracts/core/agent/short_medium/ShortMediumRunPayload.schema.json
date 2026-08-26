@@ -1,0 +1,260 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/short_medium/ShortMediumRunPayload/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "baseContent": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Basecontent"
+    },
+    "baseContentHash": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Basecontenthash"
+    },
+    "baseVersionId": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Baseversionid"
+    },
+    "chapterId": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Chapterid"
+    },
+    "contextAfter": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Contextafter"
+    },
+    "contextBefore": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Contextbefore"
+    },
+    "documentType": {
+      "enum": [
+        "outline",
+        "manuscript"
+      ],
+      "title": "Documenttype",
+      "type": "string"
+    },
+    "operation": {
+      "enum": [
+        "generate_outline",
+        "generate_manuscript",
+        "replace_selection",
+        "full_check"
+      ],
+      "title": "Operation",
+      "type": "string"
+    },
+    "selectedText": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Selectedtext"
+    },
+    "selectedTextHash": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Selectedtexthash"
+    },
+    "selectionEnd": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Selectionend"
+    },
+    "selectionStart": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Selectionstart"
+    },
+    "sourceKind": {
+      "anyOf": [
+        {
+          "enum": [
+            "idea",
+            "opening",
+            "ending",
+            "outline",
+            "mixed"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Sourcekind"
+    },
+    "sourceOutlineContent": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Sourceoutlinecontent"
+    },
+    "sourceOutlineContentHash": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Sourceoutlinecontenthash"
+    },
+    "sourceOutlineVersionId": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Sourceoutlineversionid"
+    },
+    "sourceText": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Sourcetext"
+    },
+    "targetTotalWordCount": {
+      "anyOf": [
+        {
+          "maximum": 80000,
+          "minimum": 6000,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Targettotalwordcount"
+    },
+    "userInstruction": {
+      "anyOf": [
+        {
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Userinstruction"
+    },
+    "workflow": {
+      "const": "short_medium",
+      "title": "Workflow",
+      "type": "string"
+    }
+  },
+  "required": [
+    "workflow",
+    "operation",
+    "documentType"
+  ],
+  "title": "ShortMediumRunPayload",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.short_medium.ShortMediumRunPayload"
+}

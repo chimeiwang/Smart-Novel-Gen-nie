@@ -1,0 +1,1756 @@
+{
+  "commands": [
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "argv_tty",
+      "mutation": false,
+      "name": "auth.login",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.auth:login",
+      "requiresClientRequestId": false,
+      "requiresIdentity": false
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "auth.logout",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.auth:logout",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "auth.whoami",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.auth:whoami",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "short.list",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.short.documents:list_novels",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "short.create",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.short.documents:create",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "short.pull",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.short.documents:pull",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "short.draft.save",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.short.documents:draft_save",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "short.version.preview",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.short.versions:preview",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "short.version.submit",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.short.versions:submit",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "short.version.list",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.short.versions:list_versions",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "short.version.diff",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.short.versions:diff",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": "content",
+        "kind": "primary_text",
+        "mediaType": "text/plain; charset=utf-8"
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "short.version.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.short.versions:get",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "short.version.adopt",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.short.versions:adopt",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "short.version.restore",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.short.versions:restore",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "short.agent.start",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.short.agents:start",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "short.agent.watch",
+      "outputMode": "jsonl",
+      "pythonHandler": "inkforge_cli.commands.short.agents:watch",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.novel.list",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.read:list_novels",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.novel.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.read:get_novel",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.novel.create",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.novels:create_novel",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.novel.summary.save",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.novels:save_summary",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.chapter.list",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.read:list_chapters",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": "content",
+        "kind": "primary_text",
+        "mediaType": "text/plain; charset=utf-8"
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.chapter.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.read:get_chapter",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.session.list",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.read:list_sessions",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.session.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.read:get_session",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.planning.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.knowledge:get_planning",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.lore.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.knowledge:get_lore",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.resources.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.knowledge:get_resources",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.outline-node.list",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.knowledge:list_outline_nodes",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.foreshadowing.list",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.knowledge:list_foreshadowings",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.task.list",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.tasks:list_tasks",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.task.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.tasks:get_task",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.task.watch",
+      "outputMode": "jsonl",
+      "pythonHandler": "inkforge_cli.commands.long.tasks:watch",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.artifact.list",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.knowledge:list_artifacts",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.artifact.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.knowledge:get_artifact",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.quality.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.knowledge:get_quality_check",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.chapter.create",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.chapters:create",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.chapter.save",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.chapters:save",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.chapter.status",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.chapters:update_status",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.chapter.progress.save",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.chapters:save_progress",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.agent.start",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.task_mutations:start_agent",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.task.resume",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.task_mutations:resume_task",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.task.cancel",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.task_mutations:cancel_task",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.artifact.approve",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.artifacts:approve",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.artifact.revise",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.artifacts:revise",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.artifact.discard",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.artifacts:discard",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.quality.run",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.quality:run",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.quality.skip",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.quality:skip",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.quality.reset",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.quality:reset",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.outline.save",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.planning_mutations:save_outline",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.story-background.save",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.planning_mutations:save_story_background",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.world-setting.save",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.planning_mutations:save_world_setting",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.writing-bible.save",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.planning_mutations:save_writing_bible",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.story-progress.save",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.planning_mutations:save_story_progress",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.plot-progress.save",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.planning_mutations:save_plot_progress",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.outline-node.create",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.outline_nodes:create_node",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.outline-node.update",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.outline_nodes:update_node",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.outline-node.delete",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.outline_nodes:delete_node",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.character.create",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.lore_entities:_create_handler.<locals>.create_entity",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.character.update",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.lore_entities:_update_handler.<locals>.update_entity",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.character.delete",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.lore_entities:_delete_handler.<locals>.delete_entity",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.location.create",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.lore_entities:_create_handler.<locals>.create_entity",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.location.update",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.lore_entities:_update_handler.<locals>.update_entity",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.location.delete",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.lore_entities:_delete_handler.<locals>.delete_entity",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.faction.create",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.lore_entities:_create_handler.<locals>.create_entity",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.faction.update",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.lore_entities:_update_handler.<locals>.update_entity",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.faction.delete",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.lore_entities:_delete_handler.<locals>.delete_entity",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.item.create",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.lore_entities:_create_handler.<locals>.create_entity",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.item.update",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.lore_entities:_update_handler.<locals>.update_entity",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.item.delete",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.lore_entities:_delete_handler.<locals>.delete_entity",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.glossary.create",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.lore_entities:_create_handler.<locals>.create_entity",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.glossary.update",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.lore_entities:_update_handler.<locals>.update_entity",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.glossary.delete",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.lore_entities:_delete_handler.<locals>.delete_entity",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.relation.create",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.lore_relationships:create_relation",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.relation.update",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.lore_relationships:update_relation",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.relation.delete",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.lore_relationships:delete_relation",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.experience.create",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.lore_relationships:create_experience",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.experience.update",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.lore_relationships:update_experience",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.lore.experience.delete",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.lore_relationships:delete_experience",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.reference.create",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.references:create_reference",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.reference.update",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.references:update_reference",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.reference.delete",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.references:delete_reference",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.reference.reindex",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.references:reindex_reference",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.style.apply",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.styles:apply_style",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.style.clear",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.styles:clear_style",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.project.list",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.projects:list_projects",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.project.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.projects:get_project",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.project.create",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.projects:create_project",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.asset.upload",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.projects:upload_asset",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.asset.rights",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.projects:update_asset_rights",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.asset.download",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.projects:download_asset",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.asset.preview",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.projects:preview_asset",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.adaptation.list",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.adaptations:list_adaptations",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.adaptation.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.adaptations:get_adaptation",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.adaptation.create",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.adaptations:create_adaptation",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.adaptation.watch",
+      "outputMode": "jsonl",
+      "pythonHandler": "inkforge_cli.commands.long.video.adaptations:watch_adaptation",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.plan.start",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.adaptations:start_plan",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.plan.confirm",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.adaptations:confirm_plan",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.plan.discard",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.adaptations:discard_plan_candidate",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.episode.save",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.adaptations:save_episode_plan",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.prompt.start",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.adaptations:start_prompts",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.prompt.save",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.adaptations:save_prompt",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.canon.list",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.visuals:list_canons",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.canon.candidate.set",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.visuals:set_canon_candidate",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.canon.approve",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.visuals:approve_canon",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.reference.save",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.visuals:save_references",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.render.list",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.renders:list_renders",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.render.start",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.renders:start_render",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.render.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.renders:get_render",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.render.retry",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.renders:retry_render",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.render.watch",
+      "outputMode": "jsonl",
+      "pythonHandler": "inkforge_cli.commands.long.video.renders:watch_render",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.take.confirm",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.renders:confirm_take",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.take.download",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.renders:download_take",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.post.show",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.post_production:show_post_production",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.keyframe.set",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.post_production:set_keyframe",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.keyframe.clear",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.post_production:clear_keyframe",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.keyframe.extract",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.post_production:extract_keyframe",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.edit.save",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.post_production:save_edit",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.edit.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.post_production:get_edit",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.mix.save",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.post_production:save_mix",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.mix.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.post_production:get_mix",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.export.start",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.post_production:start_export",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "data_json",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.export.get",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.post_production:get_export",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": true,
+      "name": "long.video.export.retry",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.post_production:retry_export",
+      "requiresClientRequestId": true,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.export.watch",
+      "outputMode": "jsonl",
+      "pythonHandler": "inkforge_cli.commands.long.video.post_production:watch_export",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    },
+    {
+      "fileOutput": {
+        "field": null,
+        "kind": "none",
+        "mediaType": null
+      },
+      "inputMode": "json",
+      "mutation": false,
+      "name": "long.video.export.download",
+      "outputMode": "json",
+      "pythonHandler": "inkforge_cli.commands.long.video.post_production:download_export",
+      "requiresClientRequestId": false,
+      "requiresIdentity": true
+    }
+  ],
+  "schemaVersion": "inkforge-cli-command-registry/1.0",
+  "source": "tools/inkforge-cli/src/inkforge_cli/registry.py"
+}

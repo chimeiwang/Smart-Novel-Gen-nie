@@ -1,0 +1,23 @@
+{
+  "code": "VALIDATION_ERROR",
+  "details": [
+    {
+      "message": "缺少必需字段",
+      "path": [
+        "body",
+        "clientRequestId"
+      ],
+      "type": "missing"
+    },
+    {
+      "message": "包含不允许的字段",
+      "path": [
+        "body",
+        "unknown"
+      ],
+      "type": "extra_forbidden"
+    }
+  ],
+  "message": "请求参数校验失败",
+  "requestId": "migration-baseline-request-1"
+}

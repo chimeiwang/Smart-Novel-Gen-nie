@@ -1,0 +1,43 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/video_adaptation/CoverageGoalDraft/1.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "模型只描述目标，稳定 G 编号由 Agent 按时间线物化。",
+  "properties": {
+    "description": {
+      "maxLength": 500,
+      "minLength": 1,
+      "title": "Description",
+      "type": "string"
+    },
+    "kind": {
+      "enum": [
+        "story_information",
+        "action",
+        "emotion",
+        "space",
+        "relationship",
+        "motif",
+        "transition"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "priority": {
+      "enum": [
+        "essential",
+        "supporting"
+      ],
+      "title": "Priority",
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind",
+    "priority",
+    "description"
+  ],
+  "title": "CoverageGoalDraft",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.video_adaptation.CoverageGoalDraft"
+}
