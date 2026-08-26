@@ -130,6 +130,7 @@ def test_java_failures_are_published_to_the_workflow_summary() -> None:
 
     assert "maven-verify.log" in source
     assert "## Java 迁移工作区验证失败" in source
+    assert "grep -E -A 8 '<<< (FAILURE|ERROR)!' maven-verify.log" in source
     assert 'annotation="$(tail -n 20 maven-verify.log)"' in source
     assert "::error title=Java 迁移工作区验证失败::" in source
 
