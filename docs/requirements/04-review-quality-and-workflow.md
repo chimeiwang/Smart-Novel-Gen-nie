@@ -291,6 +291,9 @@ sequenceDiagram
 - 越权返回 403。
 - 检查项不存在返回 404。
 - Agent 无报告或保存失败时，检查项标记 failed，任务标记 error。
+- 模型授权、供应商传输或用量回报明确声明可重试时，不得提前把检查项标记 failed；队列必须使用同一
+  WorkflowRun/jobId 重试。明确不可重试错误在失败回调成功后收敛单条任务，不得因此重启整个消费者；未知
+  程序异常仍由消费者监督器暴露为不健康。
 - 模型返回长度截断、内容过滤、矛盾完成原因或无合法工具调用的 unknown 响应时，Agent Service 在接受报告或执行回调前失败；日志保留供应商原始完成原因。
 - 内部回调必须校验用户、小说、检查项和运行的绑定关系，不得使用另一次运行的结果覆盖当前检查。
 - 正文变化后，检查项重置为 pending，仍在 pending/running 的旧 WorkflowRun 标记 cancelled，错误码为 `QUALITY_SOURCE_CHANGED`。

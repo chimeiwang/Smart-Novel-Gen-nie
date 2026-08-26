@@ -433,6 +433,10 @@ Provider 必须提供规范化完成原因并保留供应商原始值。`length`
 - 草案进入等待用户确认时，Agent Service 使用下一个连续序号直接保存稳定快照，不再先直发等待事件；Core 在保存快照的同一事务中创建 `artifact_awaiting_user_approval` Outbox。后续 resume/artifact_decision 命令会在自身事务内作废尚未发布的旧 waiting，Publisher 遇到 waiting 序号竞争时也会再次核对并转为 superseded。长篇 completed/error 稳定 checkpoint 只保存图内终态，数据库任务和命令保持非终态，直到 complete/fail 与 terminal Outbox 在同一事务收敛。SSE 只重放 published 边界事件，跳过 superseded，并在 pending/delivering/blocked 边界前保留原游标等待；同时发送不带游标的 PostgreSQL `run_outcome` 控制帧。客户端在建连或断流后重新读取 outcome，只按 `streamShouldClose` 收敛生命周期，legacy 事件只承担展示兼容且不能直接恢复可操作草案；非 waiting_user 终态按任务清理临时草案入口并使较早的在途读取失效，相同 succeeded outcome 的完成副作用按任务、命令和结果只执行一次。
 - Core 对账器可以强制修复 Redis 中缺失的 queued 索引或完全丢失的运行键，但不得重新打开 Redis 已记录为 completed、failed 或 cancelled 的运行。
 - Agent 队列消费者已在单进程内提供默认三个执行槽，不同 `novelId` 可并行、同一 `novelId` 只执行一个 job，每个 claim 独立续租；共享 `ModelRuntime` 同时把普通 Agent、Reviewer、中短篇、质量和画像的模型调用总数限制为三个。消费槽致命错误会立即停止新领取并使 readiness 失败，其他已领取任务排空后由监督器重启；配置 1 保留串行回退路径。
+- `ModelRuntime` 对授权、供应商和用量回报阶段只输出稳定错误码，并透传下游明确给出的重试决定。质量任务
+  遇到明确可重试错误时保留活动运行并由队列重试；明确不可重试错误只有在 Core 失败回调成功后才按已知
+  任务失败收敛，不得让整个消费者退出；未知程序异常继续触发监督器和 readiness 失败。分类日志只记录
+  job/task/run/check、阶段、稳定错误码、异常类型和重试决定，不记录异常正文、模型输入、令牌或供应商响应。
 - Agent Service 不连接数据库，所有读取工具和业务写入都通过 Core 内部工具网关完成。
 - 生产模型请求使用显式 `ModelExecutionPolicy`：创作/完整重写使用 thinking enabled + high；Reviewer、Quality、问答、复审报告、中短篇 `full_check` 和文风画像使用 thinking disabled。DeepSeek 原始 transport 的 `reasoning_content` 仅用于进程内工具轮次回放，绝不进入稳定快照、ReviewArtifact、Core 用量或人工日志正文。
 - `TokenUsage` 已在应用代码、共享契约和迁移脚本中支持可空 `promptCacheMissTokens`/`reasoningTokens`；服务器 dev 迁移、真实库只读 schema-contract 导出及生产部署仍是远程门禁，未在本地执行或宣称完成。

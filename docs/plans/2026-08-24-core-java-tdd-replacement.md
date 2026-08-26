@@ -477,7 +477,13 @@ FFmpeg/ffprobe，因此实现与隔离测试已完成，但生产镜像内的真
 - [x] 先用 MVC 配置测试证明 SSE 不受默认 30 秒异步总超时截断；
 - [x] 运行相关 JUnit 和完整 `./mvnw verify`；
 - [x] 修复部署 smoke，增加 Java Core 到真实 Uvicorn 的跨服务 POST 协议门禁；
-- [ ] 部署后用具名写作、质量、画像任务回读 PostgreSQL 权威终态，并确认日志中不再新增 h2c 400。
+- [x] 将首轮修复部署到生产，并用具名中短篇、长篇写作和画像任务确认 HTTP/1.1、补投与 SSE 修复生效；
+- [x] 用真实 HTTP 与 PostgreSQL 红灯测试排除显式 `null`，并复现无来源任务的质量运行无法取得模型授权；
+- [x] 修复活动质量 WorkflowRun 的计费归属链，并为 Agent 模型阶段与质量 handler 增加不泄密的重试分类和
+  消费者收敛测试；
+- [x] 使用真实 Java Core + Python Agent 非付费执行器走通质量上下文、模型授权、结构化报告和成功回调；
+- [ ] 再次提交、推送和部署后，用新质量运行回读 PostgreSQL 权威完成态，并确认日志不再新增 h2c 400、
+  `AsyncRequestTimeoutException` 或质量任务导致的消费者意外退出。
 
 **验收：** 不改数据库、OpenAPI、计价和模型策略；生产真实浏览器中的三类 Agent 任务可以从耐久待投递事实
 进入 Python Agent 队列，SSE 跨过 30 秒后保持有效或按权威终态关闭。

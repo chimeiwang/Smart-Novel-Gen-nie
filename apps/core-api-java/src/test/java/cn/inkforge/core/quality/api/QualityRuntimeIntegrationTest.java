@@ -247,6 +247,25 @@ class QualityRuntimeIntegrationTest {
                 false);
         assertThat(secondAccepted.statusCode()).as(secondAccepted.body()).isEqualTo(202);
         String secondRunId = json.readTree(secondAccepted.body()).get("taskId").asText();
+        String nullableContextBody = """
+                {
+                  "userId":"%s",
+                  "novelId":"%s",
+                  "taskId":"%s",
+                  "runId":"%s",
+                  "sourceTaskId":null,
+                  "message":null
+                }
+                """.formatted(userId, novelId, secondRunId, secondRunId);
+        HttpResponse<String> nullableContext = send(
+                "POST",
+                "/internal/v1/quality-checks/" + fixture.checkId() + "/context",
+                nullableContextBody,
+                null,
+                true);
+        assertThat(nullableContext.statusCode()).as(nullableContext.body()).isEqualTo(200);
+        assertThat(json.readTree(nullableContext.body()).get("message").asText())
+                .isEqualTo("检查本章一致性");
         String failureBody = json.writeValueAsString(java.util.Map.of(
                 "userId", userId,
                 "novelId", novelId,

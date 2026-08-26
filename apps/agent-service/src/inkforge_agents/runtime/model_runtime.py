@@ -93,6 +93,15 @@ class ModelCallObserver(Protocol):
     def record_model_failure(self, record: ModelCallFailureLogRecord) -> None: ...
 
 
+class ModelRuntimeStageError(RuntimeError):
+    """保留跨服务或供应商显式给出的重试决定，同时隐藏底层异常正文。"""
+
+    def __init__(self, code: str, message: str, cause: Exception) -> None:
+        self.code = code
+        self.retryable = _explicit_retry_decision(cause)
+        super().__init__(f"{code}：{message}")
+
+
 class ModelRuntime:
     def __init__(
         self,
@@ -184,7 +193,11 @@ class ModelRuntime:
                 request_id,
             )
         except Exception as exc:
-            raise RuntimeError("MODEL_AUTHORIZATION_FAILED：模型授权失败") from exc
+            raise ModelRuntimeStageError(
+                "MODEL_AUTHORIZATION_FAILED",
+                "模型授权失败",
+                exc,
+            ) from exc
         granted_max = authorization.get("maxOutputTokens")
         grant_token = authorization.get("grantToken")
         grant_request_id = authorization.get("requestId")
@@ -224,7 +237,11 @@ class ModelRuntime:
                 grant_request_id,
             )
         except Exception as exc:
-            raise RuntimeError("MODEL_USAGE_REPORT_FAILED：模型用量回报失败") from exc
+            raise ModelRuntimeStageError(
+                "MODEL_USAGE_REPORT_FAILED",
+                "模型用量回报失败",
+                exc,
+            ) from exc
         self._record(
             context,
             request,
@@ -265,7 +282,11 @@ class ModelRuntime:
                             "agent_id": record.context.agentId,
                         },
                     )
-            raise RuntimeError("MODEL_PROVIDER_FAILED：模型供应商调用失败") from exc
+            raise ModelRuntimeStageError(
+                "MODEL_PROVIDER_FAILED",
+                "模型供应商调用失败",
+                exc,
+            ) from exc
 
     def _record(
         self,
@@ -346,6 +367,16 @@ def _safe_exception_type(error: Exception) -> str:
         if len(value) <= 64 and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", value)
         else "UnknownError"
     )
+
+
+def _explicit_retry_decision(error: Exception) -> bool | None:
+    """只透传下游明确声明的决定；未知程序异常继续交给队列监督器处理。"""
+
+    retryable = getattr(error, "retryable", None)
+    if isinstance(retryable, bool):
+        return retryable
+    recoverable = getattr(error, "recoverable", None)
+    return recoverable if isinstance(recoverable, bool) else None
 
 
 def _model_failure_record(

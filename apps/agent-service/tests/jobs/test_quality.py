@@ -13,6 +13,7 @@ from inkforge_agents.providers.base import (
     ModelUsage,
 )
 from inkforge_agents.queue.cancellation import RedisRunCancellation
+from inkforge_agents.queue.consumer import NonRetryableJobError
 from inkforge_agents.queue.repository import QueueJob, RedisRunQueue
 from inkforge_agents.runtime.agent_runner import AgentRunner
 from inkforge_agents.runtime.agent_runtime import AgentRuntime
@@ -208,3 +209,57 @@ async def test_quality_job_binds_queue_job_id_for_runtime_cancellation_guard() -
     assert provider.calls == 1
     assert core.result == quality_report()
     assert core.failure is None
+
+
+@pytest.mark.asyncio
+async def test_quality_job_converges_explicit_non_retryable_failure() -> None:
+    class ExpectedFailure(RuntimeError):
+        retryable = False
+
+    class FailingRunner:
+        async def run(self, request: object) -> None:
+            del request
+            raise ExpectedFailure("模型授权被业务规则拒绝")
+
+    core = Core()
+    workflow_log = WorkflowLog()
+
+    with pytest.raises(NonRetryableJobError):
+        await QualityJobHandler(
+            core,
+            FailingRunner(),
+            workflow_log=workflow_log,
+        )(quality_job())
+
+    assert core.failure == "质量检查运行失败"
+    assert workflow_log.entries[-1] == ("结束", ("quality-check-1", "错误"))
+
+
+@pytest.mark.asyncio
+async def test_quality_job_leaves_explicit_retryable_failure_for_queue_retry() -> None:
+    class RetryableFailure(RuntimeError):
+        retryable = True
+
+    failure = RetryableFailure("计费服务暂时不可用")
+
+    class FailingRunner:
+        async def run(self, request: object) -> None:
+            del request
+            raise failure
+
+    core = Core()
+    workflow_log = WorkflowLog()
+
+    with pytest.raises(RetryableFailure) as caught:
+        await QualityJobHandler(
+            core,
+            FailingRunner(),
+            workflow_log=workflow_log,
+        )(quality_job())
+
+    assert caught.value is failure
+    assert core.failure is None
+    assert workflow_log.entries[-1] == (
+        "结束",
+        ("quality-check-1", "等待重试"),
+    )

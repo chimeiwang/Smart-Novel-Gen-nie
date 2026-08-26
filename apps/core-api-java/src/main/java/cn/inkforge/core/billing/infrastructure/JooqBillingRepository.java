@@ -10,6 +10,7 @@ import static cn.inkforge.core.db.generated.Tables.USER;
 import static cn.inkforge.core.db.generated.Tables.VIDEOADAPTATIONTASK;
 import static cn.inkforge.core.db.generated.Tables.VIDEOGENERATIONTASK;
 import static cn.inkforge.core.db.generated.Tables.VIDEOPROJECT;
+import static cn.inkforge.core.db.generated.Tables.WORKFLOWRUN;
 import static cn.inkforge.core.db.generated.Tables.WRITINGSTYLE;
 import static cn.inkforge.core.db.generated.Tables.WRITINGTASK;
 
@@ -26,6 +27,9 @@ import cn.inkforge.core.billing.application.UsageDataIntegrityException;
 import cn.inkforge.core.billing.application.UsagePair;
 import cn.inkforge.core.billing.application.UsageSnapshot;
 import cn.inkforge.core.billing.domain.BillingPricing;
+import cn.inkforge.core.db.generated.enums.Qualitycheckstatus;
+import cn.inkforge.core.db.generated.enums.Workflowrunkind;
+import cn.inkforge.core.db.generated.enums.Workflowrunstatus;
 import cn.inkforge.core.db.generated.tables.records.CreditledgerRecord;
 import cn.inkforge.core.db.generated.tables.records.TokenusageRecord;
 import cn.inkforge.core.platform.db.CoreDatabase;
@@ -92,6 +96,8 @@ final class JooqBillingRepository implements BillingRepository {
                             STYLEPORTRAITTASK.ID.eq(taskId))
                     .fetchOne(USER.CREDITBALANCEMICROS);
         } else if (balance == null) {
+            // 没有来源 WritingTask 的质量任务按跨服务契约使用 WorkflowRun.id 计费。必须沿活动运行的
+            // 完整归属链授权，不能把公开检查项 ID 当成当前队列任务 ID，也不能只凭 runId 命中任意运行。
             balance = context.select(USER.CREDITBALANCEMICROS)
                     .from(USER)
                     .join(NOVEL)
@@ -100,11 +106,39 @@ final class JooqBillingRepository implements BillingRepository {
                     .on(CHAPTER.NOVELID.eq(NOVEL.ID))
                     .join(CHAPTERQUALITYCHECK)
                     .on(CHAPTERQUALITYCHECK.CHAPTERID.eq(CHAPTER.ID))
+                    .join(WORKFLOWRUN)
+                    .on(
+                            WORKFLOWRUN.SOURCEID.eq(CHAPTERQUALITYCHECK.ID),
+                            WORKFLOWRUN.NOVELID.eq(NOVEL.ID),
+                            WORKFLOWRUN.CHAPTERID.eq(CHAPTER.ID),
+                            WORKFLOWRUN.USERID.eq(USER.ID))
                     .where(
                             USER.ID.eq(userId),
                             NOVEL.ID.eq(novelId),
-                            CHAPTERQUALITYCHECK.ID.eq(taskId))
+                            CHAPTERQUALITYCHECK.STATUS.eq(Qualitycheckstatus.running),
+                            WORKFLOWRUN.ID.eq(taskId),
+                            WORKFLOWRUN.KIND.eq(Workflowrunkind.quality_check),
+                            WORKFLOWRUN.SOURCETYPE.eq("quality_check"),
+                            WORKFLOWRUN.STATUS.in(
+                                    Workflowrunstatus.pending,
+                                    Workflowrunstatus.running))
                     .fetchOne(USER.CREDITBALANCEMICROS);
+            if (balance == null) {
+                // 观察期仍需兼容冻结基线中直接使用检查项 ID 的历史计费调用；当前新运行不会走这条分支。
+                balance = context.select(USER.CREDITBALANCEMICROS)
+                        .from(USER)
+                        .join(NOVEL)
+                        .on(NOVEL.USERID.eq(USER.ID))
+                        .join(CHAPTER)
+                        .on(CHAPTER.NOVELID.eq(NOVEL.ID))
+                        .join(CHAPTERQUALITYCHECK)
+                        .on(CHAPTERQUALITYCHECK.CHAPTERID.eq(CHAPTER.ID))
+                        .where(
+                                USER.ID.eq(userId),
+                                NOVEL.ID.eq(novelId),
+                                CHAPTERQUALITYCHECK.ID.eq(taskId))
+                        .fetchOne(USER.CREDITBALANCEMICROS);
+            }
         }
         String resourceKind = "default";
         if (balance == null) {

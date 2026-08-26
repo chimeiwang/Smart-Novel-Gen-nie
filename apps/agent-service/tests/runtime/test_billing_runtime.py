@@ -310,6 +310,48 @@ async def test_billable_runtime_classifies_authorization_failure() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("recoverable", [True, False])
+async def test_billable_runtime_preserves_explicit_authorization_retry_decision(
+    recoverable: bool,
+) -> None:
+    class BillingFailure(RuntimeError):
+        def __init__(self) -> None:
+            self.recoverable = recoverable
+            super().__init__("授权服务拒绝请求")
+
+    class FailingBilling(Billing):
+        async def authorize(
+            self,
+            context: ModelCallContext,
+            payload: dict[str, Any],
+            request_id: str,
+        ) -> dict[str, Any]:
+            del context, payload, request_id
+            raise BillingFailure()
+
+    runtime = ModelRuntime(Provider(), billing=FailingBilling())  # type: ignore[arg-type]
+
+    with pytest.raises(RuntimeError, match="^MODEL_AUTHORIZATION_FAILED：") as caught:
+        await runtime.run_turn(
+            ModelTurnRequest(
+                messages=[{"role": "user", "content": "正文"}],
+                tools=[],
+                maxOutputTokens=128,
+                policy=LEGACY_PROVIDER_DEFAULT,
+            ),
+            context=ModelCallContext(
+                userId="user-1",
+                novelId="novel-1",
+                taskId="task-1",
+                runId="run-1",
+                agentId="写作",
+            ),
+        )
+
+    assert getattr(caught.value, "retryable", None) is recoverable
+
+
+@pytest.mark.asyncio
 async def test_billable_runtime_classifies_provider_failure(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

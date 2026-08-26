@@ -7,6 +7,7 @@ import static cn.inkforge.core.db.generated.Tables.NOVEL;
 import static cn.inkforge.core.db.generated.Tables.STYLEPORTRAITTASK;
 import static cn.inkforge.core.db.generated.Tables.TOKENUSAGE;
 import static cn.inkforge.core.db.generated.Tables.USER;
+import static cn.inkforge.core.db.generated.Tables.WORKFLOWRUN;
 import static cn.inkforge.core.db.generated.Tables.WRITINGSTYLE;
 import static cn.inkforge.core.db.generated.Tables.WRITINGTASK;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -19,6 +20,8 @@ import cn.inkforge.core.db.generated.enums.Chapterstatus;
 import cn.inkforge.core.db.generated.enums.Qualitycheckstatus;
 import cn.inkforge.core.db.generated.enums.Qualitychecktype;
 import cn.inkforge.core.db.generated.enums.Stylesourcetype;
+import cn.inkforge.core.db.generated.enums.Workflowrunkind;
+import cn.inkforge.core.db.generated.enums.Workflowrunstatus;
 import cn.inkforge.core.db.generated.enums.Writingtaskphase;
 import cn.inkforge.core.platform.db.CoreDatabase;
 import cn.inkforge.core.platform.db.PostgresConnectionSettings;
@@ -101,12 +104,16 @@ class JooqBillingRepositoryTest {
         Project project = project("billing-novel-1", owner);
         writingTask("billing-task-1", project);
         qualityCheck("billing-quality-1", project.chapterId());
+        qualityRun("billing-quality-run-1", "billing-quality-1", project, owner);
         styleTask("billing-style-1", "billing-style-task-1", owner);
 
         assertThat(repository.authorizationContext(owner, "billing-task-1", project.novelId()))
                 .extracting(value -> value.balanceMicros(), value -> value.resourceKind())
                 .containsExactly(1_000_000L, "default");
         assertThat(repository.authorizationContext(owner, "billing-quality-1", project.novelId()))
+                .isNotNull();
+        assertThat(repository.authorizationContext(
+                        owner, "billing-quality-run-1", project.novelId()))
                 .isNotNull();
         assertThat(repository.authorizationContext(
                         owner, "billing-style-task-1", "style:billing-style-1"))
@@ -116,6 +123,16 @@ class JooqBillingRepositoryTest {
                 .isNull();
         assertThat(repository.authorizationContext(
                         stranger, "billing-task-1", project.novelId()))
+                .isNull();
+        assertThat(repository.authorizationContext(
+                        stranger, "billing-quality-run-1", project.novelId()))
+                .isNull();
+        database.dsl().update(WORKFLOWRUN)
+                .set(WORKFLOWRUN.STATUS, Workflowrunstatus.completed)
+                .where(WORKFLOWRUN.ID.eq("billing-quality-run-1"))
+                .execute();
+        assertThat(repository.authorizationContext(
+                        owner, "billing-quality-run-1", project.novelId()))
                 .isNull();
     }
 
@@ -345,6 +362,22 @@ class JooqBillingRepositoryTest {
                 .set(CHAPTERQUALITYCHECK.TITLE, "一致性终检")
                 .set(CHAPTERQUALITYCHECK.CREATEDAT, INITIAL)
                 .set(CHAPTERQUALITYCHECK.UPDATEDAT, INITIAL)
+                .execute();
+    }
+
+    private static void qualityRun(
+            String id, String checkId, Project project, String userId) {
+        database.dsl().insertInto(WORKFLOWRUN)
+                .set(WORKFLOWRUN.ID, id)
+                .set(WORKFLOWRUN.NOVELID, project.novelId())
+                .set(WORKFLOWRUN.CHAPTERID, project.chapterId())
+                .set(WORKFLOWRUN.USERID, userId)
+                .set(WORKFLOWRUN.KIND, Workflowrunkind.quality_check)
+                .set(WORKFLOWRUN.STATUS, Workflowrunstatus.running)
+                .set(WORKFLOWRUN.SOURCETYPE, "quality_check")
+                .set(WORKFLOWRUN.SOURCEID, checkId)
+                .set(WORKFLOWRUN.CREATEDAT, INITIAL)
+                .set(WORKFLOWRUN.UPDATEDAT, INITIAL)
                 .execute();
     }
 

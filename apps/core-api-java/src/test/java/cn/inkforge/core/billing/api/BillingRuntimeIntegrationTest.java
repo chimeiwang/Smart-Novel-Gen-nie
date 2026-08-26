@@ -1,16 +1,22 @@
 package cn.inkforge.core.billing.api;
 
 import static cn.inkforge.core.db.generated.Tables.CHAPTER;
+import static cn.inkforge.core.db.generated.Tables.CHAPTERQUALITYCHECK;
 import static cn.inkforge.core.db.generated.Tables.CREDITLEDGER;
 import static cn.inkforge.core.db.generated.Tables.NOVEL;
 import static cn.inkforge.core.db.generated.Tables.TOKENUSAGE;
 import static cn.inkforge.core.db.generated.Tables.USER;
+import static cn.inkforge.core.db.generated.Tables.WORKFLOWRUN;
 import static cn.inkforge.core.db.generated.Tables.WRITINGTASK;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import cn.inkforge.core.CoreApplication;
 import cn.inkforge.core.billing.domain.ModelGrantCodec;
 import cn.inkforge.core.db.generated.enums.Chapterstatus;
+import cn.inkforge.core.db.generated.enums.Qualitycheckstatus;
+import cn.inkforge.core.db.generated.enums.Qualitychecktype;
+import cn.inkforge.core.db.generated.enums.Workflowrunkind;
+import cn.inkforge.core.db.generated.enums.Workflowrunstatus;
 import cn.inkforge.core.db.generated.enums.Writingtaskphase;
 import cn.inkforge.core.platform.db.CoreDatabase;
 import cn.inkforge.core.platform.http.InternalServiceAuthenticator;
@@ -109,6 +115,8 @@ class BillingRuntimeIntegrationTest {
     private String userId;
     private String novelId;
     private String taskId;
+    private String qualityCheckId;
+    private String qualityRunId;
 
     @AfterEach
     void cleanup() {
@@ -117,6 +125,14 @@ class BillingRuntimeIntegrationTest {
         database.dsl().deleteFrom(CREDITLEDGER).where(CREDITLEDGER.USERID.eq(userId)).execute();
         if (taskId != null) {
             database.dsl().deleteFrom(WRITINGTASK).where(WRITINGTASK.ID.eq(taskId)).execute();
+        }
+        if (qualityRunId != null) {
+            database.dsl().deleteFrom(WORKFLOWRUN).where(WORKFLOWRUN.ID.eq(qualityRunId)).execute();
+        }
+        if (qualityCheckId != null) {
+            database.dsl().deleteFrom(CHAPTERQUALITYCHECK)
+                    .where(CHAPTERQUALITYCHECK.ID.eq(qualityCheckId))
+                    .execute();
         }
         if (novelId != null) {
             database.dsl().deleteFrom(CHAPTER).where(CHAPTER.NOVELID.eq(novelId)).execute();
@@ -226,6 +242,46 @@ class BillingRuntimeIntegrationTest {
         assertThat(task.get("calls").get(0).get("grantToken")).isNull();
     }
 
+    @Test
+    void 无来源写作任务的质量运行必须用运行标识取得模型授权() throws Exception {
+        String username = "billing_quality_"
+                + UUID.randomUUID().toString().replace("-", "").substring(0, 10);
+        HttpResponse<String> registration = send(
+                "POST",
+                "/api/v1/auth/register",
+                "{\"username\":\"" + username
+                        + "\",\"password\":\"密码1234\",\"confirmPassword\":\"密码1234\"}",
+                null,
+                false);
+        assertThat(registration.statusCode()).as(registration.body()).isEqualTo(201);
+        userId = database.dsl().select(USER.ID)
+                .from(USER)
+                .where(USER.USERNAME.eq(username))
+                .fetchSingle(USER.ID);
+        createQualityRun();
+
+        String authorizeBody = "{\"userId\":\"" + userId
+                + "\",\"novelId\":\"" + novelId
+                + "\",\"taskId\":\"" + qualityRunId
+                + "\",\"runId\":\"" + qualityRunId
+                + "\",\"agentId\":\"校验\""
+                + ",\"provider\":\"openai_compatible\",\"model\":\"deepseek-v4-flash\""
+                + ",\"estimatedPromptTokens\":10,\"requestedMaxOutputTokens\":512}";
+        HttpResponse<String> authorized = send(
+                "POST", "/internal/v1/billing/authorize", authorizeBody, null, true);
+
+        assertThat(authorized.statusCode()).as(authorized.body()).isEqualTo(200);
+        assertThat(json.readTree(authorized.body()).get("maxOutputTokens").asInt())
+                .isEqualTo(512);
+        assertThat(VERIFIED.get())
+                .isEqualTo(new VerifiedCall(
+                        authorizeBody.getBytes(StandardCharsets.UTF_8),
+                        ServiceScope.BILLING_AUTHORIZE,
+                        qualityRunId,
+                        qualityRunId,
+                        novelId));
+    }
+
     private void createWritingTask() {
         novelId = "runtime-billing-novel-" + UUID.randomUUID();
         String chapterId = novelId + "-chapter";
@@ -257,6 +313,52 @@ class BillingRuntimeIntegrationTest {
                 .set(WRITINGTASK.PHASE, Writingtaskphase.active)
                 .set(WRITINGTASK.CREATEDAT, now)
                 .set(WRITINGTASK.UPDATEDAT, now)
+                .execute();
+    }
+
+    private void createQualityRun() {
+        novelId = "runtime-billing-quality-novel-" + UUID.randomUUID();
+        String chapterId = novelId + "-chapter";
+        qualityCheckId = novelId + "-check";
+        qualityRunId = novelId + "-run";
+        LocalDateTime now = LocalDateTime.parse("2026-08-25T00:00:00.000");
+        database.dsl().insertInto(NOVEL)
+                .set(NOVEL.ID, novelId)
+                .set(NOVEL.NAME, "质量计费运行时作品")
+                .set(NOVEL.USERID, userId)
+                .set(NOVEL.CREATEDAT, now)
+                .set(NOVEL.UPDATEDAT, now)
+                .execute();
+        database.dsl().insertInto(CHAPTER)
+                .set(CHAPTER.ID, chapterId)
+                .set(CHAPTER.NOVELID, novelId)
+                .set(CHAPTER.TITLE, "第一章")
+                .set(CHAPTER.CONTENT, "正文")
+                .set(CHAPTER.ORDER, 1)
+                .set(CHAPTER.STATUS, Chapterstatus.review)
+                .set(CHAPTER.CREATEDAT, now)
+                .set(CHAPTER.UPDATEDAT, now)
+                .execute();
+        database.dsl().insertInto(CHAPTERQUALITYCHECK)
+                .set(CHAPTERQUALITYCHECK.ID, qualityCheckId)
+                .set(CHAPTERQUALITYCHECK.CHAPTERID, chapterId)
+                .set(CHAPTERQUALITYCHECK.TYPE, Qualitychecktype.consistency)
+                .set(CHAPTERQUALITYCHECK.STATUS, Qualitycheckstatus.running)
+                .set(CHAPTERQUALITYCHECK.TITLE, "一致性终检")
+                .set(CHAPTERQUALITYCHECK.CREATEDAT, now)
+                .set(CHAPTERQUALITYCHECK.UPDATEDAT, now)
+                .execute();
+        database.dsl().insertInto(WORKFLOWRUN)
+                .set(WORKFLOWRUN.ID, qualityRunId)
+                .set(WORKFLOWRUN.NOVELID, novelId)
+                .set(WORKFLOWRUN.CHAPTERID, chapterId)
+                .set(WORKFLOWRUN.USERID, userId)
+                .set(WORKFLOWRUN.KIND, Workflowrunkind.quality_check)
+                .set(WORKFLOWRUN.STATUS, Workflowrunstatus.running)
+                .set(WORKFLOWRUN.SOURCETYPE, "quality_check")
+                .set(WORKFLOWRUN.SOURCEID, qualityCheckId)
+                .set(WORKFLOWRUN.CREATEDAT, now)
+                .set(WORKFLOWRUN.UPDATEDAT, now)
                 .execute();
     }
 
