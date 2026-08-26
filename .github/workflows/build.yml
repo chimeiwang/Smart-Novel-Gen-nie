@@ -62,7 +62,25 @@ jobs:
         run: uv sync --frozen --all-packages --group dev
 
       - name: Test Java migration workspace
-        run: ./mvnw --batch-mode --no-transfer-progress verify
+        shell: bash
+        run: |
+          set +e
+          ./mvnw --batch-mode --no-transfer-progress verify 2>&1 | tee maven-verify.log
+          verify_status=${PIPESTATUS[0]}
+          if [ "$verify_status" -ne 0 ]; then
+            {
+              echo "## Java 迁移工作区验证失败"
+              echo '```text'
+              tail -n 200 maven-verify.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            annotation="$(tail -n 80 maven-verify.log)"
+            annotation="${annotation//'%'/'%25'}"
+            annotation="${annotation//$'\n'/'%0A'}"
+            annotation="${annotation//$'\r'/'%0D'}"
+            echo "::error title=Java 迁移工作区验证失败::$annotation"
+          fi
+          exit "$verify_status"
 
       - name: Check generated API client
         run: npm run api:check

@@ -125,6 +125,14 @@ def test_python_failures_are_published_to_the_workflow_summary() -> None:
     assert "::error title=Python 测试失败::" in source
 
 
+def test_java_failures_are_published_to_the_workflow_summary() -> None:
+    source = WORKFLOW.read_text(encoding="utf-8")
+
+    assert "maven-verify.log" in source
+    assert "## Java 迁移工作区验证失败" in source
+    assert "::error title=Java 迁移工作区验证失败::" in source
+
+
 def test_ci_does_not_inject_optional_redis_dependency() -> None:
     source = WORKFLOW.read_text(encoding="utf-8")
 

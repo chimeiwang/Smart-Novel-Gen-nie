@@ -482,6 +482,8 @@ Java Core 在 448 MiB 限额下实测约 271.8 MiB。上述结果证明代码、
   contract 与 Core Dockerfile 全部列为 Core 构建输入；Python Agent 的复用输入保持独立。部署前必须验证
   新 Core 镜像 runtime 标签为 `java`，然后只替换现有同名服务并执行 schema、HTTP、内部路径和 Agent
   稳定就绪 smoke。
+- Java CI 门禁失败时必须保留 Maven 完整日志，并把末尾诊断同时写入 GitHub Step Summary 与错误注解；
+  不能只暴露非零退出码，否则无日志下载权限的值守者无法区分测试失败、依赖下载故障与运行环境差异。
 
 ## 验收标准
 
@@ -512,5 +514,6 @@ Java Core 在 448 MiB 限额下实测约 271.8 MiB。上述结果证明代码、
 
 - Java 镜像在 448 MB 限额稳定；
 - Compose、HTTPS、内部路径阻断、Core/Agent readiness 和 smoke 通过；
+- Java、Python 与生产部署失败都能从工作流摘要和错误注解读取脱敏诊断；
 - 当前 Java → 上一 Python → 当前 Java 的回退与自动恢复演练通过；
 - 最终一次性切换成功并完成观察期后，才可宣称迁移完成。
