@@ -309,7 +309,7 @@ def _run_deploy(
         "#!/bin/sh\n"
         "case \"$*\" in "
         "*write-out*) printf 404;; "
-        "*health/ready*) printf '{\"status\":\"ready\"}';; "
+        "*health/ready*) printf '{\"status\":\"ready\",\"checks\":{\"agent\":\"ok\"}}';; "
         "esac\n",
     )
     log_path = tmp_path / "docker.log"

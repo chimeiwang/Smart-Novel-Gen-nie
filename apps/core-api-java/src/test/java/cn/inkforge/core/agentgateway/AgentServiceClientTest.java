@@ -38,20 +38,23 @@ class AgentServiceClientTest {
     void 提交必须发送受签名原始正文并解析严格响应() throws Exception {
         AtomicReference<String> authorization = new AtomicReference<>();
         AtomicReference<String> receivedBody = new AtomicReference<>();
+        AtomicReference<String> upgrade = new AtomicReference<>();
         HttpServer server = server(exchange -> {
             authorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
             receivedBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            upgrade.set(exchange.getRequestHeaders().getFirst("Upgrade"));
             respond(exchange, 202, """
                     {"protocolVersion":"1.0","jobId":"job-1","runId":"run-1",\
                     "taskId":"task-1","status":"queued"}
                     """);
         });
         try {
-            AgentJobAccepted accepted = client(server, Duration.ofSeconds(2)).submit(job());
+            AgentJobAccepted accepted = productionClient(server, Duration.ofSeconds(2)).submit(job());
 
             assertThat(accepted.getStatus()).isEqualTo(AgentJobAccepted.StatusEnum.QUEUED);
             assertThat(authorization.get()).startsWith("Bearer eyJ");
             assertThat(receivedBody.get()).contains("\"jobId\":\"job-1\"");
+            assertThat(upgrade.get()).isNull();
         } finally {
             server.stop(0);
         }
@@ -170,6 +173,16 @@ class AgentServiceClientTest {
     private AgentServiceClient client(HttpServer server, Duration timeout) throws Exception {
         return new AgentServiceClient(
                 HttpClient.newBuilder().connectTimeout(timeout).build(),
+                URI.create("http://127.0.0.1:" + server.getAddress().getPort()),
+                signer(),
+                new ObjectMapper(),
+                timeout);
+    }
+
+    private AgentServiceClient productionClient(HttpServer server, Duration timeout)
+            throws Exception {
+        return new AgentServiceClient(
+                new AgentGatewayConfiguration().agentHttpClient(),
                 URI.create("http://127.0.0.1:" + server.getAddress().getPort()),
                 signer(),
                 new ObjectMapper(),

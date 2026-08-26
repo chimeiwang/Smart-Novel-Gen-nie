@@ -38,6 +38,8 @@ if ($page.StatusCode -ne 200) { throw "登录页面不可用" }
 
 $health = Invoke-RestMethod "$baseUrl/api/v1/health/ready"
 if ($health.status -ne "ready") { throw "核心接口服务未就绪" }
+# agent=ok 包含 Java Core 启动后一次无写入 POST 协议探针，可识别 GET 正常但 h2c POST 失败的假健康。
+if ($health.checks.agent -ne "ok") { throw "核心到 Agent 的 POST 协议链路未就绪" }
 
 try {
     Invoke-WebRequest -UseBasicParsing "$baseUrl/internal/v1/health/live"

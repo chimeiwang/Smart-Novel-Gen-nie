@@ -90,6 +90,58 @@ class WritingRunStartRequestParserTest {
     }
 
     @Test
+    void 中短篇非选区操作必须接受冻结契约中的显式空值() throws Exception {
+        assertThat(parse("""
+                {
+                  "clientRequestId": "request-00000001",
+                  "workflow": "short_medium",
+                  "novelId": "novel-1",
+                  "operation": "generate_outline",
+                  "documentType": "outline",
+                  "chapterId": null,
+                  "baseVersionId": null,
+                  "sourceOutlineVersionId": null,
+                  "selectionStart": null,
+                  "selectionEnd": null,
+                  "selectedTextHash": null,
+                  "userInstruction": null
+                }
+                """)).isInstanceOf(ParsedWritingRunStartRequest.ShortMedium.class);
+        assertThat(parse("""
+                {
+                  "clientRequestId": "request-00000002",
+                  "workflow": "short_medium",
+                  "novelId": "novel-1",
+                  "operation": "generate_manuscript",
+                  "documentType": "manuscript",
+                  "chapterId": "chapter-1",
+                  "baseVersionId": null,
+                  "sourceOutlineVersionId": "outline-version-1",
+                  "selectionStart": null,
+                  "selectionEnd": null,
+                  "selectedTextHash": null,
+                  "userInstruction": null
+                }
+                """)).isInstanceOf(ParsedWritingRunStartRequest.ShortMedium.class);
+        assertThat(parse("""
+                {
+                  "clientRequestId": "request-00000003",
+                  "workflow": "short_medium",
+                  "novelId": "novel-1",
+                  "operation": "full_check",
+                  "documentType": "manuscript",
+                  "chapterId": "chapter-1",
+                  "baseVersionId": "version-1",
+                  "sourceOutlineVersionId": null,
+                  "selectionStart": null,
+                  "selectionEnd": null,
+                  "selectedTextHash": null,
+                  "userInstruction": null
+                }
+                """)).isInstanceOf(ParsedWritingRunStartRequest.ShortMedium.class);
+    }
+
+    @Test
     void 中短篇请求执行与文档身份必须匹配() {
         assertValidation("""
                 {

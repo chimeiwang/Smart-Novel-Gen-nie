@@ -22,7 +22,10 @@ class AgentGatewayConfiguration {
     @Bean
     @ConditionalOnProperty(name = "AGENT_SERVICE_URL")
     HttpClient agentHttpClient() {
+        // Python Agent 的 Uvicorn 只接受此内网明文链路上的 HTTP/1.1。JDK 默认优先 h2c；带正文的
+        // POST 会先发送 Upgrade 并被 Uvicorn 以 400 拒绝，而 GET readiness 仍可能回退成功，形成假健康。
         return HttpClient.newBuilder()
+                .version(HttpClient.Version.HTTP_1_1)
                 .connectTimeout(Duration.ofSeconds(2))
                 .build();
     }

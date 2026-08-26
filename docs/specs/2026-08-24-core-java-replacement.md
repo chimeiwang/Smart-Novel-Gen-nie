@@ -2,7 +2,7 @@
 
 日期：2026-08-24
 
-状态：已批准，代码与预切换验收收尾中；生产尚未切换
+状态：已批准；Java Core 已于 2026-08-26 原位接管生产，切换后回归已完成本地修复与验证，待部署验收
 
 基线提交：`c9afc95`
 
@@ -25,6 +25,8 @@
   `8aaa4d25c3cd3114bc8659330700a2eecdbcdefc7f3d83473c93c1baee576629`；
 - Python Agent 依赖 Core 工具网关、模型授权和用量上报、写作/质量/文风/RAG/视频回调；
 - 生产服务名为 `core-api`，回滚依赖上一提交的 Python Core 镜像；
+- 生产当前运行 Java Core 提交 `678ff72f0104deee61d2678d20a59ee9504f73c4`；容器健康不等同于
+  Core 到 Agent 的业务投递链路可用，切换后仍必须用真实浏览器和跨服务 POST 闭环验收；
 - 视频 P0-P3 只获开发库授权，生产配置必须继续拒绝视频写入和真实 Seedance。
 
 ## 目标
@@ -45,6 +47,57 @@
 - 不迁移 Agent、LangGraph、模型提示或供应商策略；
 - 不把 Web 改写为 Java 服务端页面；
 - 不在迁移中启用生产视频或执行未批准的生产迁移。
+
+## 2026-08-26 生产切换后回归修复
+
+### 生产证据
+
+生产真实浏览器验收和只读日志诊断确认四个相互独立的问题：
+
+1. Java `HttpClient` 默认尝试明文 HTTP/2 升级，向 Uvicorn 的
+   `POST /internal/v1/runs` 携带 `Upgrade: h2c`；Agent 返回 400，写作、质量和画像等所有共享
+   Agent job 提交均停留在 PostgreSQL 待重试状态。GET readiness 可以回退到 HTTP/1.1，因此原健康检查
+   仍错误显示全绿；
+2. 中短篇非选区请求按冻结 OpenAPI 正确发送显式 JSON `null`，Java 原始请求解析器却只区分字段缺失和
+   Java `null`，把 Jackson `NullNode` 错当成整数并返回 422；
+3. 画像任务首次提交失败后保持 `pending`，但生产没有画像 dispatcher 重试日志。画像装配仍使用顺序敏感的
+   `@ConditionalOnBean(PortraitRunSubmitter.class)`，违反本规格已经对写作 dispatcher 确立的确定性装配规则；
+4. 写作 SSE 虽每 15 秒发送心跳，Spring MVC 默认异步总超时仍约 30 秒。超时后全局 JSON 异常处理器尝试
+   向已提交的 `text/event-stream` 写 `ApiErrorResponse`，形成重复断流和二次转换异常。
+
+### 修复设计
+
+- Core 到 Python Agent 的专用 `HttpClient` 必须显式固定 `HTTP_1_1`。超时、签名、正文、路径和错误码保持
+  不变；不得通过修改 Uvicorn、开放额外端口或绕过服务身份修复；
+- 原始 JSON 可空整数校验必须同时接受字段缺失与显式 `null`，但非空值仍只接受范围内整数，选区操作的
+  必填与范围规则保持不变；
+- 画像 dispatcher 必须始终随数据库文风仓储装配，并通过延迟端口解析处理 Agent 投递器是否存在；未配置
+  Agent 时记录稳定可重试错误，不返回空 Bean，也不让 Spring 配置扫描顺序决定恢复能力；
+- 长连接 SSE 必须显式关闭 Spring MVC 的总异步超时，继续依靠 15 秒心跳、客户端断开和 PostgreSQL
+  `streamShouldClose` 收敛。该设置同时避免大文件流被框架总超时静默截断；客户端断开不得被转换成 JSON
+  错误正文；
+- 不修改 PostgreSQL schema、公共/内部 OpenAPI、Agent Pydantic 契约、计费单价、模型策略或生产视频开关。
+
+### TDD 与验收
+
+- 先增加配置级测试，证明 Agent 专用客户端不是 HTTP/2 默认值，并断言实际请求不携带 h2c 升级头；
+- 先增加中短篇显式 `null` 请求测试，覆盖生成大纲、生成正文和全文检查的非选区字段；
+- 先增加画像装配测试，证明实际投递 Bean 尚未出现时 dispatcher 仍存在，稍后出现时可解析同一端口；
+- 先增加 Spring MVC 异步配置测试，证明运行时总超时被显式禁用；保留 SSE 心跳、终态关闭和游标回放测试；
+- 相关测试通过后运行完整 `./mvnw verify`。Java Core 就绪检查启动后必须先使用同一个生产客户端向真实
+  Uvicorn 发送一次 `{}` 无写入 POST，以 Agent 的 401/422 应用层拒绝证明协议链路成立，再持续执行 GET
+  ready；Compose smoke 必须同时断言 `checks.agent=ok`，不得再以两个服务各自 GET ready 代替跨服务协议
+  验收。真正的任务提交仍由 `AgentServiceClient` 测试覆盖 Ed25519、原始正文和幂等键；
+- 修复部署后回读原任务状态或创建具名测试任务，确认写作、质量和画像至少各有一个任务进入 Agent 队列并
+  正常收敛；不得把 202、SSE 或容器 healthy 当作完成证据。
+
+### 本地验证证据
+
+- HTTP 版本、真实请求头、显式 `null`、画像确定性装配、SSE 异步配置及 POST 门禁的定向 JUnit 全部通过；
+- 画像、写作、质量三条 Spring Boot + PostgreSQL Testcontainers 运行时回归通过；
+- 本地真实 Uvicorn 对无写入 `{}` POST 返回预期 422，证明探针不会进入任务队列；
+- 部署、回滚及 Compose 安全相关架构测试共 75 项通过，Ruff 与 Shell 语法检查通过；
+- 最终 `./mvnw verify` 通过：Core 411 项无失败、2 项外部数据库验收按配置跳过，CLI 49 项无失败。
 
 ## 目标架构
 
@@ -416,8 +469,8 @@ Java Core 在 448 MiB 限额下实测约 271.8 MiB。上述结果证明代码、
 
 ## 部署与切换
 
-仓库中的生产 Compose 与镜像流水线现已改为构建 Java Core，但正式服务器仍保持当前 Python 版本；只有
-取得单独生产批准并满足下列门禁后，才允许执行一次性原位切换：
+仓库中的生产 Compose 与镜像流水线已经构建 Java Core，正式服务器已于 2026-08-26 按既有批准完成同名
+`core-api` 原位切换。以下门禁继续作为后续修复部署和回滚约束，不能因为首次切换完成而删除：
 
 1. Java 镜像沿用 `inkforge-core-api:<sha>` 和 `core-api` 服务名；
 2. 镜像包含 JRE 21、FFmpeg、ffprobe 和 CJK 字体，继续使用非 root、只读根文件系统和受控 tmpfs；

@@ -48,4 +48,30 @@ class PortraitTaskDispatcherTest {
         verify(repository).markDispatchTerminal(
                 "style-1", "task-1", PortraitDispatchStatus.FAILED);
     }
+
+    @Test
+    void Agent端口暂不可用时必须保留pending事实供后续重试() {
+        StyleRepository repository = mock(StyleRepository.class);
+        PortraitRunSubmitter submitter = mock(PortraitRunSubmitter.class);
+        Clock clock = Clock.fixed(Instant.parse("2026-08-25T05:30:00Z"), ZoneOffset.UTC);
+        PortraitDispatchRecord record = new PortraitDispatchRecord(
+                "task-1", "style-1", "user-1", null,
+                "pending", OffsetDateTime.parse("2026-08-25T05:29:00Z"));
+        when(repository.listReconcilable(
+                        20, OffsetDateTime.parse("2026-08-25T05:20:00Z")))
+                .thenReturn(List.of(record));
+        when(submitter.submit("user-1", "style-1", "task-1", "task-1", null))
+                .thenThrow(new PortraitSubmissionException("AGENT_SERVICE_UNAVAILABLE"));
+        PortraitTaskDispatcher dispatcher = new PortraitTaskDispatcher(
+                repository,
+                submitter,
+                clock,
+                20,
+                Duration.ofSeconds(5),
+                Duration.ofMinutes(10));
+
+        assertThat(dispatcher.runOnce()).isZero();
+        verify(repository, never()).markDispatchTerminal(
+                "style-1", "task-1", PortraitDispatchStatus.FAILED);
+    }
 }

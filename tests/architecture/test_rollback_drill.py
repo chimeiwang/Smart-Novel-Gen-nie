@@ -37,6 +37,7 @@ def _run_compose_smoke(
     ready_after: int,
     required_successes: int,
     max_attempts: int,
+    core_agent_status: str = "ok",
     ready_sequence: str = "",
     nginx_binding: str = "0.0.0.0:43120",
     log_write_status: int = 0,
@@ -56,7 +57,8 @@ def _run_compose_smoke(
         "printf '%s\\n' \"$url\" >> \"$FAKE_CURL_LOG\"\n"
         "case \"$url\" in\n"
         "  */login) exit 0;;\n"
-        "  */api/v1/health/ready) printf '%s\\n' '{\"status\":\"ready\"}';;\n"
+        "  */api/v1/health/ready) printf '%s\\n' "
+        "\"{\\\"status\\\":\\\"ready\\\",\\\"checks\\\":{\\\"agent\\\":\\\"$FAKE_CORE_AGENT_STATUS\\\"}}\";;\n"
         "  */internal/v1/health/live) printf 404;;\n"
         "  *) exit 1;;\n"
         "esac\n",
@@ -74,6 +76,7 @@ def _run_compose_smoke(
         "FAKE_AGENT_READY_SEQUENCE": ready_sequence,
         "FAKE_AGENT_LOG_WRITE_STATUS": str(log_write_status),
         "FAKE_CORE_UPLOAD_WRITE_STATUS": str(upload_write_status),
+        "FAKE_CORE_AGENT_STATUS": core_agent_status,
         "SMOKE_AGENT_REQUIRED_SUCCESSES": str(required_successes),
         "SMOKE_AGENT_MAX_ATTEMPTS": str(max_attempts),
         "SMOKE_AGENT_POLL_SECONDS": "0",
@@ -139,6 +142,22 @@ def test_compose_smoke_checks_both_persistent_directories_with_real_write_probes
     assert smoke_source.count('rmdir "$probe_dir"') == 2
     assert "WORKFLOW_HUMAN_LOG_DIR" in powershell_source
     assert "UPLOADS_ROOT" in powershell_source
+
+
+def test_compose_smoke_requires_core_to_agent_post_protocol_gate(tmp_path: Path) -> None:
+    result, call_count, urls = _run_compose_smoke(
+        tmp_path,
+        ready_after=1,
+        required_successes=1,
+        max_attempts=1,
+        core_agent_status="",
+    )
+
+    assert result.returncode != 0
+    assert call_count == 0
+    assert any(url.endswith("/api/v1/health/ready") for url in urls)
+    assert '"agent":"ok"' in SMOKE_SH.read_text(encoding="utf-8")
+    assert "$health.checks.agent" in SMOKE_PS1.read_text(encoding="utf-8")
 
 
 def test_compose_smoke_fails_when_agent_log_directory_is_not_writable(

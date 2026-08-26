@@ -11,7 +11,7 @@ import cn.inkforge.core.styles.application.StyleService;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Optional;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -40,14 +40,15 @@ class StyleConfiguration {
     }
 
     @Bean
-    @ConditionalOnBean(PortraitRunSubmitter.class)
     PortraitTaskDispatcher portraitTaskDispatcher(
             StyleRepository repository,
-            PortraitRunSubmitter submitter,
+            ObjectProvider<PortraitRunSubmitter> submitters,
             Clock coreClock) {
+        // dispatcher 属于 PostgreSQL 耐久恢复能力，不能由 Agent Bean 的扫描先后决定是否存在；实际端口
+        // 在每次投递时解析，未配置时只留下稳定可重试失败，StyleService 的公共 503 语义保持不变。
         return new PortraitTaskDispatcher(
                 repository,
-                submitter,
+                new ProviderPortraitRunSubmitter(submitters),
                 coreClock,
                 20,
                 Duration.ofSeconds(5),

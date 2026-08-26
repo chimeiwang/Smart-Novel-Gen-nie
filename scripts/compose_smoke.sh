@@ -79,9 +79,12 @@ case "$port" in
 esac
 base_url="http://127.0.0.1:${port}"
 
-# 从唯一公网入口同时验证页面与公共 API，并确认内部路由没有被 Nginx 暴露。
+# 从唯一公网入口同时验证页面与公共 API，并确认内部路由没有被 Nginx 暴露。Core 就绪检查中的
+# agent=ok 包含启动后一次无写入 POST 协议探针，禁止再用只能证明 GET 可用的假健康放行部署。
 curl --fail --silent --show-error "${base_url}/login" >/dev/null
-curl --fail --silent --show-error "${base_url}/api/v1/health/ready" | grep -q '"status":"ready"'
+core_health="$(curl --fail --silent --show-error "${base_url}/api/v1/health/ready")"
+printf '%s\n' "$core_health" | grep -q '"status":"ready"'
+printf '%s\n' "$core_health" | grep -q '"agent":"ok"'
 status="$(curl --silent --output /dev/null --write-out '%{http_code}' "${base_url}/internal/v1/health/live")"
 [ "$status" = "404" ]
 

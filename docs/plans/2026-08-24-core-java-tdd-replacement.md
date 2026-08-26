@@ -467,6 +467,21 @@ FFmpeg/ffprobe，因此实现与隔离测试已完成，但生产镜像内的真
 - [ ] 全量验证当前功能后建立“手机号身份”和“支付计费”两个独立新 spec；
 - [ ] 新功能不得复用迁移授权修改数据库。
 
+## Task 17：生产切换后跨服务回归修复
+
+**范围：** `agentgateway`、`writing`、`styles`、`platform/http` 及对应生产切换规格。
+
+- [x] 先用配置级测试锁定 Core 到 Agent 的 HTTP/1.1，禁止 JDK 默认 h2c 升级；
+- [x] 先用原始 JSON 测试覆盖中短篇非选区请求中的显式 `null`；
+- [x] 先用装配测试证明画像 dispatcher 不依赖 Agent Bean 扫描顺序；
+- [x] 先用 MVC 配置测试证明 SSE 不受默认 30 秒异步总超时截断；
+- [x] 运行相关 JUnit 和完整 `./mvnw verify`；
+- [x] 修复部署 smoke，增加 Java Core 到真实 Uvicorn 的跨服务 POST 协议门禁；
+- [ ] 部署后用具名写作、质量、画像任务回读 PostgreSQL 权威终态，并确认日志中不再新增 h2c 400。
+
+**验收：** 不改数据库、OpenAPI、计价和模型策略；生产真实浏览器中的三类 Agent 任务可以从耐久待投递事实
+进入 Python Agent 队列，SSE 跨过 30 秒后保持有效或按权威终态关闭。
+
 ## 全量验收命令基线
 
 实施后至少需要形成以下统一入口，具体 Maven profile 在 Task 2 固化：

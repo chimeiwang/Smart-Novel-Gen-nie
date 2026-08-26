@@ -422,7 +422,10 @@ public final class WritingRunStartRequestParser {
     }
 
     private static void optionalInteger(JsonNode value, String field, int min, int max) {
-        if (value.get(field) != null) {
+        JsonNode node = value.get(field);
+        // 冻结请求契约允许可选字段显式发送 JSON null；Jackson 的 NullNode 不是 Java null，不能把它
+        // 交给必填整数校验。非空值仍必须保持严格类型和范围，不能开启字符串到整数的隐式转换。
+        if (node != null && !node.isNull()) {
             requiredInteger(value, field, min, max);
         }
     }
