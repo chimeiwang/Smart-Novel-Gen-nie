@@ -5,6 +5,8 @@ import type { QualityCheckDto } from "../../../shared/contracts/quality-check";
 
 import {
   countUnhandledQualityChecks,
+  formatConsistencyScore,
+  getConsistencyScoreTone,
   getQualityCheckPresentationState,
   isHandledQualityCheck,
   isValidCompletedQualityCheck,
@@ -71,5 +73,18 @@ describe("质量终检展示态", () => {
       validCheck(),
       validCheck({ status: "skipped", result: null, scoreOverall: null, qualityGate: null }),
     ]), 2);
+  });
+});
+
+describe("一致性终检评分展示", () => {
+  it("按共享报告契约显示百分制总分", () => {
+    assert.equal(formatConsistencyScore(87), "综合 87/100");
+  });
+
+  it("将原有十分制色阶等比例换算为百分制", () => {
+    assert.equal(getConsistencyScoreTone(50), "low");
+    assert.equal(getConsistencyScoreTone(51), "mid");
+    assert.equal(getConsistencyScoreTone(70), "mid");
+    assert.equal(getConsistencyScoreTone(71), "high");
   });
 });

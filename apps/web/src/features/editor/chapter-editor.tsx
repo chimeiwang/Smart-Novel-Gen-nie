@@ -30,6 +30,8 @@ import {
   pollQualityCheck,
 } from "./quality-check-poller";
 import {
+  formatConsistencyScore,
+  getConsistencyScoreTone,
   getQualityCheckPresentationState,
   isHandledQualityCheck,
 } from "./quality-presentation";
@@ -749,7 +751,7 @@ function getQualityGateLabel(gate: string) {
   return gate;
 }
 
-function getScoreTone(score: number) {
+function getTenPointScoreTone(score: number) {
   if (score <= 5) return "low";
   if (score <= 7) return "mid";
   return "high";
@@ -770,12 +772,12 @@ function QualityScoreStrip({ check }: { check: QualityCheckDto }) {
   return (
     <div className="quality-score-strip">
       {typeof check.scoreOverall === "number" ? (
-        <span className={`quality-score overall ${getScoreTone(check.scoreOverall)}`}>
-          综合 {check.scoreOverall}/10
+        <span className={`quality-score overall ${getConsistencyScoreTone(check.scoreOverall)}`}>
+          {formatConsistencyScore(check.scoreOverall)}
         </span>
       ) : null}
       {visibleScores.map(([label, score]) => (
-        <span key={label} className={`quality-score ${getScoreTone(score ?? 0)}`}>
+        <span key={label} className={`quality-score ${getTenPointScoreTone(score ?? 0)}`}>
           {label} {score}/10
         </span>
       ))}

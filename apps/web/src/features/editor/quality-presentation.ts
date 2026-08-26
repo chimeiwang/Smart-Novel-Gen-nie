@@ -9,6 +9,23 @@ export type QualityCheckPresentationState =
   | QualityCheckPresentationInput["status"]
   | "invalid";
 
+export type QualityScoreTone = "low" | "mid" | "high";
+
+/**
+ * 一致性报告契约使用 0..100 百分制。这里把旧十分制的 5/7 色阶等比例换算为
+ * 50/70，避免仅修正文案后仍用错误门限着色。
+ */
+export function getConsistencyScoreTone(score: number): QualityScoreTone {
+  if (score <= 50) return "low";
+  if (score <= 70) return "mid";
+  return "high";
+}
+
+/** 保留后端权威分值，不在展示层擅自除以十或重新四舍五入。 */
+export function formatConsistencyScore(score: number): string {
+  return `综合 ${score}/100`;
+}
+
 export function isValidCompletedQualityCheck(
   check: QualityCheckPresentationInput,
 ): boolean {
