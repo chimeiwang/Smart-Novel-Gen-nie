@@ -186,6 +186,8 @@ Java 等价迁移不能只依赖外部 spec 和测试解释实现。高风险代
 - 不启用 Hibernate/JPA DDL、Flyway、Liquibase 或启动期 SQL；
 - jOOQ 代码从受控测试 schema 生成，不手写数据库表 DTO；
 - 启动受监督后台循环的 Spring/Testcontainers 完整上下文必须在测试类结束时主动关闭，再释放 PostgreSQL、Redis 和文件资源；测试不得让后台线程访问已停止容器并用预期外部故障污染后续 TDD 日志；
+- 验证“未配置外部依赖”的最小 Spring 上下文时，测试必须显式覆盖 CI 继承的数据库、Redis 等占位配置，
+  不能依赖执行机恰好没有环境变量，也不能通过放宽生产 readiness 掩盖测试环境污染；
 - 本地测试先使用隔离数据库，随后连接 `novelwriterdev` 做只读 schema guard 和具名测试数据验收；
 - dev 验收数据使用唯一前缀和精确 ID，记录创建清单并按清单清理，不扫描或删除其他用户数据；
 - 禁止连接或写入 `novelwriter` 正式库。生产仅在最终切换门禁中做只读指纹、备份和 smoke。

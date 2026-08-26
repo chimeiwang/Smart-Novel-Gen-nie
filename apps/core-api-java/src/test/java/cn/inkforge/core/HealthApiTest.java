@@ -12,7 +12,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+@SpringBootTest(
+        webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+        properties = {
+            // `false` 是 ConditionalOnProperty 的显式关闭值，避免 CI 的占位连接串污染最小健康上下文。
+            "DATABASE_URL=false",
+            "REDIS_URL=false"
+        })
 class HealthApiTest {
 
     private static final String REQUEST_ID = "java-migration-test-request";
