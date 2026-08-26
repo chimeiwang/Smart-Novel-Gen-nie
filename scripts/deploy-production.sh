@@ -5,9 +5,37 @@ APP_DIR="${APP_DIR:-/srv/smart-novel-gen}"
 REPO_URL="${REPO_URL:-https://github.com/chimeiwang/Smart-Novel-Gen-nie.git}"
 BRANCH="${BRANCH:-main}"
 DEPLOY_SHA="${DEPLOY_SHA:?必须设置部署提交}"
+DEPLOY_BUNDLE_PATH="${DEPLOY_BUNDLE_PATH:-}"
 INKFORGE_IMAGE_TAG="${INKFORGE_IMAGE_TAG:?必须设置镜像标签}"
 compose_file="infra/compose.yaml"
 python_rollback_file="infra/compose.python-core-rollback.yaml"
+
+cleanup_deploy_bundle() {
+  [ -z "$DEPLOY_BUNDLE_PATH" ] || rm -f -- "$DEPLOY_BUNDLE_PATH"
+}
+
+if [ -n "$DEPLOY_BUNDLE_PATH" ]; then
+  case "$DEPLOY_SHA" in
+    ""|*[!0-9a-f]*)
+      echo "使用 bundle 部署时，部署提交必须是 40 位小写十六进制 SHA" >&2
+      exit 1
+      ;;
+  esac
+  [ "${#DEPLOY_SHA}" -eq 40 ] || {
+    echo "使用 bundle 部署时，部署提交必须是 40 位小写十六进制 SHA" >&2
+    exit 1
+  }
+  expected_bundle_path="/tmp/inkforge-deploy-${DEPLOY_SHA}.bundle"
+  [ "$DEPLOY_BUNDLE_PATH" = "$expected_bundle_path" ] || {
+    echo "部署源码 bundle 路径不符合提交绑定约定" >&2
+    exit 1
+  }
+  trap cleanup_deploy_bundle EXIT
+  [ -f "$DEPLOY_BUNDLE_PATH" ] && [ -r "$DEPLOY_BUNDLE_PATH" ] || {
+    echo "部署源码 bundle 不存在或不可读" >&2
+    exit 1
+  }
+fi
 
 # Java 与历史 Python Core 使用不同的回滚覆盖层；运行时分类必须来自镜像标签，不能靠版本号猜测。
 compose() {
@@ -178,20 +206,33 @@ else
   safe_git remote set-url origin "$REPO_URL"
 fi
 
-max_fetch_attempts="3"
-fetch_attempt="1"
-while ! safe_git -c http.version=HTTP/1.1 fetch --depth=1 origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
-do
-  if [ "$fetch_attempt" -lt "$max_fetch_attempts" ]; then
-    next_attempt=$((fetch_attempt + 1))
-    echo "Git 获取失败，等待后进行第 $next_attempt/$max_fetch_attempts 次尝试" >&2
-    sleep $((fetch_attempt * 3))
-    fetch_attempt="$next_attempt"
-  else
-    echo "Git 获取连续失败 $max_fetch_attempts 次，停止部署" >&2
+if [ -n "$DEPLOY_BUNDLE_PATH" ]; then
+  # 标准 CI 部署只信任 runner 已 checkout 并经固定主机身份上传的 bundle；服务器无需访问 GitHub。
+  safe_git bundle verify "$DEPLOY_BUNDLE_PATH"
+  safe_git fetch "$DEPLOY_BUNDLE_PATH" HEAD
+  bundle_sha="$(safe_git rev-parse FETCH_HEAD)"
+  [ "$bundle_sha" = "$DEPLOY_SHA" ] || {
+    echo "部署源码 bundle 与部署提交不一致" >&2
     exit 1
-  fi
-done
+  }
+  safe_git update-ref "refs/remotes/origin/$BRANCH" "$DEPLOY_SHA"
+else
+  # 无 bundle 只保留给人工兼容流程；GitHub Actions 标准路径必须始终提供 bundle。
+  max_fetch_attempts="3"
+  fetch_attempt="1"
+  while ! safe_git -c http.version=HTTP/1.1 fetch --depth=1 origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+  do
+    if [ "$fetch_attempt" -lt "$max_fetch_attempts" ]; then
+      next_attempt=$((fetch_attempt + 1))
+      echo "Git 获取失败，等待后进行第 $next_attempt/$max_fetch_attempts 次尝试" >&2
+      sleep $((fetch_attempt * 3))
+      fetch_attempt="$next_attempt"
+    else
+      echo "Git 获取连续失败 $max_fetch_attempts 次，停止部署" >&2
+      exit 1
+    fi
+  done
+fi
 remote_sha="$(safe_git rev-parse "refs/remotes/origin/$BRANCH")"
 [ "$remote_sha" = "$DEPLOY_SHA" ] || {
   echo "远程分支提交与部署提交不一致" >&2
@@ -329,6 +370,9 @@ rollback() {
   original_status="$1"
   trap - EXIT
   set +e
+  if ! cleanup_deploy_bundle; then
+    echo "部署源码 bundle 清理失败" >&2
+  fi
   echo "新版本部署失败（退出码：${original_status}）" >&2
 
   # 若本次改变过 schema，必须先恢复旧 schema，再启动可能不认识新字段的旧 Core。
@@ -404,5 +448,6 @@ version_switch_started="1"
 compose up --no-build -d --wait
 refresh_nginx
 verify_java_stack
+cleanup_deploy_bundle
 trap - EXIT
 echo "生产编排已启动"

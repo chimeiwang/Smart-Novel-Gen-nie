@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import subprocess
@@ -9,6 +10,7 @@ import pytest
 
 ROOT = Path(__file__).parents[2]
 UPLOAD = ROOT / "scripts" / "upload-docker-images.sh"
+SOURCE_UPLOAD = ROOT / "scripts" / "upload-deploy-source.sh"
 DEPLOY = ROOT / "scripts" / "deploy-production.sh"
 ROLLBACK_DRILL = ROOT / "scripts" / "rollback_drill.sh"
 FAKE_DOCKER = ROOT / "tests" / "architecture" / "fixtures" / "fake_docker.sh"
@@ -68,9 +70,24 @@ def test_upload_preflights_and_processes_each_image_with_bounded_stages() -> Non
         assert contract in source
 
 
+def test_source_upload_validates_sha_and_has_bounded_ssh_retry() -> None:
+    source = SOURCE_UPLOAD.read_text(encoding="utf-8")
+
+    for contract in (
+        'case "$DEPLOY_SHA" in',
+        "部署提交必须是 40 位小写十六进制 SHA",
+        'SOURCE_UPLOAD_TIMEOUT_SECONDS="${SOURCE_UPLOAD_TIMEOUT_SECONDS:-600}"',
+        'SOURCE_UPLOAD_ATTEMPTS="${SOURCE_UPLOAD_ATTEMPTS:-3}"',
+        'if [ "$upload_status" -ne 255 ]',
+        "部署源码 bundle 上传失败，等待后重试",
+        "部署源码 bundle 上传连续失败",
+    ):
+        assert contract in source
+
+
 def test_deploy_scripts_contain_no_destructive_or_dynamic_trust_commands() -> None:
     source = "\n".join(
-        path.read_text(encoding="utf-8") for path in (UPLOAD, DEPLOY)
+        path.read_text(encoding="utf-8") for path in (UPLOAD, SOURCE_UPLOAD, DEPLOY)
     ).lower()
 
     for forbidden in (
@@ -223,6 +240,127 @@ def test_upload_timeout_names_the_image_and_stage(tmp_path: Path) -> None:
     assert list(runner_temp.iterdir()) == []
 
 
+def _run_source_upload(
+    tmp_path: Path,
+    *,
+    transient_failures: int = 0,
+    terminal_status: int = 0,
+) -> tuple[subprocess.CompletedProcess[str], str, Path]:
+    bin_dir = tmp_path / "source-bin"
+    runner_temp = tmp_path / "source-runner"
+    bin_dir.mkdir()
+    runner_temp.mkdir()
+    known_hosts = tmp_path / "source-known-hosts"
+    known_hosts.write_text("example ssh-ed25519 fixture\n", encoding="utf-8")
+    log_path = tmp_path / "source-upload.log"
+    counter_path = tmp_path / "source-upload-count"
+    deploy_sha = "b" * 40
+
+    _write_executable(
+        bin_dir / "git",
+        "#!/bin/sh\n"
+        "printf 'git %s\\n' \"$*\" >> \"$SOURCE_UPLOAD_LOG\"\n"
+        "case \"$*\" in\n"
+        "  'rev-parse HEAD') printf '%s\\n' \"$DEPLOY_SHA\" ;;\n"
+        "  bundle\\ create*) printf 'bundle-fixture' > \"$3\" ;;\n"
+        "  bundle\\ verify*) exit 0 ;;\n"
+        "  bundle\\ list-heads*) printf '%s HEAD\\n' \"$DEPLOY_SHA\" ;;\n"
+        "  *) exit 1 ;;\n"
+        "esac\n",
+    )
+    _write_executable(
+        bin_dir / "scp",
+        "#!/bin/sh\n"
+        "printf 'scp %s\\n' \"$*\" >> \"$SOURCE_UPLOAD_LOG\"\n"
+        "count=0\n"
+        "[ ! -f \"$SOURCE_UPLOAD_COUNTER\" ] || count=$(sed -n '1p' \"$SOURCE_UPLOAD_COUNTER\")\n"
+        "count=$((count + 1))\n"
+        "printf '%s\\n' \"$count\" > \"$SOURCE_UPLOAD_COUNTER\"\n"
+        "if [ \"$count\" -le \"$SOURCE_TRANSIENT_FAILURES\" ]; then exit 255; fi\n"
+        "exit \"$SOURCE_TERMINAL_STATUS\"\n",
+    )
+    _write_executable(
+        bin_dir / "ssh",
+        "#!/bin/sh\n"
+        "command_text=''\n"
+        "for argument in \"$@\"; do command_text=$argument; done\n"
+        "printf 'ssh %s\\n' \"$command_text\" >> \"$SOURCE_UPLOAD_LOG\"\n"
+        "exit 0\n",
+    )
+    _write_executable(
+        bin_dir / "timeout",
+        "#!/bin/sh\n"
+        "while [ \"$#\" -gt 0 ]; do\n"
+        "  case \"$1\" in --foreground|--kill-after=*) shift ;; *) break ;; esac\n"
+        "done\n"
+        "shift\n"
+        "exec \"$@\"\n",
+    )
+    env = {
+        **os.environ,
+        "SERVER_HOST": "example.invalid",
+        "SERVER_USER": "deploy",
+        "SSH_KEY_PATH": _posix_path(tmp_path / "source-key"),
+        "SSH_KNOWN_HOSTS_FILE": _posix_path(known_hosts),
+        "DEPLOY_SHA": deploy_sha,
+        "RUNNER_TEMP": _posix_path(runner_temp),
+        "SOURCE_UPLOAD_LOG": _posix_path(log_path),
+        "SOURCE_UPLOAD_COUNTER": _posix_path(counter_path),
+        "SOURCE_TRANSIENT_FAILURES": str(transient_failures),
+        "SOURCE_TERMINAL_STATUS": str(terminal_status),
+    }
+    result = subprocess.run(  # noqa: S603 - 仅执行仓库脚本和测试夹具
+        [
+            POSIX_SHELL,
+            "-c",
+            'PATH="$1:$PATH"; export PATH; exec /bin/bash "$2"',
+            "source-upload-test",
+            _posix_path(bin_dir),
+            _posix_path(SOURCE_UPLOAD),
+        ],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=20,
+        check=False,
+    )
+    log = log_path.read_text(encoding="utf-8") if log_path.exists() else ""
+    return result, log, runner_temp
+
+
+def test_source_upload_creates_bundle_and_atomically_promotes_remote_file(
+    tmp_path: Path,
+) -> None:
+    result, log, runner_temp = _run_source_upload(tmp_path)
+
+    assert result.returncode == 0, result.stderr
+    assert "git bundle create" in log
+    assert log.count("scp ") == 1
+    assert "chmod 600 '/tmp/inkforge-deploy-" in log
+    assert ".bundle.partial' '/tmp/inkforge-deploy-" in log
+    assert list(runner_temp.iterdir()) == []
+
+
+def test_source_upload_retries_only_transient_ssh_failure(tmp_path: Path) -> None:
+    result, log, runner_temp = _run_source_upload(tmp_path, transient_failures=1)
+
+    assert result.returncode == 0, result.stderr
+    assert log.count("scp ") == 2
+    assert "部署源码 bundle 上传失败，等待后重试第 2/3 次" in result.stderr
+    assert list(runner_temp.iterdir()) == []
+
+
+def test_source_upload_does_not_retry_deterministic_scp_failure(tmp_path: Path) -> None:
+    result, log, runner_temp = _run_source_upload(tmp_path, terminal_status=7)
+
+    assert result.returncode == 7
+    assert log.count("scp ") == 1
+    assert "部署源码 bundle 上传失败，退出码 7" in result.stderr
+    assert list(runner_temp.iterdir()) == []
+
+
 def _run_deploy(
     tmp_path: Path,
     *,
@@ -238,6 +376,8 @@ def _run_deploy(
     migration_down_status: int = 0,
     new_core_runtime: str = "java",
     previous_core_runtime: str = "",
+    deploy_sha: str = "new-tag",
+    deploy_bundle: bool = False,
 ) -> tuple[subprocess.CompletedProcess[str], str]:
     app_dir = tmp_path / "app"
     bin_dir = tmp_path / "bin"
@@ -296,6 +436,7 @@ def _run_deploy(
         bin_dir / "git",
         "#!/bin/sh\n"
         "while [ \"${1:-}\" = \"-c\" ]; do shift 2; done\n"
+        "printf 'git %s\\n' \"$*\" >> \"$FAKE_DOCKER_LOG\"\n"
         "if [ \"${1:-}\" = \"rev-parse\" ]; then printf '%s\\n' \"$DEPLOY_SHA\"; fi\n"
         "exit 0\n",
     )
@@ -318,10 +459,16 @@ def _run_deploy(
     migration_up_count_path = tmp_path / "migration-up-count"
     snapshot_state_dir = tmp_path / "snapshot-state"
     snapshot_state_dir.mkdir()
+    # 必须使用与生产脚本相同的固定目录，SHA 让并行测试互不覆盖。
+    bundle_root = Path("/tmp")  # noqa: S108
+    bundle_path = bundle_root / f"inkforge-deploy-{deploy_sha}.bundle"
+    if deploy_bundle:
+        bundle_path.write_text("bundle fixture", encoding="utf-8")
     env = {
         **os.environ,
         "APP_DIR": _posix_path(app_dir),
-        "DEPLOY_SHA": "new-tag",
+        "DEPLOY_SHA": deploy_sha,
+        "DEPLOY_BUNDLE_PATH": bundle_path.as_posix() if deploy_bundle else "",
         "INKFORGE_IMAGE_TAG": "new-tag",
         "FAKE_DOCKER_LOG": _posix_path(log_path),
         "FAKE_NEW_TAG": "new-tag",
@@ -363,6 +510,29 @@ def _run_deploy(
         check=False,
     )
     return result, log_path.read_text(encoding="utf-8") if log_path.exists() else ""
+
+
+def test_deploy_fetches_from_bundle_without_contacting_origin_and_cleans_file(
+    tmp_path: Path,
+) -> None:
+    # SHA-1 只用于生成 Git 风格测试标识，不承担密码学安全职责。
+    deploy_sha = hashlib.sha1(str(tmp_path).encode()).hexdigest()  # noqa: S324
+    bundle_root = Path("/tmp")  # noqa: S108
+    bundle_path = bundle_root / f"inkforge-deploy-{deploy_sha}.bundle"
+    try:
+        result, log = _run_deploy(
+            tmp_path,
+            previous_state="valid",
+            deploy_sha=deploy_sha,
+            deploy_bundle=True,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert f"fetch {bundle_path} HEAD" in log
+        assert "fetch --depth=1 origin" not in log
+        assert bundle_path.exists() is False
+    finally:
+        bundle_path.unlink(missing_ok=True)
 
 
 def _full_stack_up_lines(log: str) -> list[str]:

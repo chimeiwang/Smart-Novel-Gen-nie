@@ -173,6 +173,16 @@ jobs:
           SSH_KNOWN_HOSTS_FILE: /home/runner/.ssh/known_hosts
         run: scripts/upload-docker-images.sh
 
+      - name: Upload deployment source bundle
+        timeout-minutes: 15
+        env:
+          DEPLOY_SHA: ${{ github.sha }}
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SSH_KEY_PATH: /home/runner/.ssh/deploy_key
+          SSH_KNOWN_HOSTS_FILE: /home/runner/.ssh/known_hosts
+        run: scripts/upload-deploy-source.sh
+
       - name: Deploy over SSH
         shell: bash
         env:
@@ -189,7 +199,7 @@ jobs:
             -o TCPKeepAlive=yes \
             -i ~/.ssh/deploy_key \
             "${SERVER_USER}@${SERVER_HOST}" \
-            "APP_DIR='${{ vars.APP_DIR }}' REPO_URL='https://github.com/chimeiwang/Smart-Novel-Gen-nie.git' BRANCH='main' DEPLOY_SHA='${{ github.sha }}' INKFORGE_IMAGE_TAG='${INKFORGE_IMAGE_TAG}' sh -s" \
+            "APP_DIR='${{ vars.APP_DIR }}' REPO_URL='https://github.com/chimeiwang/Smart-Novel-Gen-nie.git' BRANCH='main' DEPLOY_SHA='${{ github.sha }}' DEPLOY_BUNDLE_PATH='/tmp/inkforge-deploy-${{ github.sha }}.bundle' INKFORGE_IMAGE_TAG='${INKFORGE_IMAGE_TAG}' sh -s" \
             < scripts/deploy-production.sh 2>&1 | tee deploy.log
           deploy_status=${PIPESTATUS[0]}
           if [ "$deploy_status" -ne 0 ]; then

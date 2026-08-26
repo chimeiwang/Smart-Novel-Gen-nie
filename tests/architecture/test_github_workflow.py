@@ -6,6 +6,7 @@ ROOT = Path(__file__).parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "build.yml"
 DEPLOY_SCRIPT = ROOT / "scripts" / "deploy-production.sh"
 IMAGE_UPLOAD_SCRIPT = ROOT / "scripts" / "upload-docker-images.sh"
+SOURCE_UPLOAD_SCRIPT = ROOT / "scripts" / "upload-deploy-source.sh"
 API_GENERATOR = ROOT / "scripts" / "generate_api_client.mjs"
 
 
@@ -82,6 +83,41 @@ def test_image_upload_step_has_a_total_timeout() -> None:
     upload_step = upload_step.split("      - name: Deploy over SSH", maxsplit=1)[0]
 
     assert "timeout-minutes: 30" in upload_step
+
+
+def test_deploy_uploads_verified_source_bundle_before_remote_execution() -> None:
+    source = WORKFLOW.read_text(encoding="utf-8")
+
+    upload_name = "      - name: Upload deployment source bundle"
+    deploy_name = "      - name: Deploy over SSH"
+    assert upload_name in source
+    assert source.index(upload_name) < source.index(deploy_name)
+    assert "scripts/upload-deploy-source.sh" in source
+    assert "DEPLOY_BUNDLE_PATH='/tmp/inkforge-deploy-${{ github.sha }}.bundle'" in source
+
+
+def test_source_bundle_upload_is_sha_bound_atomic_and_pinned() -> None:
+    source = SOURCE_UPLOAD_SCRIPT.read_text(encoding="utf-8")
+
+    for contract in (
+        'DEPLOY_SHA="${DEPLOY_SHA:?必须设置部署提交}"',
+        'git rev-parse HEAD',
+        'git bundle create "$local_bundle" HEAD',
+        'git bundle verify "$local_bundle"',
+        'chmod 600 "$local_bundle"',
+        'remote_bundle="/tmp/inkforge-deploy-${DEPLOY_SHA}.bundle"',
+        'remote_partial="${remote_bundle}.partial"',
+        "StrictHostKeyChecking=yes",
+        "UserKnownHostsFile=$SSH_KNOWN_HOSTS_FILE",
+        "BatchMode=yes",
+        '"${remote}:${remote_partial}"',
+        "mv -f -- '$remote_partial' '$remote_bundle'",
+    ):
+        assert contract in source
+
+    assert "StrictHostKeyChecking=no" not in source
+    assert "ssh-keyscan" not in source
+    assert SOURCE_UPLOAD_SCRIPT.stat().st_mode & 0o111
 
 
 def test_image_upload_reuses_services_with_unchanged_build_inputs() -> None:
@@ -202,6 +238,25 @@ def test_remote_deploy_requires_server_configuration_and_never_builds() -> None:
     assert '"$mode" = "600"' in source
 
     assert "up --build" not in source
+
+
+def test_remote_deploy_prefers_verified_bundle_and_always_cleans_it() -> None:
+    source = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+    for contract in (
+        'DEPLOY_BUNDLE_PATH="${DEPLOY_BUNDLE_PATH:-}"',
+        'expected_bundle_path="/tmp/inkforge-deploy-${DEPLOY_SHA}.bundle"',
+        'safe_git bundle verify "$DEPLOY_BUNDLE_PATH"',
+        'safe_git fetch "$DEPLOY_BUNDLE_PATH" HEAD',
+        'bundle_sha="$(safe_git rev-parse FETCH_HEAD)"',
+        'safe_git update-ref "refs/remotes/origin/$BRANCH" "$DEPLOY_SHA"',
+        'rm -f -- "$DEPLOY_BUNDLE_PATH"',
+    ):
+        assert contract in source
+
+    bundle_fetch = source.index('safe_git fetch "$DEPLOY_BUNDLE_PATH" HEAD')
+    origin_fetch = source.index("fetch --depth=1 origin")
+    assert bundle_fetch < origin_fetch
 
 
 def test_remote_deploy_allows_only_its_app_directory_for_git_operations() -> None:
