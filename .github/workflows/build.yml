@@ -74,7 +74,8 @@ jobs:
               tail -n 200 maven-verify.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            annotation="$(tail -n 80 maven-verify.log)"
+            # Actions 注解有长度上限；只发送最后 20 行，避免真正的 Maven 尾部错误被截掉。
+            annotation="$(tail -n 20 maven-verify.log)"
             annotation="${annotation//'%'/'%25'}"
             annotation="${annotation//$'\n'/'%0A'}"
             annotation="${annotation//$'\r'/'%0D'}"
