@@ -316,6 +316,8 @@ def _run_deploy(
     agent_counter_path = tmp_path / "agent-ready-counter"
     migration_state_path = tmp_path / "migration-state"
     migration_up_count_path = tmp_path / "migration-up-count"
+    snapshot_state_dir = tmp_path / "snapshot-state"
+    snapshot_state_dir.mkdir()
     env = {
         **os.environ,
         "APP_DIR": _posix_path(app_dir),
@@ -338,6 +340,7 @@ def _run_deploy(
         "FAKE_MIGRATION_UP_COUNT": _posix_path(migration_up_count_path),
         "FAKE_MIGRATION_UP_FAIL_ATTEMPT": str(migration_up_fail_attempt),
         "FAKE_MIGRATION_DOWN_STATUS": str(migration_down_status),
+        "FAKE_SNAPSHOT_STATE_DIR": _posix_path(snapshot_state_dir),
         "SMOKE_AGENT_MAX_ATTEMPTS": "1",
         "SMOKE_AGENT_REQUIRED_SUCCESSES": "1",
         "SMOKE_AGENT_POLL_SECONDS": "0",
@@ -398,9 +401,13 @@ def _deployment_up_events(log: str) -> list[tuple[str, str]]:
     [
         ("none", 0, 1),
         ("partial", 1, 0),
-        ("mismatch", 1, 0),
+        ("mismatch", 0, 1),
         ("valid", 0, 1),
         ("missing_image", 1, 0),
+        ("invalid_repository", 1, 0),
+        ("snapshot_tag_failure", 1, 0),
+        ("snapshot_verify_mismatch", 1, 0),
+        ("snapshot_existing_conflict", 1, 0),
     ],
 )
 def test_previous_image_state_is_validated_before_switch(
@@ -413,6 +420,46 @@ def test_previous_image_state_is_validated_before_switch(
 
     assert (result.returncode == 0) is (expected_status == 0), result.stderr
     assert len(_full_stack_up_lines(log)) == expected_up_count
+
+
+def test_current_running_bundle_is_snapshotted_by_exact_image_id_before_switch(
+    tmp_path: Path,
+) -> None:
+    result, log = _run_deploy(tmp_path, previous_state="mismatch")
+
+    assert result.returncode == 0, result.stderr
+    lines = log.splitlines()
+    expected_tags = [
+        "docker image tag sha256:previous-web-id inkforge-web:rollback-new-tag",
+        "docker image tag sha256:previous-core-api-id inkforge-core-api:rollback-new-tag",
+        "docker image tag sha256:previous-agent-service-id inkforge-agent-service:rollback-new-tag",
+    ]
+    for expected in expected_tags:
+        matching_index = next(
+            index for index, line in enumerate(lines) if expected in line
+        )
+        first_switch_index = next(
+            index
+            for index, line in enumerate(lines)
+            if line.endswith(" up --no-build -d --wait")
+        )
+        assert matching_index < first_switch_index
+
+    assert "已冻结当前生产三服务精确回滚快照：rollback-new-tag（python）" in result.stdout
+
+
+def test_existing_conflicting_rollback_snapshot_is_not_overwritten(
+    tmp_path: Path,
+) -> None:
+    result, log = _run_deploy(
+        tmp_path,
+        previous_state="snapshot_existing_conflict",
+    )
+
+    assert result.returncode != 0
+    assert "回滚镜像标签已存在但指向另一镜像" in result.stderr
+    assert "docker image tag" not in log
+    assert _full_stack_up_lines(log) == []
 
 
 def test_successful_deployment_refreshes_nginx_with_new_tag(tmp_path: Path) -> None:
@@ -540,7 +587,7 @@ def test_failed_new_version_restores_previous_version_and_keeps_failure(
     up_lines = _full_stack_up_lines(log)
     assert [line.split("|", 1)[0] for line in up_lines] == [
         "tag=new-tag",
-        "tag=previous-tag",
+        "tag=rollback-new-tag",
     ]
     assert (
         " compose --env-file .env -f infra/compose.yaml "
@@ -566,7 +613,7 @@ def test_failed_new_version_restores_previous_java_with_java_guard(
     up_lines = _full_stack_up_lines(log)
     assert [line.split("|", 1)[0] for line in up_lines] == [
         "tag=new-tag",
-        "tag=previous-tag",
+        "tag=rollback-new-tag",
     ]
     assert "compose.python-core-rollback.yaml" not in up_lines[1]
     assert log.count("exec -T core-api /usr/local/bin/inkforge-schema-guard") == 1
@@ -648,17 +695,17 @@ def test_smoke_failure_refreshes_nginx_for_new_and_rollback_tags(
     assert result.returncode != 0
     assert [line.split("|", 1)[0] for line in _full_stack_up_lines(log)] == [
         "tag=new-tag",
-        "tag=previous-tag",
+        "tag=rollback-new-tag",
     ]
     assert [line.split("|", 1)[0] for line in _nginx_refresh_lines(log)] == [
         "tag=new-tag",
-        "tag=previous-tag",
+        "tag=rollback-new-tag",
     ]
     assert _deployment_up_events(log) == [
         ("tag=new-tag", "全栈"),
         ("tag=new-tag", "Nginx"),
-        ("tag=previous-tag", "全栈"),
-        ("tag=previous-tag", "Nginx"),
+        ("tag=rollback-new-tag", "全栈"),
+        ("tag=rollback-new-tag", "Nginx"),
     ]
     assert "新版本部署失败，旧版本已恢复" in result.stdout
 
@@ -749,7 +796,8 @@ def test_failed_new_version_downs_schema_before_restoring_previous_image(
     previous_up_index = next(
         index
         for index, line in enumerate(lines)
-        if line.startswith("tag=previous-tag|") and line.endswith(" up --no-build -d --wait")
+        if line.startswith("tag=rollback-new-tag|")
+        and line.endswith(" up --no-build -d --wait")
     )
     assert down_index < previous_up_index
 
@@ -766,6 +814,7 @@ def test_failed_schema_down_does_not_restore_previous_image(tmp_path: Path) -> N
     assert result.returncode == 23
     assert "migration down" in log
     assert not any(
-        line.startswith("tag=previous-tag|") for line in _full_stack_up_lines(log)
+        line.startswith("tag=rollback-new-tag|")
+        for line in _full_stack_up_lines(log)
     )
     assert "数据库结构回退失败" in result.stderr

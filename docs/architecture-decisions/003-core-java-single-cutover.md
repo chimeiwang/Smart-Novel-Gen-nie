@@ -16,7 +16,8 @@
 - Java 在全量完成前不接管任何生产路由；
 - 最终镜像沿用 `inkforge-core-api:<sha>`、服务名、网络别名、端口、上传卷和环境变量边界；
 - 切换通过 `docker compose up --no-build -d --wait` 替换同名容器；
-- 失败时恢复上一 Python 镜像，不执行数据库反向迁移；
+- 切换前按实际运行容器的不可变镜像 ID 冻结 Web、Core、Agent 精确回滚组合，不要求三者历史标签相同；
+- 失败时恢复冻结组合中的上一 Python Core 及配套 Web、Agent，不从历史标签猜测版本；
 - 稳定观察期结束后才删除 Python Core。
 
 ## 切换门禁

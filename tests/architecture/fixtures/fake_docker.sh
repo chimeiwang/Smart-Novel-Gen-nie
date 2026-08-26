@@ -79,32 +79,64 @@ if [ "${1:-}" = "ps" ]; then
 fi
 
 if [ "${1:-}" = "inspect" ]; then
+  inspect_format=""
   container=""
-  for argument in "$@"; do container="$argument"; done
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --format)
+        inspect_format="${2:-}"
+        shift 2
+        ;;
+      *)
+        container="$1"
+        shift
+        ;;
+    esac
+  done
   service="${container#container-}"
-  tag="previous-tag"
-  if [ "${FAKE_PREVIOUS_STATE:-valid}" = "mismatch" ] && [ "$service" = "agent-service" ]; then
-    tag="other-tag"
-  fi
-  printf 'inkforge-%s:%s\n' "$service" "$tag"
+  case "$inspect_format" in
+    '{{.Image}}')
+      printf 'sha256:previous-%s-id\n' "$service"
+      ;;
+    '{{.Config.Image}}')
+      tag="previous-tag"
+      if [ "${FAKE_PREVIOUS_STATE:-valid}" = "mismatch" ] && [ "$service" = "agent-service" ]; then
+        tag="other-tag"
+      fi
+      if [ "${FAKE_PREVIOUS_STATE:-valid}" = "invalid_repository" ] && [ "$service" = "web" ]; then
+        printf 'unexpected-web:%s\n' "$tag"
+      else
+        printf 'inkforge-%s:%s\n' "$service" "$tag"
+      fi
+      ;;
+    *) exit 2 ;;
+  esac
   exit 0
 fi
 
 if [ "${1:-}" = "image" ] && [ "${2:-}" = "inspect" ]; then
+  inspect_format=""
   image=""
-  for argument in "$@"; do image="$argument"; done
+  shift 2
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --format=*) inspect_format="${1#--format=}"; shift ;;
+      --format) inspect_format="${2:-}"; shift 2 ;;
+      *) image="$1"; shift ;;
+    esac
+  done
   if [ "${FAKE_PREVIOUS_STATE:-valid}" = "missing_image" ]; then
     case "$image" in
-      inkforge-core-api:previous-tag) exit 1 ;;
+      sha256:previous-core-api-id|inkforge-core-api:previous-tag) exit 1 ;;
     esac
   fi
-  case " $* " in
-    *"cn.inkforge.core.runtime"*)
+  case "$inspect_format" in
+    *cn.inkforge.core.runtime*)
       case "$image" in
         inkforge-core-api:${FAKE_NEW_TAG:-new-tag})
           printf '%s\n' "${FAKE_NEW_CORE_RUNTIME-java}"
           ;;
-        inkforge-core-api:previous-tag)
+        sha256:previous-core-api-id|inkforge-core-api:previous-tag)
           printf '%s\n' "${FAKE_PREVIOUS_CORE_RUNTIME-}"
           ;;
         *)
@@ -112,6 +144,47 @@ if [ "${1:-}" = "image" ] && [ "${2:-}" = "inspect" ]; then
           ;;
       esac
       ;;
+    '{{.Id}}')
+      case "$image" in
+        sha256:previous-*-id)
+          printf '%s\n' "$image"
+          ;;
+        inkforge-web:rollback-*)
+          if [ "${FAKE_PREVIOUS_STATE:-valid}" = "snapshot_existing_conflict" ]; then
+            printf '%s\n' 'sha256:older-web-id'
+            exit 0
+          fi
+          [ -f "$FAKE_SNAPSHOT_STATE_DIR/web" ] || exit 1
+          printf '%s\n' 'sha256:previous-web-id'
+          ;;
+        inkforge-core-api:rollback-*)
+          [ -f "$FAKE_SNAPSHOT_STATE_DIR/core-api" ] || exit 1
+          if [ "${FAKE_PREVIOUS_STATE:-valid}" = "snapshot_verify_mismatch" ]; then
+            printf '%s\n' 'sha256:unexpected-core-id'
+          else
+            printf '%s\n' 'sha256:previous-core-api-id'
+          fi
+          ;;
+        inkforge-agent-service:rollback-*)
+          [ -f "$FAKE_SNAPSHOT_STATE_DIR/agent-service" ] || exit 1
+          printf '%s\n' 'sha256:previous-agent-service-id'
+          ;;
+        *) printf '%s\n' 'sha256:fixture-id' ;;
+      esac
+      ;;
+  esac
+  exit 0
+fi
+
+if [ "${1:-}" = "image" ] && [ "${2:-}" = "tag" ]; then
+  if [ "${FAKE_PREVIOUS_STATE:-valid}" = "snapshot_tag_failure" ] \
+    && [ "${3:-}" = "sha256:previous-core-api-id" ]; then
+    exit 27
+  fi
+  case "${4:-}" in
+    inkforge-web:rollback-*) : > "$FAKE_SNAPSHOT_STATE_DIR/web" ;;
+    inkforge-core-api:rollback-*) : > "$FAKE_SNAPSHOT_STATE_DIR/core-api" ;;
+    inkforge-agent-service:rollback-*) : > "$FAKE_SNAPSHOT_STATE_DIR/agent-service" ;;
   esac
   exit 0
 fi

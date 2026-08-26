@@ -23,7 +23,8 @@
   回滚验收前，FastAPI Core 仍是当前运行事实，生产不得双 Core 或双写。
 - Core 与 Agent 使用版本化 Pydantic 契约和 Ed25519 服务身份通信。
 - 生产由 `infra/compose.yaml` 编排，Nginx 是唯一公网入口。
-- 生产 SSH 只信任管理员离线核验的主机公钥；部署串行排队，新版本失败时由 `scripts/deploy-production.sh` 尝试恢复经验证的上一镜像。
+- 生产 SSH 只信任管理员离线核验的主机公钥；部署串行排队，切换前按运行容器的不可变镜像 ID 冻结三服务
+  精确回滚组合，新版本失败时由 `scripts/deploy-production.sh` 尝试恢复该组合。
 - PostgreSQL schema 默认冻结并由只读 `schema-contract.json` 守卫。当前具名例外包括视频控制面与章节
   改编域迁移 `20260807_video_production_control_plane.sql`、`20260817_video_review_decision_command.sql`、
   `20260817_video_domain_ownership_chain.sql`、`20260818_video_chapter_adaptation_domain.sql`，它们只允许对

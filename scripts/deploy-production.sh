@@ -88,6 +88,82 @@ classify_core_runtime() {
   esac
 }
 
+snapshot_running_service_image() {
+  service_name="$1"
+  expected_repository="$2"
+  container_id="$3"
+  rollback_tag="$4"
+
+  if declared_image="$(docker inspect --format '{{.Config.Image}}' "$container_id")"; then
+    :
+  else
+    echo "无法读取 $service_name 容器声明镜像" >&2
+    return 1
+  fi
+  # Config.Image 只用于校验服务归属；回滚来源必须使用容器实际绑定的不可变 Image ID。
+  case "$declared_image" in
+    "$expected_repository":*) ;;
+    *)
+      echo "$service_name 容器镜像仓库不符合生产约定" >&2
+      return 1
+      ;;
+  esac
+
+  if running_image_id="$(docker inspect --format '{{.Image}}' "$container_id")"; then
+    :
+  else
+    echo "无法读取 $service_name 容器实际镜像 ID" >&2
+    return 1
+  fi
+  case "$running_image_id" in
+    sha256:*) ;;
+    *)
+      echo "$service_name 容器实际镜像 ID 格式无效" >&2
+      return 1
+      ;;
+  esac
+
+  if canonical_image_id="$(docker image inspect --format '{{.Id}}' "$running_image_id")"; then
+    :
+  else
+    echo "现有生产镜像已缺失或不可读取：$service_name" >&2
+    return 1
+  fi
+  [ "$canonical_image_id" = "$running_image_id" ] || {
+    echo "$service_name 容器镜像 ID 与本机镜像不一致" >&2
+    return 1
+  }
+
+  rollback_image="$expected_repository:$rollback_tag"
+  # 同一提交的回滚标签一旦建立就不允许改指，避免人工重跑覆盖仍需保留的恢复点。
+  if existing_snapshot_id="$(
+    docker image inspect --format '{{.Id}}' "$rollback_image" 2>/dev/null
+  )"; then
+    [ "$existing_snapshot_id" = "$running_image_id" ] || {
+      echo "$service_name 回滚镜像标签已存在但指向另一镜像" >&2
+      return 1
+    }
+  else
+    # image tag 只增加本地别名，不复制镜像层，也不会重建或停止当前生产容器。
+    docker image tag "$running_image_id" "$rollback_image" >/dev/null || {
+      echo "无法创建 $service_name 回滚镜像标签" >&2
+      return 1
+    }
+  fi
+  if snapshotted_image_id="$(docker image inspect --format '{{.Id}}' "$rollback_image")"; then
+    :
+  else
+    echo "无法反查 $service_name 回滚镜像标签" >&2
+    return 1
+  fi
+  [ "$snapshotted_image_id" = "$running_image_id" ] || {
+    echo "$service_name 回滚镜像标签未指向当前运行镜像" >&2
+    return 1
+  }
+
+  printf '%s\n' "$running_image_id"
+}
+
 command -v docker >/dev/null 2>&1 || { echo "缺少 docker 命令" >&2; exit 1; }
 command -v git >/dev/null 2>&1 || { echo "缺少 git 命令" >&2; exit 1; }
 
@@ -184,42 +260,28 @@ existing_service_count="0"
 
 previous_tag=""
 previous_core_runtime=""
-# 自动回滚的前提是三服务来自同一标签且旧镜像仍在本机；不满足时宁可停止，也不拼接混合版本。
+# 自动回滚的权威来源是切换前同一时刻实际运行的三容器，而不是可能经历过复用的历史标签。
 if [ "$existing_service_count" -eq 0 ]; then
   echo "未发现现有生产容器，本次按首次部署处理"
 elif [ "$existing_service_count" -ne 3 ]; then
   echo "现有生产服务不完整，停止部署并等待人工检查" >&2
   exit 1
 else
-  web_image="$(docker inspect --format '{{.Config.Image}}' "$web_container")"
-  core_image="$(docker inspect --format '{{.Config.Image}}' "$core_container")"
-  agent_image="$(docker inspect --format '{{.Config.Image}}' "$agent_container")"
+  rollback_snapshot_tag="rollback-$DEPLOY_SHA"
+  web_image_id="$(
+    snapshot_running_service_image \
+      web inkforge-web "$web_container" "$rollback_snapshot_tag"
+  )"
+  core_image_id="$(
+    snapshot_running_service_image \
+      core-api inkforge-core-api "$core_container" "$rollback_snapshot_tag"
+  )"
+  agent_image_id="$(
+    snapshot_running_service_image \
+      agent-service inkforge-agent-service "$agent_container" "$rollback_snapshot_tag"
+  )"
 
-  case "$web_image" in
-    inkforge-web:*) web_tag="${web_image#inkforge-web:}" ;;
-    *) echo "web 容器镜像仓库不符合生产约定" >&2; exit 1 ;;
-  esac
-  case "$core_image" in
-    inkforge-core-api:*) core_tag="${core_image#inkforge-core-api:}" ;;
-    *) echo "core-api 容器镜像仓库不符合生产约定" >&2; exit 1 ;;
-  esac
-  case "$agent_image" in
-    inkforge-agent-service:*) agent_tag="${agent_image#inkforge-agent-service:}" ;;
-    *) echo "agent-service 容器镜像仓库不符合生产约定" >&2; exit 1 ;;
-  esac
-
-  [ -n "$web_tag" ] && [ "$web_tag" = "$core_tag" ] && [ "$web_tag" = "$agent_tag" ] || {
-    echo "现有生产服务镜像标签不一致，停止部署并等待人工检查" >&2
-    exit 1
-  }
-  for image in "$web_image" "$core_image" "$agent_image"
-  do
-    docker image inspect "$image" >/dev/null 2>&1 || {
-      echo "现有生产镜像已缺失，无法保证自动回滚：$image" >&2
-      exit 1
-    }
-  done
-  if previous_core_runtime_label="$(core_image_runtime_label "$core_image")"; then
+  if previous_core_runtime_label="$(core_image_runtime_label "$core_image_id")"; then
     previous_core_runtime="$(classify_core_runtime "$previous_core_runtime_label")"
   else
     echo "无法读取上一 Core 镜像 runtime 标签" >&2
@@ -229,8 +291,8 @@ else
     echo "上一 Core 镜像 runtime 标签无法识别" >&2
     exit 1
   }
-  previous_tag="$web_tag"
-  echo "已确认可回滚的上一生产镜像标签：${previous_tag}（${previous_core_runtime}）"
+  previous_tag="$rollback_snapshot_tag"
+  echo "已冻结当前生产三服务精确回滚快照：${previous_tag}（${previous_core_runtime}）"
 fi
 
 docker compose version >/dev/null 2>&1 || { echo "缺少 docker compose" >&2; exit 1; }

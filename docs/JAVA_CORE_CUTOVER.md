@@ -10,7 +10,8 @@
 - `inkforge-core-api:<sha>` 的 `cn.inkforge.core.runtime` 标签为 `java`，入口为单进程 `java -jar`；
 - Java 镜像在 448 MiB、只读根文件系统、生产 JVM 上限下通过 readiness、schema guard 和 OOM 检查；
 - 已把生产备份恢复到独立验证库并通过结构守卫；正式库备份、校验和及当前数据量基线已记录；
-- Web、Core、Agent 当前三张生产镜像使用同一标签，上一标签对应镜像仍在服务器；
+- Web、Core、Agent 三个现有生产容器完整，容器声明的镜像仓库符合约定，且各自实际使用的不可变镜像 ID
+  仍在服务器；历史标签允许不同，部署会在切换前冻结当前实际运行的精确三服务组合；
 - 第一次 Python→Java 切换使用的回退 Core 镜像，必须从切换前当前提交中的 Python Core 源码精确构建并
   完成验收；不能拿任意更早的历史标签冒充“上一版”；
 - `.env`、服务密钥归属/权限和 `host.docker.internal` 数据库网关满足部署脚本门禁；
@@ -22,14 +23,20 @@ GitHub Actions 先运行 CI，再构建并上传三张提交哈希镜像。服�
 `scripts/deploy-production.sh` 会依次：
 
 1. 校验远端提交、`.env`、服务密钥、三张新镜像和新 Core 的 Java runtime 标签；
-2. 记录当前三服务共同标签，并把上一 Core 分类为 `java` 或无标签的历史 `python`；
+2. 读取当前三服务的不可变镜像 ID，分别标记到同一个 `rollback-<部署提交>` 标签并反查验证，再把上一
+   Core 分类为 `java` 或无标签的历史 `python`；该步骤只增加本地镜像标签，不触碰运行中的容器；
 3. 用无网络、最小 `CHOWN` capability 的一次性容器，非递归初始化 `uploads` 与 `agent_logs` 两个既有卷
    的根目录所有权；
 4. 只通过已审核 helper 处理既有具名 `TokenUsage` 生产迁移门禁；
 5. 以 `--no-build` 原位替换同名服务，不创建第二个 Core；
 6. 调用镜像内 `/usr/local/bin/inkforge-schema-guard`，再执行上传卷/日志卷真实写入、HTTP、内部路由和
    Agent 稳定就绪冒烟；
-7. 任一步失败时保持原始失败码，并按上一 Core 类型恢复上一共同标签。
+7. 任一步失败时保持原始失败码，并按上一 Core 类型恢复第 2 步冻结的精确三服务快照。
+
+回滚标签只是指向三个既有镜像 ID 的本地别名，不会复制镜像层，也不能据此把三个来源不同的历史版本重新
+组合。只有切换前同一时刻实际运行的三容器组合可以成为自动回滚基线；任一服务缺失、仓库名异常、镜像 ID
+缺失、既有同名回滚标签指向其他镜像或标签反查不一致时，部署必须在数据库迁移与容器切换前停止；部署脚本
+不会覆盖已经冻结的恢复点。
 
 正常 Java 启动只使用 `infra/compose.yaml`。`infra/compose.python-core-rollback.yaml` 只允许在恢复无 Java
 runtime 标签的历史 Python Core 时叠加，用于恢复其 Python 健康检查；它不得用于新 Java 版本启动。

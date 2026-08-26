@@ -50,7 +50,8 @@
   `8aaa4d25c3cd3114bc8659330700a2eecdbcdefc7f3d83473c93c1baee576629`；
 - 生产 Core 当前限制为 0.45 CPU、448 MB 内存；
 - Agent 依赖 Core 的工具网关、计费授权、任务回调、质量回调、ReviewArtifact 和视频回调；
-- 生产回滚依赖上一提交的 `inkforge-core-api:<sha>` 镜像仍然存在。
+- 生产回滚依赖切换前实际运行的 Web、Core、Agent 三个不可变镜像 ID 仍然存在；部署会给该精确组合增加
+  本次部署专用回滚标签，不能依赖三个历史标签碰巧相同。
 
 这些数字只是范围基线。迁移目标是行为等价，不是逐行翻译 Python。
 
