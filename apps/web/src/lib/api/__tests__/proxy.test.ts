@@ -22,3 +22,26 @@ describe("登录页会话核验", () => {
     assert.equal(response.headers.get("x-middleware-next"), "1");
   });
 });
+
+describe("公开法务页面", () => {
+  for (const pathname of ["/terms", "/privacy"]) {
+    it(`未登录用户可以直接访问 ${pathname}`, async () => {
+      const request = new NextRequest(`http://127.0.0.1:43119${pathname}`);
+
+      const response = await proxy(request);
+
+      assert.equal(response.headers.get("location"), null);
+      assert.equal(response.headers.get("x-middleware-next"), "1");
+    });
+  }
+
+  it("其他工作台页面仍然要求登录", async () => {
+    const request = new NextRequest("http://127.0.0.1:43119/dashboard");
+
+    const response = await proxy(request);
+
+    const location = response.headers.get("location");
+    assert.ok(location);
+    assert.equal(new URL(location).pathname, "/login");
+  });
+});

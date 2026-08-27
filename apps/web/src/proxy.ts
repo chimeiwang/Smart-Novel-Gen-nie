@@ -1,7 +1,7 @@
 /**
  * 页面路由保护。
  *
- * 首页和登录页公开，其余页面要求存在有效会话令牌。业务接口统一由
+ * 首页、登录页和法务告知页公开，其余页面要求存在有效会话令牌。业务接口统一由
  * Nginx 转发到核心接口服务，不经过 Next.js。
  */
 
@@ -16,7 +16,7 @@ export async function proxy(request: NextRequest) {
   const jwtSecret = resolveSessionSecret();
   const { pathname } = request.nextUrl;
 
-  if (pathname === "/") {
+  if (pathname === "/" || pathname === "/terms" || pathname === "/privacy") {
     return NextResponse.next();
   }
 
