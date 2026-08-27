@@ -15,8 +15,9 @@ export default function TermsPage() {
         <h1>墨铸 InkForge 用户协议</h1>
         <p className={styles.meta}>版本日期：2026 年 8 月 27 日</p>
         <div className={styles.draft}>
-          运营主体已确认为重庆市创煜新软件有限公司。正式生效前仍须公布真实可用的联系邮箱或客服电话；
-          在联系渠道确认前，手机号认证保持关闭。
+          运营主体：重庆市创煜新软件有限公司；联系邮箱：
+          <a href="mailto:niebqoiang@gmail.com">niebqoiang@gmail.com</a>。手机号认证当前尚未开放，
+          正式开放时间以产品页面提示为准。
         </div>
 
         <p>
@@ -122,8 +123,9 @@ export default function TermsPage() {
 
         <h2>十三、运营主体与联系</h2>
         <p>
-          运营主体：重庆市创煜新软件有限公司。正式启用手机号认证前，本节将补充真实可用的联系邮箱或客服电话，
-          用于服务咨询、投诉和账号安全反馈；在联系渠道公布前，本协议不作为手机号认证的生效版本。
+          运营主体：重庆市创煜新软件有限公司。联系邮箱：
+          <a href="mailto:niebqoiang@gmail.com">niebqoiang@gmail.com</a>，用于服务咨询、投诉、账号安全反馈和
+          依法提出的数据权利请求。为保护账号及个人信息安全，我们可能在处理请求前核验请求人与相关账号的关系。
         </p>
       </article>
     </main>

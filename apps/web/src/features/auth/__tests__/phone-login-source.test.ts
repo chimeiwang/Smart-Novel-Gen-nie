@@ -28,6 +28,21 @@ test("手机号登录保留自动建号说明、协议同意和老账号边界",
   assert.doesNotMatch(source, /ALIYUN_ACCESS_KEY|PHONE_AUTH_HMAC_SECRET/);
 });
 
+test("公开协议必须展示确认后的主体与联系邮箱", async () => {
+  const termsUrl = new URL("../../../app/terms/page.tsx", import.meta.url);
+  const privacyUrl = new URL("../../../app/privacy/page.tsx", import.meta.url);
+  const sources = await Promise.all([
+    readFile(termsUrl, "utf8"),
+    readFile(privacyUrl, "utf8"),
+  ]);
+
+  for (const source of sources) {
+    assert.match(source, /重庆市创煜新软件有限公司/);
+    assert.match(source, /mailto:niebqoiang@gmail\.com/);
+    assert.doesNotMatch(source, /仍须公布真实可用/);
+  }
+});
+
 test("验证码 V3 参数使用后必须重新初始化且只动态加载官方脚本", async () => {
   const formUrl = new URL("../login-form.tsx", import.meta.url);
   const source = await readFile(formUrl, "utf8");

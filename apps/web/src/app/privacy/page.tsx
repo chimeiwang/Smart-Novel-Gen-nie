@@ -15,8 +15,9 @@ export default function PrivacyPage() {
         <h1>墨铸 InkForge 隐私政策</h1>
         <p className={styles.meta}>版本日期：2026 年 8 月 27 日</p>
         <div className={styles.draft}>
-          个人信息处理者已确认为重庆市创煜新软件有限公司。正式生效前仍须公布真实可用的个人信息权益联系
-          邮箱或客服电话；在联系渠道确认前，手机号认证保持关闭。
+          个人信息处理者：重庆市创煜新软件有限公司；联系邮箱：
+          <a href="mailto:niebqoiang@gmail.com">niebqoiang@gmail.com</a>。手机号认证当前尚未开放，
+          正式开放时间以产品页面提示为准。
         </div>
 
         <p>
@@ -122,9 +123,9 @@ export default function PrivacyPage() {
 
         <h2>十三、联系我们</h2>
         <p>
-          个人信息处理者：重庆市创煜新软件有限公司。正式启用手机号认证前，本节将补充真实可用的个人信息权益
-          联系邮箱或客服电话，用于受理权利请求、投诉和安全事件反馈；在联系渠道公布前，本政策不作为手机号认证
-          的生效版本。
+          个人信息处理者：重庆市创煜新软件有限公司。联系邮箱：
+          <a href="mailto:niebqoiang@gmail.com">niebqoiang@gmail.com</a>，用于受理个人信息权利请求、投诉和安全
+          事件反馈。为保护个人信息安全，我们会核验请求人与相关账号的关系，并按本政策说明的期限处理和答复。
         </p>
       </article>
     </main>
