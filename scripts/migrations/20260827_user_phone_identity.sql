@@ -2,11 +2,25 @@ BEGIN;
 
 SET LOCAL search_path = public, pg_catalog;
 
--- 本迁移目前只允许在隔离的 novelwriterdev 数据库验证；不得对 novelwriter 正式库执行。
+-- 开发库可直接执行；正式库必须额外提供精确的自定义 GUC 确认令牌，其他数据库一律拒绝。
+-- 生产调用示例：
+-- PGOPTIONS='-c inkforge.user_phone_identity_production=novelwriter:20260827:apply' psql ... -f 本脚本
 DO $safety$
+DECLARE
+  production_confirmation TEXT :=
+    current_setting('inkforge.user_phone_identity_production', true);
 BEGIN
-  IF current_database() <> 'novelwriterdev' THEN
-    RAISE EXCEPTION '手机号身份迁移只允许在 novelwriterdev 执行，当前数据库为 %', current_database();
+  IF current_database() = 'novelwriterdev' THEN
+    NULL;
+  ELSIF current_database() = 'novelwriter'
+      AND production_confirmation = 'novelwriter:20260827:apply' THEN
+    NULL;
+  ELSIF current_database() = 'novelwriter' THEN
+    RAISE EXCEPTION '正式库手机号身份迁移缺少精确确认令牌';
+  ELSE
+    RAISE EXCEPTION
+      '手机号身份迁移只允许在 novelwriterdev 或受确认的 novelwriter 执行，当前数据库为 %',
+      current_database();
   END IF;
 END
 $safety$;

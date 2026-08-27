@@ -181,12 +181,24 @@ class JooqPhoneAuthRepositoryTest {
     }
 
     @Test
-    void 具名迁移必须主动拒绝正式库名称() throws Exception {
+    void 正式库迁移必须要求精确确认且确认后保持幂等() throws Exception {
         ExecResult createDatabase = POSTGRES.execInContainer(
                 "createdb", "-U", POSTGRES.getUsername(), "novelwriter");
         assertThat(createDatabase.getExitCode()).as(createDatabase.getStderr()).isZero();
 
-        ExecResult migration = POSTGRES.execInContainer(
+        ExecResult restoreBaseline = POSTGRES.execInContainer(
+                "psql",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-U",
+                POSTGRES.getUsername(),
+                "-d",
+                "novelwriter",
+                "-f",
+                "/tmp/novelwriterdev-schema.sql");
+        assertThat(restoreBaseline.getExitCode()).as(restoreBaseline.getStderr()).isZero();
+
+        ExecResult unconfirmed = POSTGRES.execInContainer(
                 "psql",
                 "-v",
                 "ON_ERROR_STOP=1",
@@ -196,9 +208,37 @@ class JooqPhoneAuthRepositoryTest {
                 "novelwriter",
                 "-f",
                 "/tmp/20260827_user_phone_identity.sql");
+        assertThat(unconfirmed.getExitCode()).isNotZero();
+        assertThat(unconfirmed.getStderr()).contains("正式库手机号身份迁移缺少精确确认令牌");
 
-        assertThat(migration.getExitCode()).isNotZero();
-        assertThat(migration.getStderr()).contains("只允许在 novelwriterdev 执行");
+        for (int attempt = 0; attempt < 2; attempt++) {
+            ExecResult confirmed = POSTGRES.execInContainer(
+                    "env",
+                    "PGOPTIONS=-c inkforge.user_phone_identity_production=novelwriter:20260827:apply",
+                    "psql",
+                    "-v",
+                    "ON_ERROR_STOP=1",
+                    "-U",
+                    POSTGRES.getUsername(),
+                    "-d",
+                    "novelwriter",
+                    "-f",
+                    "/tmp/20260827_user_phone_identity.sql");
+            assertThat(confirmed.getExitCode()).as(confirmed.getStderr()).isZero();
+        }
+
+        ExecResult constraints = POSTGRES.execInContainer(
+                "psql",
+                "-At",
+                "-U",
+                POSTGRES.getUsername(),
+                "-d",
+                "novelwriter",
+                "-c",
+                "SELECT count(*) FROM pg_constraint "
+                        + "WHERE conrelid = 'public.\"UserPhoneIdentity\"'::regclass");
+        assertThat(constraints.getExitCode()).as(constraints.getStderr()).isZero();
+        assertThat(constraints.getStdout().strip()).isEqualTo("7");
     }
 
     private static void executeSql(String path) throws Exception {
@@ -220,7 +260,9 @@ class JooqPhoneAuthRepositoryTest {
                 + POSTGRES.getUsername()
                 + ":"
                 + POSTGRES.getPassword()
-                + "@127.0.0.1:"
+                + "@"
+                + POSTGRES.getHost()
+                + ":"
                 + POSTGRES.getMappedPort(5432)
                 + "/"
                 + POSTGRES.getDatabaseName();
