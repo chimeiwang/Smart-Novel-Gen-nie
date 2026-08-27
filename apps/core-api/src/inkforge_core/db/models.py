@@ -2064,6 +2064,12 @@ class User(Base):
         back_populates="user",
         foreign_keys=lambda: [Novel.userId],
     )
+    phoneIdentity: Mapped[UserPhoneIdentity | None] = relationship(
+        cascade="all, delete",
+        passive_deletes=True,
+        back_populates="user",
+        foreign_keys=lambda: [UserPhoneIdentity.userId],
+    )
     tokenUsages: Mapped[list[TokenUsage]] = relationship(
         cascade="all, delete",
         passive_deletes=True,
@@ -2083,6 +2089,73 @@ class User(Base):
             name="User_pkey",
         ),
         Index("User_username_key", "username", unique=True),
+        {"schema": "public"},
+    )
+
+
+class UserPhoneIdentity(Base):
+    __tablename__ = "UserPhoneIdentity"
+    consentVersion: Mapped[str] = mapped_column(Text, nullable=False)
+    consentedAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=False
+    )
+    createdAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False),
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    id: Mapped[str] = mapped_column(Text, nullable=False, default=generate_id)
+    phoneE164: Mapped[str] = mapped_column(Text, nullable=False)
+    updatedAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=False, default=utc_now, onupdate=utc_now
+    )
+    userId: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "public.User.id",
+            name="UserPhoneIdentity_user_fkey",
+            ondelete="CASCADE",
+            onupdate="CASCADE",
+        ),
+        nullable=False,
+    )
+    verifiedAt: Mapped[datetime] = mapped_column(
+        TIMESTAMP(precision=3, timezone=False), nullable=False
+    )
+
+    user: Mapped[User] = relationship(
+        back_populates="phoneIdentity",
+        foreign_keys=lambda: [UserPhoneIdentity.userId],
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "id",
+            name="UserPhoneIdentity_pkey",
+        ),
+        UniqueConstraint(
+            "phoneE164",
+            name="UserPhoneIdentity_phoneE164_key",
+        ),
+        UniqueConstraint(
+            "userId",
+            name="UserPhoneIdentity_userId_key",
+        ),
+        CheckConstraint(
+            'btrim("consentVersion") <> \'\' AND length("consentVersion") <= 64',
+            name="UserPhoneIdentity_consent_check",
+        ),
+        CheckConstraint(
+            "\"phoneE164\" ~ '^\\+861[3-9][0-9]{9}$'",
+            name="UserPhoneIdentity_phone_check",
+        ),
+        CheckConstraint(
+            '"verifiedAt" >= "createdAt" '
+            'AND "consentedAt" >= "createdAt" '
+            'AND "updatedAt" >= "createdAt"',
+            name="UserPhoneIdentity_time_check",
+        ),
         {"schema": "public"},
     )
 

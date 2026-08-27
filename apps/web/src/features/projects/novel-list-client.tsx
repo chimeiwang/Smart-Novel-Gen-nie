@@ -16,9 +16,10 @@ type NovelItem = {
 
 interface NovelListClientProps {
   novels: NovelItem[];
+  welcome?: boolean;
 }
 
-export function NovelListClient({ novels }: NovelListClientProps) {
+export function NovelListClient({ novels, welcome = false }: NovelListClientProps) {
   const [showModal, setShowModal] = useState(false);
 
   return (
@@ -43,6 +44,12 @@ export function NovelListClient({ novels }: NovelListClientProps) {
             <LogoutButton />
           </div>
         </div>
+
+        {welcome && (
+          <div className="notice notice-success">
+            手机号账号已创建，1000 积分已到账。现在可以新建第一部作品了。
+          </div>
+        )}
 
         <div className="panel">
           <div className="panel-header">

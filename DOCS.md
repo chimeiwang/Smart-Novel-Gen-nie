@@ -17,10 +17,10 @@
 ## 当前架构事实
 
 - Next.js 只负责页面、SSR/SEO 和浏览器交互。
-- FastAPI Core API 独占 PostgreSQL、认证、业务规则、计费、草案和 SSE。
+- Java Core API 独占 PostgreSQL、认证、业务规则、计费、草案和 SSE；FastAPI Core 只保留回滚镜像。
 - FastAPI Agent Service 负责 LangGraph、模型和工具执行，不连接数据库。
-- Java Core 单体替换已获批准并在 `codex/java-core-migration` 实施；完成全量契约、dev 数据库、部署和
-  回滚验收前，FastAPI Core 仍是当前运行事实，生产不得双 Core 或双写。
+- Java Core 单体已于 2026-08-26 完成生产切换并处于观察期；生产不得双 Core 或双写，Python Core 只按
+  已冻结流程用于整镜像回滚。
 - Core 与 Agent 使用版本化 Pydantic 契约和 Ed25519 服务身份通信。
 - 生产由 `infra/compose.yaml` 编排，Nginx 是唯一公网入口。
 - 生产 SSH 只信任管理员离线核验的主机公钥；部署串行排队，切换前按运行容器的不可变镜像 ID 冻结三服务
@@ -44,6 +44,11 @@
   `20260824_video_post_production_p1_p3.sql` 只允许对服务器端 `novelwriterdev` 开发库增加逐镜生成、
   Take、关键帧、粗剪、声音字幕和整集导出结构，并允许开发库 `VideoAsset.duty` 增加 `sfx` 与
   `episode_export`；它们不授权正式库 DDL、开发数据晋升、生产视频开关、图片生成或 TTS。
+- 用户于 2026-08-27 先批准起草并在隔离 PostgreSQL 验证 `20260827_user_phone_identity.sql`，后进一步批准
+  该具名脚本只对服务器端 `novelwriterdev` 开发库执行；该批准不授权正式库 `novelwriter` 或其他远程数据库
+  DDL，也不授权开启手机号真实发送。开发库已在备份后成功执行两次并验证幂等，真实开发库 contract 已导出；
+  完整指纹为 `4f8cbf58820c7e601026012249f1896e4f8ad0231cfa6b9bd2fdad1c83c3d195`。正式库在手机号与视频开关关闭的
+  投影下仍与冻结契约精确一致。
 
 ## 文档类型
 

@@ -439,8 +439,50 @@ def test_without_video_preview_projection_removes_every_checked_in_video_table()
     projected = project_schema_contract(contract, "without_video_preview")
     projected_table_names = {table["name"] for table in projected["tables"]}
 
-    assert len(contract["tables"]) == 85
+    assert len(contract["tables"]) == 86
+    assert len(projected_table_names) == 45
+    assert not any(name.startswith("Video") for name in projected_table_names)
+    assert "UserPhoneIdentity" in projected_table_names
+
+
+def test_phone_auth_projection_only_removes_the_named_identity_table() -> None:
+    root = Path(__file__).resolve().parents[4]
+    contract = load_schema_contract(
+        root
+        / "apps"
+        / "core-api"
+        / "src"
+        / "inkforge_core"
+        / "db"
+        / "schema-contract.json"
+    )
+
+    projected = project_schema_contract(contract, "without_phone_auth")
+    projected_table_names = {table["name"] for table in projected["tables"]}
+
+    assert len(projected_table_names) == 85
+    assert "UserPhoneIdentity" not in projected_table_names
+    assert "VideoShotRenderTask" in projected_table_names
+    assert projected["fingerprint"] == canonical_fingerprint(projected)
+
+
+def test_dark_production_projection_excludes_video_and_phone_structures() -> None:
+    root = Path(__file__).resolve().parents[4]
+    contract = load_schema_contract(
+        root
+        / "apps"
+        / "core-api"
+        / "src"
+        / "inkforge_core"
+        / "db"
+        / "schema-contract.json"
+    )
+
+    projected = project_schema_contract(contract, "without_video_preview_and_phone_auth")
+    projected_table_names = {table["name"] for table in projected["tables"]}
+
     assert len(projected_table_names) == 44
+    assert "UserPhoneIdentity" not in projected_table_names
     assert not any(name.startswith("Video") for name in projected_table_names)
 
 
@@ -487,6 +529,7 @@ def test_checked_in_contract_preserves_all_live_public_tables_without_secrets() 
         "StyleReference",
         "TokenUsage",
         "User",
+        "UserPhoneIdentity",
         "WorkflowRun",
         "WorkflowStep",
         "WorldSetting",

@@ -343,6 +343,33 @@ def test_web_and_core_require_the_same_production_jwt_secret() -> None:
     assert expected in _service_block(source, "core-api")
 
 
+def test_aliyun_phone_credentials_only_enter_core_and_feature_defaults_closed() -> None:
+    source = COMPOSE.read_text(encoding="utf-8")
+    web = _service_block(source, "web")
+    core = _service_block(source, "core-api")
+    agent = _service_block(source, "agent-service")
+    env_example = (ROOT / ".env.example").read_text(encoding="utf-8")
+
+    for secret in (
+        "ALIYUN_ACCESS_KEY_ID",
+        "ALIYUN_ACCESS_KEY_SECRET",
+        "PHONE_AUTH_HMAC_SECRET",
+    ):
+        assert secret in core
+        assert secret not in web
+        assert secret not in agent
+    for public_value in ("ALIYUN_CAPTCHA_PREFIX", "ALIYUN_CAPTCHA_SCENE_ID"):
+        assert public_value in web
+        assert public_value in core
+        assert public_value not in agent
+    for flag in ("PHONE_AUTH_ENABLED", "PHONE_AUTH_SEND_ENABLED"):
+        assert f"{flag}: ${{{flag}:-false}}" in web
+        assert f"{flag}: ${{{flag}:-false}}" in core
+        assert f"{flag}=false" in env_example
+    assert "USERNAME_REGISTRATION_ENABLED: ${USERNAME_REGISTRATION_ENABLED:-true}" in core
+    assert "USERNAME_REGISTRATION_ENABLED=true" in env_example
+
+
 def test_test_compose_does_not_fork_core_and_web_session_secrets() -> None:
     source = (ROOT / "infra" / "compose.test.yaml").read_text(encoding="utf-8")
     core = _service_block(source, "core-api")

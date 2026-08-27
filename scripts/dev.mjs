@@ -83,6 +83,41 @@ if (missingFiles.length > 0) {
 mkdirSync(process.env.UPLOADS_ROOT, { recursive: true });
 mkdirSync(process.env.WORKFLOW_HUMAN_LOG_DIR, { recursive: true });
 
+function withoutEnvironment(names) {
+  const childEnvironment = { ...process.env };
+  for (const name of names) delete childEnvironment[name];
+  return childEnvironment;
+}
+
+const webEnvironment = withoutEnvironment([
+  "DATABASE_URL",
+  "REDIS_URL",
+  "PHONE_AUTH_HMAC_SECRET",
+  "ALIYUN_ACCESS_KEY_ID",
+  "ALIYUN_ACCESS_KEY_SECRET",
+  "OPENAI_API_KEY",
+  "RAG_EMBEDDING_API_KEY",
+  "SEEDANCE_API_KEY",
+  "VIDEO_PROVIDER_MEDIA_TOKEN_SECRET",
+  "CORE_SERVICE_PRIVATE_KEY_PATH",
+  "AGENT_SERVICE_PRIVATE_KEY_PATH",
+]);
+const coreEnvironment = withoutEnvironment([
+  "OPENAI_API_KEY",
+  "RAG_EMBEDDING_API_KEY",
+  "SEEDANCE_API_KEY",
+  "AGENT_SERVICE_PRIVATE_KEY_PATH",
+]);
+const agentEnvironment = withoutEnvironment([
+  "DATABASE_URL",
+  "JWT_SECRET",
+  "PHONE_AUTH_HMAC_SECRET",
+  "ALIYUN_ACCESS_KEY_ID",
+  "ALIYUN_ACCESS_KEY_SECRET",
+  "VIDEO_PROVIDER_MEDIA_TOKEN_SECRET",
+  "CORE_SERVICE_PRIVATE_KEY_PATH",
+]);
+
 const npmExecPath = process.env.npm_execpath;
 const uvicornExecutable =
   process.platform === "win32"
@@ -107,6 +142,7 @@ if (occupiedPorts.length > 0) {
 const services = [
   {
     name: "Next.js",
+    env: webEnvironment,
     command: process.execPath,
     args: [
       npmExecPath,
@@ -121,6 +157,7 @@ const services = [
   },
   {
     name: "Core API",
+    env: coreEnvironment,
     command: uvicornExecutable,
     args: [
       "inkforge_core.app:create_app",
@@ -140,6 +177,7 @@ const services = [
   },
   {
     name: "Agent Service",
+    env: agentEnvironment,
     command: uvicornExecutable,
     args: [
       "inkforge_agents.app:create_app",
@@ -179,7 +217,7 @@ function stopChildren(exitCode) {
 for (const service of services) {
   const child = spawn(service.command, service.args, {
     cwd: root,
-    env: process.env,
+    env: service.env,
     stdio: "inherit",
   });
   children.push(child);

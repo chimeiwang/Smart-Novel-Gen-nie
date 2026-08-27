@@ -27,6 +27,19 @@ public final class CoreSettings {
     private final SecretValue databaseUrl;
     private final SecretValue redisUrl;
     private final SecretValue jwtSecret;
+    private final boolean usernameRegistrationEnabled;
+    private final boolean phoneAuthEnabled;
+    private final boolean phoneAuthSendEnabled;
+    private final SecretValue phoneAuthHmacSecret;
+    private final String phoneAuthConsentVersion;
+    private final String phoneAuthRedisPrefix;
+    private final SecretValue aliyunAccessKeyId;
+    private final SecretValue aliyunAccessKeySecret;
+    private final String aliyunPnvsSignName;
+    private final String aliyunPnvsTemplateCode;
+    private final String aliyunPnvsSchemeName;
+    private final String aliyunCaptchaPrefix;
+    private final String aliyunCaptchaSceneId;
     private final List<CidrBlock> trustedProxyCidrs;
     private final List<CidrBlock> trustedAgentCidrs;
     private final Path coreServicePrivateKeyPath;
@@ -52,6 +65,22 @@ public final class CoreSettings {
         this.databaseUrl = secret(value.apply("DATABASE_URL"));
         this.redisUrl = secret(value.apply("REDIS_URL"));
         this.jwtSecret = secret(value.apply("JWT_SECRET"));
+        this.usernameRegistrationEnabled = bool(
+                value, "USERNAME_REGISTRATION_ENABLED", true);
+        this.phoneAuthEnabled = bool(value, "PHONE_AUTH_ENABLED", false);
+        this.phoneAuthSendEnabled = bool(value, "PHONE_AUTH_SEND_ENABLED", false);
+        this.phoneAuthHmacSecret = secret(value.apply("PHONE_AUTH_HMAC_SECRET"));
+        this.phoneAuthConsentVersion = nonBlankOrDefault(
+                value.apply("PHONE_AUTH_CONSENT_VERSION"), "2026-08-27");
+        this.phoneAuthRedisPrefix = nonBlankOrDefault(
+                value.apply("PHONE_AUTH_REDIS_PREFIX"), "phone-auth:v1:");
+        this.aliyunAccessKeyId = secret(value.apply("ALIYUN_ACCESS_KEY_ID"));
+        this.aliyunAccessKeySecret = secret(value.apply("ALIYUN_ACCESS_KEY_SECRET"));
+        this.aliyunPnvsSignName = optional(value.apply("ALIYUN_PNVS_SIGN_NAME"));
+        this.aliyunPnvsTemplateCode = optional(value.apply("ALIYUN_PNVS_TEMPLATE_CODE"));
+        this.aliyunPnvsSchemeName = optional(value.apply("ALIYUN_PNVS_SCHEME_NAME"));
+        this.aliyunCaptchaPrefix = optional(value.apply("ALIYUN_CAPTCHA_PREFIX"));
+        this.aliyunCaptchaSceneId = optional(value.apply("ALIYUN_CAPTCHA_SCENE_ID"));
         this.trustedProxyCidrs = cidrs(value.apply("TRUSTED_PROXY_CIDRS"), "可信代理网段");
         String agentCidrs = firstNonBlank(
                 value.apply("TRUSTED_AGENT_CIDRS"), value.apply("AGENT_SERVICE_CIDRS"));
@@ -102,6 +131,58 @@ public final class CoreSettings {
 
     public SecretValue jwtSecret() {
         return jwtSecret;
+    }
+
+    public boolean usernameRegistrationEnabled() {
+        return usernameRegistrationEnabled;
+    }
+
+    public boolean phoneAuthEnabled() {
+        return phoneAuthEnabled;
+    }
+
+    public boolean phoneAuthSendEnabled() {
+        return phoneAuthSendEnabled;
+    }
+
+    public SecretValue phoneAuthHmacSecret() {
+        return phoneAuthHmacSecret;
+    }
+
+    public String phoneAuthConsentVersion() {
+        return phoneAuthConsentVersion;
+    }
+
+    public String phoneAuthRedisPrefix() {
+        return phoneAuthRedisPrefix;
+    }
+
+    public SecretValue aliyunAccessKeyId() {
+        return aliyunAccessKeyId;
+    }
+
+    public SecretValue aliyunAccessKeySecret() {
+        return aliyunAccessKeySecret;
+    }
+
+    public String aliyunPnvsSignName() {
+        return aliyunPnvsSignName;
+    }
+
+    public String aliyunPnvsTemplateCode() {
+        return aliyunPnvsTemplateCode;
+    }
+
+    public String aliyunPnvsSchemeName() {
+        return aliyunPnvsSchemeName;
+    }
+
+    public String aliyunCaptchaPrefix() {
+        return aliyunCaptchaPrefix;
+    }
+
+    public String aliyunCaptchaSceneId() {
+        return aliyunCaptchaSceneId;
     }
 
     public List<CidrBlock> trustedProxyCidrs() {
@@ -181,6 +262,44 @@ public final class CoreSettings {
     }
 
     private void validate() {
+        if (phoneAuthSendEnabled && !phoneAuthEnabled) {
+            throw new IllegalArgumentException("开启真实短信发送前必须先开启手机号认证");
+        }
+        if (phoneAuthHmacSecret != null
+                && utf8Length(phoneAuthHmacSecret.reveal()) < 32) {
+            throw new IllegalArgumentException("手机号认证摘要密钥至少需要 32 个 UTF-8 字节");
+        }
+        if (phoneAuthConsentVersion.length() > 64
+                || phoneAuthConsentVersion.indexOf('\0') >= 0
+                || phoneAuthRedisPrefix.length() > 128
+                || phoneAuthRedisPrefix.indexOf('\0') >= 0
+                || !phoneAuthRedisPrefix.endsWith(":")) {
+            throw new IllegalArgumentException("手机号认证版本或 Redis 前缀格式无效");
+        }
+        if (invalidOptionalText(aliyunPnvsSignName, 128)
+                || invalidOptionalText(aliyunPnvsTemplateCode, 64)
+                || invalidOptionalText(aliyunPnvsSchemeName, 20)
+                || invalidOptionalText(aliyunCaptchaPrefix, 128)
+                || invalidOptionalText(aliyunCaptchaSceneId, 128)) {
+            throw new IllegalArgumentException("阿里云手机号认证配置格式无效");
+        }
+        if (phoneAuthEnabled && phoneAuthSendEnabled) {
+            List<String> missing = new ArrayList<>();
+            required(missing, "database_url", databaseUrl);
+            required(missing, "redis_url", redisUrl);
+            required(missing, "jwt_secret", jwtSecret);
+            required(missing, "phone_auth_hmac_secret", phoneAuthHmacSecret);
+            required(missing, "aliyun_access_key_id", aliyunAccessKeyId);
+            required(missing, "aliyun_access_key_secret", aliyunAccessKeySecret);
+            required(missing, "aliyun_pnvs_sign_name", aliyunPnvsSignName);
+            required(missing, "aliyun_pnvs_template_code", aliyunPnvsTemplateCode);
+            required(missing, "aliyun_captcha_prefix", aliyunCaptchaPrefix);
+            required(missing, "aliyun_captcha_scene_id", aliyunCaptchaSceneId);
+            if (!missing.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "开启手机号认证缺少必需配置：" + String.join("、", missing));
+            }
+        }
         if (videoDispatchEnabled && !videoPreviewEnabled) {
             throw new IllegalArgumentException("开启视频后台调度前必须先开启视频预览");
         }
@@ -205,6 +324,12 @@ public final class CoreSettings {
         }
         if (environment != EnvironmentName.PRODUCTION) {
             return;
+        }
+        if (phoneAuthEnabled
+                && phoneAuthSendEnabled
+                && usernameRegistrationEnabled) {
+            throw new IllegalArgumentException(
+                    "生产开放手机号认证时必须关闭用户名新注册入口");
         }
         if (videoPreviewEnabled || videoDispatchEnabled || seedanceEnabled) {
             throw new IllegalArgumentException("生产环境禁止开启仅获开发库授权的视频能力");
@@ -350,8 +475,20 @@ public final class CoreSettings {
         return value.getBytes(StandardCharsets.UTF_8).length;
     }
 
+    private static boolean invalidOptionalText(String value, int maximumLength) {
+        return value != null && (value.length() > maximumLength || value.indexOf('\0') >= 0);
+    }
+
     @Override
     public String toString() {
-        return "CoreSettings[environment=" + environment + ", databaseUrl=********, redisUrl=********, jwtSecret=********]";
+        return "CoreSettings[environment="
+                + environment
+                + ", databaseUrl=********, redisUrl=********, jwtSecret=********"
+                + ", phoneAuthEnabled="
+                + phoneAuthEnabled
+                + ", phoneAuthSendEnabled="
+                + phoneAuthSendEnabled
+                + ", phoneAuthHmacSecret=********, aliyunAccessKeyId=********"
+                + ", aliyunAccessKeySecret=********]";
     }
 }

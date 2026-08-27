@@ -6,6 +6,9 @@ export default async function HomePage() {
   const client = await createServerApiClient();
   const { data: currentUser } = await client.GET("/api/v1/auth/me");
   const isAuthenticated = Boolean(currentUser);
+  const phoneAuthEnabled = process.env.PHONE_AUTH_ENABLED === "true"
+    && process.env.PHONE_AUTH_SEND_ENABLED === "true";
+  const signupHref = phoneAuthEnabled ? "/login" : "/login?mode=register";
 
   return (
     <main className="marketing-page">
@@ -32,8 +35,8 @@ export default async function HomePage() {
               <Link href="/login" className="button secondary">
                 登录
               </Link>
-              <Link href="/login?mode=register" className="button">
-                注册开始写作
+              <Link href={signupHref} className="button">
+                {phoneAuthEnabled ? "手机号登录" : "注册开始写作"}
               </Link>
             </>
           )}
@@ -54,8 +57,8 @@ export default async function HomePage() {
                 打开我的作品
               </Link>
             ) : (
-              <Link href="/login?mode=register" className="button marketing-primary-cta">
-                注册并领取 1000 积分
+              <Link href={signupHref} className="button marketing-primary-cta">
+                {phoneAuthEnabled ? "验证手机号，领取 1000 积分" : "注册并领取 1000 积分"}
               </Link>
             )}
             <Link href="#workflow" className="button ghost">
@@ -180,7 +183,7 @@ export default async function HomePage() {
           </article>
           <article>
             <h3>积分与用量</h3>
-            <p>注册赠送 1000 积分，使用 AI 写作能力时可以查看余额和用量记录。</p>
+            <p>首次创建账号赠送 1000 积分，使用 AI 写作能力时可以查看余额和用量记录。</p>
           </article>
         </div>
       </section>
@@ -189,15 +192,15 @@ export default async function HomePage() {
         <div>
           <div className="home-kicker">Start</div>
           <h2>先创建一个作品，再让工作流替你守住边界</h2>
-          <p>注册后即可进入工作台，新建小说，并从第一章、创作规划、设定和大纲开始搭建。</p>
+          <p>完成账号验证后即可进入工作台，新建小说，并从第一章、创作规划、设定和大纲开始搭建。</p>
         </div>
         {isAuthenticated ? (
           <Link href="/dashboard" className="button marketing-primary-cta">
             进入工作台
           </Link>
         ) : (
-          <Link href="/login?mode=register" className="button marketing-primary-cta">
-            注册开始写作
+          <Link href={signupHref} className="button marketing-primary-cta">
+            {phoneAuthEnabled ? "手机号验证后开始写作" : "注册开始写作"}
           </Link>
         )}
       </section>

@@ -18,10 +18,14 @@ async function getUserMenuData(): Promise<{
 }> {
   try {
     const client = await createServerApiClient();
-    const { data, response } = await client.GET("/api/v1/billing/summary");
+    const [billingResult, userResult] = await Promise.all([
+      client.GET("/api/v1/billing/summary"),
+      client.GET("/api/v1/auth/me"),
+    ]);
+    const { data, response } = billingResult;
     if (response.status === 401 || !data) return { username: null, creditBalance: "0" };
     return {
-      username: data.username,
+      username: userResult.data?.maskedPhone ?? data.username,
       creditBalance: data.balanceCredits,
     };
   } catch (error) {

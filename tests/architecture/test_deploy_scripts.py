@@ -13,6 +13,7 @@ UPLOAD = ROOT / "scripts" / "upload-docker-images.sh"
 SOURCE_UPLOAD = ROOT / "scripts" / "upload-deploy-source.sh"
 DEPLOY = ROOT / "scripts" / "deploy-production.sh"
 ROLLBACK_DRILL = ROOT / "scripts" / "rollback_drill.sh"
+BACKUP = ROOT / "scripts" / "backup.sh"
 FAKE_DOCKER = ROOT / "tests" / "architecture" / "fixtures" / "fake_docker.sh"
 POSIX_SHELL = shutil.which("sh") or str(
     Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Git" / "bin" / "sh.exe"
@@ -106,6 +107,12 @@ def test_deploy_scripts_contain_no_destructive_or_dynamic_trust_commands() -> No
     assert "profile=schema_profile_for_settings(settings)" in DEPLOY.read_text(
         encoding="utf-8"
     )
+
+
+def test_backup_files_default_to_private_permissions() -> None:
+    source = BACKUP.read_text(encoding="utf-8")
+
+    assert "umask 077" in source
 
 
 def test_rollback_drill_normalizes_schema_fingerprints_across_contract_versions() -> None:

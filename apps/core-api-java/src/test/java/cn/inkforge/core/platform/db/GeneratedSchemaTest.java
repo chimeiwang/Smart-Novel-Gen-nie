@@ -11,8 +11,14 @@ class GeneratedSchemaTest {
     @Test
     void jooq代码必须覆盖冻结开发库的全部业务表() {
         assertThat(Public.PUBLIC.getTables())
-                .hasSize(85)
+                .hasSize(86)
                 .extracting(Table::getName)
-                .contains("User", "Novel", "Chapter", "WritingTask", "VideoEpisodeExport");
+                .contains(
+                        "User",
+                        "UserPhoneIdentity",
+                        "Novel",
+                        "Chapter",
+                        "WritingTask",
+                        "VideoEpisodeExport");
     }
 }

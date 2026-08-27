@@ -18,7 +18,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from .url import asyncpg_connection_options
 
 Contract = dict[str, Any]
-SchemaProfile = Literal["full", "without_video_preview"]
+SchemaProfile = Literal[
+    "full",
+    "without_video_preview",
+    "without_phone_auth",
+    "without_video_preview_and_phone_auth",
+]
 
 _VIDEO_PREVIEW_TABLES = frozenset(
     {
@@ -77,6 +82,7 @@ _DEV_ONLY_TOKEN_USAGE_CHECKS = frozenset(
         "TokenUsage_token_details_nonnegative_check",
     }
 )
+_PHONE_AUTH_TABLES = frozenset({"UserPhoneIdentity"})
 
 
 class ContractIntegrityError(ValueError):
@@ -399,10 +405,16 @@ def project_schema_contract(
 
     projected = cast(Contract, json.loads(json.dumps(contract, ensure_ascii=False)))
     projected.pop("fingerprint", None)
-    if profile == "full":
-        return add_contract_fingerprint(projected)
-    if profile != "without_video_preview":
+    known_profiles = {
+        "full",
+        "without_video_preview",
+        "without_phone_auth",
+        "without_video_preview_and_phone_auth",
+    }
+    if profile not in known_profiles:
         raise ValueError(f"未知数据库结构配置：{profile}")
+    include_video_preview = profile in {"full", "without_phone_auth"}
+    include_phone_auth = profile in {"full", "without_video_preview"}
 
     tables = projected.get("tables")
     if isinstance(tables, list):
@@ -412,15 +424,17 @@ def project_schema_contract(
                 remaining_tables.append(item)
                 continue
             table_name = str(item.get("name", ""))
-            if table_name in _VIDEO_PREVIEW_TABLES:
+            if not include_video_preview and table_name in _VIDEO_PREVIEW_TABLES:
                 continue
-            if table_name == "Novel":
+            if not include_phone_auth and table_name in _PHONE_AUTH_TABLES:
+                continue
+            if not include_video_preview and table_name == "Novel":
                 _remove_named_objects(item, "uniqueConstraints", _VIDEO_PREVIEW_NOVEL_OBJECTS)
                 _remove_named_objects(item, "indexes", _VIDEO_PREVIEW_NOVEL_OBJECTS)
-            if table_name == "Chapter":
+            if not include_video_preview and table_name == "Chapter":
                 _remove_named_objects(item, "uniqueConstraints", _VIDEO_PREVIEW_CHAPTER_OBJECTS)
                 _remove_named_objects(item, "indexes", _VIDEO_PREVIEW_CHAPTER_OBJECTS)
-            if table_name == "TokenUsage":
+            if not include_video_preview and table_name == "TokenUsage":
                 # 共享开发库已有另一条尚未晋升生产的可空 token 明细实验列；
                 # Core 不读写这些列，生产投影必须继续严格匹配现网结构。
                 _remove_named_objects(item, "columns", _DEV_ONLY_TOKEN_USAGE_COLUMNS)
@@ -429,13 +443,13 @@ def project_schema_contract(
                     "checkConstraints",
                     _DEV_ONLY_TOKEN_USAGE_CHECKS,
                 )
-            if table_name == "ReviewArtifact":
+            if not include_video_preview and table_name == "ReviewArtifact":
                 _project_review_artifact_without_video(item)
             remaining_tables.append(item)
         projected["tables"] = remaining_tables
 
     enums = projected.get("enums")
-    if isinstance(enums, list):
+    if not include_video_preview and isinstance(enums, list):
         for item in enums:
             if not isinstance(item, dict) or item.get("name") != "ReviewArtifactKind":
                 continue

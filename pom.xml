@@ -31,6 +31,8 @@
     <project.build.outputTimestamp>2026-08-24T00:00:00Z</project.build.outputTimestamp>
     <spring-modulith.version>2.1.0</spring-modulith.version>
     <picocli.version>4.7.7</picocli.version>
+    <aliyun-dypnsapi.version>2.0.0</aliyun-dypnsapi.version>
+    <aliyun-captcha.version>1.2.0</aliyun-captcha.version>
   </properties>
 
   <dependencyManagement>

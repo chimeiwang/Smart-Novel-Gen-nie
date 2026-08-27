@@ -59,11 +59,26 @@ final class SchemaContractProjector {
     static SchemaContract project(SchemaContract contract, SchemaProfile profile) {
         ObjectNode document = contract.document().asObject();
         document.remove("fingerprint");
-        if (profile == SchemaProfile.WITHOUT_VIDEO_PREVIEW) {
+        if (!profile.includesVideoPreview()) {
             projectWithoutVideo(document);
+        }
+        if (!profile.includesPhoneAuth()) {
+            projectWithoutPhoneAuth(document);
         }
         document.put("fingerprint", SchemaContract.canonicalFingerprint(document));
         return SchemaContract.load(document);
+    }
+
+    private static void projectWithoutPhoneAuth(ObjectNode document) {
+        ArrayNode remaining = document.arrayNode();
+        for (JsonNode tableNode : document.path("tables")) {
+            if (tableNode.isObject()
+                    && tableNode.path("name").asString().equals("UserPhoneIdentity")) {
+                continue;
+            }
+            remaining.add(tableNode);
+        }
+        document.set("tables", remaining);
     }
 
     private static void projectWithoutVideo(ObjectNode document) {

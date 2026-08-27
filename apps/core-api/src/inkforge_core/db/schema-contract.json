@@ -224,7 +224,7 @@
       "version": "0.8.0"
     }
   ],
-  "fingerprint": "8aaa4d25c3cd3114bc8659330700a2eecdbcdefc7f3d83473c93c1baee576629",
+  "fingerprint": "4f8cbf58820c7e601026012249f1896e4f8ad0231cfa6b9bd2fdad1c83c3d195",
   "schema": "public",
   "source": {
     "product": "PostgreSQL",
@@ -6993,6 +6993,215 @@
         "validated": true
       },
       "uniqueConstraints": []
+    },
+    {
+      "checkConstraints": [
+        {
+          "definition": "CHECK (btrim(\"consentVersion\") <> ''::text AND length(\"consentVersion\") <= 64)",
+          "name": "UserPhoneIdentity_consent_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (\"phoneE164\" ~ '^\\+861[3-9][0-9]{9}$'::text)",
+          "name": "UserPhoneIdentity_phone_check",
+          "noInherit": false,
+          "validated": true
+        },
+        {
+          "definition": "CHECK (\"verifiedAt\" >= \"createdAt\" AND \"consentedAt\" >= \"createdAt\" AND \"updatedAt\" >= \"createdAt\")",
+          "name": "UserPhoneIdentity_time_check",
+          "noInherit": false,
+          "validated": true
+        }
+      ],
+      "columns": [
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "consentVersion",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "consentedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "formatType": "timestamp(3) without time zone",
+          "name": "createdAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "id",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "phoneE164",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "updatedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        },
+        {
+          "default": null,
+          "formatType": "text",
+          "name": "userId",
+          "nullable": false,
+          "udtName": "text"
+        },
+        {
+          "default": null,
+          "formatType": "timestamp(3) without time zone",
+          "name": "verifiedAt",
+          "nullable": false,
+          "udtName": "timestamp"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "userId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "matchType": "SIMPLE",
+          "name": "UserPhoneIdentity_user_fkey",
+          "onDelete": "CASCADE",
+          "onUpdate": "CASCADE",
+          "targetColumns": [
+            "id"
+          ],
+          "targetSchema": "public",
+          "targetTable": "User",
+          "validated": true
+        }
+      ],
+      "indexes": [
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "phoneE164",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
+          ],
+          "method": "btree",
+          "name": "UserPhoneIdentity_phoneE164_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "id",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
+          ],
+          "method": "btree",
+          "name": "UserPhoneIdentity_pkey",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        },
+        {
+          "includeColumns": [],
+          "keyItems": [
+            {
+              "collation": "default",
+              "collationSchema": "pg_catalog",
+              "column": "userId",
+              "expression": null,
+              "kind": "column",
+              "nulls": "LAST",
+              "opclass": "text_ops",
+              "opclassSchema": "pg_catalog",
+              "order": "ASC",
+              "position": 1
+            }
+          ],
+          "method": "btree",
+          "name": "UserPhoneIdentity_userId_key",
+          "nullsNotDistinct": false,
+          "options": [],
+          "predicate": null,
+          "ready": true,
+          "tablespace": null,
+          "unique": true,
+          "valid": true
+        }
+      ],
+      "name": "UserPhoneIdentity",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "deferrable": false,
+        "initiallyDeferred": false,
+        "name": "UserPhoneIdentity_pkey",
+        "validated": true
+      },
+      "uniqueConstraints": [
+        {
+          "columns": [
+            "phoneE164"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "name": "UserPhoneIdentity_phoneE164_key",
+          "validated": true
+        },
+        {
+          "columns": [
+            "userId"
+          ],
+          "deferrable": false,
+          "initiallyDeferred": false,
+          "name": "UserPhoneIdentity_userId_key",
+          "validated": true
+        }
+      ]
     },
     {
       "checkConstraints": [

@@ -2,11 +2,13 @@ package cn.inkforge.core.identity.infrastructure;
 
 import static cn.inkforge.core.db.generated.Tables.CREDITLEDGER;
 import static cn.inkforge.core.db.generated.Tables.USER;
+import static cn.inkforge.core.db.generated.Tables.USERPHONEIDENTITY;
 
 import cn.inkforge.core.db.generated.tables.records.UserRecord;
 import cn.inkforge.core.identity.application.AuthRepository;
 import cn.inkforge.core.identity.domain.AuthUser;
 import cn.inkforge.core.identity.domain.DuplicateUsernameException;
+import cn.inkforge.core.identity.domain.PhoneNumber;
 import cn.inkforge.core.platform.db.CoreDatabase;
 import cn.inkforge.core.platform.id.CuidV1Generator;
 import java.time.Clock;
@@ -27,15 +29,28 @@ public final class JooqAuthRepository implements AuthRepository {
     private final CoreDatabase database;
     private final CuidV1Generator ids;
     private final Clock clock;
+    private final boolean phoneIdentityAvailable;
 
     public JooqAuthRepository(CoreDatabase database, CuidV1Generator ids, Clock clock) {
+        this(database, ids, clock, false);
+    }
+
+    public JooqAuthRepository(
+            CoreDatabase database,
+            CuidV1Generator ids,
+            Clock clock,
+            boolean phoneIdentityAvailable) {
         this.database = java.util.Objects.requireNonNull(database);
         this.ids = java.util.Objects.requireNonNull(ids);
         this.clock = java.util.Objects.requireNonNull(clock);
+        this.phoneIdentityAvailable = phoneIdentityAvailable;
     }
 
     @Override
     public AuthUser findByUsername(String username) {
+        if (phoneIdentityAvailable) {
+            return findWithPhone(USER.USERNAME.eq(username));
+        }
         return map(database.dsl().selectFrom(USER)
                 .where(USER.USERNAME.eq(username))
                 .fetchOne());
@@ -43,6 +58,9 @@ public final class JooqAuthRepository implements AuthRepository {
 
     @Override
     public AuthUser findById(String userId) {
+        if (phoneIdentityAvailable) {
+            return findWithPhone(USER.ID.eq(userId));
+        }
         return map(database.dsl().selectFrom(USER)
                 .where(USER.ID.eq(userId))
                 .fetchOne());
@@ -96,6 +114,34 @@ public final class JooqAuthRepository implements AuthRepository {
                 user.getUsername(),
                 user.getPasswordhash(),
                 user.getCreditbalancemicros());
+    }
+
+    private AuthUser findWithPhone(org.jooq.Condition condition) {
+        return database.dsl()
+                .select(
+                        USER.ID,
+                        USER.USERNAME,
+                        USER.PASSWORDHASH,
+                        USER.CREDITBALANCEMICROS,
+                        USERPHONEIDENTITY.PHONEE164)
+                .from(USER)
+                .leftJoin(USERPHONEIDENTITY)
+                .on(USERPHONEIDENTITY.USERID.eq(USER.ID))
+                .where(condition)
+                .fetchOne(record -> new AuthUser(
+                        record.value1(),
+                        record.value2(),
+                        record.value3(),
+                        record.value4(),
+                        mask(record.value5())));
+    }
+
+    private static String mask(String phoneE164) {
+        if (phoneE164 == null) return null;
+        if (!phoneE164.matches("^\\+861[3-9][0-9]{9}$")) {
+            throw new IllegalStateException("数据库手机号格式无效");
+        }
+        return PhoneNumber.mainland(phoneE164.substring(3)).masked();
     }
 
     private static boolean isUsernameConflict(Throwable error) {

@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     database_url: SecretStr | None = None
     redis_url: SecretStr | None = None
     jwt_secret: SecretStr | None = None
+    username_registration_enabled: bool = True
+    phone_auth_enabled: bool = False
+    phone_auth_send_enabled: bool = False
     trusted_proxy_cidrs: Annotated[tuple[str, ...], NoDecode] = ()
     trusted_agent_cidrs: Annotated[
         tuple[str, ...],

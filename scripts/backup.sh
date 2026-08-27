@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+umask 077
 
 : "${DATABASE_URL:?必须设置 DATABASE_URL}"
 : "${BACKUP_ROOT:?必须设置 BACKUP_ROOT}"

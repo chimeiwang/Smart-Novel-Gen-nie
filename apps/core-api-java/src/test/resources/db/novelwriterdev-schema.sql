@@ -905,6 +905,25 @@ CREATE TABLE public."User" (
 
 
 --
+-- Name: UserPhoneIdentity; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public."UserPhoneIdentity" (
+    id text NOT NULL,
+    "userId" text NOT NULL,
+    "phoneE164" text NOT NULL,
+    "verifiedAt" timestamp(3) without time zone NOT NULL,
+    "consentVersion" text NOT NULL,
+    "consentedAt" timestamp(3) without time zone NOT NULL,
+    "createdAt" timestamp(3) without time zone DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    "updatedAt" timestamp(3) without time zone NOT NULL,
+    CONSTRAINT "UserPhoneIdentity_consent_check" CHECK (((btrim("consentVersion") <> ''::text) AND (length("consentVersion") <= 64))),
+    CONSTRAINT "UserPhoneIdentity_phone_check" CHECK (("phoneE164" ~ '^\+861[3-9][0-9]{9}$'::text)),
+    CONSTRAINT "UserPhoneIdentity_time_check" CHECK ((("verifiedAt" >= "createdAt") AND ("consentedAt" >= "createdAt") AND ("updatedAt" >= "createdAt")))
+);
+
+
+--
 -- Name: VideoAdaptationDecisionCommand; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2716,6 +2735,30 @@ ALTER TABLE ONLY public."StyleReference"
 
 ALTER TABLE ONLY public."TokenUsage"
     ADD CONSTRAINT "TokenUsage_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: UserPhoneIdentity UserPhoneIdentity_phoneE164_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."UserPhoneIdentity"
+    ADD CONSTRAINT "UserPhoneIdentity_phoneE164_key" UNIQUE ("phoneE164");
+
+
+--
+-- Name: UserPhoneIdentity UserPhoneIdentity_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."UserPhoneIdentity"
+    ADD CONSTRAINT "UserPhoneIdentity_pkey" PRIMARY KEY (id);
+
+
+--
+-- Name: UserPhoneIdentity UserPhoneIdentity_userId_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."UserPhoneIdentity"
+    ADD CONSTRAINT "UserPhoneIdentity_userId_key" UNIQUE ("userId");
 
 
 --
@@ -4971,6 +5014,14 @@ ALTER TABLE ONLY public."StyleReference"
 
 ALTER TABLE ONLY public."TokenUsage"
     ADD CONSTRAINT "TokenUsage_userId_fkey" FOREIGN KEY ("userId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE CASCADE;
+
+
+--
+-- Name: UserPhoneIdentity UserPhoneIdentity_user_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public."UserPhoneIdentity"
+    ADD CONSTRAINT "UserPhoneIdentity_user_fkey" FOREIGN KEY ("userId") REFERENCES public."User"(id) ON UPDATE CASCADE ON DELETE CASCADE;
 
 
 --

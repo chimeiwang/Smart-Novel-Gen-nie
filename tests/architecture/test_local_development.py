@@ -21,6 +21,16 @@ def test_root_dev_script_starts_all_three_services() -> None:
     assert 'path.join(root, "apps", "agent-service", "src")' in launcher
     assert 'path.join(root, "packages", "service-contracts", "src")' in launcher
     assert 'path.join(root, "packages", "service-auth", "src")' in launcher
+    assert "webEnvironment" in launcher
+    assert "coreEnvironment" in launcher
+    assert "agentEnvironment" in launcher
+    assert 'env: service.env' in launcher
+    for secret_name in (
+        "PHONE_AUTH_HMAC_SECRET",
+        "ALIYUN_ACCESS_KEY_ID",
+        "ALIYUN_ACCESS_KEY_SECRET",
+    ):
+        assert launcher.count(f'"{secret_name}"') == 2
 
 
 def test_next_development_rewrites_api_to_core() -> None:

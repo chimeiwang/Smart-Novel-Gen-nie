@@ -14,7 +14,20 @@ export default async function LoginPage({
   }
 
   const params = await searchParams;
-  const initialMode = params?.mode === "register" ? "register" : "login";
+  const phoneAuthEnabled = process.env.PHONE_AUTH_ENABLED === "true"
+    && process.env.PHONE_AUTH_SEND_ENABLED === "true";
+  const captchaPrefix = process.env.ALIYUN_CAPTCHA_PREFIX?.trim();
+  const captchaSceneId = process.env.ALIYUN_CAPTCHA_SCENE_ID?.trim();
+  const phoneAuth = phoneAuthEnabled && captchaPrefix && captchaSceneId
+    ? {
+        prefix: captchaPrefix,
+        sceneId: captchaSceneId,
+        consentVersion: process.env.PHONE_AUTH_CONSENT_VERSION?.trim() || "2026-08-27",
+      }
+    : null;
+  const initialMode = phoneAuth
+    ? (params?.mode === "legacy" ? "legacy-login" : "phone")
+    : (params?.mode === "register" ? "legacy-register" : "legacy-login");
 
-  return <LoginForm initialMode={initialMode} />;
+  return <LoginForm initialMode={initialMode} phoneAuth={phoneAuth} />;
 }

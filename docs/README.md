@@ -17,6 +17,7 @@
 | `WORKFLOW_EVENT_LOG_FORMAT.md` | 人工工作流日志格式 |
 | `BACKLOG.md` | 后续能力备忘，不代表当前承诺 |
 | `specs/2026-08-24-core-java-replacement.md` | Java Core 单体替换范围、TDD、dev 数据库与部署验收规格 |
+| `specs/2026-08-27-aliyun-phone-auth.md` | 阿里云手机号短信登录、自动建号、老账号隔离与上线门禁规格 |
 | `JAVA_CORE_CUTOVER.md` | Java Core 单服务生产切换、验证和历史 Python 回退手册 |
 | `architecture-decisions/001-003` | Java 技术栈、契约优先和生产单 Core 切换决策 |
 | `specs/2026-08-08-novel-to-video-product-architecture.md` | 长篇小说视频制作系统的产品与架构基线 |

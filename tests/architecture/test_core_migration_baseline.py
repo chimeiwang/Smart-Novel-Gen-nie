@@ -40,8 +40,8 @@ def test_public_openapi_baseline_is_complete_and_current() -> None:
     baseline = _json(PUBLIC_OPENAPI)
     runtime = create_app(testing=True).openapi()
 
-    assert len(baseline["paths"]) == 115
-    assert _operation_count(baseline) == 148
+    assert len(baseline["paths"]) == 117
+    assert _operation_count(baseline) == 150
     assert baseline == runtime
 
 
@@ -49,8 +49,8 @@ def test_full_openapi_baseline_covers_every_java_route() -> None:
     full = _json(FULL_OPENAPI)
     java = _json(JAVA_OPENAPI)
 
-    assert len(full["paths"]) == 146
-    assert _operation_count(full) == 179
+    assert len(full["paths"]) == 148
+    assert _operation_count(full) == 181
     assert sum(path.startswith("/internal/v1/") for path in full["paths"]) == 30
     assert "/api/v1/video/provider-assets/{token}" in full["paths"]
     assert java["openapi"] == "3.0.3"
@@ -102,8 +102,8 @@ def test_public_java_openapi_is_safe_for_cli_generation() -> None:
     assert public["x-inkforge-source-contract"] == (
         "public-openapi-python-baseline.json"
     )
-    assert len(public["paths"]) == 115
-    assert _operation_count(public) == 148
+    assert len(public["paths"]) == 117
+    assert _operation_count(public) == 150
     assert all(not path.startswith("/internal/") for path in public["paths"])
     assert "/api/v1/video/provider-assets/{token}" not in public["paths"]
 
@@ -117,11 +117,11 @@ def test_hidden_and_public_route_inventory_is_complete() -> None:
     assert all(item["path"].startswith("/internal/v1/") for item in internal["endpoints"])
 
     assert inventory["schemaVersion"] == "core-route-inventory/1.0"
-    assert len(inventory["routes"]) == 179
-    assert sum(item["exposure"] == "public" for item in inventory["routes"]) == 148
+    assert len(inventory["routes"]) == 181
+    assert sum(item["exposure"] == "public" for item in inventory["routes"]) == 150
     assert sum(item["exposure"] == "internal" for item in inventory["routes"]) == 30
     assert sum(item["exposure"] == "provider_media" for item in inventory["routes"]) == 1
-    assert len({(item["method"], item["path"]) for item in inventory["routes"]}) == 179
+    assert len({(item["method"], item["path"]) for item in inventory["routes"]}) == 181
     assert all(item["productModule"] and item["pythonTests"] for item in inventory["routes"])
 
 

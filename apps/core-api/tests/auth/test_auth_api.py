@@ -156,8 +156,82 @@ async def test_register_normalizes_username_and_returns_decimal_balance() -> Non
         "id": "user-new",
         "username": "alice_1",
         "creditBalanceMicros": "1000000000",
+        "maskedPhone": None,
     }
     assert "inkforge-token=" in response.headers["set-cookie"]
+
+
+@pytest.mark.asyncio
+async def test_username_registration_can_be_disabled_without_affecting_login_contract() -> None:
+    repository = empty_repository()
+    async with auth_client(build_service(repository)) as (app, client):
+        app.state.settings.username_registration_enabled = False
+        response = await client.post(
+            "/api/v1/auth/register",
+            json={"username": "alice_1", "password": "密码1234", "confirmPassword": "密码1234"},
+        )
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "USERNAME_REGISTRATION_DISABLED"
+    assert response.headers.get("set-cookie") is None
+    assert repository.users_by_id == {}
+
+
+@pytest.mark.asyncio
+async def test_phone_auth_contract_is_public_but_python_rollback_keeps_it_disabled() -> None:
+    async with auth_client(build_service(empty_repository())) as (_, client):
+        challenge = await client.post(
+            "/api/v1/auth/phone/challenges",
+            json={
+                "phone": "13800138000",
+                "captchaVerifyParam": "captcha-proof",
+                "consentVersion": "2026-08-27",
+                "acceptedTerms": True,
+                "clientRequestId": "phone-send-request-0001",
+            },
+        )
+        verify = await client.post(
+            "/api/v1/auth/phone/challenges/challenge-00000001/verify",
+            json={
+                "phone": "13800138000",
+                "code": "123456",
+                "clientRequestId": "phone-verify-request-01",
+            },
+        )
+
+    assert challenge.status_code == 503
+    assert challenge.json()["code"] == "PHONE_AUTH_UNAVAILABLE"
+    assert verify.status_code == 503
+    assert verify.json()["code"] == "PHONE_AUTH_UNAVAILABLE"
+    assert challenge.headers.get("set-cookie") is None
+    assert verify.headers.get("set-cookie") is None
+
+
+@pytest.mark.asyncio
+async def test_phone_auth_contract_rejects_missing_consent_and_malformed_values() -> None:
+    async with auth_client(build_service(empty_repository())) as (_, client):
+        challenge = await client.post(
+            "/api/v1/auth/phone/challenges",
+            json={
+                "phone": "1380013800",
+                "captchaVerifyParam": "captcha-proof",
+                "consentVersion": "2026-08-27",
+                "acceptedTerms": False,
+                "clientRequestId": "short",
+            },
+        )
+        verify = await client.post(
+            "/api/v1/auth/phone/challenges/challenge-00000001/verify",
+            json={
+                "phone": "13800138000",
+                "code": "12ab",
+                "clientRequestId": "phone-verify-request-01",
+                "unknown": True,
+            },
+        )
+
+    assert challenge.status_code == 422
+    assert verify.status_code == 422
 
 
 @pytest.mark.asyncio

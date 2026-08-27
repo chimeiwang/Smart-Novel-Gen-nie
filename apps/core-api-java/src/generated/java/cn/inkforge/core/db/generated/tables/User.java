@@ -10,6 +10,7 @@ import cn.inkforge.core.db.generated.Public;
 import cn.inkforge.core.db.generated.tables.Creditledger.CreditledgerPath;
 import cn.inkforge.core.db.generated.tables.Novel.NovelPath;
 import cn.inkforge.core.db.generated.tables.Tokenusage.TokenusagePath;
+import cn.inkforge.core.db.generated.tables.Userphoneidentity.UserphoneidentityPath;
 import cn.inkforge.core.db.generated.tables.Videoadaptationdecisioncommand.VideoadaptationdecisioncommandPath;
 import cn.inkforge.core.db.generated.tables.Videoepisodeeditversion.VideoepisodeeditversionPath;
 import cn.inkforge.core.db.generated.tables.Videoepisodeexporttask.VideoepisodeexporttaskPath;
@@ -234,6 +235,19 @@ public class User extends TableImpl<UserRecord> {
             _tokenusage = new TokenusagePath(this, null, Keys.TOKENUSAGE__TOKENUSAGE_USERID_FKEY.getInverseKey());
 
         return _tokenusage;
+    }
+
+    private transient UserphoneidentityPath _userphoneidentity;
+
+    /**
+     * Get the implicit to-many join path to the
+     * <code>public.UserPhoneIdentity</code> table
+     */
+    public UserphoneidentityPath userphoneidentity() {
+        if (_userphoneidentity == null)
+            _userphoneidentity = new UserphoneidentityPath(this, null, Keys.USERPHONEIDENTITY__USERPHONEIDENTITY_USER_FKEY.getInverseKey());
+
+        return _userphoneidentity;
     }
 
     private transient VideoadaptationdecisioncommandPath _videoadaptationdecisioncommand;

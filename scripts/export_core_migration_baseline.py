@@ -87,6 +87,8 @@ def _authentication(exposure: str, path: str) -> str:
         "/api/v1/auth/register",
         "/api/v1/auth/login",
         "/api/v1/auth/logout",
+        "/api/v1/auth/phone/challenges",
+        "/api/v1/auth/phone/challenges/{challenge_id}/verify",
         "/api/v1/health/live",
         "/api/v1/health/ready",
     }:

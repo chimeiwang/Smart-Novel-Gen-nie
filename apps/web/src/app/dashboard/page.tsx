@@ -5,7 +5,11 @@ import { NovelListClient } from "@/features/projects/novel-list-client";
 import { createServerApiClient } from "@/lib/api/server";
 import { CoreApiPageError, requireApiData } from "@/lib/api/response";
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ welcome?: string }>;
+}) {
   let dashboard: components["schemas"]["DashboardResponse"] | null = null;
   let loadError: string | null = null;
   try {
@@ -18,5 +22,6 @@ export default async function DashboardPage() {
   if (loadError || !dashboard) {
     return <main className="page"><div className="empty">{loadError}</div></main>;
   }
-  return <NovelListClient novels={dashboard.novels} />;
+  const params = await searchParams;
+  return <NovelListClient novels={dashboard.novels} welcome={params?.welcome === "1"} />;
 }

@@ -21,7 +21,7 @@
         "postgresql_transaction"
       ],
       "sourceFile": "apps/core-api/src/inkforge_core/auth/router.py",
-      "sourceLine": 34,
+      "sourceLine": 50,
       "statusCode": null,
       "transaction": "write"
     },
@@ -45,7 +45,7 @@
         "postgresql_transaction"
       ],
       "sourceFile": "apps/core-api/src/inkforge_core/auth/router.py",
-      "sourceLine": 50,
+      "sourceLine": 90,
       "statusCode": 204,
       "transaction": "write"
     },
@@ -67,9 +67,57 @@
       "responseKind": "json",
       "sideEffects": [],
       "sourceFile": "apps/core-api/src/inkforge_core/auth/router.py",
-      "sourceLine": 64,
+      "sourceLine": 104,
       "statusCode": null,
       "transaction": "read_only"
+    },
+    {
+      "authentication": "public",
+      "deprecated": false,
+      "endpointFunction": "create_phone_challenge",
+      "endpointModule": "inkforge_core.auth.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "create_phone_challenge_api_v1_auth_phone_challenges_post",
+      "path": "/api/v1/auth/phone/challenges",
+      "productModule": "identity",
+      "pythonTests": [
+        "apps/core-api/tests/identity/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/auth/router.py",
+      "sourceLine": 66,
+      "statusCode": 201,
+      "transaction": "write"
+    },
+    {
+      "authentication": "public",
+      "deprecated": false,
+      "endpointFunction": "verify_phone_challenge",
+      "endpointModule": "inkforge_core.auth.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "POST",
+      "mutation": true,
+      "operationId": "verify_phone_challenge_api_v1_auth_phone_challenges__challenge_id__verify_post",
+      "path": "/api/v1/auth/phone/challenges/{challenge_id}/verify",
+      "productModule": "identity",
+      "pythonTests": [
+        "apps/core-api/tests/identity/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/auth/router.py",
+      "sourceLine": 78,
+      "statusCode": null,
+      "transaction": "write"
     },
     {
       "authentication": "public",
@@ -91,7 +139,7 @@
         "postgresql_transaction"
       ],
       "sourceFile": "apps/core-api/src/inkforge_core/auth/router.py",
-      "sourceLine": 17,
+      "sourceLine": 26,
       "statusCode": 201,
       "transaction": "write"
     },

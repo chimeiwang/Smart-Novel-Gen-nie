@@ -4753,6 +4753,50 @@
         "title": "CreateOutlineNodeRequest",
         "type": "object"
       },
+      "CreatePhoneChallengeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "acceptedTerms": {
+            "title": "Acceptedterms",
+            "type": "boolean",
+            "x-inkforge-const": true
+          },
+          "captchaVerifyParam": {
+            "maxLength": 16384,
+            "minLength": 1,
+            "title": "Captchaverifyparam",
+            "type": "string"
+          },
+          "clientRequestId": {
+            "maxLength": 128,
+            "minLength": 16,
+            "title": "Clientrequestid",
+            "type": "string"
+          },
+          "consentVersion": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Consentversion",
+            "type": "string"
+          },
+          "phone": {
+            "maxLength": 11,
+            "minLength": 11,
+            "pattern": "^1[3-9][0-9]{9}$",
+            "title": "Phone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "phone",
+          "captchaVerifyParam",
+          "consentVersion",
+          "acceptedTerms",
+          "clientRequestId"
+        ],
+        "title": "CreatePhoneChallengeRequest",
+        "type": "object"
+      },
       "CreateReferenceRequest": {
         "additionalProperties": false,
         "properties": {
@@ -8944,6 +8988,64 @@
           "name"
         ],
         "title": "OwnerSummary",
+        "type": "object"
+      },
+      "PhoneChallengeResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "challengeId": {
+            "title": "Challengeid",
+            "type": "string"
+          },
+          "expiresInSeconds": {
+            "title": "Expiresinseconds",
+            "type": "integer"
+          },
+          "resendAfterSeconds": {
+            "title": "Resendafterseconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "challengeId",
+          "expiresInSeconds",
+          "resendAfterSeconds"
+        ],
+        "title": "PhoneChallengeResponse",
+        "type": "object"
+      },
+      "PhoneLoginResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "creditBalanceMicros": {
+            "title": "Creditbalancemicros",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "isNewUser": {
+            "title": "Isnewuser",
+            "type": "boolean"
+          },
+          "maskedPhone": {
+            "title": "Maskedphone",
+            "type": "string"
+          },
+          "username": {
+            "title": "Username",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "creditBalanceMicros",
+          "maskedPhone",
+          "isNewUser"
+        ],
+        "title": "PhoneLoginResponse",
         "type": "object"
       },
       "PlannedAssetArguments": {
@@ -14681,6 +14783,12 @@
             "title": "Id",
             "type": "string"
           },
+          "maskedPhone": {
+            "pattern": "^1[3-9][0-9]\\*{4}[0-9]{4}$",
+            "title": "Maskedphone",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          },
           "username": {
             "title": "Username",
             "type": "string"
@@ -14692,6 +14800,38 @@
           "creditBalanceMicros"
         ],
         "title": "UserResponse",
+        "type": "object"
+      },
+      "VerifyPhoneChallengeRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "clientRequestId": {
+            "maxLength": 128,
+            "minLength": 16,
+            "title": "Clientrequestid",
+            "type": "string"
+          },
+          "code": {
+            "maxLength": 6,
+            "minLength": 6,
+            "pattern": "^[0-9]{6}$",
+            "title": "Code",
+            "type": "string"
+          },
+          "phone": {
+            "maxLength": 11,
+            "minLength": 11,
+            "pattern": "^1[3-9][0-9]{9}$",
+            "title": "Phone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "phone",
+          "code",
+          "clientRequestId"
+        ],
+        "title": "VerifyPhoneChallengeRequest",
         "type": "object"
       },
       "VersionActionRequest": {
@@ -18679,6 +18819,281 @@
           }
         },
         "summary": "Me",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/api/v1/auth/phone/challenges": {
+      "post": {
+        "operationId": "create_phone_challenge_api_v1_auth_phone_challenges_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePhoneChallengeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneChallengeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          }
+        },
+        "summary": "Create Phone Challenge",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/api/v1/auth/phone/challenges/{challenge_id}/verify": {
+      "post": {
+        "operationId": "verify_phone_challenge_api_v1_auth_phone_challenges__challenge_id__verify_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "challenge_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 16,
+              "title": "Challenge Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyPhoneChallengeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhoneLoginResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          }
+        },
+        "summary": "Verify Phone Challenge",
         "tags": [
           "identity"
         ]

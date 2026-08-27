@@ -32,6 +32,7 @@ from sqlalchemy.orm import MANYTOMANY, ONETOMANY, Mapped, Session, configure_map
 CONTRACT_PATH = Path(__file__).parents[2] / "src" / "inkforge_core" / "db" / "schema-contract.json"
 EXPECTED_MODEL_TABLES = {
     "User",
+    "UserPhoneIdentity",
     "Novel",
     "Chapter",
     "ChapterQualityCheck",
@@ -117,6 +118,8 @@ EXPECTED_MODEL_TABLES = {
     "VideoEpisodeExport",
 }
 EXPECTED_TABLES = EXPECTED_MODEL_TABLES | {"_FactionTerritories"}
+
+
 def _contract() -> dict[str, Any]:
     return cast(dict[str, Any], json.loads(CONTRACT_PATH.read_text("utf-8")))
 
@@ -244,7 +247,7 @@ def test_timestamp_text_bigint_and_vector_types_preserve_existing_storage() -> N
     ]
     bigint_columns = [column for column in columns if isinstance(column.type, BigInteger)]
 
-    assert len(timestamp_columns) == 138
+    assert len(timestamp_columns) == 142
     assert all(column.type.precision == 3 for column in timestamp_columns)
     assert all(column.type.timezone is False for column in timestamp_columns)
     assert {(column.table.name, column.name) for column in bigint_columns} == {
@@ -445,6 +448,23 @@ def test_primary_keys_foreign_keys_and_indexes_match_the_frozen_contract() -> No
                 "TokenUsage_prompt_cache_details_check",
                 "TokenUsage_reasoning_details_check",
             }
+        elif table_name == "UserPhoneIdentity":
+            expected_unique_names = {
+                constraint["name"] for constraint in expected_table["uniqueConstraints"]
+            }
+            expected_check_names = {
+                constraint["name"] for constraint in expected_table["checkConstraints"]
+            }
+            assert {
+                constraint.name
+                for constraint in other_constraints
+                if isinstance(constraint, UniqueConstraint)
+            } == expected_unique_names
+            assert {
+                constraint.name
+                for constraint in other_constraints
+                if isinstance(constraint, CheckConstraint)
+            } == expected_check_names
         else:
             expected_unique_names = {
                 constraint["name"]
@@ -929,7 +949,7 @@ def test_mappers_cover_every_real_foreign_key_without_logical_id_relationships()
     mapped_models = [getattr(models, name) for name in EXPECTED_MODEL_TABLES]
     relationship_count = sum(len(inspect(model).relationships) for model in mapped_models)
 
-    assert relationship_count == 118
+    assert relationship_count == 120
     assert set(inspect(models.CharacterRelation).relationships.keys()) == {"character", "target"}
     assert inspect(models.Location).relationships["parent"].remote_side == {
         models.Location.__table__.c.id
@@ -977,7 +997,7 @@ def test_parent_relationship_delete_policy_matches_every_real_foreign_key() -> N
                 assert "delete" not in relation.cascade, (model_name, relation.key)
             assert "delete-orphan" not in relation.cascade, (model_name, relation.key)
 
-    assert parent_relationships == 58
+    assert parent_relationships == 59
 
 
 def _sqlite_uow_engine(*tables: Any) -> Any:
@@ -1264,13 +1284,37 @@ async def test_schema_readiness_passes_the_selected_runtime_profile(
     assert captured_profiles == ["without_video_preview"]
 
 
-def test_schema_profile_tracks_the_video_preview_capability() -> None:
+def test_schema_profile_tracks_video_and_phone_capabilities() -> None:
     from inkforge_core.config import Settings
     from inkforge_core.db.session import schema_profile_for_settings
 
-    assert schema_profile_for_settings(Settings(environment="dev")) == "without_video_preview"
+    assert (
+        schema_profile_for_settings(Settings(environment="dev"))
+        == "without_video_preview_and_phone_auth"
+    )
     assert (
         schema_profile_for_settings(Settings(environment="dev", video_preview_enabled=True))
+        == "without_phone_auth"
+    )
+    assert (
+        schema_profile_for_settings(
+            Settings(
+                environment="dev",
+                phone_auth_enabled=True,
+                phone_auth_send_enabled=True,
+            )
+        )
+        == "without_video_preview"
+    )
+    assert (
+        schema_profile_for_settings(
+            Settings(
+                environment="dev",
+                video_preview_enabled=True,
+                phone_auth_enabled=True,
+                phone_auth_send_enabled=True,
+            )
+        )
         == "full"
     )
 

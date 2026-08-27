@@ -17,9 +17,9 @@ class CoreDatabaseConfiguration {
     @Bean
     @ConditionalOnProperty(name = "DATABASE_URL")
     DatabaseReadiness databaseReadiness(CoreDatabase database, CoreSettings settings) {
-        SchemaProfile profile = settings.videoPreviewEnabled()
-                ? SchemaProfile.FULL
-                : SchemaProfile.WITHOUT_VIDEO_PREVIEW;
+        SchemaProfile profile = SchemaProfile.forCapabilities(
+                settings.videoPreviewEnabled(),
+                settings.phoneAuthEnabled() && settings.phoneAuthSendEnabled());
         return new DatabaseReadiness(database, profile);
     }
 }

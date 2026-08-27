@@ -138,6 +138,14 @@ def configure_database(app: FastAPI, settings: Settings) -> None:
 
 
 def schema_profile_for_settings(settings: Settings) -> SchemaProfile:
-    """视频开发预览关闭时，只校验生产可用的基础结构。"""
+    """按视频预览和手机号发送能力选择严格结构投影。"""
 
-    return "full" if settings.video_preview_enabled else "without_video_preview"
+    video_enabled = settings.video_preview_enabled
+    phone_enabled = settings.phone_auth_enabled and settings.phone_auth_send_enabled
+    if video_enabled and phone_enabled:
+        return "full"
+    if video_enabled:
+        return "without_phone_auth"
+    if phone_enabled:
+        return "without_video_preview"
+    return "without_video_preview_and_phone_auth"

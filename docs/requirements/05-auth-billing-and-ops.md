@@ -10,22 +10,27 @@
 与 Next.js Web。迁移规格为 `docs/specs/2026-08-24-core-java-replacement.md`，架构决策位于
 `docs/architecture-decisions/001-core-java-stack.md` 到 `003-core-java-single-cutover.md`。
 
-迁移期间 FastAPI Core 仍是当前生产实现。生产始终只允许一个 `core-api`，不得让 Python 与 Java
-同时写同一数据库，也不得按路由渐进切流。开发差异测试只能使用隔离数据库；Java 全量通过本地、
-`novelwriterdev`、Web、Agent、CLI、Compose 和回滚验收后，才可在用户批准的窗口替换同名容器。
+Java Core 已于 2026-08-26 替换同名生产容器并处于观察期，生产始终只允许一个 `core-api`；Python Core
+只保留为明确回滚镜像，不得与 Java 同时写同一数据库，也不得按路由渐进切流。
 
-本次迁移冻结现有产品和 PostgreSQL 业务结构，不增加手机号、短信、邮箱、支付、订单、订阅或新表，
-不启用生产视频。Java 应用不得使用 JPA、Flyway、Liquibase 或启动 SQL 自动修改结构；schema guard
-继续只读。切换失败恢复上一 Python 镜像，不执行数据库反向迁移。
+Java 等价迁移本身没有增加手机号、短信、邮箱、支付、订单、订阅或新表。手机号认证于 2026-08-27 另立
+独立规格并实现代码；其具名迁移已获准并完成服务器 `novelwriterdev` 备份、两次幂等执行和真实 contract
+导出，但尚未获准对 `novelwriter` 正式库执行 DDL 或启用生产。Java 应用不得使用 JPA、Flyway、Liquibase
+或启动 SQL 自动修改结构；schema guard 继续只读，并在手机号双开关关闭时只精确投影掉手机号身份表。
 
 ## 浏览器认证
 
 - 首页和登录页公开，其余页面由 Next.js `proxy.ts` 检查 `inkforge-token` Cookie。
 - 注册、登录、登出和当前用户接口由 Core API 提供。
 - 用户名输入先去除首尾空白并转为小写，再按 3 至 32 位小写字母、数字、下划线或短横线校验和存储；密码至少 6 位。
-- 密码由 Python bcrypt 哈希，禁止保存明文。
+- 密码由 Core 使用 bcrypt 哈希，禁止保存明文。
 - 会话使用 HS256 JWT，写入 httpOnly、sameSite=lax Cookie，有效期 30 天；生产 HTTPS 环境必须同时设置 `Secure`。
 - 登录失败不区分用户名不存在和密码错误。
+- 手机号认证使用验证码 2.0 服务端复核后才可发短信；阿里云号码认证负责动态生成、发送和核验 6 位验证码。
+- 手机号不存在时，核验成功后在同一事务创建独立用户、`UserPhoneIdentity` 和唯一注册奖励；存在时直接登录。
+- 老用户名账号不自动绑定手机号；老用户使用新手机号会创建独立账号，作品与积分不合并。
+- `PHONE_AUTH_ENABLED` 与 `PHONE_AUTH_SEND_ENABLED` 默认关闭；完整开放时生产必须关闭用户名新注册入口，
+  但 `/auth/login` 继续供老账号使用。
 
 ## 资源授权
 
@@ -253,6 +258,12 @@ readiness 只阻断抽帧和导出，不能阻断历史版本读取。成片必�
 | --- | --- | --- |
 | `DATABASE_URL` | Core | 现有 PostgreSQL 地址 |
 | `JWT_SECRET` | Core、Web | 浏览器会话签名 |
+| `PHONE_AUTH_ENABLED` / `PHONE_AUTH_SEND_ENABLED` | Core、Web | 手机号总开关和真实短信开关，生产默认关闭 |
+| `USERNAME_REGISTRATION_ENABLED` | Core | 用户名新注册兼容开关；手机号正式开放时关闭 |
+| `PHONE_AUTH_HMAC_SECRET` | Core | 手机号与幂等来源的带密钥摘要，至少 32 字节 |
+| `ALIYUN_ACCESS_KEY_ID` / `ALIYUN_ACCESS_KEY_SECRET` | Core | 阿里云服务端最小权限程序身份，禁止进入 Web 或 Agent |
+| `ALIYUN_PNVS_*` | Core | 号码认证签名、模板和可选方案名称 |
+| `ALIYUN_CAPTCHA_PREFIX` / `ALIYUN_CAPTCHA_SCENE_ID` | Core、Web | 验证码 2.0 服务端场景与公开客户端初始化参数 |
 | `REDIS_URL` | Core、Agent | 队列、事件和防重放 |
 | `QUEUE_TERMINAL_RETENTION_DAYS` | Agent | Redis 队列终态 tombstone 保留天数，默认 7、最少 1；Compose 显式透传 |
 | `AGENT_MAX_CONCURRENCY` | Agent | 单进程不同项目队列 job 与全局模型调用上限，只允许 1、2 或 3，2 核 2 GB 默认 3；同一 `novelId` 始终串行 |
@@ -275,7 +286,8 @@ Core 与 Agent readiness 在后台任务不健康时保留 `checks` 兼容字段
 
 ## 验收标准
 
-- 用户可以注册、登录、登出并查看计费摘要。
+- 兼容阶段可使用用户名注册；手机号全量开放后关闭用户名新注册，但旧用户名账号仍可登录、登出并查看计费
+  摘要。新手机号可在一次验证中自动建号登录，再次登录不得重复建号或发奖。
 - 未登录或越权请求不能访问受保护资源。
 - Agent 不能连接数据库，内部伪造、重放、跨任务或跨小说请求会被拒绝。
 - 余额不足时模型调用不会开始；重复完成回调不会重复扣费。

@@ -31,9 +31,10 @@ public final class SchemaGuardCommand {
             boolean compatibilityFingerprint = compatibilityFingerprintRequested(arguments);
             PostgresConnectionSettings settings =
                     PostgresConnectionSettings.parse(environment.get("DATABASE_URL"));
-            SchemaProfile profile = videoPreviewEnabled(environment.get("VIDEO_PREVIEW_ENABLED"))
-                    ? SchemaProfile.FULL
-                    : SchemaProfile.WITHOUT_VIDEO_PREVIEW;
+            SchemaProfile profile = SchemaProfile.forCapabilities(
+                    enabled(environment, "VIDEO_PREVIEW_ENABLED"),
+                    enabled(environment, "PHONE_AUTH_ENABLED")
+                            && enabled(environment, "PHONE_AUTH_SEND_ENABLED"));
             try (var connection = DriverManager.getConnection(
                     settings.jdbcUrl(), settings.username(), settings.password())) {
                 SchemaVerificationResult result =
@@ -83,14 +84,15 @@ public final class SchemaGuardCommand {
         throw new IllegalArgumentException("结构守卫参数无效");
     }
 
-    private static boolean videoPreviewEnabled(String value) {
+    private static boolean enabled(Map<String, String> environment, String name) {
+        String value = environment.get(name);
         if (value == null || value.isBlank()) {
             return false;
         }
         return switch (value.strip().toLowerCase()) {
             case "true", "1" -> true;
             case "false", "0" -> false;
-            default -> throw new IllegalArgumentException("VIDEO_PREVIEW_ENABLED 必须是布尔值");
+            default -> throw new IllegalArgumentException(name + " 必须是布尔值");
         };
     }
 }

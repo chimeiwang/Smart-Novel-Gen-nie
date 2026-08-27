@@ -62,6 +62,16 @@
       <groupId>org.springframework.security</groupId>
       <artifactId>spring-security-crypto</artifactId>
     </dependency>
+    <dependency>
+      <groupId>com.aliyun</groupId>
+      <artifactId>dypnsapi20170525</artifactId>
+      <version>${aliyun-dypnsapi.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.aliyun</groupId>
+      <artifactId>captcha20230305</artifactId>
+      <version>${aliyun-captcha.version}</version>
+    </dependency>
 
     <dependency>
       <groupId>org.springframework.boot</groupId>
@@ -89,6 +99,13 @@
     <testResources>
       <testResource>
         <directory>src/test/resources</directory>
+      </testResource>
+      <testResource>
+        <directory>../../scripts/migrations</directory>
+        <includes>
+          <include>20260827_user_phone_identity.sql</include>
+        </includes>
+        <targetPath>migrations</targetPath>
       </testResource>
       <testResource>
         <directory>../../contracts/core/model-grant-fixtures</directory>

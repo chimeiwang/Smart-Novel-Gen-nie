@@ -2,13 +2,22 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, Response, status
+from fastapi import APIRouter, Depends, Path, Request, Response, status
 
 from ..config import Settings
+from ..errors import ApiError
 from .client_ip import resolve_client_identity
 from .dependencies import get_auth_service, get_current_user
 from .repository import AuthUser
-from .schemas import LoginRequest, RegisterRequest, UserResponse
+from .schemas import (
+    CreatePhoneChallengeRequest,
+    LoginRequest,
+    PhoneChallengeResponse,
+    PhoneLoginResponse,
+    RegisterRequest,
+    UserResponse,
+    VerifyPhoneChallengeRequest,
+)
 from .service import COOKIE_NAME, SESSION_MAX_AGE_SECONDS, AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -21,6 +30,13 @@ async def register(
     response: Response,
     service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> UserResponse:
+    settings: Settings = request.app.state.settings
+    if not settings.username_registration_enabled:
+        raise ApiError(
+            status_code=404,
+            code="USERNAME_REGISTRATION_DISABLED",
+            message="用户名注册入口已关闭",
+        )
     user = await service.register(
         payload.username,
         payload.password,
@@ -45,6 +61,30 @@ async def login(
     )
     _set_session_cookie(response, service, user.id)
     return _user_response(user)
+
+
+@router.post(
+    "/phone/challenges",
+    response_model=PhoneChallengeResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_phone_challenge(
+    payload: CreatePhoneChallengeRequest,
+) -> PhoneChallengeResponse:
+    del payload
+    raise _phone_auth_unavailable()
+
+
+@router.post(
+    "/phone/challenges/{challenge_id}/verify",
+    response_model=PhoneLoginResponse,
+)
+async def verify_phone_challenge(
+    payload: VerifyPhoneChallengeRequest,
+    challenge_id: Annotated[str, Path(min_length=16, max_length=128)],
+) -> PhoneLoginResponse:
+    del payload, challenge_id
+    raise _phone_auth_unavailable()
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -83,9 +123,18 @@ def _user_response(user: AuthUser) -> UserResponse:
         id=user.id,
         username=user.username,
         creditBalanceMicros=str(user.credit_balance_micros),
+        maskedPhone=None,
     )
 
 
 def _client_identity(request: Request) -> str:
     settings: Settings = request.app.state.settings
     return resolve_client_identity(request, settings.trusted_proxy_cidrs)
+
+
+def _phone_auth_unavailable() -> ApiError:
+    return ApiError(
+        status_code=503,
+        code="PHONE_AUTH_UNAVAILABLE",
+        message="手机号认证暂时不可用",
+    )

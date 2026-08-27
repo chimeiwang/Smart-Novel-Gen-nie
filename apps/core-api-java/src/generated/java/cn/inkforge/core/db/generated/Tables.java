@@ -35,6 +35,7 @@ import cn.inkforge.core.db.generated.tables.Styleportraittask;
 import cn.inkforge.core.db.generated.tables.Stylereference;
 import cn.inkforge.core.db.generated.tables.Tokenusage;
 import cn.inkforge.core.db.generated.tables.User;
+import cn.inkforge.core.db.generated.tables.Userphoneidentity;
 import cn.inkforge.core.db.generated.tables.Videoadaptationdecisioncommand;
 import cn.inkforge.core.db.generated.tables.Videoadaptationtask;
 import cn.inkforge.core.db.generated.tables.Videoasset;
@@ -270,6 +271,11 @@ public class Tables {
      * The table <code>public.User</code>.
      */
     public static final User USER = User.USER;
+
+    /**
+     * The table <code>public.UserPhoneIdentity</code>.
+     */
+    public static final Userphoneidentity USERPHONEIDENTITY = Userphoneidentity.USERPHONEIDENTITY;
 
     /**
      * The table <code>public.VideoAdaptationDecisionCommand</code>.

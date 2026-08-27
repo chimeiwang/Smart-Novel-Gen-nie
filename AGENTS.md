@@ -31,8 +31,13 @@
   逐镜关键帧版本、分集非破坏性粗剪版本、声音/字幕版本及耐久整集导出任务，并为现有
   `VideoAsset.duty` 增加 `sfx` 与 `episode_export`。这两个 20260824 视频迁移不得对 `novelwriter` 正式库
   执行，不迁移开发数据、不启用生产功能，也不授权图片生成、TTS 或旧
-  `VideoScene`/`VideoGenerationTask` 公共语义复活。所有迁移必须先备份、受控执行并验证幂等；开发库迁移后
-  必须从真实库只读导出 `schema-contract.json`。任何其他持久化改动必须先更新 spec 和本文件、
+  `VideoScene`/`VideoGenerationTask` 公共语义复活。用户于 2026-08-27 先批准起草并在隔离 PostgreSQL
+  验证 `scripts/migrations/20260827_user_phone_identity.sql`，后进一步明确批准该具名脚本只对服务器端
+  `novelwriterdev` 开发库执行；该批准不授权正式库 `novelwriter` 或其他远程数据库 DDL，也不授权开启
+  手机号真实发送。该开发迁移已在迁移前备份后成功执行两次并验证幂等，真实开发库已只读导出包含
+  `UserPhoneIdentity` 的 `schema-contract.json`，完整指纹为
+  `4f8cbf58820c7e601026012249f1896e4f8ad0231cfa6b9bd2fdad1c83c3d195`；正式库在手机号与视频开关关闭的
+  精确投影下保持零差异。任何其他持久化改动必须先更新 spec 和本文件、
   核对 `apps/core-api/src/inkforge_core/db/schema-contract.json`，应用启动仍不得自动建表、删表或执行迁移。
 
 ## 产品基线
@@ -46,19 +51,19 @@
   工作稿，自动保存不创建版本，Agent 文档生成只产生待采用候选，全文检查只产生报告；中短篇不开放视频。
 - `long_serial` 使用多章节、创作资料、三层结构化大纲、写作会话、5 个核心 Agent、ReviewArtifact
   和一致性终检。前端显示的 30 万～100 万字、80～300 章属于规划建议，不是 Core 硬上限。
-- 当前商业化缺口包括手机号/邮箱、账号找回、在线支付、管理员后台、团队协作、移动端、内容发布
-  分发；它们不是现有功能，也不得在 Java 等价迁移中顺带加入。
+- 当前商业化缺口包括手机号认证的正式库迁移、有效联系渠道与生产开放、邮箱、账号找回、在线支付、管理员
+  后台、团队协作、移动端、内容发布分发；手机号认证代码和开发库迁移已完成但生产默认关闭，其余仍不是现有功能。
 - 章节影视化完整开发链为“章节快照 → Scene/Beat/Shot 人工审镜 → 分集 → 视觉设定版本 → 逐镜
   提示词 → 关键帧 → Seedance Take → 粗剪 → 声音字幕 → 整集导出”。生产必须保持
   `VIDEO_PREVIEW_ENABLED=false`，并拒绝视频调度和真实 Seedance；P0-P3 只获开发库授权，不支持
   图片生成、TTS 或旧 `VideoScene`/`VideoGenerationTask` 公共语义复活。
-- 基线提交 `c9afc95` 有 148 个公共 Core 操作、30 个内部 Core 操作和 125 个 CLI 命令。CLI 不是公共
-  API 全量镜像；现行生产 Python CLI 仅支持 Windows Credential Manager，尚未切换的 Java CLI 候选支持
+- 基线提交 `c9afc95` 有 148 个公共 Core 操作、30 个内部 Core 操作和 125 个 CLI 命令；当前公共 Core
+  在此基础上增加 2 个默认关闭的手机号认证操作，共 150 个。CLI 不是公共 API 全量镜像；现行生产 Java CLI 支持
   macOS Keychain 与 Windows Credential Manager，均禁止明文回退。若接口、命令或结构发生获批变化，
   必须重新计算并同步产品基线，不能机械维护旧数字。
-- Java 迁移先做行为等价：生产始终只有一个 Core，不双 Core、不双写；Python Agent 保留，Web 继续
-  遵守 Next.js 现有边界，Core 后台职责和 CLI 按已批准计划迁移。手机号、支付等新功能只能在切换完成后
-  另立 spec。Java 通过契约、差异和端到端验收前不得删除 Python Core 或宣称迁移完成。
+- Java Core 已于 2026-08-26 单切生产并处于观察期：生产始终只有一个 Core，不双 Core、不双写；Python
+  Core 只保留整镜像回滚，Python Agent 保留，Web 继续遵守 Next.js 现有边界。手机号认证已在切换后另立
+  spec 实施且开发库具名迁移已完成，但正式库迁移和生产启用仍需单独批准。
 
 ## 当前架构
 
@@ -71,7 +76,8 @@
 ```
 
 - `apps/web`：Next.js 16，仅页面、SSR/SEO、浏览器交互和生成客户端，不得包含业务 API、Server Actions、数据库客户端或模型运行时。
-- `apps/core-api`：FastAPI 核心接口服务，独占 PostgreSQL 访问、浏览器认证、归属校验、业务规则、ReviewArtifact、计费和 SSE。
+- `apps/core-api-java`：当前生产 Core，独占 PostgreSQL 访问、浏览器认证、归属校验、业务规则、ReviewArtifact、计费和 SSE。
+- `apps/core-api`：FastAPI Core 回滚镜像与公共契约来源，不与 Java Core 并行运行。
 - `apps/agent-service`：FastAPI 智能体服务，负责 LangGraph、模型、工具循环和运行队列。禁止导入数据库驱动、读取 `DATABASE_URL` 或直接写正式小说数据。
 - `packages/service-contracts`：Core 与 Agent 的版本化 Pydantic 契约。
 - `packages/service-auth`：Ed25519 服务身份、请求绑定和重放保护。

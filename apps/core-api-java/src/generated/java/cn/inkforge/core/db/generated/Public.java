@@ -35,6 +35,7 @@ import cn.inkforge.core.db.generated.tables.Styleportraittask;
 import cn.inkforge.core.db.generated.tables.Stylereference;
 import cn.inkforge.core.db.generated.tables.Tokenusage;
 import cn.inkforge.core.db.generated.tables.User;
+import cn.inkforge.core.db.generated.tables.Userphoneidentity;
 import cn.inkforge.core.db.generated.tables.Videoadaptationdecisioncommand;
 import cn.inkforge.core.db.generated.tables.Videoadaptationtask;
 import cn.inkforge.core.db.generated.tables.Videoasset;
@@ -285,6 +286,11 @@ public class Public extends SchemaImpl {
      * The table <code>public.User</code>.
      */
     public final User USER = User.USER;
+
+    /**
+     * The table <code>public.UserPhoneIdentity</code>.
+     */
+    public final Userphoneidentity USERPHONEIDENTITY = Userphoneidentity.USERPHONEIDENTITY;
 
     /**
      * The table <code>public.VideoAdaptationDecisionCommand</code>.
@@ -595,6 +601,7 @@ public class Public extends SchemaImpl {
             Stylereference.STYLEREFERENCE,
             Tokenusage.TOKENUSAGE,
             User.USER,
+            Userphoneidentity.USERPHONEIDENTITY,
             Videoadaptationdecisioncommand.VIDEOADAPTATIONDECISIONCOMMAND,
             Videoadaptationtask.VIDEOADAPTATIONTASK,
             Videoasset.VIDEOASSET,
