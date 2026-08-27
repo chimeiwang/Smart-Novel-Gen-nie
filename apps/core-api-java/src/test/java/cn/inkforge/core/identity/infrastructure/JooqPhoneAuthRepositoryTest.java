@@ -198,6 +198,21 @@ class JooqPhoneAuthRepositoryTest {
                 "/tmp/novelwriterdev-schema.sql");
         assertThat(restoreBaseline.getExitCode()).as(restoreBaseline.getStderr()).isZero();
 
+        ExecResult assignApplicationOwner = POSTGRES.execInContainer(
+                "psql",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-U",
+                POSTGRES.getUsername(),
+                "-d",
+                "novelwriter",
+                "-c",
+                "CREATE ROLE phone_app_owner NOLOGIN; "
+                        + "ALTER TABLE public.\"User\" OWNER TO phone_app_owner");
+        assertThat(assignApplicationOwner.getExitCode())
+                .as(assignApplicationOwner.getStderr())
+                .isZero();
+
         ExecResult unconfirmed = POSTGRES.execInContainer(
                 "psql",
                 "-v",
@@ -239,6 +254,29 @@ class JooqPhoneAuthRepositoryTest {
                         + "WHERE conrelid = 'public.\"UserPhoneIdentity\"'::regclass");
         assertThat(constraints.getExitCode()).as(constraints.getStderr()).isZero();
         assertThat(constraints.getStdout().strip()).isEqualTo("7");
+
+        ExecResult ownership = POSTGRES.execInContainer(
+                "psql",
+                "-At",
+                "-U",
+                POSTGRES.getUsername(),
+                "-d",
+                "novelwriter",
+                "-c",
+                "SELECT phone_table.relowner = user_table.relowner "
+                        + "AND pg_get_userbyid(phone_table.relowner) = 'phone_app_owner' "
+                        + "FROM pg_class AS phone_table "
+                        + "JOIN pg_namespace AS phone_namespace "
+                        + "ON phone_namespace.oid = phone_table.relnamespace "
+                        + "CROSS JOIN pg_class AS user_table "
+                        + "JOIN pg_namespace AS user_namespace "
+                        + "ON user_namespace.oid = user_table.relnamespace "
+                        + "WHERE phone_namespace.nspname = 'public' "
+                        + "AND phone_table.relname = 'UserPhoneIdentity' "
+                        + "AND user_namespace.nspname = 'public' "
+                        + "AND user_table.relname = 'User'");
+        assertThat(ownership.getExitCode()).as(ownership.getStderr()).isZero();
+        assertThat(ownership.getStdout().strip()).isEqualTo("t");
     }
 
     private static void executeSql(String path) throws Exception {

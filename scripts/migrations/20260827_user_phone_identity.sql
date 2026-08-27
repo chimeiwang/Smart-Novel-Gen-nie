@@ -55,6 +55,49 @@ CREATE TABLE IF NOT EXISTS "UserPhoneIdentity" (
   )
 );
 
+-- 迁移可能由 PostgreSQL 管理账户执行；新表必须继承现有 User 表的应用所有者约定。
+DO $ownership$
+DECLARE
+  expected_owner OID;
+  actual_owner OID;
+  expected_owner_name TEXT;
+BEGIN
+  SELECT table_definition.relowner
+  INTO expected_owner
+  FROM pg_class AS table_definition
+  JOIN pg_namespace AS namespace_definition
+    ON namespace_definition.oid = table_definition.relnamespace
+  WHERE namespace_definition.nspname = 'public'
+    AND table_definition.relname = 'User'
+    AND table_definition.relkind IN ('r', 'p');
+
+  SELECT table_definition.relowner
+  INTO actual_owner
+  FROM pg_class AS table_definition
+  JOIN pg_namespace AS namespace_definition
+    ON namespace_definition.oid = table_definition.relnamespace
+  WHERE namespace_definition.nspname = 'public'
+    AND table_definition.relname = 'UserPhoneIdentity'
+    AND table_definition.relkind IN ('r', 'p');
+
+  IF expected_owner IS NULL OR actual_owner IS NULL THEN
+    RAISE EXCEPTION 'User 或 UserPhoneIdentity 表所有者无法解析';
+  END IF;
+
+  IF actual_owner <> expected_owner THEN
+    expected_owner_name := pg_get_userbyid(expected_owner);
+    IF expected_owner_name IS NULL OR btrim(expected_owner_name) = '' THEN
+      RAISE EXCEPTION 'User 表所有者角色无法解析';
+    END IF;
+    EXECUTE format(
+      'ALTER TABLE public.%I OWNER TO %I',
+      'UserPhoneIdentity',
+      expected_owner_name
+    );
+  END IF;
+END
+$ownership$;
+
 -- CREATE TABLE IF NOT EXISTS 不会校验同名旧表；显式核对关键约束，避免在畸形结构上静默成功。
 DO $postcondition$
 DECLARE
@@ -81,6 +124,22 @@ BEGIN
 
   IF missing_constraints IS NOT NULL THEN
     RAISE EXCEPTION 'UserPhoneIdentity 缺少预期约束：%', missing_constraints;
+  END IF;
+
+  IF (
+    SELECT phone_table.relowner IS DISTINCT FROM user_table.relowner
+    FROM pg_class AS phone_table
+    JOIN pg_namespace AS phone_namespace ON phone_namespace.oid = phone_table.relnamespace
+    CROSS JOIN pg_class AS user_table
+    JOIN pg_namespace AS user_namespace ON user_namespace.oid = user_table.relnamespace
+    WHERE phone_namespace.nspname = 'public'
+      AND phone_table.relname = 'UserPhoneIdentity'
+      AND phone_table.relkind IN ('r', 'p')
+      AND user_namespace.nspname = 'public'
+      AND user_table.relname = 'User'
+      AND user_table.relkind IN ('r', 'p')
+  ) IS DISTINCT FROM FALSE THEN
+    RAISE EXCEPTION 'UserPhoneIdentity 与 User 表所有者不一致';
   END IF;
 END
 $postcondition$;
