@@ -262,7 +262,7 @@ flowchart TD
 - `report` 必须是非空完整自然语言报告，`rewriteBrief` 可选；
 - 缺字段、额外字段、越界分数、非法 dimension/severity 或空报告都使质量任务失败，不能保存部分报告。
 
-只有一致性终检的 `submit_quality_report` 使用 DeepSeek Beta strict Function Calling；Reviewer、Beat Plan、设定更新、视频和其他工具路由保持原有协议。strict 请求仅在规范官方 HTTPS 根地址或 `/v1` 地址上自动派生 `/beta`；自定义地址、端口或其他路径必须显式配置 `OPENAI_STRICT_BASE_URL`。strict 与非 strict 工具混用在 HTTP 请求前失败，不回退、自动重试或切换协议。Provider 发送兼容性投影 Schema，但原始 `QualityReportArgs`/Pydantic 完整复验仍是业务权威，strict 不替代本地校验。
+只有一致性终检的 `submit_quality_report` 使用 DeepSeek Beta strict Function Calling；Reviewer、Beat Plan、设定更新、视频和其他工具路由保持原有协议。strict 请求仅在规范官方 HTTPS 根地址或 `/v1` 地址上自动派生 `/beta`；自定义地址、端口或其他路径必须显式配置 `OPENAI_STRICT_BASE_URL`。strict 与非 strict 工具混用在 HTTP 请求前失败，不回退、自动重试或切换协议。在 `deepseek_v4` 配置下，`DeepSeekV4Provider` 发送兼容性投影 Schema，但原始 `QualityReportArgs`/Pydantic 完整复验仍是业务权威，strict 不替代本地校验。
 
 Core 把完整 scores、issues、report、qualityGate 和 rewriteBrief 保存到 `WorkflowRun.output`；`ChapterQualityCheck.result` 保存 report，`scoreOverall` 保存五项分数平均值经现有 Python `round()` 取整的结果。商业性评分列 `scoreHook/scoreTension/scorePayoff/scorePacing/scoreEndingHook/scoreReaderPromise` 保持空值，不能借用来存一致性维度。
 
