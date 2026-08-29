@@ -345,8 +345,7 @@ Agent Runtime 是唯一多轮 tool-call loop。
 - 新建/修改设定只使用通用更新构建器，不暴露 `append_outline_tree`；只有创建/修改大纲和管理伏笔可以追加结构化大纲树。
 - 设定 Agent 调用 `propose_updates` 或 `finish_update_builder` 成功后立即结束本轮工具循环。
 - reviewer 不暴露读取工具，只能接收 Core 权威草案并调用一次 `submit_evaluation`；reviser 使用原 Operation 工具契约，接收原草案、revision、artifactKey 和合并后的修改要求后生成同类新 revision。`plan_chapter` 是事实核对特例：reviewer 与 reviser 同时接收主 Agent 生成草案时使用的冻结 `outline` 最小投影，但不得重新查询作品资料。
-- consistency 质量任务由“校验”Agent 的 `quality` 模式执行，只暴露 `submit_quality_report`。
-- 仅一致性终检的 `submit_quality_report` 使用 DeepSeek Beta strict Function Calling；Reviewer、Beat Plan、设定更新、视频和其他工具路由不因该通道改变。视频规划继续走 Responses `text.format=json_schema` 主链（`responses_json_schema_v1`），不使用 Beta strict。
+- consistency 质量任务由“校验”Agent 的 `quality` 模式执行，只暴露 `submit_quality_report`；在本质量 hotfix 中，只有该工具使用 DeepSeek Beta strict Function Calling。
 
 队列 job 与单次 Operation 内并行使用同一个有界预算。2 核 2 GB 生产环境保持一个 Agent Uvicorn worker，默认最多同时处理三个不同 `novelId` 的独立 job，同一 `novelId` 同时只执行一个 job；同项目冲突的 claim 通过租约校验原子回队，成功回队时撤销本次 claim 增加的 attempts，且不等待项目锁占住执行槽。共享 `ModelRuntime` 把所有模型调用的全局峰值限制为三个。Reviewer `Send` 仍可并行，但与其他 job 重叠时也必须等待全局模型槽；`AGENT_MAX_CONCURRENCY=1` 可恢复严格串行。该并行不改变同一任务的命令身份、事件序号、检查点和 ReviewArtifact 顺序。
 
@@ -398,7 +397,7 @@ observer，但只有 observer 与运行 context 都存在时才写区块，并�
 
 Provider 必须提供规范化完成原因并保留供应商原始值。`length`、`content_filter`、`stop`/`tool_calls` 与实际工具状态矛盾、以及没有合法工具调用的 `unknown` 都在接受正文或执行工具副作用前失败，当前不把 `length` 作为自动续写信号；文风画像只接受 `stop`、无工具调用且正文非空的纯文本响应，半截画像不能成功。人工模型日志记录规范化值和完整原始值。
 
-DeepSeek strict 通道仅在规范官方 HTTPS 根地址或 `/v1` 地址上自动派生 `/beta`；自定义地址、带端口或其他路径必须显式配置 `OPENAI_STRICT_BASE_URL`。strict 与非 strict 工具混用在 HTTP 请求前失败，不回退、自动重试或切换协议。在 `deepseek_v4` 配置下，`DeepSeekV4Provider` 发送的是兼容性投影 Schema，原始 `QualityReportArgs`/Pydantic 完整复验仍是业务权威，strict 不替代本地校验。质量协议错误日志可以保留安全大写 `failure_code`，但不得包含异常正文、工具参数或原始响应。
+DeepSeek strict 通道仅在规范官方 HTTPS 根地址或 `/v1` 地址上自动派生 `/beta`；自定义地址、带端口或其他路径必须显式配置 `OPENAI_STRICT_BASE_URL`。strict 与非 strict 工具混用在 HTTP 请求前失败，不回退；在 `deepseek_v4` 配置下，`DeepSeekV4Provider` 与 SDK 不做隐式自动重发或切换协议，明确标记为 `retryable` 的传输错误仍按同一任务现有队列机制重试。该配置下 `DeepSeekV4Provider` 发送的是兼容性投影 Schema，原始 `QualityReportArgs`/Pydantic 完整复验仍是业务权威，strict 不替代本地校验。质量协议错误日志可以保留白名单化的原始完成原因字符串和安全大写 `failure_code`，但不得保留供应商响应正文、异常正文或工具参数。视频既有路由与能力门禁不变。
 
 上述输出与上下文能力不修改 ReviewArtifact 状态机。模型用量归集只使用用户于 2026-08-21 和 2026-08-23
 明确批准的两个 `TokenUsage` 有界版本化迁移，并新增按写作任务查询的公共 OpenAPI；不授权其他 PostgreSQL

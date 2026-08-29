@@ -31,10 +31,10 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
   浏览器或 CLI 产品入口。
 - 历史视频规划任务只服务 `long_serial`；Agent 只消费 Core 冻结的原文、设定快照、时长、画幅、
   规划路由和模型身份，不得回读 PostgreSQL 或当前可变资料。
-- 默认使用 DeepSeek Responses 的 `text.format=json_schema` 分三阶段生成轻量创意草案：
+- 视频规划按任务冻结的 `planningRoute` 和 Provider capability gate 选择结构化输出，分三阶段生成轻量创意草案：
   场景素材、故事节拍、摄影灯光。草案不得携带数据库 ID、正式素材 ID、节拍时间、调用账本
   或 ReviewArtifact 状态。
-- 故事 Responses v4 由服务器从冻结原文生成连续 `E01..ENN` 事件短别名，并在调用前把它们
+- 故事阶段由服务器从冻结原文生成连续 `E01..ENN` 事件短别名，并在调用前把它们
   固定到闭合 `beatsByAlias` 的主/次动作槽；模型不得提交或移动 E 归属，只填写槽内动作、拍级
   表演、调度与声音。服务器把唯一归属写入 story canonical checkpoint，并复核动作是否真实落地；
   不得再用整段自然语言关键词首次位置推断事件顺序。E 归属不进入摄影草案或最终 Provider 提示词。
@@ -129,10 +129,10 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 
 - 生产模型请求必须在业务入口显式携带 `ModelExecutionPolicy`。长篇初稿、场景/整章/选区改写、中短篇大纲正文和选区替换使用 `thinking=enabled`、`reasoningEffort=high`；长篇 Reviewer、一致性 Quality、问答、复审报告、中短篇 `full_check` 和文风画像使用 `thinking=disabled`。`provider_default` 只保留测试、旧快照兼容和明确 legacy 路径，不能由 Agent ID、工具集合或 URL 推断。
 - `OPENAI_COMPATIBILITY_PROFILE=generic` 继续使用通用 ChatOpenAI；`deepseek_v4` 使用 DeepSeek 原始 JSON transport。DeepSeek 工具轮次的 `reasoning_content` 只在进程内消息回放，不进入稳定快照、ReviewArtifact、Core 用量或人工日志正文；日志只记录策略和用量诊断结构头。
-- 只有一致性终检的 `submit_quality_report` 使用 DeepSeek Beta strict Function Calling；Reviewer、Beat Plan、设定更新、视频和其他工具路由保持原有传输。视频规划继续使用 Responses `text.format=json_schema` 主链（`responses_json_schema_v1`），不得改写为 Beta strict。
-- strict 请求仅在 DeepSeek 模型且 `OPENAI_BASE_URL` 为规范官方 HTTPS 根地址或 `/v1` 地址时自动派生 `/beta`；自定义地址、端口或其他路径必须显式设置 `OPENAI_STRICT_BASE_URL`。strict 与非 strict 工具混用必须在发出 HTTP 前失败，零 HTTP 回退；strict 不自动重试或切换协议。
+- 只有一致性终检的 `submit_quality_report` 使用 DeepSeek Beta strict Function Calling；Reviewer、Beat Plan、设定更新和其他工具路由保持原有传输。本质量 hotfix 不修改视频任务已冻结的 `planningRoute`、Provider capability gate 或历史兼容规则，视频既有路由与能力门禁不变。
+- strict 请求仅在 DeepSeek 模型且 `OPENAI_BASE_URL` 为规范官方 HTTPS 根地址或 `/v1` 地址时自动派生 `/beta`；自定义地址、端口或其他路径必须显式设置 `OPENAI_STRICT_BASE_URL`。strict 与非 strict 工具混用必须在发出 HTTP 前失败，零 HTTP 回退；`DeepSeekV4Provider` 与 SDK 不做隐式自动重发或切换协议；明确标记为 `retryable` 的传输错误仍按同一任务现有队列机制重试。
 - 在 `deepseek_v4` 配置下，`DeepSeekV4Provider` 发给 DeepSeek 的 strict Schema 是兼容性投影；原始 `QualityReportArgs`/Pydantic 完整复验仍是业务权威。strict 不能替代本地校验，也不能因供应商 Schema 限制放宽或截断业务字段。
-- 质量协议错误日志可以保留安全的大写 `failure_code` 和必要分类元数据，但不得记录异常正文、工具参数或原始供应商响应。
+- 质量协议错误日志可以保留白名单化的原始完成原因字符串、安全的大写 `failure_code` 和必要分类元数据，但不得保留供应商响应正文、异常正文或工具参数。
 
 ## 数据与信任边界
 
