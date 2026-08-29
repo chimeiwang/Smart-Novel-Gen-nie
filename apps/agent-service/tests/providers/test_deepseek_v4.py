@@ -11,6 +11,8 @@ from inkforge_agents.config import Settings
 from inkforge_agents.providers.base import ModelTurnRequest, ProviderTransportError
 from inkforge_agents.providers.deepseek_v4 import (
     DeepSeekV4Provider,
+    _normalize_deepseek_quality_arguments,
+    _project_deepseek_quality_schema,
     _project_deepseek_strict_schema,
 )
 from inkforge_agents.runtime.model_policy import (
@@ -185,9 +187,23 @@ async def test_quality_strict_request_uses_beta_endpoint_and_strict_wire() -> No
     wire_schema = payload["tools"][0]["function"]["parameters"]
     assert wire_schema["required"] == list(wire_schema["properties"])
     assert wire_schema["additionalProperties"] is False
-    issue_schema = wire_schema["$defs"]["ConsistencyIssue"]
+    encoded_schema = json.dumps(wire_schema, ensure_ascii=False)
+    assert '"$defs"' not in encoded_schema
+    assert '"$def"' not in encoded_schema
+    assert '"$ref"' not in encoded_schema
+    assert '"null"' not in encoded_schema
+    assert wire_schema["properties"]["scores"]["type"] == "object"
+    issue_schema = wire_schema["properties"]["issues"]["items"]
     assert issue_schema["required"] == list(issue_schema["properties"])
     assert issue_schema["additionalProperties"] is False
+    assert wire_schema["properties"]["rewriteBrief"] == {
+        "type": "string",
+        "description": "0～1000 字；无需返工时返回空字符串。",
+    }
+    assert issue_schema["properties"]["location"] == {
+        "type": "string",
+        "description": "0～200 字；无明确位置时返回空字符串。",
+    }
     assert not {
         "title",
         "default",
@@ -197,6 +213,141 @@ async def test_quality_strict_request_uses_beta_endpoint_and_strict_wire() -> No
         "maxItems",
     } & set(_schema_keys(wire_schema))
     assert "parallel_tool_calls" not in payload
+
+
+def _valid_quality_arguments() -> dict[str, Any]:
+    return {
+        "scores": {
+            "characterConsistency": 91,
+            "worldRuleConsistency": 92,
+            "timelineConsistency": 93,
+            "causalityConsistency": 94,
+            "foreshadowingConsistency": 95,
+        },
+        "qualityGate": "pass",
+        "issues": [
+            {
+                "dimension": "causality",
+                "severity": "warning",
+                "message": "完整消息",
+                "evidence": "完整证据",
+                "location": "",
+                "suggestion": "完整建议",
+            }
+        ],
+        "report": "完整报告",
+        "rewriteBrief": "",
+    }
+
+
+def _quality_tool_response(arguments: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": "resp-quality",
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "quality-call-1",
+                            "type": "function",
+                            "function": {
+                                "name": "submit_quality_report",
+                                "arguments": json.dumps(arguments, ensure_ascii=False),
+                            },
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 10,
+            "prompt_cache_hit_tokens": 0,
+            "prompt_cache_miss_tokens": 10,
+            "completion_tokens": 20,
+            "total_tokens": 30,
+        },
+    }
+
+
+def test_quality_wire_inlines_pydantic_refs_without_mutating_source() -> None:
+    source = QualityReportArgs.model_json_schema()
+    snapshot = deepcopy(source)
+
+    projected = _project_deepseek_quality_schema(source)
+    encoded = json.dumps(projected, ensure_ascii=False)
+
+    assert source == snapshot
+    assert '"$defs"' not in encoded
+    assert '"$def"' not in encoded
+    assert '"$ref"' not in encoded
+    assert '"null"' not in encoded
+    assert projected["properties"]["scores"]["type"] == "object"
+    assert projected["properties"]["issues"]["items"]["type"] == "object"
+    assert projected["properties"]["rewriteBrief"]["type"] == "string"
+
+
+def test_quality_wire_normalizes_only_optional_empty_strings() -> None:
+    original = _valid_quality_arguments()
+    snapshot = deepcopy(original)
+
+    normalized = _normalize_deepseek_quality_arguments(original)
+
+    assert original == snapshot
+    assert normalized["issues"][0]["location"] is None
+    assert normalized["rewriteBrief"] is None
+    assert normalized["report"] == "完整报告"
+    assert QualityReportArgs.model_validate(normalized).report == "完整报告"
+
+
+def test_quality_wire_preserves_non_empty_optional_strings() -> None:
+    original = _valid_quality_arguments()
+    original["issues"][0]["location"] = "第三段"
+    original["rewriteBrief"] = "无需返工，仅建议后续留意。"
+
+    normalized = _normalize_deepseek_quality_arguments(original)
+
+    assert normalized["issues"][0]["location"] == "第三段"
+    assert normalized["rewriteBrief"] == "无需返工，仅建议后续留意。"
+
+
+@pytest.mark.asyncio
+async def test_quality_strict_response_normalizes_optional_empty_strings() -> None:
+    provider, _, client = _provider(response=_quality_tool_response(_valid_quality_arguments()))
+    try:
+        result = await provider.complete_turn(
+            _request(
+                policy=QUALITY_NO_THINKING,
+                tool_name="submit_quality_report",
+                strict=True,
+                parameters=QualityReportArgs.model_json_schema(),
+            )
+        )
+    finally:
+        await client.aclose()
+
+    assert result.toolCalls[0].arguments["issues"][0]["location"] is None
+    assert result.toolCalls[0].arguments["rewriteBrief"] is None
+    QualityReportArgs.model_validate(result.toolCalls[0].arguments)
+
+
+@pytest.mark.asyncio
+async def test_non_quality_strict_tool_fails_before_http_request() -> None:
+    provider, requests, client = _provider()
+    try:
+        with pytest.raises(ValueError, match="只支持 submit_quality_report"):
+            await provider.complete_turn(
+                _request(
+                    policy=REVIEWER_NO_THINKING,
+                    tool_name="submit_evaluation",
+                    strict=True,
+                )
+            )
+    finally:
+        await client.aclose()
+    assert requests == []
 
 
 @pytest.mark.asyncio
@@ -274,7 +425,12 @@ async def test_strict_request_uses_explicit_custom_strict_base_url() -> None:
     )
     try:
         await provider.complete_turn(
-            _request(policy=QUALITY_NO_THINKING, tool_name="submit_quality_report", strict=True)
+            _request(
+                policy=QUALITY_NO_THINKING,
+                tool_name="submit_quality_report",
+                strict=True,
+                parameters=QualityReportArgs.model_json_schema(),
+            )
         )
     finally:
         await client.aclose()

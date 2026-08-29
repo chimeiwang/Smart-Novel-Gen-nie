@@ -44,6 +44,11 @@ _DEEPSEEK_STRICT_SCHEMA_KEYS = (
     "exclusiveMaximum",
     "multipleOf",
 )
+_QUALITY_TOOL_NAME = "submit_quality_report"
+_QUALITY_OPTIONAL_STRING_PATHS = {
+    ("properties", "rewriteBrief"),
+    ("properties", "issues", "items", "properties", "location"),
+}
 
 
 class DeepSeekV4Provider:
@@ -84,6 +89,8 @@ class DeepSeekV4Provider:
         if use_strict_endpoint:
             if self._strict_endpoint is None:
                 raise ValueError("DeepSeek strict 工具请求缺少 OPENAI_STRICT_BASE_URL")
+            if len(request.tools) != 1 or request.tools[0].name != _QUALITY_TOOL_NAME:
+                raise ValueError("DeepSeek strict 当前只支持 submit_quality_report")
             endpoint = self._strict_endpoint
         else:
             endpoint = self._endpoint
@@ -100,7 +107,7 @@ class DeepSeekV4Provider:
                         "name": tool.name,
                         "description": tool.description,
                         "parameters": (
-                            _project_deepseek_strict_schema(tool.parameters)
+                            _project_deepseek_quality_schema(tool.parameters)
                             if use_strict_endpoint
                             else tool.parameters
                         ),
@@ -149,7 +156,191 @@ class DeepSeekV4Provider:
             body = response.json()
         except (ValueError, UnicodeError) as exc:
             raise ValueError("DeepSeek 响应不是有效 JSON") from exc
-        return _parse_response(body)
+        result = _parse_response(body)
+        return (
+            _normalize_deepseek_quality_result(result)
+            if use_strict_endpoint
+            else result
+        )
+
+
+def _project_deepseek_quality_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
+    """把质量报告 Schema 收敛为无引用、无 null 的 DeepSeek strict 方言。"""
+
+    definitions = schema.get("$defs")
+    if not isinstance(definitions, Mapping):
+        raise ValueError("质量报告 Schema 缺少 $defs")
+    inlined = _inline_quality_schema_node(schema, definitions, stack=())
+    normalized, optional_paths = _replace_quality_nullable_strings(inlined, path=())
+    if optional_paths != _QUALITY_OPTIONAL_STRING_PATHS:
+        raise ValueError("质量报告 Schema 可选字符串路径不符合预期")
+    if not isinstance(normalized, Mapping):
+        raise ValueError("质量报告 Schema 根节点必须是对象")
+    projected = _project_deepseek_strict_schema(normalized)
+    _apply_quality_wire_descriptions(projected)
+    return projected
+
+
+def _inline_quality_schema_node(
+    node: object,
+    definitions: Mapping[str, Any],
+    *,
+    stack: tuple[str, ...],
+) -> object:
+    if isinstance(node, list):
+        return [
+            _inline_quality_schema_node(item, definitions, stack=stack)
+            for item in node
+        ]
+    if not isinstance(node, Mapping):
+        return deepcopy(node)
+    if "$ref" in node:
+        if len(node) != 1:
+            raise ValueError("质量报告 Schema 引用节点不能携带其他约束")
+        reference = node["$ref"]
+        prefix = "#/$defs/"
+        if not isinstance(reference, str) or not reference.startswith(prefix):
+            raise ValueError("质量报告 Schema 只允许本地 $defs 引用")
+        name = reference.removeprefix(prefix)
+        if not name or "/" in name or name not in definitions:
+            raise ValueError("质量报告 Schema 引用目标不存在")
+        if name in stack:
+            raise ValueError("质量报告 Schema 不能包含循环引用")
+        return _inline_quality_schema_node(
+            definitions[name],
+            definitions,
+            stack=(*stack, name),
+        )
+    return {
+        str(key): _inline_quality_schema_node(value, definitions, stack=stack)
+        for key, value in node.items()
+        if key != "$defs"
+    }
+
+
+def _replace_quality_nullable_strings(
+    node: object,
+    *,
+    path: tuple[str, ...],
+) -> tuple[object, set[tuple[str, ...]]]:
+    if isinstance(node, list):
+        values: list[object] = []
+        found: set[tuple[str, ...]] = set()
+        for index, item in enumerate(node):
+            normalized, child_found = _replace_quality_nullable_strings(
+                item,
+                path=(*path, str(index)),
+            )
+            values.append(normalized)
+            found.update(child_found)
+        return values, found
+    if not isinstance(node, Mapping):
+        return deepcopy(node), set()
+    string_branch = _nullable_string_branch(node)
+    if string_branch is not None:
+        if path not in _QUALITY_OPTIONAL_STRING_PATHS:
+            raise ValueError("质量报告 Schema 出现未登记的可空字符串")
+        return deepcopy(string_branch), {path}
+    normalized_mapping: dict[str, object] = {}
+    found = set()
+    for key, value in node.items():
+        if key == "properties" and isinstance(value, Mapping):
+            properties: dict[str, object] = {}
+            for property_name, property_schema in value.items():
+                normalized, child_found = _replace_quality_nullable_strings(
+                    property_schema,
+                    path=(*path, "properties", str(property_name)),
+                )
+                properties[str(property_name)] = normalized
+                found.update(child_found)
+            normalized_mapping[key] = properties
+        elif key == "items":
+            normalized, child_found = _replace_quality_nullable_strings(
+                value,
+                path=(*path, "items"),
+            )
+            normalized_mapping[key] = normalized
+            found.update(child_found)
+        else:
+            normalized, child_found = _replace_quality_nullable_strings(
+                value,
+                path=(*path, str(key)),
+            )
+            normalized_mapping[str(key)] = normalized
+            found.update(child_found)
+    return normalized_mapping, found
+
+
+def _nullable_string_branch(node: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    branches = node.get("anyOf")
+    if not isinstance(branches, list) or len(branches) != 2:
+        return None
+    string_branches = [
+        branch
+        for branch in branches
+        if isinstance(branch, Mapping) and branch.get("type") == "string"
+    ]
+    null_branches = [
+        branch
+        for branch in branches
+        if isinstance(branch, Mapping) and branch.get("type") == "null"
+    ]
+    return string_branches[0] if len(string_branches) == len(null_branches) == 1 else None
+
+
+def _apply_quality_wire_descriptions(schema: dict[str, Any]) -> None:
+    try:
+        properties = schema["properties"]
+        issues = properties["issues"]
+        issue_properties = issues["items"]["properties"]
+    except (KeyError, TypeError) as exc:
+        raise ValueError("质量报告 Schema 结构不符合预期") from exc
+    descriptions = {
+        "message": "1～500 字。",
+        "evidence": "1～1000 字。",
+        "location": "0～200 字；无明确位置时返回空字符串。",
+        "suggestion": "1～1000 字。",
+    }
+    for field, description in descriptions.items():
+        target = issue_properties.get(field)
+        if not isinstance(target, dict):
+            raise ValueError("质量报告 issue Schema 结构不符合预期")
+        target["description"] = description
+    issues["description"] = "最多 100 项；没有问题时返回空数组。"
+    report = properties.get("report")
+    rewrite_brief = properties.get("rewriteBrief")
+    if not isinstance(report, dict) or not isinstance(rewrite_brief, dict):
+        raise ValueError("质量报告文本 Schema 结构不符合预期")
+    report["description"] = "非空完整一致性终检报告。"
+    rewrite_brief["description"] = "0～1000 字；无需返工时返回空字符串。"
+
+
+def _normalize_deepseek_quality_arguments(
+    arguments: Mapping[str, Any],
+) -> dict[str, Any]:
+    """只归一化 quality wire 中约定的两个可选字符串。"""
+
+    normalized = deepcopy(dict(arguments))
+    if normalized.get("rewriteBrief") == "":
+        normalized["rewriteBrief"] = None
+    issues = normalized.get("issues")
+    if isinstance(issues, list):
+        for issue in issues:
+            if isinstance(issue, dict) and issue.get("location") == "":
+                issue["location"] = None
+    return normalized
+
+
+def _normalize_deepseek_quality_result(result: ModelTurnResult) -> ModelTurnResult:
+    calls = [
+        call.model_copy(
+            update={"arguments": _normalize_deepseek_quality_arguments(call.arguments)}
+        )
+        if call.name == _QUALITY_TOOL_NAME
+        else call
+        for call in result.toolCalls
+    ]
+    return result.model_copy(update={"toolCalls": calls})
 
 
 def _project_deepseek_strict_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
