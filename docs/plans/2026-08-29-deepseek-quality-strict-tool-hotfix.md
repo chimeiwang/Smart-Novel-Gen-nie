@@ -20,7 +20,7 @@
 - Test: `apps/agent-service/tests/tools/test_registry.py`
 - Test: `apps/agent-service/tests/tools/test_arguments.py`
 
-- [ ] **Step 1: 写入失败测试**
+- [x] **Step 1: 写入失败测试**
 
 在工具注册测试中断言普通工具仍为非 strict；在参数测试中断言默认注册表内只有质量报告工具为 strict：
 
@@ -36,7 +36,7 @@ def test_only_quality_report_control_tool_is_strict() -> None:
     assert strict_names == {"submit_quality_report"}
 ```
 
-- [ ] **Step 2: 验证 RED**
+- [x] **Step 2: 验证 RED**
 
 Run:
 
@@ -46,7 +46,7 @@ uv run pytest apps/agent-service/tests/tools/test_registry.py apps/agent-service
 
 Expected: `submit_quality_report` 的 strict 集合断言失败。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 给 `ToolDefinition` 增加默认关闭的字段并透传：
 
@@ -85,7 +85,7 @@ ToolDefinition(
 )
 ```
 
-- [ ] **Step 4: 验证 GREEN**
+- [x] **Step 4: 验证 GREEN**
 
 Run:
 
@@ -101,7 +101,7 @@ Expected: 全部通过。
 - Modify: `apps/agent-service/src/inkforge_agents/providers/deepseek_v4.py:24-108`
 - Test: `apps/agent-service/tests/providers/test_deepseek_v4.py`
 
-- [ ] **Step 1: 写入端点与 wire 失败测试**
+- [x] **Step 1: 写入端点与 wire 失败测试**
 
 扩展测试 helper 允许设置 `ModelTool.strict` 和与策略一致的工具名：
 
@@ -185,7 +185,7 @@ async def test_custom_endpoint_requires_explicit_strict_base_url() -> None:
     assert requests == []
 ```
 
-- [ ] **Step 2: 写入 Schema 投影失败测试**
+- [x] **Step 2: 写入 Schema 投影失败测试**
 
 使用真实 `QualityReportArgs` Schema 证明 Provider wire 不发送不兼容关键词，并把全部对象属性提升为 required：
 
@@ -203,7 +203,7 @@ def test_quality_schema_projects_to_deepseek_strict_subset() -> None:
     assert issue["additionalProperties"] is False
 ```
 
-- [ ] **Step 3: 验证 RED**
+- [x] **Step 3: 验证 RED**
 
 Run:
 
@@ -213,7 +213,7 @@ uv run pytest apps/agent-service/tests/providers/test_deepseek_v4.py -q
 
 Expected: Beta 端点、strict wire、混用拒绝或投影函数相关断言失败。
 
-- [ ] **Step 4: 实现 strict 端点选择**
+- [x] **Step 4: 实现 strict 端点选择**
 
 复用现有 strict 地址解析，并在 Provider 初始化时保存可选 Beta endpoint：
 
@@ -238,7 +238,7 @@ if use_strict and self._strict_endpoint is None:
 endpoint = self._strict_endpoint if use_strict else self._endpoint
 ```
 
-- [ ] **Step 5: 实现 strict Schema 投影与 wire**
+- [x] **Step 5: 实现 strict Schema 投影与 wire**
 
 在 `deepseek_v4.py` 中加入独立纯函数和白名单，递归投影 Schema，并为对象强制全部字段 required：
 
@@ -286,7 +286,7 @@ def _project_deepseek_strict_schema(value: object) -> dict[str, Any]:
 **({"strict": True} if use_strict else {}),
 ```
 
-- [ ] **Step 6: 验证 GREEN 与普通路径回归**
+- [x] **Step 6: 验证 GREEN 与普通路径回归**
 
 Run:
 
@@ -302,7 +302,7 @@ Expected: 全部通过，现有标准端点测试不变。
 - Modify: `apps/agent-service/src/inkforge_agents/jobs/quality.py:174-203`
 - Test: `apps/agent-service/tests/jobs/test_quality.py`
 
-- [ ] **Step 1: 写入失败测试**
+- [x] **Step 1: 写入失败测试**
 
 ```python
 def test_safe_failure_code_extracts_runtime_protocol_prefix() -> None:
@@ -315,7 +315,7 @@ def test_safe_failure_code_does_not_expose_arbitrary_runtime_message() -> None:
     assert _safe_failure_code(error) == "RuntimeError"
 ```
 
-- [ ] **Step 2: 验证 RED**
+- [x] **Step 2: 验证 RED**
 
 Run:
 
@@ -325,7 +325,7 @@ uv run pytest apps/agent-service/tests/jobs/test_quality.py -q
 
 Expected: 第一个测试得到 `RuntimeError` 而失败。
 
-- [ ] **Step 3: 最小实现**
+- [x] **Step 3: 最小实现**
 
 只检查异常第一个字符串参数的安全前缀，不调用或记录完整 `str(error)`：
 
@@ -343,7 +343,7 @@ def _safe_failure_code(error: Exception) -> str:
     return value if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", value) else "UnknownError"
 ```
 
-- [ ] **Step 4: 验证 GREEN**
+- [x] **Step 4: 验证 GREEN**
 
 Run:
 
@@ -360,11 +360,11 @@ Expected: 全部通过。
 - Modify: `docs/requirements/03-ai-writing-and-agents.md`
 - Modify: `docs/requirements/04-review-quality-and-workflow.md`
 
-- [ ] **Step 1: 同步当前事实**
+- [x] **Step 1: 同步当前事实**
 
 三处文档明确记录：只有一致性终检质量工具进入 DeepSeek Beta strict；其他 Agent 工具、Reviewer 和视频路由不变；strict wire 仍须通过原始 Pydantic 契约复验，且失败不自动回退普通协议。
 
-- [ ] **Step 2: 运行定向测试**
+- [x] **Step 2: 运行定向测试**
 
 Run:
 
@@ -374,7 +374,7 @@ uv run pytest apps/agent-service/tests/providers/test_deepseek_v4.py apps/agent-
 
 Expected: 全部通过。
 
-- [ ] **Step 3: 运行 Agent Service 全量测试与静态检查**
+- [x] **Step 3: 运行 Agent Service 全量测试与静态检查**
 
 Run:
 
@@ -386,7 +386,7 @@ uv run mypy apps/agent-service/src packages/service-contracts/src
 
 Expected: 三条命令退出码均为 0。
 
-- [ ] **Step 4: 检查最终差异**
+- [x] **Step 4: 检查最终差异**
 
 Run:
 
@@ -398,7 +398,7 @@ git diff --stat origin/main...HEAD
 
 Expected: 无空白错误；仅包含本规格、计划、Agent strict 最小修复、测试和同步文档。
 
-- [ ] **Step 5: 提交实现**
+- [x] **Step 5: 提交实现**
 
 ```powershell
 git add -- apps/agent-service/src apps/agent-service/tests apps/agent-service/AGENTS.md docs/requirements/03-ai-writing-and-agents.md docs/requirements/04-review-quality-and-workflow.md docs/plans/2026-08-29-deepseek-quality-strict-tool-hotfix.md
@@ -535,7 +535,7 @@ with pytest.raises(ModelToolArgumentsInvalidError) as caught:
     runtime._preflight_response(response, exposed, context, terminal_tools)
 
 assert caught.value.code == "MODEL_TOOL_ARGUMENTS_INVALID"
-assert "issues.0.message:string_too_long" in caught.value.validationIssues
+assert "loc=issues.0.message type=string_too_long" in caught.value.validation_issues
 assert "不能进入日志的秘密" not in str(caught.value)
 ```
 
@@ -560,11 +560,11 @@ Expected: 专用异常和 `validation_issues` 日志尚不存在而失败。
 - [x] **Step 3: 实现安全异常与日志投影**
 
 新增 `ModelToolArgumentsInvalidError(RuntimeError)`，只持有 `code`、安全工具名和最多 10 条
-`field.path:error_type`。从 `ValidationError.errors(include_url=False, include_context=False,
+`loc=field.path type=error_type`。从 `ValidationError.errors(include_url=False, include_context=False,
 include_input=False)` 读取 `loc/type`，所有片段经过字符白名单和长度限制。质量日志只读取该属性：
 
 ```python
-validation_issues = getattr(error, "validationIssues", ())
+validation_issues = getattr(error, "validation_issues", ())
 safe_issues = ",".join(validation_issues) if validation_issues else "none"
 logger.warning(
     "质量检查任务失败 ... failure_code=%s exception_type=%s retryable=%s "
