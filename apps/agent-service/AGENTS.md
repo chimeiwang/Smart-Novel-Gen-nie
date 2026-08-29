@@ -132,7 +132,7 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 - 只有一致性终检的 `submit_quality_report` 使用 DeepSeek Beta strict Function Calling；Reviewer、Beat Plan、设定更新和其他工具路由保持原有传输。本质量 hotfix 不修改视频任务已冻结的 `planningRoute`、Provider capability gate 或历史兼容规则，视频既有路由与能力门禁不变。
 - strict 请求仅在 DeepSeek 模型且 `OPENAI_BASE_URL` 为规范官方 HTTPS 根地址或 `/v1` 地址时自动派生 `/beta`；自定义地址、端口或其他路径必须显式设置 `OPENAI_STRICT_BASE_URL`。strict 与非 strict 工具混用必须在发出 HTTP 前失败，零 HTTP 回退；`DeepSeekV4Provider` 与 SDK 不做隐式自动重发或切换协议；明确标记为 `retryable` 的传输错误仍按同一任务现有队列机制重试。
 - 在 `deepseek_v4` 配置下，`DeepSeekV4Provider` 发给 DeepSeek 的 strict Schema 是兼容性投影；原始 `QualityReportArgs`/Pydantic 完整复验仍是业务权威。strict 不能替代本地校验，也不能因供应商 Schema 限制放宽或截断业务字段。
-- 质量协议错误日志可以保留白名单化的原始完成原因字符串、安全的大写 `failure_code` 和必要分类元数据，但不得保留供应商响应正文、异常正文或工具参数。
+- 质量协议错误日志可以保留原始完成原因字符串、安全的大写 `failure_code` 和必要分类元数据，但不得保留供应商响应正文、异常正文或工具参数。
 
 ## 数据与信任边界
 
