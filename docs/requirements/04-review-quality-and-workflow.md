@@ -1,5 +1,7 @@
 # 草案审核、质量检查与工作流需求
 
+章节影视化规划继续使用 Responses `text.format=json_schema` 主链（`responses_json_schema_v1`）；该视频路由不使用 DeepSeek Beta strict Function Calling。
+
 ## 长篇章节影视化方案审核
 
 电影化镜头候选遵循 `proposal -> ReviewArtifact -> 作者结构编辑 -> 用户确认 -> Core 应用`。
@@ -260,6 +262,8 @@ flowchart TD
 - `report` 必须是非空完整自然语言报告，`rewriteBrief` 可选；
 - 缺字段、额外字段、越界分数、非法 dimension/severity 或空报告都使质量任务失败，不能保存部分报告。
 
+只有一致性终检的 `submit_quality_report` 使用 DeepSeek Beta strict Function Calling；Reviewer、Beat Plan、设定更新、视频和其他工具路由保持原有协议。strict 请求仅在规范官方 HTTPS 根地址或 `/v1` 地址上自动派生 `/beta`；自定义地址、端口或其他路径必须显式配置 `OPENAI_STRICT_BASE_URL`。strict 与非 strict 工具混用在 HTTP 请求前失败，不回退、自动重试或切换协议。Provider 发送兼容性投影 Schema，但原始 `QualityReportArgs`/Pydantic 完整复验仍是业务权威，strict 不替代本地校验。
+
 Core 把完整 scores、issues、report、qualityGate 和 rewriteBrief 保存到 `WorkflowRun.output`；`ChapterQualityCheck.result` 保存 report，`scoreOverall` 保存五项分数平均值经现有 Python `round()` 取整的结果。商业性评分列 `scoreHook/scoreTension/scorePayoff/scorePacing/scoreEndingHook/scoreReaderPromise` 保持空值，不能借用来存一致性维度。
 
 ## 一致性终检运行流程
@@ -295,6 +299,7 @@ sequenceDiagram
   WorkflowRun/jobId 重试。明确不可重试错误在失败回调成功后收敛单条任务，不得因此重启整个消费者；未知
   程序异常仍由消费者监督器暴露为不健康。
 - 模型返回长度截断、内容过滤、矛盾完成原因或无合法工具调用的 unknown 响应时，Agent Service 在接受报告或执行回调前失败；日志保留供应商原始完成原因。
+- 质量协议错误日志可以保留安全大写 `failure_code` 和必要分类元数据，但不得记录异常正文、工具参数或原始供应商响应。
 - 内部回调必须校验用户、小说、检查项和运行的绑定关系，不得使用另一次运行的结果覆盖当前检查。
 - 正文变化后，检查项重置为 pending，仍在 pending/running 的旧 WorkflowRun 标记 cancelled，错误码为 `QUALITY_SOURCE_CHANGED`。
 - 浏览器在运行受理后轮询检查项到终态；pending/running 期间禁用重复运行、跳过和章节完成操作。
