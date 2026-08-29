@@ -330,6 +330,7 @@ def control_tools() -> list[ToolDefinition]:
             argumentsModel=model,
             permission=control_permission(capability, agent_ids),
             toolKind="control",
+            strict=name == "submit_quality_report",
         )
         for name, description, model, capability, agent_ids in specs
     ]

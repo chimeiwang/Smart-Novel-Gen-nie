@@ -16,6 +16,14 @@ def test_tool_arguments_are_strictly_validated_without_truncation() -> None:
     assert tool.validate({"character_name": long_name})["character_name"] == long_name
 
 
+def test_default_registry_has_only_quality_report_strict_tool() -> None:
+    registry = build_default_registry()
+
+    assert {
+        tool.name for tool in registry.all() if tool.as_model_tool().strict
+    } == {"submit_quality_report"}
+
+
 def test_evaluation_arguments_reject_invalid_verdict() -> None:
     tool = build_default_registry().require("submit_evaluation")
 

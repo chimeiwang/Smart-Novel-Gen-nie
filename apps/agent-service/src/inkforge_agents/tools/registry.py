@@ -44,6 +44,7 @@ class ToolDefinition:
     permission: ToolPermission
     toolKind: ToolKind
     handler: ToolHandler | None = None
+    strict: bool = False
 
     def validate(self, arguments: Mapping[str, object]) -> dict[str, Any]:
         return self.argumentsModel.model_validate(arguments).model_dump(
@@ -58,6 +59,7 @@ class ToolDefinition:
             name=self.name,
             description=self.description,
             parameters=schema,
+            strict=self.strict,
         )
 
 

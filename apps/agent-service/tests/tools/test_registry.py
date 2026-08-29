@@ -75,6 +75,10 @@ def test_registry_contains_migrated_read_proposal_and_control_tools() -> None:
     assert set(READ_TOOL_NAMES) <= names
 
 
+def test_restricted_tool_model_declaration_is_not_strict_by_default() -> None:
+    assert restricted_tool().as_model_tool().strict is False
+
+
 def test_for_execution_returns_exact_tools_in_registry_order() -> None:
     registry = build_default_registry()
     tools = registry.for_execution(
