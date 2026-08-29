@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from copy import deepcopy
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
@@ -18,7 +19,31 @@ from .base import (
     ModelUsageDiagnostics,
     ProviderTransportError,
 )
-from .openai_compatible import normalize_finish_reason
+from .openai_compatible import (
+    _resolve_deepseek_strict_base_url,
+    normalize_finish_reason,
+)
+
+_DEEPSEEK_STRICT_SCHEMA_KEYS = (
+    "type",
+    "properties",
+    "required",
+    "additionalProperties",
+    "enum",
+    "const",
+    "anyOf",
+    "items",
+    "$ref",
+    "$defs",
+    "description",
+    "pattern",
+    "format",
+    "minimum",
+    "maximum",
+    "exclusiveMinimum",
+    "exclusiveMaximum",
+    "multipleOf",
+)
 
 
 class DeepSeekV4Provider:
@@ -37,6 +62,10 @@ class DeepSeekV4Provider:
             raise ValueError("真实模型提供方缺少 OPENAI_API_KEY")
         self.model_name = settings.openai_model
         self._endpoint = _completion_endpoint(settings.openai_base_url)
+        strict_base_url = _resolve_deepseek_strict_base_url(settings)
+        self._strict_endpoint = (
+            _completion_endpoint(strict_base_url) if strict_base_url is not None else None
+        )
         self._api_key = settings.openai_api_key.get_secret_value()
         self._client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(connect=10, read=300, write=60, pool=60)
@@ -48,6 +77,16 @@ class DeepSeekV4Provider:
             await self._client.aclose()
 
     async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+        strict_tool_count = sum(tool.strict for tool in request.tools)
+        if 0 < strict_tool_count < len(request.tools):
+            raise ValueError("DeepSeek 工具请求不能混用 strict 与非 strict 函数")
+        use_strict_endpoint = strict_tool_count > 0
+        if use_strict_endpoint:
+            if self._strict_endpoint is None:
+                raise ValueError("DeepSeek strict 工具请求缺少 OPENAI_STRICT_BASE_URL")
+            endpoint = self._strict_endpoint
+        else:
+            endpoint = self._endpoint
         payload = {
             "model": self.model_name,
             "messages": [_message_to_wire(message) for message in request.messages],
@@ -60,7 +99,12 @@ class DeepSeekV4Provider:
                     "function": {
                         "name": tool.name,
                         "description": tool.description,
-                        "parameters": tool.parameters,
+                        "parameters": (
+                            _project_deepseek_strict_schema(tool.parameters)
+                            if use_strict_endpoint
+                            else tool.parameters
+                        ),
+                        **({"strict": True} if use_strict_endpoint else {}),
                     },
                 }
                 for tool in request.tools
@@ -70,7 +114,7 @@ class DeepSeekV4Provider:
         transport_error: ProviderTransportError | None = None
         try:
             response = await self._client.post(
-                self._endpoint,
+                endpoint,
                 headers={
                     "Authorization": f"Bearer {self._api_key}",
                     "Content-Type": "application/json",
@@ -106,6 +150,41 @@ class DeepSeekV4Provider:
         except (ValueError, UnicodeError) as exc:
             raise ValueError("DeepSeek 响应不是有效 JSON") from exc
         return _parse_response(body)
+
+
+def _project_deepseek_strict_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
+    """将业务 JSON Schema 投影为 DeepSeek strict 支持的确定性子集。"""
+
+    projected: dict[str, Any] = {}
+    for key in _DEEPSEEK_STRICT_SCHEMA_KEYS:
+        if key not in schema:
+            continue
+        value = schema[key]
+        if key in {"properties", "$defs"} and isinstance(value, Mapping):
+            projected[key] = {
+                property_name: _project_deepseek_strict_schema(property_schema)
+                for property_name, property_schema in value.items()
+                if isinstance(property_schema, Mapping)
+            }
+        elif key == "anyOf" and isinstance(value, list):
+            projected[key] = [
+                (
+                    _project_deepseek_strict_schema(item)
+                    if isinstance(item, Mapping)
+                    else deepcopy(item)
+                )
+                for item in value
+            ]
+        elif key == "items" and isinstance(value, Mapping):
+            projected[key] = _project_deepseek_strict_schema(value)
+        else:
+            projected[key] = deepcopy(value)
+
+    if projected.get("type") == "object" and isinstance(projected.get("properties"), Mapping):
+        properties = projected["properties"]
+        projected["required"] = list(properties)
+        projected["additionalProperties"] = False
+    return projected
 
 
 def _completion_endpoint(base_url: str) -> str:

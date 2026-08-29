@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
@@ -8,12 +9,17 @@ import httpx
 import pytest
 from inkforge_agents.config import Settings
 from inkforge_agents.providers.base import ModelTurnRequest, ProviderTransportError
-from inkforge_agents.providers.deepseek_v4 import DeepSeekV4Provider
+from inkforge_agents.providers.deepseek_v4 import (
+    DeepSeekV4Provider,
+    _project_deepseek_strict_schema,
+)
 from inkforge_agents.runtime.model_policy import (
     CREATIVE_HIGH,
     LEGACY_PROVIDER_DEFAULT,
+    QUALITY_NO_THINKING,
     REVIEWER_NO_THINKING,
 )
+from inkforge_agents.tools.control import QualityReportArgs
 
 FIXTURES = Path(__file__).parent.parent / "fixtures" / "deepseek_v4"
 
@@ -31,7 +37,11 @@ def _response_with_usage(usage: object) -> dict[str, Any]:
     }
 
 
-def _settings(base_url: str = "https://api.deepseek.com") -> Settings:
+def _settings(
+    base_url: str = "https://api.deepseek.com",
+    *,
+    strict_base_url: str | None = None,
+) -> Settings:
     return Settings.model_validate(
         {
             "environment": "test",
@@ -39,22 +49,31 @@ def _settings(base_url: str = "https://api.deepseek.com") -> Settings:
             "openai_compatibility_profile": "deepseek_v4",
             "openai_api_key": "test-key",
             "openai_base_url": base_url,
+            "openai_strict_base_url": strict_base_url,
             "openai_model": "deepseek-v4-flash",
         }
     )
 
 
-def _request(*, policy: Any = LEGACY_PROVIDER_DEFAULT) -> ModelTurnRequest:
+def _request(
+    *,
+    policy: Any = LEGACY_PROVIDER_DEFAULT,
+    tool_name: str = "lookup",
+    strict: bool = False,
+    tools: list[dict[str, Any]] | None = None,
+) -> ModelTurnRequest:
     return ModelTurnRequest(
         messages=[{"role": "user", "content": "请调用工具"}],
-        tools=[
+        tools=tools
+        or [
             {
-                "name": "lookup",
+                "name": tool_name,
                 "description": "查询资料",
                 "parameters": {
                     "type": "object",
                     "properties": {},
                 },
+                "strict": strict,
             }
         ],
         maxOutputTokens=256,
@@ -65,6 +84,7 @@ def _request(*, policy: Any = LEGACY_PROVIDER_DEFAULT) -> ModelTurnRequest:
 def _provider(
     base_url: str = "https://api.deepseek.com",
     *,
+    strict_base_url: str | None = None,
     response: dict[str, Any] | None = None,
     status_code: int = 200,
 ) -> tuple[
@@ -94,7 +114,11 @@ def _provider(
         return httpx.Response(status_code, json=body, request=request)
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    return DeepSeekV4Provider(_settings(base_url), client=client), requests, client
+    return (
+        DeepSeekV4Provider(_settings(base_url, strict_base_url=strict_base_url), client=client),
+        requests,
+        client,
+    )
 
 
 @pytest.mark.asyncio
@@ -131,6 +155,125 @@ async def test_deepseek_endpoint_normalizes_official_and_preserves_proxy_prefix(
     finally:
         await client.aclose()
     assert str(requests[0].url) == expected
+
+
+@pytest.mark.asyncio
+async def test_quality_strict_request_uses_beta_endpoint_and_strict_wire() -> None:
+    provider, requests, client = _provider()
+    try:
+        await provider.complete_turn(
+            _request(policy=QUALITY_NO_THINKING, tool_name="submit_quality_report", strict=True)
+        )
+    finally:
+        await client.aclose()
+
+    assert str(requests[0].url) == "https://api.deepseek.com/beta/chat/completions"
+    payload = json.loads(requests[0].content)
+    assert payload["thinking"] == {"type": "disabled"}
+    assert payload["tool_choice"] == {
+        "type": "function",
+        "function": {"name": "submit_quality_report"},
+    }
+    assert payload["tools"][0]["function"]["strict"] is True
+    assert "parallel_tool_calls" not in payload
+
+
+@pytest.mark.asyncio
+async def test普通工具仍使用标准端点且不发送_strict字段() -> None:
+    provider, requests, client = _provider()
+    try:
+        await provider.complete_turn(_request(tool_name="lookup", strict=False))
+    finally:
+        await client.aclose()
+
+    payload = json.loads(requests[0].content)
+    assert str(requests[0].url) == "https://api.deepseek.com/chat/completions"
+    assert "strict" not in payload["tools"][0]["function"]
+
+
+@pytest.mark.asyncio
+async def test_strict_and_non_strict_tools_fail_before_http_request() -> None:
+    provider, requests, client = _provider()
+    try:
+        with pytest.raises(ValueError, match="不能混用"):
+            await provider.complete_turn(
+                _request(
+                    tools=[
+                        {
+                            "name": "lookup",
+                            "description": "查询资料",
+                            "parameters": {"type": "object", "properties": {}},
+                        },
+                        {
+                            "name": "submit_quality_report",
+                            "description": "提交质量报告",
+                            "parameters": {"type": "object", "properties": {}},
+                            "strict": True,
+                        },
+                    ]
+                )
+            )
+    finally:
+        await client.aclose()
+    assert requests == []
+
+
+@pytest.mark.asyncio
+async def test_strict_request_with_custom_normal_base_url_fails_before_http_request() -> None:
+    provider, requests, client = _provider("https://proxy.example/llm/v1")
+    try:
+        with pytest.raises(ValueError, match="OPENAI_STRICT_BASE_URL"):
+            await provider.complete_turn(
+                _request(policy=QUALITY_NO_THINKING, tool_name="submit_quality_report", strict=True)
+            )
+    finally:
+        await client.aclose()
+    assert requests == []
+
+
+@pytest.mark.asyncio
+async def test_strict_request_uses_explicit_custom_strict_base_url() -> None:
+    provider, requests, client = _provider(
+        "https://proxy.example/llm/v1",
+        strict_base_url="https://strict-proxy.example/deepseek/beta",
+    )
+    try:
+        await provider.complete_turn(
+            _request(policy=QUALITY_NO_THINKING, tool_name="submit_quality_report", strict=True)
+        )
+    finally:
+        await client.aclose()
+    assert str(requests[0].url) == "https://strict-proxy.example/deepseek/beta/chat/completions"
+
+
+def test_deepseek_strict_schema_projection_is_deterministic_and_non_mutating() -> None:
+    original = QualityReportArgs.model_json_schema()
+    original_snapshot = deepcopy(original)
+
+    projected = _project_deepseek_strict_schema(original)
+
+    assert original == original_snapshot
+    assert projected["required"] == list(projected["properties"])
+    assert projected["additionalProperties"] is False
+    issue = projected["$defs"]["ConsistencyIssue"]
+    assert issue["required"] == list(issue["properties"])
+    assert issue["additionalProperties"] is False
+
+    forbidden = {"title", "default", "minLength", "maxLength", "minItems", "maxItems"}
+
+    def assert_projected(node: object) -> None:
+        if isinstance(node, dict):
+            assert forbidden.isdisjoint(node)
+            if node.get("type") == "object" and "properties" in node:
+                assert node["required"] == list(node["properties"])
+                assert node["additionalProperties"] is False
+            for value in node.values():
+                assert_projected(value)
+        elif isinstance(node, list):
+            for value in node:
+                assert_projected(value)
+
+    assert_projected(projected)
 
 
 @pytest.mark.parametrize(
