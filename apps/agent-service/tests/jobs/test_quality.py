@@ -5,7 +5,7 @@ from typing import Any
 
 import fakeredis.aioredis
 import pytest
-from inkforge_agents.jobs.quality import QualityJobHandler, _safe_failure_code
+from inkforge_agents.jobs.quality import QualityJobHandler, _log_failure, _safe_failure_code
 from inkforge_agents.providers.base import (
     ModelToolCall,
     ModelTurnRequest,
@@ -16,7 +16,10 @@ from inkforge_agents.queue.cancellation import RedisRunCancellation
 from inkforge_agents.queue.consumer import NonRetryableJobError
 from inkforge_agents.queue.repository import QueueJob, RedisRunQueue
 from inkforge_agents.runtime.agent_runner import AgentRunner
-from inkforge_agents.runtime.agent_runtime import AgentRuntime
+from inkforge_agents.runtime.agent_runtime import (
+    AgentRuntime,
+    ModelToolArgumentsInvalidError,
+)
 from inkforge_agents.runtime.execution import QUALITY_AGENT_ID
 from inkforge_agents.runtime.model_runtime import ModelRuntime
 from inkforge_agents.tools.registry import build_default_registry
@@ -78,6 +81,37 @@ def test_safe_failure_code_rejects_unsafe_or_non_full_width_colon_prefix(
     message: str,
 ) -> None:
     assert _safe_failure_code(RuntimeError(message)) == "RuntimeError"
+
+
+def test_quality_failure_log_includes_only_safe_validation_issues(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    raw_model_value = "模型参数中的秘密正文"
+    error = ModelToolArgumentsInvalidError(
+        "submit_quality_report",
+        (
+            "loc=issues.0.location type=string_type",
+            "loc=rewriteBrief type=string_type",
+        ),
+    )
+    error.__cause__ = RuntimeError(raw_model_value)
+
+    caplog.set_level("WARNING", logger="inkforge_agents.jobs.quality")
+    _log_failure(
+        quality_job(),
+        "check-1",
+        error,
+        phase="run",
+        retryable=None,
+    )
+
+    message = caplog.records[-1].getMessage()
+    assert "failure_code=MODEL_TOOL_ARGUMENTS_INVALID" in message
+    assert (
+        "validation_issues=loc=issues.0.location type=string_type|"
+        "loc=rewriteBrief type=string_type" in message
+    )
+    assert raw_model_value not in message
 
 
 class Core:

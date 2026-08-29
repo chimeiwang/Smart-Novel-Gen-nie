@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import Coroutine, Sequence
 from typing import Any
 
@@ -34,6 +35,74 @@ _BUILDER_CONTINUATION_TOOLS = {
     "put_update_item_text_blocks",
     "finish_update_builder",
 }
+
+_SAFE_TOOL_NAME_PATTERN = re.compile(r"[a-z][a-z0-9_]{0,63}")
+_SAFE_FIELD_NAME_PATTERN = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
+_SAFE_ERROR_TYPE_PATTERN = re.compile(r"[a-z][a-z0-9_]{0,63}")
+_SAFE_VALIDATION_ISSUE_PATTERN = re.compile(
+    r"loc=(?:<root>|\?|[A-Za-z_][A-Za-z0-9_]{0,63}"
+    r"(?:\.(?:[A-Za-z_][A-Za-z0-9_]{0,63}|[0-9]{1,4}|\?))*) "
+    r"type=[a-z][a-z0-9_]{0,63}"
+)
+_MAX_VALIDATION_ISSUES = 10
+
+
+class ModelToolArgumentsInvalidError(RuntimeError):
+    """只携带字段路径和错误类型，不携带模型参数值。"""
+
+    code = "MODEL_TOOL_ARGUMENTS_INVALID"
+    retryable = False
+
+    def __init__(self, tool_name: str, validation_issues: Sequence[str]) -> None:
+        self.tool_name = (
+            tool_name if _SAFE_TOOL_NAME_PATTERN.fullmatch(tool_name) else "unknown_tool"
+        )
+        self.validation_issues = tuple(
+            issue
+            for issue in validation_issues[:_MAX_VALIDATION_ISSUES]
+            if _SAFE_VALIDATION_ISSUE_PATTERN.fullmatch(issue)
+        )
+        summary = "|".join(self.validation_issues) or "none"
+        super().__init__(
+            f"{self.code}：工具 {self.tool_name} 参数校验失败（{summary}）"
+        )
+
+    @classmethod
+    def from_validation_error(
+        cls,
+        tool_name: str,
+        error: ValidationError,
+    ) -> ModelToolArgumentsInvalidError:
+        issues: list[str] = []
+        for detail in error.errors(
+            include_url=False,
+            include_context=False,
+            include_input=False,
+        )[:_MAX_VALIDATION_ISSUES]:
+            location = _safe_validation_location(detail.get("loc"))
+            error_type = detail.get("type")
+            safe_type = (
+                error_type
+                if isinstance(error_type, str)
+                and _SAFE_ERROR_TYPE_PATTERN.fullmatch(error_type)
+                else "unknown"
+            )
+            issues.append(f"loc={location} type={safe_type}")
+        return cls(tool_name, issues)
+
+
+def _safe_validation_location(value: object) -> str:
+    if not isinstance(value, tuple) or not value:
+        return "<root>"
+    parts: list[str] = []
+    for item in value:
+        if isinstance(item, str):
+            parts.append(item if _SAFE_FIELD_NAME_PATTERN.fullmatch(item) else "?")
+        elif isinstance(item, int) and 0 <= item <= 9999:
+            parts.append(str(item))
+        else:
+            parts.append("?")
+    return ".".join(parts)
 
 
 class AgentRuntime:
@@ -327,8 +396,9 @@ class AgentRuntime:
             try:
                 arguments = tool.validate(call.arguments)
             except ValidationError as exc:
-                raise RuntimeError(
-                    f"MODEL_TOOL_ARGUMENTS_INVALID：工具 {call.name} 参数校验失败：{exc}"
+                raise ModelToolArgumentsInvalidError.from_validation_error(
+                    call.name,
+                    exc,
                 ) from exc
             validated_calls.append((call, tool, arguments))
 

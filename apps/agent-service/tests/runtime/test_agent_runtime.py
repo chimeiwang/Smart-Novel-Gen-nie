@@ -11,7 +11,10 @@ from inkforge_agents.providers.base import (
 )
 from inkforge_agents.providers.fake import FakeModelProvider
 from inkforge_agents.queue.cancellation import JobCancelledError
-from inkforge_agents.runtime.agent_runtime import AgentRuntime
+from inkforge_agents.runtime.agent_runtime import (
+    AgentRuntime,
+    ModelToolArgumentsInvalidError,
+)
 from inkforge_agents.runtime.model_policy import CREATIVE_HIGH, LEGACY_PROVIDER_DEFAULT
 from inkforge_agents.runtime.model_runtime import ModelRuntime
 from inkforge_agents.tools.registry import (
@@ -376,6 +379,55 @@ async def test_runtime_rejects_unexposed_tool_and_invalid_arguments() -> None:
             ),
             context=context(),
         )
+
+
+@pytest.mark.asyncio
+async def test_runtime_reports_bounded_validation_paths_without_argument_values() -> None:
+    raw_model_value = "绝不能进入异常或日志的模型原始值"
+    registry = build_default_registry(RecordingGateway())
+    invalid_arguments: dict[str, object] = {
+        "scores": {},
+        "qualityGate": raw_model_value,
+        "issues": [{}],
+        "report": {"raw": raw_model_value},
+        "rewriteBrief": [raw_model_value],
+    }
+    runtime = make_agent_runtime(
+        ModelRuntime(
+            ScriptedProvider(
+                [
+                    turn(
+                        "",
+                        (
+                            "call-quality-invalid",
+                            "submit_quality_report",
+                            invalid_arguments,
+                        ),
+                    )
+                ]
+            )
+        ),
+        registry,
+    )
+
+    with pytest.raises(ModelToolArgumentsInvalidError) as caught:
+        await runtime.run(
+            policy=LEGACY_PROVIDER_DEFAULT,
+            messages=[{"role": "user", "content": "质量检查"}],
+            exposed_tools=[registry.require("submit_quality_report")],
+            context=context("校验"),
+            terminal_control_tools={"submit_quality_report"},
+        )
+
+    error = caught.value
+    assert error.code == "MODEL_TOOL_ARGUMENTS_INVALID"
+    assert error.tool_name == "submit_quality_report"
+    assert len(error.validation_issues) == 10
+    assert "loc=scores.characterConsistency type=missing" in error.validation_issues
+    assert all(issue.startswith("loc=") and " type=" in issue for issue in error.validation_issues)
+    assert raw_model_value not in str(error)
+    assert raw_model_value not in repr(error.validation_issues)
+    assert "input_value" not in str(error)
 
 
 @pytest.mark.asyncio

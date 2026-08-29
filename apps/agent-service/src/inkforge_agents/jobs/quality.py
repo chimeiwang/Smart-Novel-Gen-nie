@@ -183,6 +183,23 @@ def _safe_failure_code(error: Exception) -> str:
     return value if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", value) else "UnknownError"
 
 
+def _safe_validation_issues(error: Exception) -> str:
+    raw_issues = getattr(error, "validation_issues", None)
+    if not isinstance(raw_issues, tuple):
+        return "none"
+    pattern = re.compile(
+        r"loc=(?:<root>|\?|[A-Za-z_][A-Za-z0-9_]{0,63}"
+        r"(?:\.(?:[A-Za-z_][A-Za-z0-9_]{0,63}|[0-9]{1,4}|\?))*) "
+        r"type=[a-z][a-z0-9_]{0,63}"
+    )
+    safe_issues = [
+        issue
+        for issue in raw_issues[:10]
+        if isinstance(issue, str) and pattern.fullmatch(issue)
+    ]
+    return "|".join(safe_issues) or "none"
+
+
 def _log_failure(
     job: QueueJob,
     check_id: str,
@@ -195,7 +212,7 @@ def _log_failure(
     # 禁止输出 str(error)。
     logger.warning(
         "质量检查任务失败 job_id=%s task_id=%s run_id=%s check_id=%s phase=%s "
-        "failure_code=%s exception_type=%s retryable=%s",
+        "failure_code=%s exception_type=%s retryable=%s validation_issues=%s",
         job.jobId,
         job.taskId,
         job.runId,
@@ -204,4 +221,5 @@ def _log_failure(
         _safe_failure_code(error),
         type(error).__name__,
         retryable,
+        _safe_validation_issues(error),
     )
