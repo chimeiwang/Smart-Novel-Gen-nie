@@ -399,7 +399,7 @@ class AgentRuntime:
                 raise ModelToolArgumentsInvalidError.from_validation_error(
                     call.name,
                     exc,
-                ) from exc
+                ) from None
             validated_calls.append((call, tool, arguments))
 
         terminal_count = sum(

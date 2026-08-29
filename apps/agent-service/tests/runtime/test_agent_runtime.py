@@ -428,6 +428,8 @@ async def test_runtime_reports_bounded_validation_paths_without_argument_values(
     assert raw_model_value not in str(error)
     assert raw_model_value not in repr(error.validation_issues)
     assert "input_value" not in str(error)
+    assert error.__cause__ is None
+    assert error.__suppress_context__ is True
 
 
 @pytest.mark.asyncio
