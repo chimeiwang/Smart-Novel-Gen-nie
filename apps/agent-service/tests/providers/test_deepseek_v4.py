@@ -276,6 +276,22 @@ def test_deepseek_strict_schema_projection_is_deterministic_and_non_mutating() -
     assert_projected(projected)
 
 
+def test_deepseek_strict_schema_projection_restricts_empty_root_object() -> None:
+    projected = _project_deepseek_strict_schema({"type": "object"})
+
+    assert projected["required"] == []
+    assert projected["additionalProperties"] is False
+
+
+def test_deepseek_strict_schema_projection_restricts_empty_object_in_items() -> None:
+    projected = _project_deepseek_strict_schema(
+        {"type": "array", "items": {"type": "object"}}
+    )
+
+    assert projected["items"]["required"] == []
+    assert projected["items"]["additionalProperties"] is False
+
+
 @pytest.mark.parametrize(
     "base_url", ["https://api.deepseek.com/v1?x=1", "https://proxy.example/v1#fragment"]
 )

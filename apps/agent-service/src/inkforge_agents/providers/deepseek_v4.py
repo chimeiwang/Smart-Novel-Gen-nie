@@ -180,9 +180,10 @@ def _project_deepseek_strict_schema(schema: Mapping[str, Any]) -> dict[str, Any]
         else:
             projected[key] = deepcopy(value)
 
-    if projected.get("type") == "object" and isinstance(projected.get("properties"), Mapping):
-        properties = projected["properties"]
-        projected["required"] = list(properties)
+    if projected.get("type") == "object":
+        properties = projected.get("properties")
+        # 非法 properties 不被放宽为可接收额外字段，保持 strict 约束并让供应商拒绝坏 Schema。
+        projected["required"] = list(properties) if isinstance(properties, Mapping) else []
         projected["additionalProperties"] = False
     return projected
 
