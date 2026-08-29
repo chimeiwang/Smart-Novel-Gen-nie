@@ -82,10 +82,29 @@ def _is_deepseek_model(model_name: str) -> bool:
     return model_name.strip().casefold().startswith("deepseek-")
 
 
-def _is_official_deepseek_endpoint(base_url: str) -> bool:
-    """只信任官方主机名，不能把自定义兼容网关误判为官方能力。"""
+def _is_canonical_official_deepseek_url(base_url: str) -> bool:
+    """判断是否为可安全派生官方 DeepSeek 能力的规范根 URL。"""
 
-    return urlparse(base_url).hostname == _DEEPSEEK_OFFICIAL_HOST
+    parsed = urlparse(base_url)
+    try:
+        port = parsed.port
+    except ValueError:
+        return False
+    return (
+        parsed.scheme.lower() == "https"
+        and parsed.hostname is not None
+        and parsed.hostname.lower() == _DEEPSEEK_OFFICIAL_HOST
+        and port is None
+        and not parsed.query
+        and not parsed.fragment
+        and unquote(parsed.path) in {"", "/", "/v1", "/v1/"}
+    )
+
+
+def _is_official_deepseek_endpoint(base_url: str) -> bool:
+    """只信任官方规范根 URL，不能把非规范地址误判为官方能力。"""
+
+    return _is_canonical_official_deepseek_url(base_url)
 
 
 def _resolve_deepseek_strict_base_url(settings: Settings) -> str | None:
@@ -93,16 +112,7 @@ def _resolve_deepseek_strict_base_url(settings: Settings) -> str | None:
         return settings.openai_strict_base_url
     if not _is_deepseek_model(settings.openai_model):
         return None
-    parsed = urlparse(settings.openai_base_url)
-    if (
-        parsed.scheme.lower() == "https"
-        and parsed.hostname is not None
-        and parsed.hostname.lower() == _DEEPSEEK_OFFICIAL_HOST
-        and parsed.port is None
-        and not parsed.query
-        and not parsed.fragment
-        and unquote(parsed.path) in {"", "/", "/v1", "/v1/"}
-    ):
+    if _is_canonical_official_deepseek_url(settings.openai_base_url):
         # 官方普通地址可能带 /v1；strict 通道固定使用官方 /beta 根地址。
         return _DEEPSEEK_STRICT_BASE_URL
     return None

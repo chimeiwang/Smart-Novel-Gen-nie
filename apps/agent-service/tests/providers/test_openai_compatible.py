@@ -1441,7 +1441,15 @@ async def complete_responses_text(
 @pytest.mark.parametrize(
     ("base_url", "model_name", "supports_responses"),
     [
+        ("https://api.deepseek.com", "deepseek-v4-flash", True),
         ("https://api.deepseek.com/v1", "deepseek-v4-flash", True),
+        ("https://api.deepseek.com/", "deepseek-v4-flash", True),
+        ("https://api.deepseek.com/v1/", "deepseek-v4-flash", True),
+        ("https://api.deepseek.com:8443/v1", "deepseek-v4-flash", False),
+        ("https://api.deepseek.com/custom", "deepseek-v4-flash", False),
+        ("https://api.deepseek.com/v1?tenant=test", "deepseek-v4-flash", False),
+        ("https://api.deepseek.com/v1#fragment", "deepseek-v4-flash", False),
+        ("http://api.deepseek.com/v1", "deepseek-v4-flash", False),
         ("https://api.deepseek.com/v1", "deepseek-chat", False),
         ("https://gateway.example/v1", "deepseek-v4-flash", False),
     ],
