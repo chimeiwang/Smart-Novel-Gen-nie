@@ -62,9 +62,11 @@ class TerminalProvider:
         self.tool_name = tool_name
         self.arguments = dict(arguments)
         self.calls = 0
+        self.requests: list[ModelTurnRequest] = []
 
     async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
         self.calls += 1
+        self.requests.append(request)
         if self.calls > 1:
             raise AssertionError("终止控制工具成功后不应再次调用模型")
         assert self.tool_name in {tool.name for tool in request.tools}
@@ -393,6 +395,9 @@ async def test_runtime_stops_on_call_level_terminal_tool(
     assert provider.calls == 1
     assert result.finishReason == "terminal_control_tool"
     assert [event["type"] for event in result.controlEvents] == [tool_name]
+    if mode == "quality":
+        assert {tool.name for tool in provider.requests[0].tools} == {"submit_quality_report"}
+        assert provider.requests[0].tools[0].strict is True
 
 
 def test_execution_tool_contract_is_immutable() -> None:

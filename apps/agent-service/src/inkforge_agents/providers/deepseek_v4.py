@@ -155,28 +155,32 @@ class DeepSeekV4Provider:
 def _project_deepseek_strict_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
     """将业务 JSON Schema 投影为 DeepSeek strict 支持的确定性子集。"""
 
+    projected = _project_deepseek_strict_schema_node(schema)
+    if not isinstance(projected, dict):
+        raise ValueError("DeepSeek strict Schema 根节点必须是对象")
+    return projected
+
+
+def _project_deepseek_strict_schema_node(node: object) -> object:
+    """递归投影 Schema 节点，同时保留 JSON Schema 布尔节点。"""
+
+    if not isinstance(node, Mapping):
+        if isinstance(node, list):
+            return [_project_deepseek_strict_schema_node(item) for item in node]
+        return deepcopy(node)
+
     projected: dict[str, Any] = {}
     for key in _DEEPSEEK_STRICT_SCHEMA_KEYS:
-        if key not in schema:
+        if key not in node:
             continue
-        value = schema[key]
+        value = node[key]
         if key in {"properties", "$defs"} and isinstance(value, Mapping):
             projected[key] = {
-                property_name: _project_deepseek_strict_schema(property_schema)
+                property_name: _project_deepseek_strict_schema_node(property_schema)
                 for property_name, property_schema in value.items()
-                if isinstance(property_schema, Mapping)
             }
-        elif key == "anyOf" and isinstance(value, list):
-            projected[key] = [
-                (
-                    _project_deepseek_strict_schema(item)
-                    if isinstance(item, Mapping)
-                    else deepcopy(item)
-                )
-                for item in value
-            ]
-        elif key == "items" and isinstance(value, Mapping):
-            projected[key] = _project_deepseek_strict_schema(value)
+        elif key in {"anyOf", "items", "additionalProperties"}:
+            projected[key] = _project_deepseek_strict_schema_node(value)
         else:
             projected[key] = deepcopy(value)
 
@@ -184,7 +188,10 @@ def _project_deepseek_strict_schema(schema: Mapping[str, Any]) -> dict[str, Any]
         properties = projected.get("properties")
         # 非法 properties 不被放宽为可接收额外字段，保持 strict 约束并让供应商拒绝坏 Schema。
         projected["required"] = list(properties) if isinstance(properties, Mapping) else []
-        projected["additionalProperties"] = False
+        if isinstance(properties, Mapping) or "additionalProperties" not in projected:
+            projected["additionalProperties"] = False
+        elif not isinstance(projected["additionalProperties"], Mapping):
+            projected["additionalProperties"] = False
     return projected
 
 

@@ -358,6 +358,32 @@ def test_deepseek_strict_schema_projection_restricts_empty_object_in_items() -> 
     assert projected["items"]["additionalProperties"] is False
 
 
+def test_deepseek_strict_schema_projection_recurses_additional_properties() -> None:
+    projected = _project_deepseek_strict_schema(
+        {
+            "type": "object",
+            "additionalProperties": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 3,
+            },
+        }
+    )
+
+    assert projected["additionalProperties"] == {"type": "string"}
+
+
+def test_deepseek_strict_schema_projection_preserves_boolean_schema_properties() -> None:
+    projected = _project_deepseek_strict_schema(
+        {
+            "type": "object",
+            "properties": {"enabled": True, "disabled": False},
+        }
+    )
+
+    assert projected["properties"] == {"enabled": True, "disabled": False}
+
+
 @pytest.mark.parametrize(
     "base_url", ["https://api.deepseek.com/v1?x=1", "https://proxy.example/v1#fragment"]
 )

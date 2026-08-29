@@ -24,6 +24,45 @@ def test_default_registry_has_only_quality_report_strict_tool() -> None:
     } == {"submit_quality_report"}
 
 
+def test_quality_tool_validation_keeps_local_length_and_count_limits() -> None:
+    tool = build_default_registry().require("submit_quality_report")
+    scores = {
+        "characterConsistency": 90,
+        "worldRuleConsistency": 90,
+        "timelineConsistency": 90,
+        "causalityConsistency": 90,
+        "foreshadowingConsistency": 90,
+    }
+    issue = {
+        "dimension": "character",
+        "severity": "warning",
+        "message": "长" * 501,
+        "evidence": "证据",
+        "suggestion": "建议",
+    }
+
+    with pytest.raises(ValidationError):
+        tool.validate(
+            {
+                "scores": scores,
+                "qualityGate": "pass",
+                "issues": [issue],
+                "report": "报告",
+            }
+        )
+
+    valid_issue = {**issue, "message": "消息"}
+    with pytest.raises(ValidationError):
+        tool.validate(
+            {
+                "scores": scores,
+                "qualityGate": "pass",
+                "issues": [valid_issue] * 101,
+                "report": "报告",
+            }
+        )
+
+
 def test_evaluation_arguments_reject_invalid_verdict() -> None:
     tool = build_default_registry().require("submit_evaluation")
 
