@@ -175,6 +175,10 @@ def _safe_failure_code(error: Exception) -> str:
     code = getattr(error, "code", None)
     if isinstance(code, str) and re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", code):
         return code
+    if error.args and isinstance(error.args[0], str):
+        match = re.match(r"\A([A-Z][A-Z0-9_]{0,63})：", error.args[0])
+        if match is not None:
+            return match.group(1)
     value = type(error).__name__
     return value if re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,63}", value) else "UnknownError"
 

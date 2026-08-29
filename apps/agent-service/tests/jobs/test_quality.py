@@ -5,7 +5,7 @@ from typing import Any
 
 import fakeredis.aioredis
 import pytest
-from inkforge_agents.jobs.quality import QualityJobHandler
+from inkforge_agents.jobs.quality import QualityJobHandler, _safe_failure_code
 from inkforge_agents.providers.base import (
     ModelToolCall,
     ModelTurnRequest,
@@ -50,6 +50,34 @@ def quality_job() -> QueueJob:
         payload={"checkId": "check-1", "sourceTaskId": None, "message": "检查一致性"},
         createdAt=datetime.now(UTC),
     )
+
+
+def test_safe_failure_code_extracts_safe_code_from_full_width_colon_message() -> None:
+    error = RuntimeError("MODEL_TOOL_ARGUMENTS_INVALID：不能进入日志的工具参数")
+
+    assert _safe_failure_code(error) == "MODEL_TOOL_ARGUMENTS_INVALID"
+
+
+def test_safe_failure_code_does_not_leak_runtime_error_message() -> None:
+    message = "中文秘密消息：不能进入日志"
+
+    assert _safe_failure_code(RuntimeError(message)) == "RuntimeError"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "1MODEL_TOOL_ARGUMENTS_INVALID：不应提取",
+        "MODEL-TOOL-ARGUMENTS_INVALID：不应提取",
+        "A" * 65 + "：不应提取",
+        "MODEL_TOOL_ARGUMENTS_INVALID:不应提取",
+        "model_tool_arguments_invalid：不应提取",
+    ],
+)
+def test_safe_failure_code_rejects_unsafe_or_non_full_width_colon_prefix(
+    message: str,
+) -> None:
+    assert _safe_failure_code(RuntimeError(message)) == "RuntimeError"
 
 
 class Core:
