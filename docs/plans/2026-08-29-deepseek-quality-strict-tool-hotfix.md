@@ -1,14 +1,16 @@
-# DeepSeek 一致性终检 strict 工具最小修复实施计划
+# DeepSeek 一致性终检 strict 工具修复与生产收敛实施计划
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 只让一致性终检的 `submit_quality_report` 使用真实 DeepSeek Beta strict Function Calling，并保留本地完整质量报告校验与安全失败分类。
+**Goal:** 让一致性终检使用与 DeepSeek strict 方言一致的专用 wire 契约，并在本地完整校验失败时留下不含字段值的可定位诊断。
 
-**Architecture:** 在工具定义层增加默认关闭的 `strict` 元数据，只为质量报告工具开启；`DeepSeekV4Provider` 遇到全 strict 工具集合时切换 Beta 端点并发送供应商兼容 Schema 投影。普通工具链保持标准端点，质量结果仍由原始 Pydantic 契约复验，日志只提取异常中已有的安全大写错误码。
+**Architecture:** 第一阶段已在提交 `e672666` 接通质量工具的 Beta strict wire。第二阶段只为 `submit_quality_report` 内联 Pydantic 引用、移除未明确支持的 `null` 并精确归一化两个可选字符串；AgentRuntime 仍用原始 Pydantic 契约复验，并把字段路径与错误类型作为脱敏诊断交给质量日志。普通工具、其他 Agent、Core 和数据库不变。
 
 **Tech Stack:** Python 3.12、Pydantic v2、httpx、pytest、Ruff、Mypy
 
 ---
+
+> Task 1～4 已由提交 `e672666` 完成并部署。以下 Task 5～7 是生产重跑暴露出的第二阶段收敛工作；旧步骤保留为第一阶段审计记录。
 
 ### Task 1: 工具 strict 元数据
 
@@ -404,3 +406,247 @@ git commit -m "修复：为一致性终检启用 DeepSeek strict"
 ```
 
 提交后不得直接重跑生产质量检查；生产发布与重跑仍需分别取得授权并按不可变镜像验证。
+
+### Task 5: 专用 DeepSeek 质量 wire 契约
+
+**Files:**
+- Modify: `apps/agent-service/src/inkforge_agents/providers/deepseek_v4.py`
+- Test: `apps/agent-service/tests/providers/test_deepseek_v4.py`
+
+- [ ] **Step 1: 写入生产失配回归测试**
+
+新增测试直接使用真实 `QualityReportArgs.model_json_schema()`，要求质量 wire：
+
+```python
+def test_quality_wire_inlines_pydantic_refs_and_avoids_null() -> None:
+    projected = _project_deepseek_quality_schema(QualityReportArgs.model_json_schema())
+    encoded = json.dumps(projected, ensure_ascii=False)
+
+    assert '"$defs"' not in encoded
+    assert '"$def"' not in encoded
+    assert '"$ref"' not in encoded
+    assert '"null"' not in encoded
+    assert projected["properties"]["scores"]["type"] == "object"
+    assert projected["properties"]["issues"]["items"]["type"] == "object"
+    assert projected["properties"]["rewriteBrief"]["type"] == "string"
+```
+
+同时覆盖返回归一化：
+
+```python
+def test_quality_wire_normalizes_only_optional_empty_strings() -> None:
+    normalized = _normalize_deepseek_quality_arguments(
+        {
+            "scores": _valid_scores(),
+            "qualityGate": "pass",
+            "issues": [{
+                "dimension": "causality",
+                "severity": "warning",
+                "message": "完整消息",
+                "evidence": "完整证据",
+                "location": "",
+                "suggestion": "完整建议",
+            }],
+            "report": "完整报告",
+            "rewriteBrief": "",
+        }
+    )
+
+    assert normalized["issues"][0]["location"] is None
+    assert normalized["rewriteBrief"] is None
+    assert normalized["report"] == "完整报告"
+```
+
+- [ ] **Step 2: 运行 RED**
+
+Run:
+
+```powershell
+uv run pytest apps/agent-service/tests/providers/test_deepseek_v4.py -q
+```
+
+Expected: 因 `_project_deepseek_quality_schema` 和归一化函数尚不存在而失败；不得修改断言迎合旧通用投影。
+
+- [ ] **Step 3: 实现专用投影与归一化**
+
+在 `deepseek_v4.py` 中：
+
+```python
+_QUALITY_TOOL_NAME = "submit_quality_report"
+
+
+def _project_deepseek_quality_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
+    definitions = schema.get("$defs")
+    if not isinstance(definitions, Mapping):
+        raise ValueError("质量报告 Schema 缺少 $defs")
+    inlined = _inline_quality_schema_node(schema, definitions, stack=())
+    projected = _project_deepseek_quality_node(inlined)
+    _apply_quality_wire_descriptions(projected)
+    return projected
+
+
+def _normalize_deepseek_quality_arguments(arguments: Mapping[str, Any]) -> dict[str, Any]:
+    normalized = deepcopy(dict(arguments))
+    if normalized.get("rewriteBrief") == "":
+        normalized["rewriteBrief"] = None
+    issues = normalized.get("issues")
+    if isinstance(issues, list):
+        for issue in issues:
+            if isinstance(issue, dict) and issue.get("location") == "":
+                issue["location"] = None
+    return normalized
+```
+
+内联函数只接受 `#/$defs/<name>` 本地引用并防止循环；投影函数把 `string|null` 精确收敛为 `string`，其他
+`anyOf` 原样递归。`complete_turn()` 仅在唯一 strict 工具名为 `submit_quality_report` 时使用该 Schema，并在
+`_parse_response()` 后对同名调用执行归一化；其他 strict 工具在 HTTP 前抛出稳定错误。
+
+- [ ] **Step 4: 运行 GREEN 与 Provider 回归**
+
+Run:
+
+```powershell
+uv run pytest apps/agent-service/tests/providers/test_deepseek_v4.py -q
+```
+
+Expected: 全部通过；普通非 strict 请求仍使用标准端点和原始 Schema。
+
+- [ ] **Step 5: 提交 wire 收敛**
+
+```powershell
+git add -- apps/agent-service/src/inkforge_agents/providers/deepseek_v4.py apps/agent-service/tests/providers/test_deepseek_v4.py
+git commit -m "修复：收敛 DeepSeek 质量 strict 契约"
+```
+
+### Task 6: Pydantic 字段级脱敏诊断
+
+**Files:**
+- Modify: `apps/agent-service/src/inkforge_agents/runtime/agent_runtime.py`
+- Modify: `apps/agent-service/src/inkforge_agents/jobs/quality.py`
+- Test: `apps/agent-service/tests/runtime/test_agent_runtime.py`
+- Test: `apps/agent-service/tests/jobs/test_quality.py`
+
+- [ ] **Step 1: 写入 RED 测试**
+
+构造包含秘密字段值的非法质量参数，断言异常只暴露路径和错误类型：
+
+```python
+with pytest.raises(ModelToolArgumentsInvalidError) as caught:
+    runtime._preflight_response(response, exposed, context, terminal_tools)
+
+assert caught.value.code == "MODEL_TOOL_ARGUMENTS_INVALID"
+assert "issues.0.message:string_too_long" in caught.value.validationIssues
+assert "不能进入日志的秘密" not in str(caught.value)
+```
+
+质量日志测试使用 `caplog` 断言：
+
+```python
+assert "failure_code=MODEL_TOOL_ARGUMENTS_INVALID" in caplog.text
+assert "validation_issues=issues.0.message:string_too_long" in caplog.text
+assert "不能进入日志的秘密" not in caplog.text
+```
+
+- [ ] **Step 2: 运行 RED**
+
+Run:
+
+```powershell
+uv run pytest apps/agent-service/tests/runtime/test_agent_runtime.py apps/agent-service/tests/jobs/test_quality.py -q
+```
+
+Expected: 专用异常和 `validation_issues` 日志尚不存在而失败。
+
+- [ ] **Step 3: 实现安全异常与日志投影**
+
+新增 `ModelToolArgumentsInvalidError(RuntimeError)`，只持有 `code`、安全工具名和最多 10 条
+`field.path:error_type`。从 `ValidationError.errors(include_url=False, include_context=False,
+include_input=False)` 读取 `loc/type`，所有片段经过字符白名单和长度限制。质量日志只读取该属性：
+
+```python
+validation_issues = getattr(error, "validationIssues", ())
+safe_issues = ",".join(validation_issues) if validation_issues else "none"
+logger.warning(
+    "质量检查任务失败 ... failure_code=%s exception_type=%s retryable=%s "
+    "validation_issues=%s",
+    ...,
+    safe_issues,
+)
+```
+
+不得把 `str(ValidationError)`、`input`、`ctx`、工具参数或章节内容写入异常和日志。
+
+- [ ] **Step 4: 运行 GREEN**
+
+Run:
+
+```powershell
+uv run pytest apps/agent-service/tests/runtime/test_agent_runtime.py apps/agent-service/tests/jobs/test_quality.py -q
+```
+
+Expected: 全部通过，秘密字段值不出现在异常或日志。
+
+- [ ] **Step 5: 提交诊断收敛**
+
+```powershell
+git add -- apps/agent-service/src/inkforge_agents/runtime/agent_runtime.py apps/agent-service/src/inkforge_agents/jobs/quality.py apps/agent-service/tests/runtime/test_agent_runtime.py apps/agent-service/tests/jobs/test_quality.py
+git commit -m "日志：记录质量参数脱敏校验路径"
+```
+
+### Task 7: 文档同步与完整验证
+
+**Files:**
+- Modify: `apps/agent-service/AGENTS.md`
+- Modify: `docs/requirements/03-ai-writing-and-agents.md`
+- Modify: `docs/requirements/04-review-quality-and-workflow.md`
+- Modify: `docs/specs/2026-08-29-deepseek-quality-strict-tool-hotfix.md`
+- Modify: `docs/plans/2026-08-29-deepseek-quality-strict-tool-hotfix.md`
+
+- [ ] **Step 1: 同步当前事实**
+
+三处架构/需求文档明确记录：质量 strict 使用专用内联 wire 契约；两个可选字符串通过空字符串传输并在
+Provider 内精确归一化；本地完整 Pydantic 校验仍为权威；失败日志只记录字段路径和错误类型。
+
+- [ ] **Step 2: 运行定向测试**
+
+Run:
+
+```powershell
+uv run pytest apps/agent-service/tests/providers/test_deepseek_v4.py apps/agent-service/tests/runtime/test_agent_runtime.py apps/agent-service/tests/jobs/test_quality.py apps/agent-service/tests/tools/test_arguments.py apps/agent-service/tests/tools/test_registry.py -q
+```
+
+Expected: 全部通过。
+
+- [ ] **Step 3: 运行 Agent Service 全量验证**
+
+Run:
+
+```powershell
+uv run pytest apps/agent-service/tests -q
+uv run ruff check apps/agent-service/src apps/agent-service/tests
+uv run mypy apps/agent-service/src packages/service-contracts/src
+git diff --check
+```
+
+Expected: 四条命令退出码均为 0。
+
+- [ ] **Step 4: 最终差异审计**
+
+Run:
+
+```powershell
+git status --short
+git diff origin/main...HEAD --stat
+git diff origin/main...HEAD -- apps/agent-service docs/specs/2026-08-29-deepseek-quality-strict-tool-hotfix.md docs/plans/2026-08-29-deepseek-quality-strict-tool-hotfix.md
+```
+
+Expected: 只包含质量 strict wire、脱敏诊断、测试与事实文档；无 Core、数据库、前端和其他工具路由变更。
+
+- [ ] **Step 5: 提交文档与验证状态**
+
+```powershell
+git add -- apps/agent-service/AGENTS.md docs/requirements/03-ai-writing-and-agents.md docs/requirements/04-review-quality-and-workflow.md docs/specs/2026-08-29-deepseek-quality-strict-tool-hotfix.md docs/plans/2026-08-29-deepseek-quality-strict-tool-hotfix.md
+git commit -m "文档：同步质量 strict 生产收敛边界"
+```
+
+不得在本计划内推送、部署或再次重跑生产质量检查；这些动作需要用户另行明确授权。
