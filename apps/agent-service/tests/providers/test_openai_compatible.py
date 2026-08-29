@@ -112,6 +112,56 @@ def provider_with_response(response: AIMessage) -> OpenAICompatibleProvider:
     return provider
 
 
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://api.deepseek.com",
+        "https://api.deepseek.com/",
+        "https://api.deepseek.com/v1",
+        "https://api.deepseek.com/v1/",
+    ],
+)
+def test_deepseek_strict_base_url_auto_derivation_requires_canonical_official_url(
+    base_url: str,
+) -> None:
+    settings = Settings.model_validate(
+        {
+            "openai_api_key": "test-key",
+            "openai_base_url": base_url,
+            "openai_model": "deepseek-v4-flash",
+        }
+    )
+
+    assert (
+        provider_module._resolve_deepseek_strict_base_url(settings)
+        == "https://api.deepseek.com/beta"
+    )
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "http://api.deepseek.com/v1",
+        "https://api.deepseek.com:8443/v1",
+        "https://api.deepseek.com/custom",
+        "https://api.deepseek.com/v1?tenant=test",
+        "https://api.deepseek.com/v1#fragment",
+    ],
+)
+def test_deepseek_strict_base_url_does_not_derive_for_noncanonical_official_url(
+    base_url: str,
+) -> None:
+    settings = Settings.model_validate(
+        {
+            "openai_api_key": "test-key",
+            "openai_base_url": base_url,
+            "openai_model": "deepseek-v4-flash",
+        }
+    )
+
+    assert provider_module._resolve_deepseek_strict_base_url(settings) is None
+
+
 @pytest.mark.asyncio
 async def test_normal_chat_timeout_is_sanitized_transport_error() -> None:
     """普通工具通道的超时也必须脱敏归一化，不能只覆盖结构化输出。"""

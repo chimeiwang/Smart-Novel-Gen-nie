@@ -60,6 +60,7 @@ def _request(
     policy: Any = LEGACY_PROVIDER_DEFAULT,
     tool_name: str = "lookup",
     strict: bool = False,
+    parameters: dict[str, Any] | None = None,
     tools: list[dict[str, Any]] | None = None,
 ) -> ModelTurnRequest:
     return ModelTurnRequest(
@@ -69,7 +70,8 @@ def _request(
             {
                 "name": tool_name,
                 "description": "查询资料",
-                "parameters": {
+                "parameters": parameters
+                or {
                     "type": "object",
                     "properties": {},
                 },
@@ -162,7 +164,12 @@ async def test_quality_strict_request_uses_beta_endpoint_and_strict_wire() -> No
     provider, requests, client = _provider()
     try:
         await provider.complete_turn(
-            _request(policy=QUALITY_NO_THINKING, tool_name="submit_quality_report", strict=True)
+            _request(
+                policy=QUALITY_NO_THINKING,
+                tool_name="submit_quality_report",
+                strict=True,
+                parameters=QualityReportArgs.model_json_schema(),
+            )
         )
     finally:
         await client.aclose()
@@ -175,6 +182,20 @@ async def test_quality_strict_request_uses_beta_endpoint_and_strict_wire() -> No
         "function": {"name": "submit_quality_report"},
     }
     assert payload["tools"][0]["function"]["strict"] is True
+    wire_schema = payload["tools"][0]["function"]["parameters"]
+    assert wire_schema["required"] == list(wire_schema["properties"])
+    assert wire_schema["additionalProperties"] is False
+    issue_schema = wire_schema["$defs"]["ConsistencyIssue"]
+    assert issue_schema["required"] == list(issue_schema["properties"])
+    assert issue_schema["additionalProperties"] is False
+    assert not {
+        "title",
+        "default",
+        "minLength",
+        "maxLength",
+        "minItems",
+        "maxItems",
+    } & set(_schema_keys(wire_schema))
     assert "parallel_tool_calls" not in payload
 
 
@@ -188,7 +209,21 @@ async def test普通工具仍使用标准端点且不发送_strict字段() -> No
 
     payload = json.loads(requests[0].content)
     assert str(requests[0].url) == "https://api.deepseek.com/chat/completions"
-    assert "strict" not in payload["tools"][0]["function"]
+    assert payload == {
+        "model": "deepseek-v4-flash",
+        "messages": [{"role": "user", "content": "请调用工具"}],
+        "max_tokens": 256,
+        "tools": [
+            {
+                "type": "function",
+                "function": {
+                    "name": "lookup",
+                    "description": "查询资料",
+                    "parameters": {"type": "object", "properties": {}},
+                },
+            }
+        ],
+    }
 
 
 @pytest.mark.asyncio
@@ -246,6 +281,25 @@ async def test_strict_request_uses_explicit_custom_strict_base_url() -> None:
     assert str(requests[0].url) == "https://strict-proxy.example/deepseek/beta/chat/completions"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "base_url",
+    ["https://api.deepseek.com:8443/v1", "https://api.deepseek.com/custom"],
+)
+async def test_official_host_noncanonical_strict_base_url_fails_before_http_request(
+    base_url: str,
+) -> None:
+    provider, requests, client = _provider(base_url)
+    try:
+        with pytest.raises(ValueError, match="OPENAI_STRICT_BASE_URL"):
+            await provider.complete_turn(
+                _request(policy=QUALITY_NO_THINKING, tool_name="submit_quality_report", strict=True)
+            )
+    finally:
+        await client.aclose()
+    assert requests == []
+
+
 def test_deepseek_strict_schema_projection_is_deterministic_and_non_mutating() -> None:
     original = QualityReportArgs.model_json_schema()
     original_snapshot = deepcopy(original)
@@ -274,6 +328,18 @@ def test_deepseek_strict_schema_projection_is_deterministic_and_non_mutating() -
                 assert_projected(value)
 
     assert_projected(projected)
+
+
+def _schema_keys(schema: object) -> list[str]:
+    keys: list[str] = []
+    if isinstance(schema, dict):
+        keys.extend(schema)
+        for value in schema.values():
+            keys.extend(_schema_keys(value))
+    elif isinstance(schema, list):
+        for value in schema:
+            keys.extend(_schema_keys(value))
+    return keys
 
 
 def test_deepseek_strict_schema_projection_restricts_empty_root_object() -> None:

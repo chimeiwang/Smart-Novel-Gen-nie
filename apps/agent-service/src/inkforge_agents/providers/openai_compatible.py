@@ -7,7 +7,7 @@ import re
 from collections.abc import Mapping
 from math import isfinite
 from typing import Any, Literal, cast
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import jsonschema_rs
 from langchain_core.messages import (
@@ -93,7 +93,16 @@ def _resolve_deepseek_strict_base_url(settings: Settings) -> str | None:
         return settings.openai_strict_base_url
     if not _is_deepseek_model(settings.openai_model):
         return None
-    if urlparse(settings.openai_base_url).hostname == _DEEPSEEK_OFFICIAL_HOST:
+    parsed = urlparse(settings.openai_base_url)
+    if (
+        parsed.scheme.lower() == "https"
+        and parsed.hostname is not None
+        and parsed.hostname.lower() == _DEEPSEEK_OFFICIAL_HOST
+        and parsed.port is None
+        and not parsed.query
+        and not parsed.fragment
+        and unquote(parsed.path) in {"", "/", "/v1", "/v1/"}
+    ):
         # 官方普通地址可能带 /v1；strict 通道固定使用官方 /beta 根地址。
         return _DEEPSEEK_STRICT_BASE_URL
     return None
