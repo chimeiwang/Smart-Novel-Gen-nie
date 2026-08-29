@@ -188,10 +188,7 @@ def _project_deepseek_strict_schema_node(node: object) -> object:
         properties = projected.get("properties")
         # 非法 properties 不被放宽为可接收额外字段，保持 strict 约束并让供应商拒绝坏 Schema。
         projected["required"] = list(properties) if isinstance(properties, Mapping) else []
-        if isinstance(properties, Mapping) or "additionalProperties" not in projected:
-            projected["additionalProperties"] = False
-        elif not isinstance(projected["additionalProperties"], Mapping):
-            projected["additionalProperties"] = False
+        projected["additionalProperties"] = False
     return projected
 
 

@@ -370,7 +370,8 @@ def test_deepseek_strict_schema_projection_recurses_additional_properties() -> N
         }
     )
 
-    assert projected["additionalProperties"] == {"type": "string"}
+    assert projected["additionalProperties"] is False
+    assert "minLength" not in _schema_keys(projected["additionalProperties"])
 
 
 def test_deepseek_strict_schema_projection_preserves_boolean_schema_properties() -> None:
