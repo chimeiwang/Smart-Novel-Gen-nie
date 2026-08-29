@@ -397,7 +397,7 @@ observer，但只有 observer 与运行 context 都存在时才写区块，并�
 
 Provider 必须提供规范化完成原因并保留供应商原始值。`length`、`content_filter`、`stop`/`tool_calls` 与实际工具状态矛盾、以及没有合法工具调用的 `unknown` 都在接受正文或执行工具副作用前失败，当前不把 `length` 作为自动续写信号；文风画像只接受 `stop`、无工具调用且正文非空的纯文本响应，半截画像不能成功。人工模型日志记录规范化值和完整原始值。
 
-DeepSeek strict 通道仅在规范官方 HTTPS 根地址或 `/v1` 地址上自动派生 `/beta`；自定义地址、带端口或其他路径必须显式配置 `OPENAI_STRICT_BASE_URL`。strict 与非 strict 工具混用在 HTTP 请求前失败，不回退；在 `deepseek_v4` 配置下，`DeepSeekV4Provider` 与 SDK 不做隐式自动重发或切换协议，明确标记为 `retryable` 的传输错误仍按同一任务现有队列机制重试。该配置下 `DeepSeekV4Provider` 发送的是兼容性投影 Schema，原始 `QualityReportArgs`/Pydantic 完整复验仍是业务权威，strict 不替代本地校验。质量协议错误日志可以保留原始完成原因字符串和安全大写 `failure_code`，但不得保留供应商响应正文、异常正文或工具参数。视频既有路由与能力门禁不变。
+DeepSeek strict 通道仅在规范官方 HTTPS 根地址或 `/v1` 地址上自动派生 `/beta`；自定义地址、带端口或其他路径必须显式配置 `OPENAI_STRICT_BASE_URL`。strict 与非 strict 工具混用在 HTTP 请求前失败，不回退；在 `deepseek_v4` 配置下，`DeepSeekV4Provider` 与 SDK 不做隐式自动重发或切换协议，明确标记为 `retryable` 的传输错误仍按同一任务现有队列机制重试。当前只有 `submit_quality_report` 使用专用 strict wire 契约：本地 `$defs` 全部内联且 wire 不含引用或 `type:null`，`location` 与 `rewriteBrief` 以空字符串表达无值并只在 Provider 的这两个精确路径归一化为 `None`；非质量 strict 工具在 HTTP 前失败。原始 `QualityReportArgs`/Pydantic 完整复验仍是业务权威，strict 不替代本地校验，也不做截断或猜测修复。质量协议错误日志可以保留原始完成原因字符串和安全大写 `failure_code`；Pydantic 失败最多额外记录 10 条脱敏 `loc/type`，不得保留供应商响应正文、异常正文、字段值、工具参数、`input` 或 `ctx`，且该参数错误不可盲重试。视频既有路由与能力门禁不变。
 
 上述输出与上下文能力不修改 ReviewArtifact 状态机。模型用量归集只使用用户于 2026-08-21 和 2026-08-23
 明确批准的两个 `TokenUsage` 有界版本化迁移，并新增按写作任务查询的公共 OpenAPI；不授权其他 PostgreSQL

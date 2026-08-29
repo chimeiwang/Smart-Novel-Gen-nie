@@ -413,7 +413,7 @@ git commit -m "修复：为一致性终检启用 DeepSeek strict"
 - Modify: `apps/agent-service/src/inkforge_agents/providers/deepseek_v4.py`
 - Test: `apps/agent-service/tests/providers/test_deepseek_v4.py`
 
-- [ ] **Step 1: 写入生产失配回归测试**
+- [x] **Step 1: 写入生产失配回归测试**
 
 新增测试直接使用真实 `QualityReportArgs.model_json_schema()`，要求质量 wire：
 
@@ -457,7 +457,7 @@ def test_quality_wire_normalizes_only_optional_empty_strings() -> None:
     assert normalized["report"] == "完整报告"
 ```
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
 Run:
 
@@ -467,7 +467,7 @@ uv run pytest apps/agent-service/tests/providers/test_deepseek_v4.py -q
 
 Expected: 因 `_project_deepseek_quality_schema` 和归一化函数尚不存在而失败；不得修改断言迎合旧通用投影。
 
-- [ ] **Step 3: 实现专用投影与归一化**
+- [x] **Step 3: 实现专用投影与归一化**
 
 在 `deepseek_v4.py` 中：
 
@@ -501,7 +501,7 @@ def _normalize_deepseek_quality_arguments(arguments: Mapping[str, Any]) -> dict[
 `anyOf` 原样递归。`complete_turn()` 仅在唯一 strict 工具名为 `submit_quality_report` 时使用该 Schema，并在
 `_parse_response()` 后对同名调用执行归一化；其他 strict 工具在 HTTP 前抛出稳定错误。
 
-- [ ] **Step 4: 运行 GREEN 与 Provider 回归**
+- [x] **Step 4: 运行 GREEN 与 Provider 回归**
 
 Run:
 
@@ -511,7 +511,7 @@ uv run pytest apps/agent-service/tests/providers/test_deepseek_v4.py -q
 
 Expected: 全部通过；普通非 strict 请求仍使用标准端点和原始 Schema。
 
-- [ ] **Step 5: 提交 wire 收敛**
+- [x] **Step 5: 提交 wire 收敛**
 
 ```powershell
 git add -- apps/agent-service/src/inkforge_agents/providers/deepseek_v4.py apps/agent-service/tests/providers/test_deepseek_v4.py
@@ -526,7 +526,7 @@ git commit -m "修复：收敛 DeepSeek 质量 strict 契约"
 - Test: `apps/agent-service/tests/runtime/test_agent_runtime.py`
 - Test: `apps/agent-service/tests/jobs/test_quality.py`
 
-- [ ] **Step 1: 写入 RED 测试**
+- [x] **Step 1: 写入 RED 测试**
 
 构造包含秘密字段值的非法质量参数，断言异常只暴露路径和错误类型：
 
@@ -547,7 +547,7 @@ assert "validation_issues=issues.0.message:string_too_long" in caplog.text
 assert "不能进入日志的秘密" not in caplog.text
 ```
 
-- [ ] **Step 2: 运行 RED**
+- [x] **Step 2: 运行 RED**
 
 Run:
 
@@ -557,7 +557,7 @@ uv run pytest apps/agent-service/tests/runtime/test_agent_runtime.py apps/agent-
 
 Expected: 专用异常和 `validation_issues` 日志尚不存在而失败。
 
-- [ ] **Step 3: 实现安全异常与日志投影**
+- [x] **Step 3: 实现安全异常与日志投影**
 
 新增 `ModelToolArgumentsInvalidError(RuntimeError)`，只持有 `code`、安全工具名和最多 10 条
 `field.path:error_type`。从 `ValidationError.errors(include_url=False, include_context=False,
@@ -576,7 +576,7 @@ logger.warning(
 
 不得把 `str(ValidationError)`、`input`、`ctx`、工具参数或章节内容写入异常和日志。
 
-- [ ] **Step 4: 运行 GREEN**
+- [x] **Step 4: 运行 GREEN**
 
 Run:
 
@@ -586,7 +586,7 @@ uv run pytest apps/agent-service/tests/runtime/test_agent_runtime.py apps/agent-
 
 Expected: 全部通过，秘密字段值不出现在异常或日志。
 
-- [ ] **Step 5: 提交诊断收敛**
+- [x] **Step 5: 提交诊断收敛**
 
 ```powershell
 git add -- apps/agent-service/src/inkforge_agents/runtime/agent_runtime.py apps/agent-service/src/inkforge_agents/jobs/quality.py apps/agent-service/tests/runtime/test_agent_runtime.py apps/agent-service/tests/jobs/test_quality.py
@@ -602,12 +602,12 @@ git commit -m "日志：记录质量参数脱敏校验路径"
 - Modify: `docs/specs/2026-08-29-deepseek-quality-strict-tool-hotfix.md`
 - Modify: `docs/plans/2026-08-29-deepseek-quality-strict-tool-hotfix.md`
 
-- [ ] **Step 1: 同步当前事实**
+- [x] **Step 1: 同步当前事实**
 
 三处架构/需求文档明确记录：质量 strict 使用专用内联 wire 契约；两个可选字符串通过空字符串传输并在
 Provider 内精确归一化；本地完整 Pydantic 校验仍为权威；失败日志只记录字段路径和错误类型。
 
-- [ ] **Step 2: 运行定向测试**
+- [x] **Step 2: 运行定向测试**
 
 Run:
 
@@ -617,7 +617,7 @@ uv run pytest apps/agent-service/tests/providers/test_deepseek_v4.py apps/agent-
 
 Expected: 全部通过。
 
-- [ ] **Step 3: 运行 Agent Service 全量验证**
+- [x] **Step 3: 运行 Agent Service 全量验证**
 
 Run:
 
@@ -630,7 +630,7 @@ git diff --check
 
 Expected: 四条命令退出码均为 0。
 
-- [ ] **Step 4: 最终差异审计**
+- [x] **Step 4: 最终差异审计**
 
 Run:
 
@@ -642,7 +642,7 @@ git diff origin/main...HEAD -- apps/agent-service docs/specs/2026-08-29-deepseek
 
 Expected: 只包含质量 strict wire、脱敏诊断、测试与事实文档；无 Core、数据库、前端和其他工具路由变更。
 
-- [ ] **Step 5: 提交文档与验证状态**
+- [x] **Step 5: 提交文档与验证状态**
 
 ```powershell
 git add -- apps/agent-service/AGENTS.md docs/requirements/03-ai-writing-and-agents.md docs/requirements/04-review-quality-and-workflow.md docs/specs/2026-08-29-deepseek-quality-strict-tool-hotfix.md docs/plans/2026-08-29-deepseek-quality-strict-tool-hotfix.md

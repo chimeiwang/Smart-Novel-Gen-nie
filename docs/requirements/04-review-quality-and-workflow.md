@@ -260,7 +260,7 @@ flowchart TD
 - `report` 必须是非空完整自然语言报告，`rewriteBrief` 可选；
 - 缺字段、额外字段、越界分数、非法 dimension/severity 或空报告都使质量任务失败，不能保存部分报告。
 
-只有一致性终检的 `submit_quality_report` 使用 DeepSeek Beta strict Function Calling，报告仍须通过原始 `QualityReportArgs`/Pydantic 完整复验；视频既有路由与能力门禁不变。
+只有一致性终检的 `submit_quality_report` 使用 DeepSeek Beta strict Function Calling。Provider 为该工具生成专用 wire 契约：递归内联本地 `$defs`，不发送 `$defs`、`$def`、`$ref` 或 `type:null`；可选的 `location` 与 `rewriteBrief` 在 wire 中以必填字符串传输，无值时返回空字符串，并只在这两个精确路径归一化为 `None`。非质量 strict 工具必须在 HTTP 前拒绝。报告仍须通过原始 `QualityReportArgs`/Pydantic 完整复验，Provider 不截断或猜测修复业务字段；参数失败最多记录 10 条脱敏 `loc/type`，不得记录字段值、异常正文、`input`、`ctx` 或工具参数，且不对同一坏参数盲重试。视频既有路由与能力门禁不变。
 
 Core 把完整 scores、issues、report、qualityGate 和 rewriteBrief 保存到 `WorkflowRun.output`；`ChapterQualityCheck.result` 保存 report，`scoreOverall` 保存五项分数平均值经现有 Python `round()` 取整的结果。商业性评分列 `scoreHook/scoreTension/scorePayoff/scorePacing/scoreEndingHook/scoreReaderPromise` 保持空值，不能借用来存一致性维度。
 
