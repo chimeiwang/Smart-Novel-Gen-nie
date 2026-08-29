@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import pytest
 from inkforge_agents.providers.base import (
@@ -13,10 +14,10 @@ from inkforge_agents.providers.fake import FakeModelProvider
 from inkforge_agents.queue.cancellation import JobCancelledError
 from inkforge_agents.runtime.agent_runtime import (
     AgentRuntime,
-    ModelToolArgumentsInvalidError,
+    ModelToolProtocolRecoveryFailedError,
 )
 from inkforge_agents.runtime.model_policy import CREATIVE_HIGH, LEGACY_PROVIDER_DEFAULT
-from inkforge_agents.runtime.model_runtime import ModelRuntime
+from inkforge_agents.runtime.model_runtime import ModelCallContext, ModelRuntime
 from inkforge_agents.tools.registry import (
     ToolContext,
     ToolDefinition,
@@ -47,8 +48,39 @@ def turn(
     )
 
 
+def invalid_tool_turn(
+    *,
+    content: str = "",
+    valid_calls: tuple[tuple[str, str, dict[str, object]], ...] = (),
+    name: str = "get_character_detail",
+    code: str = "json_decode_error",
+    argument_character_count: int = 17,
+) -> ModelTurnResult:
+    return ModelTurnResult(
+        content=content,
+        toolCalls=[
+            ModelToolCall(id=call_id, name=tool_name, arguments=arguments)
+            for call_id, tool_name, arguments in valid_calls
+        ],
+        invalidToolCallCount=1,
+        invalidToolCallNames=[name],
+        invalidToolCallCodes=[code],
+        invalidToolCallArgumentCharacterCounts=[argument_character_count],
+        usage=ModelUsage(
+            promptTokens=10,
+            cachedTokens=2,
+            completionTokens=5,
+            totalTokens=15,
+        ),
+        finishReason="tool_calls",
+        rawFinishReason="tool_calls",
+    )
+
+
 class ScriptedProvider:
     billable = False
+    provider_name = "openai_compatible"
+    model_name = "deepseek-v4-flash"
 
     def __init__(self, responses: list[ModelTurnResult | Exception]) -> None:
         self.responses = responses
@@ -60,6 +92,35 @@ class ScriptedProvider:
         if isinstance(response, Exception):
             raise response
         return response
+
+
+class RecordingBilling:
+    def __init__(self) -> None:
+        self.authorizations: list[dict[str, Any]] = []
+        self.usages: list[dict[str, Any]] = []
+
+    async def authorize(
+        self,
+        context: ModelCallContext,
+        payload: dict[str, Any],
+        request_id: str,
+    ) -> dict[str, Any]:
+        del context
+        self.authorizations.append({**payload, "requestId": request_id})
+        return {
+            "requestId": request_id,
+            "grantToken": f"grant-{len(self.authorizations)}",
+            "maxOutputTokens": payload["requestedMaxOutputTokens"],
+        }
+
+    async def report(
+        self,
+        context: ModelCallContext,
+        payload: dict[str, Any],
+        request_id: str,
+    ) -> None:
+        del context
+        self.usages.append({**payload, "reportedRequestId": request_id})
 
 
 class RecordingGateway:
@@ -366,11 +427,15 @@ async def test_runtime_rejects_unexposed_tool_and_invalid_arguments() -> None:
             context=context(),
         )
 
+    invalid_response = turn("", ("call-2", "get_character_detail", {}))
     invalid = make_agent_runtime(
-        ModelRuntime(ScriptedProvider([turn("", ("call-2", "get_character_detail", {}))])),
+        ModelRuntime(ScriptedProvider([invalid_response, invalid_response])),
         registry,
     )
-    with pytest.raises(RuntimeError, match="MODEL_TOOL_ARGUMENTS_INVALID"):
+    with pytest.raises(
+        ModelToolProtocolRecoveryFailedError,
+        match="MODEL_TOOL_PROTOCOL_RECOVERY_FAILED",
+    ):
         await invalid.run(
             policy=LEGACY_PROVIDER_DEFAULT,
             messages=[{"role": "user", "content": "读取角色"}],
@@ -392,25 +457,22 @@ async def test_runtime_reports_bounded_validation_paths_without_argument_values(
         "report": {"raw": raw_model_value},
         "rewriteBrief": [raw_model_value],
     }
+    invalid_response = turn(
+        "",
+        (
+            "call-quality-invalid",
+            "submit_quality_report",
+            invalid_arguments,
+        ),
+    )
     runtime = make_agent_runtime(
         ModelRuntime(
-            ScriptedProvider(
-                [
-                    turn(
-                        "",
-                        (
-                            "call-quality-invalid",
-                            "submit_quality_report",
-                            invalid_arguments,
-                        ),
-                    )
-                ]
-            )
+            ScriptedProvider([invalid_response, invalid_response])
         ),
         registry,
     )
 
-    with pytest.raises(ModelToolArgumentsInvalidError) as caught:
+    with pytest.raises(ModelToolProtocolRecoveryFailedError) as caught:
         await runtime.run(
             policy=LEGACY_PROVIDER_DEFAULT,
             messages=[{"role": "user", "content": "质量检查"}],
@@ -420,8 +482,10 @@ async def test_runtime_reports_bounded_validation_paths_without_argument_values(
         )
 
     error = caught.value
-    assert error.code == "MODEL_TOOL_ARGUMENTS_INVALID"
-    assert error.tool_name == "submit_quality_report"
+    assert error.code == "MODEL_TOOL_PROTOCOL_RECOVERY_FAILED"
+    assert error.protocol_issues == (
+        "tool=submit_quality_report code=schema_validation chars=0",
+    )
     assert len(error.validation_issues) == 10
     assert "loc=scores.characterConsistency type=missing" in error.validation_issues
     assert all(issue.startswith("loc=") and " type=" in issue for issue in error.validation_issues)
@@ -430,6 +494,279 @@ async def test_runtime_reports_bounded_validation_paths_without_argument_values(
     assert "input_value" not in str(error)
     assert error.__cause__ is None
     assert error.__suppress_context__ is True
+
+
+@pytest.mark.asyncio
+async def test_runtime_discards_whole_invalid_tool_package_and_corrects_once() -> None:
+    discarded_content = "首轮不能保留的正文"
+    provider = ScriptedProvider(
+        [
+            invalid_tool_turn(
+                content=discarded_content,
+                valid_calls=(("call-must-not-run", "get_novel_info", {}),),
+            ),
+            turn(
+                "纠正后的工具说明",
+                (
+                    "call-corrected",
+                    "get_character_detail",
+                    {"character_name": "林澈"},
+                ),
+            ),
+            turn("最终完成"),
+        ]
+    )
+    gateway = RecordingGateway()
+    registry = build_default_registry(gateway)
+    runtime = make_agent_runtime(ModelRuntime(provider), registry)
+
+    result = await runtime.run(
+        policy=LEGACY_PROVIDER_DEFAULT,
+        messages=[
+            {"role": "system", "content": "原始系统指令"},
+            {"role": "user", "content": "读取角色"},
+        ],
+        exposed_tools=registry.for_agent(
+            agent_id="设定",
+            capabilities={"novel.read", "character.read"},
+        ),
+        context=context(),
+    )
+
+    assert gateway.calls == ["get_character_detail"]
+    assert result.visibleContent == "纠正后的工具说明\n\n最终完成"
+    assert discarded_content not in result.visibleContent
+    assert result.usage.totalTokens == 45
+    assert len(provider.requests) == 3
+    correction_request = provider.requests[1]
+    assert [message.role for message in correction_request.messages] == [
+        "system",
+        "system",
+        "user",
+    ]
+    assert "工具协议校验" in correction_request.messages[1].content
+    assert discarded_content not in correction_request.model_dump_json()
+    assert correction_request.tools == provider.requests[0].tools
+    assert correction_request.policy == provider.requests[0].policy
+
+
+@pytest.mark.asyncio
+async def test_runtime_corrects_pydantic_invalid_arguments_without_replaying_values() -> None:
+    raw_model_value = "绝不能回放给模型的参数值"
+    provider = ScriptedProvider(
+        [
+            turn(
+                "不能保留",
+                (
+                    "call-invalid",
+                    "get_character_detail",
+                    {"unexpected": raw_model_value},
+                ),
+            ),
+            turn(
+                "",
+                (
+                    "call-corrected",
+                    "get_character_detail",
+                    {"character_name": "林澈"},
+                ),
+            ),
+            turn("已完成"),
+        ]
+    )
+    gateway = RecordingGateway()
+    registry = build_default_registry(gateway)
+    runtime = make_agent_runtime(ModelRuntime(provider), registry)
+
+    result = await runtime.run(
+        policy=LEGACY_PROVIDER_DEFAULT,
+        messages=[{"role": "user", "content": "读取角色"}],
+        exposed_tools=registry.for_agent(
+            agent_id="设定", capabilities={"character.read"}
+        ),
+        context=context(),
+    )
+
+    assert gateway.calls == ["get_character_detail"]
+    assert result.visibleContent == "已完成"
+    assert result.usage.totalTokens == 45
+    assert raw_model_value not in provider.requests[1].model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_runtime_protocol_correction_uses_separate_authorization_and_usage() -> None:
+    class BillableScriptedProvider(ScriptedProvider):
+        billable = True
+
+    provider = BillableScriptedProvider(
+        [
+            invalid_tool_turn(name="submit_validation_report"),
+            turn(
+                "",
+                (
+                    "call-corrected",
+                    "submit_validation_report",
+                    {"hasConflicts": False, "conflicts": []},
+                ),
+            ),
+        ]
+    )
+    billing = RecordingBilling()
+    gateway = RecordingGateway()
+    registry = build_default_registry(gateway)
+    runtime = make_agent_runtime(
+        ModelRuntime(provider, billing=billing),
+        registry,
+    )
+    model_context = ModelCallContext(
+        userId="user-1",
+        novelId="novel-1",
+        taskId="task-1",
+        runId="run-1",
+        agentId="校验",
+    )
+
+    result = await runtime.run(
+        policy=LEGACY_PROVIDER_DEFAULT,
+        messages=[{"role": "user", "content": "校验"}],
+        exposed_tools=registry.for_agent(
+            agent_id="校验", capabilities={"control.validation"}
+        ),
+        context=context("校验"),
+        terminal_control_tools={"submit_validation_report"},
+        model_context=model_context,
+    )
+
+    authorization_ids = [item["requestId"] for item in billing.authorizations]
+    assert len(authorization_ids) == 2
+    assert len(set(authorization_ids)) == 2
+    assert [item["requestId"] for item in billing.usages] == authorization_ids
+    assert [item["totalTokens"] for item in billing.usages] == [15, 15]
+    assert result.usage.totalTokens == 30
+    assert result.finishReason == "terminal_control_tool"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "second_response",
+    [
+        invalid_tool_turn(argument_character_count=29),
+        turn("不能用纯文本绕过工具纠正"),
+    ],
+)
+async def test_runtime_fails_safely_when_single_protocol_correction_does_not_recover(
+    second_response: ModelTurnResult,
+) -> None:
+    provider = ScriptedProvider(
+        [
+            invalid_tool_turn(argument_character_count=23),
+            second_response,
+        ]
+    )
+    gateway = RecordingGateway()
+    registry = build_default_registry(gateway)
+    runtime = make_agent_runtime(ModelRuntime(provider), registry)
+
+    with pytest.raises(ModelToolProtocolRecoveryFailedError) as caught:
+        await runtime.run(
+            policy=LEGACY_PROVIDER_DEFAULT,
+            messages=[{"role": "user", "content": "读取角色"}],
+            exposed_tools=registry.for_agent(
+                agent_id="设定", capabilities={"character.read"}
+            ),
+            context=context(),
+        )
+
+    assert caught.value.code == "MODEL_TOOL_PROTOCOL_RECOVERY_FAILED"
+    assert caught.value.retryable is False
+    assert len(provider.requests) == 2
+    assert gateway.calls == []
+    assert "arguments" not in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_runtime_uses_only_one_protocol_correction_across_business_turns() -> None:
+    provider = ScriptedProvider(
+        [
+            invalid_tool_turn(),
+            turn("", ("call-corrected", "get_novel_info", {})),
+            invalid_tool_turn(argument_character_count=31),
+        ]
+    )
+    gateway = RecordingGateway()
+    registry = build_default_registry(gateway)
+    runtime = make_agent_runtime(ModelRuntime(provider), registry)
+
+    with pytest.raises(ModelToolProtocolRecoveryFailedError):
+        await runtime.run(
+            policy=LEGACY_PROVIDER_DEFAULT,
+            messages=[{"role": "user", "content": "连续调用"}],
+            exposed_tools=registry.for_agent(
+                agent_id="设定",
+                capabilities={"novel.read", "character.read"},
+            ),
+            context=context(),
+        )
+
+    assert len(provider.requests) == 3
+    assert gateway.calls == ["get_novel_info"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("finish_reason", "error_code"),
+    [
+        ("length", "MODEL_OUTPUT_TRUNCATED"),
+        ("content_filter", "MODEL_OUTPUT_FILTERED"),
+        ("insufficient_system_resource", "MODEL_INSUFFICIENT_SYSTEM_RESOURCE"),
+    ],
+)
+async def test_runtime_does_not_correct_invalid_tools_from_incomplete_response(
+    finish_reason: str,
+    error_code: str,
+) -> None:
+    response = invalid_tool_turn().model_copy(
+        update={
+            "finishReason": finish_reason,
+            "rawFinishReason": finish_reason,
+        }
+    )
+    provider = ScriptedProvider([response])
+    gateway = RecordingGateway()
+    registry = build_default_registry(gateway)
+    runtime = make_agent_runtime(ModelRuntime(provider), registry)
+
+    with pytest.raises(RuntimeError, match=error_code):
+        await runtime.run(
+            policy=LEGACY_PROVIDER_DEFAULT,
+            messages=[{"role": "user", "content": "生成"}],
+            exposed_tools=registry.for_agent(
+                agent_id="设定", capabilities={"character.read"}
+            ),
+            context=context(),
+        )
+
+    assert len(provider.requests) == 1
+    assert gateway.calls == []
+
+
+@pytest.mark.asyncio
+async def test_runtime_does_not_spend_correction_call_without_exposed_tools() -> None:
+    provider = ScriptedProvider(
+        [invalid_tool_turn(name="unknown_tool", argument_character_count=7)]
+    )
+    registry = build_default_registry(RecordingGateway())
+    runtime = make_agent_runtime(ModelRuntime(provider), registry)
+
+    with pytest.raises(ModelToolProtocolRecoveryFailedError):
+        await runtime.run(
+            policy=LEGACY_PROVIDER_DEFAULT,
+            messages=[{"role": "user", "content": "普通问答"}],
+            exposed_tools=[],
+            context=context(),
+        )
+
+    assert len(provider.requests) == 1
 
 
 @pytest.mark.asyncio
@@ -699,12 +1036,10 @@ async def test_runtime_preflights_unknown_tool_calls_before_execution(
 ) -> None:
     gateway = RecordingGateway()
     registry = build_default_registry(gateway)
+    response = turn("", ("call-1", tool_name, arguments), finish_reason="unknown")
+    responses = [response] if tool_name == "submit_evaluation" else [response, response]
     runtime = make_agent_runtime(
-        ModelRuntime(
-            ScriptedProvider(
-                [turn("", ("call-1", tool_name, arguments), finish_reason="unknown")]
-            )
-        ),
+        ModelRuntime(ScriptedProvider(responses)),
         registry,
     )
     exposed = (
@@ -713,7 +1048,12 @@ async def test_runtime_preflights_unknown_tool_calls_before_execution(
         else registry.for_agent(agent_id="设定", capabilities={"character.read"})
     )
 
-    with pytest.raises(RuntimeError, match=error_code):
+    expected_error_code = (
+        error_code
+        if tool_name == "submit_evaluation"
+        else "MODEL_TOOL_PROTOCOL_RECOVERY_FAILED"
+    )
+    with pytest.raises(RuntimeError, match=expected_error_code):
         await runtime.run(
             policy=LEGACY_PROVIDER_DEFAULT,
             messages=[{"role": "user", "content": "测试"}],
@@ -761,22 +1101,24 @@ async def test_runtime_allows_unknown_finish_reason_with_valid_tool_calls() -> N
 async def test_runtime_validates_all_tool_calls_before_first_side_effect() -> None:
     gateway = RecordingGateway()
     registry = build_default_registry(gateway)
+    invalid_response = turn(
+        "",
+        ("call-1", "get_novel_info", {}),
+        ("call-2", "get_character_detail", {}),
+    )
     runtime = make_agent_runtime(
         ModelRuntime(
             ScriptedProvider(
-                [
-                    turn(
-                        "",
-                        ("call-1", "get_novel_info", {}),
-                        ("call-2", "get_character_detail", {}),
-                    )
-                ]
+                [invalid_response, invalid_response]
             )
         ),
         registry,
     )
 
-    with pytest.raises(RuntimeError, match="MODEL_TOOL_ARGUMENTS_INVALID"):
+    with pytest.raises(
+        ModelToolProtocolRecoveryFailedError,
+        match="MODEL_TOOL_PROTOCOL_RECOVERY_FAILED",
+    ):
         await runtime.run(
             policy=LEGACY_PROVIDER_DEFAULT,
             messages=[{"role": "user", "content": "测试"}],

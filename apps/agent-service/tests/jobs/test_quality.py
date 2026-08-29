@@ -19,6 +19,7 @@ from inkforge_agents.runtime.agent_runner import AgentRunner
 from inkforge_agents.runtime.agent_runtime import (
     AgentRuntime,
     ModelToolArgumentsInvalidError,
+    ModelToolProtocolRecoveryFailedError,
 )
 from inkforge_agents.runtime.execution import QUALITY_AGENT_ID
 from inkforge_agents.runtime.model_runtime import ModelRuntime
@@ -110,6 +111,35 @@ def test_quality_failure_log_includes_only_safe_validation_issues(
     assert (
         "validation_issues=loc=issues.0.location type=string_type|"
         "loc=rewriteBrief type=string_type" in message
+    )
+    assert raw_model_value not in message
+
+
+def test_quality_failure_log_includes_only_safe_protocol_issues(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    raw_model_value = "不能进入日志的原始 arguments"
+    error = ModelToolProtocolRecoveryFailedError(
+        protocol_issues=(
+            "tool=submit_quality_report code=json_decode_error chars=8192",
+            f"tool={raw_model_value} code=json_decode_error chars=2",
+        ),
+    )
+
+    caplog.set_level("WARNING", logger="inkforge_agents.jobs.quality")
+    _log_failure(
+        quality_job(),
+        "check-1",
+        error,
+        phase="run",
+        retryable=False,
+    )
+
+    message = caplog.records[-1].getMessage()
+    assert "failure_code=MODEL_TOOL_PROTOCOL_RECOVERY_FAILED" in message
+    assert (
+        "protocol_issues=tool=submit_quality_report "
+        "code=json_decode_error chars=8192" in message
     )
     assert raw_model_value not in message
 

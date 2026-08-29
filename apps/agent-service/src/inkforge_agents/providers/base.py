@@ -46,6 +46,11 @@ ProviderTransportErrorCode = Literal[
     "connection_error",
     "timeout_error",
 ]
+ProviderProtocolErrorCode = Literal[
+    "invalid_response_json",
+    "invalid_response_envelope",
+    "invalid_usage",
+]
 
 
 class ProviderTransportError(RuntimeError):
@@ -74,6 +79,35 @@ class ProviderTransportError(RuntimeError):
             "ProviderTransportError("
             f"code={self.code!r}, statusCode={self.statusCode!r}, "
             f"requestId={self.requestId!r}, retryable=True)"
+        )
+
+
+class ProviderProtocolError(RuntimeError):
+    """不携带供应商正文或底层异常的不可重试响应协议错误。"""
+
+    retryable = False
+
+    def __init__(
+        self,
+        *,
+        code: ProviderProtocolErrorCode,
+        statusCode: int | None,
+        requestId: str | None,
+    ) -> None:
+        self.code = code
+        self.statusCode = statusCode
+        self.requestId = requestId
+        super().__init__(
+            f"供应商响应协议失败(code={code},statusCode={statusCode},requestId={requestId})"
+        )
+
+    def __repr__(self) -> str:
+        """显式限制 repr 字段，避免调试器展示供应商响应或底层异常。"""
+
+        return (
+            "ProviderProtocolError("
+            f"code={self.code!r}, statusCode={self.statusCode!r}, "
+            f"requestId={self.requestId!r}, retryable=False)"
         )
 
 

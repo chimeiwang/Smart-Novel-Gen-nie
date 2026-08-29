@@ -8,7 +8,11 @@ from typing import Any
 import httpx
 import pytest
 from inkforge_agents.config import Settings
-from inkforge_agents.providers.base import ModelTurnRequest, ProviderTransportError
+from inkforge_agents.providers.base import (
+    ModelTurnRequest,
+    ProviderProtocolError,
+    ProviderTransportError,
+)
 from inkforge_agents.providers.deepseek_v4 import (
     DeepSeekV4Provider,
     _normalize_deepseek_quality_arguments,
@@ -334,6 +338,33 @@ async def test_quality_strict_response_normalizes_optional_empty_strings() -> No
 
 
 @pytest.mark.asyncio
+async def test_quality_strict_response_is_revalidated_against_original_schema() -> None:
+    arguments = _valid_quality_arguments()
+    arguments["qualityGate"] = "invalid-secret-gate"
+    provider, _, client = _provider(response=_quality_tool_response(arguments))
+    try:
+        result = await provider.complete_turn(
+            _request(
+                policy=QUALITY_NO_THINKING,
+                tool_name="submit_quality_report",
+                strict=True,
+                parameters=QualityReportArgs.model_json_schema(),
+            )
+        )
+    finally:
+        await client.aclose()
+
+    assert result.toolCalls == []
+    assert result.invalidToolCallCount == 1
+    assert result.invalidToolCallNames == ["submit_quality_report"]
+    assert result.invalidToolCallCodes == ["provider_strict_schema_violation"]
+    assert result.invalidToolCallArgumentCharacterCounts == [
+        len(json.dumps(arguments, ensure_ascii=False))
+    ]
+    assert "invalid-secret-gate" not in result.model_dump_json()
+
+
+@pytest.mark.asyncio
 async def test_non_quality_strict_tool_fails_before_http_request() -> None:
     provider, requests, client = _provider()
     try:
@@ -646,10 +677,12 @@ async def test_deepseek_requires_exactly_one_choice(choices: list[dict[str, Any]
     body["choices"] = choices
     provider, _, client = _provider(response=body)
     try:
-        with pytest.raises(ValueError, match="choices.*恰好一个"):
+        with pytest.raises(ProviderProtocolError) as caught:
             await provider.complete_turn(_request())
     finally:
         await client.aclose()
+    assert caught.value.code == "invalid_response_envelope"
+    assert caught.value.retryable is False
 
 
 @pytest.mark.parametrize(
@@ -725,10 +758,12 @@ async def test_deepseek_requires_exactly_one_choice(choices: list[dict[str, Any]
 async def test_deepseek_rejects_missing_invalid_or_inconsistent_usage(usage: object) -> None:
     provider, _, client = _provider(response=_response_with_usage(usage))
     try:
-        with pytest.raises(ValueError, match="用量"):
+        with pytest.raises(ProviderProtocolError) as caught:
             await provider.complete_turn(_request())
     finally:
         await client.aclose()
+    assert caught.value.code == "invalid_usage"
+    assert caught.value.retryable is False
 
 
 @pytest.mark.asyncio
@@ -739,10 +774,11 @@ async def test_deepseek_requires_prompt_cache_hit_tokens() -> None:
         )
     )
     try:
-        with pytest.raises(ValueError, match="prompt_cache_hit_tokens"):
+        with pytest.raises(ProviderProtocolError) as caught:
             await provider.complete_turn(_request())
     finally:
         await client.aclose()
+    assert caught.value.code == "invalid_usage"
 
 
 @pytest.mark.asyncio
@@ -754,12 +790,17 @@ async def test_deepseek_converts_invalid_utf8_to_sanitized_protocol_error() -> N
     )
     provider = DeepSeekV4Provider(_settings(), client=client)
     try:
-        with pytest.raises(ValueError, match="JSON|协议") as error:
+        with pytest.raises(ProviderProtocolError) as error:
             await provider.complete_turn(_request())
     finally:
         await client.aclose()
+    assert error.value.code == "invalid_response_json"
+    assert error.value.statusCode == 200
+    assert error.value.retryable is False
     assert "UnicodeDecodeError" not in str(error.value)
     assert "\\xff" not in str(error.value)
+    assert error.value.__cause__ is None
+    assert error.value.__context__ is None
 
 
 @pytest.mark.asyncio
@@ -824,14 +865,234 @@ async def test_tool_call_fixture_preserves_reasoning_and_usage_diagnostics() -> 
 
 
 @pytest.mark.asyncio
-async def test_invalid_tool_arguments_fail_before_registry_validation() -> None:
+async def test_invalid_tool_arguments_return_safe_diagnostics_with_usage() -> None:
     fixture = json.loads((FIXTURES / "invalid_tool_call.json").read_text(encoding="utf-8"))
     provider, _, client = _provider(response=fixture)
     try:
-        with pytest.raises(ValueError, match="JSON|对象|工具名称"):
-            await provider.complete_turn(_request(policy=CREATIVE_HIGH))
+        result = await provider.complete_turn(_request(policy=CREATIVE_HIGH))
     finally:
         await client.aclose()
+
+    assert result.toolCalls == []
+    assert result.invalidToolCallCount == 1
+    assert result.invalidToolCallNames == ["lookup"]
+    assert result.invalidToolCallCodes == ["unknown_invalid_tool_call"]
+    assert result.invalidToolCallArgumentCharacterCounts == [5]
+    assert result.usage.totalTokens == 2
+    assert result.finishReason == "tool_calls"
+
+
+@pytest.mark.asyncio
+async def test_deepseek_recovers_only_missing_container_closers_after_schema_validation() -> None:
+    response = {
+        "id": "resp-recovered",
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call-recovered",
+                            "type": "function",
+                            "function": {
+                                "name": "lookup",
+                                "arguments": '{"query":"世界观","filters":["人物"',
+                            },
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 3,
+            "prompt_cache_hit_tokens": 0,
+            "completion_tokens": 2,
+            "total_tokens": 5,
+        },
+    }
+    parameters = {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string"},
+            "filters": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["query", "filters"],
+        "additionalProperties": False,
+    }
+    provider, _, client = _provider(response=response)
+    try:
+        result = await provider.complete_turn(
+            _request(policy=CREATIVE_HIGH, parameters=parameters)
+        )
+    finally:
+        await client.aclose()
+
+    assert result.toolCalls[0].arguments == {
+        "query": "世界观",
+        "filters": ["人物"],
+    }
+    assert result.invalidToolCallCount == 0
+    assert result.recoveredToolCallCount == 1
+    assert result.recoveredToolCallCodes == ["append_container_closers"]
+    assert result.recoveredToolCallAppendedContainerCounts == [2]
+
+
+@pytest.mark.asyncio
+async def test_deepseek_does_not_recover_closed_json_that_fails_original_schema() -> None:
+    raw_arguments = '{"unknown":"字段"'
+    response = {
+        "id": "resp-schema-rejected",
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call-schema-rejected",
+                            "type": "function",
+                            "function": {
+                                "name": "lookup",
+                                "arguments": raw_arguments,
+                            },
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 3,
+            "prompt_cache_hit_tokens": 0,
+            "completion_tokens": 2,
+            "total_tokens": 5,
+        },
+    }
+    parameters = {
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+        "required": ["query"],
+        "additionalProperties": False,
+    }
+    provider, _, client = _provider(response=response)
+    try:
+        result = await provider.complete_turn(_request(parameters=parameters))
+    finally:
+        await client.aclose()
+
+    assert result.toolCalls == []
+    assert result.invalidToolCallCodes == ["json_decode_error"]
+    assert result.recoveredToolCallCount == 0
+    assert raw_arguments not in result.model_dump_json()
+
+
+@pytest.mark.asyncio
+async def test_deepseek_rejects_nonstandard_json_constants_as_safe_diagnostic() -> None:
+    raw_arguments = '{"query":NaN}'
+    response = {
+        "id": "resp-nonstandard-json",
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": "call-nonstandard-json",
+                            "type": "function",
+                            "function": {
+                                "name": "lookup",
+                                "arguments": raw_arguments,
+                            },
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 3,
+            "prompt_cache_hit_tokens": 0,
+            "completion_tokens": 2,
+            "total_tokens": 5,
+        },
+    }
+    provider, _, client = _provider(response=response)
+    try:
+        result = await provider.complete_turn(_request())
+    finally:
+        await client.aclose()
+
+    assert result.toolCalls == []
+    assert result.invalidToolCallCodes == ["json_decode_error"]
+    assert result.invalidToolCallArgumentCharacterCounts == [len(raw_arguments)]
+    assert raw_arguments not in result.model_dump_json()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("raw_arguments", "expected_code"),
+    [
+        ('{"query":"未闭合字符串}', "json_decode_error"),
+        ('{"query":}', "json_decode_error"),
+        ('{"unknown":"字段"', "json_decode_error"),
+        ('{"query":"值"}]', "json_decode_error"),
+    ],
+)
+async def test_deepseek_does_not_guess_repair_invalid_tool_arguments(
+    raw_arguments: str,
+    expected_code: str,
+) -> None:
+    unknown_tool_name = "secret_tool_name_must_not_leak"
+    response = {
+        "id": "resp-not-recovered",
+        "choices": [
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "不能接受的半坏正文",
+                    "tool_calls": [
+                        {
+                            "id": "call-invalid",
+                            "type": "function",
+                            "function": {
+                                "name": unknown_tool_name,
+                                "arguments": raw_arguments,
+                            },
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 3,
+            "prompt_cache_hit_tokens": 0,
+            "completion_tokens": 2,
+            "total_tokens": 5,
+        },
+    }
+    parameters = {
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+        "required": ["query"],
+        "additionalProperties": False,
+    }
+    provider, _, client = _provider(response=response)
+    try:
+        result = await provider.complete_turn(_request(parameters=parameters))
+    finally:
+        await client.aclose()
+
+    assert result.toolCalls == []
+    assert result.invalidToolCallNames == ["未知工具"]
+    assert result.invalidToolCallCodes == [expected_code]
+    assert result.invalidToolCallArgumentCharacterCounts == [len(raw_arguments)]
+    assert result.recoveredToolCallCount == 0
+    assert unknown_tool_name not in result.model_dump_json()
+    assert raw_arguments not in result.model_dump_json()
 
 
 @pytest.mark.asyncio

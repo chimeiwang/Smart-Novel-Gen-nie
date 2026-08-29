@@ -71,6 +71,10 @@ Agent Service 不加入数据库网络、不接收 `DATABASE_URL`，只能通过
   usage 不产生任何写副作用，`balanceAfterMicros` 返回重放时查询到的当前余额；
 - 重复回调不能重复扣费。
 
+AgentRuntime 为无效工具 JSON 或本地参数契约发起的一次显式协议纠正，必须作为新的模型调用独立申请授权并使用
+不同 `requestId` 回报真实 usage；首次无效调用已有可靠 usage 时也必须正常结算，不能把两次调用合并、覆盖或
+伪装成免费重试。Provider 连可靠 usage 都无法构造时不得自动纠正或伪造零 Token。
+
 `TokenUsage.requestId` 唯一。相同 `requestId` 只有在用户、小说、任务、运行、Agent、模型和四项 token
 全部一致时才作为安全重放；任何身份或 usage 差异都返回冲突。`cachedTokens` 是 `promptTokens` 的子集，
 `totalTokens = promptTokens + completionTokens`，汇总时不得再次把缓存 token 加入合计。
@@ -175,6 +179,9 @@ readiness 只阻断抽帧和导出，不能阻断历史版本读取。成片必�
 - 使用 `INKFORGE-HUMAN-LOG/2` 长度分帧格式保存完整模型 messages、模型正文和中文状态切换；正文
   中出现日志标记或 JSON 不得污染结构解析。
 - 每个模型调用区块记录 `taskId`、`runId`、Core 计费 `requestId`、provider/model 和四项实际 token；
+- 工具协议异常只额外记录无效调用数量、允许列表内工具名、稳定分类和 arguments 字符数；确定性恢复只记录
+  `append_container_closers` 与追加容器数。显式协议纠正必须形成独立模型区块和计费 `requestId`，日志不得保存
+  或重建原始 arguments；
 - 可选 `promptCacheMissTokens`、`reasoningTokens` 仅作为诊断结构头记录；DeepSeek 原始 `reasoning_content`
   只在进程内工具轮次回放，绝不持久化或写入日志正文；
   非计费调用显示无计费请求标识，Provider 无可靠 usage 的失败不伪造 token，任何区块都不记录

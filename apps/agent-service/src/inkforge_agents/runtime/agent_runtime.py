@@ -45,6 +45,16 @@ _SAFE_VALIDATION_ISSUE_PATTERN = re.compile(
     r"type=[a-z][a-z0-9_]{0,63}"
 )
 _MAX_VALIDATION_ISSUES = 10
+_MAX_PROTOCOL_ISSUES = 10
+_SAFE_PROTOCOL_ISSUE_PATTERN = re.compile(
+    r"tool=[a-z][a-z0-9_]{0,63} "
+    r"code=[a-z][a-z0-9_]{0,63} chars=[0-9]{1,9}"
+)
+_TOOL_PROTOCOL_CORRECTION_INSTRUCTION = (
+    "上一轮输出未通过工具协议校验。请重新生成本轮完整工具调用；"
+    "必须只使用当前声明的工具，arguments 必须是完整 JSON 对象并严格符合对应 JSON Schema；"
+    "不要解释、不要输出纯文本替代工具调用，也不要复述上一轮内容。"
+)
 
 
 class ModelToolArgumentsInvalidError(RuntimeError):
@@ -91,6 +101,76 @@ class ModelToolArgumentsInvalidError(RuntimeError):
         return cls(tool_name, issues)
 
 
+class ModelToolProtocolRecoveryFailedError(RuntimeError):
+    """一次有界纠正后仍无合法工具调用；只携带安全派生诊断。"""
+
+    code = "MODEL_TOOL_PROTOCOL_RECOVERY_FAILED"
+    retryable = False
+
+    def __init__(
+        self,
+        *,
+        protocol_issues: Sequence[str] = (),
+        validation_issues: Sequence[str] = (),
+    ) -> None:
+        self.protocol_issues = tuple(
+            issue
+            for issue in protocol_issues[:_MAX_PROTOCOL_ISSUES]
+            if _SAFE_PROTOCOL_ISSUE_PATTERN.fullmatch(issue)
+        )
+        self.validation_issues = tuple(
+            issue
+            for issue in validation_issues[:_MAX_VALIDATION_ISSUES]
+            if _SAFE_VALIDATION_ISSUE_PATTERN.fullmatch(issue)
+        )
+        protocol_summary = "|".join(self.protocol_issues) or "none"
+        validation_summary = "|".join(self.validation_issues) or "none"
+        super().__init__(
+            f"{self.code}：工具协议纠正失败"
+            f"（protocol={protocol_summary},validation={validation_summary}）"
+        )
+
+    @classmethod
+    def from_response(
+        cls,
+        response: ModelTurnResult,
+    ) -> ModelToolProtocolRecoveryFailedError:
+        issues: list[str] = []
+        for name, code, character_count in zip(
+            response.invalidToolCallNames,
+            response.invalidToolCallCodes,
+            response.invalidToolCallArgumentCharacterCounts,
+            strict=True,
+        ):
+            safe_name = (
+                name if _SAFE_TOOL_NAME_PATTERN.fullmatch(name) else "unknown_tool"
+            )
+            issues.append(
+                f"tool={safe_name} code={code} chars={min(character_count, 999_999_999)}"
+            )
+        return cls(protocol_issues=issues)
+
+    @classmethod
+    def from_arguments_error(
+        cls,
+        error: ModelToolArgumentsInvalidError,
+    ) -> ModelToolProtocolRecoveryFailedError:
+        return cls(
+            protocol_issues=(
+                f"tool={error.tool_name} code=schema_validation chars=0",
+            ),
+            validation_issues=error.validation_issues,
+        )
+
+    @classmethod
+    def missing_corrected_tool_call(cls) -> ModelToolProtocolRecoveryFailedError:
+        return cls(
+            protocol_issues=(
+                "tool=unknown_tool code=missing_corrected_tool_call chars=0",
+            )
+        )
+
+
 def _safe_validation_location(value: object) -> str:
     if not isinstance(value, tuple) or not value:
         return "<root>"
@@ -103,6 +183,27 @@ def _safe_validation_location(value: object) -> str:
         else:
             parts.append("?")
     return ".".join(parts)
+
+
+def _with_tool_protocol_correction(
+    conversation: Sequence[ModelMessage],
+) -> list[ModelMessage]:
+    """插入固定纠正指令，不回放供应商无效响应或 arguments。"""
+
+    leading_system_count = 0
+    for message in conversation:
+        if message.role != "system":
+            break
+        leading_system_count += 1
+    correction = ModelMessage(
+        role="system",
+        content=_TOOL_PROTOCOL_CORRECTION_INSTRUCTION,
+    )
+    return [
+        *conversation[:leading_system_count],
+        correction,
+        *conversation[leading_system_count:],
+    ]
 
 
 class AgentRuntime:
@@ -140,31 +241,72 @@ class AgentRuntime:
         tool_results: list[RuntimeToolResult] = []
         usage = empty_usage()
         active_builder_key: str | None = None
+        protocol_correction_used = False
 
         for _ in range(max_iterations):
-            await self._ensure_active(context)
             available_tools = [
                 tool
                 for tool in exposed_tools
                 if not (active_builder_key is not None and tool.name == "start_update_builder")
             ]
-            response = await self._model_runtime.run_turn(
-                ModelTurnRequest(
-                    messages=conversation,
-                    tools=[tool.as_model_tool() for tool in available_tools],
-                    maxOutputTokens=self._max_output_tokens,
-                    policy=policy,
-                ),
-                context=model_context,
-            )
-            await self._ensure_active(context)
-            usage = add_usage(usage, response.usage)
-            validated_calls = self._preflight_response(
-                response,
-                {tool.name: tool for tool in available_tools},
-                context,
-                terminal_control_tools,
-            )
+            request_messages = conversation
+            correction_in_progress = False
+            while True:
+                await self._ensure_active(context)
+                response = await self._model_runtime.run_turn(
+                    ModelTurnRequest(
+                        messages=request_messages,
+                        tools=[tool.as_model_tool() for tool in available_tools],
+                        maxOutputTokens=self._max_output_tokens,
+                        policy=policy,
+                    ),
+                    context=model_context,
+                )
+                await self._ensure_active(context)
+                usage = add_usage(usage, response.usage)
+                self._raise_incomplete_response(response)
+
+                if response.invalidToolCallCount:
+                    protocol_error = ModelToolProtocolRecoveryFailedError.from_response(
+                        response
+                    )
+                    if protocol_correction_used or not available_tools:
+                        raise protocol_error from None
+                    protocol_correction_used = True
+                    correction_in_progress = True
+                    request_messages = _with_tool_protocol_correction(conversation)
+                    continue
+
+                if (
+                    correction_in_progress
+                    and response.finishReason == "tool_calls"
+                    and not response.toolCalls
+                ):
+                    raise (
+                        ModelToolProtocolRecoveryFailedError.missing_corrected_tool_call()
+                    ) from None
+                try:
+                    validated_calls = self._preflight_response(
+                        response,
+                        {tool.name: tool for tool in available_tools},
+                        context,
+                        terminal_control_tools,
+                    )
+                except ModelToolArgumentsInvalidError as error:
+                    protocol_error = (
+                        ModelToolProtocolRecoveryFailedError.from_arguments_error(error)
+                    )
+                    if protocol_correction_used:
+                        raise protocol_error from None
+                    protocol_correction_used = True
+                    correction_in_progress = True
+                    request_messages = _with_tool_protocol_correction(conversation)
+                    continue
+                if correction_in_progress and not validated_calls:
+                    raise (
+                        ModelToolProtocolRecoveryFailedError.missing_corrected_tool_call()
+                    ) from None
+                break
             if response.content:
                 visible_parts.append(response.content)
             if not validated_calls:
@@ -340,26 +482,7 @@ class AgentRuntime:
         context: ToolContext,
         terminal_control_tools: set[str] | frozenset[str],
     ) -> list[tuple[ModelToolCall, ToolDefinition, dict[str, Any]]]:
-        raw_finish_reason = (
-            response.rawFinishReason
-            if response.rawFinishReason is not None
-            else "未提供"
-        )
-        if response.finishReason == "length":
-            raise RuntimeError(
-                "MODEL_OUTPUT_TRUNCATED：供应商报告模型输出达到长度上限"
-                f"（原始原因：{raw_finish_reason}）"
-            )
-        if response.finishReason == "content_filter":
-            raise RuntimeError(
-                "MODEL_OUTPUT_FILTERED：供应商报告模型输出被内容过滤"
-                f"（原始原因：{raw_finish_reason}）"
-            )
-        if response.finishReason == "insufficient_system_resource":
-            raise RuntimeError(
-                "MODEL_INSUFFICIENT_SYSTEM_RESOURCE：供应商报告系统资源不足"
-                f"（原始原因：{raw_finish_reason}）"
-            )
+        self._raise_incomplete_response(response)
 
         has_tool_calls = bool(response.toolCalls)
         if (response.finishReason == "stop" and has_tool_calls) or (
@@ -410,6 +533,29 @@ class AgentRuntime:
                 "MODEL_TERMINAL_TOOL_CONFLICT：同一模型响应包含多个终止控制工具"
             )
         return validated_calls
+
+    @staticmethod
+    def _raise_incomplete_response(response: ModelTurnResult) -> None:
+        raw_finish_reason = (
+            response.rawFinishReason
+            if response.rawFinishReason is not None
+            else "未提供"
+        )
+        if response.finishReason == "length":
+            raise RuntimeError(
+                "MODEL_OUTPUT_TRUNCATED：供应商报告模型输出达到长度上限"
+                f"（原始原因：{raw_finish_reason}）"
+            )
+        if response.finishReason == "content_filter":
+            raise RuntimeError(
+                "MODEL_OUTPUT_FILTERED：供应商报告模型输出被内容过滤"
+                f"（原始原因：{raw_finish_reason}）"
+            )
+        if response.finishReason == "insufficient_system_resource":
+            raise RuntimeError(
+                "MODEL_INSUFFICIENT_SYSTEM_RESOURCE：供应商报告系统资源不足"
+                f"（原始原因：{raw_finish_reason}）"
+            )
 
     @staticmethod
     def _normalize_result(result: object) -> dict[str, Any]:

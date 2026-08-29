@@ -189,6 +189,8 @@ class HumanWorkflowLog:
                 + (
                     record.providerResponseId if record.providerResponseId is not None else "未提供"
                 ),
+                _invalid_tool_call_summary(record),
+                _recovered_tool_call_summary(record),
                 "Token 消耗："
                 f"输入 {usage.promptTokens} | "
                 f"缓存 {usage.cachedTokens} | "
@@ -822,6 +824,43 @@ def _role_label(value: object) -> str:
         "tool": "工具",
     }
     return labels.get(str(value), str(value or "未知"))
+
+
+def _invalid_tool_call_summary(record: ModelCallLogRecord) -> str:
+    if record.invalidToolCallCount == 0:
+        return "无效工具调用：无"
+    details = []
+    for name, code, character_count in zip(
+        record.invalidToolCallNames,
+        record.invalidToolCallCodes,
+        record.invalidToolCallArgumentCharacterCounts,
+        strict=True,
+    ):
+        safe_name = (
+            name if re.fullmatch(r"[a-z][a-z0-9_]{0,63}", name) else "未知工具"
+        )
+        details.append(f"{safe_name}/{code}/{character_count}字符")
+    return (
+        f"无效工具调用：{record.invalidToolCallCount}；"
+        + (" | ".join(details) if details else "诊断缺失")
+    )
+
+
+def _recovered_tool_call_summary(record: ModelCallLogRecord) -> str:
+    if record.recoveredToolCallCount == 0:
+        return "工具调用确定性恢复：无"
+    details = [
+        f"{code}/追加{appended_count}个容器闭合符"
+        for code, appended_count in zip(
+            record.recoveredToolCallCodes,
+            record.recoveredToolCallAppendedContainerCounts,
+            strict=True,
+        )
+    ]
+    return (
+        f"工具调用确定性恢复：{record.recoveredToolCallCount}；"
+        + (" | ".join(details) if details else "审计缺失")
+    )
 
 
 def _json(value: object) -> str:

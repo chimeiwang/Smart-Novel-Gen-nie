@@ -202,6 +202,48 @@ def test_human_log_records_each_model_call_usage_without_accumulation(
     assert written.count("Token 消耗：输入 3 | 缓存 0 | 输出 4 | 合计 7") == 1
 
 
+def test_human_log_records_safe_tool_protocol_diagnostics_without_arguments(
+    tmp_path: Path,
+) -> None:
+    log = HumanWorkflowLog(tmp_path)
+    log.start_run(
+        run_id="run-tool-protocol",
+        task_id="task-tool-protocol",
+        run_kind="质量检查",
+        user_id="user-1",
+        novel_id="novel-1",
+        chapter_id="chapter-1",
+    )
+    raw_arguments = '{"report":"绝不能进入日志的原始参数"'
+    record = _model_record(
+        run_id="run-tool-protocol",
+        task_id="task-tool-protocol",
+        prompt_tokens=10,
+        completion_tokens=20,
+    ).model_copy(
+        update={
+            "invalidToolCallCount": 1,
+            "invalidToolCallNames": ["submit_quality_report"],
+            "invalidToolCallCodes": ["json_decode_error"],
+            "invalidToolCallArgumentCharacterCounts": [len(raw_arguments)],
+            "recoveredToolCallCount": 1,
+            "recoveredToolCallCodes": ["append_container_closers"],
+            "recoveredToolCallAppendedContainerCounts": [2],
+        }
+    )
+
+    log.record_model_call(record)
+    written = log.finish_run("run-tool-protocol", "错误").read_text(encoding="utf-8")
+
+    assert (
+        "无效工具调用：1；submit_quality_report/json_decode_error/"
+        f"{len(raw_arguments)}字符" in written
+    )
+    assert "工具调用确定性恢复：1；append_container_closers/追加2个容器闭合符" in written
+    assert raw_arguments not in written
+    assert "绝不能进入日志的原始参数" not in written
+
+
 def test_human_log_payload_cannot_forge_summary_or_model_sequence(
     tmp_path: Path,
 ) -> None:

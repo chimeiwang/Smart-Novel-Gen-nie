@@ -3,23 +3,28 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping
 from copy import deepcopy
-from typing import Any
+from typing import Any, cast
 from urllib.parse import unquote, urlsplit
 
 import httpx
+import jsonschema_rs
 
 from ..config import Settings
 from .base import (
     ModelFinishReason,
+    ModelInvalidToolCallCode,
     ModelMessage,
     ModelToolCall,
+    ModelToolRecoveryCode,
     ModelTurnRequest,
     ModelTurnResult,
     ModelUsage,
     ModelUsageDiagnostics,
+    ProviderProtocolError,
     ProviderTransportError,
 )
 from .openai_compatible import (
+    _append_missing_container_closers,
     _resolve_deepseek_strict_base_url,
     normalize_finish_reason,
 )
@@ -152,11 +157,25 @@ class DeepSeekV4Provider:
                 statusCode=response.status_code,
                 requestId=_response_request_id(response),
             )
+        protocol_error: ProviderProtocolError | None = None
         try:
             body = response.json()
-        except (ValueError, UnicodeError) as exc:
-            raise ValueError("DeepSeek 响应不是有效 JSON") from exc
-        result = _parse_response(body)
+        except (ValueError, UnicodeError):
+            protocol_error = ProviderProtocolError(
+                code="invalid_response_json",
+                statusCode=response.status_code,
+                requestId=_response_request_id(response),
+            )
+            body = None
+        # 与网络错误相同，离开捕获块后再抛出，清除可能携带正文的 JSON 异常上下文。
+        if protocol_error is not None:
+            raise protocol_error
+        result = _parse_response(
+            body,
+            request,
+            status_code=response.status_code,
+            request_id=_response_request_id(response),
+        )
         return (
             _normalize_deepseek_quality_result(result)
             if use_strict_endpoint
@@ -467,67 +486,275 @@ def _apply_policy(payload: dict[str, Any], request: ModelTurnRequest) -> None:
             }
 
 
-def _parse_response(body: object) -> ModelTurnResult:
+class _ParsedToolCalls:
+    """DeepSeek 工具调用的有效结果、安全失败诊断与恢复审计。"""
+
+    def __init__(self) -> None:
+        self.calls: list[ModelToolCall] = []
+        self.invalid_names: list[str] = []
+        self.invalid_codes: list[ModelInvalidToolCallCode] = []
+        self.invalid_argument_character_counts: list[int] = []
+        self.recovered_codes: list[ModelToolRecoveryCode] = []
+        self.recovered_appended_container_counts: list[int] = []
+
+    def add_invalid(
+        self,
+        *,
+        name: str,
+        code: ModelInvalidToolCallCode,
+        argument_character_count: int,
+    ) -> None:
+        self.invalid_names.append(name)
+        self.invalid_codes.append(code)
+        self.invalid_argument_character_counts.append(argument_character_count)
+
+
+def _parse_response(
+    body: object,
+    request: ModelTurnRequest,
+    *,
+    status_code: int,
+    request_id: str | None,
+) -> ModelTurnResult:
     if not isinstance(body, Mapping):
-        raise ValueError("DeepSeek 响应顶层不是对象")
+        raise ProviderProtocolError(
+            code="invalid_response_envelope",
+            statusCode=status_code,
+            requestId=request_id,
+        )
     choices = body.get("choices")
     if not isinstance(choices, list) or len(choices) != 1 or not isinstance(choices[0], Mapping):
-        raise ValueError("DeepSeek 响应 choices 必须恰好一个")
+        raise ProviderProtocolError(
+            code="invalid_response_envelope",
+            statusCode=status_code,
+            requestId=request_id,
+        )
     choice = choices[0]
     message = choice.get("message")
     if not isinstance(message, Mapping):
-        raise ValueError("DeepSeek 响应缺少 message")
+        raise ProviderProtocolError(
+            code="invalid_response_envelope",
+            statusCode=status_code,
+            requestId=request_id,
+        )
     content = message.get("content")
     if content is None:
         content = ""
     if not isinstance(content, str):
-        raise ValueError("DeepSeek 响应 content 不是文本或 null")
-    tool_calls = _parse_tool_calls(message.get("tool_calls", []))
+        raise ProviderProtocolError(
+            code="invalid_response_envelope",
+            statusCode=status_code,
+            requestId=request_id,
+        )
+    usage_protocol_error: ProviderProtocolError | None = None
+    try:
+        usage = _parse_usage(body.get("usage"))
+    except ValueError:
+        usage_protocol_error = ProviderProtocolError(
+            code="invalid_usage",
+            statusCode=status_code,
+            requestId=request_id,
+        )
+        usage = None
+    if usage_protocol_error is not None:
+        raise usage_protocol_error
+    usage = cast(tuple[ModelUsage, ModelUsageDiagnostics], usage)
+    parsed_tool_calls = _parse_tool_calls(message.get("tool_calls", []), request)
     raw_reason = choice.get("finish_reason")
     normalized: ModelFinishReason = normalize_finish_reason(raw_reason)
-    usage = _parse_usage(body.get("usage"))
-    response_id = body.get("id")
+    envelope_protocol_error: ProviderProtocolError | None = None
+    try:
+        reasoning_content = _optional_text(message.get("reasoning_content"))
+        response_id = _optional_text(body.get("id"))
+    except ValueError:
+        envelope_protocol_error = ProviderProtocolError(
+            code="invalid_response_envelope",
+            statusCode=status_code,
+            requestId=request_id,
+        )
+        reasoning_content = None
+        response_id = None
+    if envelope_protocol_error is not None:
+        raise envelope_protocol_error
     return ModelTurnResult(
         content=content,
-        reasoningContent=_optional_text(message.get("reasoning_content")),
-        toolCalls=tool_calls,
-        providerResponseId=_optional_text(response_id),
+        reasoningContent=reasoning_content,
+        toolCalls=parsed_tool_calls.calls,
+        invalidToolCallCount=len(parsed_tool_calls.invalid_codes),
+        invalidToolCallNames=parsed_tool_calls.invalid_names,
+        invalidToolCallCodes=parsed_tool_calls.invalid_codes,
+        invalidToolCallArgumentCharacterCounts=(
+            parsed_tool_calls.invalid_argument_character_counts
+        ),
+        recoveredToolCallCount=len(parsed_tool_calls.recovered_codes),
+        recoveredToolCallCodes=parsed_tool_calls.recovered_codes,
+        recoveredToolCallAppendedContainerCounts=(
+            parsed_tool_calls.recovered_appended_container_counts
+        ),
+        providerResponseId=response_id,
         usage=usage[0],
         diagnostics=usage[1],
         finishReason=normalized,
         rawFinishReason=_raw_reason(raw_reason),
+        effectiveMaxOutputTokens=request.maxOutputTokens,
     )
 
 
-def _parse_tool_calls(raw: object) -> list[ModelToolCall]:
+def _parse_tool_calls(
+    raw: object,
+    request: ModelTurnRequest,
+) -> _ParsedToolCalls:
+    result = _ParsedToolCalls()
     if raw is None:
-        return []
+        return result
     if not isinstance(raw, list):
-        raise ValueError("DeepSeek tool_calls 不是数组")
-    parsed: list[ModelToolCall] = []
+        result.add_invalid(
+            name="未知工具",
+            code="unknown_invalid_tool_call",
+            argument_character_count=0,
+        )
+        return result
+    requested_by_name = {tool.name: tool for tool in request.tools}
     for item in raw:
         if not isinstance(item, Mapping):
-            raise ValueError("DeepSeek 工具调用不是对象")
+            result.add_invalid(
+                name="未知工具",
+                code="unknown_invalid_tool_call",
+                argument_character_count=0,
+            )
+            continue
         call_id = item.get("id")
         function = item.get("function")
-        if not isinstance(call_id, str) or not call_id.strip():
-            raise ValueError("DeepSeek 工具调用缺少有效 ID")
         if not isinstance(function, Mapping):
-            raise ValueError("DeepSeek 工具调用缺少 function")
+            result.add_invalid(
+                name="未知工具",
+                code="unknown_invalid_tool_call",
+                argument_character_count=0,
+            )
+            continue
         name = function.get("name")
         raw_arguments = function.get("arguments")
+        argument_character_count = (
+            len(raw_arguments) if isinstance(raw_arguments, str) else 0
+        )
+        safe_name = (
+            name
+            if isinstance(name, str) and name in requested_by_name
+            else "未知工具"
+        )
         if not isinstance(name, str) or not name.strip():
-            raise ValueError("DeepSeek 工具名称缺失")
+            result.add_invalid(
+                name="未知工具",
+                code="missing_tool_name",
+                argument_character_count=argument_character_count,
+            )
+            continue
+        if not isinstance(call_id, str) or not call_id.strip():
+            result.add_invalid(
+                name=safe_name,
+                code="unknown_invalid_tool_call",
+                argument_character_count=argument_character_count,
+            )
+            continue
         if not isinstance(raw_arguments, str):
-            raise ValueError("DeepSeek 工具参数不是 JSON 字符串")
+            result.add_invalid(
+                name=safe_name,
+                code="unknown_invalid_tool_call",
+                argument_character_count=0,
+            )
+            continue
         try:
-            arguments = json.loads(raw_arguments)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"DeepSeek 工具参数 JSON 无效：{exc.msg}") from exc
+            arguments = _load_strict_json(raw_arguments)
+        except (ValueError, RecursionError):
+            recovery = (
+                _recover_deepseek_tool_call(
+                    call_id=call_id,
+                    name=name,
+                    raw_arguments=raw_arguments,
+                    schema=requested_by_name[name].parameters,
+                )
+                if name in requested_by_name
+                else None
+            )
+            if recovery is not None:
+                recovered_call, appended_container_count = recovery
+                result.calls.append(recovered_call)
+                result.recovered_codes.append("append_container_closers")
+                result.recovered_appended_container_counts.append(
+                    appended_container_count
+                )
+                continue
+            result.add_invalid(
+                name=safe_name,
+                code="json_decode_error",
+                argument_character_count=argument_character_count,
+            )
+            continue
         if not isinstance(arguments, dict):
-            raise ValueError("DeepSeek 工具参数 JSON 必须是对象")
-        parsed.append(ModelToolCall(id=call_id, name=name, arguments=arguments))
-    return parsed
+            result.add_invalid(
+                name=safe_name,
+                code="unknown_invalid_tool_call",
+                argument_character_count=argument_character_count,
+            )
+            continue
+        if name not in requested_by_name:
+            result.add_invalid(
+                name="未知工具",
+                code="unknown_invalid_tool_call",
+                argument_character_count=argument_character_count,
+            )
+            continue
+        requested_tool = requested_by_name[name]
+        if requested_tool.strict:
+            try:
+                jsonschema_rs.validate(requested_tool.parameters, arguments)
+            except ValueError:
+                result.add_invalid(
+                    name=safe_name,
+                    code="provider_strict_schema_violation",
+                    argument_character_count=argument_character_count,
+                )
+                continue
+        result.calls.append(ModelToolCall(id=call_id, name=name, arguments=arguments))
+    return result
+
+
+def _recover_deepseek_tool_call(
+    *,
+    call_id: str,
+    name: str,
+    raw_arguments: str,
+    schema: dict[str, Any],
+) -> tuple[ModelToolCall, int] | None:
+    """只追加缺失容器闭合符，并以本轮原始 Schema 复验。"""
+
+    repaired = _append_missing_container_closers(raw_arguments)
+    if repaired is None:
+        return None
+    candidate, appended_container_count = repaired
+    try:
+        parsed = _load_strict_json(candidate)
+    except (ValueError, RecursionError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    try:
+        jsonschema_rs.validate(schema, parsed)
+    except ValueError:
+        return None
+    return (
+        ModelToolCall(id=call_id, name=name, arguments=parsed),
+        appended_container_count,
+    )
+
+
+def _load_strict_json(value: str) -> object:
+    """拒绝 Python JSON 解码器默认接受的 NaN/Infinity 非标准常量。"""
+
+    def reject_nonstandard_constant(_: str) -> None:
+        raise ValueError("工具参数包含非标准 JSON 常量")
+
+    return json.loads(value, parse_constant=reject_nonstandard_constant)
 
 
 def _parse_usage(raw: object) -> tuple[ModelUsage, ModelUsageDiagnostics]:

@@ -1,5 +1,10 @@
 # DeepSeek 一致性终检 strict 工具最小修复规格
 
+> 后续说明：本规格的 strict wire 已保留；生产部署后仍出现 Provider 工具参数解析失败，因此
+> [`2026-08-29-deepseek-tool-protocol-recovery.md`](./2026-08-29-deepseek-tool-protocol-recovery.md)
+> 进一步增加安全解析、确定性闭合符恢复和整个 Agent 运行最多一次的显式协议纠正。下文“无自动重试”继续约束
+> SDK 隐式重发、队列盲重试和坏参数原样重放，不否定后续规格中的独立计费纠正调用。
+
 ## 背景
 
 生产环境第十三章的一致性终检连续失败两次。只读生产日志确认：

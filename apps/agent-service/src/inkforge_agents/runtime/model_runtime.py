@@ -7,15 +7,18 @@ import re
 from time import monotonic
 from typing import Any, Protocol
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..providers.base import (
     ModelFinishReason,
+    ModelInvalidToolCallCode,
     ModelProvider,
     ModelStructuredOutputRoute,
+    ModelToolRecoveryCode,
     ModelTurnRequest,
     ModelTurnResult,
     ModelUsage,
+    ProviderProtocolError,
     ProviderTransportError,
 )
 
@@ -50,6 +53,13 @@ class ModelCallLogRecord(BaseModel):
     reasoningTokens: int | None = None
     promptCacheMissTokens: int | None = None
     providerResponseId: str | None = None
+    invalidToolCallCount: int = 0
+    invalidToolCallNames: list[str] = Field(default_factory=list)
+    invalidToolCallCodes: list[ModelInvalidToolCallCode] = Field(default_factory=list)
+    invalidToolCallArgumentCharacterCounts: list[int] = Field(default_factory=list)
+    recoveredToolCallCount: int = 0
+    recoveredToolCallCodes: list[ModelToolRecoveryCode] = Field(default_factory=list)
+    recoveredToolCallAppendedContainerCounts: list[int] = Field(default_factory=list)
 
 
 class ModelCallFailureLogRecord(BaseModel):
@@ -356,8 +366,32 @@ class ModelRuntime:
                 reasoningTokens=result.diagnostics.reasoningTokens,
                 promptCacheMissTokens=result.diagnostics.promptCacheMissTokens,
                 providerResponseId=result.providerResponseId,
+                invalidToolCallCount=result.invalidToolCallCount,
+                invalidToolCallNames=_safe_invalid_tool_names(request, result),
+                invalidToolCallCodes=result.invalidToolCallCodes,
+                invalidToolCallArgumentCharacterCounts=(
+                    result.invalidToolCallArgumentCharacterCounts
+                ),
+                recoveredToolCallCount=result.recoveredToolCallCount,
+                recoveredToolCallCodes=result.recoveredToolCallCodes,
+                recoveredToolCallAppendedContainerCounts=(
+                    result.recoveredToolCallAppendedContainerCounts
+                ),
             )
         )
+
+
+def _safe_invalid_tool_names(
+    request: ModelTurnRequest,
+    result: ModelTurnResult,
+) -> list[str]:
+    """人工日志只保留本轮允许列表内的名称，未知值固定收敛。"""
+
+    allowed_names = {tool.name for tool in request.tools}
+    return [
+        name if name in allowed_names else "未知工具"
+        for name in result.invalidToolCallNames
+    ]
 
 
 def _safe_exception_type(error: Exception) -> str:
@@ -389,15 +423,19 @@ def _model_failure_record(
 ) -> ModelCallFailureLogRecord | None:
     if context is None:
         return None
-    transport_error = error if isinstance(error, ProviderTransportError) else None
+    provider_error = (
+        error
+        if isinstance(error, (ProviderTransportError, ProviderProtocolError))
+        else None
+    )
     return ModelCallFailureLogRecord(
         context=context,
         provider=provider.provider_name,
         model=provider.model_name,
-        failureCode=(transport_error.code if transport_error is not None else "unexpected_error"),
+        failureCode=(provider_error.code if provider_error is not None else "unexpected_error"),
         exceptionType=_safe_exception_type(error),
-        statusCode=(transport_error.statusCode if transport_error is not None else None),
-        providerRequestId=(transport_error.requestId if transport_error is not None else None),
+        statusCode=(provider_error.statusCode if provider_error is not None else None),
+        providerRequestId=(provider_error.requestId if provider_error is not None else None),
         elapsedMs=elapsed_ms,
         messageCount=len(request.messages),
         toolCount=len(request.tools),

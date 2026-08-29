@@ -9,6 +9,7 @@ from inkforge_agents.providers.base import (
     ModelTurnResult,
     ModelUsage,
     ModelUsageDiagnostics,
+    ProviderProtocolError,
 )
 from inkforge_agents.runtime.model_policy import LEGACY_PROVIDER_DEFAULT, REPORT_NO_THINKING
 from inkforge_agents.runtime.model_runtime import (
@@ -403,6 +404,53 @@ async def test_billable_runtime_classifies_provider_failure(
 
 
 @pytest.mark.asyncio
+async def test_billable_runtime_preserves_safe_provider_protocol_classification(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class ProtocolFailingProvider(Provider):
+        async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+            del request
+            raise ProviderProtocolError(
+                code="invalid_usage",
+                statusCode=200,
+                requestId="deepseek-request-1",
+            )
+
+    observer = ModelObserver()
+    caplog.set_level("WARNING", logger="inkforge_agents.runtime.model_runtime")
+    runtime = ModelRuntime(  # type: ignore[arg-type]
+        ProtocolFailingProvider(),
+        billing=Billing(),
+        observer=observer,
+    )
+
+    with pytest.raises(RuntimeError, match="^MODEL_PROVIDER_FAILED：") as caught:
+        await runtime.run_turn(
+            ModelTurnRequest(
+                messages=[{"role": "user", "content": "正文"}],
+                tools=[],
+                maxOutputTokens=128,
+                policy=LEGACY_PROVIDER_DEFAULT,
+            ),
+            context=ModelCallContext(
+                userId="user-1",
+                novelId="novel-1",
+                taskId="task-protocol",
+                runId="run-protocol",
+                agentId="写作",
+            ),
+        )
+
+    assert getattr(caught.value, "retryable", None) is False
+    failure = observer.failures[0]
+    assert failure.failureCode == "invalid_usage"
+    assert failure.exceptionType == "ProviderProtocolError"
+    assert failure.statusCode == 200
+    assert failure.providerRequestId == "deepseek-request-1"
+    assert "failure_code=invalid_usage" in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_billable_runtime_classifies_usage_report_failure_without_logging() -> None:
     class FailingBilling(Billing):
         async def report(
@@ -639,6 +687,64 @@ async def test_runtime_records_complete_messages_without_tool_schema(billable: b
     )
     assert record.finishReason == "stop"
     assert record.rawFinishReason == "stop"
+
+
+@pytest.mark.asyncio
+async def test_runtime_records_only_allowlisted_tool_protocol_diagnostics() -> None:
+    untrusted_tool_name = "secret_unknown_tool"
+
+    class InvalidToolProvider(Provider):
+        billable = False
+
+        async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+            del request
+            return ModelTurnResult(
+                content="",
+                toolCalls=[],
+                invalidToolCallCount=1,
+                invalidToolCallNames=[untrusted_tool_name],
+                invalidToolCallCodes=["json_decode_error"],
+                invalidToolCallArgumentCharacterCounts=[123],
+                finishReason="tool_calls",
+                rawFinishReason="tool_calls",
+                usage=ModelUsage(
+                    promptTokens=10,
+                    cachedTokens=0,
+                    completionTokens=5,
+                    totalTokens=15,
+                ),
+            )
+
+    observer = ModelObserver()
+    runtime = ModelRuntime(InvalidToolProvider(), observer=observer)  # type: ignore[arg-type]
+    await runtime.run_turn(
+        ModelTurnRequest(
+            messages=[{"role": "user", "content": "调用工具"}],
+            tools=[
+                {
+                    "name": "lookup",
+                    "description": "查询",
+                    "parameters": {"type": "object", "properties": {}},
+                }
+            ],
+            maxOutputTokens=128,
+            policy=LEGACY_PROVIDER_DEFAULT,
+        ),
+        context=ModelCallContext(
+            userId="user-1",
+            novelId="novel-1",
+            taskId="task-1",
+            runId="run-1",
+            agentId="写作",
+        ),
+    )
+
+    record = observer.calls[0]
+    assert record.invalidToolCallCount == 1
+    assert record.invalidToolCallNames == ["未知工具"]
+    assert record.invalidToolCallCodes == ["json_decode_error"]
+    assert record.invalidToolCallArgumentCharacterCounts == [123]
+    assert untrusted_tool_name not in repr(record)
 
 
 @pytest.mark.asyncio

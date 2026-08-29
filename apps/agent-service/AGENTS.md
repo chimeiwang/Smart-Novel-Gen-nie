@@ -132,7 +132,8 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 - 只有一致性终检的 `submit_quality_report` 使用 DeepSeek Beta strict Function Calling；Reviewer、Beat Plan、设定更新和其他工具路由保持原有传输。本质量 hotfix 不修改视频任务已冻结的 `planningRoute`、Provider capability gate 或历史兼容规则，视频既有路由与能力门禁不变。
 - strict 请求仅在 DeepSeek 模型且 `OPENAI_BASE_URL` 为规范官方 HTTPS 根地址或 `/v1` 地址时自动派生 `/beta`；自定义地址、端口或其他路径必须显式设置 `OPENAI_STRICT_BASE_URL`。strict 与非 strict 工具混用必须在发出 HTTP 前失败，零 HTTP 回退；`DeepSeekV4Provider` 与 SDK 不做隐式自动重发或切换协议；明确标记为 `retryable` 的传输错误仍按同一任务现有队列机制重试。
 - 在 `deepseek_v4` 配置下，`submit_quality_report` 使用专用 DeepSeek strict wire 契约：递归内联本地 `$defs` 引用，最终不发送 `$defs`、`$def`、`$ref` 或 `type:null`；`location` 与 `rewriteBrief` 在 wire 中是必填字符串，无值时由模型返回空字符串，Provider 只在这两个精确路径归一化为 `None`。非质量 strict 工具必须在 HTTP 前拒绝。原始 `QualityReportArgs`/Pydantic 完整复验仍是业务权威，strict 不能替代本地校验，也不能因供应商 Schema 限制放宽、截断或猜测修复业务字段。
-- 质量协议错误日志可以保留原始完成原因字符串、安全的大写 `failure_code` 和必要分类元数据；Pydantic 参数失败最多额外记录 10 条经过白名单约束的 `loc/type`，不得保留供应商响应正文、异常正文、字段值、工具参数、`input` 或 `ctx`。`MODEL_TOOL_ARGUMENTS_INVALID` 明确不可盲重试。
+- DeepSeek arguments 无法解析时必须先保留可靠 usage，再返回无原文的无效工具诊断；只允许在末尾追加缺失对象/数组闭合符，且补齐后必须通过本轮原始 JSON Schema。AgentRuntime 把一轮工具响应作为原子包，存在任一无效调用就不得接受正文或执行任何调用；无效 JSON 或 Pydantic 参数在整个运行中最多触发一次不回放坏参数的显式协议纠正，纠正调用必须独立授权、结算 usage 和记录。`length`、`content_filter`、资源不足、无暴露工具或纠正仍失败时不得继续纠正，最终以不可重试的 `MODEL_TOOL_PROTOCOL_RECOVERY_FAILED` 收敛。
+- 质量协议错误日志可以保留原始完成原因字符串、安全的大写 `failure_code` 和必要分类元数据；Pydantic 参数失败最多额外记录 10 条经过白名单约束的 `loc/type`，Provider 无效调用只保留允许列表内工具名、稳定分类和 arguments 字符数，确定性恢复只保留方法和追加容器数。不得保留供应商响应正文、异常正文、字段值、工具参数、`input` 或 `ctx`；显式协议纠正不等于 SDK 隐式重发、同一坏参数盲重试或队列盲重试。
 
 ## 数据与信任边界
 
@@ -170,7 +171,8 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
   `promptCacheMissTokens`/`reasoningTokens` 诊断，再把同一调用的 `taskId`、`runId`、Core 计费
   `requestId`、provider、model、usage、完整 messages 和完整 output 交给人工日志 observer。DeepSeek
   原始 `reasoning_content` 永不写入快照、ReviewArtifact、Core 或日志正文；非计费调用的计费请求标识
-  明确为“无”，Provider 在返回 usage 前失败时不伪造 token，人工日志绝不记录 `grantToken`。
+  明确为“无”，Provider 在返回 usage 前失败时不伪造 token，人工日志绝不记录 `grantToken`。工具协议纠正
+  是新的模型调用，首次调用与纠正调用必须各自拥有计费 `requestId`、usage 回报和人工模型区块，不能合并。
 - Provider 必须返回规范化 `finishReason` 并保留供应商原始原因；`length`、`content_filter`、完成原因与工具状态矛盾，以及无合法工具调用的 `unknown` 都必须在接受正文或执行工具副作用前失败，当前不把 `length` 作为自动续写信号。文风画像只接受 `stop`、无工具调用且正文非空的纯文本响应，半截画像不得成功。人工模型日志同时记录规范化值和未经截断的原始值。
 - 人工日志当前使用 `INKFORGE-HUMAN-LOG/2` 长度分帧格式，结构头与正文按字节长度隔离，正文中的
   日志标记或 JSON 不参与结构解析。旧版文本迁入 `trust=unverified` 的只读 legacy 帧；残缺尾部只在
