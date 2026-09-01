@@ -189,10 +189,25 @@ if [ "${1:-}" = "image" ] && [ "${2:-}" = "tag" ]; then
   exit 0
 fi
 
+if [ "${1:-}" = "exec" ]; then
+  if [ "${2:-}" = "container-core-api" ]; then
+    case " $* " in
+      *"DURABLE_AGENT_EXECUTION_ROUTE_MODE"*)
+        [ "${FAKE_RUNNING_CORE_ROUTE_MODE:-off}" = "off" ]
+        exit $?
+        ;;
+    esac
+  fi
+  case " $* " in
+    *" /usr/local/bin/inkforge-schema-guard "*) exit "${FAKE_SCHEMA_VERIFY_STATUS:-0}" ;;
+  esac
+fi
+
 if [ "${1:-}" = "run" ]; then
   case " $* " in
     *"source=inkforge_uploads,target=/data/uploads"*) exit "${FAKE_UPLOAD_INIT_STATUS:-0}" ;;
     *"source=inkforge_agent_logs,target=/data/agent-logs"*) exit "${FAKE_AGENT_LOG_INIT_STATUS:-0}" ;;
+    *"source=inkforge_execution_redis_data,target=/data"*) exit "${FAKE_EXECUTION_REDIS_INIT_STATUS:-0}" ;;
   esac
 fi
 

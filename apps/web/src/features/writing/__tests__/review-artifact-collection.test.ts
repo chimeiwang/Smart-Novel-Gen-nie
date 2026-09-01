@@ -38,4 +38,27 @@ describe("章节待审核产物收集", () => {
     ]);
     assert.equal(merged[0].summary, "旧产物新状态");
   });
+
+  it("同一 revision 的完整详情不会被后到的列表摘要覆盖", () => {
+    const merged = mergeActionableReviewArtifacts([
+      {
+        id: "artifact-1",
+        status: "awaiting_user",
+        revision: 3,
+        detailLoaded: true,
+        summary: "完整详情",
+      },
+    ], [
+      {
+        id: "artifact-1",
+        status: "awaiting_user",
+        revision: 3,
+        detailLoaded: false,
+        summary: "列表摘要",
+      },
+    ]);
+
+    assert.equal(merged[0].detailLoaded, true);
+    assert.equal(merged[0].summary, "完整详情");
+  });
 });

@@ -17,9 +17,21 @@ class CoreDatabaseConfiguration {
     @Bean
     @ConditionalOnProperty(name = "DATABASE_URL")
     DatabaseReadiness databaseReadiness(CoreDatabase database, CoreSettings settings) {
-        SchemaProfile profile = SchemaProfile.forCapabilities(
+        return new DatabaseReadiness(database, schemaProfile(settings));
+    }
+
+    @Bean
+    @ConditionalOnProperty(
+            name = "DURABLE_AGENT_EXECUTION_SCHEMA_READY",
+            havingValue = "true")
+    DurableAgentSchemaGate durableAgentSchemaGate(
+            CoreDatabase database, CoreSettings settings) {
+        return new DurableAgentSchemaGate(database, schemaProfile(settings));
+    }
+
+    private static SchemaProfile schemaProfile(CoreSettings settings) {
+        return SchemaProfile.forCapabilities(
                 settings.videoPreviewEnabled(),
                 settings.phoneAuthEnabled() && settings.phoneAuthSendEnabled());
-        return new DatabaseReadiness(database, profile);
     }
 }

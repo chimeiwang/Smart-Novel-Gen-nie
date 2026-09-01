@@ -1,6 +1,12 @@
 spring:
   application:
     name: inkforge-core-api
+  threads:
+    virtual:
+      enabled: true
+  main:
+    # Spring MVC 的 SSE/文件异步流使用虚拟线程；显式 keep-alive 避免只剩虚拟线程时 JVM 提前退出。
+    keep-alive: true
   jackson:
     deserialization:
       fail-on-unknown-properties: true

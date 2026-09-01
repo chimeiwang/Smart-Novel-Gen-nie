@@ -447,6 +447,8 @@ def _response(
     cancelled_job_id: str | None,
 ) -> CancelWritingRunResponse:
     return CancelWritingRunResponse(
+        engineVersion=1,
+        runId=command.taskId,
         taskId=command.taskId,
         commandId=command.id,
         commandStatus=cast(WritingCommandStatus, command.status),

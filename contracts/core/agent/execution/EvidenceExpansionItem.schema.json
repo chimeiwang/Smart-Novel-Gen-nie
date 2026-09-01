@@ -1,0 +1,71 @@
+{
+  "$defs": {
+    "EvidenceRange": {
+      "additionalProperties": false,
+      "description": "以 Unicode 码点计数的半开区间。",
+      "properties": {
+        "endCodePoint": {
+          "exclusiveMinimum": 0,
+          "title": "Endcodepoint",
+          "type": "integer"
+        },
+        "startCodePoint": {
+          "minimum": 0,
+          "title": "Startcodepoint",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "startCodePoint",
+        "endCodePoint"
+      ],
+      "title": "EvidenceRange",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/execution/EvidenceExpansionItem/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "purposeCode": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "title": "Purposecode",
+      "type": "string"
+    },
+    "range": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EvidenceRange"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "resourceId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Resourceid",
+      "type": "string"
+    },
+    "resourceType": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "title": "Resourcetype",
+      "type": "string"
+    }
+  },
+  "required": [
+    "resourceType",
+    "resourceId",
+    "purposeCode"
+  ],
+  "title": "EvidenceExpansionItem",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.EvidenceExpansionItem"
+}

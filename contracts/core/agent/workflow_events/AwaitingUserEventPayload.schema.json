@@ -1,0 +1,51 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/workflow_events/AwaitingUserEventPayload/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "allowedDecisions": {
+      "items": {
+        "enum": [
+          "approve",
+          "discard",
+          "revise"
+        ],
+        "type": "string"
+      },
+      "maxItems": 3,
+      "minItems": 1,
+      "title": "Alloweddecisions",
+      "type": "array"
+    },
+    "artifactId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Artifactid",
+      "type": "string"
+    },
+    "artifactRevision": {
+      "exclusiveMinimum": 0,
+      "title": "Artifactrevision",
+      "type": "integer"
+    },
+    "reviewAvailability": {
+      "enum": [
+        "complete",
+        "partial",
+        "unavailable"
+      ],
+      "title": "Reviewavailability",
+      "type": "string"
+    }
+  },
+  "required": [
+    "artifactId",
+    "artifactRevision",
+    "allowedDecisions",
+    "reviewAvailability"
+  ],
+  "title": "AwaitingUserEventPayload",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.workflow_events.AwaitingUserEventPayload"
+}

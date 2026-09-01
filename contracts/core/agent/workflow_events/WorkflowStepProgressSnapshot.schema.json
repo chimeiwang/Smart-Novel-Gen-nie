@@ -1,0 +1,50 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/workflow_events/WorkflowStepProgressSnapshot/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "elapsedSeconds": {
+      "minimum": 0,
+      "title": "Elapsedseconds",
+      "type": "integer"
+    },
+    "phase": {
+      "enum": [
+        "preparing",
+        "waiting_provider",
+        "validating",
+        "reporting"
+      ],
+      "title": "Phase",
+      "type": "string"
+    },
+    "progressSequence": {
+      "exclusiveMinimum": 0,
+      "title": "Progresssequence",
+      "type": "integer"
+    },
+    "usageStatus": {
+      "enum": [
+        "complete",
+        "partial",
+        "unknown"
+      ],
+      "title": "Usagestatus",
+      "type": "string"
+    },
+    "waitingOnProvider": {
+      "title": "Waitingonprovider",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "progressSequence",
+    "phase",
+    "elapsedSeconds",
+    "waitingOnProvider",
+    "usageStatus"
+  ],
+  "title": "WorkflowStepProgressSnapshot",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.workflow_events.WorkflowStepProgressSnapshot"
+}

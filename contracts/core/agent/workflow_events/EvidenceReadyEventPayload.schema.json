@@ -1,0 +1,38 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/workflow_events/EvidenceReadyEventPayload/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "bundleId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Bundleid",
+      "type": "string"
+    },
+    "bundleVersion": {
+      "exclusiveMinimum": 0,
+      "title": "Bundleversion",
+      "type": "integer"
+    },
+    "manifestSha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Manifestsha256",
+      "type": "string"
+    },
+    "totalBytes": {
+      "minimum": 0,
+      "title": "Totalbytes",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "bundleId",
+    "bundleVersion",
+    "manifestSha256",
+    "totalBytes"
+  ],
+  "title": "EvidenceReadyEventPayload",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.workflow_events.EvidenceReadyEventPayload"
+}

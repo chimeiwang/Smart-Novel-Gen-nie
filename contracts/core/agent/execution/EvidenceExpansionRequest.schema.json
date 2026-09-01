@@ -1,0 +1,126 @@
+{
+  "$defs": {
+    "EvidenceExpansionItem": {
+      "additionalProperties": false,
+      "properties": {
+        "purposeCode": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Purposecode",
+          "type": "string"
+        },
+        "range": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvidenceRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "resourceId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Resourceid",
+          "type": "string"
+        },
+        "resourceType": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Resourcetype",
+          "type": "string"
+        }
+      },
+      "required": [
+        "resourceType",
+        "resourceId",
+        "purposeCode"
+      ],
+      "title": "EvidenceExpansionItem",
+      "type": "object"
+    },
+    "EvidenceRange": {
+      "additionalProperties": false,
+      "description": "以 Unicode 码点计数的半开区间。",
+      "properties": {
+        "endCodePoint": {
+          "exclusiveMinimum": 0,
+          "title": "Endcodepoint",
+          "type": "integer"
+        },
+        "startCodePoint": {
+          "minimum": 0,
+          "title": "Startcodepoint",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "startCodePoint",
+        "endCodePoint"
+      ],
+      "title": "EvidenceRange",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/execution/EvidenceExpansionRequest/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "items": {
+      "items": {
+        "$ref": "#/$defs/EvidenceExpansionItem"
+      },
+      "maxItems": 100,
+      "minItems": 1,
+      "title": "Items",
+      "type": "array"
+    },
+    "maxAdditionalBytes": {
+      "exclusiveMinimum": 0,
+      "title": "Maxadditionalbytes",
+      "type": "integer"
+    },
+    "reasonCode": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "title": "Reasoncode",
+      "type": "string"
+    },
+    "requestId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Requestid",
+      "type": "string"
+    },
+    "sourceBundleId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Sourcebundleid",
+      "type": "string"
+    },
+    "sourceBundleVersion": {
+      "exclusiveMinimum": 0,
+      "title": "Sourcebundleversion",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "requestId",
+    "sourceBundleId",
+    "sourceBundleVersion",
+    "reasonCode",
+    "maxAdditionalBytes",
+    "items"
+  ],
+  "title": "EvidenceExpansionRequest",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.EvidenceExpansionRequest"
+}

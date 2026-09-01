@@ -80,6 +80,7 @@ def _status(
     **extra: Any,
 ) -> dict[str, Any]:
     return {
+        "engineVersion": 1,
         "taskId": TASK_ID,
         "phase": phase,
         "commandStatus": "不参与生命周期判断",
@@ -181,6 +182,29 @@ def test_watch_gets_snapshot_before_sse_and_reconnects_with_latest_event_id() ->
         ("GET", TASK_PATH, {}),
     ]
     assert clock.sleeps == [0.5]
+
+
+def test_watch_accepts_legacy_v1_snapshot_without_engine_version() -> None:
+    legacy = _status(
+        "waiting_user",
+        artifact_id="artifact-legacy",
+    )
+    legacy.pop("engineVersion")
+    api = WatchApi(snapshots=[legacy])
+
+    exit_code, frames, stderr = _invoke(api, FakeClock())
+
+    assert exit_code == 0
+    assert stderr == ""
+    assert frames == [
+        {"type": "snapshot", "data": legacy},
+        {
+            "type": "waiting_user",
+            "taskId": TASK_ID,
+            "artifactId": "artifact-legacy",
+            "data": legacy,
+        },
+    ]
 
 
 def test_watch_does_not_timeout_when_core_is_reachable_without_sse_events() -> None:

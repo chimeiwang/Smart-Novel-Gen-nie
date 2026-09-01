@@ -146,6 +146,25 @@ async def test_default_client_waits_up_to_300_seconds_for_response() -> None:
 @pytest.mark.parametrize(
     ("base_url", "expected"),
     [
+        ("https://api.deepseek.com", "endpoint.deepseek-official.v1"),
+        ("https://proxy.example/llm/v1", "endpoint.deepseek-custom.v1"),
+    ],
+)
+async def test_endpoint_profile_distinguishes_official_from_custom_transport(
+    base_url: str,
+    expected: str,
+) -> None:
+    provider = DeepSeekV4Provider(_settings(base_url))
+    try:
+        assert provider.endpoint_profile == expected
+    finally:
+        await provider.aclose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("base_url", "expected"),
+    [
         ("https://api.deepseek.com", "https://api.deepseek.com/chat/completions"),
         ("https://api.deepseek.com/", "https://api.deepseek.com/chat/completions"),
         ("https://api.deepseek.com/v1", "https://api.deepseek.com/chat/completions"),

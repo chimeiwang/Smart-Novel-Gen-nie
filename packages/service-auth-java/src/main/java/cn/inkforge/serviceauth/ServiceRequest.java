@@ -21,5 +21,11 @@ public record ServiceRequest(
         body = body.clone();
         queryString = queryString.clone();
         scopes = List.copyOf(scopes);
+        if (novelId == null && !ServiceScope.allowsNullNovelId(scopes)) {
+            throw new IllegalArgumentException("只有纯 execution scope 服务请求允许 novelId 为 null");
+        }
+        if (novelId != null) {
+            novelId = ServiceAuthCanonical.nonBlank(novelId, "novelId");
+        }
     }
 }

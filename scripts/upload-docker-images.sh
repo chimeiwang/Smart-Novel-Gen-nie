@@ -172,6 +172,7 @@ build_inputs_unchanged() {
         packages/service-contracts-java
         contracts/core
         contracts/agent-service
+        contracts/agent-execution
         apps/core-api/src/inkforge_core/db/schema-contract.json
         tools/inkforge-cli-java/pom.xml
         infra/docker/core-api.Dockerfile
@@ -185,6 +186,7 @@ build_inputs_unchanged() {
         .python-version
         packages/service-auth
         packages/service-contracts
+        contracts/agent-execution
         apps/agent-service
         infra/docker/agent-service.Dockerfile
       )

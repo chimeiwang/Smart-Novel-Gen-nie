@@ -1,0 +1,83 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/execution/ExecutionCancelRequest/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "cancelRequestId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Cancelrequestid",
+      "type": "string"
+    },
+    "fencingToken": {
+      "exclusiveMinimum": 0,
+      "title": "Fencingtoken",
+      "type": "integer"
+    },
+    "jobId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Jobid",
+      "type": "string"
+    },
+    "novelId": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Novelid"
+    },
+    "protocolVersion": {
+      "const": "2.0",
+      "title": "Protocolversion",
+      "type": "string"
+    },
+    "requestHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Requesthash",
+      "type": "string"
+    },
+    "requestedAt": {
+      "format": "date-time",
+      "title": "Requestedat",
+      "type": "string"
+    },
+    "runId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Runid",
+      "type": "string"
+    },
+    "stepId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Stepid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocolVersion",
+    "cancelRequestId",
+    "runId",
+    "novelId",
+    "stepId",
+    "jobId",
+    "fencingToken",
+    "requestHash",
+    "requestedAt"
+  ],
+  "title": "ExecutionCancelRequest",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.ExecutionCancelRequest"
+}

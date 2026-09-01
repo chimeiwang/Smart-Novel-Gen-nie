@@ -1,0 +1,25 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/execution/EvidenceRange/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "以 Unicode 码点计数的半开区间。",
+  "properties": {
+    "endCodePoint": {
+      "exclusiveMinimum": 0,
+      "title": "Endcodepoint",
+      "type": "integer"
+    },
+    "startCodePoint": {
+      "minimum": 0,
+      "title": "Startcodepoint",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "startCodePoint",
+    "endCodePoint"
+  ],
+  "title": "EvidenceRange",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.EvidenceRange"
+}

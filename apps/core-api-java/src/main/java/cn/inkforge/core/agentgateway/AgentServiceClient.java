@@ -3,10 +3,17 @@ package cn.inkforge.core.agentgateway;
 import cn.inkforge.contracts.agent.AgentJobAccepted;
 import cn.inkforge.contracts.agent.AgentJobCancelRequest;
 import cn.inkforge.contracts.agent.AgentJobRequest;
+import cn.inkforge.contracts.agent.ExecutionCancelAccepted;
+import cn.inkforge.contracts.agent.ExecutionCancelRequest;
+import cn.inkforge.contracts.agent.ExecutionStepAccepted;
+import cn.inkforge.contracts.agent.ExecutionStepRequest;
+import cn.inkforge.contracts.agent.ResolvedModelRef;
 import cn.inkforge.contracts.agent.SeedanceRenderQueryRequest;
 import cn.inkforge.contracts.agent.SeedanceRenderQueryResponse;
 import cn.inkforge.contracts.agent.SeedanceRenderSubmitRequest;
 import cn.inkforge.contracts.agent.SeedanceRenderSubmitResponse;
+import cn.inkforge.core.workflows.application.WorkflowExecutionAdmissionSaturatedException;
+import cn.inkforge.core.workflows.application.WorkflowExecutionRejectedException;
 import cn.inkforge.serviceauth.ServiceRequest;
 import cn.inkforge.serviceauth.ServiceScope;
 import cn.inkforge.serviceauth.ServiceTokenSigner;
@@ -32,6 +39,7 @@ import tools.jackson.databind.DeserializationFeature;
 public final class AgentServiceClient {
 
     private static final String RUNS_PATH = "/internal/v1/runs";
+    private static final String EXECUTIONS_PATH = "/internal/v1/executions";
     private static final String DEBUG_PATH = "/internal/v1/debug/workflow-runs";
     private static final String SEEDANCE_PATH = "/internal/v1/video/seedance/tasks";
     private static final Duration SEEDANCE_TIMEOUT = Duration.ofSeconds(40);
@@ -114,6 +122,94 @@ public final class AgentServiceClient {
         if (response.statusCode() != 204) {
             throw new AgentGatewayException("AGENT_RUN_CANCEL_FAILED", "智能体运行取消投递失败");
         }
+    }
+
+    public ExecutionStepAccepted submitExecution(ExecutionStepRequest request) {
+        requireExecutionStepRequest(request);
+        byte[] body = objectMapper.writeValueAsBytes(request);
+        SignedServiceRequest signed = signer.sign(new ServiceRequest(
+                body,
+                "POST",
+                EXECUTIONS_PATH,
+                new byte[0],
+                request.getIdempotencyKey(),
+                List.of(ServiceScope.EXECUTION_SUBMIT),
+                request.getStepId(),
+                request.getRunId(),
+                request.getNovelId(),
+                null,
+                0,
+                null));
+        AgentHttpResponse response = send(
+                signedRequest(EXECUTIONS_PATH, "POST", body, signed),
+                "AGENT_EXECUTION_SUBMIT_FAILED",
+                "智能体执行步骤提交失败");
+        Duration admissionRetryAfter = executionAdmissionRetryAfter(response);
+        if (admissionRetryAfter != null) {
+            throw new WorkflowExecutionAdmissionSaturatedException(admissionRetryAfter);
+        }
+        if (isDefinitiveExecutionRejection(response.statusCode())) {
+            throw new WorkflowExecutionRejectedException(
+                    "EXECUTION_SUBMIT_REJECTED_" + response.statusCode());
+        }
+        if (response.statusCode() != 202) {
+            throw executionSubmitFailed();
+        }
+        ExecutionStepAccepted accepted;
+        try {
+            accepted = objectMapper.readValue(response.body(), ExecutionStepAccepted.class);
+        } catch (RuntimeException exception) {
+            throw executionSubmitFailed();
+        }
+        if (!matchesExecutionStep(request, accepted)) {
+            throw executionSubmitFailed();
+        }
+        return accepted;
+    }
+
+    private static boolean isDefinitiveExecutionRejection(int statusCode) {
+        return switch (statusCode) {
+            case 400, 401, 403, 404, 409, 422 -> true;
+            default -> false;
+        };
+    }
+
+    public ExecutionCancelAccepted cancelExecution(
+            String jobId, ExecutionCancelRequest request) {
+        String normalizedJobId = pathSegment(jobId);
+        requireExecutionCancelRequest(normalizedJobId, request);
+        String path = EXECUTIONS_PATH + "/" + normalizedJobId + "/cancel";
+        byte[] body = objectMapper.writeValueAsBytes(request);
+        SignedServiceRequest signed = signer.sign(new ServiceRequest(
+                body,
+                "PUT",
+                path,
+                new byte[0],
+                request.getCancelRequestId(),
+                List.of(ServiceScope.EXECUTION_CANCEL),
+                request.getStepId(),
+                request.getRunId(),
+                request.getNovelId(),
+                null,
+                0,
+                null));
+        AgentHttpResponse response = send(
+                signedRequest(path, "PUT", body, signed),
+                "AGENT_EXECUTION_CANCEL_FAILED",
+                "智能体执行取消投递失败");
+        if (response.statusCode() != 202) {
+            throw executionCancelFailed();
+        }
+        ExecutionCancelAccepted accepted;
+        try {
+            accepted = objectMapper.readValue(response.body(), ExecutionCancelAccepted.class);
+        } catch (RuntimeException exception) {
+            throw executionCancelFailed();
+        }
+        if (!matchesExecutionCancel(request, accepted)) {
+            throw executionCancelFailed();
+        }
+        return accepted;
     }
 
     public Map<String, Object> getWorkflowRuns(String userId, String runId) {
@@ -255,7 +351,10 @@ public final class AgentServiceClient {
                 if (bytes.length > MAX_RESPONSE_BYTES) {
                     throw new AgentGatewayException(code, message);
                 }
-                return new AgentHttpResponse(response.statusCode(), bytes);
+                return new AgentHttpResponse(
+                        response.statusCode(),
+                        bytes,
+                        response.headers().firstValue("Retry-After").orElse(null));
             }
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
@@ -277,6 +376,138 @@ public final class AgentServiceClient {
             // 远端错误体不是可信输入，解析失败时使用稳定内部诊断。
         }
         return "Seedance 内部网关拒绝请求";
+    }
+
+    private static void requireExecutionStepRequest(ExecutionStepRequest request) {
+        if (request == null
+                || !"2.0".equals(request.getProtocolVersion())
+                || !validResourceId(request.getJobId())
+                || !validResourceId(request.getRunId())
+                || !validResourceId(request.getStepId())
+                || (request.getNovelId() != null && !validResourceId(request.getNovelId()))
+                || request.getFencingToken() == null
+                || request.getFencingToken() <= 0
+                || request.getRequestHash() == null
+                || !request.getRequestHash().matches("[0-9a-f]{64}")
+                || !validResourceId(request.getIdempotencyKey())) {
+            throw new IllegalArgumentException("智能体执行步骤资源身份无效");
+        }
+    }
+
+    private static void requireExecutionCancelRequest(
+            String jobId, ExecutionCancelRequest request) {
+        if (request == null
+                || !validResourceId(jobId)
+                || !jobId.equals(request.getJobId())
+                || !"2.0".equals(request.getProtocolVersion())
+                || !validResourceId(request.getRunId())
+                || !validResourceId(request.getStepId())
+                || (request.getNovelId() != null && !validResourceId(request.getNovelId()))
+                || request.getFencingToken() == null
+                || request.getFencingToken() <= 0
+                || request.getRequestHash() == null
+                || !request.getRequestHash().matches("[0-9a-f]{64}")
+                || !validResourceId(request.getCancelRequestId())) {
+            throw new IllegalArgumentException("智能体执行取消资源身份无效");
+        }
+    }
+
+    private static boolean matchesExecutionStep(
+            ExecutionStepRequest request, ExecutionStepAccepted accepted) {
+        // 202 只表示 Agent 已受理；资源回声必须逐项命中，避免把其他并发步骤的响应绑定到当前耐久 Step。
+        return accepted != null
+                && java.util.Objects.equals(
+                        request.getProtocolVersion(), accepted.getProtocolVersion())
+                && java.util.Objects.equals(request.getJobId(), accepted.getJobId())
+                && java.util.Objects.equals(request.getRunId(), accepted.getRunId())
+                && java.util.Objects.equals(request.getNovelId(), accepted.getNovelId())
+                && java.util.Objects.equals(request.getStepId(), accepted.getStepId())
+                && java.util.Objects.equals(
+                        request.getFencingToken(), accepted.getFencingToken())
+                && java.util.Objects.equals(request.getRequestHash(), accepted.getRequestHash())
+                && accepted.getStatus() != null
+                && accepted.getAcceptedAt() != null
+                && validResolvedModel(accepted.getResolvedModel());
+    }
+
+    private static boolean matchesExecutionCancel(
+            ExecutionCancelRequest request, ExecutionCancelAccepted accepted) {
+        // 取消响应契约不回显 requestHash；它由原始正文签名保护，响应侧再以 cancelRequestId 和资源身份闭合。
+        return accepted != null
+                && java.util.Objects.equals(
+                        request.getProtocolVersion(), accepted.getProtocolVersion())
+                && java.util.Objects.equals(
+                        request.getCancelRequestId(), accepted.getCancelRequestId())
+                && java.util.Objects.equals(request.getJobId(), accepted.getJobId())
+                && java.util.Objects.equals(request.getRunId(), accepted.getRunId())
+                && java.util.Objects.equals(request.getNovelId(), accepted.getNovelId())
+                && java.util.Objects.equals(request.getStepId(), accepted.getStepId())
+                && java.util.Objects.equals(
+                        request.getFencingToken(), accepted.getFencingToken())
+                && accepted.getStatus() != null
+                && accepted.getAcceptedAt() != null;
+    }
+
+    private static boolean validResolvedModel(ResolvedModelRef model) {
+        return model != null
+                && model.getDeploymentFingerprint() != null
+                && model.getDeploymentFingerprint().matches("[0-9a-f]{64}")
+                && model.getDeploymentProfileKey() != null
+                && !model.getDeploymentProfileKey().isBlank()
+                && model.getModel() != null
+                && !model.getModel().isBlank()
+                && model.getProvider() != null
+                && !model.getProvider().isBlank()
+                && model.getTransportProfile() != null
+                && !model.getTransportProfile().isBlank()
+                && model.getEndpointProfile() != null
+                && !model.getEndpointProfile().isBlank()
+                && model.getStructuredOutputRoute() != null
+                && model.getCapabilityVersion() != null
+                && !model.getCapabilityVersion().isBlank()
+                && model.getReasoningMode() != null
+                && model.getSupportsRequestIdempotency() != null;
+    }
+
+    private static boolean validResourceId(String value) {
+        return value != null
+                && value.matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}");
+    }
+
+    private static AgentGatewayException executionSubmitFailed() {
+        return new AgentGatewayException(
+                "AGENT_EXECUTION_SUBMIT_FAILED", "智能体执行步骤提交失败");
+    }
+
+    private Duration executionAdmissionRetryAfter(AgentHttpResponse response) {
+        if (response.statusCode() != 503 || response.retryAfter() == null) return null;
+        try {
+            JsonNode value = objectMapper.readTree(response.body());
+            if (!value.isObject()
+                    || value.size() != 4
+                    || !"2.0".equals(value.path("protocolVersion").asText())
+                    || !"EXECUTION_ADMISSION_SATURATED"
+                            .equals(value.path("errorCode").asText())
+                    || !value.path("retryable").isBoolean()
+                    || !value.path("retryable").asBoolean()
+                    || !value.path("retryAfterSeconds").canConvertToInt()) {
+                return null;
+            }
+            int seconds = value.path("retryAfterSeconds").asInt();
+            if (seconds < 1
+                    || seconds > 60
+                    || !Integer.toString(seconds).equals(response.retryAfter())) {
+                return null;
+            }
+            return Duration.ofSeconds(seconds);
+        } catch (RuntimeException exception) {
+            return null;
+        }
+    }
+
+    private static AgentGatewayException executionCancelFailed() {
+        return new AgentGatewayException(
+                "AGENT_EXECUTION_CANCEL_FAILED", "智能体执行取消投递失败");
     }
 
     private static URI normalizeBaseUri(URI value) {
@@ -312,7 +543,7 @@ public final class AgentServiceClient {
         }
     }
 
-    private record AgentHttpResponse(int statusCode, byte[] body) {
+    private record AgentHttpResponse(int statusCode, byte[] body, String retryAfter) {
 
         private AgentHttpResponse {
             body = body.clone();

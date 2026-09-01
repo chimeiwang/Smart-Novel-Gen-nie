@@ -139,6 +139,237 @@ async def test_model_runtime_limits_process_wide_parallel_calls() -> None:
     assert provider.maximum == 3
 
 
+@pytest.mark.asyncio
+async def test_lane_limiter_reserves_capacity_from_creative_and_reviewer_fanout() -> None:
+    class LaneProvider(Provider):
+        billable = False
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.active: list[str] = []
+            self.started: list[str] = []
+            self.changed = asyncio.Condition()
+            self.releases: asyncio.Queue[None] = asyncio.Queue()
+
+        async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+            label = request.messages[0].content
+            async with self.changed:
+                self.active.append(label)
+                self.started.append(label)
+                self.changed.notify_all()
+            try:
+                await self.releases.get()
+                return await super().complete_turn(request)
+            finally:
+                async with self.changed:
+                    self.active.remove(label)
+                    self.changed.notify_all()
+
+        async def wait_started(self, count: int) -> None:
+            async with self.changed:
+                await asyncio.wait_for(
+                    self.changed.wait_for(lambda: len(self.started) >= count),
+                    timeout=1,
+                )
+
+    def lane_request(label: str) -> ModelTurnRequest:
+        return ModelTurnRequest(
+            messages=[{"role": "user", "content": label}],
+            tools=[],
+            maxOutputTokens=128,
+            policy=LEGACY_PROVIDER_DEFAULT,
+        )
+
+    creative_provider = LaneProvider()
+    creative_runtime = ModelRuntime(creative_provider, max_concurrency=3)  # type: ignore[arg-type]
+    creative_tasks = [
+        asyncio.create_task(
+            creative_runtime.run_turn(lane_request(f"creative-{index}"), lane="creative")
+        )
+        for index in range(4)
+    ]
+    await creative_provider.wait_started(3)
+    assert creative_provider.started == ["creative-0", "creative-1", "creative-2"]
+    interactive = asyncio.create_task(
+        creative_runtime.run_turn(lane_request("interactive"), lane="interactive")
+    )
+    await creative_provider.releases.put(None)
+    await creative_provider.wait_started(4)
+    assert creative_provider.started[3] == "interactive"
+    for _ in range(5):
+        await creative_provider.releases.put(None)
+    await asyncio.gather(*creative_tasks, interactive)
+
+    reviewer_provider = LaneProvider()
+    reviewer_runtime = ModelRuntime(reviewer_provider, max_concurrency=3)  # type: ignore[arg-type]
+    reviewer_tasks = [
+        asyncio.create_task(
+            reviewer_runtime.run_turn(
+                lane_request(f"reviewer-{index}"),
+                lane="interactive",
+                reviewer=True,
+            )
+        )
+        for index in range(3)
+    ]
+    await reviewer_provider.wait_started(2)
+    creative = asyncio.create_task(
+        reviewer_runtime.run_turn(lane_request("creative"), lane="creative")
+    )
+    await reviewer_provider.wait_started(3)
+    assert reviewer_provider.active == ["reviewer-0", "reviewer-1", "creative"]
+    for _ in range(4):
+        await reviewer_provider.releases.put(None)
+    await asyncio.gather(*reviewer_tasks, creative)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("capacity", "reviewer_cap"),
+    [(1, 1), (2, 2), (3, 2)],
+)
+async def test_reviewer_lane_cap_is_minimum_of_two_and_global_capacity(
+    capacity: int,
+    reviewer_cap: int,
+) -> None:
+    class ReviewerProvider(Provider):
+        billable = False
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = 0
+            self.enough_started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+            self.started += 1
+            if self.started >= reviewer_cap:
+                self.enough_started.set()
+            await self.release.wait()
+            return await super().complete_turn(request)
+
+    provider = ReviewerProvider()
+    runtime = ModelRuntime(provider, max_concurrency=capacity)  # type: ignore[arg-type]
+    request = ModelTurnRequest(
+        messages=[{"role": "user", "content": "Reviewer"}],
+        tools=[],
+        maxOutputTokens=128,
+        policy=LEGACY_PROVIDER_DEFAULT,
+    )
+    tasks = [
+        asyncio.create_task(
+            runtime.run_turn(request, lane="interactive", reviewer=True)
+        )
+        for _ in range(3)
+    ]
+    await asyncio.wait_for(provider.enough_started.wait(), timeout=1)
+    await asyncio.sleep(0.01)
+    assert provider.started == reviewer_cap
+    provider.release.set()
+    await asyncio.gather(*tasks)
+
+
+@pytest.mark.asyncio
+async def test_interactive_gets_next_slot_when_lower_lanes_hold_borrowed_capacity() -> None:
+    class PriorityProvider(Provider):
+        billable = False
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.started: list[str] = []
+            self.changed = asyncio.Condition()
+            self.releases: dict[str, asyncio.Event] = {}
+
+        async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+            label = request.messages[0].content
+            release = self.releases.setdefault(label, asyncio.Event())
+            async with self.changed:
+                self.started.append(label)
+                self.changed.notify_all()
+            await release.wait()
+            return await super().complete_turn(request)
+
+        async def wait_started(self, count: int) -> None:
+            async with self.changed:
+                await asyncio.wait_for(
+                    self.changed.wait_for(lambda: len(self.started) >= count),
+                    timeout=1,
+                )
+
+    def request(label: str) -> ModelTurnRequest:
+        return ModelTurnRequest(
+            messages=[{"role": "user", "content": label}],
+            tools=[],
+            maxOutputTokens=128,
+            policy=LEGACY_PROVIDER_DEFAULT,
+        )
+
+    provider = PriorityProvider()
+    runtime = ModelRuntime(provider, max_concurrency=3)  # type: ignore[arg-type]
+    active: list[asyncio.Task[ModelTurnResult]] = []
+    for label, lane in (
+        ("creative-active", "creative"),
+        ("batch-active", "batch_media"),
+        ("interactive-active", "interactive"),
+    ):
+        active.append(asyncio.create_task(runtime.run_turn(request(label), lane=lane)))
+        await provider.wait_started(len(active))
+
+    creative_waiter = asyncio.create_task(
+        runtime.run_turn(request("creative-waiter"), lane="creative")
+    )
+    interactive_waiter = asyncio.create_task(
+        runtime.run_turn(request("interactive-waiter"), lane="interactive")
+    )
+    await asyncio.sleep(0.01)
+    provider.releases["interactive-active"].set()
+    await provider.wait_started(4)
+
+    assert provider.started[3] == "interactive-waiter"
+    for release in provider.releases.values():
+        release.set()
+    await provider.wait_started(5)
+    provider.releases["creative-waiter"].set()
+    await asyncio.gather(*active, creative_waiter, interactive_waiter)
+
+
+@pytest.mark.asyncio
+async def test_lane_limiter_configuration_one_is_strictly_serial() -> None:
+    class SerialProvider(Provider):
+        billable = False
+
+        def __init__(self) -> None:
+            super().__init__()
+            self.active = 0
+            self.maximum = 0
+
+        async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+            self.active += 1
+            self.maximum = max(self.maximum, self.active)
+            try:
+                await asyncio.sleep(0.01)
+                return await super().complete_turn(request)
+            finally:
+                self.active -= 1
+
+    provider = SerialProvider()
+    runtime = ModelRuntime(provider, max_concurrency=1)  # type: ignore[arg-type]
+    request = ModelTurnRequest(
+        messages=[{"role": "user", "content": "串行"}],
+        tools=[],
+        maxOutputTokens=128,
+        policy=LEGACY_PROVIDER_DEFAULT,
+    )
+
+    await asyncio.gather(
+        runtime.run_turn(request, lane="creative"),
+        runtime.run_turn(request, lane="interactive", reviewer=True),
+        runtime.run_turn(request, lane="batch_media"),
+    )
+
+    assert provider.maximum == 1
+
+
 def test_model_runtime_rejects_non_positive_parallel_limit() -> None:
     with pytest.raises(ValueError, match="模型调用并发数必须为正整数"):
         ModelRuntime(Provider(), max_concurrency=0)  # type: ignore[arg-type]

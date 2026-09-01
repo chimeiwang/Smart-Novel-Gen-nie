@@ -1218,6 +1218,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/review-artifact-summaries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Review Artifact Summaries */
+        get: operations["list_review_artifact_summaries_api_v1_review_artifact_summaries_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/review-artifacts/{artifact_id}": {
         parameters: {
             query?: never;
@@ -2092,6 +2109,12 @@ export interface components {
         };
         /** ArtifactDecisionAcceptedResponse */
         ArtifactDecisionAcceptedResponse: {
+            /**
+             * Engineversion
+             * @default 1
+             * @constant
+             */
+            engineVersion: 1;
             /** Artifactid */
             artifactId: string;
             /** Taskid */
@@ -2119,6 +2142,7 @@ export interface components {
              */
             deleted: boolean;
         };
+        ArtifactDecisionPublicResponse: components["schemas"]["ArtifactDecisionAcceptedResponse"] | components["schemas"]["WritingRunV2Response"];
         /** ArtifactEvaluationResponse */
         ArtifactEvaluationResponse: {
             /** Id */
@@ -2249,6 +2273,7 @@ export interface components {
             /** File */
             file: string;
         };
+        CancelWritingRunPublicResponse: components["schemas"]["CancelWritingRunResponse"] | components["schemas"]["WritingRunV2Response"];
         /** CancelWritingRunRequest */
         CancelWritingRunRequest: {
             /** Clientrequestid */
@@ -2256,6 +2281,13 @@ export interface components {
         };
         /** CancelWritingRunResponse */
         CancelWritingRunResponse: {
+            /**
+             * Engineversion
+             * @constant
+             */
+            engineVersion: 1;
+            /** Runid */
+            runId: string;
             /** Taskid */
             taskId: string;
             /** Commandid */
@@ -4678,6 +4710,24 @@ export interface components {
              */
             createdAt: string;
         };
+        /**
+         * ModelProfileRef
+         * @description Core 授权的逻辑模型 Profile；不包含 Agent 部署配置。
+         */
+        ModelProfileRef: {
+            /** Profile */
+            profile: string;
+            /** Version */
+            version: number;
+            /**
+             * Reasoningmode
+             * @enum {string}
+             */
+            reasoningMode: "disabled" | "bounded";
+            /** Deploymentprofilekey */
+            deploymentProfileKey: string;
+            promptProfile: components["schemas"]["PromptProfileRef"];
+        };
         /** NovelResponse */
         NovelResponse: {
             /** Id */
@@ -5048,6 +5098,18 @@ export interface components {
             createdAt: string;
             asset: components["schemas"]["PostProductionAssetResponse"];
         };
+        /**
+         * PromptProfileRef
+         * @description Manifest 管理的静态 system prompt 身份；正文由双端 Registry 按哈希校验。
+         */
+        PromptProfileRef: {
+            /** Name */
+            name: string;
+            /** Version */
+            version: number;
+            /** Sha256 */
+            sha256: string;
+        };
         /** QualityCheckDto */
         QualityCheckDto: {
             /** Id */
@@ -5272,6 +5334,41 @@ export interface components {
         };
         /** @enum {string} */
         RelationType: "family" | "master_student" | "friend" | "enemy" | "ally" | "lover" | "rival" | "subordinate" | "acquaintance" | "other";
+        /**
+         * ResolvedModelRef
+         * @description Agent 对逻辑 Profile 的一次可审计部署解析。
+         */
+        ResolvedModelRef: {
+            /** Deploymentprofilekey */
+            deploymentProfileKey: string;
+            /** Deploymentfingerprint */
+            deploymentFingerprint: string;
+            /** Provider */
+            provider: string;
+            /** Model */
+            model: string;
+            /** Transportprofile */
+            transportProfile: string;
+            /** Endpointprofile */
+            endpointProfile: string;
+            /**
+             * Structuredoutputroute
+             * @enum {string}
+             */
+            structuredOutputRoute: "responses_json_schema_v1" | "chat_json_output_v1";
+            /** Capabilityversion */
+            capabilityVersion: string;
+            /**
+             * Reasoningmode
+             * @enum {string}
+             */
+            reasoningMode: "disabled" | "bounded";
+            /**
+             * Supportsrequestidempotency
+             * @description 仅当 Provider 确实原样传递 ExecutionStepRequest.idempotencyKey 时为 true
+             */
+            supportsRequestIdempotency: boolean;
+        };
         /** ResumeWritingRunRequest */
         ResumeWritingRunRequest: {
             /** Clientrequestid */
@@ -5284,12 +5381,19 @@ export interface components {
         /** ResumeWritingRunResponse */
         ResumeWritingRunResponse: {
             /**
+             * Engineversion
+             * @constant
+             */
+            engineVersion: 1;
+            /** Runid */
+            runId: string;
+            /** Taskid */
+            taskId: string;
+            /**
              * Accepted
              * @constant
              */
             accepted: true;
-            /** Taskid */
-            taskId: string;
             /** Commandid */
             commandId: string;
             /**
@@ -5313,9 +5417,19 @@ export interface components {
         };
         /** ReviewArtifactDecisionRequest */
         ReviewArtifactDecisionRequest: {
+            /**
+             * Engineversion
+             * @description 审核决定引擎版本；省略只兼容解释为 V1，V2 必须显式提交 2
+             * @default 1
+             * @enum {integer}
+             */
+            engineVersion: 1 | 2;
             /** Clientrequestid */
             clientRequestId: string;
-            /** Expectedrevision */
+            /**
+             * Expectedrevision
+             * @description V1 为既有草案修订号；V2 为规范 expectedArtifactRevision wire 字段
+             */
             expectedRevision: number;
             /**
              * Decision
@@ -5340,6 +5454,11 @@ export interface components {
         };
         /** ReviewArtifactResponse */
         ReviewArtifactResponse: {
+            /**
+             * Engineversion
+             * @enum {integer}
+             */
+            engineVersion: 1 | 2;
             /** Id */
             id: string;
             /** Novelid */
@@ -5388,6 +5507,64 @@ export interface components {
              * @enum {string}
              */
             sourceBindingStatus: "verified" | "legacy_missing" | "not_yet_supported";
+            /**
+             * Createdat
+             * Format: date-time
+             */
+            createdAt: string;
+            /**
+             * Updatedat
+             * Format: date-time
+             */
+            updatedAt: string;
+        };
+        /** ReviewArtifactSummaryListResponse */
+        ReviewArtifactSummaryListResponse: {
+            /** Items */
+            items: components["schemas"]["ReviewArtifactSummaryResponse"][];
+            /** Nextcursor */
+            nextCursor: string | null;
+        };
+        /**
+         * ReviewArtifactSummaryResponse
+         * @description 集合查询使用的有界索引；完整内容必须按精确 revision 单独读取。
+         */
+        ReviewArtifactSummaryResponse: {
+            /**
+             * Engineversion
+             * @enum {integer}
+             */
+            engineVersion: 1 | 2;
+            /** Id */
+            id: string;
+            /** Novelid */
+            novelId: string;
+            /** Chapterid */
+            chapterId: string | null;
+            /** Taskid */
+            taskId: string | null;
+            /** Workflowrunid */
+            workflowRunId: string | null;
+            /** Artifactkey */
+            artifactKey: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "agent_updates" | "outline_draft" | "chapter_draft" | "lore_draft" | "revision_brief" | "beat_plan_draft" | "chapter_content" | "beat_plan" | "freeform_markdown";
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "draft" | "under_review" | "awaiting_user" | "applying" | "applied";
+            /** Title */
+            title: string | null;
+            /** Summary */
+            summary: string | null;
+            /** Revision */
+            revision: number;
+            /** Actionable */
+            actionable: boolean;
             /**
              * Createdat
              * Format: date-time
@@ -6933,6 +7110,59 @@ export interface components {
              */
             createdAt: string;
         };
+        /** WorkflowArtifactSnapshot */
+        WorkflowArtifactSnapshot: {
+            /** Artifactid */
+            artifactId: string;
+            /** Artifactrevision */
+            artifactRevision: number;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "draft" | "under_review" | "awaiting_user" | "applying" | "applied";
+            /** Actionable */
+            actionable: boolean;
+            /** Reviewavailability */
+            reviewAvailability?: ("complete" | "partial" | "unavailable") | null;
+        };
+        /** WorkflowCurrentStepSnapshot */
+        WorkflowCurrentStepSnapshot: {
+            /** Stepid */
+            stepId: string;
+            /** Ordinal */
+            ordinal: number;
+            /** Purpose */
+            purpose: string;
+            /**
+             * Lane
+             * @enum {string}
+             */
+            lane: "control" | "interactive" | "creative" | "batch_media";
+            modelProfile: components["schemas"]["ModelProfileRef"] | null;
+            resolvedModel: components["schemas"]["ResolvedModelRef"] | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "completed" | "failed" | "skipped";
+            /** Attemptcount */
+            attemptCount: number;
+            /** Fencingtoken */
+            fencingToken: number;
+            latestProgress: components["schemas"]["WorkflowStepProgressSnapshot"] | null;
+            /** Errorcode */
+            errorCode?: string | null;
+        };
+        /** WorkflowErrorSnapshot */
+        WorkflowErrorSnapshot: {
+            /** Errorcode */
+            errorCode: string;
+            /** Failedstepid */
+            failedStepId?: string | null;
+            /** Outcomeunknown */
+            outcomeUnknown: boolean;
+        };
         /** WorkflowRunDetailResponse */
         WorkflowRunDetailResponse: {
             summary: components["schemas"]["WorkflowRunSummary"];
@@ -6964,6 +7194,25 @@ export interface components {
             endedAt: string;
             /** Status */
             status: string;
+        };
+        /** WorkflowStepProgressSnapshot */
+        WorkflowStepProgressSnapshot: {
+            /** Progresssequence */
+            progressSequence: number;
+            /**
+             * Phase
+             * @enum {string}
+             */
+            phase: "preparing" | "waiting_provider" | "validating" | "reporting";
+            /** Elapsedseconds */
+            elapsedSeconds: number;
+            /** Waitingonprovider */
+            waitingOnProvider: boolean;
+            /**
+             * Usagestatus
+             * @enum {string}
+             */
+            usageStatus: "complete" | "partial" | "unknown";
         };
         /** WorkspaceBootstrapResponse */
         WorkspaceBootstrapResponse: {
@@ -7226,6 +7475,13 @@ export interface components {
         };
         /** WritingRunListItem */
         WritingRunListItem: {
+            /**
+             * Engineversion
+             * @constant
+             */
+            engineVersion: 1;
+            /** Runid */
+            runId: string;
             /** Taskid */
             taskId: string;
             /** Novelid */
@@ -7270,7 +7526,7 @@ export interface components {
         /** WritingRunListResponse */
         WritingRunListResponse: {
             /** Items */
-            items: components["schemas"]["WritingRunListItem"][];
+            items: components["schemas"]["WritingRunPublicListItem"][];
             /** Nextcursor */
             nextCursor: string | null;
         };
@@ -7326,8 +7582,18 @@ export interface components {
             /** Id */
             id?: string | null;
         };
+        WritingRunPublicListItem: components["schemas"]["WritingRunListItem"] | components["schemas"]["WritingRunV2Response"];
         /** WritingRunResponse */
         WritingRunResponse: {
+            /**
+             * Engineversion
+             * @constant
+             */
+            engineVersion: 1;
+            /** Runid */
+            runId: string;
+            /** Taskid */
+            taskId: string;
             /** Id */
             id: string;
             /** Novelid */
@@ -7360,8 +7626,17 @@ export interface components {
              */
             commandStatus: "pending" | "submitted" | "processing" | "succeeded" | "failed";
         };
+        WritingRunStartResponse: components["schemas"]["WritingRunResponse"] | components["schemas"]["WritingRunV2Response"];
+        WritingRunStatusPublicResponse: components["schemas"]["WritingRunStatusResponse"] | components["schemas"]["WritingRunV2Response"];
         /** WritingRunStatusResponse */
         WritingRunStatusResponse: {
+            /**
+             * Engineversion
+             * @constant
+             */
+            engineVersion: 1;
+            /** Runid */
+            runId: string;
             /** Taskid */
             taskId: string;
             /** Novelid */
@@ -7420,6 +7695,50 @@ export interface components {
                 [key: string]: components["schemas"]["JsonValue"];
             } | null;
             outcome: components["schemas"]["WritingRunOutcome"];
+        };
+        /** WritingRunV2Response */
+        WritingRunV2Response: {
+            /** Workflow */
+            workflow: string;
+            /** Operation */
+            operation?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "waiting_user" | "completed" | "failed" | "cancelled";
+            /** Activesteps */
+            activeSteps: components["schemas"]["WorkflowCurrentStepSnapshot"][];
+            currentStep?: components["schemas"]["WorkflowCurrentStepSnapshot"] | null;
+            /** Cancelrequestedat */
+            cancelRequestedAt?: string | null;
+            /** Lasteventsequence */
+            lastEventSequence: number;
+            /** Revision */
+            revision: number;
+            artifact?: components["schemas"]["WorkflowArtifactSnapshot"] | null;
+            error?: components["schemas"]["WorkflowErrorSnapshot"] | null;
+            /**
+             * Engineversion
+             * @constant
+             */
+            engineVersion: 2;
+            /** Runid */
+            runId: string;
+            /** Taskid */
+            taskId: string | null;
+            /** Chapterid */
+            chapterId: string | null;
+            /**
+             * Commandid
+             * @enum {unknown}
+             */
+            commandId: null;
+            /**
+             * Commandstatus
+             * @enum {unknown}
+             */
+            commandStatus: null;
         };
         /** WritingSessionDetail */
         WritingSessionDetail: {
@@ -18364,7 +18683,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WritingRunResponse"];
+                    "application/json": components["schemas"]["WritingRunStartResponse"];
                 };
             };
             /** @description 统一错误响应 */
@@ -18478,7 +18797,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WritingRunStatusResponse"];
+                    "application/json": components["schemas"]["WritingRunStatusPublicResponse"];
                 };
             };
             /** @description 统一错误响应 */
@@ -18714,7 +19033,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CancelWritingRunResponse"];
+                    "application/json": components["schemas"]["CancelWritingRunPublicResponse"];
                 };
             };
             /** @description 统一错误响应 */
@@ -18824,12 +19143,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Successful Response */
+            /** @description 持续输出 V1 事件；V2 首帧为 RunSnapshot，后续为 WorkflowEventEnvelope。 */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "text/event-stream": string;
+                };
             };
             /** @description 统一错误响应 */
             400: {
@@ -19043,13 +19364,19 @@ export interface operations {
             };
         };
     };
-    get_review_artifact_api_v1_review_artifacts__artifact_id__get: {
+    list_review_artifact_summaries_api_v1_review_artifact_summaries_get: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                artifact_id: string;
+            query: {
+                novelId: string;
+                chapterId?: string | null;
+                taskId?: string | null;
+                status?: string | null;
+                kind?: string | null;
+                cursor?: string | null;
+                limit?: number;
             };
+            header?: never;
+            path?: never;
             cookie?: {
                 "inkforge-token"?: string | null;
             };
@@ -19062,8 +19389,135 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    "application/json": components["schemas"]["ReviewArtifactSummaryListResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 统一错误响应 */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_review_artifact_api_v1_review_artifacts__artifact_id__get: {
+        parameters: {
+            query?: {
+                revision?: number | null;
+            };
+            header?: {
+                "If-None-Match"?: string | null;
+            };
+            path: {
+                artifact_id: string;
+            };
+            cookie?: {
+                "inkforge-token"?: string | null;
+            };
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description artifactId、精确 revision 与权威状态共同生成的强 ETag */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
                     "application/json": components["schemas"]["ReviewArtifactResponse"];
                 };
+            };
+            /** @description 精确 revision 详情与 If-None-Match 一致 */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description 统一错误响应 */
             400: {
@@ -19294,7 +19748,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ArtifactDecisionAcceptedResponse"];
+                    "application/json": components["schemas"]["ArtifactDecisionPublicResponse"];
                 };
             };
             /** @description 统一错误响应 */

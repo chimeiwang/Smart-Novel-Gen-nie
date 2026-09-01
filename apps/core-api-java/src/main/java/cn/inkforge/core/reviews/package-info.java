@@ -10,6 +10,9 @@
             "outlines::outline-domain",
             "platform",
             "references::references",
-            "references::reference-domain"
+            "references::reference-domain",
+            "workflows::catalog",
+            "workflows::protocol",
+            "workflows::workflow-domain"
         })
 package cn.inkforge.core.reviews;

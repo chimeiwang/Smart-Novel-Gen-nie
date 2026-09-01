@@ -36,8 +36,11 @@ class AgentCallbackAuthConfiguration {
                         ServiceScope.PORTRAIT_WRITE,
                         ServiceScope.QUALITY_WRITE,
                         ServiceScope.VIDEO_WRITE,
+                        ServiceScope.EXECUTION_PROGRESS,
+                        ServiceScope.EXECUTION_RESULT,
                         ServiceScope.BILLING_AUTHORIZE,
-                        ServiceScope.BILLING_USAGE_WRITE));
+                        ServiceScope.BILLING_USAGE_WRITE,
+                        ServiceScope.BILLING_RECONCILE));
         return verifier::verify;
     }
 

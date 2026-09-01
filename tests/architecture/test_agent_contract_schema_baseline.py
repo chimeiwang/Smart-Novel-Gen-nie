@@ -32,6 +32,13 @@ def test_agent_contract_schema_baseline_is_complete_and_reproducible(tmp_path: P
     paths = {item["path"] for item in actual_manifest["models"]}
     assert {
         "events/RunCompletionCallback.schema.json",
+        "execution/BillingReconciliationReceipt.schema.json",
+        "execution/BillingReconciliationRequest.schema.json",
+        "execution/ExecutionCancelRequest.schema.json",
+        "execution/ExecutionStepFailure.schema.json",
+        "execution/ExecutionStepRequest.schema.json",
+        "execution/ExecutionStepResult.schema.json",
+        "execution/PromptProfileRef.schema.json",
         "jobs/AgentJobRequest.schema.json",
         "jwt_claims/ServiceJwtClaims.schema.json",
         "quality/ConsistencyQualityReport.schema.json",

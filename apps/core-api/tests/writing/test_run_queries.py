@@ -253,6 +253,8 @@ def test_review_projection_keeps_complete_large_terminal_callback_report() -> No
         artifacts=[],
     )
 
+    assert status.engineVersion == 1
+    assert status.runId == status.taskId == "task-1"
     assert len(status.reviewReport or "") > 80_000
     assert status.reviewReport == report
     assert status.outcome.state == "succeeded"
@@ -676,6 +678,8 @@ async def test_list_runs_enforces_owner_and_novel_and_keeps_tasks_without_sessio
     )
 
     assert [item.taskId for item in response.items] == ["task-2", "task-1"]
+    assert all(item.engineVersion == 1 for item in response.items)
+    assert all(item.runId == item.taskId for item in response.items)
     assert response.items[0].writingSessionId is None
     rendered = str(
         session.statements[0].compile(

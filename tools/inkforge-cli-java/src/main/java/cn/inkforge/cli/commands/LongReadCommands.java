@@ -1,10 +1,12 @@
 package cn.inkforge.cli.commands;
 
+import cn.inkforge.cli.runtime.CliInputException;
 import cn.inkforge.cli.runtime.CommandHandler;
 import cn.inkforge.cli.runtime.CommandResult;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ObjectNode;
 
 /** 长篇公共只读命令；所有映射都显式登记，不使用命令名前缀猜路由。 */
@@ -58,8 +60,7 @@ public final class LongReadCommands {
         handlers.put("long.task.get", (context, payload) -> resource(
                 context, payload, "taskId", "/api/v1/writing/runs/"));
         handlers.put("long.artifact.list", LongReadCommands::listArtifacts);
-        handlers.put("long.artifact.get", (context, payload) -> resource(
-                context, payload, "artifactId", "/api/v1/review-artifacts/"));
+        handlers.put("long.artifact.get", LongReadCommands::getArtifact);
         handlers.put("long.quality.get", (context, payload) -> resource(
                 context, payload, "checkId", "/api/v1/quality-checks/"));
         LongNovelCommands.register(handlers);
@@ -105,7 +106,35 @@ public final class LongReadCommands {
                 List.of("novelId"),
                 List.of(filters).subList(1, filters.length),
                 true);
-        return get(context, "/api/v1/review-artifacts", Payloads.query(payload, filters));
+        return get(
+                context,
+                "/api/v1/review-artifact-summaries",
+                Payloads.query(payload, filters));
+    }
+
+    private static CommandResult getArtifact(
+            cn.inkforge.cli.runtime.CommandContext context, ObjectNode payload) {
+        Payloads.validateRead(
+                payload,
+                List.of("artifactId"),
+                List.of("revision"),
+                true);
+        String path = "/api/v1/review-artifacts/"
+                + Payloads.segment(Payloads.requireString(payload, "artifactId"));
+        if (!payload.has("revision")) return get(context, path, Map.of());
+        JsonNode value = payload.get("revision");
+        if (value == null
+                || !value.isIntegralNumber()
+                || !value.canConvertToInt()
+                || value.intValue() < 1) {
+            throw new CliInputException(
+                    "INVALID_ARTIFACT_REVISION",
+                    "revision 必须是大于等于 1 的整数");
+        }
+        return get(
+                context,
+                path,
+                Map.of("revision", List.of(Integer.toString(value.intValue()))));
     }
 
     private static CommandResult workspace(

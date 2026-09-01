@@ -129,6 +129,7 @@ class ModelShortMediumGenerator:
                 runId=resource.runId,
                 agentId="写作",
             ),
+            lane="creative",
         )
 
 class ShortMediumWritingJobHandler:

@@ -1,0 +1,59 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/workflow_events/ReviewCompletedEventPayload/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifactId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Artifactid",
+      "type": "string"
+    },
+    "artifactRevision": {
+      "exclusiveMinimum": 0,
+      "title": "Artifactrevision",
+      "type": "integer"
+    },
+    "evaluationIds": {
+      "items": {
+        "maxLength": 128,
+        "minLength": 1,
+        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+        "type": "string"
+      },
+      "maxItems": 32,
+      "minItems": 1,
+      "title": "Evaluationids",
+      "type": "array"
+    },
+    "mergedVerdict": {
+      "enum": [
+        "pass",
+        "issues_found",
+        "cannot_assess"
+      ],
+      "title": "Mergedverdict",
+      "type": "string"
+    },
+    "reviewAvailability": {
+      "enum": [
+        "complete",
+        "partial",
+        "unavailable"
+      ],
+      "title": "Reviewavailability",
+      "type": "string"
+    }
+  },
+  "required": [
+    "artifactId",
+    "artifactRevision",
+    "evaluationIds",
+    "mergedVerdict",
+    "reviewAvailability"
+  ],
+  "title": "ReviewCompletedEventPayload",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.workflow_events.ReviewCompletedEventPayload"
+}

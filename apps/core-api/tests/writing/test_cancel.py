@@ -73,6 +73,8 @@ def test_active_artifact_decision_cancel_preserves_accepted_response() -> None:
 def test_cancel_request_and_response_use_the_public_contract() -> None:
     request = CancelWritingRunRequest(clientRequestId="cancel-request-0001")
     response = CancelWritingRunResponse(
+        engineVersion=1,
+        runId="task-1",
         taskId="task-1",
         commandId="cancel-1",
         commandStatus="succeeded",
@@ -84,6 +86,8 @@ def test_cancel_request_and_response_use_the_public_contract() -> None:
 
     assert request.clientRequestId == "cancel-request-0001"
     assert response.model_dump() == {
+        "engineVersion": 1,
+        "runId": "task-1",
         "taskId": "task-1",
         "commandId": "cancel-1",
         "commandStatus": "succeeded",
@@ -106,6 +110,8 @@ async def test_cancel_service_only_kicks_pending_commands() -> None:
                 "cancel-request-0001",
             )
             return CancelWritingRunResponse(
+                engineVersion=1,
+                runId=task_id,
                 taskId=task_id,
                 commandId="cancel-1",
                 commandStatus="pending",

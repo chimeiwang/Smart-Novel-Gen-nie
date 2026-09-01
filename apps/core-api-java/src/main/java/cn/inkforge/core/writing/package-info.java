@@ -11,6 +11,8 @@
             "references::references",
             "reviews::application",
             "reviews::domain",
-            "shortmedium::domain"
+            "shortmedium::domain",
+            "workflows::catalog",
+            "workflows::execution"
         })
 package cn.inkforge.core.writing;

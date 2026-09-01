@@ -1,0 +1,60 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/workflow_events/WorkflowArtifactSnapshot/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "actionable": {
+      "title": "Actionable",
+      "type": "boolean"
+    },
+    "artifactId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Artifactid",
+      "type": "string"
+    },
+    "artifactRevision": {
+      "exclusiveMinimum": 0,
+      "title": "Artifactrevision",
+      "type": "integer"
+    },
+    "reviewAvailability": {
+      "anyOf": [
+        {
+          "enum": [
+            "complete",
+            "partial",
+            "unavailable"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reviewavailability"
+    },
+    "status": {
+      "enum": [
+        "draft",
+        "under_review",
+        "awaiting_user",
+        "applying",
+        "applied"
+      ],
+      "title": "Status",
+      "type": "string"
+    }
+  },
+  "required": [
+    "artifactId",
+    "artifactRevision",
+    "status",
+    "actionable"
+  ],
+  "title": "WorkflowArtifactSnapshot",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.workflow_events.WorkflowArtifactSnapshot"
+}

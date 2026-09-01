@@ -1718,6 +1718,9 @@ def _new_command(
 
 def _run_response(task: WritingTask, command: WritingRunCommand) -> WritingRunResponse:
     return WritingRunResponse(
+        engineVersion=1,
+        runId=task.id,
+        taskId=task.id,
         id=task.id,
         novelId=task.novelId,
         chapterId=task.chapterId,
@@ -1734,6 +1737,8 @@ def _run_response(task: WritingTask, command: WritingRunCommand) -> WritingRunRe
 
 def _resume_response(command: WritingRunCommand) -> ResumeWritingRunResponse:
     return ResumeWritingRunResponse(
+        engineVersion=1,
+        runId=command.taskId,
         accepted=True,
         taskId=command.taskId,
         commandId=command.id,

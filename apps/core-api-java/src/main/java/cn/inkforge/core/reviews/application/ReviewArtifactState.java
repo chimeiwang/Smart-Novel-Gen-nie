@@ -19,7 +19,7 @@ public record ReviewArtifactState(
     public ReviewArtifactState {
         Objects.requireNonNull(id);
         Objects.requireNonNull(novelId);
-        Objects.requireNonNull(taskId);
+        // V1 绑定 WritingTask；V2 由 workflowRunId 归属，因此正式应用快照允许 taskId 为空。
         Objects.requireNonNull(kind);
         Objects.requireNonNull(payload);
         payload = Collections.unmodifiableMap(new LinkedHashMap<>(payload));

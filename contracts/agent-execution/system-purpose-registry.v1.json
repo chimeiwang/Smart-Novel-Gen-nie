@@ -1,0 +1,80 @@
+{
+  "registryVersion": "1",
+  "purposes": [
+    {
+      "purpose": "resolve_intent",
+      "supported": false,
+      "modelProfile": "system.intent_resolver.v1",
+      "outputSchema": "output.proposed_command.v1",
+      "evidencePolicy": "evidence.system.intent.v1",
+      "lane": "interactive",
+      "stepBudgetProfile": "step_budget.system.resolve_intent.v1",
+      "workflows": ["long_serial", "quality", "short_medium", "style", "video"],
+      "parentOperations": []
+    },
+    {
+      "purpose": "summarize_evidence",
+      "supported": false,
+      "modelProfile": "system.evidence_summarizer.v1",
+      "outputSchema": "output.evidence_summary.v1",
+      "evidencePolicy": "evidence.system.summary.v1",
+      "lane": "batch_media",
+      "stepBudgetProfile": "step_budget.system.summarize_evidence.v1",
+      "workflows": ["long_serial", "quality", "short_medium", "style", "video"],
+      "parentOperations": [
+        "long_serial.answer_question",
+        "long_serial.create_lore",
+        "long_serial.revise_lore",
+        "long_serial.create_outline",
+        "long_serial.revise_outline",
+        "long_serial.plan_chapter",
+        "long_serial.write_chapter",
+        "long_serial.rewrite_scene",
+        "long_serial.rewrite_chapter_selection",
+        "long_serial.rewrite_outline_selection",
+        "long_serial.review_chapter",
+        "long_serial.manage_foreshadowing",
+        "short_medium.generate_outline",
+        "short_medium.generate_manuscript",
+        "short_medium.replace_selection",
+        "short_medium.full_check",
+        "quality.consistency",
+        "style.portrait",
+        "video.chapter_cinematic_adaptation_v2",
+        "video.chapter_shot_prompt_v2"
+      ]
+    },
+    {
+      "purpose": "protocol_correction",
+      "supported": false,
+      "modelProfile": "system.protocol_corrector.v1",
+      "outputSchema": "output.protocol_correction.v1",
+      "evidencePolicy": "evidence.system.protocol_correction.v1",
+      "lane": "interactive",
+      "stepBudgetProfile": "step_budget.system.protocol_correction.v1",
+      "workflows": ["long_serial", "quality", "short_medium", "style", "video"],
+      "parentOperations": [
+        "long_serial.answer_question",
+        "long_serial.create_lore",
+        "long_serial.revise_lore",
+        "long_serial.create_outline",
+        "long_serial.revise_outline",
+        "long_serial.plan_chapter",
+        "long_serial.write_chapter",
+        "long_serial.rewrite_scene",
+        "long_serial.rewrite_chapter_selection",
+        "long_serial.rewrite_outline_selection",
+        "long_serial.review_chapter",
+        "long_serial.manage_foreshadowing",
+        "short_medium.generate_outline",
+        "short_medium.generate_manuscript",
+        "short_medium.replace_selection",
+        "short_medium.full_check",
+        "quality.consistency",
+        "style.portrait",
+        "video.chapter_cinematic_adaptation_v2",
+        "video.chapter_shot_prompt_v2"
+      ]
+    }
+  ]
+}

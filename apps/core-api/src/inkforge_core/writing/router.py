@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal, cast
+from typing import Annotated, Any, Literal, cast
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
@@ -12,8 +12,8 @@ from .cancellation import WritingRunCancellationService
 from .commands import WritingRunCommandRepository
 from .outbox import WritingOutboxRepository
 from .schemas import (
+    CancelWritingRunPublicResponse,
     CancelWritingRunRequest,
-    CancelWritingRunResponse,
     CreateMessageRequest,
     CreateWritingSessionRequest,
     MessageResponse,
@@ -22,9 +22,9 @@ from .schemas import (
     UpdateWritingSessionRequest,
     WritingRunListResponse,
     WritingRunOutcome,
-    WritingRunResponse,
     WritingRunStartRequest,
-    WritingRunStatusResponse,
+    WritingRunStartResponse,
+    WritingRunStatusPublicResponse,
     WritingSessionDetail,
     WritingSessionListItem,
     WritingSessionResponse,
@@ -141,6 +141,22 @@ RunCommandRepository = Annotated[
 ]
 EventStore = Annotated[object, Depends(get_writing_event_store)]
 
+_WRITING_RUN_SSE_RESPONSES: dict[int | str, dict[str, Any]] = {
+    200: {
+        "description": "持续输出 V1 事件；V2 首帧为 RunSnapshot，后续为 WorkflowEventEnvelope。",
+        "content": {"text/event-stream": {"schema": {"type": "string"}}},
+        "x-inkforge-v2-sse": {
+            "firstFrame": {
+                "event": "run_snapshot",
+                "schema": "inkforge_contracts.workflow_events.RunSnapshot",
+            },
+            "subsequentFrames": {
+                "schema": "inkforge_contracts.workflow_events.WorkflowEventEnvelope",
+            },
+        },
+    }
+}
+
 
 @router.get("/sessions", response_model=list[WritingSessionListItem])
 async def list_writing_sessions(
@@ -202,14 +218,14 @@ async def add_writing_message(
 
 @router.post(
     "/runs",
-    response_model=WritingRunResponse,
+    response_model=WritingRunStartResponse,
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def start_writing_run(
     body: WritingRunStartRequest,
     user: User,
     service: TaskService,
-) -> WritingRunResponse:
+) -> WritingRunStartResponse:
     return await service.start(user.id, body)
 
 
@@ -251,12 +267,12 @@ async def list_writing_runs(
     )
 
 
-@router.get("/runs/{task_id}", response_model=WritingRunStatusResponse)
+@router.get("/runs/{task_id}", response_model=WritingRunStatusPublicResponse)
 async def get_writing_run_status(
     task_id: str,
     user: User,
     service: TaskService,
-) -> WritingRunStatusResponse:
+) -> WritingRunStatusPublicResponse:
     return await service.get_status(user.id, task_id)
 
 
@@ -276,7 +292,7 @@ async def resume_writing_run(
 
 @router.post(
     "/runs/{task_id}/cancel",
-    response_model=CancelWritingRunResponse,
+    response_model=CancelWritingRunPublicResponse,
     status_code=status.HTTP_202_ACCEPTED,
 )
 async def cancel_writing_run(
@@ -284,11 +300,15 @@ async def cancel_writing_run(
     body: CancelWritingRunRequest,
     user: User,
     service: CancellationService,
-) -> CancelWritingRunResponse:
+) -> CancelWritingRunPublicResponse:
     return await service.cancel(user.id, task_id, body)
 
 
-@router.get("/runs/{task_id}/events", response_class=StreamingResponse)
+@router.get(
+    "/runs/{task_id}/events",
+    response_class=StreamingResponse,
+    responses=_WRITING_RUN_SSE_RESPONSES,
+)
 async def stream_writing_run_events(
     task_id: str,
     user: User,

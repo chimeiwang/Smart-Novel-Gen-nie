@@ -1,0 +1,64 @@
+{
+  "manifestVersion": "1",
+  "catalogVersion": "1",
+  "catalog": {
+    "path": "operation-catalog.v1.json",
+    "sha256": "36d05435a0a56173dca17f50274adcee08f8c3356df9cdd4d93d73fdb4e3f957"
+  },
+  "schema": {
+    "path": "operation-catalog.schema.json",
+    "sha256": "665a8bff65fdd26c27de1a3badfcde30ee3f2ed9754152ab7532bc76e445daba"
+  },
+  "profileRegistry": {
+    "path": "profile-registry.v1.json",
+    "sha256": "9e8adb84d09fb8d3079fffb51442bde43603ba68aaaa746e377ac3b1231bf407"
+  },
+  "profileRegistrySchema": {
+    "path": "profile-registry.schema.json",
+    "sha256": "808a642d7f9acf28dfbef226e767e5ae1329ee019a27e8e97ef3146742fb863a"
+  },
+  "deploymentProfileRegistry": {
+    "path": "deployment-profile-registry.v1.json",
+    "sha256": "ea41a2a5ed41221a3e9090f2dc90b621b592072e4b81e3857055075323a58b27"
+  },
+  "deploymentProfileRegistrySchema": {
+    "path": "deployment-profile-registry.schema.json",
+    "sha256": "71fa21901595574b91fe567aa30c3fe838f6b09ac73e483aba0c64c1bd84d631"
+  },
+  "promptProfileRegistry": {
+    "path": "prompt-profile-registry.v1.json",
+    "sha256": "96d863e99cecde37bd6bfdc55e654827dfff8aa4577654c86fc16f2fc0c505b3"
+  },
+  "promptProfileRegistrySchema": {
+    "path": "prompt-profile-registry.schema.json",
+    "sha256": "d526eee84ca9b68e2589d06f519a78313ed910dca7232dd74ca7d278a28e586b"
+  },
+  "outputSchemaRegistry": {
+    "path": "output-schema-registry.v1.json",
+    "sha256": "c7cfd04c11a20fb0790ecea09ce3a5fdca336feadee36fcbf49f412a7d34faed"
+  },
+  "outputSchemaRegistrySchema": {
+    "path": "output-schema-registry.schema.json",
+    "sha256": "bf31505b0485a8f7b50835acfce34d2b098393ee7123ecfcea72fa44e4413243"
+  },
+  "stepBudgetRegistry": {
+    "path": "step-budget-registry.v1.json",
+    "sha256": "d6139388e455facf484f2a3a40e56f9d64f48948fff86010d47339d3bf9ba326"
+  },
+  "stepBudgetRegistrySchema": {
+    "path": "step-budget-registry.schema.json",
+    "sha256": "682c3ab44ebe18870b1b03e323bdd46c246a8104f0b88d32ede405a435b7adb8"
+  },
+  "systemPurposeRegistry": {
+    "path": "system-purpose-registry.v1.json",
+    "sha256": "015ccc20954db2804868178b1107aa55ed8834c200eb09d7dfe308ea0c9daf79"
+  },
+  "systemPurposeRegistrySchema": {
+    "path": "system-purpose-registry.schema.json",
+    "sha256": "88a434e1562285e736e97cdffe1589c17446400da47ae2e22855d83d960eaa40"
+  },
+  "hashVectors": {
+    "path": "hash-vectors.v1.json",
+    "sha256": "a6a9d165fcdad2d11e666be60ab5072a4e885b1dad32b05561ab42659888bcce"
+  }
+}

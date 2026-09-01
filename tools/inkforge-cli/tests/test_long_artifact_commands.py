@@ -79,6 +79,7 @@ def test_approve_and_revise_preflight_verified_source_then_post_fixed_body(
             f"/api/v1/review-artifacts/{encoded}/decision",
             {
                 "json": {
+                    "engineVersion": 1,
                     "clientRequestId": "decision-request-0001",
                     "expectedRevision": 3,
                     "decision": decision,
@@ -114,6 +115,7 @@ def test_edited_content_file_is_read_as_exact_utf8_without_newline_changes(
     )
 
     body = api.calls[1][2]["json"]
+    assert body["engineVersion"] == 1
     assert body["editedContent"] == content
     assert "editedContentFile" not in body
     assert "profile" not in body
@@ -148,6 +150,7 @@ def test_selection_artifact_uses_structured_edited_replacement_file(
     )
 
     body = api.calls[1][2]["json"]
+    assert body["engineVersion"] == 1
     assert body["editedReplacement"] == replacement
     assert "editedReplacementFile" not in body
     assert "editedContent" not in body
@@ -221,6 +224,67 @@ def test_decision_requires_a_positive_integer_expected_revision(
         artifacts.approve(runtime(api), payload(**values))
 
     assert caught.value.code == "INVALID_EXPECTED_REVISION"
+    assert api.calls == []
+
+
+@pytest.mark.parametrize(
+    ("handler", "decision", "extra"),
+    [
+        (artifacts.approve, "approve", {}),
+        (artifacts.revise, "revise", {"userMessage": "请重新生成"}),
+        (artifacts.discard, "discard", {}),
+    ],
+)
+@pytest.mark.parametrize("engine_version", [1, 2])
+def test_all_decisions_send_explicit_valid_engine_version(
+    handler: Any,
+    decision: str,
+    extra: dict[str, object],
+    engine_version: int,
+) -> None:
+    responses: list[Any] = []
+    if decision != "discard":
+        responses.append({"sourceBindingStatus": "verified"})
+    responses.append({"artifactId": "artifact-1", "decision": decision})
+    api = RecordingApi(responses=responses)
+
+    handler(
+        runtime(api),
+        payload(
+            artifactId="artifact-1",
+            clientRequestId="decision-engine-0001",
+            expectedRevision=1,
+            engineVersion=engine_version,
+            **extra,
+        ),
+    )
+
+    assert api.calls[-1][2]["json"]["engineVersion"] == engine_version
+
+
+@pytest.mark.parametrize(
+    "handler",
+    [artifacts.approve, artifacts.revise, artifacts.discard],
+)
+@pytest.mark.parametrize("engine_version", [None, 0, 3, True, 1.5, "2"])
+def test_all_decisions_reject_invalid_engine_version_before_network(
+    handler: Any,
+    engine_version: object,
+) -> None:
+    api = RecordingApi()
+    values: dict[str, object] = {
+        "artifactId": "artifact-1",
+        "clientRequestId": "decision-engine-0001",
+        "expectedRevision": 1,
+        "engineVersion": engine_version,
+    }
+    if handler is artifacts.revise:
+        values["userMessage"] = "请重新生成"
+
+    with pytest.raises(CliInputError) as caught:
+        handler(runtime(api), payload(**values))
+
+    assert caught.value.code == "INVALID_ENGINE_VERSION"
     assert api.calls == []
 
 
@@ -336,6 +400,7 @@ def test_discard_skips_source_preflight_and_still_sends_expected_revision() -> N
             "/api/v1/review-artifacts/artifact-1/decision",
             {
                 "json": {
+                    "engineVersion": 1,
                     "clientRequestId": "decision-request-0001",
                     "expectedRevision": 4,
                     "decision": "discard",

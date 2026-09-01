@@ -23,6 +23,11 @@ public record ReviewDecisionIdentity(Map<String, Object> normalizedBody, String 
             ReviewArtifactDecisionRequest request,
             ObjectMapper json) {
         Map<String, Object> body = new LinkedHashMap<>();
+        // V1 已上线指纹不能改变；只有显式 V2 才把引擎身份纳入规范正文。
+        if (request.getEngineVersion()
+                == ReviewArtifactDecisionRequest.EngineVersionEnum.NUMBER_2) {
+            body.put("engineVersion", 2);
+        }
         body.put("expectedRevision", request.getExpectedRevision());
         body.put("decision", request.getDecision().getValue());
         body.put("editedContent", nullable(request.getEditedContent()));

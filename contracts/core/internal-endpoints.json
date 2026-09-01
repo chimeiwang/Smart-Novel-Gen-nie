@@ -657,6 +657,103 @@
     {
       "authentication": "direct_peer_and_ed25519",
       "deprecated": false,
+      "endpointFunction": "reconcile_workflow_billing",
+      "endpointModule": "inkforge_core.billing.reconciliation_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/billing-reconciliation",
+      "productModule": "billing",
+      "pythonTests": [
+        "apps/core-api/tests/billing/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "credit_ledger_or_usage",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/billing/reconciliation_router.py",
+      "sourceLine": 20,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "report_execution_failure",
+      "endpointModule": "inkforge_core.workflows.router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/failure",
+      "productModule": "workflows",
+      "pythonTests": [
+        "apps/core-api/tests/workflows/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/workflows/router.py",
+      "sourceLine": 157,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "report_execution_progress",
+      "endpointModule": "inkforge_core.workflows.router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/progress",
+      "productModule": "workflows",
+      "pythonTests": [
+        "apps/core-api/tests/workflows/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/workflows/router.py",
+      "sourceLine": 109,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "report_execution_result",
+      "endpointModule": "inkforge_core.workflows.router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/result",
+      "productModule": "workflows",
+      "pythonTests": [
+        "apps/core-api/tests/workflows/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/workflows/router.py",
+      "sourceLine": 133,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
       "endpointFunction": "save_checkpoint",
       "endpointModule": "inkforge_core.writing.callbacks",
       "exposure": "internal",

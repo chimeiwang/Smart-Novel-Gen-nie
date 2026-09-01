@@ -1,0 +1,151 @@
+{
+  "$defs": {
+    "EvidenceRange": {
+      "additionalProperties": false,
+      "description": "以 Unicode 码点计数的半开区间。",
+      "properties": {
+        "endCodePoint": {
+          "exclusiveMinimum": 0,
+          "title": "Endcodepoint",
+          "type": "integer"
+        },
+        "startCodePoint": {
+          "minimum": 0,
+          "title": "Startcodepoint",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "startCodePoint",
+        "endCodePoint"
+      ],
+      "title": "EvidenceRange",
+      "type": "object"
+    },
+    "JsonValue": {}
+  },
+  "$id": "https://inkforge.local/contracts/agent/execution/EvidenceManifestItem/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "byteCount": {
+      "minimum": 0,
+      "title": "Bytecount",
+      "type": "integer"
+    },
+    "contentSha256": {
+      "anyOf": [
+        {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Contentsha256"
+    },
+    "contentType": {
+      "anyOf": [
+        {
+          "enum": [
+            "text",
+            "json"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Contenttype"
+    },
+    "exists": {
+      "title": "Exists",
+      "type": "boolean"
+    },
+    "itemId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Itemid",
+      "type": "string"
+    },
+    "metadata": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "title": "Metadata",
+      "type": "object"
+    },
+    "ordinal": {
+      "exclusiveMinimum": 0,
+      "title": "Ordinal",
+      "type": "integer"
+    },
+    "range": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/EvidenceRange"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "resourceId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Resourceid",
+      "type": "string"
+    },
+    "resourceRevision": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Resourcerevision"
+    },
+    "resourceType": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "title": "Resourcetype",
+      "type": "string"
+    },
+    "resourceUpdatedAt": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Resourceupdatedat"
+    }
+  },
+  "required": [
+    "itemId",
+    "ordinal",
+    "resourceType",
+    "resourceId",
+    "exists",
+    "byteCount"
+  ],
+  "title": "EvidenceManifestItem",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.EvidenceManifestItem"
+}

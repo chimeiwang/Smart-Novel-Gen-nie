@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://inkforge.cn/contracts/agent-execution/deployment-profile-registry.schema.json",
+  "title": "InkForge Agent Deployment Profile Registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "registryVersion",
+    "profiles"
+  ],
+  "properties": {
+    "registryVersion": {
+      "const": "1"
+    },
+    "profiles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/profile"
+      }
+    }
+  },
+  "$defs": {
+    "versionedIdentifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*\\.v[1-9][0-9]*$"
+    },
+    "purpose": {
+      "enum": [
+        "generation",
+        "review",
+        "evaluation",
+        "embedding",
+        "media"
+      ]
+    },
+    "allowedModel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "model",
+        "transportProfile",
+        "endpointProfile",
+        "structuredOutputRoute",
+        "capabilityVersion",
+        "reasoningMode",
+        "supportsRequestIdempotency",
+        "allowedEnvironments",
+        "pricingVersion",
+        "billable"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$"
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]*$"
+        },
+        "transportProfile": {
+          "$ref": "#/$defs/versionedIdentifier"
+        },
+        "endpointProfile": {
+          "$ref": "#/$defs/versionedIdentifier"
+        },
+        "structuredOutputRoute": {
+          "enum": [
+            "responses_json_schema_v1",
+            "chat_json_output_v1"
+          ]
+        },
+        "capabilityVersion": {
+          "$ref": "#/$defs/versionedIdentifier"
+        },
+        "reasoningMode": {
+          "enum": [
+            "disabled",
+            "bounded"
+          ]
+        },
+        "supportsRequestIdempotency": {
+          "type": "boolean"
+        },
+        "allowedEnvironments": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "dev",
+              "test",
+              "production"
+            ]
+          }
+        },
+        "pricingVersion": {
+          "$ref": "#/$defs/versionedIdentifier"
+        },
+        "billable": {
+          "type": "boolean"
+        }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "version",
+        "supported",
+        "purpose",
+        "allowedModels"
+      ],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/versionedIdentifier"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "purpose": {
+          "$ref": "#/$defs/purpose"
+        },
+        "allowedModels": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/allowedModel"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "supported": {
+                "const": true
+              }
+            },
+            "required": [
+              "supported"
+            ]
+          },
+          "then": {
+            "properties": {
+              "allowedModels": {
+                "minItems": 1
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "allowedModels": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

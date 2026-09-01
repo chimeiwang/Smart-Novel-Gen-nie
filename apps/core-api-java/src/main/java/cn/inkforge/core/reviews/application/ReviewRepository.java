@@ -2,11 +2,12 @@ package cn.inkforge.core.reviews.application;
 
 import cn.inkforge.contracts.api.ArtifactConflictQuarantineRequest;
 import cn.inkforge.contracts.api.ArtifactConflictQuarantineResponse;
-import cn.inkforge.contracts.api.ArtifactDecisionAcceptedResponse;
+import cn.inkforge.contracts.api.ArtifactDecisionPublicResponse;
 import cn.inkforge.contracts.api.CreateArtifactRequest;
 import cn.inkforge.contracts.api.ReviewArtifactDecisionRequest;
 import cn.inkforge.contracts.api.ReviewArtifactListResponse;
 import cn.inkforge.contracts.api.ReviewArtifactResponse;
+import cn.inkforge.contracts.api.ReviewArtifactSummaryListResponse;
 import cn.inkforge.contracts.api.SubmitArtifactEvaluationRequest;
 import cn.inkforge.core.reviews.domain.ReviewArtifactSummary;
 import java.util.List;
@@ -16,9 +17,25 @@ public interface ReviewRepository {
 
     ReviewArtifactResponse get(String userId, String artifactId);
 
+    ReviewArtifactDetail getDetail(
+            String userId,
+            String artifactId,
+            Integer revision,
+            String ifNoneMatch);
+
     ReviewArtifactResponse getTaskArtifact(String userId, String taskId);
 
     ReviewArtifactListResponse list(
+            String userId,
+            String novelId,
+            String chapterId,
+            String taskId,
+            String status,
+            String kind,
+            String cursor,
+            int limit);
+
+    ReviewArtifactSummaryListResponse listSummaries(
             String userId,
             String novelId,
             String chapterId,
@@ -44,6 +61,6 @@ public interface ReviewRepository {
     ArtifactConflictQuarantineResponse quarantine(
             String artifactId, ArtifactConflictQuarantineRequest request);
 
-    ArtifactDecisionAcceptedResponse decide(
+    ArtifactDecisionPublicResponse decide(
             String userId, String artifactId, ReviewArtifactDecisionRequest request);
 }

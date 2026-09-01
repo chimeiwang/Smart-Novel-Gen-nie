@@ -2,11 +2,12 @@ package cn.inkforge.core.reviews.api;
 
 import cn.inkforge.contracts.api.ArtifactConflictQuarantineRequest;
 import cn.inkforge.contracts.api.ArtifactConflictQuarantineResponse;
-import cn.inkforge.contracts.api.ArtifactDecisionAcceptedResponse;
+import cn.inkforge.contracts.api.ArtifactDecisionPublicResponse;
 import cn.inkforge.contracts.api.CreateArtifactRequest;
 import cn.inkforge.contracts.api.ReviewArtifactDecisionRequest;
 import cn.inkforge.contracts.api.ReviewArtifactListResponse;
 import cn.inkforge.contracts.api.ReviewArtifactResponse;
+import cn.inkforge.contracts.api.ReviewArtifactSummaryListResponse;
 import cn.inkforge.contracts.api.SubmitArtifactEvaluationRequest;
 import cn.inkforge.core.generated.api.ReviewsApi;
 import cn.inkforge.core.identity.application.AuthenticatedUser;
@@ -15,6 +16,7 @@ import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.http.InternalServiceAuthenticator;
 import cn.inkforge.core.platform.http.RawRequestBody;
 import cn.inkforge.core.reviews.application.ReviewRepository;
+import cn.inkforge.core.reviews.application.ReviewArtifactDetail;
 import cn.inkforge.serviceauth.ServiceScope;
 import jakarta.servlet.http.HttpServletRequest;
 import java.util.Optional;
@@ -52,12 +54,12 @@ public final class ReviewController implements ReviewsApi {
     }
 
     @Override
-    public ResponseEntity<ArtifactDecisionAcceptedResponse>
+    public ResponseEntity<ArtifactDecisionPublicResponse>
             decideReviewArtifactApiV1ReviewArtifactsArtifactIdDecisionPost(
                     String artifactId,
                     ReviewArtifactDecisionRequest request,
                     String inkforgeToken) {
-        ArtifactDecisionAcceptedResponse response = repository().decide(
+        ArtifactDecisionPublicResponse response = repository().decide(
                 user(inkforgeToken).id(), artifactId, request);
         return ResponseEntity.accepted().body(response);
     }
@@ -65,8 +67,20 @@ public final class ReviewController implements ReviewsApi {
     @Override
     public ResponseEntity<ReviewArtifactResponse>
             getReviewArtifactApiV1ReviewArtifactsArtifactIdGet(
-                    String artifactId, String inkforgeToken) {
-        return ResponseEntity.ok(repository().get(user(inkforgeToken).id(), artifactId));
+                    String artifactId,
+                    Integer revision,
+                    String ifNoneMatch,
+                    String inkforgeToken) {
+        ReviewArtifactDetail detail = repository().getDetail(
+                user(inkforgeToken).id(), artifactId, revision, ifNoneMatch);
+        if (detail.notModified()) {
+            return ResponseEntity.status(304)
+                    .header("ETag", detail.etag())
+                    .build();
+        }
+        return ResponseEntity.ok()
+                .header("ETag", detail.etag())
+                .body(detail.response());
     }
 
     @Override
@@ -88,6 +102,28 @@ public final class ReviewController implements ReviewsApi {
                     Integer limit,
                     String inkforgeToken) {
         return ResponseEntity.ok(repository().list(
+                user(inkforgeToken).id(),
+                novelId,
+                chapterId,
+                taskId,
+                status,
+                kind,
+                cursor,
+                limit));
+    }
+
+    @Override
+    public ResponseEntity<ReviewArtifactSummaryListResponse>
+            listReviewArtifactSummariesApiV1ReviewArtifactSummariesGet(
+                    String novelId,
+                    String chapterId,
+                    String taskId,
+                    String status,
+                    String kind,
+                    String cursor,
+                    Integer limit,
+                    String inkforgeToken) {
+        return ResponseEntity.ok(repository().listSummaries(
                 user(inkforgeToken).id(),
                 novelId,
                 chapterId,

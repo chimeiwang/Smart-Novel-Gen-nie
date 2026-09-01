@@ -10,6 +10,7 @@ import {
   assertReviewArtifactStatusTransition,
   canTransitionReviewArtifactStatus,
   ReviewArtifactDecisionSchema,
+  ReviewArtifactDtoSchema,
   ReviewArtifactKindSchema,
   ReviewArtifactPayloadSchema,
   ReviewArtifactStatusSchema,
@@ -70,6 +71,50 @@ describe("ReviewArtifact contract", () => {
       }).success,
       true
     );
+  });
+
+  it("Artifact DTO 必须显式携带与 Run 归属一致的 engineVersion", () => {
+    const base = {
+      id: "artifact-1",
+      novelId: "novel-1",
+      chapterId: "chapter-1",
+      artifactKey: "chapter-1:selection",
+      kind: "outline_draft",
+      status: "awaiting_user",
+      title: "候选",
+      summary: "摘要",
+      payload: { kind: "outline_draft", content: "候选内容" },
+      diff: null,
+      createdByAgent: null,
+      updatedByAgent: null,
+      reviewerAgent: null,
+      revision: 1,
+      createdAt: "2026-09-01T12:00:00Z",
+      updatedAt: "2026-09-01T12:00:00Z",
+    };
+    assert.equal(ReviewArtifactDtoSchema.safeParse({
+      ...base,
+      engineVersion: 1,
+      taskId: "task-1",
+      workflowRunId: null,
+    }).success, true);
+    assert.equal(ReviewArtifactDtoSchema.safeParse({
+      ...base,
+      engineVersion: 2,
+      taskId: null,
+      workflowRunId: "run-2",
+    }).success, true);
+    assert.equal(ReviewArtifactDtoSchema.safeParse({
+      ...base,
+      engineVersion: 2,
+      taskId: "task-1",
+      workflowRunId: null,
+    }).success, false);
+    assert.equal(ReviewArtifactDtoSchema.safeParse({
+      ...base,
+      taskId: "task-1",
+      workflowRunId: null,
+    }).success, false);
   });
 
   it("只允许明确的草案状态流转", () => {

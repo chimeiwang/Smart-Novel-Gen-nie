@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal, Self
 
 from inkforge_contracts.long_serial import SourceBinding
 from pydantic import BaseModel, ConfigDict, Field, JsonValue, StrictInt, model_validator
+
+from ..writing.schemas import WritingRunV2Response
 
 ArtifactStatus = Literal["draft", "under_review", "awaiting_user", "applying", "applied"]
 ArtifactKind = Literal[
@@ -51,6 +53,7 @@ class ArtifactEvaluationResponse(ReviewSchema):
 
 
 class ReviewArtifactResponse(ReviewSchema):
+    engineVersion: Literal[1, 2]
     id: str
     novelId: str
     chapterId: str | None
@@ -74,8 +77,33 @@ class ReviewArtifactResponse(ReviewSchema):
     updatedAt: datetime
 
 
+class ReviewArtifactSummaryResponse(ReviewSchema):
+    """集合查询使用的有界索引；完整内容必须按精确 revision 单独读取。"""
+
+    engineVersion: Literal[1, 2]
+    id: str
+    novelId: str
+    chapterId: str | None
+    taskId: str | None
+    workflowRunId: str | None
+    artifactKey: str | None
+    kind: ArtifactKind
+    status: ArtifactStatus
+    title: str | None
+    summary: str | None
+    revision: int
+    actionable: bool
+    createdAt: datetime
+    updatedAt: datetime
+
+
 class ReviewArtifactListResponse(ReviewSchema):
     items: list[ReviewArtifactResponse]
+    nextCursor: str | None
+
+
+class ReviewArtifactSummaryListResponse(ReviewSchema):
+    items: list[ReviewArtifactSummaryResponse]
     nextCursor: str | None
 
 
@@ -85,13 +113,45 @@ class ArtifactSelectionRef(ReviewSchema):
 
 
 class ReviewArtifactDecisionRequest(ReviewSchema):
+    engineVersion: Literal[1, 2] = Field(
+        default=1,
+        description=(
+            "审核决定引擎版本；省略只兼容解释为 V1，V2 必须显式提交 2"
+        ),
+    )
     clientRequestId: str = Field(min_length=16, max_length=128)
-    expectedRevision: StrictInt = Field(ge=1)
+    expectedRevision: StrictInt = Field(
+        ge=1,
+        description=(
+            "V1 为既有草案修订号；V2 为规范 expectedArtifactRevision wire 字段"
+        ),
+    )
     decision: Literal["approve", "discard", "revise"]
     editedContent: str | None = None
     editedReplacement: str | None = None
     selectedUpdateRefs: list[ArtifactSelectionRef] | None = None
     userMessage: str | None = None
+
+    @model_validator(mode="after")
+    def validate_v2_decision_shape(self) -> Self:
+        if self.engineVersion != 2:
+            return self
+        if self.editedContent is not None or self.selectedUpdateRefs is not None:
+            raise ValueError("V2 章节选区决定只允许提交 editedReplacement")
+        if self.decision == "approve":
+            if (
+                self.editedReplacement is not None
+                and not self.editedReplacement.strip()
+            ):
+                raise ValueError("V2 editedReplacement 不能为空白")
+            return self
+        if self.editedReplacement is not None:
+            raise ValueError("只有 V2 approve 可以提交 editedReplacement")
+        if self.decision == "revise" and (
+            self.userMessage is None or not self.userMessage.strip()
+        ):
+            raise ValueError("V2 revise 必须携带非空白 userMessage")
+        return self
 
 
 class ArtifactDecisionResponse(ReviewSchema):
@@ -102,6 +162,7 @@ class ArtifactDecisionResponse(ReviewSchema):
 
 
 class ArtifactDecisionAcceptedResponse(ReviewSchema):
+    engineVersion: Literal[1] = 1
     artifactId: str
     taskId: str
     commandId: str
@@ -109,6 +170,12 @@ class ArtifactDecisionAcceptedResponse(ReviewSchema):
     status: Literal["pending", "submitted", "processing", "succeeded", "failed"]
     savedCount: int = 0
     deleted: bool = False
+
+
+type ArtifactDecisionPublicResponse = Annotated[
+    ArtifactDecisionAcceptedResponse | WritingRunV2Response,
+    Field(discriminator="engineVersion"),
+]
 
 
 class ArtifactConflictQuarantineRequest(ReviewSchema):

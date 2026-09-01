@@ -44,6 +44,15 @@
   `b5d2c319303f1ca52d411b8f986aa98a5d48168338c75c65d675d23968c22c78`；生产手机号登录与真实发送开关已开启，
   用户名新注册已关闭，老账号密码登录保留。任何其他持久化改动必须先更新 spec 和本文件、
   核对 `apps/core-api/src/inkforge_core/db/schema-contract.json`，应用启动仍不得自动建表、删表或执行迁移。
+  用户于 2026-08-31 进一步批准按
+  `docs/specs/2026-08-31-core-owned-durable-agent-execution.md` 重构 Agent 执行内核，并授权具名
+  `scripts/migrations/20260831_durable_agent_execution.sql` 在完成隔离 PostgreSQL、开发库、备份、契约、
+  回滚和全量测试门禁后依次用于 `novelwriterdev` 与 `novelwriter`。该授权只允许演进
+  `WorkflowRun/WorkflowStep`、允许 V2 非章节 Run、增加 Workflow Evidence/Event/Evaluation 与逐 Step
+  BillingReservation 表及规格列、约束和索引；BillingReservation 只用于模型调用前的积分预留、幂等结算和
+  未知用量对账，不得成为第二份作品或工作流状态。不授权修改正式作品内容、回填历史 Graph、删除旧任务表、
+  启用生产视频或跳过生产 canary。
+  一旦正式库存在 V2 Run，DDL rollback 禁止执行；应用回滚必须继续读取或隔离 V2 记录。
 
 ## 产品基线
 
@@ -63,7 +72,8 @@
   `VIDEO_PREVIEW_ENABLED=false`，并拒绝视频调度和真实 Seedance；P0-P3 只获开发库授权，不支持
   图片生成、TTS 或旧 `VideoScene`/`VideoGenerationTask` 公共语义复活。
 - 基线提交 `c9afc95` 有 148 个公共 Core 操作、30 个内部 Core 操作和 125 个 CLI 命令；当前公共 Core
-  在此基础上增加 2 个受配置门禁的手机号认证操作，共 150 个。CLI 不是公共 API 全量镜像；现行生产 Java CLI 支持
+  在此基础上增加 2 个受配置门禁的手机号认证操作和 1 个有界审核摘要操作，共 151 个；当前内部 Core 另增加 3 个 V2 耐久
+  Workflow Step 回调和 1 个受审计计费对账入口，共 34 个。CLI 不是公共 API 全量镜像；现行生产 Java CLI 支持
   macOS Keychain 与 Windows Credential Manager，均禁止明文回退。若接口、命令或结构发生获批变化，
   必须重新计算并同步产品基线，不能机械维护旧数字。
 - Java Core 已于 2026-08-26 单切生产并处于观察期：生产始终只有一个 Core，不双 Core、不双写；Python
@@ -84,7 +94,8 @@
 - `apps/web`：Next.js 16，仅页面、SSR/SEO、浏览器交互和生成客户端，不得包含业务 API、Server Actions、数据库客户端或模型运行时。
 - `apps/core-api-java`：当前生产 Core，独占 PostgreSQL 访问、浏览器认证、归属校验、业务规则、ReviewArtifact、计费和 SSE。
 - `apps/core-api`：FastAPI Core 回滚镜像与公共契约来源，不与 Java Core 并行运行。
-- `apps/agent-service`：FastAPI 智能体服务，负责 LangGraph、模型、工具循环和运行队列。禁止导入数据库驱动、读取 `DATABASE_URL` 或直接写正式小说数据。
+- `apps/agent-service`：FastAPI 智能体服务，负责 LangGraph、模型、工具循环和运行队列；V2 单 Step 执行边界使用
+  独立持久 execution Redis，普通队列/认证 Redis 仍可重建。禁止导入数据库驱动、读取 `DATABASE_URL` 或直接写正式小说数据。
 - `packages/service-contracts`：Core 与 Agent 的版本化 Pydantic 契约。
 - `packages/service-auth`：Ed25519 服务身份、请求绑定和重放保护。
 - `packages/api-client`：由 Core OpenAPI 生成的 TypeScript 客户端。

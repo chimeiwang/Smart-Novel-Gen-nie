@@ -12,6 +12,8 @@ type ReviewArtifactCandidate = {
   id: string;
   artifactKey?: string | null;
   status: string;
+  revision?: number;
+  detailLoaded?: boolean;
 };
 
 export function collectAwaitingReviewTaskIds(
@@ -36,7 +38,23 @@ export function mergeActionableReviewArtifacts<T extends ReviewArtifactCandidate
     for (const artifact of collection) {
       if (artifact.status !== "awaiting_user") continue;
       const key = artifact.id;
-      if (!artifacts.has(key)) order.push(key);
+      const current = artifacts.get(key);
+      if (!current) order.push(key);
+      if (
+        current
+        && typeof current.revision === "number"
+        && typeof artifact.revision === "number"
+        && (
+          current.revision > artifact.revision
+          || (
+            current.revision === artifact.revision
+            && current.detailLoaded === true
+            && artifact.detailLoaded !== true
+          )
+        )
+      ) {
+        continue;
+      }
       artifacts.set(key, artifact);
     }
   }

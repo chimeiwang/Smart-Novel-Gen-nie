@@ -2567,6 +2567,7 @@ async def test_single_json_fence_is_unwrapped_and_fully_validated(
     )
     assert not hasattr(recovery, "raw_text")
     assert not hasattr(recovery, "output")
+    assert result.structuredOutputCorrectionCount == 1
     if expected_keyword is None:
         assert result.structuredOutput == {"value": 5}
         assert result.structuredOutputDiagnostic is None

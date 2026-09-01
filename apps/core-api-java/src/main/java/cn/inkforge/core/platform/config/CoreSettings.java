@@ -4,8 +4,10 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 
@@ -15,11 +17,19 @@ public final class CoreSettings {
     public static final String OLD_DEFAULT_JWT_SECRET = "inkforge-default-secret-change-me";
     private static final Pattern VIDEO_NAMESPACE =
             Pattern.compile("[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?");
+    private static final Pattern EXECUTION_RESOURCE_ID =
+            Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:-]{0,127}");
 
     public enum EnvironmentName {
         DEV,
         TEST,
         PRODUCTION
+    }
+
+    public enum DurableAgentRouteMode {
+        OFF,
+        ALLOWLIST,
+        ALL
     }
 
     private final EnvironmentName environment;
@@ -46,8 +56,13 @@ public final class CoreSettings {
     private final String coreServiceKeyId;
     private final Path agentServicePublicKeyPath;
     private final URI agentServiceUrl;
+    private final int agentMaxConcurrency;
     private final boolean ragIndexEnabled;
     private final boolean workflowEventDebugEnabled;
+    private final boolean durableAgentExecutionSchemaReady;
+    private final DurableAgentRouteMode durableAgentRouteMode;
+    private final Set<String> durableAgentUserAllowlist;
+    private final Set<String> durableAgentNovelAllowlist;
     private final Path uploadsRoot;
     private final boolean videoPreviewEnabled;
     private final boolean videoDispatchEnabled;
@@ -89,9 +104,21 @@ public final class CoreSettings {
         this.coreServiceKeyId = nonBlankOrDefault(value.apply("CORE_SERVICE_KEY_ID"), "core-api-v1");
         this.agentServicePublicKeyPath = optionalPath(value.apply("AGENT_SERVICE_PUBLIC_KEY_PATH"));
         this.agentServiceUrl = optionalHttpUri(value.apply("AGENT_SERVICE_URL"), "智能体服务地址");
+        this.agentMaxConcurrency = boundedInteger(
+                value.apply("AGENT_MAX_CONCURRENCY"), "AGENT_MAX_CONCURRENCY", 3, 1, 3);
         this.ragIndexEnabled = bool(value, "RAG_INDEX_ENABLED", false);
         this.workflowEventDebugEnabled = bool(
                 value, "WORKFLOW_EVENT_DEBUG_ENABLED", false);
+        this.durableAgentExecutionSchemaReady = bool(
+                value, "DURABLE_AGENT_EXECUTION_SCHEMA_READY", false);
+        this.durableAgentRouteMode = durableAgentRouteMode(
+                value.apply("DURABLE_AGENT_EXECUTION_ROUTE_MODE"));
+        this.durableAgentUserAllowlist = idAllowlist(
+                value.apply("DURABLE_AGENT_EXECUTION_USER_ALLOWLIST"),
+                "耐久 Agent 用户 allowlist");
+        this.durableAgentNovelAllowlist = idAllowlist(
+                value.apply("DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST"),
+                "耐久 Agent 小说 allowlist");
         this.uploadsRoot = absolutePath(nonBlankOrDefault(value.apply("UPLOADS_ROOT"), "/data/uploads"));
         this.videoPreviewEnabled = bool(value, "VIDEO_PREVIEW_ENABLED", false);
         this.videoDispatchEnabled = bool(value, "VIDEO_DISPATCH_ENABLED", false);
@@ -209,12 +236,46 @@ public final class CoreSettings {
         return agentServiceUrl;
     }
 
+    /** Core 与 Agent 共享的全局模型并发/Workflow active lease 上限。 */
+    public int agentMaxConcurrency() {
+        return agentMaxConcurrency;
+    }
+
     public boolean ragIndexEnabled() {
         return ragIndexEnabled;
     }
 
     public boolean workflowEventDebugEnabled() {
         return workflowEventDebugEnabled;
+    }
+
+    /** 只有具名迁移已经精确命中迁移后契约时，才允许装配 V2 数据库能力。 */
+    public boolean durableAgentExecutionSchemaReady() {
+        return durableAgentExecutionSchemaReady;
+    }
+
+    public DurableAgentRouteMode durableAgentRouteMode() {
+        return durableAgentRouteMode;
+    }
+
+    public Set<String> durableAgentUserAllowlist() {
+        return durableAgentUserAllowlist;
+    }
+
+    public Set<String> durableAgentNovelAllowlist() {
+        return durableAgentNovelAllowlist;
+    }
+
+    /** 开关只决定新 Run 的路由；既有 V2 Run 必须继续由 V2 引擎收敛。 */
+    public boolean routesNewDurableAgentRun(String userId, String novelId) {
+        if (!durableAgentExecutionSchemaReady) return false;
+        return switch (durableAgentRouteMode) {
+            case OFF -> false;
+            case ALL -> true;
+            case ALLOWLIST -> durableAgentUserAllowlist.contains(userId)
+                    && novelId != null
+                    && durableAgentNovelAllowlist.contains(novelId);
+        };
     }
 
     public Path uploadsRoot() {
@@ -322,6 +383,17 @@ public final class CoreSettings {
                 && utf8Length(videoProviderMediaTokenSecret.reveal()) < 32) {
             throw new IllegalArgumentException("供应商素材短时令牌密钥至少需要 32 个 UTF-8 字节");
         }
+        if (durableAgentRouteMode == DurableAgentRouteMode.ALLOWLIST
+                && (durableAgentUserAllowlist.isEmpty()
+                        || durableAgentNovelAllowlist.isEmpty())) {
+            throw new IllegalArgumentException(
+                    "耐久 Agent allowlist 路由必须同时配置用户和小说 ID");
+        }
+        if (!durableAgentExecutionSchemaReady
+                && durableAgentRouteMode != DurableAgentRouteMode.OFF) {
+            throw new IllegalArgumentException(
+                    "耐久 Agent 数据库结构未就绪时，新建路由必须保持 off");
+        }
         if (environment != EnvironmentName.PRODUCTION) {
             return;
         }
@@ -362,6 +434,34 @@ public final class CoreSettings {
             case "production" -> EnvironmentName.PRODUCTION;
             default -> throw new IllegalArgumentException("environment 必须是 dev、test 或 production");
         };
+    }
+
+    private static DurableAgentRouteMode durableAgentRouteMode(String value) {
+        String normalized = nonBlankOrDefault(value, "off").toLowerCase();
+        return switch (normalized) {
+            case "off" -> DurableAgentRouteMode.OFF;
+            case "allowlist" -> DurableAgentRouteMode.ALLOWLIST;
+            case "all" -> DurableAgentRouteMode.ALL;
+            default -> throw new IllegalArgumentException(
+                    "DURABLE_AGENT_EXECUTION_ROUTE_MODE 必须是 off、allowlist 或 all");
+        };
+    }
+
+    private static Set<String> idAllowlist(String value, String label) {
+        String normalized = optional(value);
+        if (normalized == null) return Set.of();
+        LinkedHashSet<String> result = new LinkedHashSet<>();
+        for (String item : normalized.split(",", -1)) {
+            String id = item.strip();
+            if (id.isEmpty() || !EXECUTION_RESOURCE_ID.matcher(id).matches()) {
+                throw new IllegalArgumentException(label + "包含无效 ID");
+            }
+            result.add(id);
+            if (result.size() > 1_000) {
+                throw new IllegalArgumentException(label + "不能超过 1000 项");
+            }
+        }
+        return Set.copyOf(result);
     }
 
     private static List<CidrBlock> cidrs(String value, String label) {
@@ -441,6 +541,20 @@ public final class CoreSettings {
             case "false", "0" -> false;
             default -> throw new IllegalArgumentException(name + " 必须是布尔值");
         };
+    }
+
+    private static int boundedInteger(
+            String value, String name, int fallback, int minimum, int maximum) {
+        String normalized = optional(value);
+        if (normalized == null) return fallback;
+        try {
+            int parsed = Integer.parseInt(normalized);
+            if (parsed < minimum || parsed > maximum) throw new NumberFormatException();
+            return parsed;
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException(
+                    name + " 必须是 " + minimum + " 到 " + maximum + " 的整数");
+        }
     }
 
     private static SecretValue secret(String value) {

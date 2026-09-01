@@ -289,6 +289,30 @@ def fixture(*, fail: bool = False) -> Fixture:
 
 
 @pytest.mark.asyncio
+async def test_python_rollback_core_rejects_v2_before_any_lookup_or_write() -> None:
+    subject = fixture()
+
+    with pytest.raises(ApiError) as captured:
+        await subject.orchestrator.decide(
+            "user-1",
+            "artifact-1",
+            ReviewArtifactDecisionRequest(
+                engineVersion=2,
+                clientRequestId="request-00000001",
+                expectedRevision=1,
+                decision="discard",
+            ),
+        )
+
+    assert captured.value.status_code == 409
+    assert captured.value.code == "ARTIFACT_ENGINE_VERSION_MISMATCH"
+    assert subject.artifacts.required == 0
+    assert subject.commands.created is None
+    assert subject.outer.transaction.committed is False
+    assert subject.outer.transaction.rolled_back is False
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("decision", ["approve", "discard", "revise"])
 async def test_all_decisions_create_one_durable_resume_command(decision: str) -> None:
     subject = fixture()
@@ -412,6 +436,7 @@ async def test_decision_retry_replays_accepted_response_after_terminal_update(
     terminal: str,
 ) -> None:
     accepted = {
+        "engineVersion": 1,
         "artifactId": "artifact-1",
         "taskId": "task-1",
         "commandId": "command-1",

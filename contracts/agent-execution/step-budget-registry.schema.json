@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://inkforge.cn/contracts/agent-execution/step-budget-registry.schema.json",
+  "title": "InkForge Agent Execution Step Budget Registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "registryVersion",
+    "budgets"
+  ],
+  "properties": {
+    "registryVersion": {
+      "const": "1"
+    },
+    "budgets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/stepBudgetProfile"
+      }
+    }
+  },
+  "$defs": {
+    "versionedIdentifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*\\.v[1-9][0-9]*$"
+    },
+    "stepBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxModelCalls",
+        "maxInputTokens",
+        "maxPromptCacheMissTokens",
+        "maxCompletionTokens",
+        "maxReasoningTokens",
+        "maxVisibleOutputTokens",
+        "maxCostMicros",
+        "maxWallClockSeconds",
+        "maxProviderRetries",
+        "maxProtocolCorrections"
+      ],
+      "properties": {
+        "maxModelCalls": {
+          "const": 1
+        },
+        "maxInputTokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "maxPromptCacheMissTokens": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10000000
+        },
+        "maxCompletionTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000000
+        },
+        "maxReasoningTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000000
+        },
+        "maxVisibleOutputTokens": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10000000
+        },
+        "maxCostMicros": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000000
+        },
+        "maxWallClockSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "maxProviderRetries": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "maxProtocolCorrections": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "stepBudgetProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "version",
+        "supported",
+        "budget"
+      ],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/versionedIdentifier"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "budget": {
+          "$ref": "#/$defs/stepBudget"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,1090 @@
+{
+  "$defs": {
+    "ApplyingEventPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "artifactId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Artifactid",
+          "type": "string"
+        },
+        "artifactRevision": {
+          "exclusiveMinimum": 0,
+          "title": "Artifactrevision",
+          "type": "integer"
+        },
+        "decisionStepId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Decisionstepid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifactId",
+        "artifactRevision",
+        "decisionStepId"
+      ],
+      "title": "ApplyingEventPayload",
+      "type": "object"
+    },
+    "AwaitingUserEventPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "allowedDecisions": {
+          "items": {
+            "enum": [
+              "approve",
+              "discard",
+              "revise"
+            ],
+            "type": "string"
+          },
+          "maxItems": 3,
+          "minItems": 1,
+          "title": "Alloweddecisions",
+          "type": "array"
+        },
+        "artifactId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Artifactid",
+          "type": "string"
+        },
+        "artifactRevision": {
+          "exclusiveMinimum": 0,
+          "title": "Artifactrevision",
+          "type": "integer"
+        },
+        "reviewAvailability": {
+          "enum": [
+            "complete",
+            "partial",
+            "unavailable"
+          ],
+          "title": "Reviewavailability",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifactId",
+        "artifactRevision",
+        "allowedDecisions",
+        "reviewAvailability"
+      ],
+      "title": "AwaitingUserEventPayload",
+      "type": "object"
+    },
+    "CancelledEventPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "cancelRequestId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Cancelrequestid",
+          "type": "string"
+        },
+        "cancelledStepId": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cancelledstepid"
+        }
+      },
+      "required": [
+        "cancelRequestId"
+      ],
+      "title": "CancelledEventPayload",
+      "type": "object"
+    },
+    "CandidateReadyEventPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "artifactId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Artifactid",
+          "type": "string"
+        },
+        "artifactRevision": {
+          "exclusiveMinimum": 0,
+          "title": "Artifactrevision",
+          "type": "integer"
+        },
+        "stepId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Stepid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stepId",
+        "artifactId",
+        "artifactRevision"
+      ],
+      "title": "CandidateReadyEventPayload",
+      "type": "object"
+    },
+    "ClarificationRequiredEventPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "clarificationCode": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Clarificationcode",
+          "type": "string"
+        },
+        "decisionStepId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Decisionstepid",
+          "type": "string"
+        },
+        "prompt": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Prompt",
+          "type": "string"
+        }
+      },
+      "required": [
+        "clarificationCode",
+        "prompt",
+        "decisionStepId"
+      ],
+      "title": "ClarificationRequiredEventPayload",
+      "type": "object"
+    },
+    "CompletedEventPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "artifactId": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifactid"
+        },
+        "artifactRevision": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifactrevision"
+        },
+        "outcomeType": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Outcometype",
+          "type": "string"
+        },
+        "resultId": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resultid"
+        }
+      },
+      "required": [
+        "outcomeType"
+      ],
+      "title": "CompletedEventPayload",
+      "type": "object"
+    },
+    "EvidenceReadyEventPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "bundleId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Bundleid",
+          "type": "string"
+        },
+        "bundleVersion": {
+          "exclusiveMinimum": 0,
+          "title": "Bundleversion",
+          "type": "integer"
+        },
+        "manifestSha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Manifestsha256",
+          "type": "string"
+        },
+        "totalBytes": {
+          "minimum": 0,
+          "title": "Totalbytes",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "bundleId",
+        "bundleVersion",
+        "manifestSha256",
+        "totalBytes"
+      ],
+      "title": "EvidenceReadyEventPayload",
+      "type": "object"
+    },
+    "FailedEventPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "errorCode": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Z][A-Z0-9_]*$",
+          "title": "Errorcode",
+          "type": "string"
+        },
+        "failedStepId": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Failedstepid"
+        },
+        "outcomeUnknown": {
+          "title": "Outcomeunknown",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "errorCode",
+        "outcomeUnknown"
+      ],
+      "title": "FailedEventPayload",
+      "type": "object"
+    },
+    "IntentResolvedEventPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "confidence": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "operation": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Operation",
+          "type": "string"
+        },
+        "targetId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Targetid",
+          "type": "string"
+        },
+        "targetType": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Targettype",
+          "type": "string"
+        },
+        "workflow": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Workflow",
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow",
+        "operation",
+        "targetType",
+        "targetId",
+        "confidence"
+      ],
+      "title": "IntentResolvedEventPayload",
+      "type": "object"
+    },
+    "ModelProfileRef": {
+      "additionalProperties": false,
+      "description": "Core 授权的逻辑模型 Profile；不包含 Agent 部署配置。",
+      "properties": {
+        "deploymentProfileKey": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Deploymentprofilekey",
+          "type": "string"
+        },
+        "profile": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Profile",
+          "type": "string"
+        },
+        "promptProfile": {
+          "$ref": "#/$defs/PromptProfileRef"
+        },
+        "reasoningMode": {
+          "enum": [
+            "disabled",
+            "bounded"
+          ],
+          "title": "Reasoningmode",
+          "type": "string"
+        },
+        "version": {
+          "exclusiveMinimum": 0,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "profile",
+        "version",
+        "reasoningMode",
+        "deploymentProfileKey",
+        "promptProfile"
+      ],
+      "title": "ModelProfileRef",
+      "type": "object"
+    },
+    "PromptProfileRef": {
+      "additionalProperties": false,
+      "description": "Manifest 管理的静态 system prompt 身份；正文由双端 Registry 按哈希校验。",
+      "properties": {
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "version": {
+          "exclusiveMinimum": 0,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "sha256"
+      ],
+      "title": "PromptProfileRef",
+      "type": "object"
+    },
+    "ResolvedModelRef": {
+      "additionalProperties": false,
+      "description": "Agent 对逻辑 Profile 的一次可审计部署解析。",
+      "properties": {
+        "capabilityVersion": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Capabilityversion",
+          "type": "string"
+        },
+        "deploymentFingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Deploymentfingerprint",
+          "type": "string"
+        },
+        "deploymentProfileKey": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Deploymentprofilekey",
+          "type": "string"
+        },
+        "endpointProfile": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Endpointprofile",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Provider",
+          "type": "string"
+        },
+        "reasoningMode": {
+          "enum": [
+            "disabled",
+            "bounded"
+          ],
+          "title": "Reasoningmode",
+          "type": "string"
+        },
+        "structuredOutputRoute": {
+          "enum": [
+            "responses_json_schema_v1",
+            "chat_json_output_v1"
+          ],
+          "title": "Structuredoutputroute",
+          "type": "string"
+        },
+        "supportsRequestIdempotency": {
+          "description": "仅当 Provider 确实原样传递 ExecutionStepRequest.idempotencyKey 时为 true",
+          "title": "Supportsrequestidempotency",
+          "type": "boolean"
+        },
+        "transportProfile": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Transportprofile",
+          "type": "string"
+        }
+      },
+      "required": [
+        "deploymentProfileKey",
+        "deploymentFingerprint",
+        "provider",
+        "model",
+        "transportProfile",
+        "endpointProfile",
+        "structuredOutputRoute",
+        "capabilityVersion",
+        "reasoningMode",
+        "supportsRequestIdempotency"
+      ],
+      "title": "ResolvedModelRef",
+      "type": "object"
+    },
+    "ReviewCompletedEventPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "artifactId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Artifactid",
+          "type": "string"
+        },
+        "artifactRevision": {
+          "exclusiveMinimum": 0,
+          "title": "Artifactrevision",
+          "type": "integer"
+        },
+        "evaluationIds": {
+          "items": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "type": "string"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Evaluationids",
+          "type": "array"
+        },
+        "mergedVerdict": {
+          "enum": [
+            "pass",
+            "issues_found",
+            "cannot_assess"
+          ],
+          "title": "Mergedverdict",
+          "type": "string"
+        },
+        "reviewAvailability": {
+          "enum": [
+            "complete",
+            "partial",
+            "unavailable"
+          ],
+          "title": "Reviewavailability",
+          "type": "string"
+        }
+      },
+      "required": [
+        "artifactId",
+        "artifactRevision",
+        "evaluationIds",
+        "mergedVerdict",
+        "reviewAvailability"
+      ],
+      "title": "ReviewCompletedEventPayload",
+      "type": "object"
+    },
+    "ReviewPendingStepSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "attemptCount": {
+          "const": 0,
+          "title": "Attemptcount",
+          "type": "integer"
+        },
+        "fencingToken": {
+          "const": 0,
+          "title": "Fencingtoken",
+          "type": "integer"
+        },
+        "lane": {
+          "enum": [
+            "control",
+            "interactive",
+            "creative",
+            "batch_media"
+          ],
+          "title": "Lane",
+          "type": "string"
+        },
+        "modelProfile": {
+          "$ref": "#/$defs/ModelProfileRef"
+        },
+        "ordinal": {
+          "exclusiveMinimum": 0,
+          "title": "Ordinal",
+          "type": "integer"
+        },
+        "purpose": {
+          "const": "review",
+          "title": "Purpose",
+          "type": "string"
+        },
+        "status": {
+          "const": "pending",
+          "title": "Status",
+          "type": "string"
+        },
+        "stepId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Stepid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stepId",
+        "ordinal",
+        "purpose",
+        "lane",
+        "modelProfile",
+        "status",
+        "attemptCount",
+        "fencingToken"
+      ],
+      "title": "ReviewPendingStepSnapshot",
+      "type": "object"
+    },
+    "ReviewStartedEventPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "artifactId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Artifactid",
+          "type": "string"
+        },
+        "artifactRevision": {
+          "exclusiveMinimum": 0,
+          "title": "Artifactrevision",
+          "type": "integer"
+        },
+        "reviewerSteps": {
+          "items": {
+            "$ref": "#/$defs/ReviewPendingStepSnapshot"
+          },
+          "maxItems": 32,
+          "minItems": 1,
+          "title": "Reviewersteps",
+          "type": "array"
+        }
+      },
+      "required": [
+        "artifactId",
+        "artifactRevision",
+        "reviewerSteps"
+      ],
+      "title": "ReviewStartedEventPayload",
+      "type": "object"
+    },
+    "RunAcceptedEventPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "operation": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_.-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Operation"
+        },
+        "runRevision": {
+          "exclusiveMinimum": 0,
+          "title": "Runrevision",
+          "type": "integer"
+        },
+        "targetId": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Targetid"
+        },
+        "targetType": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_.-]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Targettype"
+        },
+        "workflow": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Workflow",
+          "type": "string"
+        }
+      },
+      "required": [
+        "workflow",
+        "runRevision"
+      ],
+      "title": "RunAcceptedEventPayload",
+      "type": "object"
+    },
+    "StepFinishedEventPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "errorCode": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Z][A-Z0-9_]*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Errorcode"
+        },
+        "fencingToken": {
+          "exclusiveMinimum": 0,
+          "title": "Fencingtoken",
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "failed",
+            "skipped"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "stepId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Stepid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stepId",
+        "fencingToken",
+        "status",
+        "errorCode"
+      ],
+      "title": "StepFinishedEventPayload",
+      "type": "object"
+    },
+    "StepProgressEventPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "elapsedSeconds": {
+          "minimum": 0,
+          "title": "Elapsedseconds",
+          "type": "integer"
+        },
+        "fencingToken": {
+          "exclusiveMinimum": 0,
+          "title": "Fencingtoken",
+          "type": "integer"
+        },
+        "modelProfile": {
+          "$ref": "#/$defs/ModelProfileRef"
+        },
+        "phase": {
+          "enum": [
+            "preparing",
+            "waiting_provider",
+            "validating",
+            "reporting"
+          ],
+          "title": "Phase",
+          "type": "string"
+        },
+        "progressSequence": {
+          "exclusiveMinimum": 0,
+          "title": "Progresssequence",
+          "type": "integer"
+        },
+        "resolvedModel": {
+          "$ref": "#/$defs/ResolvedModelRef"
+        },
+        "stepId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Stepid",
+          "type": "string"
+        },
+        "usageStatus": {
+          "enum": [
+            "complete",
+            "partial",
+            "unknown"
+          ],
+          "title": "Usagestatus",
+          "type": "string"
+        },
+        "waitingOnProvider": {
+          "title": "Waitingonprovider",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "progressSequence",
+        "phase",
+        "elapsedSeconds",
+        "waitingOnProvider",
+        "usageStatus",
+        "stepId",
+        "fencingToken",
+        "modelProfile",
+        "resolvedModel"
+      ],
+      "title": "StepProgressEventPayload",
+      "type": "object"
+    },
+    "StepQueuedEventPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "attemptCount": {
+          "exclusiveMinimum": 0,
+          "title": "Attemptcount",
+          "type": "integer"
+        },
+        "fencingToken": {
+          "exclusiveMinimum": 0,
+          "title": "Fencingtoken",
+          "type": "integer"
+        },
+        "lane": {
+          "enum": [
+            "control",
+            "interactive",
+            "creative",
+            "batch_media"
+          ],
+          "title": "Lane",
+          "type": "string"
+        },
+        "modelProfile": {
+          "$ref": "#/$defs/ModelProfileRef"
+        },
+        "ordinal": {
+          "exclusiveMinimum": 0,
+          "title": "Ordinal",
+          "type": "integer"
+        },
+        "purpose": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Purpose",
+          "type": "string"
+        },
+        "reason": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Reason",
+          "type": "string"
+        },
+        "stepId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Stepid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stepId",
+        "ordinal",
+        "purpose",
+        "lane",
+        "modelProfile",
+        "attemptCount",
+        "fencingToken",
+        "reason"
+      ],
+      "title": "StepQueuedEventPayload",
+      "type": "object"
+    },
+    "StepStartedEventPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "attemptCount": {
+          "exclusiveMinimum": 0,
+          "title": "Attemptcount",
+          "type": "integer"
+        },
+        "fencingToken": {
+          "exclusiveMinimum": 0,
+          "title": "Fencingtoken",
+          "type": "integer"
+        },
+        "modelProfile": {
+          "$ref": "#/$defs/ModelProfileRef"
+        },
+        "ordinal": {
+          "exclusiveMinimum": 0,
+          "title": "Ordinal",
+          "type": "integer"
+        },
+        "purpose": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Purpose",
+          "type": "string"
+        },
+        "stepId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Stepid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "stepId",
+        "ordinal",
+        "purpose",
+        "modelProfile",
+        "attemptCount",
+        "fencingToken"
+      ],
+      "title": "StepStartedEventPayload",
+      "type": "object"
+    },
+    "WorkflowEventPayload": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RunAcceptedEventPayload"
+        },
+        {
+          "$ref": "#/$defs/IntentResolvedEventPayload"
+        },
+        {
+          "$ref": "#/$defs/ClarificationRequiredEventPayload"
+        },
+        {
+          "$ref": "#/$defs/EvidenceReadyEventPayload"
+        },
+        {
+          "$ref": "#/$defs/StepQueuedEventPayload"
+        },
+        {
+          "$ref": "#/$defs/StepStartedEventPayload"
+        },
+        {
+          "$ref": "#/$defs/StepProgressEventPayload"
+        },
+        {
+          "$ref": "#/$defs/StepFinishedEventPayload"
+        },
+        {
+          "$ref": "#/$defs/CandidateReadyEventPayload"
+        },
+        {
+          "$ref": "#/$defs/ReviewStartedEventPayload"
+        },
+        {
+          "$ref": "#/$defs/ReviewCompletedEventPayload"
+        },
+        {
+          "$ref": "#/$defs/AwaitingUserEventPayload"
+        },
+        {
+          "$ref": "#/$defs/ApplyingEventPayload"
+        },
+        {
+          "$ref": "#/$defs/CompletedEventPayload"
+        },
+        {
+          "$ref": "#/$defs/FailedEventPayload"
+        },
+        {
+          "$ref": "#/$defs/CancelledEventPayload"
+        }
+      ]
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/workflow_events/WorkflowEventEnvelope/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "engineVersion": {
+      "const": 2,
+      "title": "Engineversion",
+      "type": "integer"
+    },
+    "eventType": {
+      "enum": [
+        "run_accepted",
+        "intent_resolved",
+        "clarification_required",
+        "evidence_ready",
+        "step_queued",
+        "step_started",
+        "step_progress",
+        "step_finished",
+        "candidate_ready",
+        "review_started",
+        "review_completed",
+        "awaiting_user",
+        "applying",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "title": "Eventtype",
+      "type": "string"
+    },
+    "occurredAt": {
+      "format": "date-time",
+      "title": "Occurredat",
+      "type": "string"
+    },
+    "payload": {
+      "$ref": "#/$defs/WorkflowEventPayload"
+    },
+    "protocolVersion": {
+      "const": "2.0",
+      "title": "Protocolversion",
+      "type": "string"
+    },
+    "runId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Runid",
+      "type": "string"
+    },
+    "sequence": {
+      "exclusiveMinimum": 0,
+      "title": "Sequence",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "protocolVersion",
+    "engineVersion",
+    "runId",
+    "sequence",
+    "eventType",
+    "occurredAt",
+    "payload"
+  ],
+  "title": "WorkflowEventEnvelope",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.workflow_events.WorkflowEventEnvelope"
+}

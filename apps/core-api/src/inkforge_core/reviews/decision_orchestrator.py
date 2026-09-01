@@ -135,8 +135,19 @@ class ReviewDecisionOrchestrator:
         artifact_id: str,
         request: ReviewArtifactDecisionRequest,
     ) -> ArtifactDecisionAcceptedResponse:
+        if request.engineVersion != 1:
+            raise ApiError(
+                status_code=409,
+                code="ARTIFACT_ENGINE_VERSION_MISMATCH",
+                message="Python 回滚 Core 只允许处理 V1 待审核草案",
+                details={
+                    "requestedEngineVersion": request.engineVersion,
+                    "supportedEngineVersion": 1,
+                },
+            )
         request_body = request.model_dump(mode="json", exclude={"clientRequestId"})
         # 新增字段保持旧请求的幂等指纹兼容：未提供时不改变历史规范化正文。
+        request_body.pop("engineVersion", None)
         if request.editedReplacement is None:
             request_body.pop("editedReplacement", None)
         normalized_body = normalize_json_value(request_body)

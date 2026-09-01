@@ -2,6 +2,8 @@ package cn.inkforge.core.agentgateway;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import cn.inkforge.core.platform.config.CoreSettings;
+import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
@@ -12,6 +14,7 @@ import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -19,8 +22,10 @@ import tools.jackson.databind.ObjectMapper;
 
 class AgentServiceReadinessTest {
 
+    private static final String MANIFEST_FINGERPRINT = "a".repeat(64);
+
     @Test
-    void 只有Agent明确返回ready才可通过() throws Exception {
+    void schemaReady关闭时V1不强制manifest但仍只有Agent明确ready才通过() throws Exception {
         HttpServer server = server(200, "{\"status\":\"ready\",\"checks\":{}}");
         try {
             AgentServiceReadiness readiness = readiness(server);
@@ -34,6 +39,87 @@ class AgentServiceReadinessTest {
             assertThat(readiness(notReady).check()).isFalse();
         } finally {
             notReady.stop(0);
+        }
+    }
+
+    @Test
+    void schemaReady开启时必须精确匹配canonicalManifestFingerprint() throws Exception {
+        HttpServer exact = server(
+                200,
+                "{\"status\":\"ready\",\"executionManifestFingerprint\":\""
+                        + MANIFEST_FINGERPRINT
+                        + "\"}");
+        try {
+            assertThat(readiness(exact, MANIFEST_FINGERPRINT).check()).isTrue();
+        } finally {
+            exact.stop(0);
+        }
+
+        for (String body : List.of(
+                "{\"status\":\"ready\"}",
+                "{\"status\":\"ready\",\"executionManifestFingerprint\":\""
+                        + "b".repeat(64)
+                        + "\"}",
+                "{\"status\":\"ready\",\"executionManifestFingerprint\":\""
+                        + "a".repeat(65)
+                        + "\"}",
+                "{\"status\":\"ready\",\"executionManifestFingerprint\":1}",
+                "not-json",
+                "{\"status\":\"ready\",\"executionManifestFingerprint\":\""
+                        + MANIFEST_FINGERPRINT
+                        + "\",\"padding\":\""
+                        + "x".repeat(64 * 1024)
+                        + "\"}")) {
+            HttpServer rejected = server(200, body);
+            try {
+                assertThat(readiness(rejected, MANIFEST_FINGERPRINT).check()).isFalse();
+            } finally {
+                rejected.stop(0);
+            }
+        }
+    }
+
+    @Test
+    void Core配置在schemaReady时绑定自身RegistryFingerprint() throws Exception {
+        ExecutionRegistry registry =
+                ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
+        HttpServer server = server(
+                200,
+                "{\"status\":\"ready\",\"executionManifestFingerprint\":\""
+                        + registry.manifestFingerprint()
+                        + "\"}");
+        try {
+            AgentGatewayConfiguration configuration = new AgentGatewayConfiguration();
+            CoreSettings settings = CoreSettings.from(Map.of(
+                    "AGENT_SERVICE_URL",
+                    "http://127.0.0.1:" + server.getAddress().getPort(),
+                    "DURABLE_AGENT_EXECUTION_SCHEMA_READY",
+                    "true"));
+            AgentServiceReadiness readiness = configuration.agentServiceReadiness(
+                    configuration.agentHttpClient(), settings, new ObjectMapper(), registry);
+
+            assertThat(readiness.check()).isTrue();
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void Core配置schemaReady关闭时不要求Agent返回manifest() throws Exception {
+        ExecutionRegistry registry =
+                ExecutionRegistry.loadClasspath(ExecutionRegistry.Environment.TEST);
+        HttpServer server = server(200, "{\"status\":\"ready\"}");
+        try {
+            AgentGatewayConfiguration configuration = new AgentGatewayConfiguration();
+            CoreSettings settings = CoreSettings.from(Map.of(
+                    "AGENT_SERVICE_URL",
+                    "http://127.0.0.1:" + server.getAddress().getPort()));
+            AgentServiceReadiness readiness = configuration.agentServiceReadiness(
+                    configuration.agentHttpClient(), settings, new ObjectMapper(), registry);
+
+            assertThat(readiness.check()).isTrue();
+        } finally {
+            server.stop(0);
         }
     }
 
@@ -106,11 +192,17 @@ class AgentServiceReadinessTest {
     }
 
     private AgentServiceReadiness readiness(HttpServer server) {
+        return readiness(server, null);
+    }
+
+    private AgentServiceReadiness readiness(
+            HttpServer server, String expectedManifestFingerprint) {
         return new AgentServiceReadiness(
                 new AgentGatewayConfiguration().agentHttpClient(),
                 URI.create("http://127.0.0.1:" + server.getAddress().getPort()),
                 new ObjectMapper(),
-                Duration.ofSeconds(1));
+                Duration.ofSeconds(1),
+                expectedManifestFingerprint);
     }
 
     private static HttpServer server(int status, String body) throws Exception {

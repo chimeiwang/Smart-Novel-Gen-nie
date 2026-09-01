@@ -151,11 +151,13 @@ test("当前会话收到权威终态后重新读取持久化消息但不覆盖�
   );
 });
 
-test("审核托盘汇总多个会话产物并隔离并发失败与旧响应", async () => {
+test("审核托盘用一次权威摘要列表查询汇总产物并淘汰旧响应", async () => {
   const conversationUrl = new URL("../../writing/writing-conversation.tsx", import.meta.url);
   const source = await readFile(conversationUrl, "utf8");
 
-  assert.match(source, /Promise\.allSettled/);
+  assert.match(source, /"\/api\/v1\/review-artifact-summaries"/);
+  assert.match(source, /status: "awaiting_user"/);
+  assert.doesNotMatch(source, /Promise\.allSettled\(taskIds/);
   assert.match(source, /artifactCollectionVersionRef/);
   assert.match(source, /artifactTrayArtifacts\.map/);
   assert.match(source, /mergeActionableReviewArtifacts/);

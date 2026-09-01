@@ -1,9 +1,18 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated, Self
+from typing import Annotated, Self, cast
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    StrictInt,
+    StringConstraints,
+    model_validator,
+)
+from pydantic.config import JsonDict
 
 NonBlankClaim = Annotated[
     str,
@@ -29,8 +38,44 @@ class ServiceScope(StrEnum):
     QUALITY_WRITE = "quality:write"
     VIDEO_WRITE = "video:write"
     VIDEO_RENDER = "video:render"
+    EXECUTION_SUBMIT = "execution:submit"
+    EXECUTION_CANCEL = "execution:cancel"
+    EXECUTION_PROGRESS = "execution:progress"
+    EXECUTION_RESULT = "execution:result"
     BILLING_AUTHORIZE = "billing:authorize"
     BILLING_USAGE_WRITE = "billing:usage:write"
+    BILLING_RECONCILE = "billing:reconcile"
+
+
+EXECUTION_SERVICE_SCOPES = frozenset(
+    {
+        ServiceScope.EXECUTION_SUBMIT,
+        ServiceScope.EXECUTION_CANCEL,
+        ServiceScope.EXECUTION_PROGRESS,
+        ServiceScope.EXECUTION_RESULT,
+        ServiceScope.BILLING_RECONCILE,
+    }
+)
+_EXECUTION_SCOPE_JSON_VALUES = cast(
+    list[JsonValue],
+    sorted(scope.value for scope in EXECUTION_SERVICE_SCOPES),
+)
+
+_SERVICE_JWT_JSON_SCHEMA_EXTRA: JsonDict = {
+    "allOf": [
+        {
+            "if": {
+                "properties": {"novel_id": {"type": "null"}},
+                "required": ["novel_id"],
+            },
+            "then": {
+                "properties": {
+                    "scope": {"items": {"enum": _EXECUTION_SCOPE_JSON_VALUES}}
+                }
+            },
+        }
+    ]
+}
 
 
 WRITE_SERVICE_SCOPES = frozenset(
@@ -47,13 +92,24 @@ WRITE_SERVICE_SCOPES = frozenset(
         ServiceScope.QUALITY_WRITE,
         ServiceScope.VIDEO_WRITE,
         ServiceScope.VIDEO_RENDER,
+        ServiceScope.EXECUTION_SUBMIT,
+        ServiceScope.EXECUTION_CANCEL,
+        ServiceScope.EXECUTION_PROGRESS,
+        ServiceScope.EXECUTION_RESULT,
         ServiceScope.BILLING_USAGE_WRITE,
+        ServiceScope.BILLING_RECONCILE,
     }
 )
 
 
 class ServiceJwtClaims(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    """服务 JWT；V2 execution 固定 task_id=stepId、run_id=runId、novel_id=novelId。"""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        json_schema_extra=_SERVICE_JWT_JSON_SCHEMA_EXTRA,
+    )
 
     iss: NonBlankClaim
     sub: NonBlankClaim
@@ -61,7 +117,7 @@ class ServiceJwtClaims(BaseModel):
     scope: tuple[ServiceScope, ...] = Field(min_length=1)
     task_id: NonBlankClaim
     run_id: NonBlankClaim
-    novel_id: NonBlankClaim
+    novel_id: NonBlankClaim | None
     jti: NonBlankClaim
     iat: StrictInt
     exp: StrictInt
@@ -83,4 +139,6 @@ class ServiceJwtClaims(BaseModel):
             raise ValueError("request_timestamp 必须与 iat 相同")
         if len(set(self.scope)) != len(self.scope):
             raise ValueError("服务令牌权限范围不能重复")
+        if self.novel_id is None and not set(self.scope) <= EXECUTION_SERVICE_SCOPES:
+            raise ValueError("只有纯 execution scope 服务令牌允许 novel_id 为 null")
         return self

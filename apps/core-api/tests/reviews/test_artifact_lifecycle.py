@@ -168,3 +168,70 @@ def test_artifact_decision_expected_revision_rejects_boolean() -> None:
                 "decision": "revise",
             }
         )
+
+
+def test_artifact_decision_omitted_engine_version_preserves_v1_shape() -> None:
+    request = ReviewArtifactDecisionRequest.model_validate(
+        {
+            "clientRequestId": "client-request-v1-0001",
+            "expectedRevision": 3,
+            "decision": "approve",
+            "editedContent": "V1 全文编辑保持兼容",
+            "selectedUpdateRefs": [{"section": "characters", "index": 0}],
+        }
+    )
+
+    assert request.engineVersion == 1
+    assert request.editedContent == "V1 全文编辑保持兼容"
+    assert request.selectedUpdateRefs is not None
+
+
+def test_artifact_decision_v2_accepts_selection_approve_and_explicit_revise() -> None:
+    approve = ReviewArtifactDecisionRequest.model_validate(
+        {
+            "engineVersion": 2,
+            "clientRequestId": "client-request-v2-approve",
+            "expectedRevision": 7,
+            "decision": "approve",
+            "editedReplacement": "只替换冻结选区",
+        }
+    )
+    revise = ReviewArtifactDecisionRequest.model_validate(
+        {
+            "engineVersion": 2,
+            "clientRequestId": "client-request-v2-revise",
+            "expectedRevision": 7,
+            "decision": "revise",
+            "userMessage": "保留含义，压缩动作描写",
+        }
+    )
+
+    assert approve.engineVersion == revise.engineVersion == 2
+    assert approve.editedReplacement == "只替换冻结选区"
+    assert revise.userMessage == "保留含义，压缩动作描写"
+
+
+@pytest.mark.parametrize(
+    ("decision", "extra"),
+    [
+        ("approve", {"editedContent": "禁止用全文伪装选区"}),
+        ("approve", {"selectedUpdateRefs": [{"section": "characters"}]}),
+        ("approve", {"editedReplacement": "   "}),
+        ("discard", {"editedReplacement": "不能在丢弃时编辑"}),
+        ("revise", {}),
+        ("revise", {"userMessage": "   "}),
+    ],
+)
+def test_artifact_decision_v2_rejects_ambiguous_or_incomplete_shape(
+    decision: str, extra: dict[str, object]
+) -> None:
+    with pytest.raises(ValidationError):
+        ReviewArtifactDecisionRequest.model_validate(
+            {
+                "engineVersion": 2,
+                "clientRequestId": "client-request-v2-invalid",
+                "expectedRevision": 1,
+                "decision": decision,
+                **extra,
+            }
+        )

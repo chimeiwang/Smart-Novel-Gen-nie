@@ -1,0 +1,787 @@
+{
+  "$defs": {
+    "EvidenceBundle": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/EvidenceItem"
+          },
+          "maxItems": 4096,
+          "minItems": 1,
+          "title": "Items",
+          "type": "array"
+        },
+        "manifest": {
+          "$ref": "#/$defs/EvidenceManifest"
+        },
+        "manifestSha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Manifestsha256",
+          "type": "string"
+        },
+        "policyVersion": {
+          "description": "本 Step 对同一不可变 bundle 的授权视图；generation 使用捕获策略，review 可使用 Catalog 固定的 reviewer evidence policy，bundle id/items/manifest 不变",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Policyversion",
+          "type": "string"
+        },
+        "runId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Runid",
+          "type": "string"
+        },
+        "totalBytes": {
+          "minimum": 0,
+          "title": "Totalbytes",
+          "type": "integer"
+        },
+        "version": {
+          "exclusiveMinimum": 0,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "runId",
+        "version",
+        "policyVersion",
+        "manifest",
+        "manifestSha256",
+        "totalBytes",
+        "items"
+      ],
+      "title": "EvidenceBundle",
+      "type": "object"
+    },
+    "EvidenceItem": {
+      "additionalProperties": false,
+      "properties": {
+        "bundleId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Bundleid",
+          "type": "string"
+        },
+        "byteCount": {
+          "minimum": 0,
+          "title": "Bytecount",
+          "type": "integer"
+        },
+        "contentJson": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/JsonValue"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "contentSha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Contentsha256"
+        },
+        "contentText": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Contenttext"
+        },
+        "contentType": {
+          "anyOf": [
+            {
+              "enum": [
+                "text",
+                "json"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Contenttype"
+        },
+        "exists": {
+          "title": "Exists",
+          "type": "boolean"
+        },
+        "id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Metadata",
+          "type": "object"
+        },
+        "ordinal": {
+          "exclusiveMinimum": 0,
+          "title": "Ordinal",
+          "type": "integer"
+        },
+        "range": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvidenceRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "resourceId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Resourceid",
+          "type": "string"
+        },
+        "resourceRevision": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resourcerevision"
+        },
+        "resourceType": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Resourcetype",
+          "type": "string"
+        },
+        "resourceUpdatedAt": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resourceupdatedat"
+        }
+      },
+      "required": [
+        "id",
+        "bundleId",
+        "ordinal",
+        "resourceType",
+        "resourceId",
+        "exists",
+        "byteCount"
+      ],
+      "title": "EvidenceItem",
+      "type": "object"
+    },
+    "EvidenceManifest": {
+      "additionalProperties": false,
+      "properties": {
+        "bundleId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Bundleid",
+          "type": "string"
+        },
+        "bundleVersion": {
+          "exclusiveMinimum": 0,
+          "title": "Bundleversion",
+          "type": "integer"
+        },
+        "itemCount": {
+          "exclusiveMinimum": 0,
+          "title": "Itemcount",
+          "type": "integer"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/EvidenceManifestItem"
+          },
+          "maxItems": 4096,
+          "minItems": 1,
+          "title": "Items",
+          "type": "array"
+        }
+      },
+      "required": [
+        "bundleId",
+        "bundleVersion",
+        "itemCount",
+        "items"
+      ],
+      "title": "EvidenceManifest",
+      "type": "object"
+    },
+    "EvidenceManifestItem": {
+      "additionalProperties": false,
+      "properties": {
+        "byteCount": {
+          "minimum": 0,
+          "title": "Bytecount",
+          "type": "integer"
+        },
+        "contentSha256": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Contentsha256"
+        },
+        "contentType": {
+          "anyOf": [
+            {
+              "enum": [
+                "text",
+                "json"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Contenttype"
+        },
+        "exists": {
+          "title": "Exists",
+          "type": "boolean"
+        },
+        "itemId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Itemid",
+          "type": "string"
+        },
+        "metadata": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Metadata",
+          "type": "object"
+        },
+        "ordinal": {
+          "exclusiveMinimum": 0,
+          "title": "Ordinal",
+          "type": "integer"
+        },
+        "range": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EvidenceRange"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "resourceId": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "title": "Resourceid",
+          "type": "string"
+        },
+        "resourceRevision": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resourcerevision"
+        },
+        "resourceType": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Resourcetype",
+          "type": "string"
+        },
+        "resourceUpdatedAt": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resourceupdatedat"
+        }
+      },
+      "required": [
+        "itemId",
+        "ordinal",
+        "resourceType",
+        "resourceId",
+        "exists",
+        "byteCount"
+      ],
+      "title": "EvidenceManifestItem",
+      "type": "object"
+    },
+    "EvidenceRange": {
+      "additionalProperties": false,
+      "description": "以 Unicode 码点计数的半开区间。",
+      "properties": {
+        "endCodePoint": {
+          "exclusiveMinimum": 0,
+          "title": "Endcodepoint",
+          "type": "integer"
+        },
+        "startCodePoint": {
+          "minimum": 0,
+          "title": "Startcodepoint",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "startCodePoint",
+        "endCodePoint"
+      ],
+      "title": "EvidenceRange",
+      "type": "object"
+    },
+    "JsonValue": {},
+    "ModelProfileRef": {
+      "additionalProperties": false,
+      "description": "Core 授权的逻辑模型 Profile；不包含 Agent 部署配置。",
+      "properties": {
+        "deploymentProfileKey": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Deploymentprofilekey",
+          "type": "string"
+        },
+        "profile": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Profile",
+          "type": "string"
+        },
+        "promptProfile": {
+          "$ref": "#/$defs/PromptProfileRef"
+        },
+        "reasoningMode": {
+          "enum": [
+            "disabled",
+            "bounded"
+          ],
+          "title": "Reasoningmode",
+          "type": "string"
+        },
+        "version": {
+          "exclusiveMinimum": 0,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "profile",
+        "version",
+        "reasoningMode",
+        "deploymentProfileKey",
+        "promptProfile"
+      ],
+      "title": "ModelProfileRef",
+      "type": "object"
+    },
+    "OutputSchemaRef": {
+      "additionalProperties": false,
+      "properties": {
+        "jsonSchema": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "minProperties": 1,
+          "title": "Jsonschema",
+          "type": "object"
+        },
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "version": {
+          "exclusiveMinimum": 0,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "sha256",
+        "jsonSchema"
+      ],
+      "title": "OutputSchemaRef",
+      "type": "object"
+    },
+    "PromptProfileRef": {
+      "additionalProperties": false,
+      "description": "Manifest 管理的静态 system prompt 身份；正文由双端 Registry 按哈希校验。",
+      "properties": {
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "version": {
+          "exclusiveMinimum": 0,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "sha256"
+      ],
+      "title": "PromptProfileRef",
+      "type": "object"
+    },
+    "StepBudget": {
+      "additionalProperties": false,
+      "description": "一个耐久 Step 的完整、不可隐式扩张的执行预算。",
+      "properties": {
+        "maxCompletionTokens": {
+          "maximum": 10000000,
+          "minimum": 0,
+          "title": "Maxcompletiontokens",
+          "type": "integer"
+        },
+        "maxCostMicros": {
+          "maximum": 1000000000,
+          "minimum": 0,
+          "title": "Maxcostmicros",
+          "type": "integer"
+        },
+        "maxInputTokens": {
+          "exclusiveMinimum": 0,
+          "maximum": 10000000,
+          "title": "Maxinputtokens",
+          "type": "integer"
+        },
+        "maxModelCalls": {
+          "const": 1,
+          "title": "Maxmodelcalls",
+          "type": "integer"
+        },
+        "maxPromptCacheMissTokens": {
+          "exclusiveMinimum": 0,
+          "maximum": 10000000,
+          "title": "Maxpromptcachemisstokens",
+          "type": "integer"
+        },
+        "maxProtocolCorrections": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Maxprotocolcorrections",
+          "type": "integer"
+        },
+        "maxProviderRetries": {
+          "description": "当前单 Step 内的供应商重试上限；不是 RunBudget catalog 字段",
+          "maximum": 2,
+          "minimum": 0,
+          "title": "Maxproviderretries",
+          "type": "integer"
+        },
+        "maxReasoningTokens": {
+          "maximum": 10000000,
+          "minimum": 0,
+          "title": "Maxreasoningtokens",
+          "type": "integer"
+        },
+        "maxVisibleOutputTokens": {
+          "maximum": 10000000,
+          "minimum": 0,
+          "title": "Maxvisibleoutputtokens",
+          "type": "integer"
+        },
+        "maxWallClockSeconds": {
+          "exclusiveMinimum": 0,
+          "maximum": 86400,
+          "title": "Maxwallclockseconds",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "maxModelCalls",
+        "maxInputTokens",
+        "maxPromptCacheMissTokens",
+        "maxCompletionTokens",
+        "maxReasoningTokens",
+        "maxVisibleOutputTokens",
+        "maxCostMicros",
+        "maxWallClockSeconds",
+        "maxProviderRetries",
+        "maxProtocolCorrections"
+      ],
+      "title": "StepBudget",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/execution/ExecutionStepRequest/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "artifactId": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Artifactid"
+    },
+    "artifactRevision": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Artifactrevision"
+    },
+    "budget": {
+      "$ref": "#/$defs/StepBudget"
+    },
+    "dispatchMode": {
+      "description": "transport/fencing 事实，不进入 requestHash；running_recovery 缺 journal 时必须 MODEL_OUTCOME_UNKNOWN",
+      "enum": [
+        "initial",
+        "pending_recovery",
+        "running_recovery"
+      ],
+      "title": "Dispatchmode",
+      "type": "string"
+    },
+    "evidenceBundle": {
+      "$ref": "#/$defs/EvidenceBundle"
+    },
+    "fencingToken": {
+      "exclusiveMinimum": 0,
+      "title": "Fencingtoken",
+      "type": "integer"
+    },
+    "idempotencyKey": {
+      "description": "Agent 必须把此键原样传给声明支持请求幂等的供应商",
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Idempotencykey",
+      "type": "string"
+    },
+    "input": {
+      "additionalProperties": {
+        "$ref": "#/$defs/JsonValue"
+      },
+      "title": "Input",
+      "type": "object"
+    },
+    "inputHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Inputhash",
+      "type": "string"
+    },
+    "jobId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Jobid",
+      "type": "string"
+    },
+    "lane": {
+      "enum": [
+        "interactive",
+        "creative",
+        "batch_media"
+      ],
+      "title": "Lane",
+      "type": "string"
+    },
+    "modelProfile": {
+      "$ref": "#/$defs/ModelProfileRef"
+    },
+    "novelId": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Novelid"
+    },
+    "operation": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "title": "Operation",
+      "type": "string"
+    },
+    "outputSchema": {
+      "$ref": "#/$defs/OutputSchemaRef"
+    },
+    "protocolVersion": {
+      "const": "2.0",
+      "title": "Protocolversion",
+      "type": "string"
+    },
+    "purpose": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "title": "Purpose",
+      "type": "string"
+    },
+    "requestHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Requesthash",
+      "type": "string"
+    },
+    "runId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Runid",
+      "type": "string"
+    },
+    "stepId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Stepid",
+      "type": "string"
+    },
+    "submittedAt": {
+      "format": "date-time",
+      "title": "Submittedat",
+      "type": "string"
+    },
+    "workflow": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "title": "Workflow",
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocolVersion",
+    "jobId",
+    "runId",
+    "novelId",
+    "stepId",
+    "fencingToken",
+    "dispatchMode",
+    "idempotencyKey",
+    "requestHash",
+    "inputHash",
+    "input",
+    "workflow",
+    "operation",
+    "purpose",
+    "lane",
+    "evidenceBundle",
+    "modelProfile",
+    "outputSchema",
+    "budget",
+    "submittedAt"
+  ],
+  "title": "ExecutionStepRequest",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.ExecutionStepRequest"
+}

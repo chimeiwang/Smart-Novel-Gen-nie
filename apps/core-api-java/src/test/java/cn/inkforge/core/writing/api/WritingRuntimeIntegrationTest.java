@@ -8,7 +8,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 import cn.inkforge.core.CoreApplication;
 import cn.inkforge.core.db.generated.enums.Writingtaskphase;
 import cn.inkforge.core.platform.db.CoreDatabase;
+import cn.inkforge.core.platform.db.DurableAgentSchemaGate;
 import cn.inkforge.core.platform.http.InternalServiceAuthenticator;
+import cn.inkforge.core.workflows.api.WorkflowsController;
+import cn.inkforge.core.workflows.application.DurableWorkflowService;
+import cn.inkforge.core.workflows.application.WorkflowCallbackRepository;
+import cn.inkforge.core.workflows.application.WorkflowCancellationReconciler;
+import cn.inkforge.core.workflows.application.WorkflowDispatchRepository;
+import cn.inkforge.core.workflows.application.WorkflowEventStreamRepository;
+import cn.inkforge.core.workflows.application.WorkflowEventTailObserver;
+import cn.inkforge.core.workflows.application.WorkflowRunCancellationRepository;
+import cn.inkforge.core.workflows.application.WorkflowRunCancellationService;
+import cn.inkforge.core.workflows.application.WorkflowStartRepository;
+import cn.inkforge.core.workflows.application.WorkflowStepDispatcher;
+import cn.inkforge.core.writing.application.LongSerialDurableRunStarter;
 import cn.inkforge.core.writing.application.WritingCallbackService;
 import cn.inkforge.core.writing.application.WritingCommandSubmitter;
 import cn.inkforge.core.writing.application.WritingEventStreamService;
@@ -34,6 +47,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.test.annotation.DirtiesContext;
@@ -87,6 +101,8 @@ class WritingRuntimeIntegrationTest {
         registry.add("ENVIRONMENT", () -> "test");
         registry.add("TRUSTED_AGENT_CIDRS", () -> "127.0.0.1/32");
         registry.add("VIDEO_PREVIEW_ENABLED", () -> "true");
+        registry.add("DURABLE_AGENT_EXECUTION_SCHEMA_READY", () -> "false");
+        registry.add("DURABLE_AGENT_EXECUTION_ROUTE_MODE", () -> "off");
     }
 
     @BeforeAll
@@ -120,6 +136,9 @@ class WritingRuntimeIntegrationTest {
     @Autowired
     private WritingEventStreamService streams;
 
+    @Autowired
+    private ApplicationContext context;
+
     private final HttpClient client = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(5))
             .build();
@@ -140,6 +159,36 @@ class WritingRuntimeIntegrationTest {
         assertThat(dispatcher).isNotNull();
         assertThat(callbacks).isNotNull();
         assertThat(streams).isNotNull();
+        assertThat(context.getBeansOfType(DurableWorkflowService.class)).isEmpty();
+        assertThat(context.getBeansOfType(DurableAgentSchemaGate.class)).isEmpty();
+        assertThat(context.getBeansOfType(WorkflowStartRepository.class)).isEmpty();
+        assertThat(context.getBeansOfType(WorkflowCallbackRepository.class)).isEmpty();
+        assertThat(context.getBeansOfType(WorkflowDispatchRepository.class)).isEmpty();
+        assertThat(context.getBeansOfType(WorkflowEventStreamRepository.class)).isEmpty();
+        assertThat(context.getBeansOfType(WorkflowEventTailObserver.class)).isEmpty();
+        assertThat(context.getBeansOfType(WorkflowRunCancellationRepository.class)).isEmpty();
+        assertThat(context.getBeansOfType(WorkflowRunCancellationService.class)).isEmpty();
+        assertThat(context.getBeansOfType(WorkflowCancellationReconciler.class)).isEmpty();
+        assertThat(context.getBeansOfType(
+                                cn.inkforge.core.workflows.application.WorkflowEventStreamService
+                                        .class))
+                .isEmpty();
+        assertThat(context.getBeansOfType(WorkflowStepDispatcher.class)).isEmpty();
+        assertThat(context.getBeansOfType(LongSerialDurableRunStarter.class)).isEmpty();
+        assertThat(context.getBeansOfType(WorkflowsController.class)).isEmpty();
+        assertThat(context.containsBean("workflowCancellationReconcilerStarter")).isFalse();
+        assertThat(context.containsBean("workflowStepDispatcherStarter")).isFalse();
+        HttpResponse<String> disabledV2Callback = send(
+                "PUT",
+                "/internal/v1/workflow-runs/run-disabled/steps/step-disabled/progress",
+                "{}",
+                null,
+                false);
+        assertThat(disabledV2Callback.statusCode()).as(disabledV2Callback.body()).isEqualTo(404);
+        HttpResponse<String> readiness = send(
+                "GET", "/api/v1/health/ready", null, null, false);
+        assertThat(readiness.statusCode()).as(readiness.body()).isEqualTo(200);
+        assertThat(readiness.body()).contains("\"database\":\"ok\"");
 
         String username = "writing_"
                 + UUID.randomUUID().toString().replace("-", "").substring(0, 12);
@@ -242,6 +291,9 @@ class WritingRuntimeIntegrationTest {
                 cookie);
         String taskId = firstRun.get("id").asText();
         String commandId = firstRun.get("commandId").asText();
+        assertThat(firstRun.get("engineVersion").asInt()).isEqualTo(1);
+        assertThat(firstRun.get("runId").asText()).isEqualTo(taskId);
+        assertThat(firstRun.get("taskId").asText()).isEqualTo(taskId);
         assertThat(SUBMITTED).anySatisfy(record -> {
             assertThat(record.id()).isEqualTo(commandId);
             assertThat(record.taskId()).isEqualTo(taskId);
@@ -251,12 +303,19 @@ class WritingRuntimeIntegrationTest {
         HttpResponse<String> status = send(
                 "GET", "/api/v1/writing/runs/" + taskId, null, cookie, false);
         assertThat(status.statusCode()).as(status.body()).isEqualTo(200);
-        assertThat(json.readTree(status.body()).get("operation").asText())
+        JsonNode statusBody = json.readTree(status.body());
+        assertThat(statusBody.get("engineVersion").asInt()).isEqualTo(1);
+        assertThat(statusBody.get("runId").asText()).isEqualTo(taskId);
+        assertThat(statusBody.get("taskId").asText()).isEqualTo(taskId);
+        assertThat(statusBody.get("operation").asText())
                 .isEqualTo("review_chapter");
         HttpResponse<String> listed = send(
                 "GET", "/api/v1/writing/runs?novelId=" + novelId, null, cookie, false);
         assertThat(listed.statusCode()).as(listed.body()).isEqualTo(200);
-        assertThat(listed.body()).contains(taskId);
+        JsonNode listedItem = json.readTree(listed.body()).path("items").get(0);
+        assertThat(listedItem.get("engineVersion").asInt()).isEqualTo(1);
+        assertThat(listedItem.get("runId").asText()).isEqualTo(taskId);
+        assertThat(listedItem.get("taskId").asText()).isEqualTo(taskId);
 
         String toolBody = json.writeValueAsString(Map.of(
                 "userId", userId,
@@ -365,7 +424,11 @@ class WritingRuntimeIntegrationTest {
                 cookie,
                 false);
         assertThat(resumed.statusCode()).as(resumed.body()).isEqualTo(202);
-        String resumeCommandId = json.readTree(resumed.body()).get("commandId").asText();
+        JsonNode resumedBody = json.readTree(resumed.body());
+        assertThat(resumedBody.get("engineVersion").asInt()).isEqualTo(1);
+        assertThat(resumedBody.get("runId").asText()).isEqualTo(secondTaskId);
+        assertThat(resumedBody.get("taskId").asText()).isEqualTo(secondTaskId);
+        String resumeCommandId = resumedBody.get("commandId").asText();
         assertThat(SUBMITTED).anySatisfy(record -> assertThat(record.id())
                 .isEqualTo(resumeCommandId));
 
@@ -376,6 +439,10 @@ class WritingRuntimeIntegrationTest {
                 cookie,
                 false);
         assertThat(cancelled.statusCode()).as(cancelled.body()).isEqualTo(202);
+        JsonNode cancelledBody = json.readTree(cancelled.body());
+        assertThat(cancelledBody.get("engineVersion").asInt()).isEqualTo(1);
+        assertThat(cancelledBody.get("runId").asText()).isEqualTo(secondTaskId);
+        assertThat(cancelledBody.get("taskId").asText()).isEqualTo(secondTaskId);
         assertThat(CANCELLED).anySatisfy(record -> assertThat(record.taskId())
                 .isEqualTo(secondTaskId));
         HttpResponse<String> cancelledStatus = send(

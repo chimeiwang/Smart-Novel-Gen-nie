@@ -11,8 +11,19 @@ DEPLOYMENT_FILES = (
     ROOT / ".github" / "workflows" / "build.yml",
     ROOT / "scripts" / "deploy-production.sh",
     ROOT / "scripts" / "upload-docker-images.sh",
+    ROOT / "scripts" / "durable-agent-execution-migration.sh",
+    ROOT / "scripts" / "durable-agent-v2-rollout-gate.sh",
+    ROOT / "scripts" / "prepare-postgres-restore-quarantine.sh",
+    ROOT / "scripts" / "verify-durable-agent-v2-image.sh",
 )
-PRODUCTION_SERVICES = ("nginx", "web", "core-api", "agent-service", "redis")
+PRODUCTION_SERVICES = (
+    "nginx",
+    "web",
+    "core-api",
+    "agent-service",
+    "redis",
+    "execution-redis",
+)
 _COMPOSE_DEFAULT_EXPRESSION = re.compile(
     r"^\$\{(?P<name>[A-Za-z_][A-Za-z0-9_]*):-(?P<default>.*)\}$"
 )
@@ -255,12 +266,48 @@ def test_python_core_rollback_override_is_explicit_and_only_changes_healthcheck(
 
 
 def test_redis_is_bounded() -> None:
-    redis_config = (ROOT / "infra" / "redis" / "redis.conf").read_text(encoding="utf-8")
+    redis_config_path = ROOT / "infra" / "redis" / "redis.conf"
+    execution_config_path = ROOT / "infra" / "redis" / "execution-redis.conf"
+    redis_config = redis_config_path.read_text(encoding="utf-8")
+    execution_config = execution_config_path.read_text(encoding="utf-8")
+    compose = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))
+    redis = compose["services"]["redis"]
+    execution_redis = compose["services"]["execution-redis"]
+    agent = compose["services"]["agent-service"]
 
     assert "64mb" in redis_config.lower()
     assert re.search(r"(?m)^appendonly\s+no$", redis_config)
     assert re.search(r"(?m)^maxmemory-policy\s+noeviction$", redis_config)
     assert "allkeys-lru" not in redis_config
+    assert any(item.startswith("/data:") for item in redis.get("tmpfs", []))
+    assert all(not item.endswith(":/data") for item in redis.get("volumes", []))
+
+    assert re.search(r"(?m)^maxmemory\s+32mb$", execution_config)
+    assert re.search(r"(?m)^auto-aof-rewrite-min-size\s+8mb$", execution_config)
+    assert re.search(r"(?m)^hash-max-listpack-value\s+4096$", execution_config)
+    assert re.search(r"(?m)^hash-max-listpack-entries\s+64$", execution_config)
+    for contract in (
+        r"(?m)^appendonly\s+yes$",
+        r"(?m)^appendfsync\s+always$",
+        r"(?m)^aof-load-truncated\s+no$",
+        r"(?m)^maxmemory-policy\s+noeviction$",
+    ):
+        assert re.search(contract, execution_config)
+    assert "execution_redis_data:/data" in execution_redis["volumes"]
+    assert all(
+        not item.startswith("/data:") for item in execution_redis.get("tmpfs", [])
+    )
+    assert "execution_redis_data" in compose["volumes"]
+    assert execution_redis["networks"] == ["execution_net"]
+    assert "execution_net" in agent["networks"]
+    assert "EXECUTION_REDIS_URL" in agent["environment"]
+    assert execution_config_path.stat().st_mode & 0o777 == 0o644
+    execution_memory_mib = int(execution_redis["mem_limit"].removesuffix("m"))
+    # AOF rewrite 最坏按 live dataset 全量 CoW 预留，另留 64 MiB 给 Redis/AOF 缓冲。
+    assert execution_memory_mib >= 2 * 32 + 64
+    for service_name, service in compose["services"].items():
+        if service_name not in {"agent-service", "execution-redis"}:
+            assert "execution_net" not in (service.get("networks") or [])
 
 
 def test_agent_queue_terminal_retention_is_configurable() -> None:
@@ -271,6 +318,13 @@ def test_agent_queue_terminal_retention_is_configurable() -> None:
         "QUEUE_TERMINAL_RETENTION_DAYS: ${QUEUE_TERMINAL_RETENTION_DAYS:-7}"
         in agent
     )
+    assert (
+        "EXECUTION_TERMINAL_RETENTION_HOURS: "
+        "${EXECUTION_TERMINAL_RETENTION_HOURS:-24}" in agent
+    )
+    assert "EXECUTION_TERMINAL_RETENTION_HOURS=24" in (
+        ROOT / ".env.example"
+    ).read_text(encoding="utf-8")
 
 
 def test_production_agent_static_compose_interpolation_contract_for_deepseek_defaults() -> None:
@@ -313,6 +367,7 @@ def test_model_examples_document_explicit_profile_boundary_without_secrets() -> 
 
 def test_agent_parallel_limit_is_explicit_and_keeps_one_process() -> None:
     compose = COMPOSE.read_text(encoding="utf-8")
+    core = _service_block(compose, "core-api")
     agent = _service_block(compose, "agent-service")
     production_env = (ROOT / ".env.example").read_text(encoding="utf-8")
     local_env = (ROOT / ".env.local.example").read_text(encoding="utf-8")
@@ -321,9 +376,30 @@ def test_agent_parallel_limit_is_explicit_and_keeps_one_process() -> None:
     )
 
     assert "AGENT_MAX_CONCURRENCY: ${AGENT_MAX_CONCURRENCY:-3}" in agent
+    assert "AGENT_MAX_CONCURRENCY: ${AGENT_MAX_CONCURRENCY:-3}" in core
     assert "AGENT_MAX_CONCURRENCY=3" in production_env
     assert "AGENT_MAX_CONCURRENCY=3" in local_env
     assert '"--workers", "1"' in dockerfile
+
+
+def test_durable_agent_schema_and_route_gates_default_closed() -> None:
+    compose = yaml.safe_load(COMPOSE.read_text(encoding="utf-8"))
+    core = compose["services"]["core-api"]
+    production_env = (ROOT / ".env.example").read_text(encoding="utf-8")
+    local_env = (ROOT / ".env.local.example").read_text(encoding="utf-8")
+
+    assert core["environment"]["DURABLE_AGENT_EXECUTION_SCHEMA_READY"] == (
+        "${DURABLE_AGENT_EXECUTION_SCHEMA_READY:-false}"
+    )
+    assert core["environment"]["DURABLE_AGENT_EXECUTION_ROUTE_MODE"] == (
+        "${DURABLE_AGENT_EXECUTION_ROUTE_MODE:-off}"
+    )
+    for source in (production_env, local_env):
+        assert "DURABLE_AGENT_EXECUTION_SCHEMA_READY=false" in source
+        assert "DURABLE_AGENT_EXECUTION_ROUTE_MODE=off" in source
+    assert "DURABLE_AGENT_EXECUTION_SCHEMA_READY" not in (
+        compose["services"]["agent-service"]["environment"]
+    )
 
 
 def test_python_redis_pools_allow_bounded_agent_parallelism() -> None:

@@ -84,6 +84,13 @@ public final class ServiceTokenSigner {
         String method = ServiceAuthCanonical.method(request.httpMethod());
         String path = ServiceAuthCanonical.path(request.httpPath());
         String idempotencyKey = ServiceAuthCanonical.nonBlank(request.idempotencyKey(), "Idempotency-Key");
+        String novelId = request.novelId();
+        if (novelId == null && !ServiceScope.allowsNullNovelId(scopes)) {
+            throw new IllegalArgumentException("只有纯 execution scope 服务令牌允许 novel_id 为 null");
+        }
+        if (novelId != null) {
+            novelId = ServiceAuthCanonical.nonBlank(novelId, "novel_id");
+        }
 
         ObjectNode header = OBJECT_MAPPER.createObjectNode();
         header.put("alg", "EdDSA");
@@ -98,7 +105,11 @@ public final class ServiceTokenSigner {
         scopes.forEach(item -> scope.add(item.value()));
         claims.put("task_id", ServiceAuthCanonical.nonBlank(request.taskId(), "task_id"));
         claims.put("run_id", ServiceAuthCanonical.nonBlank(request.runId(), "run_id"));
-        claims.put("novel_id", ServiceAuthCanonical.nonBlank(request.novelId(), "novel_id"));
+        if (novelId == null) {
+            claims.putNull("novel_id");
+        } else {
+            claims.put("novel_id", novelId);
+        }
         claims.put(
                 "jti",
                 request.jti() == null

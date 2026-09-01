@@ -120,6 +120,12 @@ class AgentRunner:
                 runId=request.toolContext.runId,
                 agentId=request.agentId,
             ),
+            model_lane=(
+                "interactive"
+                if request.executionMode in {"reviewer", "quality"}
+                else "creative"
+            ),
+            reviewer=request.executionMode == "reviewer",
         )
         payload: dict[str, Any] = result.model_dump()
         return AgentRunResult(agentId=definition.id, **payload)

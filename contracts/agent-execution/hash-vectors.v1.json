@@ -1,0 +1,24 @@
+{
+  "algorithm": "inkforge-canonical-json/1",
+  "vectors": [
+    {
+      "name": "unicode-decimal-null",
+      "value": {
+        "z": null,
+        "a": [
+          1.0,
+          -0.0,
+          1e-7,
+          "换行\n😀",
+          {
+            "😀": 2,
+            "": 1
+          }
+        ],
+        "decimal": 1.23
+      },
+      "canonicalUtf8": "{\"a\":[1,0,0.0000001,\"换行\\n😀\",{\"\":1,\"😀\":2}],\"decimal\":1.23,\"z\":null}",
+      "sha256": "8120300c6d33bc324976d7175a1311532a5f69f3a45775a3e6f8b94999fb134e"
+    }
+  ]
+}

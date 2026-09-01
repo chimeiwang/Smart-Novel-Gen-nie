@@ -17,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import cn.inkforge.contracts.api.ArtifactConflictQuarantineRequest;
+import cn.inkforge.contracts.api.ArtifactDecisionAcceptedResponse;
 import cn.inkforge.contracts.api.CreateArtifactRequest;
 import cn.inkforge.contracts.api.ReviewArtifactDecisionRequest;
 import cn.inkforge.contracts.api.SubmitArtifactEvaluationRequest;
@@ -101,6 +102,22 @@ class JooqReviewRepositoryTest {
     }
 
     @Test
+    void 迁移前结构显式V2决定必须在任何V2查询前稳定拒绝() {
+        ReviewArtifactDecisionRequest request = new ReviewArtifactDecisionRequest(
+                        "pre-schema-v2-decision-0001",
+                        ReviewArtifactDecisionRequest.DecisionEnum.DISCARD,
+                        1)
+                .engineVersion(ReviewArtifactDecisionRequest.EngineVersionEnum.NUMBER_2);
+
+        assertThatThrownBy(() -> repository.decide(
+                        "pre-schema-user", "pre-schema-artifact", request))
+                .isInstanceOfSatisfying(ApiException.class, error -> {
+                    assertThat(error.statusCode()).isEqualTo(503);
+                    assertThat(error.code()).isEqualTo("DURABLE_WORKFLOW_SCHEMA_UNAVAILABLE");
+                });
+    }
+
+    @Test
     void 创建与修订必须绑定当前job追加不可变历史并隐藏控制字段() throws Exception {
         Fixture fixture = fixture("review-lifecycle", "完整章节正文");
         CreateArtifactRequest createdRequest = request(
@@ -112,6 +129,7 @@ class JooqReviewRepositoryTest {
         var revised = repository.createOrRevise(revisedRequest);
 
         assertThat(created.getRevision()).isEqualTo(1);
+        assertThat(created.getEngineVersion().getValue()).isEqualTo(1);
         assertThat(revised.getRevision()).isEqualTo(2);
         assertThat(revised.getPayload()).containsEntry("content", "修订稿");
         assertThat(revised.getPayload()).doesNotContainKey("_inkforgeControl");
@@ -268,7 +286,8 @@ class JooqReviewRepositoryTest {
                 .editedContent("用户确认后的正文")
                 .userMessage("继续写下一步");
 
-        var accepted = repository.decide(fixture.userId(), artifact.getId(), request);
+        var accepted = (ArtifactDecisionAcceptedResponse)
+                repository.decide(fixture.userId(), artifact.getId(), request);
         var replay = repository.decide(fixture.userId(), artifact.getId(), request);
 
         assertThat(replay).isEqualTo(accepted);
@@ -326,7 +345,7 @@ class JooqReviewRepositoryTest {
                 fixture, "chapter:selection-decision", payload, "awaiting_user"));
         readyForDecision(fixture);
 
-        var accepted = repository.decide(
+        var accepted = (ArtifactDecisionAcceptedResponse) repository.decide(
                 fixture.userId(),
                 artifact.getId(),
                 new ReviewArtifactDecisionRequest(
@@ -446,7 +465,7 @@ class JooqReviewRepositoryTest {
                 fixture, "chapter:job-inheritance", "正文草案", null, "awaiting_user"));
         readyForDecision(fixture);
 
-        var accepted = repository.decide(
+        var accepted = (ArtifactDecisionAcceptedResponse) repository.decide(
                 fixture.userId(),
                 artifact.getId(),
                 new ReviewArtifactDecisionRequest(

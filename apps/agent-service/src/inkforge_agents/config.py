@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ipaddress import ip_network
 from typing import Annotated, Literal
+from urllib.parse import unquote, urlsplit
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
@@ -29,7 +30,10 @@ class Settings(BaseSettings):
     model_max_output_tokens: int = Field(default=384_000, ge=1, le=1_000_000)
     agent_max_concurrency: int = Field(default=3, ge=1, le=3)
     redis_url: SecretStr | None = None
+    # V2 execution journal 使用独立、持久化的 Redis；不得复用普通队列实例。
+    execution_redis_url: SecretStr | None = None
     queue_terminal_retention_days: int = Field(default=7, ge=1)
+    execution_terminal_retention_hours: int = Field(default=24, ge=24, le=168)
     trusted_core_cidrs: Annotated[tuple[str, ...], NoDecode] = ()
     core_service_public_key_path: str | None = None
     agent_service_private_key_path: str | None = None
@@ -75,6 +79,18 @@ class Settings(BaseSettings):
                 raise ValueError("可信核心服务网段无效") from exc
         return tuple(normalized)
 
+    def validate_execution_redis_configuration(self) -> None:
+        """校验真实运行时的双 Redis 边界；测试可直接注入内存 journal。"""
+
+        if self.environment != "production":
+            return
+        if self.redis_url is None or self.execution_redis_url is None:
+            raise ValueError("生产环境必须分别配置 REDIS_URL 与 EXECUTION_REDIS_URL")
+        ordinary = _redis_endpoint_identity(self.redis_url)
+        execution = _redis_endpoint_identity(self.execution_redis_url)
+        if ordinary == execution:
+            raise ValueError("生产环境的 REDIS_URL 与 EXECUTION_REDIS_URL 不能指向同一 Redis 实例")
+
 
 def create_testing_settings() -> Settings:
     return Settings.model_validate(
@@ -85,3 +101,44 @@ def create_testing_settings() -> Settings:
             "trusted_core_cidrs": ("127.0.0.1/32", "::1/128"),
         }
     )
+
+
+def _redis_endpoint_identity(value: SecretStr) -> tuple[str, str, int]:
+    """忽略凭据、大小写、默认端口和逻辑 DB，只比较物理 Redis 实例。"""
+
+    raw = value.get_secret_value().strip()
+    parsed = urlsplit(raw)
+    scheme = parsed.scheme.lower()
+    if scheme in {"redis", "rediss"}:
+        if parsed.hostname is None:
+            raise ValueError("Redis URL 缺少主机")
+        try:
+            port = parsed.port or 6379
+        except ValueError as exc:
+            raise ValueError("Redis URL 端口无效") from exc
+        path = unquote(parsed.path or "").strip("/")
+        try:
+            database = int(path or "0")
+        except ValueError as exc:
+            raise ValueError("Redis URL DB 必须是非负整数") from exc
+        if database < 0:
+            raise ValueError("Redis URL DB 必须是非负整数")
+        return ("tcp", parsed.hostname.rstrip(".").lower(), port)
+    if scheme == "unix":
+        path = unquote(parsed.path)
+        if not path:
+            raise ValueError("Unix Redis URL 缺少 socket 路径")
+        query = {
+            key: value
+            for item in parsed.query.split("&")
+            if item
+            for key, _, value in (item.partition("="),)
+        }
+        try:
+            database = int(query.get("db", "0"))
+        except ValueError as exc:
+            raise ValueError("Redis URL DB 必须是非负整数") from exc
+        if database < 0:
+            raise ValueError("Redis URL DB 必须是非负整数")
+        return ("unix", path, 0)
+    raise ValueError("Redis URL 只允许 redis、rediss 或 unix scheme")

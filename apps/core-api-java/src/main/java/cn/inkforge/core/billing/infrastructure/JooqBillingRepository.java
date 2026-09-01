@@ -70,7 +70,20 @@ final class JooqBillingRepository implements BillingRepository {
     @Override
     public AuthorizationContext authorizationContext(
             String userId, String taskId, String novelId) {
-        DSLContext context = database.dsl();
+        return database.dsl().transactionResult(configuration ->
+                authorizationContext(DSL.using(configuration), userId, taskId, novelId));
+    }
+
+    private static AuthorizationContext authorizationContext(
+            DSLContext context, String userId, String taskId, String novelId) {
+        // V1 grant 与 V2 预留统一以 User 行作为跨引擎临界区。这里只冻结授权读取；真正扣费仍会在
+        // charge 事务内再次锁 User、重算 outstanding reservation，不能信任较早的 grant 快照。
+        Long lockedBalance = context.select(USER.CREDITBALANCEMICROS)
+                .from(USER)
+                .where(USER.ID.eq(userId))
+                .forUpdate()
+                .fetchOne(USER.CREDITBALANCEMICROS);
+        if (lockedBalance == null) return null;
         Long balance = context.select(USER.CREDITBALANCEMICROS)
                 .from(USER)
                 .join(NOVEL)
@@ -179,7 +192,10 @@ final class JooqBillingRepository implements BillingRepository {
                 resourceKind = "video";
             }
         }
-        return balance == null ? null : new AuthorizationContext(balance, resourceKind);
+        return balance == null
+                ? null
+                : new AuthorizationContext(
+                        availableBalance(context, userId, balance), resourceKind);
     }
 
     @Override
@@ -197,6 +213,9 @@ final class JooqBillingRepository implements BillingRepository {
             // 锁定计费请求而非用户：同一用户的不同模型调用可并发，同一调用重放只能结算一次。
             transaction.fetch(
                     "SELECT pg_advisory_xact_lock(?)", advisoryLockKey(usage.requestId()));
+            if (workflowReservationOwnsRequestId(transaction, usage.requestId())) {
+                throw new UsageConflictException();
+            }
             long amount = BillingPricing.usageCostMicros(
                     usage.promptTokens(),
                     usage.cachedTokens(),
@@ -214,25 +233,34 @@ final class JooqBillingRepository implements BillingRepository {
                     return legacy;
                 }
             }
-            Long balanceAfter;
-            if (amount == 0) {
-                balanceAfter = transaction.select(USER.CREDITBALANCEMICROS)
-                        .from(USER)
-                        .where(USER.ID.eq(usage.userId()))
-                        .fetchOne(USER.CREDITBALANCEMICROS);
-            } else {
-                balanceAfter = transaction.update(USER)
-                        .set(
-                                USER.CREDITBALANCEMICROS,
-                                USER.CREDITBALANCEMICROS.minus(amount))
-                        .where(
-                                USER.ID.eq(usage.userId()),
-                                USER.CREDITBALANCEMICROS.ge(amount))
-                        .returning(USER.CREDITBALANCEMICROS)
-                        .fetchOne(USER.CREDITBALANCEMICROS);
+            // V1 结算仍沿用原 grant/report 契约，但不得花掉 V2 已在 User 行锁内保留的额度。
+            // 迁移前的 V1-only schema 没有 Reservation 表时，availableBalance 保持原行为。
+            Long settledBalance = transaction.select(USER.CREDITBALANCEMICROS)
+                    .from(USER)
+                    .where(USER.ID.eq(usage.userId()))
+                    .forUpdate()
+                    .fetchOne(USER.CREDITBALANCEMICROS);
+            // V2 对账不使用 V1 requestId advisory lock。User 锁后必须重查 reservation 与
+            // TokenUsage，避免“V1 先查无记录 → 等 User → V2 提交 → V1 唯一键 500”。
+            if (workflowReservationOwnsRequestId(transaction, usage.requestId())) {
+                throw new UsageConflictException();
             }
-            if (balanceAfter == null) {
+            TokenusageRecord serializedExisting = transaction.selectFrom(TOKENUSAGE)
+                    .where(TOKENUSAGE.REQUESTID.eq(usage.requestId()))
+                    .fetchOne();
+            if (serializedExisting != null) {
+                return idempotentResult(transaction, serializedExisting, usage, amount);
+            }
+            if (settledBalance == null
+                    || availableBalance(transaction, usage.userId(), settledBalance) < amount) {
                 throw new InsufficientCreditsException();
+            }
+            long balanceAfter = Math.subtractExact(settledBalance, amount);
+            if (amount > 0) {
+                transaction.update(USER)
+                        .set(USER.CREDITBALANCEMICROS, balanceAfter)
+                        .where(USER.ID.eq(usage.userId()))
+                        .execute();
             }
             LocalDateTime now = DatabaseTimestamp.now(clock);
             // 余额、CreditLedger 与 TokenUsage 同事务提交；不能出现“已扣余额但查不到调用明细”。
@@ -463,5 +491,40 @@ final class JooqBillingRepository implements BillingRepository {
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("当前 JRE 缺少 SHA-256", exception);
         }
+    }
+
+    private static long availableBalance(
+            DSLContext context, String userId, long settledBalance) {
+        Record relation = context.fetchOne(
+                "SELECT to_regclass('public.\"WorkflowBillingReservation\"') AS relation");
+        if (relation == null || relation.get("relation") == null) return settledBalance;
+        BigDecimal outstanding = context.fetchOne(
+                        """
+                        SELECT COALESCE(sum("reservedMicros"), 0)::numeric AS reserved
+                        FROM public."WorkflowBillingReservation"
+                        WHERE "userId" = ?
+                          AND status IN ('reserved', 'reconciliation_required')
+                        """,
+                        userId)
+                .get("reserved", BigDecimal.class);
+        return Math.max(
+                0L,
+                Math.subtractExact(settledBalance, outstanding.longValueExact()));
+    }
+
+    private static boolean workflowReservationOwnsRequestId(
+            DSLContext context, String requestId) {
+        Record relation = context.fetchOne(
+                "SELECT to_regclass('public.\"WorkflowBillingReservation\"') AS relation");
+        if (relation == null || relation.get("relation") == null) return false;
+        return Boolean.TRUE.equals(context.fetchOne(
+                        """
+                        SELECT EXISTS (
+                          SELECT 1 FROM public."WorkflowBillingReservation"
+                          WHERE "requestId" = ?
+                        ) AS owned
+                        """,
+                        requestId)
+                .get("owned", Boolean.class));
     }
 }

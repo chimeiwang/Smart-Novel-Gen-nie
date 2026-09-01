@@ -1,0 +1,361 @@
+{
+  "$defs": {
+    "ResolvedModelRef": {
+      "additionalProperties": false,
+      "description": "Agent 对逻辑 Profile 的一次可审计部署解析。",
+      "properties": {
+        "capabilityVersion": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Capabilityversion",
+          "type": "string"
+        },
+        "deploymentFingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Deploymentfingerprint",
+          "type": "string"
+        },
+        "deploymentProfileKey": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Deploymentprofilekey",
+          "type": "string"
+        },
+        "endpointProfile": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Endpointprofile",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Provider",
+          "type": "string"
+        },
+        "reasoningMode": {
+          "enum": [
+            "disabled",
+            "bounded"
+          ],
+          "title": "Reasoningmode",
+          "type": "string"
+        },
+        "structuredOutputRoute": {
+          "enum": [
+            "responses_json_schema_v1",
+            "chat_json_output_v1"
+          ],
+          "title": "Structuredoutputroute",
+          "type": "string"
+        },
+        "supportsRequestIdempotency": {
+          "description": "仅当 Provider 确实原样传递 ExecutionStepRequest.idempotencyKey 时为 true",
+          "title": "Supportsrequestidempotency",
+          "type": "boolean"
+        },
+        "transportProfile": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Transportprofile",
+          "type": "string"
+        }
+      },
+      "required": [
+        "deploymentProfileKey",
+        "deploymentFingerprint",
+        "provider",
+        "model",
+        "transportProfile",
+        "endpointProfile",
+        "structuredOutputRoute",
+        "capabilityVersion",
+        "reasoningMode",
+        "supportsRequestIdempotency"
+      ],
+      "title": "ResolvedModelRef",
+      "type": "object"
+    },
+    "StepUsage": {
+      "additionalProperties": false,
+      "properties": {
+        "cachedTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cachedtokens"
+        },
+        "completionTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completiontokens"
+        },
+        "costMicros": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Costmicros"
+        },
+        "inputTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Inputtokens"
+        },
+        "promptCacheMissTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Promptcachemisstokens"
+        },
+        "protocolCorrections": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Protocolcorrections",
+          "type": "integer"
+        },
+        "providerAttempts": {
+          "maximum": 3,
+          "minimum": 0,
+          "title": "Providerattempts",
+          "type": "integer"
+        },
+        "reasoningTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoningtokens"
+        },
+        "usageStatus": {
+          "enum": [
+            "complete",
+            "partial",
+            "unknown"
+          ],
+          "title": "Usagestatus",
+          "type": "string"
+        },
+        "visibleOutputTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Visibleoutputtokens"
+        },
+        "wallTimeMillis": {
+          "minimum": 0,
+          "title": "Walltimemillis",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "usageStatus",
+        "providerAttempts",
+        "protocolCorrections",
+        "wallTimeMillis"
+      ],
+      "title": "StepUsage",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/execution/ExecutionStepFailure/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "cancelRequestId": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cancelrequestid"
+    },
+    "errorCategory": {
+      "enum": [
+        "provider_transient",
+        "provider_terminal",
+        "protocol",
+        "validation",
+        "model_outcome_unknown",
+        "cancelled",
+        "internal"
+      ],
+      "title": "Errorcategory",
+      "type": "string"
+    },
+    "errorCode": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Z][A-Z0-9_]*$",
+      "title": "Errorcode",
+      "type": "string"
+    },
+    "failedAt": {
+      "format": "date-time",
+      "title": "Failedat",
+      "type": "string"
+    },
+    "fencingToken": {
+      "exclusiveMinimum": 0,
+      "title": "Fencingtoken",
+      "type": "integer"
+    },
+    "inputHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Inputhash",
+      "type": "string"
+    },
+    "jobId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Jobid",
+      "type": "string"
+    },
+    "novelId": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Novelid"
+    },
+    "outcomeUnknown": {
+      "title": "Outcomeunknown",
+      "type": "boolean"
+    },
+    "protocolVersion": {
+      "const": "2.0",
+      "title": "Protocolversion",
+      "type": "string"
+    },
+    "requestHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Requesthash",
+      "type": "string"
+    },
+    "resolvedModel": {
+      "$ref": "#/$defs/ResolvedModelRef"
+    },
+    "resultHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Resulthash",
+      "type": "string"
+    },
+    "retryable": {
+      "title": "Retryable",
+      "type": "boolean"
+    },
+    "runId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Runid",
+      "type": "string"
+    },
+    "stepId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Stepid",
+      "type": "string"
+    },
+    "usage": {
+      "$ref": "#/$defs/StepUsage"
+    }
+  },
+  "required": [
+    "protocolVersion",
+    "jobId",
+    "runId",
+    "novelId",
+    "stepId",
+    "fencingToken",
+    "requestHash",
+    "inputHash",
+    "resolvedModel",
+    "errorCategory",
+    "errorCode",
+    "retryable",
+    "outcomeUnknown",
+    "resultHash",
+    "usage",
+    "failedAt"
+  ],
+  "title": "ExecutionStepFailure",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.ExecutionStepFailure"
+}

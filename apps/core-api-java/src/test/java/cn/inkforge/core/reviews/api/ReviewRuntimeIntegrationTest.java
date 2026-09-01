@@ -207,6 +207,18 @@ class ReviewRuntimeIntegrationTest {
         assertThat(listed.statusCode()).as(listed.body()).isEqualTo(200);
         assertThat(json.readTree(listed.body()).get("items").size()).isEqualTo(1);
 
+        String summaryQuery = "/api/v1/review-artifact-summaries?novelId="
+                + URLEncoder.encode(novelId, StandardCharsets.UTF_8);
+        HttpResponse<String> summarized = send("GET", summaryQuery, null, cookie, false);
+        assertThat(summarized.statusCode()).as(summarized.body()).isEqualTo(200);
+        JsonNode summary = json.readTree(summarized.body()).get("items").get(0);
+        assertThat(summary.get("id").asText()).isEqualTo(artifactId);
+        assertThat(summary.get("revision").asInt()).isEqualTo(1);
+        assertThat(summary.get("actionable").asBoolean()).isTrue();
+        assertThat(summary.has("payload")).isFalse();
+        assertThat(summary.has("diff")).isFalse();
+        assertThat(summary.has("evaluations")).isFalse();
+
         HttpResponse<String> fetched = send(
                 "GET", "/api/v1/review-artifacts/" + artifactId, null, cookie, false);
         assertThat(fetched.statusCode()).as(fetched.body()).isEqualTo(200);

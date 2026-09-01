@@ -1,0 +1,80 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/execution/BillingReconciliationReceipt/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "对账结算回执；duplicate 不得暗示再次扣费。",
+  "properties": {
+    "balanceAfterMicros": {
+      "format": "int64",
+      "maximum": 9000000000000000000,
+      "minimum": 0,
+      "title": "Balanceaftermicros",
+      "type": "integer"
+    },
+    "chargedMicros": {
+      "format": "int64",
+      "maximum": 9000000000000000000,
+      "minimum": 0,
+      "title": "Chargedmicros",
+      "type": "integer"
+    },
+    "decision": {
+      "enum": [
+        "exact_usage",
+        "proven_zero"
+      ],
+      "title": "Decision",
+      "type": "string"
+    },
+    "duplicate": {
+      "title": "Duplicate",
+      "type": "boolean"
+    },
+    "protocolVersion": {
+      "const": "2.0",
+      "title": "Protocolversion",
+      "type": "string"
+    },
+    "reconciliationId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Reconciliationid",
+      "type": "string"
+    },
+    "reservationRequestId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Reservationrequestid",
+      "type": "string"
+    },
+    "reservationStatus": {
+      "enum": [
+        "settled",
+        "released"
+      ],
+      "title": "Reservationstatus",
+      "type": "string"
+    },
+    "settledAt": {
+      "format": "date-time",
+      "title": "Settledat",
+      "type": "string"
+    }
+  },
+  "required": [
+    "protocolVersion",
+    "reconciliationId",
+    "reservationRequestId",
+    "decision",
+    "reservationStatus",
+    "chargedMicros",
+    "balanceAfterMicros",
+    "settledAt",
+    "duplicate"
+  ],
+  "title": "BillingReconciliationReceipt",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.BillingReconciliationReceipt"
+}

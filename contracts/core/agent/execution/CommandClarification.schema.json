@@ -1,0 +1,27 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/execution/CommandClarification/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "code": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "title": "Code",
+      "type": "string"
+    },
+    "prompt": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Prompt",
+      "type": "string"
+    }
+  },
+  "required": [
+    "code",
+    "prompt"
+  ],
+  "title": "CommandClarification",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.CommandClarification"
+}

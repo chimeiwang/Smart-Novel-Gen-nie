@@ -4,8 +4,12 @@ import asyncio
 import hashlib
 import logging
 import re
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from itertools import count
 from time import monotonic
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -23,6 +27,123 @@ from ..providers.base import (
 )
 
 logger = logging.getLogger(__name__)
+
+ModelLane = Literal["interactive", "creative", "batch_media"]
+_LANE_ORDER: tuple[ModelLane, ...] = ("interactive", "creative", "batch_media")
+
+
+@dataclass(frozen=True, slots=True)
+class _LaneWaiter:
+    sequence: int
+    lane: ModelLane
+    reviewer: bool
+
+
+class _LaneAwareModelLimiter:
+    """单进程共享模型门：总量有界、同 lane FIFO、lane 间轮转。"""
+
+    def __init__(self, capacity: int) -> None:
+        self._capacity = capacity
+        self._condition = asyncio.Condition()
+        self._waiters: list[_LaneWaiter] = []
+        self._sequence = count()
+        self._active_total = 0
+        self._active_by_lane: dict[ModelLane, int] = {
+            "interactive": 0,
+            "creative": 0,
+            "batch_media": 0,
+        }
+        self._active_reviewers = 0
+        self._next_lane = 0
+
+    @asynccontextmanager
+    async def acquire(
+        self,
+        lane: ModelLane,
+        *,
+        reviewer: bool,
+    ) -> AsyncIterator[None]:
+        waiter = _LaneWaiter(next(self._sequence), lane, reviewer)
+        async with self._condition:
+            self._waiters.append(waiter)
+            try:
+                await self._condition.wait_for(lambda: self._selected() is waiter)
+            except BaseException:
+                if waiter in self._waiters:
+                    self._waiters.remove(waiter)
+                    self._condition.notify_all()
+                raise
+            self._waiters.remove(waiter)
+            self._active_total += 1
+            self._active_by_lane[lane] += 1
+            if reviewer:
+                self._active_reviewers += 1
+            self._next_lane = (_LANE_ORDER.index(lane) + 1) % len(_LANE_ORDER)
+            self._condition.notify_all()
+        try:
+            yield
+        finally:
+            async with self._condition:
+                self._active_total -= 1
+                self._active_by_lane[lane] -= 1
+                if reviewer:
+                    self._active_reviewers -= 1
+                self._condition.notify_all()
+
+    def _selected(self) -> _LaneWaiter | None:
+        if self._active_total >= self._capacity:
+            return None
+        if self._capacity == 1:
+            return min(self._waiters, key=lambda value: value.sequence, default=None)
+        # creative/batch 在无竞争 lane 时可以借满；一旦 interactive 到达，
+        # 借槽不抢占正在执行的调用，但下一个释放槽必须先归还。
+        interactive = self._oldest_eligible("interactive")
+        lower_lane_active = (
+            self._active_by_lane["creative"]
+            + self._active_by_lane["batch_media"]
+        )
+        if (
+            interactive is not None
+            and self._active_by_lane["interactive"] == 0
+            and lower_lane_active > 0
+        ):
+            return interactive
+        for offset in range(len(_LANE_ORDER)):
+            lane = _LANE_ORDER[(self._next_lane + offset) % len(_LANE_ORDER)]
+            selected = self._oldest_eligible(lane)
+            if selected is not None:
+                return selected
+        return None
+
+    def _oldest_eligible(self, lane: ModelLane) -> _LaneWaiter | None:
+        eligible = [
+            waiter
+            for waiter in self._waiters
+            if waiter.lane == lane and self._eligible(waiter)
+        ]
+        return min(eligible, key=lambda value: value.sequence, default=None)
+
+    def _eligible(self, waiter: _LaneWaiter) -> bool:
+        interactive_waiting = any(
+            value.lane == "interactive" for value in self._waiters
+        )
+        foreground_waiting = any(
+            value.lane in {"interactive", "creative"} for value in self._waiters
+        )
+        if (
+            waiter.lane == "creative"
+            and interactive_waiting
+            and self._active_by_lane["creative"] >= self._capacity - 1
+        ):
+            return False
+        if (
+            waiter.lane == "batch_media"
+            and foreground_waiting
+            and self._active_by_lane["batch_media"] >= 1
+        ):
+            return False
+        reviewer_cap = min(2, self._capacity)
+        return not (waiter.reviewer and self._active_reviewers >= reviewer_cap)
 
 
 class ModelCallContext(BaseModel):
@@ -127,7 +248,7 @@ class ModelRuntime:
         self._billing = billing
         self._observer = observer
         self._max_concurrency = max_concurrency
-        self._semaphore = asyncio.Semaphore(max_concurrency)
+        self._limiter = _LaneAwareModelLimiter(max_concurrency)
 
     @property
     def max_concurrency(self) -> int:
@@ -145,6 +266,28 @@ class ModelRuntime:
 
         return self._provider.model_name
 
+    @property
+    def transport_profile(self) -> str:
+        """暴露实际 wire adapter 身份，防止通用兼容层冒充专用适配器。"""
+
+        return self._provider.transport_profile
+
+    @property
+    def endpoint_profile(self) -> str:
+        """暴露非敏感端点分类，不保存 URL 或凭证。"""
+
+        return self._provider.endpoint_profile
+
+    @property
+    def capability_version(self) -> str:
+        """暴露结构化输出适配能力版本。"""
+
+        return self._provider.capability_version
+
+    @property
+    def supports_request_idempotency(self) -> bool:
+        return bool(getattr(self._provider, "supports_request_idempotency", False))
+
     def supports_structured_output(self, route: ModelStructuredOutputRoute) -> bool:
         """在业务预占前查询 Provider 的显式能力，未知实现一律按不支持处理。"""
 
@@ -156,9 +299,33 @@ class ModelRuntime:
         request: ModelTurnRequest,
         *,
         context: ModelCallContext | None = None,
+        lane: ModelLane = "interactive",
+        reviewer: bool = False,
     ) -> ModelTurnResult:
-        async with self._semaphore:
+        async with self._limiter.acquire(lane, reviewer=reviewer):
             return await self._run_turn_limited(request, context=context)
+
+    async def run_execution_turn(
+        self,
+        request: ModelTurnRequest,
+        *,
+        before_provider: Callable[[], Awaitable[int]],
+        lane: ModelLane,
+        reviewer: bool = False,
+        provider_timeout_seconds: float | None = None,
+    ) -> tuple[int, ModelTurnResult]:
+        """执行一个 V2 Step 的供应商调用，并与 V1 共用同一全局并发门。
+
+        V2 的预算预留、用量结算与日志边界由 Core WorkflowStep 和结构化终报承担，
+        因此这里不进入 V1 的 billing/observer 流程，也不进入 Agent 工具循环。
+        """
+
+        async with self._limiter.acquire(lane, reviewer=reviewer):
+            attempt = await before_provider()
+            if provider_timeout_seconds is None:
+                return attempt, await self._provider.complete_turn(request)
+            async with asyncio.timeout(provider_timeout_seconds):
+                return attempt, await self._provider.complete_turn(request)
 
     async def _run_turn_limited(
         self,
@@ -388,10 +555,7 @@ def _safe_invalid_tool_names(
     """人工日志只保留本轮允许列表内的名称，未知值固定收敛。"""
 
     allowed_names = {tool.name for tool in request.tools}
-    return [
-        name if name in allowed_names else "未知工具"
-        for name in result.invalidToolCallNames
-    ]
+    return [name if name in allowed_names else "未知工具" for name in result.invalidToolCallNames]
 
 
 def _safe_exception_type(error: Exception) -> str:
@@ -424,9 +588,7 @@ def _model_failure_record(
     if context is None:
         return None
     provider_error = (
-        error
-        if isinstance(error, (ProviderTransportError, ProviderProtocolError))
-        else None
+        error if isinstance(error, (ProviderTransportError, ProviderProtocolError)) else None
     )
     return ModelCallFailureLogRecord(
         context=context,

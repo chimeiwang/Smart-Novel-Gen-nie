@@ -1,0 +1,35 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/workflow_events/ClarificationRequiredEventPayload/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "clarificationCode": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "title": "Clarificationcode",
+      "type": "string"
+    },
+    "decisionStepId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Decisionstepid",
+      "type": "string"
+    },
+    "prompt": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Prompt",
+      "type": "string"
+    }
+  },
+  "required": [
+    "clarificationCode",
+    "prompt",
+    "decisionStepId"
+  ],
+  "title": "ClarificationRequiredEventPayload",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.workflow_events.ClarificationRequiredEventPayload"
+}

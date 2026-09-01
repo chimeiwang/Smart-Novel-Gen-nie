@@ -193,6 +193,8 @@ class ModelTurnRequest(BaseModel):
     parallelToolCalls: bool = True
     # 结构化文本输出与工具通道互斥，避免同一响应同时承担两种控制协议。
     structuredOutput: ModelStructuredOutputRequest | None = None
+    # V2 只有在 Provider 明确保证并实际透传此键时，才允许 started 恢复重调。
+    requestIdempotencyKey: str | None = Field(default=None, min_length=1, max_length=128)
 
     @model_validator(mode="after")
     def validate_required_tool(self) -> ModelTurnRequest:
@@ -244,6 +246,8 @@ class ModelTurnResult(BaseModel):
     # 只有已解析且通过调用方原始 JSON Schema 复验的对象才能进入结果。
     structuredOutput: dict[str, JsonValue] | None = None
     structuredOutputDiagnostic: ModelStructuredOutputDiagnostic | None = None
+    # 只计数本地确定性 JSON 闭合/规范化，不包含新的模型调用。
+    structuredOutputCorrectionCount: int = Field(default=0, ge=0, le=1)
     usage: ModelUsage
     finishReason: ModelFinishReason
     rawFinishReason: str | None = None
@@ -286,5 +290,9 @@ class ModelProvider(Protocol):
     billable: bool
     provider_name: str
     model_name: str
+    transport_profile: str
+    endpoint_profile: str
+    capability_version: str
+    supports_request_idempotency: bool
 
     async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult: ...

@@ -33,6 +33,8 @@ _CORE_TO_AGENT_SCOPES = frozenset(
         ServiceScope.AGENT_CANCEL,
         ServiceScope.AGENT_DEBUG_READ,
         ServiceScope.VIDEO_RENDER,
+        ServiceScope.EXECUTION_SUBMIT,
+        ServiceScope.EXECUTION_CANCEL,
     }
 )
 _AGENT_TO_CORE_SCOPES = frozenset(
@@ -47,8 +49,11 @@ _AGENT_TO_CORE_SCOPES = frozenset(
         ServiceScope.PORTRAIT_WRITE,
         ServiceScope.QUALITY_WRITE,
         ServiceScope.VIDEO_WRITE,
+        ServiceScope.EXECUTION_PROGRESS,
+        ServiceScope.EXECUTION_RESULT,
         ServiceScope.BILLING_AUTHORIZE,
         ServiceScope.BILLING_USAGE_WRITE,
+        ServiceScope.BILLING_RECONCILE,
     }
 )
 _PUBLIC_MESSAGES = {

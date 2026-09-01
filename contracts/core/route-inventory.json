@@ -2084,6 +2084,28 @@
     {
       "authentication": "browser_cookie",
       "deprecated": false,
+      "endpointFunction": "list_review_artifact_summaries",
+      "endpointModule": "inkforge_core.reviews.router",
+      "exposure": "public",
+      "includeInOpenApi": true,
+      "method": "GET",
+      "mutation": false,
+      "operationId": "list_review_artifact_summaries_api_v1_review_artifact_summaries_get",
+      "path": "/api/v1/review-artifact-summaries",
+      "productModule": "reviews",
+      "pythonTests": [
+        "apps/core-api/tests/reviews/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [],
+      "sourceFile": "apps/core-api/src/inkforge_core/reviews/router.py",
+      "sourceLine": 84,
+      "statusCode": null,
+      "transaction": "read_only"
+    },
+    {
+      "authentication": "browser_cookie",
+      "deprecated": false,
       "endpointFunction": "list_review_artifacts",
       "endpointModule": "inkforge_core.reviews.router",
       "exposure": "public",
@@ -2099,7 +2121,7 @@
       "responseKind": "json",
       "sideEffects": [],
       "sourceFile": "apps/core-api/src/inkforge_core/reviews/router.py",
-      "sourceLine": 57,
+      "sourceLine": 59,
       "statusCode": null,
       "transaction": "read_only"
     },
@@ -2121,7 +2143,7 @@
       "responseKind": "json",
       "sideEffects": [],
       "sourceFile": "apps/core-api/src/inkforge_core/reviews/router.py",
-      "sourceLine": 82,
+      "sourceLine": 112,
       "statusCode": null,
       "transaction": "read_only"
     },
@@ -2146,7 +2168,7 @@
         "redis_event_or_queue"
       ],
       "sourceFile": "apps/core-api/src/inkforge_core/reviews/router.py",
-      "sourceLine": 99,
+      "sourceLine": 170,
       "statusCode": 202,
       "transaction": "write"
     },
@@ -3273,7 +3295,7 @@
       "responseKind": "json",
       "sideEffects": [],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 216,
+      "sourceLine": 232,
       "statusCode": null,
       "transaction": "read_only"
     },
@@ -3299,7 +3321,7 @@
         "redis_event_or_queue"
       ],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 203,
+      "sourceLine": 219,
       "statusCode": 202,
       "transaction": "write"
     },
@@ -3321,7 +3343,7 @@
       "responseKind": "json",
       "sideEffects": [],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 254,
+      "sourceLine": 270,
       "statusCode": null,
       "transaction": "read_only"
     },
@@ -3347,7 +3369,7 @@
         "redis_event_or_queue"
       ],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 277,
+      "sourceLine": 293,
       "statusCode": 202,
       "transaction": "write"
     },
@@ -3371,7 +3393,7 @@
         "redis_stream_subscription"
       ],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 291,
+      "sourceLine": 307,
       "statusCode": null,
       "transaction": "stream"
     },
@@ -3397,7 +3419,7 @@
         "redis_event_or_queue"
       ],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 263,
+      "sourceLine": 279,
       "statusCode": 202,
       "transaction": "write"
     },
@@ -3419,7 +3441,7 @@
       "responseKind": "json",
       "sideEffects": [],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 145,
+      "sourceLine": 161,
       "statusCode": null,
       "transaction": "read_only"
     },
@@ -3445,7 +3467,7 @@
         "redis_event_or_queue"
       ],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 155,
+      "sourceLine": 171,
       "statusCode": 201,
       "transaction": "write"
     },
@@ -3471,7 +3493,7 @@
         "redis_event_or_queue"
       ],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 183,
+      "sourceLine": 199,
       "statusCode": 204,
       "transaction": "write"
     },
@@ -3493,7 +3515,7 @@
       "responseKind": "json",
       "sideEffects": [],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 166,
+      "sourceLine": 182,
       "statusCode": null,
       "transaction": "read_only"
     },
@@ -3519,7 +3541,7 @@
         "redis_event_or_queue"
       ],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 173,
+      "sourceLine": 189,
       "statusCode": null,
       "transaction": "write"
     },
@@ -3545,7 +3567,7 @@
         "redis_event_or_queue"
       ],
       "sourceFile": "apps/core-api/src/inkforge_core/writing/router.py",
-      "sourceLine": 189,
+      "sourceLine": 205,
       "statusCode": 201,
       "transaction": "write"
     },
@@ -3567,7 +3589,7 @@
       "responseKind": "json",
       "sideEffects": [],
       "sourceFile": "apps/core-api/src/inkforge_core/reviews/router.py",
-      "sourceLine": 89,
+      "sourceLine": 160,
       "statusCode": null,
       "transaction": "read_only"
     },
@@ -4223,6 +4245,103 @@
       "sourceFile": "apps/core-api/src/inkforge_core/video/internal_router.py",
       "sourceLine": 143,
       "statusCode": 204,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "reconcile_workflow_billing",
+      "endpointModule": "inkforge_core.billing.reconciliation_router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/billing-reconciliation",
+      "productModule": "billing",
+      "pythonTests": [
+        "apps/core-api/tests/billing/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "credit_ledger_or_usage",
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/billing/reconciliation_router.py",
+      "sourceLine": 20,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "report_execution_failure",
+      "endpointModule": "inkforge_core.workflows.router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/failure",
+      "productModule": "workflows",
+      "pythonTests": [
+        "apps/core-api/tests/workflows/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/workflows/router.py",
+      "sourceLine": 157,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "report_execution_progress",
+      "endpointModule": "inkforge_core.workflows.router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/progress",
+      "productModule": "workflows",
+      "pythonTests": [
+        "apps/core-api/tests/workflows/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/workflows/router.py",
+      "sourceLine": 109,
+      "statusCode": null,
+      "transaction": "write"
+    },
+    {
+      "authentication": "direct_peer_and_ed25519",
+      "deprecated": false,
+      "endpointFunction": "report_execution_result",
+      "endpointModule": "inkforge_core.workflows.router",
+      "exposure": "internal",
+      "includeInOpenApi": false,
+      "method": "PUT",
+      "mutation": true,
+      "operationId": null,
+      "path": "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/result",
+      "productModule": "workflows",
+      "pythonTests": [
+        "apps/core-api/tests/workflows/**/test_*.py"
+      ],
+      "responseKind": "json",
+      "sideEffects": [
+        "postgresql_transaction"
+      ],
+      "sourceFile": "apps/core-api/src/inkforge_core/workflows/router.py",
+      "sourceLine": 133,
+      "statusCode": null,
       "transaction": "write"
     },
     {

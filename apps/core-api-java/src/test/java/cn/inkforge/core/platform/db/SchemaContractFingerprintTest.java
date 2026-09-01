@@ -12,18 +12,20 @@ import tools.jackson.databind.node.ObjectNode;
 
 class SchemaContractFingerprintTest {
 
-    private static final String EXPECTED_FINGERPRINT =
+    private static final String EXPECTED_PRE_MIGRATION_FINGERPRINT =
             "4f8cbf58820c7e601026012249f1896e4f8ad0231cfa6b9bd2fdad1c83c3d195";
+    private static final String EXPECTED_POST_MIGRATION_FINGERPRINT =
+            "15d50f0b8572d6b7fffbeecc2b9f762ff16500efa94cd93729e4a84c393fa798";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
-    void 当前结构契约必须与Python指纹完全一致() throws IOException {
+    void 迁移前冻结契约必须与Python指纹完全一致() throws IOException {
         JsonNode document = readContract();
 
         SchemaContract loaded = SchemaContract.load(document);
 
-        assertThat(loaded.fingerprint()).isEqualTo(EXPECTED_FINGERPRINT);
+        assertThat(loaded.fingerprint()).isEqualTo(EXPECTED_PRE_MIGRATION_FINGERPRINT);
         assertThat(document.path("tables").size()).isEqualTo(86);
         assertThat(document.path("enums").size()).isEqualTo(22);
     }
@@ -37,6 +39,34 @@ class SchemaContractFingerprintTest {
         assertThatThrownBy(() -> SchemaContract.load(document))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("数据库结构契约指纹不自洽");
+    }
+
+    @Test
+    void 迁移后冻结契约必须来自PostgreSQL14且与迁移前契约明确分离() {
+        SchemaContract pre = SchemaContracts.loadPreDurableAgentV2();
+        SchemaContract post = SchemaContracts.loadPostDurableAgentV2();
+
+        assertThat(pre.fingerprint()).isEqualTo(EXPECTED_PRE_MIGRATION_FINGERPRINT);
+        assertThat(post.fingerprint()).isEqualTo(EXPECTED_POST_MIGRATION_FINGERPRINT);
+        assertThat(post.fingerprint()).isNotEqualTo(pre.fingerprint());
+        assertThat(post.document().path("source").path("serverVersionNum").asInt())
+                .isBetween(140000, 149999);
+        assertThat(post.document().path("tables")).hasSize(91);
+        assertThat(post.document().path("enums")).hasSize(22);
+        assertThat(post.document().path("tables").toString())
+                .contains(
+                        "WorkflowEvidenceBundle",
+                        "WorkflowEvidenceItem",
+                        "WorkflowEvent",
+                        "WorkflowEvaluation",
+                        "WorkflowBillingReservation");
+        assertThat(pre.document().path("tables").toString())
+                .doesNotContain(
+                        "WorkflowEvidenceBundle",
+                        "WorkflowEvidenceItem",
+                        "WorkflowEvent",
+                        "WorkflowEvaluation",
+                        "WorkflowBillingReservation");
     }
 
     @Test
@@ -67,7 +97,8 @@ class SchemaContractFingerprintTest {
     }
 
     private JsonNode readContract() throws IOException {
-        try (InputStream input = getClass().getResourceAsStream("/db/schema-contract.json")) {
+        try (InputStream input = getClass().getResourceAsStream(
+                "/db/pre-durable-agent-v2/schema-contract.json")) {
             if (input == null) {
                 throw new IOException("测试资源缺少 schema-contract.json");
             }

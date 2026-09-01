@@ -1,0 +1,9 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/workflow_events/_StrictWorkflowEventModel/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {},
+  "title": "_StrictWorkflowEventModel",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.workflow_events._StrictWorkflowEventModel"
+}

@@ -48,6 +48,21 @@ def test_queue_terminal_retention_days_reads_environment(
     assert Settings().queue_terminal_retention_days == 3
 
 
+def test_execution_terminal_retention_is_independent_and_bounded() -> None:
+    settings = Settings.model_validate(
+        {
+            "queue_terminal_retention_days": 7,
+            "execution_terminal_retention_hours": 24,
+        }
+    )
+
+    assert settings.queue_terminal_retention_days == 7
+    assert settings.execution_terminal_retention_hours == 24
+    for invalid in (0, 23, 169):
+        with pytest.raises(ValidationError):
+            Settings.model_validate({"execution_terminal_retention_hours": invalid})
+
+
 def test_agent_parallel_limit_defaults_to_three_and_accepts_lower_fallback(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -94,3 +109,52 @@ def test_runtime_passes_terminal_retention_setting_to_queue() -> None:
     app_module._configure_runtime(app, settings)
 
     assert app.state.run_queue.terminal_retention == timedelta(days=3)
+
+
+def test_production_requires_dedicated_execution_redis_url() -> None:
+    missing = Settings.model_validate(
+        {
+            "environment": "production",
+            "redis_url": "redis://redis:6379/0",
+        }
+    )
+    with pytest.raises(ValueError, match="EXECUTION_REDIS_URL"):
+        missing.validate_execution_redis_configuration()
+
+
+def test_production_rejects_normalized_same_execution_redis_db() -> None:
+    settings = Settings.model_validate(
+        {
+            "environment": "production",
+            "redis_url": "redis://user:old@REDIS.:6379/0",
+            "execution_redis_url": "rediss://user:new@redis/0",
+        }
+    )
+
+    with pytest.raises(ValueError, match="同一 Redis 实例"):
+        settings.validate_execution_redis_configuration()
+
+
+def test_production_rejects_same_instance_even_when_logical_db_differs() -> None:
+    settings = Settings.model_validate(
+        {
+            "environment": "production",
+            "redis_url": "redis://redis:6379/0",
+            "execution_redis_url": "redis://redis:6379/1",
+        }
+    )
+
+    with pytest.raises(ValueError, match="同一 Redis 实例"):
+        settings.validate_execution_redis_configuration()
+
+
+def test_production_accepts_distinct_execution_redis_instance() -> None:
+    settings = Settings.model_validate(
+        {
+            "environment": "production",
+            "redis_url": "redis://redis:6379/0",
+            "execution_redis_url": "redis://execution-redis:6379/0",
+        }
+    )
+
+    settings.validate_execution_redis_configuration()

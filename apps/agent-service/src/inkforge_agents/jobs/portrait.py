@@ -177,6 +177,7 @@ class ModelPortraitGenerator:
                     runId=resource.runId,
                     agentId="编辑",
                 ),
+                lane="batch_media",
             )
             raw_finish_reason = (
                 response.rawFinishReason

@@ -25,6 +25,27 @@ class CoreSettingsTest {
         assertThat(settings.phoneAuthEnabled()).isFalse();
         assertThat(settings.phoneAuthSendEnabled()).isFalse();
         assertThat(settings.usernameRegistrationEnabled()).isTrue();
+        assertThat(settings.durableAgentRouteMode())
+                .isEqualTo(CoreSettings.DurableAgentRouteMode.OFF);
+        assertThat(settings.durableAgentExecutionSchemaReady()).isFalse();
+        assertThat(settings.agentMaxConcurrency()).isEqualTo(3);
+        assertThat(settings.routesNewDurableAgentRun("user-1", "novel-1")).isFalse();
+    }
+
+    @Test
+    void Agent并发上限必须与部署约束一致且支持严格串行() {
+        assertThat(CoreSettings.from(Map.of("AGENT_MAX_CONCURRENCY", "1"))
+                        .agentMaxConcurrency())
+                .isEqualTo(1);
+        assertThat(CoreSettings.from(Map.of("AGENT_MAX_CONCURRENCY", "3"))
+                        .agentMaxConcurrency())
+                .isEqualTo(3);
+        assertThatThrownBy(() -> CoreSettings.from(Map.of("AGENT_MAX_CONCURRENCY", "0")))
+                .hasMessageContaining("1 到 3");
+        assertThatThrownBy(() -> CoreSettings.from(Map.of("AGENT_MAX_CONCURRENCY", "4")))
+                .hasMessageContaining("1 到 3");
+        assertThatThrownBy(() -> CoreSettings.from(Map.of("AGENT_MAX_CONCURRENCY", "three")))
+                .hasMessageContaining("1 到 3");
     }
 
     @Test
@@ -111,6 +132,48 @@ class CoreSettingsTest {
         CoreSettings settings = CoreSettings.from(Map.of("RAG_INDEX_ENABLED", "true"));
 
         assertThat(settings.ragIndexEnabled()).isTrue();
+    }
+
+    @Test
+    void 耐久Agent新建路由支持关闭白名单和全量且不猜测空白名单() {
+        CoreSettings allowlist = CoreSettings.from(Map.of(
+                "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
+                "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "allowlist",
+                "DURABLE_AGENT_EXECUTION_USER_ALLOWLIST", "user-1,user-2",
+                "DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST", "novel-1"));
+
+        assertThat(allowlist.routesNewDurableAgentRun("user-1", "novel-1")).isTrue();
+        assertThat(allowlist.routesNewDurableAgentRun("user-1", "novel-x")).isFalse();
+        assertThat(allowlist.routesNewDurableAgentRun("user-x", "novel-1")).isFalse();
+        assertThat(allowlist.routesNewDurableAgentRun("user-x", "novel-x")).isFalse();
+        assertThat(allowlist.routesNewDurableAgentRun("user-1", null)).isFalse();
+        assertThat(CoreSettings.from(Map.of(
+                                "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
+                                "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "all"))
+                        .routesNewDurableAgentRun("any-user", null))
+                .isTrue();
+        assertThatThrownBy(() -> CoreSettings.from(Map.of(
+                        "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
+                        "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "allowlist")))
+                .hasMessageContaining("同时配置");
+        assertThatThrownBy(() -> CoreSettings.from(Map.of(
+                        "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
+                        "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "allowlist",
+                        "DURABLE_AGENT_EXECUTION_USER_ALLOWLIST", "user-1")))
+                .hasMessageContaining("同时配置");
+        assertThatThrownBy(() -> CoreSettings.from(Map.of(
+                        "DURABLE_AGENT_EXECUTION_SCHEMA_READY", "true",
+                        "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "allowlist",
+                        "DURABLE_AGENT_EXECUTION_USER_ALLOWLIST", "bad id")))
+                .hasMessageContaining("无效 ID");
+        assertThatThrownBy(() -> CoreSettings.from(Map.of(
+                        "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "all")))
+                .hasMessageContaining("数据库结构未就绪");
+        assertThatThrownBy(() -> CoreSettings.from(Map.of(
+                        "DURABLE_AGENT_EXECUTION_ROUTE_MODE", "allowlist",
+                        "DURABLE_AGENT_EXECUTION_USER_ALLOWLIST", "user-1",
+                        "DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST", "novel-1")))
+                .hasMessageContaining("数据库结构未就绪");
     }
 
     @Test

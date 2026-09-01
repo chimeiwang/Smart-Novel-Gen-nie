@@ -1,0 +1,127 @@
+{
+  "$defs": {
+    "ModelProfileRef": {
+      "additionalProperties": false,
+      "description": "Core 授权的逻辑模型 Profile；不包含 Agent 部署配置。",
+      "properties": {
+        "deploymentProfileKey": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Deploymentprofilekey",
+          "type": "string"
+        },
+        "profile": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Profile",
+          "type": "string"
+        },
+        "promptProfile": {
+          "$ref": "#/$defs/PromptProfileRef"
+        },
+        "reasoningMode": {
+          "enum": [
+            "disabled",
+            "bounded"
+          ],
+          "title": "Reasoningmode",
+          "type": "string"
+        },
+        "version": {
+          "exclusiveMinimum": 0,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "profile",
+        "version",
+        "reasoningMode",
+        "deploymentProfileKey",
+        "promptProfile"
+      ],
+      "title": "ModelProfileRef",
+      "type": "object"
+    },
+    "PromptProfileRef": {
+      "additionalProperties": false,
+      "description": "Manifest 管理的静态 system prompt 身份；正文由双端 Registry 按哈希校验。",
+      "properties": {
+        "name": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Name",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        },
+        "version": {
+          "exclusiveMinimum": 0,
+          "title": "Version",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "sha256"
+      ],
+      "title": "PromptProfileRef",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/workflow_events/StepStartedEventPayload/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "attemptCount": {
+      "exclusiveMinimum": 0,
+      "title": "Attemptcount",
+      "type": "integer"
+    },
+    "fencingToken": {
+      "exclusiveMinimum": 0,
+      "title": "Fencingtoken",
+      "type": "integer"
+    },
+    "modelProfile": {
+      "$ref": "#/$defs/ModelProfileRef"
+    },
+    "ordinal": {
+      "exclusiveMinimum": 0,
+      "title": "Ordinal",
+      "type": "integer"
+    },
+    "purpose": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "title": "Purpose",
+      "type": "string"
+    },
+    "stepId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Stepid",
+      "type": "string"
+    }
+  },
+  "required": [
+    "stepId",
+    "ordinal",
+    "purpose",
+    "modelProfile",
+    "attemptCount",
+    "fencingToken"
+  ],
+  "title": "StepStartedEventPayload",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.workflow_events.StepStartedEventPayload"
+}

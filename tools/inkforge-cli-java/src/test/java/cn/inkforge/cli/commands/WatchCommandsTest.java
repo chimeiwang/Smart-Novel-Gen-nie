@@ -64,6 +64,84 @@ class WatchCommandsTest {
     }
 
     @Test
+    void 长篇任务观察只把缺失引擎字段的旧响应兼容为V1() {
+        WatchApi api = new WatchApi(json);
+        api.response(json.readTree("{\"taskId\":\"t/1\",\"outcome\":{\"state\":\"waiting_user\","
+                + "\"result\":{\"kind\":\"review_artifact\",\"ready\":true,\"id\":\"artifact-legacy\"}}}"));
+
+        Invocation result = invoke(
+                "long.task.watch", "{\"taskId\":\"t/1\"}", api, new FakeClock());
+
+        assertThat(result.exit()).isZero();
+        assertThat(result.frames()).extracting(frame -> frame.get("type").textValue())
+                .containsExactly("snapshot", "waiting_user");
+        assertThat(result.frames().getLast().get("artifactId").textValue())
+                .isEqualTo("artifact-legacy");
+    }
+
+    @Test
+    void 长篇任务观察拒绝显式非法引擎字段() {
+        for (String invalid : List.of("null", "0", "3", "true", "1.5", "\"1\"")) {
+            WatchApi api = new WatchApi(json);
+            api.response(json.readTree("{\"engineVersion\":" + invalid
+                    + ",\"taskId\":\"t/1\",\"outcome\":{\"state\":\"waiting_user\","
+                    + "\"result\":{\"kind\":\"review_artifact\",\"ready\":true,\"id\":\"artifact-1\"}}}"));
+
+            Invocation result = invoke(
+                    "long.task.watch", "{\"taskId\":\"t/1\"}", api, new FakeClock());
+
+            assertThat(result.exit()).as(invalid).isEqualTo(5);
+            assertThat(result.frames()).as(invalid).hasSize(1);
+            assertThat(result.frames().getFirst().at("/error/code").textValue())
+                    .as(invalid)
+                    .isEqualTo("CORE_RESPONSE_CONTRACT_ERROR");
+        }
+    }
+
+    @Test
+    void 长篇V2观察透传数字快照游标并断线后按status对账() {
+        WatchApi api = new WatchApi(json);
+        api.response(v2Status("running", null, 4));
+        JsonNode firstSnapshot = v2RunSnapshot(4, "running");
+        api.stream(firstSnapshot, new CoreSseConnectionException());
+        api.response(v2Status("running", null, 4));
+        api.stream(
+                v2RunSnapshot(4, "running"),
+                json.readTree("{\"id\":5,\"event\":\"step_progress\",\"data\":{\"engineVersion\":2,\"sequence\":5}}"),
+                new CoreSseConnectionException());
+        api.response(v2Status("waiting_user", "artifact-v2", 5));
+
+        Invocation result = invoke(
+                "long.task.watch", "{\"taskId\":\"t/1\"}", api, new FakeClock());
+
+        assertThat(result.exit()).isZero();
+        assertThat(result.frames()).extracting(frame -> frame.get("type").textValue())
+                .containsExactly("snapshot", "event", "event", "event", "waiting_user");
+        assertThat(result.frames().get(1).get("id").intValue()).isEqualTo(4);
+        assertThat(result.frames().get(1).get("event").textValue()).isEqualTo("run_snapshot");
+        assertThat(result.frames().get(1).get("data"))
+                .isEqualTo(firstSnapshot.get("data"));
+        assertThat(result.frames().getLast().get("artifactId").textValue())
+                .isEqualTo("artifact-v2");
+        assertThat(api.sseCursors).containsExactly(null, "4");
+    }
+
+    @Test
+    void 长篇V2终态严格区分完成失败和取消() {
+        for (String status : List.of("completed", "failed", "cancelled")) {
+            WatchApi api = new WatchApi(json);
+            api.response(v2Status(status, null, 9));
+            Invocation result = invoke(
+                    "long.task.watch", "{\"taskId\":\"t/1\"}", api, new FakeClock());
+            assertThat(result.exit()).as(status)
+                    .isEqualTo(status.equals("completed") ? 0 : 5);
+            assertThat(result.frames()).extracting(frame -> frame.get("type").textValue())
+                    .containsExactly("snapshot", "terminal");
+            assertThat(api.sseCursors).as(status).isEmpty();
+        }
+    }
+
+    @Test
     void 改编观察仅在签名变化时输出进度并由任务状态决定退出码() {
         WatchApi api = new WatchApi(json);
         api.response(adaptation("pending", "none", "v1", "task-1"));
@@ -120,7 +198,28 @@ class WatchCommandsTest {
         String result = artifactId == null
                 ? "{\"kind\":\"none\",\"ready\":false,\"id\":null}"
                 : "{\"kind\":\"review_artifact\",\"ready\":true,\"id\":\"" + artifactId + "\"}";
-        return json.readTree("{\"taskId\":\"t/1\",\"outcome\":{\"state\":\"" + state + "\",\"result\":" + result + "}}");
+        return json.readTree("{\"engineVersion\":1,\"taskId\":\"t/1\",\"outcome\":{\"state\":\""
+                + state + "\",\"result\":" + result + "}}");
+    }
+
+    private JsonNode v2Status(String status, String artifactId, int sequence) {
+        String artifact = artifactId == null
+                ? "null"
+                : "{\"artifactId\":\"" + artifactId
+                        + "\",\"artifactRevision\":2,\"status\":\"awaiting_user\",\"actionable\":true}";
+        return json.readTree("{\"engineVersion\":2,\"runId\":\"t/1\",\"taskId\":\"t/1\","
+                + "\"workflow\":\"long_serial\",\"operation\":\"rewrite_chapter_selection\","
+                + "\"status\":\"" + status + "\",\"lastEventSequence\":" + sequence
+                + ",\"revision\":3,\"artifact\":" + artifact + "}");
+    }
+
+    private JsonNode v2RunSnapshot(int sequence, String status) {
+        return json.readTree("{\"id\":" + sequence + ",\"event\":\"run_snapshot\",\"data\":{"
+                + "\"protocolVersion\":\"2.0\",\"engineVersion\":2,\"runId\":\"t/1\","
+                + "\"baseSequence\":" + sequence + ",\"snapshot\":{\"workflow\":\"long_serial\","
+                + "\"operation\":\"rewrite_chapter_selection\",\"status\":\"" + status + "\","
+                + "\"activeSteps\":[],\"currentStep\":null,\"lastEventSequence\":" + sequence
+                + ",\"revision\":3,\"artifact\":null,\"error\":null}}}");
     }
 
     private JsonNode adaptation(String status, String checkpoint, String updated, String taskId) {

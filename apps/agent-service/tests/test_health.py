@@ -1,4 +1,5 @@
 import asyncio
+import re
 from datetime import timedelta
 from pathlib import Path
 
@@ -7,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from inkforge_agents.app import create_app
 from inkforge_agents.config import Settings
+from inkforge_agents.execution.service import ExecutionServiceHealth
 from inkforge_agents.queue.cancellation import RedisRunCancellation
 from inkforge_agents.queue.consumer import QueueConsumer
 from inkforge_agents.supervision import CoroutineSupervisor
@@ -48,13 +50,21 @@ def test_liveness_is_independent_of_model_credentials() -> None:
     response = client.get("/internal/v1/health/ready")
     assert response.status_code == 503
     assert response.json()["checks"]["model_provider"] == "failed"
+    assert re.fullmatch(
+        r"[0-9a-f]{64}", response.json()["executionManifestFingerprint"]
+    )
 
 
 def test_testing_app_is_ready_with_explicit_fake_provider() -> None:
-    response = TestClient(create_app(testing=True)).get("/internal/v1/health/ready")
+    app = create_app(testing=True)
+    response = TestClient(app).get("/internal/v1/health/ready")
 
     assert response.status_code == 200
     assert response.json()["status"] == "ready"
+    fingerprint = response.json()["executionManifestFingerprint"]
+    assert isinstance(fingerprint, str)
+    assert re.fullmatch(r"[0-9a-f]{64}", fingerprint)
+    assert fingerprint == app.state.execution_registry.manifest_fingerprint
     assert "backgroundTasks" not in response.json()
 
 
@@ -71,6 +81,67 @@ def test_app_lifespan_starts_and_stops_single_queue_consumer() -> None:
         assert consumer.started is True
 
     assert consumer.stopped is True
+
+
+def test_readiness_fails_when_terminal_callback_replayer_crashes() -> None:
+    class CrashedReplayer:
+        async def run(self) -> None:
+            raise RuntimeError("模拟终态重放器崩溃")
+
+        def request_stop(self) -> None:
+            pass
+
+    class Execution:
+        callback_replayer = CrashedReplayer()
+
+        async def health(self) -> ExecutionServiceHealth:
+            return ExecutionServiceHealth(
+                ready=True,
+                callback_pending=0,
+                callback_rejected=0,
+                error_code=None,
+                admission_active=0,
+                admission_capacity=3,
+                admission_saturated=False,
+                journal_connected=True,
+                journal_persistence_ok=True,
+                journal_quarantined=False,
+            )
+
+        async def close(self) -> None:
+            pass
+
+    settings = Settings.model_validate(
+        {"environment": "production", "model_provider": "fake"}
+    )
+    consumer = Consumer()
+    app = create_app(
+        testing=True,
+        settings=settings,
+        run_queue=object(),  # type: ignore[arg-type]
+        core_request_verifier=object(),  # type: ignore[arg-type]
+        queue_consumer=consumer,
+        execution_service=Execution(),  # type: ignore[arg-type]
+    )
+    app.state.core_client = object()
+
+    with TestClient(app) as client:
+        import time
+
+        deadline = time.monotonic() + 1
+        while (
+            app.state.execution_replayer_supervisor.error_code
+            != "BACKGROUND_TASK_BACKOFF"
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.001)
+        response = client.get("/internal/v1/health/ready")
+
+    assert response.status_code == 503
+    assert response.json()["checks"]["execution_callback_replayer"] == "failed"
+    assert response.json()["backgroundTasks"]["execution_callback_replayer"] == (
+        "BACKGROUND_TASK_BACKOFF"
+    )
 
 
 def test_readiness_fails_when_queue_consumer_task_exits_unexpectedly() -> None:

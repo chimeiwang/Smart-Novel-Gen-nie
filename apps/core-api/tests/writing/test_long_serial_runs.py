@@ -622,6 +622,8 @@ async def test_long_serial_start_persists_authoritative_envelope_and_job(
     envelope = json.loads(command.payloadJson)
     job = envelope["job"]
     assert response.id == task.id
+    assert response.engineVersion == 1
+    assert response.runId == response.taskId == response.id
     assert task.selectedAgents == "写作,校验,编辑"
     assert task.conversationHistory == json.dumps(
         [{"content": "  写出雨夜的不可逆选择  ", "role": "user"}],
@@ -946,6 +948,9 @@ async def test_second_idempotency_check_wins_before_busy_state(
         SessionFactory(session)
     )
     existing = commands_module.WritingRunResponse(
+        engineVersion=1,
+        runId="task-existing",
+        taskId="task-existing",
         id="task-existing",
         novelId="novel-1",
         chapterId="chapter-1",
@@ -1002,6 +1007,8 @@ async def test_second_idempotency_check_wins_before_busy_state(
     )
 
     assert response.id == "task-existing"
+    assert response.engineVersion == 1
+    assert response.runId == response.taskId == response.id
     assert order == ["replay", "lock", "profile", "replay"]
     assert session.added == []
 

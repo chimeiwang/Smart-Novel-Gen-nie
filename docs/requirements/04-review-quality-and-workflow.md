@@ -49,9 +49,9 @@ ReviewArtifact 应用，也不得反向覆盖正式镜头或提示词。
 
 ## 长篇选区 ReviewArtifact 应用
 
-选区改写（章节正文或大纲正文/节点）必须保持 `proposal -> ReviewArtifact -> 用户确认 -> Core 应用` 闭环，禁止 CLI、Agent 或前端直接写入正式内容。选区草案的 `payload.target.mode` 为选区模式时，approve 只能提交结构化 `editedReplacement`（或 `editedReplacementFile`）；不得用 `editedContent` 伪装全文替换。全文章节/大纲草案继续使用 `editedContent`，Beat Plan 继续按结构化 Beat Plan 应用，语义不变。
+选区改写（章节正文或大纲正文/节点）必须保持 `proposal -> ReviewArtifact -> 用户确认 -> Core 应用` 闭环，禁止 CLI、Agent 或前端直接写入正式内容。选区草案的 `payload.target.mode` 为选区模式时，approve 只能提交结构化 `editedReplacement`（V1 CLI 仍可使用既有 `editedReplacementFile`）；V2 公共请求只允许 `editedReplacement`，不得提交 `editedContent`、`selectedUpdateRefs` 或改写 source/prefix/suffix。全文章节/大纲草案继续使用 V1 `editedContent`，Beat Plan 继续按既有结构化应用语义处理；V2 首切只开放 `long_serial/rewrite_chapter_selection/chapter_draft`，其他 kind 必须明确拒绝。
 
-操作者在 approve 前必须先 GET Artifact，读取完整 diff（包括选区前后正文、replacement 和来源绑定），对该 diff 做一次独立确认，再使用稳定 `clientRequestId`、当前 `expectedRevision` 提交决定；Core 仍执行 sourceBinding preflight、幂等 fingerprint 与 CAS 校验。approve/revise/discard 返回受理后，操作者再次 GET Artifact/任务状态核对最终 applied 或冲突结果，不以受理响应代替回读。
+操作者在 approve 前必须先 GET Artifact，读取完整 diff（包括选区前后正文、replacement 和来源绑定），对该 diff 做一次独立确认，再使用稳定 `clientRequestId`、当前 `expectedRevision` 提交决定；V2 中该 wire 字段规范解释为 `expectedArtifactRevision`。Core 仍执行 sourceBinding preflight、幂等 fingerprint 与 revision/source CAS 校验。V1 返回受理后再次 GET Artifact/任务状态核对最终结果；V2 决定响应直接返回 PostgreSQL 权威 `WritingRunV2Response`，断流或结果不确定时仍按 `runId` 回读，不得从 HTTP 状态或前端乐观状态伪造完成。
 
 ## 目标
 
@@ -140,10 +140,10 @@ flowchart TD
     I --> E
     G -->|"block"| D
     D --> J{"用户提交单一决定请求"}
-    J -->|"approve"| K["事务内正式落库、标记 applied、创建命令"]
-    J -->|"revise"| L["事务内退回 draft、创建命令"]
-    J -->|"discard"| M["事务内删除草案、创建命令"]
-    K --> N["Agent 持久恢复并收敛任务终态"]
+    J -->|"approve"| K["V1 创建命令；V2 事务内应用并完成 Run"]
+    J -->|"revise"| L["V1 创建命令；V2 记录决定并创建 generation Step"]
+    J -->|"discard"| M["V1 物理删除；V2 保留审计并完成 Run"]
+    K --> N["按 engineVersion 收敛权威终态"]
     L --> N
     M --> N
 ~~~
@@ -158,7 +158,11 @@ flowchart TD
 - revise：继续修改；
 - discard：丢弃。
 
-公开入口是 `POST /api/v1/review-artifacts/{artifactId}/decision`。请求必须携带 clientRequestId，Core 先按该标识检查幂等结果，再在一个数据库事务中完成正式写入或草案变化并创建 `artifact_decision` 命令，成功返回 202。前端随后只连接该任务 SSE，不再额外调用恢复接口。
+公开入口是 `POST /api/v1/review-artifacts/{artifactId}/decision`。请求必须携带稳定 `clientRequestId`；省略 `engineVersion` 只按 V1 兼容解释，V2 必须显式提交 `engineVersion=2`。Core 使用 `clientRequestId + requestHash` 做幂等：同标识同请求重放原响应，同标识不同请求稳定冲突。
+
+- V1 保留既有 wire 和行为：事务内完成正式写入或草案变化、创建 `artifact_decision` 命令并返回 202 `ArtifactDecisionAcceptedResponse`，前端随后观察既有任务 SSE。
+- V2 以 Artifact 上的 `workflowRunId` 为唯一持久身份，不伪造 WritingTask、WritingRunCommand 或 commandId；响应是权威 `WritingRunV2Response`。approve 在单事务内按 Unicode code point 精确替换选区并完成 Run；discard 不删除 Artifact、Revision 或 Evaluation，而把 Artifact head 移出 `awaiting_user`、保留为非 actionable `draft` 后完成 Run；revise 记录用户决定、使旧 revision 不再 actionable、保持 Run `running`，并创建绑定同一 EvidenceBundle 与旧 revision 的新 generation Step 供异步派发。
+- V2 决定锁顺序固定为 Run → Artifact → 精确 Artifact Revision → source target。锁住 Chapter 后必须重算正文哈希、更新时间与 selectedTextHash；任一 revision/source CAS 不匹配都整体回滚。终态一旦提交不得被另一决定翻转。
 
 前端需求：
 

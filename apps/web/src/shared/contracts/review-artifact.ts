@@ -110,6 +110,7 @@ export const ReviewArtifactEvaluationDtoSchema = z.object({
 export type ReviewArtifactEvaluationDto = z.infer<typeof ReviewArtifactEvaluationDtoSchema>;
 
 export const ReviewArtifactDtoSchema = z.object({
+  engineVersion: z.union([z.literal(1), z.literal(2)]),
   id: z.string(),
   novelId: z.string(),
   chapterId: z.string().nullable(),
@@ -129,6 +130,19 @@ export const ReviewArtifactDtoSchema = z.object({
   evaluations: z.array(ReviewArtifactEvaluationDtoSchema).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
+}).superRefine((artifact, context) => {
+  const isV1 = artifact.engineVersion === 1
+    && Boolean(artifact.taskId)
+    && artifact.workflowRunId === null;
+  const isV2 = artifact.engineVersion === 2
+    && artifact.taskId === null
+    && Boolean(artifact.workflowRunId);
+  if (!isV1 && !isV2) {
+    context.addIssue({
+      code: "custom",
+      message: "engineVersion 与 taskId/workflowRunId 归属不一致",
+    });
+  }
 });
 export type ReviewArtifactDto = z.infer<typeof ReviewArtifactDtoSchema>;
 

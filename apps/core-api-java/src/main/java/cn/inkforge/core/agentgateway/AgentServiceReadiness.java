@@ -1,5 +1,6 @@
 package cn.inkforge.core.agentgateway;
 
+import cn.inkforge.core.writing.application.DurableAgentExecutionReadiness;
 import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -7,20 +8,24 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Objects;
+import java.util.regex.Pattern;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /** 对 Agent 执行一次 POST 协议门禁，并持续检查内部就绪接口。 */
-public final class AgentServiceReadiness {
+public final class AgentServiceReadiness implements DurableAgentExecutionReadiness {
 
     private static final String READY_PATH = "/internal/v1/health/ready";
     private static final String RUNS_PATH = "/internal/v1/runs";
     private static final int MAX_RESPONSE_BYTES = 64 * 1024;
+    private static final Pattern MANIFEST_FINGERPRINT = Pattern.compile("[0-9a-f]{64}");
 
     private final HttpClient httpClient;
     private final URI baseUri;
     private final ObjectMapper objectMapper;
     private final Duration timeout;
+    private final String expectedManifestFingerprint;
     private final Object postProbeMonitor = new Object();
     private volatile boolean postTransportVerified;
 
@@ -29,15 +34,30 @@ public final class AgentServiceReadiness {
             URI baseUri,
             ObjectMapper objectMapper,
             Duration timeout) {
-        this.httpClient = java.util.Objects.requireNonNull(httpClient);
+        this(httpClient, baseUri, objectMapper, timeout, null);
+    }
+
+    public AgentServiceReadiness(
+            HttpClient httpClient,
+            URI baseUri,
+            ObjectMapper objectMapper,
+            Duration timeout,
+            String expectedManifestFingerprint) {
+        this.httpClient = Objects.requireNonNull(httpClient);
         this.baseUri = normalizeBaseUri(baseUri);
-        this.objectMapper = java.util.Objects.requireNonNull(objectMapper);
+        this.objectMapper = Objects.requireNonNull(objectMapper);
         if (timeout == null || timeout.isZero() || timeout.isNegative()) {
             throw new IllegalArgumentException("Agent 就绪探测超时必须为正数");
         }
         this.timeout = timeout;
+        if (expectedManifestFingerprint != null
+                && !MANIFEST_FINGERPRINT.matcher(expectedManifestFingerprint).matches()) {
+            throw new IllegalArgumentException("Core execution manifest fingerprint 格式无效");
+        }
+        this.expectedManifestFingerprint = expectedManifestFingerprint;
     }
 
+    @Override
     public boolean check() {
         try {
             if (!checkPostTransport()) {
@@ -55,7 +75,18 @@ public final class AgentServiceReadiness {
                     return false;
                 }
                 JsonNode value = objectMapper.readTree(bytes);
-                return value.isObject() && "ready".equals(value.path("status").asString());
+                if (!value.isObject() || !"ready".equals(value.path("status").asString())) {
+                    return false;
+                }
+                if (expectedManifestFingerprint == null) {
+                    // 迁移前 schemaReady=false 的 V1 Core 保持旧 Agent readiness 兼容。
+                    return true;
+                }
+                JsonNode fingerprint = value.get("executionManifestFingerprint");
+                return fingerprint != null
+                        && fingerprint.isTextual()
+                        && MANIFEST_FINGERPRINT.matcher(fingerprint.textValue()).matches()
+                        && expectedManifestFingerprint.equals(fingerprint.textValue());
             }
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();

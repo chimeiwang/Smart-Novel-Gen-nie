@@ -1,0 +1,346 @@
+{
+  "$defs": {
+    "ResolvedModelRef": {
+      "additionalProperties": false,
+      "description": "Agent 对逻辑 Profile 的一次可审计部署解析。",
+      "properties": {
+        "capabilityVersion": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Capabilityversion",
+          "type": "string"
+        },
+        "deploymentFingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Deploymentfingerprint",
+          "type": "string"
+        },
+        "deploymentProfileKey": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Deploymentprofilekey",
+          "type": "string"
+        },
+        "endpointProfile": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Endpointprofile",
+          "type": "string"
+        },
+        "model": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Model",
+          "type": "string"
+        },
+        "provider": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Provider",
+          "type": "string"
+        },
+        "reasoningMode": {
+          "enum": [
+            "disabled",
+            "bounded"
+          ],
+          "title": "Reasoningmode",
+          "type": "string"
+        },
+        "structuredOutputRoute": {
+          "enum": [
+            "responses_json_schema_v1",
+            "chat_json_output_v1"
+          ],
+          "title": "Structuredoutputroute",
+          "type": "string"
+        },
+        "supportsRequestIdempotency": {
+          "description": "仅当 Provider 确实原样传递 ExecutionStepRequest.idempotencyKey 时为 true",
+          "title": "Supportsrequestidempotency",
+          "type": "boolean"
+        },
+        "transportProfile": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9_.-]*$",
+          "title": "Transportprofile",
+          "type": "string"
+        }
+      },
+      "required": [
+        "deploymentProfileKey",
+        "deploymentFingerprint",
+        "provider",
+        "model",
+        "transportProfile",
+        "endpointProfile",
+        "structuredOutputRoute",
+        "capabilityVersion",
+        "reasoningMode",
+        "supportsRequestIdempotency"
+      ],
+      "title": "ResolvedModelRef",
+      "type": "object"
+    },
+    "StepUsage": {
+      "additionalProperties": false,
+      "properties": {
+        "cachedTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cachedtokens"
+        },
+        "completionTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completiontokens"
+        },
+        "costMicros": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Costmicros"
+        },
+        "inputTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Inputtokens"
+        },
+        "promptCacheMissTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Promptcachemisstokens"
+        },
+        "protocolCorrections": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Protocolcorrections",
+          "type": "integer"
+        },
+        "providerAttempts": {
+          "maximum": 3,
+          "minimum": 0,
+          "title": "Providerattempts",
+          "type": "integer"
+        },
+        "reasoningTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoningtokens"
+        },
+        "usageStatus": {
+          "enum": [
+            "complete",
+            "partial",
+            "unknown"
+          ],
+          "title": "Usagestatus",
+          "type": "string"
+        },
+        "visibleOutputTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Visibleoutputtokens"
+        },
+        "wallTimeMillis": {
+          "minimum": 0,
+          "title": "Walltimemillis",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "usageStatus",
+        "providerAttempts",
+        "protocolCorrections",
+        "wallTimeMillis"
+      ],
+      "title": "StepUsage",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/execution/ExecutionStepProgress/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "elapsedSeconds": {
+      "minimum": 0,
+      "title": "Elapsedseconds",
+      "type": "integer"
+    },
+    "fencingToken": {
+      "exclusiveMinimum": 0,
+      "title": "Fencingtoken",
+      "type": "integer"
+    },
+    "jobId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Jobid",
+      "type": "string"
+    },
+    "novelId": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Novelid"
+    },
+    "occurredAt": {
+      "format": "date-time",
+      "title": "Occurredat",
+      "type": "string"
+    },
+    "phase": {
+      "enum": [
+        "preparing",
+        "waiting_provider",
+        "validating",
+        "reporting"
+      ],
+      "title": "Phase",
+      "type": "string"
+    },
+    "progressCode": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "title": "Progresscode",
+      "type": "string"
+    },
+    "progressId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Progressid",
+      "type": "string"
+    },
+    "protocolVersion": {
+      "const": "2.0",
+      "title": "Protocolversion",
+      "type": "string"
+    },
+    "requestHash": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Requesthash",
+      "type": "string"
+    },
+    "resolvedModel": {
+      "$ref": "#/$defs/ResolvedModelRef"
+    },
+    "runId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Runid",
+      "type": "string"
+    },
+    "sequence": {
+      "exclusiveMinimum": 0,
+      "title": "Sequence",
+      "type": "integer"
+    },
+    "stepId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Stepid",
+      "type": "string"
+    },
+    "usage": {
+      "$ref": "#/$defs/StepUsage"
+    },
+    "waitingOnProvider": {
+      "title": "Waitingonprovider",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "protocolVersion",
+    "progressId",
+    "jobId",
+    "runId",
+    "novelId",
+    "stepId",
+    "fencingToken",
+    "requestHash",
+    "resolvedModel",
+    "sequence",
+    "phase",
+    "progressCode",
+    "elapsedSeconds",
+    "waitingOnProvider",
+    "usage",
+    "occurredAt"
+  ],
+  "title": "ExecutionStepProgress",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.ExecutionStepProgress"
+}

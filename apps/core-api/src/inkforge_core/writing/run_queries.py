@@ -21,6 +21,7 @@ from .schemas import (
     WritingRunCheckpointResponse,
     WritingRunListItem,
     WritingRunListResponse,
+    WritingRunPublicListItem,
     WritingRunStatusResponse,
 )
 from .tasks import TERMINAL_CALLBACK_RESULT_FIELD
@@ -236,7 +237,10 @@ class WritingRunQueryRepository:
                 created_at=last_item.createdAt,
                 task_id=last_item.taskId,
             )
-        return WritingRunListResponse(items=page, nextCursor=next_cursor)
+        return WritingRunListResponse(
+            items=cast(list[WritingRunPublicListItem], page),
+            nextCursor=next_cursor,
+        )
 
 
 def project_run_status(
@@ -403,6 +407,8 @@ def project_run_status(
         and resolve_recoverable_checkpoint(task, commands) is not None
     )
     return WritingRunStatusResponse(
+        engineVersion=1,
+        runId=task.id,
         taskId=task.id,
         novelId=task.novelId,
         chapterId=task.chapterId,
@@ -449,6 +455,8 @@ def _list_item(status: WritingRunStatusResponse) -> WritingRunListItem:
     if status.createdAt is None or status.target is None or status.scope is None:
         raise RuntimeError("统一任务投影缺少列表必需字段")
     return WritingRunListItem(
+        engineVersion=1,
+        runId=status.runId,
         taskId=status.taskId,
         novelId=status.novelId,
         chapterId=status.chapterId,

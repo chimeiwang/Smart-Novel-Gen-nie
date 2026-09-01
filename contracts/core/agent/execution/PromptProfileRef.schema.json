@@ -1,0 +1,33 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/execution/PromptProfileRef/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Manifest 管理的静态 system prompt 身份；正文由双端 Registry 按哈希校验。",
+  "properties": {
+    "name": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[a-z][a-z0-9_.-]*$",
+      "title": "Name",
+      "type": "string"
+    },
+    "sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Sha256",
+      "type": "string"
+    },
+    "version": {
+      "exclusiveMinimum": 0,
+      "title": "Version",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "name",
+    "version",
+    "sha256"
+  ],
+  "title": "PromptProfileRef",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.PromptProfileRef"
+}

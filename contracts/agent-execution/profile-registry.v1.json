@@ -1,0 +1,248 @@
+{
+  "registryVersion": "1",
+  "profiles": [
+    {
+      "key": "editor.answer.v1",
+      "version": 1,
+      "supported": false,
+      "reasoningMode": "disabled",
+      "purpose": "generation",
+      "promptProfile": "prompt.unavailable.generation.v1",
+      "deploymentProfileKey": "deployment.unavailable.generation.v1"
+    },
+    {
+      "key": "editor.chapter_review.v1",
+      "version": 1,
+      "supported": false,
+      "reasoningMode": "disabled",
+      "purpose": "evaluation",
+      "promptProfile": "prompt.unavailable.evaluation.v1",
+      "deploymentProfileKey": "deployment.unavailable.evaluation.v1"
+    },
+    {
+      "key": "lore.generator.v1",
+      "version": 1,
+      "supported": false,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.unavailable.generation.v1",
+      "deploymentProfileKey": "deployment.unavailable.generation.v1"
+    },
+    {
+      "key": "lore.reviser.v1",
+      "version": 1,
+      "supported": false,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.unavailable.generation.v1",
+      "deploymentProfileKey": "deployment.unavailable.generation.v1"
+    },
+    {
+      "key": "plot.chapter_plan.v1",
+      "version": 1,
+      "supported": false,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.unavailable.generation.v1",
+      "deploymentProfileKey": "deployment.unavailable.generation.v1"
+    },
+    {
+      "key": "plot.foreshadowing.v1",
+      "version": 1,
+      "supported": false,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.unavailable.generation.v1",
+      "deploymentProfileKey": "deployment.unavailable.generation.v1"
+    },
+    {
+      "key": "plot.outline_generator.v1",
+      "version": 1,
+      "supported": false,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.unavailable.generation.v1",
+      "deploymentProfileKey": "deployment.unavailable.generation.v1"
+    },
+    {
+      "key": "plot.outline_reviser.v1",
+      "version": 1,
+      "supported": false,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.unavailable.generation.v1",
+      "deploymentProfileKey": "deployment.unavailable.generation.v1"
+    },
+    {
+      "key": "plot.outline_selection.v1",
+      "version": 1,
+      "supported": false,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.unavailable.generation.v1",
+      "deploymentProfileKey": "deployment.unavailable.generation.v1"
+    },
+    {
+      "key": "plot.short_medium_outline.v1",
+      "version": 1,
+      "supported": false,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.unavailable.generation.v1",
+      "deploymentProfileKey": "deployment.unavailable.generation.v1"
+    },
+    {
+      "key": "quality.consistency.v1",
+      "version": 1,
+      "supported": false,
+      "reasoningMode": "disabled",
+      "purpose": "evaluation",
+      "promptProfile": "prompt.unavailable.evaluation.v1",
+      "deploymentProfileKey": "deployment.unavailable.evaluation.v1"
+    },
+    {
+      "key": "quality.short_medium_full_check.v1",
+      "version": 1,
+      "supported": false,
+      "reasoningMode": "disabled",
+      "purpose": "evaluation",
+      "promptProfile": "prompt.unavailable.evaluation.v1",
+      "deploymentProfileKey": "deployment.unavailable.evaluation.v1"
+    },
+    {
+      "key": "rag.embedding.v1",
+      "version": 1,
+      "supported": false,
+      "reasoningMode": "disabled",
+      "purpose": "embedding",
+      "promptProfile": "prompt.unavailable.embedding.v1",
+      "deploymentProfileKey": "deployment.unavailable.embedding.v1"
+    },
+    {
+      "key": "reviewer.cinematic.v2",
+      "version": 2,
+      "supported": false,
+      "reasoningMode": "disabled",
+      "purpose": "review",
+      "promptProfile": "prompt.unavailable.review.v1",
+      "deploymentProfileKey": "deployment.unavailable.review.v1"
+    },
+    {
+      "key": "reviewer.consistency.v1",
+      "version": 1,
+      "supported": true,
+      "reasoningMode": "disabled",
+      "purpose": "review",
+      "promptProfile": "prompt.reviewer.consistency.v1",
+      "deploymentProfileKey": "deployment.reviewer.consistency.v1"
+    },
+    {
+      "key": "reviewer.editorial.v1",
+      "version": 1,
+      "supported": true,
+      "reasoningMode": "disabled",
+      "purpose": "review",
+      "promptProfile": "prompt.reviewer.editorial.v1",
+      "deploymentProfileKey": "deployment.reviewer.editorial.v1"
+    },
+    {
+      "key": "style.portrait.v1",
+      "version": 1,
+      "supported": false,
+      "reasoningMode": "disabled",
+      "purpose": "generation",
+      "promptProfile": "prompt.unavailable.generation.v1",
+      "deploymentProfileKey": "deployment.unavailable.generation.v1"
+    },
+    {
+      "key": "system.evidence_summarizer.v1",
+      "version": 1,
+      "supported": false,
+      "reasoningMode": "disabled",
+      "purpose": "generation",
+      "promptProfile": "prompt.unavailable.generation.v1",
+      "deploymentProfileKey": "deployment.unavailable.generation.v1"
+    },
+    {
+      "key": "system.intent_resolver.v1",
+      "version": 1,
+      "supported": false,
+      "reasoningMode": "disabled",
+      "purpose": "generation",
+      "promptProfile": "prompt.unavailable.generation.v1",
+      "deploymentProfileKey": "deployment.unavailable.generation.v1"
+    },
+    {
+      "key": "system.protocol_corrector.v1",
+      "version": 1,
+      "supported": false,
+      "reasoningMode": "disabled",
+      "purpose": "generation",
+      "promptProfile": "prompt.unavailable.generation.v1",
+      "deploymentProfileKey": "deployment.unavailable.generation.v1"
+    },
+    {
+      "key": "video.chapter_adaptation.v2",
+      "version": 2,
+      "supported": false,
+      "reasoningMode": "disabled",
+      "purpose": "media",
+      "promptProfile": "prompt.unavailable.media.v1",
+      "deploymentProfileKey": "deployment.unavailable.media.v1"
+    },
+    {
+      "key": "video.shot_prompt.v2",
+      "version": 2,
+      "supported": false,
+      "reasoningMode": "disabled",
+      "purpose": "media",
+      "promptProfile": "prompt.unavailable.media.v1",
+      "deploymentProfileKey": "deployment.unavailable.media.v1"
+    },
+    {
+      "key": "writer.chapter_draft.v1",
+      "version": 1,
+      "supported": false,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.unavailable.generation.v1",
+      "deploymentProfileKey": "deployment.unavailable.generation.v1"
+    },
+    {
+      "key": "writer.chapter_selection.v1",
+      "version": 1,
+      "supported": true,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.writer.chapter_selection.v1",
+      "deploymentProfileKey": "deployment.writer.chapter_selection.v1"
+    },
+    {
+      "key": "writer.scene_rewrite.v1",
+      "version": 1,
+      "supported": false,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.unavailable.generation.v1",
+      "deploymentProfileKey": "deployment.unavailable.generation.v1"
+    },
+    {
+      "key": "writer.short_medium_manuscript.v1",
+      "version": 1,
+      "supported": false,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.unavailable.generation.v1",
+      "deploymentProfileKey": "deployment.unavailable.generation.v1"
+    },
+    {
+      "key": "writer.short_medium_selection.v1",
+      "version": 1,
+      "supported": false,
+      "reasoningMode": "bounded",
+      "purpose": "generation",
+      "promptProfile": "prompt.unavailable.generation.v1",
+      "deploymentProfileKey": "deployment.unavailable.generation.v1"
+    }
+  ]
+}

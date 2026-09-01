@@ -15,6 +15,7 @@ import jwt
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from inkforge_contracts.jwt_claims import ServiceScope
+from inkforge_contracts.workflow_events import RunSnapshot, WorkflowEventEnvelope
 from inkforge_core.app import create_app
 from inkforge_core.auth.service import COOKIE_NAME, SESSION_MAX_AGE_SECONDS
 from inkforge_core.http.cursor import encode_run_cursor
@@ -30,6 +31,7 @@ from inkforge_core.writing.sse import (
     format_sse_event,
 )
 from inkforge_service_auth import ServiceTokenSigner
+from pydantic import TypeAdapter
 from starlette.responses import FileResponse
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -63,6 +65,7 @@ def _product_module(endpoint_module: str) -> str:
         (".billing", "billing"),
         (".reviews", "reviews"),
         (".writing", "writing"),
+        (".workflows", "workflows"),
         (".quality", "quality"),
         (".debug", "debug"),
         (".operations", "operations"),
@@ -258,6 +261,10 @@ def _java_openapi(
                 for key in ("default", "description", "title"):
                     if key in normalized and key not in replacement:
                         replacement[key] = normalized[key]
+                if normalized.get("enum") == [None]:
+                    # OpenAPI 3.0 无法表达“必显且只能为 null”；保留机器可读标记，
+                    # 避免 Java 投影把 V2 的兼容 command 字段误解成普通可空字符串。
+                    replacement["x-inkforge-fixed-null"] = True
                 replacement["nullable"] = True
                 return replacement
         return normalized
@@ -288,6 +295,44 @@ def _java_openapi(
             if isinstance(operation, dict) and "requestBody" in operation:
                 request_schemas.update(schema_references(operation["requestBody"]))
     schemas = java_openapi.get("components", {}).get("schemas", {})
+
+    # SSE 正文是字节流，FastAPI 的公开 OpenAPI 因而只把 200 表达成 string，并通过
+    # x-inkforge-v2-sse 指向共享 Pydantic 类型。Java 仍必须机械生成这两个帧 DTO，
+    # 不能在 Core 手写另一套 envelope。这里从同一共享类型导出 definitions，再走
+    # 下方统一的 3.0/nullability 降级；不会给公共路由伪造 application/json 响应。
+    workflow_sse_schema = TypeAdapter(
+        RunSnapshot | WorkflowEventEnvelope
+    ).json_schema(ref_template="#/components/schemas/{model}")
+    workflow_sse_definitions = workflow_sse_schema.get("$defs")
+    if not isinstance(workflow_sse_definitions, dict):
+        raise RuntimeError("共享 Workflow SSE 契约缺少 definitions")
+    for schema_name, schema in workflow_sse_definitions.items():
+        # 该 anyOf 聚合本身不能表达“由 envelope.eventType 判别”；只生成精确分支 DTO，
+        # envelope 槽位在下方投影为 Object 并由运行时显式选择分支。
+        if schema_name == "WorkflowEventPayload":
+            continue
+        normalized_schema = normalize(schema)
+        existing_schema = schemas.get(schema_name)
+        # Snapshot 子模型已经因 WritingRunV2Response 出现在公开组件中；沿用该份
+        # FastAPI 投影，避免 default/null 的纯生成差异造成重复定义。其余帧模型补入。
+        if existing_schema is None:
+            schemas[schema_name] = normalized_schema
+    workflow_event_envelope = schemas.get("WorkflowEventEnvelope")
+    if not isinstance(workflow_event_envelope, dict):
+        raise RuntimeError("Java 迁移契约缺少 WorkflowEventEnvelope")
+    workflow_event_payload = workflow_event_envelope.get("properties", {}).get("payload")
+    if not isinstance(workflow_event_payload, dict):
+        raise RuntimeError("Java 迁移契约缺少 WorkflowEventEnvelope.payload")
+    # payload 的具体类型由同一 envelope 的 eventType 决定，OpenAPI Generator 无法跨兄弟字段
+    # 表达这种判别，若直接保留 anyOf 会错误生成“全部字段同时必填”的合并类。Java 只把该槽位
+    # 映射为 Object，运行时仍按 eventType 反序列化并校验上方机械生成的精确 Payload DTO。
+    workflow_event_payload.clear()
+    workflow_event_payload.update(
+        {
+            "type": "object",
+            "x-inkforge-java-discriminated-by": "eventType",
+        }
+    )
 
     # PostgreSQL VideoAsset.byteSize 是 BIGINT，受控整集导出又允许接近 2 GiB；
     # Java 生成器在没有 format 时默认使用 Integer，会在合法文件边界发生溢出。

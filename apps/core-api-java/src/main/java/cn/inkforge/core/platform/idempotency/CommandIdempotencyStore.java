@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import org.jooq.DSLContext;
+import org.jooq.Record;
 import org.jooq.Record2;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
@@ -35,9 +36,16 @@ public final class CommandIdempotencyStore {
             "requestFingerprint");
 
     private final ObjectMapper json;
+    private final boolean durableAgentSchemaReady;
 
     public CommandIdempotencyStore(ObjectMapper json) {
+        this(json, false);
+    }
+
+    public CommandIdempotencyStore(
+            ObjectMapper json, boolean durableAgentSchemaReady) {
         this.json = Objects.requireNonNull(json);
+        this.durableAgentSchemaReady = durableAgentSchemaReady;
     }
 
     public Resolution resolve(
@@ -86,6 +94,35 @@ public final class CommandIdempotencyStore {
                 matches.add(new Resolution(
                         RecordKind.WORKFLOW_RUN, row.value1(), parsed.metadata()));
             }
+        }
+
+        // V2 不再把幂等信封夹在 input JSON 中；具名列就是权威身份与指纹。迁移前兼容镜像必须由
+        // schemaReady 快照完全跳过这条 SQL，不能用“先查询系统表、存在就读”把在线迁移偷偷变成功能启用。
+        // schemaReady 后这里与 V1 共用同一用户级锁，路由开关变化也只能重放最初选定的引擎。
+        List<Record> durableRows = durableAgentSchemaReady
+                ? transaction.fetch(
+                        """
+                        SELECT id, "requestHash"
+                        FROM public."WorkflowRun"
+                        WHERE "engineVersion" = 2 AND "userId" = ? AND "idempotencyKey" = ?
+                        """,
+                        userId,
+                        clientRequestId)
+                : List.of();
+        for (Record row : durableRows) {
+            String fingerprint = row.get("requestHash", String.class);
+            if (fingerprint == null || !fingerprint.matches("[0-9a-f]{64}")) {
+                throw reused(clientRequestId);
+            }
+            matches.add(new Resolution(
+                    RecordKind.WORKFLOW_RUN,
+                    row.get("id", String.class),
+                    new Metadata(
+                            clientRequestId,
+                            "start",
+                            Map.of(),
+                            Map.of(),
+                            fingerprint)));
         }
 
         if (matches.isEmpty()) return null;

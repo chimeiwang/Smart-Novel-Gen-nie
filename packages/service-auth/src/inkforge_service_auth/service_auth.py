@@ -227,7 +227,7 @@ class ServiceTokenSigner:
         scope: Sequence[ServiceScope],
         task_id: str,
         run_id: str,
-        novel_id: str,
+        novel_id: str | None,
         now: int | datetime | None = None,
         ttl_seconds: int | None = None,
         jti: str | None = None,
@@ -352,7 +352,7 @@ class ServiceTokenVerifier:
         required_scope: ServiceScope,
         task_id: str,
         run_id: str,
-        novel_id: str,
+        novel_id: str | None,
         now: int | datetime | None = None,
     ) -> ServiceJwtClaims:
         if required_scope not in self._allowed_scopes:
@@ -432,7 +432,6 @@ class ServiceTokenVerifier:
                         "scope",
                         "task_id",
                         "run_id",
-                        "novel_id",
                         "jti",
                         "iat",
                         "exp",
@@ -447,6 +446,8 @@ class ServiceTokenVerifier:
                     "verify_iat": False,
                 },
             )
+            if "novel_id" not in payload:
+                raise ValueError("服务令牌缺少 novel_id")
             claims = ServiceJwtClaims.model_validate(payload)
         except (InvalidTokenError, ValidationError, ValueError, TypeError):
             raise ServiceAuthenticationError() from None
@@ -508,7 +509,7 @@ class ServiceTokenVerifier:
         *,
         task_id: str,
         run_id: str,
-        novel_id: str,
+        novel_id: str | None,
     ) -> None:
         resources = (
             ("task_id", claims.task_id, task_id),

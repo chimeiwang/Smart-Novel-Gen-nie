@@ -16,8 +16,13 @@
         "quality:write",
         "video:write",
         "video:render",
+        "execution:submit",
+        "execution:cancel",
+        "execution:progress",
+        "execution:result",
         "billing:authorize",
-        "billing:usage:write"
+        "billing:usage:write",
+        "billing:reconcile"
       ],
       "title": "ServiceScope",
       "type": "string"
@@ -26,6 +31,36 @@
   "$id": "https://inkforge.local/contracts/agent/jwt_claims/ServiceJwtClaims/1.0",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "novel_id": {
+            "type": "null"
+          }
+        },
+        "required": [
+          "novel_id"
+        ]
+      },
+      "then": {
+        "properties": {
+          "scope": {
+            "items": {
+              "enum": [
+                "billing:reconcile",
+                "execution:cancel",
+                "execution:progress",
+                "execution:result",
+                "execution:submit"
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
+  "description": "服务 JWT；V2 execution 固定 task_id=stepId、run_id=runId、novel_id=novelId。",
   "properties": {
     "aud": {
       "maxLength": 256,
@@ -79,10 +114,17 @@
       "type": "string"
     },
     "novel_id": {
-      "maxLength": 256,
-      "minLength": 1,
-      "title": "Novel Id",
-      "type": "string"
+      "anyOf": [
+        {
+          "maxLength": 256,
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Novel Id"
     },
     "query_sha256": {
       "pattern": "^[0-9a-f]{64}$",

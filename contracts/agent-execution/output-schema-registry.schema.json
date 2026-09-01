@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://inkforge.cn/contracts/agent-execution/output-schema-registry.schema.json",
+  "title": "InkForge Agent Execution Output Schema Registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "registryVersion",
+    "hashAlgorithm",
+    "schemas"
+  ],
+  "properties": {
+    "registryVersion": {
+      "const": "1"
+    },
+    "hashAlgorithm": {
+      "const": "inkforge-canonical-json/1"
+    },
+    "schemas": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/outputSchema"
+      }
+    }
+  },
+  "$defs": {
+    "versionedIdentifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*\\.v[1-9][0-9]*$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "strictObjectSchema": {
+      "type": "object",
+      "required": [
+        "$schema",
+        "type",
+        "additionalProperties",
+        "required",
+        "properties"
+      ],
+      "properties": {
+        "$schema": {
+          "const": "https://json-schema.org/draft/2020-12/schema"
+        },
+        "type": {
+          "const": "object"
+        },
+        "additionalProperties": {
+          "const": false
+        },
+        "required": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "properties": {
+          "type": "object"
+        }
+      }
+    },
+    "outputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "version",
+        "supported",
+        "purpose",
+        "sha256",
+        "jsonSchema"
+      ],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/versionedIdentifier"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "purpose": {
+          "enum": [
+            "generation",
+            "evaluation",
+            "embedding",
+            "media"
+          ]
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "jsonSchema": {
+          "$ref": "#/$defs/strictObjectSchema"
+        }
+      }
+    }
+  }
+}

@@ -9,6 +9,7 @@ import cn.inkforge.core.db.generated.tables.records.WritingruncommandRecord;
 import cn.inkforge.core.db.generated.tables.records.WritingtaskRecord;
 import cn.inkforge.core.platform.db.CoreDatabase;
 import cn.inkforge.core.platform.http.ApiException;
+import cn.inkforge.core.platform.idempotency.CommandIdempotency;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
 import cn.inkforge.core.writing.application.WritingCommandDispatchRepository;
 import cn.inkforge.core.writing.application.WritingCommandPayload;
@@ -18,6 +19,7 @@ import cn.inkforge.core.writing.domain.WritingTaskFailure;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -36,12 +38,22 @@ final class JooqWritingCommandDispatchRepository
     private final CoreDatabase database;
     private final Clock clock;
     private final ObjectMapper json;
+    private final boolean durableAgentSchemaReady;
 
     JooqWritingCommandDispatchRepository(
             CoreDatabase database, Clock clock, ObjectMapper json) {
+        this(database, clock, json, false);
+    }
+
+    JooqWritingCommandDispatchRepository(
+            CoreDatabase database,
+            Clock clock,
+            ObjectMapper json,
+            boolean durableAgentSchemaReady) {
         this.database = Objects.requireNonNull(database);
         this.clock = Objects.requireNonNull(clock);
         this.json = Objects.requireNonNull(json);
+        this.durableAgentSchemaReady = durableAgentSchemaReady;
     }
 
     @Override
@@ -76,9 +88,39 @@ final class JooqWritingCommandDispatchRepository
                     .skipLocked()
                     .fetch();
             List<WritingDispatchRecord> result = new ArrayList<>(rows.size());
-            for (Record row : rows) result.add(dispatchRecord(row));
+            Set<String> claimedNovels = new HashSet<>();
+            for (Record row : rows) {
+                String novelId = row.get(WRITINGTASK.NOVELID);
+                if (!claimedNovels.add(novelId)) continue;
+                transaction.execute(
+                        "SELECT pg_catalog.pg_advisory_xact_lock(?)",
+                        CommandIdempotency.advisoryLockKey(
+                                "agent-novel-dispatch", novelId));
+                if (durableAgentSchemaReady
+                        && hasActiveV2Execution(transaction, novelId)) continue;
+                result.add(dispatchRecord(row));
+            }
             return List.copyOf(result);
         });
+    }
+
+    private static boolean hasActiveV2Execution(
+            DSLContext transaction, String novelId) {
+        return Boolean.TRUE.equals(transaction.fetchOne(
+                        """
+                        SELECT EXISTS (
+                          SELECT 1
+                          FROM public."WorkflowRun" AS run
+                          JOIN public."WorkflowStep" AS step ON step."runId" = run.id
+                          WHERE run."engineVersion" = 2 AND run."novelId" = ?
+                            AND run.status IN ('pending', 'running')
+                            AND run."cancelRequestedAt" IS NULL
+                            AND step.status IN ('pending', 'running')
+                            AND (step.status = 'running' OR step."activeJobId" IS NOT NULL)
+                        ) AS blocked
+                        """,
+                        novelId)
+                .get("blocked", Boolean.class));
     }
 
     @Override

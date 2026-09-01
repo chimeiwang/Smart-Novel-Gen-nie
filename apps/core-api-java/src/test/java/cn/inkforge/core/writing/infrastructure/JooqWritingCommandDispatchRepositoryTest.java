@@ -82,18 +82,31 @@ class JooqWritingCommandDispatchRepositoryTest {
 
     @Test
     void 只领取到期Pending与过期活动命令并按稳定顺序返回() {
-        Fixture fixture = fixture("dispatch-claim");
-        insertCommand(fixture, "task-due", "command-due", "pending", NOW.minusSeconds(5), NOW);
-        insertCommand(fixture, "task-future", "command-future", "pending", NOW.plusMinutes(1), NOW);
+        Fixture dueFixture = fixture("dispatch-claim-due");
+        Fixture staleFixture = fixture("dispatch-claim-stale");
         insertCommand(
-                fixture,
+                dueFixture,
+                "task-due",
+                "command-due",
+                "pending",
+                NOW.minusSeconds(5),
+                NOW);
+        insertCommand(
+                dueFixture,
+                "task-future",
+                "command-future",
+                "pending",
+                NOW.plusMinutes(1),
+                NOW);
+        insertCommand(
+                staleFixture,
                 "task-stale",
                 "command-stale",
                 "submitted",
                 NOW.minusMinutes(20),
                 NOW.minusMinutes(20));
         insertCommand(
-                fixture,
+                staleFixture,
                 "task-fresh",
                 "command-fresh",
                 "processing",
@@ -104,7 +117,7 @@ class JooqWritingCommandDispatchRepositoryTest {
 
         assertThat(claimed).extracting(record -> record.id())
                 .containsExactly("command-stale", "command-due");
-        assertThat(claimed.getFirst().userId()).isEqualTo(fixture.userId());
+        assertThat(claimed.getFirst().userId()).isEqualTo(staleFixture.userId());
         assertThat(claimed.getFirst().job()).containsEntry("resume", false);
     }
 

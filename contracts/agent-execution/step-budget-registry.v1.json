@@ -1,0 +1,107 @@
+{
+  "registryVersion": "1",
+  "budgets": [
+    {
+      "key": "step_budget.long_serial.rewrite_chapter_selection.generator.v1",
+      "version": 1,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 30000,
+        "maxPromptCacheMissTokens": 10000,
+        "maxCompletionTokens": 8000,
+        "maxReasoningTokens": 4000,
+        "maxVisibleOutputTokens": 4000,
+        "maxCostMicros": 300000,
+        "maxWallClockSeconds": 120,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
+    {
+      "key": "step_budget.long_serial.rewrite_chapter_selection.reviewer_consistency.v1",
+      "version": 1,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 15000,
+        "maxPromptCacheMissTokens": 5000,
+        "maxCompletionTokens": 1000,
+        "maxReasoningTokens": 0,
+        "maxVisibleOutputTokens": 1000,
+        "maxCostMicros": 100000,
+        "maxWallClockSeconds": 60,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
+    {
+      "key": "step_budget.long_serial.rewrite_chapter_selection.reviewer_editorial.v1",
+      "version": 1,
+      "supported": true,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 15000,
+        "maxPromptCacheMissTokens": 5000,
+        "maxCompletionTokens": 1000,
+        "maxReasoningTokens": 0,
+        "maxVisibleOutputTokens": 1000,
+        "maxCostMicros": 100000,
+        "maxWallClockSeconds": 60,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
+    {
+      "key": "step_budget.system.protocol_correction.v1",
+      "version": 1,
+      "supported": false,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 16000,
+        "maxPromptCacheMissTokens": 8000,
+        "maxCompletionTokens": 4000,
+        "maxReasoningTokens": 0,
+        "maxVisibleOutputTokens": 4000,
+        "maxCostMicros": 100000,
+        "maxWallClockSeconds": 60,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 0
+      }
+    },
+    {
+      "key": "step_budget.system.resolve_intent.v1",
+      "version": 1,
+      "supported": false,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 8000,
+        "maxPromptCacheMissTokens": 8000,
+        "maxCompletionTokens": 1000,
+        "maxReasoningTokens": 0,
+        "maxVisibleOutputTokens": 1000,
+        "maxCostMicros": 50000,
+        "maxWallClockSeconds": 30,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    },
+    {
+      "key": "step_budget.system.summarize_evidence.v1",
+      "version": 1,
+      "supported": false,
+      "budget": {
+        "maxModelCalls": 1,
+        "maxInputTokens": 40000,
+        "maxPromptCacheMissTokens": 20000,
+        "maxCompletionTokens": 8000,
+        "maxReasoningTokens": 0,
+        "maxVisibleOutputTokens": 8000,
+        "maxCostMicros": 200000,
+        "maxWallClockSeconds": 120,
+        "maxProviderRetries": 2,
+        "maxProtocolCorrections": 1
+      }
+    }
+  ]
+}

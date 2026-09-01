@@ -115,6 +115,122 @@ class ServiceAuthGoldenVectorTest {
     }
 
     @org.junit.jupiter.api.Test
+    void 用户级Execution令牌允许null小说并固定Step资源身份() throws Exception {
+        byte[] body = "{\"runId\":\"run-user-1\",\"novelId\":null,\"stepId\":\"step-user-1\"}"
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        ServiceTokenSigner signer = executionSigner(List.of(ServiceScope.EXECUTION_SUBMIT));
+        SignedServiceRequest signed = signer.sign(executionRequest(
+                body,
+                List.of(ServiceScope.EXECUTION_SUBMIT),
+                null,
+                "jti-user-execution"));
+        ServiceTokenVerifier verifier = ServiceTokenVerifier.fromJwks(
+                jwks(),
+                "inkforge-core-fixture",
+                "core-api",
+                "inkforge-agent-fixture",
+                new InMemoryReplayStore(),
+                ReplayPolicy.ALL_SCOPES,
+                10,
+                List.of(ServiceScope.EXECUTION_SUBMIT));
+
+        VerifiedServiceRequest verified = verifier.verify(executionVerification(
+                signed,
+                body,
+                ServiceScope.EXECUTION_SUBMIT,
+                null));
+
+        assertThat(verified.claims().taskId()).isEqualTo("step-user-1");
+        assertThat(verified.claims().runId()).isEqualTo("run-user-1");
+        assertThat(verified.claims().novelId()).isNull();
+    }
+
+    @org.junit.jupiter.api.Test
+    void 计费对账使用独立写Scope并允许null小说且必须防重放() throws Exception {
+        byte[] body = "{\"runId\":\"run-user-1\",\"novelId\":null,\"stepId\":\"step-user-1\"}"
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        ServiceTokenSigner signer = executionSigner(List.of(ServiceScope.BILLING_RECONCILE));
+        SignedServiceRequest signed = signer.sign(executionRequest(
+                body,
+                List.of(ServiceScope.BILLING_RECONCILE),
+                null,
+                "jti-billing-reconcile"));
+        ServiceTokenVerifier verifier = ServiceTokenVerifier.fromJwks(
+                jwks(),
+                "inkforge-core-fixture",
+                "core-api",
+                "inkforge-agent-fixture",
+                new InMemoryReplayStore(),
+                ReplayPolicy.WRITE_SCOPES_ONLY,
+                10,
+                List.of(ServiceScope.BILLING_RECONCILE));
+        ServiceVerificationRequest request = executionVerification(
+                signed,
+                body,
+                ServiceScope.BILLING_RECONCILE,
+                null);
+
+        assertThat(verifier.verify(request).claims().scope())
+                .containsExactly(ServiceScope.BILLING_RECONCILE);
+        assertThatThrownBy(() -> verifier.verify(request))
+                .isInstanceOf(ServiceAuthException.class)
+                .extracting(error -> ((ServiceAuthException) error).code())
+                .isEqualTo("SERVICE_TOKEN_REPLAYED");
+    }
+
+    @org.junit.jupiter.api.Test
+    void 旧Scope与混合Scope不得放宽null小说约束() throws Exception {
+        byte[] body = "{}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        List<List<ServiceScope>> invalidScopes = List.of(
+                List.of(ServiceScope.AGENT_RUN),
+                List.of(ServiceScope.EXECUTION_SUBMIT, ServiceScope.AGENT_RUN));
+
+        for (List<ServiceScope> scopes : invalidScopes) {
+            ServiceTokenSigner signer = executionSigner(scopes);
+            assertThatThrownBy(() -> signer.sign(executionRequest(
+                            body,
+                            scopes,
+                            null,
+                            "jti-null-novel")))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("纯 execution scope");
+            assertThatThrownBy(() -> claims(scopes, null))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessageContaining("纯 execution scope");
+        }
+    }
+
+    @org.junit.jupiter.api.Test
+    void Execution正文小说与Jwt小说不一致必须拒绝() throws Exception {
+        byte[] body = "{\"runId\":\"run-user-1\",\"novelId\":\"novel-body\",\"stepId\":\"step-user-1\"}"
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        ServiceTokenSigner signer = executionSigner(List.of(ServiceScope.EXECUTION_SUBMIT));
+        SignedServiceRequest signed = signer.sign(executionRequest(
+                body,
+                List.of(ServiceScope.EXECUTION_SUBMIT),
+                null,
+                "jti-resource-mismatch"));
+        ServiceTokenVerifier verifier = ServiceTokenVerifier.fromJwks(
+                jwks(),
+                "inkforge-core-fixture",
+                "core-api",
+                "inkforge-agent-fixture",
+                new InMemoryReplayStore(),
+                ReplayPolicy.ALL_SCOPES,
+                10,
+                List.of(ServiceScope.EXECUTION_SUBMIT));
+
+        assertThatThrownBy(() -> verifier.verify(executionVerification(
+                        signed,
+                        body,
+                        ServiceScope.EXECUTION_SUBMIT,
+                        "novel-body")))
+                .isInstanceOf(ServiceAuthException.class)
+                .satisfies(error -> assertThat(((ServiceAuthException) error).code())
+                        .isEqualTo("SERVICE_RESOURCE_MISMATCH"));
+    }
+
+    @org.junit.jupiter.api.Test
     void Redis重放适配必须使用固定前缀与300秒TTL() {
         java.util.List<Object> calls = new java.util.ArrayList<>();
         RedisReplayStore store = new RedisReplayStore((key, value, ttl) -> {
@@ -171,6 +287,84 @@ class ServiceAuthGoldenVectorTest {
                 "run-fixture",
                 "novel-fixture",
                 Instant.ofEpochSecond(1_800_000_000L));
+    }
+
+    private ServiceTokenSigner executionSigner(List<ServiceScope> allowedScopes) throws Exception {
+        JsonNode fixture = fixture();
+        PrivateKey privateKey = KeyFactory.getInstance("Ed25519")
+                .generatePrivate(new EdECPrivateKeySpec(
+                        NamedParameterSpec.ED25519,
+                        java.util.HexFormat.of().parseHex(
+                                fixture.path("testOnlyPrivateKeySeedHex").asString())));
+        return new ServiceTokenSigner(
+                privateKey,
+                "inkforge-core-fixture",
+                "core-api",
+                "inkforge-agent-fixture",
+                "migration-fixture-v1",
+                120,
+                allowedScopes);
+    }
+
+    private ServiceRequest executionRequest(
+            byte[] body,
+            List<ServiceScope> scopes,
+            String novelId,
+            String jti) {
+        return new ServiceRequest(
+                body,
+                "POST",
+                "/internal/v1/execution/steps",
+                new byte[0],
+                "idem-user-execution",
+                scopes,
+                "step-user-1",
+                "run-user-1",
+                novelId,
+                Instant.ofEpochSecond(1_800_000_000L),
+                120,
+                jti);
+    }
+
+    private ServiceVerificationRequest executionVerification(
+            SignedServiceRequest signed,
+            byte[] body,
+            ServiceScope requiredScope,
+            String novelId) {
+        return new ServiceVerificationRequest(
+                signed.token(),
+                body,
+                "POST",
+                "/internal/v1/execution/steps",
+                new byte[0],
+                "idem-user-execution",
+                "1800000000",
+                signed.headers().get("X-InkForge-Body-SHA256"),
+                requiredScope,
+                "step-user-1",
+                "run-user-1",
+                novelId,
+                Instant.ofEpochSecond(1_800_000_000L));
+    }
+
+    private ServiceJwtClaims claims(List<ServiceScope> scopes, String novelId) {
+        return new ServiceJwtClaims(
+                "inkforge-core-fixture",
+                "core-api",
+                "inkforge-agent-fixture",
+                scopes,
+                "step-user-1",
+                "run-user-1",
+                novelId,
+                "jti-claims",
+                1_800_000_000L,
+                1_800_000_120L,
+                "0".repeat(64),
+                "0".repeat(64),
+                "idem-user-execution",
+                1_800_000_000L,
+                "POST",
+                "/internal/v1/execution/steps");
     }
 
     private JsonNode fixture() throws Exception {

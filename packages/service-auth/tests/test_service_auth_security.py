@@ -200,6 +200,67 @@ def test_claims_reject_unknown_fields_and_empty_scope() -> None:
         ServiceJwtClaims.model_validate({**base, "unknown": "value"})
     with pytest.raises(ValidationError):
         ServiceJwtClaims.model_validate({**base, "scope": []})
+    missing_novel = dict(base)
+    missing_novel.pop("novel_id")
+    with pytest.raises(ValidationError):
+        ServiceJwtClaims.model_validate(missing_novel)
+
+
+def test_claims_only_allow_null_novel_for_execution_only_scopes() -> None:
+    base = {
+        "iss": "core-api",
+        "sub": "core-api",
+        "aud": "agent-service",
+        "scope": [
+            "execution:submit",
+            "execution:cancel",
+            "execution:progress",
+            "execution:result",
+            "billing:reconcile",
+        ],
+        "task_id": "step-user-1",
+        "run_id": "run-user-1",
+        "novel_id": None,
+        "jti": "jti-execution-1",
+        "iat": NOW_SECONDS,
+        "exp": NOW_SECONDS + 120,
+        "body_sha256": "0" * 64,
+        "query_sha256": hashlib.sha256(b"").hexdigest(),
+        "idempotency_key": "idem-execution-1",
+        "request_timestamp": NOW_SECONDS,
+        "http_method": "PUT",
+        "http_path": "/internal/v1/workflow-runs/run-user-1/steps/step-user-1/result",
+    }
+
+    claims = ServiceJwtClaims.model_validate(base)
+    assert claims.novel_id is None
+
+    with pytest.raises(ValidationError, match="纯 execution scope"):
+        ServiceJwtClaims.model_validate({**base, "scope": ["agent:run"]})
+    with pytest.raises(ValidationError, match="纯 execution scope"):
+        ServiceJwtClaims.model_validate(
+            {**base, "scope": ["execution:submit", "agent:run"]}
+        )
+
+
+def test_claims_schema_keeps_novel_required_and_limits_null_to_execution_scopes() -> None:
+    schema = ServiceJwtClaims.model_json_schema()
+
+    assert "novel_id" in schema["required"]
+    assert {branch.get("type") for branch in schema["properties"]["novel_id"]["anyOf"]} == {
+        "string",
+        "null",
+    }
+    allowed_when_null = schema["allOf"][0]["then"]["properties"]["scope"]["items"][
+        "enum"
+    ]
+    assert set(allowed_when_null) == {
+        "execution:submit",
+        "execution:cancel",
+        "execution:progress",
+        "execution:result",
+        "billing:reconcile",
+    }
 
 
 def test_claims_reject_ttl_over_300_seconds_and_non_integer_time(tmp_path: Path) -> None:
@@ -396,6 +457,139 @@ async def test_valid_token_verifies_all_bindings_and_consumes_jti(tmp_path: Path
     assert claims.run_id == "run-1"
     assert claims.novel_id == "novel-1"
     assert redis.calls == [("测试:重放:jti-1", "1", True, 300)]
+
+
+@pytest.mark.asyncio
+async def test_user_scoped_execution_token_binds_null_novel_and_step_identity(
+    tmp_path: Path,
+) -> None:
+    signer, verifier, redis = _build_auth(tmp_path)
+    body = canonical_json_body(
+        {"runId": "run-user-1", "novelId": None, "stepId": "step-user-1"}
+    )
+    signed = signer.sign_request(
+        body=body,
+        http_method="POST",
+        http_path="/internal/v1/execution/steps",
+        query_string=b"",
+        idempotency_key="idem-user-1",
+        scope=(ServiceScope.EXECUTION_SUBMIT,),
+        task_id="step-user-1",
+        run_id="run-user-1",
+        novel_id=None,
+        now=NOW_SECONDS,
+        jti="jti-user-1",
+    )
+
+    claims = await verifier.verify_request(
+        token=signed.token,
+        body=body,
+        http_method="POST",
+        http_path="/internal/v1/execution/steps",
+        query_string=b"",
+        idempotency_key="idem-user-1",
+        request_timestamp=signed.headers["X-InkForge-Timestamp"],
+        body_sha256=signed.headers["X-InkForge-Body-SHA256"],
+        required_scope=ServiceScope.EXECUTION_SUBMIT,
+        task_id="step-user-1",
+        run_id="run-user-1",
+        novel_id=None,
+        now=NOW_SECONDS,
+    )
+
+    assert claims.task_id == "step-user-1"
+    assert claims.run_id == "run-user-1"
+    assert claims.novel_id is None
+    assert redis.calls == [("测试:重放:jti-user-1", "1", True, 300)]
+
+
+@pytest.mark.parametrize(
+    "scopes",
+    [
+        (ServiceScope.AGENT_RUN,),
+        (ServiceScope.EXECUTION_SUBMIT, ServiceScope.AGENT_RUN),
+    ],
+)
+def test_signer_rejects_null_novel_for_legacy_or_mixed_scopes(
+    tmp_path: Path,
+    scopes: tuple[ServiceScope, ...],
+) -> None:
+    signer = _standalone_signer(tmp_path)
+
+    with pytest.raises(ValidationError, match="纯 execution scope"):
+        signer.sign_request(
+            body=b"{}",
+            http_method="POST",
+            http_path="/internal/v1/runs",
+            query_string=b"",
+            idempotency_key="idem-null-novel",
+            scope=scopes,
+            task_id="step-1",
+            run_id="run-1",
+            novel_id=None,
+            now=NOW_SECONDS,
+        )
+
+
+@pytest.mark.asyncio
+async def test_execution_body_novel_must_equal_jwt_novel_claim(tmp_path: Path) -> None:
+    signer, verifier, redis = _build_auth(tmp_path)
+    body = canonical_json_body(
+        {"runId": "run-1", "novelId": "novel-body", "stepId": "step-1"}
+    )
+    signed = signer.sign_request(
+        body=body,
+        http_method="POST",
+        http_path="/internal/v1/execution/steps",
+        query_string=b"",
+        idempotency_key="idem-novel-mismatch",
+        scope=(ServiceScope.EXECUTION_SUBMIT,),
+        task_id="step-1",
+        run_id="run-1",
+        novel_id="novel-jwt",
+        now=NOW_SECONDS,
+        jti="jti-novel-mismatch",
+    )
+
+    with pytest.raises(ServiceAuthorizationError) as captured:
+        await verifier.verify_request(
+            token=signed.token,
+            body=body,
+            http_method="POST",
+            http_path="/internal/v1/execution/steps",
+            query_string=b"",
+            idempotency_key="idem-novel-mismatch",
+            request_timestamp=signed.headers["X-InkForge-Timestamp"],
+            body_sha256=signed.headers["X-InkForge-Body-SHA256"],
+            required_scope=ServiceScope.EXECUTION_SUBMIT,
+            task_id="step-1",
+            run_id="run-1",
+            novel_id="novel-body",
+            now=NOW_SECONDS,
+        )
+
+    assert captured.value.code == "SERVICE_RESOURCE_MISMATCH"
+    assert "novel_id" in str(captured.value)
+    assert redis.calls == []
+
+
+@pytest.mark.asyncio
+async def test_verifier_rejects_signed_token_that_omits_novel_claim(tmp_path: Path) -> None:
+    signer, verifier, redis = _build_auth(tmp_path)
+    body, signed = _issue(signer)
+    payload = jwt.decode(signed.token, options={"verify_signature": False})
+    payload.pop("novel_id")
+    missing_novel = jwt.encode(
+        payload,
+        signer._private_key,
+        algorithm="EdDSA",
+        headers=jwt.get_unverified_header(signed.token),
+    )
+
+    with pytest.raises(ServiceAuthenticationError):
+        await _verify(verifier, replace(signed, token=missing_novel), body)
+
+    assert redis.calls == []
 
 
 @pytest.mark.asyncio

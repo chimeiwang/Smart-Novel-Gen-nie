@@ -1,0 +1,83 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/execution/StepBudget/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "一个耐久 Step 的完整、不可隐式扩张的执行预算。",
+  "properties": {
+    "maxCompletionTokens": {
+      "maximum": 10000000,
+      "minimum": 0,
+      "title": "Maxcompletiontokens",
+      "type": "integer"
+    },
+    "maxCostMicros": {
+      "maximum": 1000000000,
+      "minimum": 0,
+      "title": "Maxcostmicros",
+      "type": "integer"
+    },
+    "maxInputTokens": {
+      "exclusiveMinimum": 0,
+      "maximum": 10000000,
+      "title": "Maxinputtokens",
+      "type": "integer"
+    },
+    "maxModelCalls": {
+      "const": 1,
+      "title": "Maxmodelcalls",
+      "type": "integer"
+    },
+    "maxPromptCacheMissTokens": {
+      "exclusiveMinimum": 0,
+      "maximum": 10000000,
+      "title": "Maxpromptcachemisstokens",
+      "type": "integer"
+    },
+    "maxProtocolCorrections": {
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Maxprotocolcorrections",
+      "type": "integer"
+    },
+    "maxProviderRetries": {
+      "description": "当前单 Step 内的供应商重试上限；不是 RunBudget catalog 字段",
+      "maximum": 2,
+      "minimum": 0,
+      "title": "Maxproviderretries",
+      "type": "integer"
+    },
+    "maxReasoningTokens": {
+      "maximum": 10000000,
+      "minimum": 0,
+      "title": "Maxreasoningtokens",
+      "type": "integer"
+    },
+    "maxVisibleOutputTokens": {
+      "maximum": 10000000,
+      "minimum": 0,
+      "title": "Maxvisibleoutputtokens",
+      "type": "integer"
+    },
+    "maxWallClockSeconds": {
+      "exclusiveMinimum": 0,
+      "maximum": 86400,
+      "title": "Maxwallclockseconds",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "maxModelCalls",
+    "maxInputTokens",
+    "maxPromptCacheMissTokens",
+    "maxCompletionTokens",
+    "maxReasoningTokens",
+    "maxVisibleOutputTokens",
+    "maxCostMicros",
+    "maxWallClockSeconds",
+    "maxProviderRetries",
+    "maxProtocolCorrections"
+  ],
+  "title": "StepBudget",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.StepBudget"
+}

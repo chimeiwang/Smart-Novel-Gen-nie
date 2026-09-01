@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://inkforge.cn/contracts/agent-execution/prompt-profile-registry.schema.json",
+  "title": "InkForge Agent Execution Prompt Profile Registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "registryVersion",
+    "hashAlgorithm",
+    "prompts"
+  ],
+  "properties": {
+    "registryVersion": {
+      "const": "1"
+    },
+    "hashAlgorithm": {
+      "const": "sha256-utf8/1"
+    },
+    "prompts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/promptProfile"
+      }
+    }
+  },
+  "$defs": {
+    "versionedIdentifier": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*\\.v[1-9][0-9]*$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "promptProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "version",
+        "supported",
+        "purpose",
+        "sha256",
+        "systemPrompt"
+      ],
+      "properties": {
+        "key": {
+          "$ref": "#/$defs/versionedIdentifier"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "supported": {
+          "type": "boolean"
+        },
+        "purpose": {
+          "enum": [
+            "generation",
+            "review",
+            "evaluation",
+            "embedding",
+            "media"
+          ]
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "systemPrompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 16000
+        }
+      }
+    }
+  }
+}

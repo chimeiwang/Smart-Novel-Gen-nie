@@ -17,7 +17,7 @@ from ..providers.base import (
 )
 from ..queue.cancellation import JobCancelledError, RunCancellationPort
 from ..tools.registry import ToolContext, ToolDefinition, ToolRegistry
-from .model_runtime import ModelCallContext, ModelRuntime
+from .model_runtime import ModelCallContext, ModelLane, ModelRuntime
 from .turn_result import (
     AgentTurnResult,
     RuntimeToolCall,
@@ -230,6 +230,8 @@ class AgentRuntime:
         terminal_control_tools: set[str] | frozenset[str] = frozenset(),
         policy: ModelExecutionPolicy,
         model_context: ModelCallContext | None = None,
+        model_lane: ModelLane = "interactive",
+        reviewer: bool = False,
     ) -> AgentTurnResult:
         conversation = [
             message if isinstance(message, ModelMessage) else ModelMessage.model_validate(message)
@@ -261,6 +263,8 @@ class AgentRuntime:
                         policy=policy,
                     ),
                     context=model_context,
+                    lane=model_lane,
+                    reviewer=reviewer,
                 )
                 await self._ensure_active(context)
                 usage = add_usage(usage, response.usage)

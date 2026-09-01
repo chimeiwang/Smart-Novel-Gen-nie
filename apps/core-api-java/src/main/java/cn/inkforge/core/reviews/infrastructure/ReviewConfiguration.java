@@ -9,8 +9,10 @@ import cn.inkforge.core.references.application.ReferenceRepository;
 import cn.inkforge.core.reviews.application.AgentUpdatesExecutor;
 import cn.inkforge.core.reviews.application.FormalArtifactWriter;
 import cn.inkforge.core.reviews.application.ReviewRepository;
+import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import java.time.Clock;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import tools.jackson.databind.ObjectMapper;
@@ -47,8 +49,24 @@ class ReviewConfiguration {
             CuidV1Generator ids,
             Clock coreClock,
             ObjectMapper objectMapper,
-            FormalArtifactWriter formalWriter) {
+            FormalArtifactWriter formalWriter,
+            ObjectProvider<ExecutionRegistry> workflowExecutionRegistries,
+            CoreSettings settings) {
+        ExecutionRegistry workflowExecutionRegistry =
+                settings.durableAgentExecutionSchemaReady()
+                        ? workflowExecutionRegistries.getIfAvailable()
+                        : null;
+        if (settings.durableAgentExecutionSchemaReady()
+                && workflowExecutionRegistry == null) {
+            throw new IllegalStateException("耐久 Agent 数据库结构已就绪但执行 Registry 未装配");
+        }
         return new JooqReviewRepository(
-                database, ids, coreClock, objectMapper, formalWriter);
+                database,
+                ids,
+                coreClock,
+                objectMapper,
+                formalWriter,
+                workflowExecutionRegistry,
+                settings.durableAgentExecutionSchemaReady());
     }
 }

@@ -10,6 +10,7 @@ Agent Service 负责：
 - CreativeOperation 的 LangGraph 编排；
 - 模型供应商适配和唯一多轮工具循环；
 - 运行队列消费、检查点恢复和事件回调；
+- V2 单 Step 执行、独立 execution journal 与未送达终态重放；
 - 人工工作流日志。
 
 Agent Service 不负责浏览器认证、数据库查询、正式业务写入、草案最终应用或计费落账。它不得接收 `DATABASE_URL`，不得导入 SQLAlchemy、asyncpg 或其他数据库客户端。
@@ -154,6 +155,18 @@ Agent Service 不负责浏览器认证、数据库查询、正式业务写入、
 - 图稳定结束为 completed/error 时仍先保存可恢复快照，但该 checkpoint 不能提前结束数据库任务；任务、命令终态和 terminal Outbox 只由随后 complete/fail 回调的同一 Core 事务提交。
 - 图稳定结束于 `phase=error` 时必须保存错误快照并调用 Core 失败回调，禁止用完成回调表达失败终态。
 - Core 强制对账只允许修复 Redis 中缺失的 queued 索引或完全丢失的运行键；Redis 已记录为 completed、failed 或 cancelled 的运行不得被 `force` 重新打开。
+- V2 execution journal 只使用独立 `EXECUTION_REDIS_URL`，生产必须与普通 `REDIS_URL` 分离。该 Redis 固定
+  `appendonly yes + appendfsync always + aof-load-truncated no + noeviction`；普通队列 Redis 继续关闭 AOF。
+  `accepted`、供应商尝试和未送达终态在 Core 回执前不设 TTL。独立 callback replayer 使用 Redis 原子
+  claim/lease 和到期时间重放同一 `resultHash`；合法 `accepted/duplicate/stale` 回执才进入保留期，确定性 4xx
+  隔离为 rejected 并阻断 readiness，网络、5xx 和损坏回执按稳定抖动退避。
+- 已送达终态删除完整模型输出，只按独立 `EXECUTION_TERMINAL_RETENTION_HOURS` 保留幂等 tombstone，默认/最少
+  24 小时；pending/rejected 的完整终态永不过期。
+  `used_memory` 达到 `maxmemory` 90%、出现历史 eviction 或 callback backlog 越界时，不得继续开始新 provider 调用；
+  终态 replay 和精确取消仍保持可用。
+- execution journal 连接、AOF 写状态或恢复 quarantine 异常时，V2 新执行必须在任何供应商调用前 fail-closed；
+  已持久化终态仍可继续幂等回调。备份恢复必须先写持久 quarantine marker，只有具名 Core/供应商对账完成并
+  提供精确报告哈希后才能由人工脚本解除，绝不因旧备份缺失 key 自动重调模型。
 - 队列消费者必须由生命周期任务监督器托管；基础设施异常按退避策略重试，消费者协程意外结束必须使就绪检查失败并触发重启，不能只凭消费者对象存在判断健康。
 - 2 核 2 GB 生产环境保持一个 Uvicorn worker，消费者默认在同一事件循环内运行三个独立 job 槽；同一 `novelId` 同时只允许一个 job 执行，同项目冲突的 claim 必须通过租约校验原子回队，成功回队时撤销本次 claim 增加的 attempts。回填、清理、租约恢复和 claim 串行进入维护临界区，每个已领取 job 独立续租和收敛。`AGENT_MAX_CONCURRENCY` 只允许 1、2 或 3，配置 1 可回退原串行行为。
 - 所有普通 Agent、中短篇、质量检查和文风画像模型请求共用 `ModelRuntime` 的全局并发门；默认最多三个模型调用，Reviewer `Send` 扇出也必须受该门限制，不能因三个 job 重叠放大供应商请求。

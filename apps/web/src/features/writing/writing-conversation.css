@@ -2201,6 +2201,126 @@
   box-shadow: var(--shadow);
 }
 
+.writing-chat .workflow-run-status-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 10px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.writing-chat .workflow-run-status-card.status-running,
+.writing-chat .workflow-run-status-card.status-pending {
+  border-color: #cfe7ff;
+  background: #f8fbff;
+}
+
+.writing-chat .workflow-run-status-card.status-waiting_user {
+  border-color: #ead8a6;
+  background: #fffdf6;
+}
+
+.writing-chat .workflow-run-status-card.status-failed {
+  border-color: #f3c4c4;
+  background: #fff8f8;
+}
+
+.writing-chat .workflow-run-status-copy {
+  min-width: 0;
+}
+
+.writing-chat .workflow-run-status-title {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 20px;
+}
+
+.writing-chat .workflow-run-status-detail {
+  display: grid;
+  gap: 2px;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.writing-chat .workflow-run-active-steps {
+  display: grid;
+  gap: 5px;
+  margin-top: 2px;
+}
+
+.writing-chat .workflow-run-active-step {
+  display: grid;
+  grid-template-columns: minmax(132px, 1fr) minmax(150px, auto) auto;
+  align-items: baseline;
+  gap: 6px 12px;
+  padding: 5px 7px;
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.writing-chat .workflow-run-step-role {
+  min-width: 0;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.writing-chat .workflow-run-step-ordinal {
+  margin-right: 6px;
+  color: var(--subtle);
+  font-weight: 500;
+}
+
+.writing-chat .workflow-run-step-phase {
+  color: var(--muted);
+}
+
+.writing-chat .workflow-run-step-model {
+  overflow: hidden;
+  max-width: 220px;
+  color: var(--subtle);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .writing-chat .workflow-run-active-step {
+    grid-template-columns: 1fr;
+    gap: 1px;
+  }
+}
+
+.writing-chat .workflow-run-stop {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.writing-chat .workflow-run-stop:hover:not(:disabled) {
+  border-color: #c92a2a;
+  color: #c92a2a;
+}
+
+.writing-chat .workflow-run-stop:disabled {
+  color: var(--muted);
+  cursor: wait;
+}
+
 .writing-chat .next-action-panel {
   display: flex;
   align-items: center;

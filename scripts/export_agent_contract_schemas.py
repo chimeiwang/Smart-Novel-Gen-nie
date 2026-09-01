@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 CONTRACT_MODULES = (
     "events",
+    "execution",
     "identity",
     "jobs",
     "jwt_claims",
@@ -27,13 +28,16 @@ CONTRACT_MODULES = (
     "video",
     "video_adaptation",
     "video_render",
+    "workflow_events",
 )
 ABSTRACT_MODELS = {
+    "_StrictModel",
     "StrictModel",
     "VideoContractModel",
     "VideoAdaptationContractModel",
     "VideoRenderContractModel",
 }
+MODULE_SCHEMA_VERSIONS = {"execution": "2.0", "workflow_events": "2.0"}
 
 
 def _json_bytes(value: object) -> bytes:
@@ -62,7 +66,8 @@ def export_contracts(output: Path) -> dict[str, object]:
             schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"
             schema["$id"] = (
                 "https://inkforge.local/contracts/agent/"
-                f"{module_name}/{model_type.__name__}/1.0"
+                f"{module_name}/{model_type.__name__}/"
+                f"{MODULE_SCHEMA_VERSIONS.get(module_name, '1.0')}"
             )
             schema["x-inkforge-python-type"] = (
                 f"inkforge_contracts.{module_name}.{model_type.__name__}"

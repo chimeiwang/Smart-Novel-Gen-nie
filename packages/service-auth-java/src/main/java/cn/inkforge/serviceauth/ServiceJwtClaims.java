@@ -23,5 +23,11 @@ public record ServiceJwtClaims(
 
     public ServiceJwtClaims {
         scope = List.copyOf(scope);
+        if (novelId == null && !ServiceScope.allowsNullNovelId(scope)) {
+            throw new IllegalArgumentException("只有纯 execution scope 服务令牌允许 novel_id 为 null");
+        }
+        if (novelId != null) {
+            novelId = ServiceAuthCanonical.nonBlank(novelId, "novel_id");
+        }
     }
 }

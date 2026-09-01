@@ -301,7 +301,8 @@ class PostgresCompatibilityTest {
     }
 
     private JsonNode readContract() throws Exception {
-        try (var input = getClass().getResourceAsStream("/db/schema-contract.json")) {
+        try (var input = getClass().getResourceAsStream(
+                "/db/pre-durable-agent-v2/schema-contract.json")) {
             if (input == null) {
                 throw new IllegalStateException("测试资源缺少 schema-contract.json");
             }

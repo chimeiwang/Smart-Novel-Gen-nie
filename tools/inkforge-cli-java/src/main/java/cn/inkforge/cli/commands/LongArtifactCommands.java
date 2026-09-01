@@ -6,6 +6,7 @@ import cn.inkforge.cli.runtime.CommandHandler;
 import cn.inkforge.cli.runtime.CommandResult;
 import cn.inkforge.cli.transport.CoreApiException;
 import cn.inkforge.cli.transport.CoreResponseContractException;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -20,6 +21,7 @@ final class LongArtifactCommands {
             "editedContentFile",
             "editedReplacement",
             "editedReplacementFile",
+            "engineVersion",
             "selectedUpdateRefs",
             "userMessage");
     private static final Set<String> EDIT_FIELDS = Set.of(
@@ -48,19 +50,31 @@ final class LongArtifactCommands {
             CommandContext context, ObjectNode payload, String decision) {
         MutationPayloads.requireFields(
                 payload,
-                Set.of("artifactId", "clientRequestId", "expectedRevision"),
+                Set.of(
+                        "artifactId",
+                        "clientRequestId",
+                        "expectedRevision"),
                 OPTIONAL_FIELDS);
         MutationPayloads.clientRequestId(payload, 128);
-        expectedRevision(payload);
+        int requestedEngineVersion = requestedEngineVersion(payload);
+        int revision = expectedRevision(payload);
         preflightLocalDecision(payload, decision);
         String artifactId = MutationPayloads.requireString(payload, "artifactId");
         String artifactPath =
                 "/api/v1/review-artifacts/" + Payloads.segment(artifactId);
         ObjectNode artifact = null;
         if (!decision.equals("discard")) {
-            artifact = verifiedArtifact(context, artifactId, artifactPath);
+            artifact = exactArtifact(
+                    context, artifactId, artifactPath, revision);
+            int artifactEngineVersion = artifactEngineVersion(artifact);
+            if (requestedEngineVersion != artifactEngineVersion) {
+                throw engineVersionMismatch(
+                        context, requestedEngineVersion, artifactEngineVersion);
+            }
+            requireVerifiedSourceBinding(context, artifactId, artifact);
         }
-        ObjectNode body = decisionBody(context, payload, decision, artifact);
+        ObjectNode body = decisionBody(
+                context, payload, decision, artifact, requestedEngineVersion);
         return CommandResult.json(context.requireApi().request(
                 "POST", artifactPath + "/decision", body));
     }
@@ -73,7 +87,7 @@ final class LongArtifactCommands {
                         "DISCARD_EDIT_FIELDS_FORBIDDEN",
                         "discard 不接受字段：" + forbidden.getFirst());
             }
-            validateUserMessage(payload, false);
+            validateUserMessage(payload);
             return;
         }
         rejectNonNullPair(
@@ -94,18 +108,88 @@ final class LongArtifactCommands {
                     "EDITED_FIELDS_CONFLICT",
                     "editedContent 与 editedReplacement 不能同时提供");
         }
-        validateUserMessage(payload, decision.equals("revise"));
+        validateUserMessage(payload);
     }
 
-    private static ObjectNode verifiedArtifact(
-            CommandContext context, String artifactId, String path) {
-        JsonNode response = context.requireApi().request("GET", path);
+    private static ObjectNode exactArtifact(
+            CommandContext context,
+            String artifactId,
+            String path,
+            int revision) {
+        JsonNode response = context.requireApi().request(
+                "GET",
+                path,
+                Map.of("revision", List.of(Integer.toString(revision))),
+                null);
         if (!(response instanceof ObjectNode artifact)) {
             throw new CoreResponseContractException("Artifact 响应不是 JSON 对象");
         }
+        JsonNode responseId = artifact.get("id");
+        if (responseId == null
+                || !responseId.isTextual()
+                || !responseId.textValue().equals(artifactId)) {
+            throw new CoreResponseContractException(
+                    "Artifact 响应与请求 artifactId 不一致");
+        }
+        JsonNode responseRevision = artifact.get("revision");
+        if (responseRevision == null
+                || !responseRevision.isIntegralNumber()
+                || !responseRevision.canConvertToInt()
+                || responseRevision.intValue() != revision) {
+            throw new CoreResponseContractException(
+                    "Artifact 响应与请求 revision 不一致");
+        }
+        return artifact;
+    }
+
+    private static int artifactEngineVersion(ObjectNode artifact) {
+        JsonNode version = artifact.get("engineVersion");
+        if (!version.isIntegralNumber()
+                || !version.canConvertToInt()
+                || version.intValue() < 1
+                || version.intValue() > 2) {
+            throw new CoreResponseContractException(
+                    "Artifact 响应缺少有效 engineVersion");
+        }
+        return version.intValue();
+    }
+
+    private static int requestedEngineVersion(ObjectNode payload) {
+        JsonNode version = payload.get("engineVersion");
+        // 兼容既有 V1 CLI 自动化：省略只解释为 V1；V2 始终必须显式提供 2，
+        // approve/revise 还会与精确 Artifact 详情交叉核对。discard 不做前读，
+        // 因而省略时稳定发送 1，保留资源已物理删除后的幂等重放能力。
+        if (version == null) return 1;
+        if (version == null
+                || !version.isIntegralNumber()
+                || !version.canConvertToInt()
+                || version.intValue() < 1
+                || version.intValue() > 2) {
+            throw new CliInputException(
+                    "INVALID_ENGINE_VERSION",
+                    "engineVersion 必须是整数 1 或 2");
+        }
+        return version.intValue();
+    }
+
+    private static CoreApiException engineVersionMismatch(
+            CommandContext context, int requested, int artifact) {
+        ObjectNode details = context.dependencies().json().createObjectNode();
+        details.put("requestedEngineVersion", requested);
+        details.put("artifactEngineVersion", artifact);
+        return new CoreApiException(
+                409,
+                "ARTIFACT_ENGINE_VERSION_MISMATCH",
+                "审核决定引擎版本与草案持久身份不一致",
+                details,
+                null);
+    }
+
+    private static void requireVerifiedSourceBinding(
+            CommandContext context, String artifactId, ObjectNode artifact) {
         JsonNode status = artifact.get("sourceBindingStatus");
         if (status != null && status.isTextual() && status.textValue().equals("verified")) {
-            return artifact;
+            return;
         }
         if (status != null
                 && status.isTextual()
@@ -128,11 +212,39 @@ final class LongArtifactCommands {
             CommandContext context,
             ObjectNode payload,
             String decision,
-            ObjectNode artifact) {
+            ObjectNode artifact,
+            int engineVersion) {
         ObjectNode body = context.dependencies().json().createObjectNode();
+        body.put("engineVersion", engineVersion);
         body.put("clientRequestId", MutationPayloads.clientRequestId(payload, 128));
         body.put("expectedRevision", expectedRevision(payload));
         body.put("decision", decision);
+        if (engineVersion == 2) {
+            addV2DecisionFields(body, payload, decision);
+        } else {
+            addV1DecisionFields(body, payload, decision, artifact);
+        }
+        if (payload.has("userMessage")) {
+            body.set("userMessage", userMessage(payload));
+        }
+        if (engineVersion == 2 && decision.equals("revise")) {
+            JsonNode message = body.get("userMessage");
+            if (message == null
+                    || !message.isTextual()
+                    || message.textValue().trim().isEmpty()) {
+                throw new CliInputException(
+                        "USER_MESSAGE_REQUIRED",
+                        "V2 revise 必须提供非空 userMessage");
+            }
+        }
+        return body;
+    }
+
+    private static void addV1DecisionFields(
+            ObjectNode body,
+            ObjectNode payload,
+            String decision,
+            ObjectNode artifact) {
         if (!decision.equals("discard")) {
             String editedContent = editedContent(payload);
             String editedReplacement = editedReplacement(payload);
@@ -162,20 +274,23 @@ final class LongArtifactCommands {
                         payload.get("selectedUpdateRefs").deepCopy());
             }
         }
-        if (payload.has("userMessage")) {
-            body.set("userMessage", userMessage(payload));
+    }
+
+    private static void addV2DecisionFields(
+            ObjectNode body, ObjectNode payload, String decision) {
+        TreeSet<String> forbidden = presentNonNullFields(payload, EDIT_FIELDS);
+        if (decision.equals("approve")) {
+            forbidden.remove("editedReplacement");
+            forbidden.remove("editedReplacementFile");
         }
-        if (decision.equals("revise")) {
-            JsonNode message = body.get("userMessage");
-            if (message == null
-                    || !message.isTextual()
-                    || message.textValue().trim().isEmpty()) {
-                throw new CliInputException(
-                        "USER_MESSAGE_REQUIRED",
-                        "revise 必须提供非空 userMessage");
-            }
+        if (!forbidden.isEmpty()) {
+            throw new CliInputException(
+                    "V2_EDIT_FIELDS_FORBIDDEN",
+                    "V2 " + decision + " 不接受字段：" + forbidden.getFirst());
         }
-        return body;
+        if (!decision.equals("approve")) return;
+        String replacement = editedReplacement(payload);
+        if (replacement != null) body.put("editedReplacement", replacement);
     }
 
     private static int expectedRevision(ObjectNode payload) {
@@ -261,23 +376,16 @@ final class LongArtifactCommands {
         return mode != null && mode.isTextual() && SELECTION_MODES.contains(mode.textValue());
     }
 
-    private static void validateUserMessage(ObjectNode payload, boolean required) {
+    private static void validateUserMessage(ObjectNode payload) {
         JsonNode message = payload.get("userMessage");
         if (message != null && !message.isNull() && !message.isTextual()) {
             throw new CliInputException(
                     "INVALID_USER_MESSAGE", "userMessage 必须是字符串或 null");
         }
-        if (required
-                && (message == null
-                        || !message.isTextual()
-                        || message.textValue().trim().isEmpty())) {
-            throw new CliInputException(
-                    "USER_MESSAGE_REQUIRED", "revise 必须提供非空 userMessage");
-        }
     }
 
     private static JsonNode userMessage(ObjectNode payload) {
-        validateUserMessage(payload, false);
+        validateUserMessage(payload);
         return payload.get("userMessage");
     }
 
@@ -302,6 +410,15 @@ final class LongArtifactCommands {
         TreeSet<String> present = new TreeSet<>();
         fields.forEach(field -> {
             if (payload.has(field)) present.add(field);
+        });
+        return present;
+    }
+
+    private static TreeSet<String> presentNonNullFields(
+            ObjectNode payload, Set<String> fields) {
+        TreeSet<String> present = new TreeSet<>();
+        fields.forEach(field -> {
+            if (nonNull(payload, field)) present.add(field);
         });
         return present;
     }

@@ -40,8 +40,8 @@ def test_public_openapi_baseline_is_complete_and_current() -> None:
     baseline = _json(PUBLIC_OPENAPI)
     runtime = create_app(testing=True).openapi()
 
-    assert len(baseline["paths"]) == 117
-    assert _operation_count(baseline) == 150
+    assert len(baseline["paths"]) == 118
+    assert _operation_count(baseline) == 151
     assert baseline == runtime
 
 
@@ -49,20 +49,58 @@ def test_full_openapi_baseline_covers_every_java_route() -> None:
     full = _json(FULL_OPENAPI)
     java = _json(JAVA_OPENAPI)
 
-    assert len(full["paths"]) == 148
-    assert _operation_count(full) == 181
-    assert sum(path.startswith("/internal/v1/") for path in full["paths"]) == 30
+    assert len(full["paths"]) == 153
+    assert _operation_count(full) == 186
+    assert sum(path.startswith("/internal/v1/") for path in full["paths"]) == 34
+    assert {
+        "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/progress",
+        "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/result",
+        "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/failure",
+        "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/billing-reconciliation",
+    } <= full["paths"].keys()
     assert "/api/v1/video/provider-assets/{token}" in full["paths"]
     assert java["openapi"] == "3.0.3"
     assert java["paths"].keys() == full["paths"].keys()
     assert _operation_count(java) == _operation_count(full)
     source_schemas = set(full["components"]["schemas"])
     java_schemas = set(java["components"]["schemas"])
-    # Java 专用投影只增加两个已在迁移 spec 中批准的流式响应占位；它们让
-    # OpenAPI Generator 生成 StreamingResponseBody，不改变 Python 公共契约。
-    assert java_schemas == source_schemas | {"BinaryFileStream", "WritingEventStream"}
+    workflow_sse_schemas = {
+        "ApplyingEventPayload",
+        "AwaitingUserEventPayload",
+        "CancelledEventPayload",
+        "CandidateReadyEventPayload",
+        "ClarificationRequiredEventPayload",
+        "CompletedEventPayload",
+        "EvidenceReadyEventPayload",
+        "FailedEventPayload",
+        "IntentResolvedEventPayload",
+            "ReviewCompletedEventPayload",
+            "ReviewPendingStepSnapshot",
+            "ReviewStartedEventPayload",
+            "RunAcceptedEventPayload",
+            "RunSnapshot",
+            "StepFinishedEventPayload",
+            "StepProgressEventPayload",
+        "StepQueuedEventPayload",
+        "StepStartedEventPayload",
+        "WorkflowEventEnvelope",
+        "WorkflowRunSnapshot",
+    }
+    # Java 专用投影增加流式响应占位，并从共享 Pydantic 契约机械生成 V2 SSE 帧；
+    # Python 公开响应仍只有 text/event-stream，不伪造 application/json。
+    assert java_schemas == source_schemas | {
+        "BinaryFileStream",
+        "WritingEventStream",
+    } | workflow_sse_schemas
     assert java["components"]["schemas"]["BinaryFileStream"]["format"] == "binary"
     assert java["components"]["schemas"]["WritingEventStream"]["format"] == "binary"
+    envelope_payload = java["components"]["schemas"]["WorkflowEventEnvelope"][
+        "properties"
+    ]["payload"]
+    assert envelope_payload == {
+        "type": "object",
+        "x-inkforge-java-discriminated-by": "eventType",
+    }
     assert {item["name"] for item in java["tags"]} == {
         "billing",
         "chapters",
@@ -78,6 +116,7 @@ def test_full_openapi_baseline_covers_every_java_route() -> None:
         "shortmedium",
         "styles",
         "video",
+        "workflows",
         "writing",
     }
     assert all(
@@ -102,10 +141,47 @@ def test_public_java_openapi_is_safe_for_cli_generation() -> None:
     assert public["x-inkforge-source-contract"] == (
         "public-openapi-python-baseline.json"
     )
-    assert len(public["paths"]) == 117
-    assert _operation_count(public) == 150
+    assert len(public["paths"]) == 118
+    assert _operation_count(public) == 151
     assert all(not path.startswith("/internal/") for path in public["paths"])
     assert "/api/v1/video/provider-assets/{token}" not in public["paths"]
+
+
+def test_writing_run_union_preserves_discriminator_and_fixed_null_semantics() -> None:
+    python = _json(FULL_OPENAPI)
+    java = _json(JAVA_OPENAPI)
+
+    for schema_name in (
+        "WritingRunStartResponse",
+        "WritingRunStatusPublicResponse",
+        "WritingRunPublicListItem",
+        "CancelWritingRunPublicResponse",
+    ):
+        schema = python["components"]["schemas"][schema_name]
+        assert schema["discriminator"] == {
+            "mapping": {
+                "1": "#/components/schemas/" + (
+                    "CancelWritingRunResponse"
+                    if schema_name == "CancelWritingRunPublicResponse"
+                    else "WritingRunListItem"
+                    if schema_name == "WritingRunPublicListItem"
+                    else "WritingRunStatusResponse"
+                    if schema_name == "WritingRunStatusPublicResponse"
+                    else "WritingRunResponse"
+                ),
+                "2": "#/components/schemas/WritingRunV2Response",
+            },
+            "propertyName": "engineVersion",
+        }
+        assert java["components"]["schemas"][schema_name]["discriminator"] == schema[
+            "discriminator"
+        ]
+
+    python_v2 = python["components"]["schemas"]["WritingRunV2Response"]
+    java_v2 = java["components"]["schemas"]["WritingRunV2Response"]
+    for field in ("commandId", "commandStatus"):
+        assert python_v2["properties"][field]["enum"] == [None]
+        assert java_v2["properties"][field]["x-inkforge-fixed-null"] is True
 
 
 def test_hidden_and_public_route_inventory_is_complete() -> None:
@@ -113,15 +189,15 @@ def test_hidden_and_public_route_inventory_is_complete() -> None:
     inventory = _json(ROUTE_INVENTORY)
 
     assert internal["schemaVersion"] == "core-internal-endpoints/1.0"
-    assert len(internal["endpoints"]) == 30
+    assert len(internal["endpoints"]) == 34
     assert all(item["path"].startswith("/internal/v1/") for item in internal["endpoints"])
 
     assert inventory["schemaVersion"] == "core-route-inventory/1.0"
-    assert len(inventory["routes"]) == 181
-    assert sum(item["exposure"] == "public" for item in inventory["routes"]) == 150
-    assert sum(item["exposure"] == "internal" for item in inventory["routes"]) == 30
+    assert len(inventory["routes"]) == 186
+    assert sum(item["exposure"] == "public" for item in inventory["routes"]) == 151
+    assert sum(item["exposure"] == "internal" for item in inventory["routes"]) == 34
     assert sum(item["exposure"] == "provider_media" for item in inventory["routes"]) == 1
-    assert len({(item["method"], item["path"]) for item in inventory["routes"]}) == 181
+    assert len({(item["method"], item["path"]) for item in inventory["routes"]}) == 186
     assert all(item["productModule"] and item["pythonTests"] for item in inventory["routes"])
 
 

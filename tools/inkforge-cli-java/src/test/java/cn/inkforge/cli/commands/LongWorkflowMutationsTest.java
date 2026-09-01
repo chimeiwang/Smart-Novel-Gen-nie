@@ -17,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import tools.jackson.databind.JsonNode;
@@ -98,36 +99,38 @@ class LongWorkflowMutationsTest {
     }
 
     @Test
-    void Artifact决定先验证来源绑定并按草案类型限制编辑字段(@TempDir Path directory) throws Exception {
+    void Artifact批准返工先验证详情来源并按草案类型限制编辑字段(@TempDir Path directory) throws Exception {
         RecordingApi api = new RecordingApi(json);
         CliApplication application = application(api);
         Path edited = directory.resolve("完整正文.txt");
         Files.writeString(edited, "正文\r\n末尾😀", StandardCharsets.UTF_8);
 
-        api.nextGet = json.readTree("{\"sourceBindingStatus\":\"verified\",\"payload\":{\"target\":{\"mode\":\"replace_full\"}}}");
+        api.nextGet = artifact(1, "a/1", 2, "verified", "replace_full");
         Result approve = run(
                 application,
                 "long.artifact.approve",
-                "{\"artifactId\":\"a/1\",\"clientRequestId\":\"artifact-approve-01\",\"expectedRevision\":2,"
+                "{\"artifactId\":\"a/1\",\"clientRequestId\":\"artifact-approve-01\",\"engineVersion\":1,\"expectedRevision\":2,"
                         + "\"editedContentFile\":" + json.writeValueAsString(edited.toString()) + ",\"selectedUpdateRefs\":[\"u1\"],\"userMessage\":null}");
         assertThat(approve.exit()).as(approve.stdout()).isZero();
         assertThat(api.calls).extracting(Call::method, Call::path)
                 .endsWith(
                         org.assertj.core.groups.Tuple.tuple("GET", "/api/v1/review-artifacts/a%2F1"),
                         org.assertj.core.groups.Tuple.tuple("POST", "/api/v1/review-artifacts/a%2F1/decision"));
+        assertThat(api.calls.get(api.calls.size() - 2).query())
+                .isEqualTo(Map.of("revision", List.of("2")));
         assertThat(api.calls.getLast().body().toString()).isEqualTo(
-                "{\"clientRequestId\":\"artifact-approve-01\",\"expectedRevision\":2,\"decision\":\"approve\","
+                "{\"engineVersion\":1,\"clientRequestId\":\"artifact-approve-01\",\"expectedRevision\":2,\"decision\":\"approve\","
                         + "\"editedContent\":\"正文\\r\\n末尾😀\",\"selectedUpdateRefs\":[\"u1\"],\"userMessage\":null}");
 
-        api.nextGet = json.readTree("{\"sourceBindingStatus\":\"verified\",\"payload\":{\"target\":{\"mode\":\"replace_selection\"}}}");
+        api.nextGet = artifact(1, "a2", 3, "verified", "replace_selection");
         Result revise = run(
                 application,
                 "long.artifact.revise",
-                "{\"artifactId\":\"a2\",\"clientRequestId\":\"artifact-revise-01\",\"expectedRevision\":3,"
+                "{\"artifactId\":\"a2\",\"clientRequestId\":\"artifact-revise-01\",\"engineVersion\":1,\"expectedRevision\":3,"
                         + "\"editedReplacement\":\"替换文本\",\"userMessage\":\"请按意见返工\"}");
         assertThat(revise.exit()).as(revise.stdout()).isZero();
         assertThat(api.calls.getLast().body().toString()).isEqualTo(
-                "{\"clientRequestId\":\"artifact-revise-01\",\"expectedRevision\":3,\"decision\":\"revise\","
+                "{\"engineVersion\":1,\"clientRequestId\":\"artifact-revise-01\",\"expectedRevision\":3,\"decision\":\"revise\","
                         + "\"editedReplacement\":\"替换文本\",\"userMessage\":\"请按意见返工\"}");
 
         int beforeDiscard = api.calls.size();
@@ -135,11 +138,154 @@ class LongWorkflowMutationsTest {
                 application,
                 api,
                 "long.artifact.discard",
-                "{\"artifactId\":\"a3\",\"clientRequestId\":\"artifact-discard-01\",\"expectedRevision\":1}",
+                "{\"artifactId\":\"a3\",\"clientRequestId\":\"artifact-discard-01\",\"engineVersion\":2,\"expectedRevision\":1}",
                 "POST",
                 "/api/v1/review-artifacts/a3/decision",
-                "{\"clientRequestId\":\"artifact-discard-01\",\"expectedRevision\":1,\"decision\":\"discard\"}");
+                "{\"engineVersion\":2,\"clientRequestId\":\"artifact-discard-01\",\"expectedRevision\":1,\"decision\":\"discard\"}");
         assertThat(api.calls).hasSize(beforeDiscard + 1);
+        assertThat(api.calls.get(beforeDiscard).method()).isEqualTo("POST");
+    }
+
+    @Test
+    void ArtifactV1丢弃在草案物理删除后仍直接幂等重放相同请求() {
+        RecordingApi api = new RecordingApi(json);
+        CliApplication application = application(api);
+        String input = "{\"artifactId\":\"deleted-v1\",\"clientRequestId\":\"artifact-v1-discard-replay\","
+                + "\"expectedRevision\":5}";
+        String expectedBody = "{\"engineVersion\":1,\"clientRequestId\":\"artifact-v1-discard-replay\","
+                + "\"expectedRevision\":5,\"decision\":\"discard\"}";
+
+        Result first = run(application, "long.artifact.discard", input);
+        Result replay = run(application, "long.artifact.discard", input);
+
+        assertThat(first.exit()).as(first.stdout()).isZero();
+        assertThat(replay.exit()).as(replay.stdout()).isZero();
+        assertThat(api.calls).hasSize(2).allSatisfy(call -> {
+            assertThat(call.method()).isEqualTo("POST");
+            assertThat(call.path())
+                    .isEqualTo("/api/v1/review-artifacts/deleted-v1/decision");
+            assertThat(call.query()).isEmpty();
+            assertThat(call.body().toString()).isEqualTo(expectedBody);
+        });
+    }
+
+    @Test
+    void Artifact决定省略引擎仅兼容V1且显式值始终核对详情引擎() {
+        RecordingApi api = new RecordingApi(json);
+        CliApplication application = application(api);
+
+        api.nextGet = artifact(1, "a1", 1, "verified", "replace_full");
+        Result legacyV1 = run(
+                application,
+                "long.artifact.approve",
+                "{\"artifactId\":\"a1\",\"clientRequestId\":\"artifact-engine-missing\","
+                        + "\"expectedRevision\":1}");
+        assertThat(legacyV1.exit()).as(legacyV1.stdout()).isZero();
+        assertThat(api.calls.getLast().body().path("engineVersion").intValue()).isEqualTo(1);
+
+        api.nextGet = artifact(2, "a2", 1, "verified", "replace_selection");
+        Result omittedV2 = run(
+                application,
+                "long.artifact.approve",
+                "{\"artifactId\":\"a2\",\"clientRequestId\":\"artifact-v2-engine-missing\","
+                        + "\"expectedRevision\":1}");
+        assertThat(omittedV2.exit()).isEqualTo(4);
+        assertThat(omittedV2.stdout()).contains("ARTIFACT_ENGINE_VERSION_MISMATCH");
+
+        int callsBeforeInvalid = api.calls.size();
+
+        for (String invalidVersion : List.of("null", "0", "3", "true", "1.5", "\"2\"")) {
+            Result invalid = run(
+                    application,
+                    "long.artifact.discard",
+                    "{\"artifactId\":\"a1\",\"clientRequestId\":\"artifact-engine-invalid\","
+                            + "\"engineVersion\":" + invalidVersion + ",\"expectedRevision\":1}");
+            assertThat(invalid.exit()).as(invalidVersion).isEqualTo(2);
+            assertThat(invalid.stdout()).as(invalidVersion)
+                    .contains("INVALID_ENGINE_VERSION");
+            assertThat(api.calls).as(invalidVersion).hasSize(callsBeforeInvalid);
+        }
+
+        api.nextGet = artifact(2, "a1", 1, "verified", "replace_selection");
+        Result mismatch = run(
+                application,
+                "long.artifact.approve",
+                "{\"artifactId\":\"a1\",\"clientRequestId\":\"artifact-engine-mismatch\","
+                        + "\"engineVersion\":1,\"expectedRevision\":1}");
+        assertThat(mismatch.exit()).isEqualTo(4);
+        assertThat(mismatch.stdout()).contains("ARTIFACT_ENGINE_VERSION_MISMATCH");
+        assertThat(api.calls).hasSize(callsBeforeInvalid + 1);
+        assertThat(api.calls.getLast().method()).isEqualTo("GET");
+    }
+
+    @Test
+    void ArtifactV2只允许选区批准且V1返工保持可选说明() {
+        RecordingApi api = new RecordingApi(json);
+        CliApplication application = application(api);
+
+        api.nextGet = artifact(2, "a2", 7, "verified", "replace_selection");
+        Result approve = run(
+                application,
+                "long.artifact.approve",
+                "{\"artifactId\":\"a2\",\"clientRequestId\":\"artifact-v2-approve\",\"engineVersion\":2,\"expectedRevision\":7,"
+                        + "\"editedReplacement\":\"新选区\"}");
+        assertThat(approve.exit()).as(approve.stdout()).isZero();
+        assertThat(api.calls.getLast().body().toString()).isEqualTo(
+                "{\"engineVersion\":2,\"clientRequestId\":\"artifact-v2-approve\",\"expectedRevision\":7,"
+                        + "\"decision\":\"approve\",\"editedReplacement\":\"新选区\"}");
+
+        api.nextGet = artifact(2, "a2", 8, "verified", "replace_selection");
+        Result revise = run(
+                application,
+                "long.artifact.revise",
+                "{\"artifactId\":\"a2\",\"clientRequestId\":\"artifact-v2-revise-01\",\"engineVersion\":2,\"expectedRevision\":8,"
+                        + "\"userMessage\":\"保留含义，压缩动作\"}");
+        assertThat(revise.exit()).as(revise.stdout()).isZero();
+        assertThat(api.calls.getLast().body().toString()).isEqualTo(
+                "{\"engineVersion\":2,\"clientRequestId\":\"artifact-v2-revise-01\",\"expectedRevision\":8,"
+                        + "\"decision\":\"revise\",\"userMessage\":\"保留含义，压缩动作\"}");
+
+        int beforeInvalid = api.calls.size();
+        api.nextGet = artifact(2, "a2", 9, "verified", "replace_selection");
+        Result invalid = run(
+                application,
+                "long.artifact.approve",
+                "{\"artifactId\":\"a2\",\"clientRequestId\":\"artifact-v2-invalid-1\",\"engineVersion\":2,\"expectedRevision\":9,"
+                        + "\"editedContent\":\"不允许\"}");
+        assertThat(invalid.exit()).isEqualTo(2);
+        assertThat(invalid.stdout()).contains("V2_EDIT_FIELDS_FORBIDDEN");
+        assertThat(api.calls).hasSize(beforeInvalid + 1);
+
+        int beforeInvalidRevise = api.calls.size();
+        api.nextGet = artifact(2, "a2", 10, "verified", "replace_selection");
+        Result invalidRevise = run(
+                application,
+                "long.artifact.revise",
+                "{\"artifactId\":\"a2\",\"clientRequestId\":\"artifact-v2-invalid-2\",\"engineVersion\":2,\"expectedRevision\":10,"
+                        + "\"editedReplacement\":\"不能在返工时编辑\",\"userMessage\":\"重新写\"}");
+        assertThat(invalidRevise.exit()).isEqualTo(2);
+        assertThat(invalidRevise.stdout()).contains("V2_EDIT_FIELDS_FORBIDDEN");
+        assertThat(api.calls).hasSize(beforeInvalidRevise + 1);
+
+        int beforeMissingMessage = api.calls.size();
+        api.nextGet = artifact(2, "a2", 11, "verified", "replace_selection");
+        Result missingMessage = run(
+                application,
+                "long.artifact.revise",
+                "{\"artifactId\":\"a2\",\"clientRequestId\":\"artifact-v2-invalid-3\",\"engineVersion\":2,\"expectedRevision\":11}");
+        assertThat(missingMessage.exit()).isEqualTo(2);
+        assertThat(missingMessage.stdout()).contains("USER_MESSAGE_REQUIRED");
+        assertThat(api.calls).hasSize(beforeMissingMessage + 1);
+
+        api.nextGet = artifact(1, "a1", 4, "verified", "replace_full");
+        Result v1Revise = run(
+                application,
+                "long.artifact.revise",
+                "{\"artifactId\":\"a1\",\"clientRequestId\":\"artifact-v1-revise-01\",\"engineVersion\":1,\"expectedRevision\":4}");
+        assertThat(v1Revise.exit()).as(v1Revise.stdout()).isZero();
+        assertThat(api.calls.getLast().body().toString()).isEqualTo(
+                "{\"engineVersion\":1,\"clientRequestId\":\"artifact-v1-revise-01\",\"expectedRevision\":4,"
+                        + "\"decision\":\"revise\"}");
     }
 
     @Test
@@ -147,12 +293,12 @@ class LongWorkflowMutationsTest {
         RecordingApi api = new RecordingApi(json);
         CliApplication application = application(api);
 
-        api.nextGet = json.readTree("{\"sourceBindingStatus\":\"legacy_missing\"}");
+        api.nextGet = artifact(1, "a1", 1, "legacy_missing", "replace_full");
         int before = api.calls.size();
         Result blocked = run(
                 application,
                 "long.artifact.approve",
-                "{\"artifactId\":\"a1\",\"clientRequestId\":\"artifact-blocked-01\",\"expectedRevision\":1}");
+                "{\"artifactId\":\"a1\",\"clientRequestId\":\"artifact-blocked-01\",\"engineVersion\":1,\"expectedRevision\":1}");
         assertThat(blocked.exit()).isEqualTo(4);
         assertThat(blocked.stdout()).contains("SOURCE_BINDING_NOT_VERIFIED");
         assertThat(api.calls).hasSize(before + 1);
@@ -181,6 +327,20 @@ class LongWorkflowMutationsTest {
                 "PATCH",
                 "/api/v1/quality-checks/q1",
                 "{\"status\":\"pending\",\"resetResult\":true,\"expectedUpdatedAt\":\"v2\"}");
+    }
+
+    private JsonNode artifact(
+            int engineVersion,
+            String artifactId,
+            int revision,
+            String sourceBindingStatus,
+            String targetMode) {
+        return json.readTree("{\"engineVersion\":" + engineVersion
+                + ",\"id\":" + json.writeValueAsString(artifactId)
+                + ",\"revision\":" + revision
+                + ",\"sourceBindingStatus\":" + json.writeValueAsString(sourceBindingStatus)
+                + ",\"payload\":{\"target\":{\"mode\":"
+                + json.writeValueAsString(targetMode) + "}}}");
     }
 
     private void assertLastRequest(
@@ -225,7 +385,11 @@ class LongWorkflowMutationsTest {
 
     private record Result(int exit, String stdout) {}
 
-    private record Call(String method, String path, JsonNode body) {}
+    private record Call(
+            String method,
+            String path,
+            Map<String, List<String>> query,
+            JsonNode body) {}
 
     private static final class RecordingApi implements CoreApi {
         private final JsonMapper json;
@@ -243,7 +407,16 @@ class LongWorkflowMutationsTest {
 
         @Override
         public JsonNode request(String method, String path, JsonNode body) {
-            calls.add(new Call(method, path, body));
+            return request(method, path, Map.of(), body);
+        }
+
+        @Override
+        public JsonNode request(
+                String method,
+                String path,
+                Map<String, List<String>> query,
+                JsonNode body) {
+            calls.add(new Call(method, path, Map.copyOf(query), body));
             if (method.equals("GET") && nextGet != null) {
                 JsonNode result = nextGet;
                 nextGet = null;

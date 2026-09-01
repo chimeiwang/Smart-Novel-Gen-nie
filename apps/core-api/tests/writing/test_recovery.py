@@ -144,6 +144,8 @@ class DurableCommandRepository:
         assert task_id == "task-1"
         self.requests.append(request)
         return ResumeWritingRunResponse(
+            engineVersion=1,
+            runId=task_id,
             accepted=True,
             taskId=task_id,
             commandId="command-1",
@@ -176,6 +178,8 @@ async def test_resume_is_durable_when_immediate_dispatch_fails() -> None:
     )
 
     assert response.model_dump() == {
+        "engineVersion": 1,
+        "runId": "task-1",
         "accepted": True,
         "taskId": "task-1",
         "commandId": "command-1",

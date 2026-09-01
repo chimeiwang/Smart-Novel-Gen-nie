@@ -1,6 +1,7 @@
 package cn.inkforge.serviceauth;
 
 import java.util.Arrays;
+import java.util.List;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonValue;
 
@@ -20,8 +21,13 @@ public enum ServiceScope {
     QUALITY_WRITE("quality:write"),
     VIDEO_WRITE("video:write"),
     VIDEO_RENDER("video:render"),
+    EXECUTION_SUBMIT("execution:submit"),
+    EXECUTION_CANCEL("execution:cancel"),
+    EXECUTION_PROGRESS("execution:progress"),
+    EXECUTION_RESULT("execution:result"),
     BILLING_AUTHORIZE("billing:authorize"),
-    BILLING_USAGE_WRITE("billing:usage:write");
+    BILLING_USAGE_WRITE("billing:usage:write"),
+    BILLING_RECONCILE("billing:reconcile");
 
     private final String value;
 
@@ -40,5 +46,16 @@ public enum ServiceScope {
                 .filter(scope -> scope.value.equals(value))
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("未知服务权限：" + value));
+    }
+
+    /** 只有非空且全部为 V2 execution scope 时，JWT novel_id 才可为 JSON null。 */
+    public static boolean allowsNullNovelId(List<ServiceScope> scopes) {
+        return scopes != null
+                && !scopes.isEmpty()
+                && scopes.stream().allMatch(scope -> switch (scope) {
+                    case EXECUTION_SUBMIT, EXECUTION_CANCEL, EXECUTION_PROGRESS, EXECUTION_RESULT,
+                                    BILLING_RECONCILE -> true;
+                    default -> false;
+                });
     }
 }

@@ -22,7 +22,8 @@
 - Java Core 单体已于 2026-08-26 完成生产切换并处于观察期；生产不得双 Core 或双写，Python Core 只按
   已冻结流程用于整镜像回滚。
 - Core 与 Agent 使用版本化 Pydantic 契约和 Ed25519 服务身份通信。
-- 生产由 `infra/compose.yaml` 编排，Nginx 是唯一公网入口。
+- 生产由 `infra/compose.yaml` 编排，Nginx 是唯一公网入口；普通 Redis 承担可重建队列/认证事实，独立 AOF
+  execution Redis 只承担当次模型调用边界和未送达终态 journal。
 - 生产 SSH 只信任管理员离线核验的主机公钥；部署串行排队，切换前按运行容器的不可变镜像 ID 冻结三服务
   精确回滚组合，新版本失败时由 `scripts/deploy-production.sh` 尝试恢复该组合。
 - PostgreSQL schema 默认冻结并由只读 `schema-contract.json` 守卫。当前具名例外包括视频控制面与章节
@@ -90,5 +91,9 @@
 - Java Core 架构决策：`docs/architecture-decisions/001-core-java-stack.md` 到
   `003-core-java-single-cutover.md`
 - Java Core 生产切换：`docs/JAVA_CORE_CUTOVER.md`
+- Agent 执行内核重构：`docs/specs/2026-08-31-core-owned-durable-agent-execution.md`
+- Agent 执行架构决策：`docs/architecture-decisions/004-core-owned-durable-agent-execution.md`
+- Agent 执行实施计划：`docs/plans/2026-08-31-core-owned-durable-agent-execution.md`
+- execution journal 容量与恢复演练：`docs/audits/2026-09-01-execution-journal-capacity.md`
 - 生产部署：`infra/compose.yaml`
 - 生产发布入口：`.github/workflows/build.yml`、`scripts/deploy-production.sh`

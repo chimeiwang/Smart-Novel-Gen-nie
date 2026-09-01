@@ -55,7 +55,7 @@ class JooqBillingRepositoryTest {
     @Container
     private static final PostgreSQLContainer POSTGRES =
             new PostgreSQLContainer("pgvector/pgvector:0.8.0-pg14")
-                    .withDatabaseName("inkforge_billing_test")
+                    .withDatabaseName("novelwriterdev")
                     .withUsername("inkforge")
                     .withPassword("test-only-password");
 
@@ -68,6 +68,10 @@ class JooqBillingRepositoryTest {
         POSTGRES.copyFileToContainer(
                 MountableFile.forClasspathResource("db/novelwriterdev-schema.sql"),
                 "/tmp/novelwriterdev-schema.sql");
+        POSTGRES.copyFileToContainer(
+                MountableFile.forClasspathResource(
+                        "migrations/20260831_durable_agent_execution.sql"),
+                "/tmp/20260831_durable_agent_execution.sql");
         ExecResult result = POSTGRES.execInContainer(
                 "psql",
                 "-v",
@@ -79,6 +83,17 @@ class JooqBillingRepositoryTest {
                 "-f",
                 "/tmp/novelwriterdev-schema.sql");
         assertThat(result.getExitCode()).as(result.getStderr()).isZero();
+        ExecResult migration = POSTGRES.execInContainer(
+                "psql",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-U",
+                POSTGRES.getUsername(),
+                "-d",
+                POSTGRES.getDatabaseName(),
+                "-f",
+                "/tmp/20260831_durable_agent_execution.sql");
+        assertThat(migration.getExitCode()).as(migration.getStderr()).isZero();
         database = CoreDatabase.connect(PostgresConnectionSettings.parse(databaseUrl()));
         repository = new JooqBillingRepository(
                 database, new CuidV1Generator(CLOCK), CLOCK);
@@ -89,6 +104,7 @@ class JooqBillingRepositoryTest {
         if (!users.isEmpty()) {
             database.dsl().deleteFrom(NOVEL).where(NOVEL.USERID.in(users)).execute();
             database.dsl().deleteFrom(USER).where(USER.ID.in(users)).execute();
+            users.clear();
         }
     }
 
@@ -134,6 +150,50 @@ class JooqBillingRepositoryTest {
         assertThat(repository.authorizationContext(
                         owner, "billing-quality-run-1", project.novelId()))
                 .isNull();
+    }
+
+    @Test
+    void V1授权与扣费必须扣除同用户未结算的V2预留() {
+        String owner = user("billing-cross-engine-owner", 1_000_000L);
+        Project legacyProject = project("billing-cross-engine-v1", owner);
+        writingTask("billing-cross-engine-task", legacyProject);
+        Project v2Project = project("billing-cross-engine-v2", owner);
+        insertV2Reservation(owner, v2Project, 900_000L);
+        // 具名 V2 事实在本 Testcontainer 生命周期内保留；后续用例均使用全局唯一 ID 隔离。
+        users.remove(owner);
+
+        assertThat(repository.authorizationContext(
+                                owner,
+                                "billing-cross-engine-task",
+                                legacyProject.novelId())
+                        .balanceMicros())
+                .isEqualTo(100_000L);
+        ChargeUsage tooExpensive = usage(
+                "billing-cross-engine-charge",
+                owner,
+                legacyProject.novelId(),
+                "billing-cross-engine-task",
+                100,
+                20,
+                25,
+                125,
+                80,
+                5);
+        assertThatThrownBy(() -> repository.charge(tooExpensive))
+                .isInstanceOf(InsufficientCreditsException.class);
+        assertThat(database.dsl().fetchCount(
+                        TOKENUSAGE,
+                        TOKENUSAGE.REQUESTID.eq("billing-cross-engine-charge")))
+                .isZero();
+        assertThat(database.dsl().fetchCount(
+                        CREDITLEDGER,
+                        CREDITLEDGER.REQUESTID.eq("billing-cross-engine-charge")))
+                .isZero();
+        assertThat(database.dsl().select(USER.CREDITBALANCEMICROS)
+                        .from(USER)
+                        .where(USER.ID.eq(owner))
+                        .fetchSingle(USER.CREDITBALANCEMICROS))
+                .isEqualTo(1_000_000L);
     }
 
     @Test
@@ -397,6 +457,68 @@ class JooqBillingRepositoryTest {
                 .set(STYLEPORTRAITTASK.CREATEDAT, INITIAL)
                 .set(STYLEPORTRAITTASK.UPDATEDAT, INITIAL)
                 .execute();
+    }
+
+    private static void insertV2Reservation(
+            String userId, Project project, long reservedMicros) {
+        String runId = project.novelId() + "-v2-run";
+        String stepId = project.novelId() + "-v2-step";
+        database.dsl().execute(
+                """
+                INSERT INTO public."WorkflowRun" (
+                  id, "novelId", "chapterId", "userId", kind, status,
+                  "createdAt", "updatedAt", "engineVersion", workflow, operation,
+                  "operationCatalogVersion", "idempotencyKey", "requestHash", "budgetJson",
+                  "modelPolicyJson", "lastEventSequence", revision
+                ) VALUES (
+                  ?, ?, ?, ?, CAST('chat' AS "WorkflowRunKind"),
+                  CAST('running' AS "WorkflowRunStatus"), ?, ?, 2, 'long_serial',
+                  'rewrite_chapter_selection', '1', ?, repeat('a', 64), '{}', '{}', 0, 1
+                )
+                """,
+                runId,
+                project.novelId(),
+                project.chapterId(),
+                userId,
+                INITIAL,
+                INITIAL,
+                runId + "-idempotency");
+        database.dsl().execute(
+                """
+                INSERT INTO public."WorkflowStep" (
+                  id, "runId", "stepType", status, input, "createdAt", ordinal, purpose,
+                  lane, "attemptCount", "nextAttemptAt", "fencingToken", "idempotencyKey",
+                  "requestHash", "inputHash", "budgetJson", "submittedAt", "updatedAt"
+                ) VALUES (
+                  ?, ?, CAST('agent' AS "WorkflowStepType"),
+                  CAST('pending' AS "WorkflowStepStatus"), '{}', ?, 1, 'generation',
+                  'creative', 1, ?, 1, ?, repeat('b', 64), repeat('c', 64),
+                  '{"budget":{"maxModelCalls":1}}', ?, ?
+                )
+                """,
+                stepId,
+                runId,
+                INITIAL,
+                INITIAL,
+                stepId + "-idempotency",
+                INITIAL,
+                INITIAL);
+        database.dsl().execute(
+                """
+                INSERT INTO public."WorkflowBillingReservation" (
+                  id, "runId", "stepId", "userId", "requestId", "pricingVersion",
+                  "pricingJson", "reservedMicros", "chargedMicros", status,
+                  "createdAt", "updatedAt"
+                ) VALUES (?, ?, ?, ?, ?, 'credit-pricing.v1', '{}', ?, 0, 'reserved', ?, ?)
+                """,
+                stepId + "-reservation",
+                runId,
+                stepId,
+                userId,
+                stepId + "-request",
+                reservedMicros,
+                INITIAL,
+                INITIAL);
     }
 
     private static ChargeUsage usage(

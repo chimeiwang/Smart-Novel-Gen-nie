@@ -3,7 +3,7 @@ package cn.inkforge.core.writing.api;
 import cn.inkforge.contracts.api.AgentEvent;
 import cn.inkforge.contracts.api.CallbackReceipt;
 import cn.inkforge.contracts.api.CancelWritingRunRequest;
-import cn.inkforge.contracts.api.CancelWritingRunResponse;
+import cn.inkforge.contracts.api.CancelWritingRunPublicResponse;
 import cn.inkforge.contracts.api.CheckpointCallback;
 import cn.inkforge.contracts.api.CreateMessageRequest;
 import cn.inkforge.contracts.api.CreateWritingSessionRequest;
@@ -16,8 +16,8 @@ import cn.inkforge.contracts.api.ToolCallBody;
 import cn.inkforge.contracts.api.ToolCallResponse;
 import cn.inkforge.contracts.api.UpdateWritingSessionRequest;
 import cn.inkforge.contracts.api.WritingRunListResponse;
-import cn.inkforge.contracts.api.WritingRunResponse;
-import cn.inkforge.contracts.api.WritingRunStatusResponse;
+import cn.inkforge.contracts.api.WritingRunStartResponse;
+import cn.inkforge.contracts.api.WritingRunStatusPublicResponse;
 import cn.inkforge.contracts.api.WritingSessionDetail;
 import cn.inkforge.contracts.api.WritingSessionListItem;
 import cn.inkforge.contracts.api.WritingSessionResponse;
@@ -92,7 +92,7 @@ public final class WritingController implements WritingApi {
     }
 
     @Override
-    public ResponseEntity<CancelWritingRunResponse>
+    public ResponseEntity<CancelWritingRunPublicResponse>
             cancelWritingRunApiV1WritingRunsTaskIdCancelPost(
                     String taskId,
                     CancelWritingRunRequest request,
@@ -117,7 +117,7 @@ public final class WritingController implements WritingApi {
     }
 
     @Override
-    public ResponseEntity<WritingRunStatusResponse>
+    public ResponseEntity<WritingRunStatusPublicResponse>
             getWritingRunStatusApiV1WritingRunsTaskIdGet(
                     String taskId, String inkforgeToken) {
         return ResponseEntity.ok(runs().get(user(inkforgeToken).id(), taskId));
@@ -170,7 +170,7 @@ public final class WritingController implements WritingApi {
     }
 
     @Override
-    public ResponseEntity<WritingRunResponse> startWritingRunApiV1WritingRunsPost(
+    public ResponseEntity<WritingRunStartResponse> startWritingRunApiV1WritingRunsPost(
             WritingRunStartBody request, String inkforgeToken) {
         return ResponseEntity.accepted().body(runs().start(user(inkforgeToken).id(), request));
     }

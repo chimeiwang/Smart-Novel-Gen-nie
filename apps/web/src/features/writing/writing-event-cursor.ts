@@ -25,5 +25,13 @@ export function createWritingEventCursors() {
     update(taskId: string, eventId: string | null): void {
       if (eventId) state(taskId).lastEventId = eventId;
     },
+    resetToSnapshot(taskId: string, baseSequence: number): void {
+      const current = state(taskId);
+      current.lastSequence = baseSequence;
+      current.lastEventId = baseSequence > 0 ? String(baseSequence) : null;
+    },
+    clear(taskId: string): void {
+      states.set(taskId, createSseState());
+    },
   };
 }

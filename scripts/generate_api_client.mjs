@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 import openapiTS, { astToString } from "openapi-typescript";
 
@@ -24,12 +24,39 @@ function normalizeLineEndings(value) {
   return value.replace(/\r\n?/g, "\n");
 }
 
+function omitNumericDiscriminators(value) {
+  if (Array.isArray(value)) {
+    value.forEach(omitNumericDiscriminators);
+    return;
+  }
+  if (value === null || typeof value !== "object") {
+    return;
+  }
+
+  const mapping = value.discriminator?.mapping;
+  if (
+    mapping !== null &&
+    typeof mapping === "object" &&
+    !Array.isArray(mapping) &&
+    Object.keys(mapping).length > 0 &&
+    Object.keys(mapping).every((key) => /^\d+$/.test(key))
+  ) {
+    // OpenAPI 的 discriminator mapping key 按规范只能是字符串；openapi-typescript
+    // 会据此把真实的整数 const 1/2 错投影为字符串字面量。TS 联合仍由分支中的
+    // 数字 const 完整判别，因此只在生成器输入副本中移除这层元数据。
+    delete value.discriminator;
+  }
+  Object.values(value).forEach(omitNumericDiscriminators);
+}
+
 try {
   execFileSync(uvCommand, uvArgs, {
     cwd: root,
     stdio: "inherit",
   });
-  const ast = await openapiTS(pathToFileURL(openapiPath));
+  const openapi = JSON.parse(readFileSync(openapiPath, "utf8"));
+  omitNumericDiscriminators(openapi);
+  const ast = await openapiTS(openapi);
   const generated = astToString(ast);
   if (process.argv.includes("--check")) {
     let current = "";

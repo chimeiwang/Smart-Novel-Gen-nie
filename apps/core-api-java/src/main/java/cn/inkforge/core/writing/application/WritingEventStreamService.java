@@ -3,6 +3,7 @@ package cn.inkforge.core.writing.application;
 import cn.inkforge.contracts.api.WritingRunOutcome;
 import cn.inkforge.contracts.api.WritingRunStatusResponse;
 import cn.inkforge.core.platform.idempotency.CommandIdempotency;
+import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.writing.domain.WritingEvent;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -25,6 +26,8 @@ public final class WritingEventStreamService {
     private final ObjectMapper json;
     private final Duration pollInterval;
     private final Duration heartbeatInterval;
+    private final cn.inkforge.core.workflows.application.WorkflowEventStreamService
+            workflowStreams;
 
     public WritingEventStreamService(
             WritingRunQueryRepository queries,
@@ -33,10 +36,30 @@ public final class WritingEventStreamService {
             ObjectMapper json,
             Duration pollInterval,
             Duration heartbeatInterval) {
+        this(
+                queries,
+                events,
+                outbox,
+                json,
+                pollInterval,
+                heartbeatInterval,
+                null);
+    }
+
+    public WritingEventStreamService(
+            WritingRunQueryRepository queries,
+            WritingEventStore events,
+            WritingOutboxRepository outbox,
+            ObjectMapper json,
+            Duration pollInterval,
+            Duration heartbeatInterval,
+            cn.inkforge.core.workflows.application.WorkflowEventStreamService
+                    workflowStreams) {
         this.queries = Objects.requireNonNull(queries);
-        this.events = Objects.requireNonNull(events);
+        this.events = events;
         this.outbox = Objects.requireNonNull(outbox);
         this.json = Objects.requireNonNull(json);
+        this.workflowStreams = workflowStreams;
         if (pollInterval == null
                 || pollInterval.isZero()
                 || pollInterval.isNegative()
@@ -51,6 +74,14 @@ public final class WritingEventStreamService {
 
     public StreamingResponseBody stream(
             String userId, String taskId, String lastEventId) {
+        if (workflowStreams != null) {
+            var v2 = workflowStreams.streamIfV2(userId, taskId, lastEventId);
+            if (v2.isPresent()) return v2.orElseThrow();
+        }
+        if (events == null) {
+            throw new ApiException(
+                    503, "WRITING_EVENTS_UNAVAILABLE", "写作事件流暂时不可用");
+        }
         WritingRunStatusResponse initial = queries.get(userId, taskId);
         return output -> writeLoop(output, userId, taskId, lastEventId, initial);
     }

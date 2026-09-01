@@ -2,12 +2,16 @@ package cn.inkforge.core.writing.infrastructure;
 
 import cn.inkforge.core.novels.application.NovelRepository;
 import cn.inkforge.core.outlines.application.OutlineRepository;
+import cn.inkforge.core.platform.config.CoreSettings;
 import cn.inkforge.core.platform.db.CoreDatabase;
 import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.idempotency.CommandIdempotencyStore;
 import cn.inkforge.core.platform.redis.CoreRedis;
 import cn.inkforge.core.references.application.ReferenceRepository;
 import cn.inkforge.core.reviews.application.ReviewRepository;
+import cn.inkforge.core.writing.application.DurableAgentExecutionReadiness;
+import cn.inkforge.core.writing.application.EngineIdentityProbe;
+import cn.inkforge.core.writing.application.LongSerialDurableRunStarter;
 import cn.inkforge.core.writing.application.WritingCallbackRepository;
 import cn.inkforge.core.writing.application.WritingCallbackService;
 import cn.inkforge.core.writing.application.WritingCommandDispatchRepository;
@@ -31,6 +35,7 @@ import cn.inkforge.core.writing.application.WritingRunQueryRepository;
 import cn.inkforge.core.writing.application.WritingRunReconciler;
 import cn.inkforge.core.writing.application.WritingRunService;
 import cn.inkforge.core.writing.application.WritingRunStartRequestParser;
+import cn.inkforge.core.writing.application.WritingRunStarter;
 import cn.inkforge.core.writing.application.WritingSemanticReferenceReader;
 import cn.inkforge.core.writing.application.WritingSessionRepository;
 import cn.inkforge.core.writing.application.WritingSessionService;
@@ -39,11 +44,13 @@ import cn.inkforge.core.writing.application.WritingWorkspaceReader;
 import cn.inkforge.core.writing.domain.WritingRunCursor;
 import cn.inkforge.core.writing.domain.WritingRunOutcomeProjector;
 import cn.inkforge.core.writing.domain.WritingRunStatusProjector;
+import cn.inkforge.core.workflows.application.DurableWorkflowService;
+import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
 import jakarta.validation.Validator;
 import java.time.Clock;
 import java.time.Duration;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import tools.jackson.databind.ObjectMapper;
@@ -90,9 +97,14 @@ class WritingConfiguration {
     WritingRunQueryRepository writingRunQueryRepository(
             CoreDatabase database,
             WritingRunStatusProjector projector,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            CoreSettings settings) {
         return new JooqWritingRunQueryRepository(
-                database, projector, new WritingRunCursor(objectMapper));
+                database,
+                projector,
+                new WritingRunCursor(objectMapper),
+                objectMapper,
+                settings.durableAgentExecutionSchemaReady());
     }
 
     @Bean
@@ -100,20 +112,91 @@ class WritingConfiguration {
             CoreDatabase database,
             CuidV1Generator ids,
             Clock coreClock,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            CommandIdempotencyStore writingCommandIdempotencyStore) {
         return new JooqWritingCommandRepository(
                 database,
                 ids,
                 coreClock,
                 objectMapper,
-                new CommandIdempotencyStore(objectMapper));
+                writingCommandIdempotencyStore);
+    }
+
+    @Bean
+    CommandIdempotencyStore writingCommandIdempotencyStore(
+            ObjectMapper objectMapper, CoreSettings settings) {
+        return new CommandIdempotencyStore(
+                objectMapper, settings.durableAgentExecutionSchemaReady());
+    }
+
+    @Bean
+    LongSerialRunAssembler longSerialRunAssembler(ObjectMapper objectMapper) {
+        return new LongSerialRunAssembler(
+                objectMapper, new WritingSourceBindingCapture(objectMapper));
+    }
+
+    @Bean
+    @ConditionalOnProperty(
+            name = "DURABLE_AGENT_EXECUTION_SCHEMA_READY",
+            havingValue = "true")
+    LongSerialDurableRunStarter longSerialDurableRunStarter(
+            CoreDatabase database,
+            LongSerialRunAssembler assembler,
+            DurableWorkflowService workflows,
+            ExecutionRegistry registry,
+            CuidV1Generator ids,
+            Clock coreClock,
+            ObjectMapper objectMapper) {
+        return new JooqLongSerialDurableRunStarter(
+                database, assembler, workflows, registry, ids, coreClock, objectMapper);
+    }
+
+    @Bean
+    WritingRunStarter writingRunStarter(
+            CoreDatabase database,
+            WritingCommandRepository legacy,
+            ObjectProvider<LongSerialDurableRunStarter> durableStarters,
+            ObjectProvider<DurableAgentExecutionReadiness> agentReadinessChecks,
+            CommandIdempotencyStore writingCommandIdempotencyStore,
+            CoreSettings settings,
+            ObjectMapper objectMapper) {
+        if (!settings.durableAgentExecutionSchemaReady()) return legacy::start;
+        LongSerialDurableRunStarter durable = durableStarters.getIfAvailable();
+        if (durable == null) {
+            throw new IllegalStateException("耐久 Agent 数据库结构已就绪但 V2 启动器未装配");
+        }
+        return new RoutingWritingRunStarter(
+                database,
+                legacy,
+                durable,
+                writingCommandIdempotencyStore,
+                settings,
+                () -> {
+                    DurableAgentExecutionReadiness readiness =
+                            agentReadinessChecks.getIfAvailable();
+                    return readiness != null && readiness.check();
+                },
+                objectMapper);
+    }
+
+    @Bean
+    EngineIdentityProbe writingRunEngineIdentityProbe(
+            CoreDatabase database, CoreSettings settings) {
+        return new JooqEngineIdentityProbe(
+                database, settings.durableAgentExecutionSchemaReady());
     }
 
     @Bean
     WritingCommandDispatchRepository writingCommandDispatchRepository(
-            CoreDatabase database, Clock coreClock, ObjectMapper objectMapper) {
+            CoreDatabase database,
+            Clock coreClock,
+            ObjectMapper objectMapper,
+            CoreSettings settings) {
         return new JooqWritingCommandDispatchRepository(
-                database, coreClock, objectMapper);
+                database,
+                coreClock,
+                objectMapper,
+                settings.durableAgentExecutionSchemaReady());
     }
 
     @Bean
@@ -209,27 +292,40 @@ class WritingConfiguration {
     @Bean
     WritingRunService writingRunService(
             WritingRunStartRequestParser parser,
+            WritingRunStarter starter,
             WritingCommandRepository commands,
             WritingRunQueryRepository queries,
-            WritingRunCommandDispatcher dispatcher) {
-        return new WritingRunService(parser, commands, queries, dispatcher);
+            WritingRunCommandDispatcher dispatcher,
+            EngineIdentityProbe engineIdentities,
+            ObjectProvider<cn.inkforge.core.workflows.application.WorkflowRunCancellationService>
+                    workflowCancellations) {
+        return new WritingRunService(
+                parser,
+                starter,
+                commands,
+                queries,
+                dispatcher,
+                engineIdentities,
+                workflowCancellations.getIfAvailable());
     }
 
     @Bean
-    @ConditionalOnProperty(name = "REDIS_URL")
     WritingEventStreamService writingEventStreamService(
             WritingRunQueryRepository queries,
-            WritingEventStore eventStore,
+            ObjectProvider<WritingEventStore> eventStores,
             WritingOutboxRepository outbox,
-            ObjectMapper objectMapper) {
+            ObjectMapper objectMapper,
+            ObjectProvider<cn.inkforge.core.workflows.application.WorkflowEventStreamService>
+                    workflowStreams) {
         // 1 秒用于断流后权威 outcome 对账，15 秒心跳用于穿过代理空闲超时；都不代表任务完成。
         return new WritingEventStreamService(
                 queries,
-                eventStore,
+                eventStores.getIfAvailable(),
                 outbox,
                 objectMapper,
                 Duration.ofSeconds(1),
-                Duration.ofSeconds(15));
+                Duration.ofSeconds(15),
+                workflowStreams.getIfAvailable());
     }
 
     @Bean

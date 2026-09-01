@@ -1261,6 +1261,7 @@ def _structured_turn_result(
         toolCalls=[],
         structuredOutput=structured_output,
         structuredOutputDiagnostic=diagnostic,
+        structuredOutputCorrectionCount=1 if recovery_code is not None else 0,
         usage=usage,
         finishReason=finish_reason,
         rawFinishReason=raw_finish_reason,
@@ -1371,8 +1372,11 @@ def _recover_single_strict_tool_call(
 
 
 class OpenAICompatibleProvider:
+    supports_request_idempotency = False
     billable = True
     provider_name = "openai_compatible"
+    transport_profile = "transport.openai-compatible.v1"
+    capability_version = "capability.openai-compatible.structured-output.v1"
 
     def __init__(self, settings: Settings) -> None:
         if settings.openai_api_key is None or not settings.openai_api_key.get_secret_value():
@@ -1417,6 +1421,11 @@ class OpenAICompatibleProvider:
             else None
         )
         self.model_name = settings.openai_model
+        self.endpoint_profile = (
+            "endpoint.deepseek-official.v1"
+            if _is_official_deepseek_endpoint(settings.openai_base_url)
+            else "endpoint.openai-compatible-custom.v1"
+        )
 
     def supports_structured_output(self, route: ModelStructuredOutputRoute) -> bool:
         """报告当前实例可实际调用的结构化输出路由。"""

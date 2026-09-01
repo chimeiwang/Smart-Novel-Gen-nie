@@ -9,15 +9,19 @@ import static cn.inkforge.core.db.generated.Tables.REVIEWARTIFACTEVALUATION;
 import static cn.inkforge.core.db.generated.Tables.REVIEWARTIFACTREVISION;
 import static cn.inkforge.core.db.generated.Tables.WRITINGRUNCOMMAND;
 import static cn.inkforge.core.db.generated.Tables.WRITINGTASK;
+import static cn.inkforge.core.db.generated.Tables.WORKFLOWRUN;
 
 import cn.inkforge.contracts.api.ArtifactConflictQuarantineRequest;
 import cn.inkforge.contracts.api.ArtifactConflictQuarantineResponse;
 import cn.inkforge.contracts.api.ArtifactDecisionAcceptedResponse;
+import cn.inkforge.contracts.api.ArtifactDecisionPublicResponse;
 import cn.inkforge.contracts.api.ArtifactEvaluationResponse;
 import cn.inkforge.contracts.api.CreateArtifactRequest;
 import cn.inkforge.contracts.api.ReviewArtifactListResponse;
 import cn.inkforge.contracts.api.ReviewArtifactDecisionRequest;
 import cn.inkforge.contracts.api.ReviewArtifactResponse;
+import cn.inkforge.contracts.api.ReviewArtifactSummaryListResponse;
+import cn.inkforge.contracts.api.ReviewArtifactSummaryResponse;
 import cn.inkforge.contracts.api.SourceBinding;
 import cn.inkforge.contracts.api.SubmitArtifactEvaluationRequest;
 import cn.inkforge.core.db.generated.enums.Reviewartifactevaluationverdict;
@@ -31,11 +35,14 @@ import cn.inkforge.core.platform.http.ApiException;
 import cn.inkforge.core.platform.id.CuidV1Generator;
 import cn.inkforge.core.platform.time.DatabaseTimestamp;
 import cn.inkforge.core.reviews.application.ReviewRepository;
+import cn.inkforge.core.reviews.application.ReviewArtifactDetail;
 import cn.inkforge.core.reviews.application.FormalArtifactWriter;
 import cn.inkforge.core.reviews.domain.ReviewArtifactRules;
 import cn.inkforge.core.reviews.domain.ReviewArtifactSummary;
 import cn.inkforge.core.reviews.domain.SelectionMaterialization;
 import cn.inkforge.core.reviews.domain.SelectionSource;
+import cn.inkforge.core.workflows.catalog.ExecutionRegistry;
+import cn.inkforge.core.workflows.domain.DurableSelectionArtifact;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -46,6 +53,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import org.jooq.Condition;
 import org.jooq.DSLContext;
 import org.jooq.Record;
@@ -79,7 +87,8 @@ final class JooqReviewRepository implements ReviewRepository {
     private final CuidV1Generator ids;
     private final Clock clock;
     private final ObjectMapper json;
-    private final JooqReviewDecisionStore decisions;
+    private final JooqReviewDecisionRouter decisions;
+    private final boolean durableAgentSchemaReady;
 
     JooqReviewRepository(
             CoreDatabase database,
@@ -91,7 +100,9 @@ final class JooqReviewRepository implements ReviewRepository {
                 ids,
                 clock,
                 json,
-                new JooqFormalArtifactWriter(database, ids, clock, json));
+                new JooqFormalArtifactWriter(database, ids, clock, json),
+                null,
+                false);
     }
 
     JooqReviewRepository(
@@ -100,23 +111,94 @@ final class JooqReviewRepository implements ReviewRepository {
             Clock clock,
             ObjectMapper json,
             FormalArtifactWriter formalWriter) {
-        this.database = Objects.requireNonNull(database);
-        this.ids = Objects.requireNonNull(ids);
-        this.clock = Objects.requireNonNull(clock);
-        this.json = Objects.requireNonNull(json);
-        this.decisions = new JooqReviewDecisionStore(
+        this(
                 database,
                 ids,
                 clock,
                 json,
-                formalWriter);
+                formalWriter,
+                null,
+                false);
+    }
+
+    JooqReviewRepository(
+            CoreDatabase database,
+            CuidV1Generator ids,
+            Clock clock,
+            ObjectMapper json,
+            FormalArtifactWriter formalWriter,
+            ExecutionRegistry registry) {
+        this(database, ids, clock, json, formalWriter, registry, true);
+    }
+
+    JooqReviewRepository(
+            CoreDatabase database,
+            CuidV1Generator ids,
+            Clock clock,
+            ObjectMapper json,
+            FormalArtifactWriter formalWriter,
+            ExecutionRegistry registry,
+            boolean durableAgentSchemaReady) {
+        this.database = Objects.requireNonNull(database);
+        this.ids = Objects.requireNonNull(ids);
+        this.clock = Objects.requireNonNull(clock);
+        this.json = Objects.requireNonNull(json);
+        this.durableAgentSchemaReady = durableAgentSchemaReady;
+        JooqReviewDecisionStore legacy =
+                new JooqReviewDecisionStore(database, ids, clock, json, formalWriter);
+        JooqDurableReviewDecisionStore durable = durableAgentSchemaReady
+                ? new JooqDurableReviewDecisionStore(
+                        database,
+                        ids,
+                        clock,
+                        json,
+                        formalWriter)
+                : null;
+        this.decisions = new JooqReviewDecisionRouter(
+                database, json, legacy, durable, durableAgentSchemaReady);
     }
 
     @Override
     public ReviewArtifactResponse get(String userId, String artifactId) {
+        ReviewArtifactDetail detail = getDetail(userId, artifactId, null, null);
+        if (detail.response() == null) throw new IllegalStateException("无条件读取不能返回 304");
+        return detail.response();
+    }
+
+    @Override
+    public ReviewArtifactDetail getDetail(
+            String userId,
+            String artifactId,
+            Integer requestedRevision,
+            String ifNoneMatch) {
         ReviewartifactRecord artifact = ownedArtifact(database.dsl(), userId, artifactId, false);
         if (artifact == null) throw forbidden();
-        return response(database.dsl(), artifact, true);
+        int revision = requestedRevision == null ? artifact.getRevision() : requestedRevision;
+        if (artifact.getWorkflowrunid() != null && requestedRevision == null) {
+            throw new ApiException(
+                    422,
+                    "ARTIFACT_REVISION_REQUIRED",
+                    "V2 待审核草案详情必须指定精确 revision");
+        }
+        if (artifact.getWorkflowrunid() == null && revision != artifact.getRevision()) {
+            throw revisionConflict(revision, artifact.getRevision(), "待审核草案修订号已变化");
+        }
+        if (artifact.getWorkflowrunid() != null) {
+            Record revisionRecord = database.dsl().fetchOne(
+                            """
+                            SELECT id FROM public."ReviewArtifactRevision"
+                            WHERE "artifactId" = ? AND revision = ?
+                            """,
+                            artifactId,
+                            revision);
+            if (revisionRecord == null) {
+                throw revisionConflict(revision, artifact.getRevision(), "待审核草案修订不存在");
+            }
+        }
+        String etag = detailEtag(artifact, revision);
+        if (etagMatches(ifNoneMatch, etag)) return new ReviewArtifactDetail(etag, null);
+        return new ReviewArtifactDetail(
+                etag, response(database.dsl(), artifact, true, revision));
     }
 
     @Override
@@ -137,7 +219,7 @@ final class JooqReviewRepository implements ReviewRepository {
                 .orderBy(REVIEWARTIFACT.UPDATEDAT.desc(), REVIEWARTIFACT.ID.desc())
                 .limit(1)
                 .fetchOne();
-        return artifact == null ? null : response(database.dsl(), artifact, true);
+        return artifact == null ? null : response(database.dsl(), artifact, true, artifact.getRevision());
     }
 
     @Override
@@ -150,28 +232,11 @@ final class JooqReviewRepository implements ReviewRepository {
             String kind,
             String cursor,
             int limit) {
-        List<Condition> conditions = new ArrayList<>();
-        conditions.add(REVIEWARTIFACT.NOVELID.eq(novelId));
-        conditions.add(REVIEWARTIFACT.NOVELID.in(database.dsl()
-                .select(NOVEL.ID)
-                .from(NOVEL)
-                .where(NOVEL.USERID.eq(userId))));
-        if (chapterId != null) conditions.add(REVIEWARTIFACT.CHAPTERID.eq(chapterId));
-        if (taskId != null) conditions.add(REVIEWARTIFACT.TASKID.eq(taskId));
-        if (status != null) {
-            Reviewartifactstatus value = Reviewartifactstatus.lookupLiteral(status);
-            conditions.add(value == null ? DSL.falseCondition() : REVIEWARTIFACT.STATUS.eq(value));
-        }
-        if (kind != null) {
-            Reviewartifactkind value = Reviewartifactkind.lookupLiteral(kind);
-            conditions.add(value == null ? DSL.falseCondition() : REVIEWARTIFACT.KIND.eq(value));
-        }
-        if (cursor != null) {
-            CursorValue value = decodeCursor(cursor);
-            conditions.add(REVIEWARTIFACT.CREATEDAT.lt(value.createdAt())
-                    .or(REVIEWARTIFACT.CREATEDAT.eq(value.createdAt())
-                            .and(REVIEWARTIFACT.ID.lt(value.id()))));
-        }
+        List<Condition> conditions = artifactListConditions(
+                userId, novelId, chapterId, taskId, status, kind, cursor);
+        // V1 已发布兼容入口不混入 V2 Artifact；V2/Web 使用显式 summary + revision detail。
+        conditions.add(REVIEWARTIFACT.TASKID.isNotNull());
+        conditions.add(REVIEWARTIFACT.WORKFLOWRUNID.isNull());
         List<ReviewartifactRecord> artifacts = database.dsl().selectFrom(REVIEWARTIFACT)
                 .where(conditions)
                 .orderBy(REVIEWARTIFACT.CREATEDAT.desc(), REVIEWARTIFACT.ID.desc())
@@ -180,12 +245,74 @@ final class JooqReviewRepository implements ReviewRepository {
         boolean more = artifacts.size() > limit;
         if (more) artifacts = new ArrayList<>(artifacts.subList(0, limit));
         List<ReviewArtifactResponse> items = artifacts.stream()
-                .map(item -> response(database.dsl(), item, false))
+                .map(item -> response(database.dsl(), item, false, item.getRevision()))
                 .toList();
         String next = more && !artifacts.isEmpty()
                 ? encodeCursor(artifacts.getLast())
                 : null;
         return new ReviewArtifactListResponse(items, next);
+    }
+
+    @Override
+    public ReviewArtifactSummaryListResponse listSummaries(
+            String userId,
+            String novelId,
+            String chapterId,
+            String taskId,
+            String status,
+            String kind,
+            String cursor,
+            int limit) {
+        List<Condition> conditions = artifactListConditions(
+                userId, novelId, chapterId, taskId, status, kind, cursor);
+        List<Record> artifacts = new ArrayList<>(database.dsl().select(
+                        REVIEWARTIFACT.ID,
+                        REVIEWARTIFACT.NOVELID,
+                        REVIEWARTIFACT.CHAPTERID,
+                        REVIEWARTIFACT.TASKID,
+                        REVIEWARTIFACT.WORKFLOWRUNID,
+                        REVIEWARTIFACT.ARTIFACTKEY,
+                        REVIEWARTIFACT.KIND,
+                        REVIEWARTIFACT.STATUS,
+                        REVIEWARTIFACT.TITLE,
+                        REVIEWARTIFACT.SUMMARY,
+                        REVIEWARTIFACT.REVISION,
+                        REVIEWARTIFACT.CREATEDAT,
+                        REVIEWARTIFACT.UPDATEDAT)
+                .from(REVIEWARTIFACT)
+                .where(conditions)
+                .orderBy(REVIEWARTIFACT.CREATEDAT.desc(), REVIEWARTIFACT.ID.desc())
+                .limit(limit + 1)
+                .fetch());
+        boolean more = artifacts.size() > limit;
+        if (more) artifacts = new ArrayList<>(artifacts.subList(0, limit));
+        Set<String> actionableV2 = durableAgentSchemaReady
+                ? database.dsl().select(REVIEWARTIFACT.ID)
+                        .from(REVIEWARTIFACT)
+                        .join(WORKFLOWRUN)
+                        .on(WORKFLOWRUN.ID.eq(REVIEWARTIFACT.WORKFLOWRUNID))
+                        .where(
+                                REVIEWARTIFACT.ID.in(artifacts.stream()
+                                        .map(item -> item.get(REVIEWARTIFACT.ID))
+                                        .toList()),
+                                REVIEWARTIFACT.STATUS.eq(Reviewartifactstatus.awaiting_user),
+                                DSL.field("{0}::text", String.class, WORKFLOWRUN.STATUS)
+                                        .eq("waiting_user"),
+                                DSL.condition("{0}.\"cancelRequestedAt\" IS NULL", WORKFLOWRUN))
+                        .fetchSet(REVIEWARTIFACT.ID)
+                : Set.of();
+        List<ReviewArtifactSummaryResponse> items = artifacts.stream()
+                .map(item -> summary(
+                        item,
+                        item.get(REVIEWARTIFACT.TASKID) != null
+                                ? item.get(REVIEWARTIFACT.STATUS)
+                                        == Reviewartifactstatus.awaiting_user
+                                : actionableV2.contains(item.get(REVIEWARTIFACT.ID))))
+                .toList();
+        String next = more && !artifacts.isEmpty()
+                ? encodeCursor(artifacts.getLast())
+                : null;
+        return new ReviewArtifactSummaryListResponse(items, next);
     }
 
     @Override
@@ -481,7 +608,7 @@ final class JooqReviewRepository implements ReviewRepository {
     }
 
     @Override
-    public ArtifactDecisionAcceptedResponse decide(
+    public ArtifactDecisionPublicResponse decide(
             String userId,
             String artifactId,
             ReviewArtifactDecisionRequest request) {
@@ -489,24 +616,39 @@ final class JooqReviewRepository implements ReviewRepository {
     }
 
     private ReviewArtifactResponse response(
-            DSLContext context, ReviewartifactRecord artifact, boolean includeEvaluations) {
-        Map<String, Object> payload = parseObject(artifact.getPayloadjson());
+            DSLContext context,
+            ReviewartifactRecord artifact,
+            boolean includeEvaluations,
+            int revision) {
+        DurableDetail durable = artifact.getWorkflowrunid() == null
+                ? null
+                : durableDetail(context, artifact, revision);
+        Map<String, Object> payload = durable == null
+                ? parseObject(artifact.getPayloadjson())
+                : durable.materialized().payload();
         if (!artifact.getKind().getLiteral().equals(payload.get("kind"))) {
             throw invalidPayload();
         }
         payload = new LinkedHashMap<>(payload);
         payload.remove("_inkforgeControl");
-        Object diff = artifact.getDiffjson() == null
-                ? null
-                : parseValue(artifact.getDiffjson());
-        SourceView sourceView = sourceView(context, artifact);
+        Object diff = durable == null
+                ? artifact.getDiffjson() == null ? null : parseValue(artifact.getDiffjson())
+                : durable.materialized().diff();
+        SourceView sourceView = durable == null
+                ? sourceView(context, artifact)
+                : new SourceView(List.of(durable.sourceBinding()), "verified");
         List<ArtifactEvaluationResponse> evaluations = includeEvaluations
-                ? context.selectFrom(REVIEWARTIFACTEVALUATION)
-                        .where(REVIEWARTIFACTEVALUATION.ARTIFACTID.eq(artifact.getId()))
-                        .orderBy(REVIEWARTIFACTEVALUATION.CREATEDAT.desc())
-                        .fetch(this::evaluation)
+                ? durable == null
+                        ? context.selectFrom(REVIEWARTIFACTEVALUATION)
+                                .where(REVIEWARTIFACTEVALUATION.ARTIFACTID.eq(artifact.getId()))
+                                .orderBy(REVIEWARTIFACTEVALUATION.CREATEDAT.desc())
+                                .fetch(this::evaluation)
+                        : durableEvaluations(context, artifact.getId(), revision)
                 : List.of();
         ReviewArtifactResponse result = new ReviewArtifactResponse();
+        result.setEngineVersion(artifact.getWorkflowrunid() == null
+                ? ReviewArtifactResponse.EngineVersionEnum.NUMBER_1
+                : ReviewArtifactResponse.EngineVersionEnum.NUMBER_2);
         result.setId(artifact.getId());
         result.setNovelId(artifact.getNovelid());
         result.setChapterId(artifact.getChapterid());
@@ -524,7 +666,7 @@ final class JooqReviewRepository implements ReviewRepository {
         result.setCreatedByAgent(artifact.getCreatedbyagent());
         result.setUpdatedByAgent(artifact.getUpdatedbyagent());
         result.setReviewerAgent(artifact.getRevieweragent());
-        result.setRevision(artifact.getRevision());
+        result.setRevision(revision);
         result.setEvaluations(evaluations);
         result.setSourceBindings(sourceView.bindings());
         result.setSourceBindingStatus(ReviewArtifactResponse.SourceBindingStatusEnum.fromValue(
@@ -532,6 +674,145 @@ final class JooqReviewRepository implements ReviewRepository {
         result.setCreatedAt(DatabaseTimestamp.api(artifact.getCreatedat()));
         result.setUpdatedAt(DatabaseTimestamp.api(artifact.getUpdatedat()));
         return result;
+    }
+
+    private ReviewArtifactSummaryResponse summary(Record artifact, boolean actionable) {
+        ReviewArtifactSummaryResponse result = new ReviewArtifactSummaryResponse();
+        result.setEngineVersion(artifact.get(REVIEWARTIFACT.WORKFLOWRUNID) == null
+                ? ReviewArtifactSummaryResponse.EngineVersionEnum.NUMBER_1
+                : ReviewArtifactSummaryResponse.EngineVersionEnum.NUMBER_2);
+        result.setId(artifact.get(REVIEWARTIFACT.ID));
+        result.setNovelId(artifact.get(REVIEWARTIFACT.NOVELID));
+        result.setChapterId(artifact.get(REVIEWARTIFACT.CHAPTERID));
+        result.setTaskId(artifact.get(REVIEWARTIFACT.TASKID));
+        result.setWorkflowRunId(artifact.get(REVIEWARTIFACT.WORKFLOWRUNID));
+        result.setArtifactKey(artifact.get(REVIEWARTIFACT.ARTIFACTKEY));
+        result.setKind(ReviewArtifactSummaryResponse.KindEnum.fromValue(
+                artifact.get(REVIEWARTIFACT.KIND).getLiteral()));
+        result.setStatus(ReviewArtifactSummaryResponse.StatusEnum.fromValue(
+                artifact.get(REVIEWARTIFACT.STATUS).getLiteral()));
+        result.setTitle(artifact.get(REVIEWARTIFACT.TITLE));
+        result.setSummary(artifact.get(REVIEWARTIFACT.SUMMARY));
+        result.setRevision(artifact.get(REVIEWARTIFACT.REVISION));
+        result.setActionable(actionable);
+        result.setCreatedAt(DatabaseTimestamp.api(artifact.get(REVIEWARTIFACT.CREATEDAT)));
+        result.setUpdatedAt(DatabaseTimestamp.api(artifact.get(REVIEWARTIFACT.UPDATEDAT)));
+        return result;
+    }
+
+    private DurableDetail durableDetail(
+            DSLContext context, ReviewartifactRecord artifact, int revision) {
+        if (!durableAgentSchemaReady) {
+            throw new ApiException(
+                    503,
+                    "DURABLE_AGENT_SCHEMA_UNAVAILABLE",
+                    "V2 待审核草案读取尚未启用");
+        }
+        Record revisionRecord = context.fetchOne(
+                """
+                SELECT "payloadJson", "diffJson"
+                FROM public."ReviewArtifactRevision"
+                WHERE "artifactId" = ? AND revision = ?
+                """,
+                artifact.getId(),
+                revision);
+        if (revisionRecord == null) {
+            throw revisionConflict(revision, artifact.getRevision(), "待审核草案修订不存在");
+        }
+        Map<String, Object> storedPayload = parseObject(
+                revisionRecord.get("payloadJson", String.class));
+        Map<String, Object> storedDiff = parseObject(
+                revisionRecord.get("diffJson", String.class));
+        if (revision == artifact.getRevision()
+                && (!storedPayload.equals(parseObject(artifact.getPayloadjson()))
+                        || !storedDiff.equals(parseObject(artifact.getDiffjson())))) {
+            throw new ApiException(
+                    409,
+                    "ARTIFACT_REVISION_HEAD_INCONSISTENT",
+                    "待审核草案 head 与精确修订事实不一致");
+        }
+        String bundleId = requiredStoredText(storedPayload, "evidenceBundleId");
+        String itemId = requiredStoredText(storedPayload, "evidenceItemId");
+        Record evidence = context.fetchOne(
+                """
+                SELECT item.id, item."bundleId", item."resourceType", item."resourceId",
+                       item."resourceRevision", item."resourceUpdatedAt", item."contentText",
+                       item."contentSha256", item."rangeJson"
+                FROM public."WorkflowEvidenceItem" AS item
+                JOIN public."WorkflowEvidenceBundle" AS bundle ON bundle.id = item."bundleId"
+                WHERE item.id = ? AND item."bundleId" = ? AND bundle."runId" = ?
+                  AND item.exists AND item."contentType" = 'text'
+                """,
+                itemId,
+                bundleId,
+                artifact.getWorkflowrunid());
+        if (evidence == null) throw artifactIntegrityError();
+        Map<String, Object> range = parseObject(evidence.get("rangeJson", String.class));
+        Integer start = number(range.get("startCodePoint"));
+        Integer end = number(range.get("endCodePoint"));
+        if (start == null || end == null) throw artifactIntegrityError();
+        DurableSelectionArtifact.Evidence value = new DurableSelectionArtifact.Evidence(
+                evidence.get("bundleId", String.class),
+                evidence.get("id", String.class),
+                evidence.get("resourceType", String.class),
+                evidence.get("resourceId", String.class),
+                DatabaseTimestamp.api(evidence.get("resourceUpdatedAt", LocalDateTime.class)),
+                evidence.get("contentText", String.class),
+                evidence.get("contentSha256", String.class),
+                start,
+                end);
+        DurableSelectionArtifact.Materialized materialized =
+                DurableSelectionArtifact.reconstruct(storedPayload, storedDiff, value);
+        SourceBinding binding = new SourceBinding(
+                null,
+                value.contentSha256(),
+                true,
+                value.resourceId(),
+                value.resourceType(),
+                evidence.get("resourceRevision", Integer.class),
+                value.resourceUpdatedAt());
+        return new DurableDetail(materialized, binding);
+    }
+
+    private List<ArtifactEvaluationResponse> durableEvaluations(
+            DSLContext context, String artifactId, int revision) {
+        return context.fetch(
+                        """
+                        SELECT id, "evaluatorProfile", "executionStatus", "contentVerdict",
+                               "findingsJson", "createdAt"
+                        FROM public."WorkflowEvaluation"
+                        WHERE "artifactId" = ? AND "artifactRevision" = ?
+                        ORDER BY "createdAt" DESC, id DESC
+                        """,
+                        artifactId,
+                        revision)
+                .map(value -> {
+                    String execution = value.get("executionStatus", String.class);
+                    String verdict = value.get("contentVerdict", String.class);
+                    ArtifactEvaluationResponse.VerdictEnum publicVerdict =
+                            "completed".equals(execution) && "pass".equals(verdict)
+                                    ? ArtifactEvaluationResponse.VerdictEnum.PASS
+                                    : "completed".equals(execution) && "issues_found".equals(verdict)
+                                            ? ArtifactEvaluationResponse.VerdictEnum.REVISE
+                                            : ArtifactEvaluationResponse.VerdictEnum.BLOCK;
+                    String findings = value.get("findingsJson", String.class);
+                    String summary = switch (publicVerdict) {
+                        case PASS -> "自动复审通过";
+                        case REVISE -> "自动复审发现需要作者关注的问题";
+                        case BLOCK -> "自动复审未能完成";
+                    };
+                    return new ArtifactEvaluationResponse(
+                            artifactId,
+                            DatabaseTimestamp.api(value.get("createdAt", LocalDateTime.class)),
+                            value.get("evaluatorProfile", String.class),
+                            value.get("id", String.class),
+                            publicVerdict == ArtifactEvaluationResponse.VerdictEnum.PASS
+                                    ? null
+                                    : findings,
+                            revision,
+                            summary,
+                            publicVerdict);
+                });
     }
 
     private ArtifactEvaluationResponse evaluation(ReviewartifactevaluationRecord value) {
@@ -724,10 +1005,49 @@ final class JooqReviewRepository implements ReviewRepository {
         return lock ? query.forUpdate().fetchOne() : query.fetchOne();
     }
 
-    private String encodeCursor(ReviewartifactRecord artifact) {
+    private List<Condition> artifactListConditions(
+            String userId,
+            String novelId,
+            String chapterId,
+            String taskId,
+            String status,
+            String kind,
+            String cursor) {
+        List<Condition> conditions = new ArrayList<>();
+        conditions.add(REVIEWARTIFACT.NOVELID.eq(novelId));
+        conditions.add(REVIEWARTIFACT.NOVELID.in(database.dsl()
+                .select(NOVEL.ID)
+                .from(NOVEL)
+                .where(NOVEL.USERID.eq(userId))));
+        if (chapterId != null) conditions.add(REVIEWARTIFACT.CHAPTERID.eq(chapterId));
+        if (taskId != null) conditions.add(REVIEWARTIFACT.TASKID.eq(taskId));
+        if (status != null) {
+            Reviewartifactstatus value = Reviewartifactstatus.lookupLiteral(status);
+            conditions.add(value == null
+                    ? DSL.falseCondition()
+                    : REVIEWARTIFACT.STATUS.eq(value));
+        }
+        if (kind != null) {
+            Reviewartifactkind value = Reviewartifactkind.lookupLiteral(kind);
+            conditions.add(value == null
+                    ? DSL.falseCondition()
+                    : REVIEWARTIFACT.KIND.eq(value));
+        }
+        if (cursor != null) {
+            CursorValue value = decodeCursor(cursor);
+            conditions.add(REVIEWARTIFACT.CREATEDAT.lt(value.createdAt())
+                    .or(REVIEWARTIFACT.CREATEDAT.eq(value.createdAt())
+                            .and(REVIEWARTIFACT.ID.lt(value.id()))));
+        }
+        return conditions;
+    }
+
+    private String encodeCursor(Record artifact) {
         String payload = json.writeValueAsString(Map.of(
-                "createdAt", DatabaseTimestamp.api(artifact.getCreatedat()).toString(),
-                "id", artifact.getId()));
+                "createdAt",
+                DatabaseTimestamp.api(artifact.get(REVIEWARTIFACT.CREATEDAT)).toString(),
+                "id",
+                artifact.get(REVIEWARTIFACT.ID)));
         return Base64.getUrlEncoder()
                 .withoutPadding()
                 .encodeToString(payload.getBytes(StandardCharsets.UTF_8));
@@ -771,6 +1091,49 @@ final class JooqReviewRepository implements ReviewRepository {
         } catch (RuntimeException exception) {
             throw invalidPayload();
         }
+    }
+
+    private static String detailEtag(ReviewartifactRecord artifact, int revision) {
+        String identity = artifact.getId()
+                + ":"
+                + revision
+                + ":"
+                + artifact.getStatus().getLiteral()
+                + ":"
+                + DatabaseTimestamp.api(artifact.getUpdatedat());
+        return "\"" + DurableSelectionArtifact.sha256(identity) + "\"";
+    }
+
+    private static boolean etagMatches(String candidate, String expected) {
+        if (candidate == null) return false;
+        for (String raw : candidate.split(",")) {
+            String value = raw.strip();
+            if ("*".equals(value)) return true;
+            if (value.startsWith("W/")) value = value.substring(2);
+            if (expected.equals(value)) return true;
+        }
+        return false;
+    }
+
+    private static String requiredStoredText(Map<String, Object> value, String field) {
+        Object item = value.get(field);
+        if (!(item instanceof String text) || text.isEmpty()) throw artifactIntegrityError();
+        return text;
+    }
+
+    private static Integer number(Object value) {
+        if (!(value instanceof Number number)) return null;
+        long result = number.longValue();
+        return result < Integer.MIN_VALUE || result > Integer.MAX_VALUE
+                ? null
+                : (int) result;
+    }
+
+    private static ApiException artifactIntegrityError() {
+        return new ApiException(
+                409,
+                "ARTIFACT_REVISION_INTEGRITY_ERROR",
+                "待审核草案的不可变修订或 Evidence 无法通过完整性校验");
     }
 
     private static <T> T nullable(JsonNullable<T> value) {
@@ -836,4 +1199,8 @@ final class JooqReviewRepository implements ReviewRepository {
     private record SourceFacts(String commandId, List<SourceBinding> bindings) {}
 
     private record SourceView(List<SourceBinding> bindings, String status) {}
+
+    private record DurableDetail(
+            DurableSelectionArtifact.Materialized materialized,
+            SourceBinding sourceBinding) {}
 }

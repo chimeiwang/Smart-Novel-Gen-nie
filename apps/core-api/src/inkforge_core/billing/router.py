@@ -69,7 +69,7 @@ async def _verify_internal_request(
     scope: ServiceScope,
     task_id: str,
     run_id: str,
-    novel_id: str,
+    novel_id: str | None,
 ) -> None:
     authorization = request.headers.get("Authorization", "")
     if not authorization.startswith("Bearer "):

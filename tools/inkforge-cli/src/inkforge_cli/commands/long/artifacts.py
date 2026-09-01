@@ -26,6 +26,7 @@ _ALLOWED_FIELDS = {
     "editedContentFile",
     "editedReplacement",
     "editedReplacementFile",
+    "engineVersion",
     "selectedUpdateRefs",
     "userMessage",
 }
@@ -61,6 +62,20 @@ def _require_expected_revision(payload: JsonObject) -> int:
         raise CliInputError(
             "INVALID_EXPECTED_REVISION",
             "expectedRevision 必须是大于等于 1 的整数",
+        )
+    return value
+
+
+def _require_engine_version(payload: JsonObject) -> int:
+    # 已发布的 V1 自动化不会携带该字段；省略只能解释为 V1，并在请求体中
+    # 显式补成 1。V2 必须由调用方明确给出 2，不能根据 Artifact 字段猜测。
+    if "engineVersion" not in payload:
+        return 1
+    value = payload["engineVersion"]
+    if type(value) is not int or value not in {1, 2}:
+        raise CliInputError(
+            "INVALID_ENGINE_VERSION",
+            "engineVersion 必须是整数 1 或 2",
         )
     return value
 
@@ -174,6 +189,7 @@ def _decision_body(
 ) -> JsonObject:
     _reject_unexpected_fields(payload)
     body: JsonObject = {
+        "engineVersion": _require_engine_version(payload),
         "clientRequestId": _require_stable_client_request_id(payload),
         "expectedRevision": _require_expected_revision(payload),
         "decision": decision,
@@ -239,6 +255,7 @@ def _decide(
     _reject_unexpected_fields(payload)
     _require_stable_client_request_id(payload)
     _require_expected_revision(payload)
+    _require_engine_version(payload)
     if decision == "discard":
         forbidden = sorted(_EDIT_FIELDS.intersection(payload))
         if forbidden:

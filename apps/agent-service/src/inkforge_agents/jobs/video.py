@@ -1935,6 +1935,7 @@ class ModelVideoScenePlanner:
                 runId=resource.runId,
                 agentId="剧情",
             ),
+            lane="batch_media",
         )
         if (
             response.finishReason != "stop"

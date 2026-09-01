@@ -537,12 +537,18 @@ export function ShortMediumWorkspace({
           userInstruction: instruction.trim() || null,
         },
       }));
+      if (run.engineVersion !== 1) {
+        throw new Error("中短篇任务被错误路由到不支持的执行引擎。");
+      }
       setRunningTaskId(run.id);
       await waitForTerminalOutcome(run.id);
       const terminal = requireApiData(await browserApi.GET(
         "/api/v1/writing/runs/{task_id}",
         { params: { path: { task_id: run.id } } },
       ));
+      if (terminal.engineVersion !== 1) {
+        throw new Error("中短篇任务的权威状态引擎发生变化，已停止处理。");
+      }
       const outcomeDecision = decideShortRunOutcome(terminal.outcome);
       if (outcomeDecision.kind === "failed") {
         throw new Error(

@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
+import pytest
+from inkforge_contracts import calculate_resolved_model_fingerprint
 from inkforge_core.app import create_app
+from inkforge_core.writing.schemas import WritingRunV2Response
+from pydantic import ValidationError
 
 ERROR_STATUS_CODES = (
     "400",
@@ -14,6 +20,50 @@ ERROR_STATUS_CODES = (
     "503",
     "default",
 )
+
+MODEL_SHA = "a" * 64
+
+
+def _v2_model_profile() -> dict[str, object]:
+    return {
+        "profile": "writer.chapter_selection.v1",
+        "version": 1,
+        "reasoningMode": "bounded",
+        "deploymentProfileKey": "deployment.writer.chapter_selection.v1",
+        "promptProfile": {
+            "name": "prompt.writer.chapter_selection.v1",
+            "version": 1,
+            "sha256": MODEL_SHA,
+        },
+    }
+
+
+def _v2_resolved_model() -> dict[str, object]:
+    material = {
+        "deploymentProfileKey": "deployment.writer.chapter_selection.v1",
+        "provider": "fake",
+        "model": "fake-writer",
+        "transportProfile": "transport.fake.v1",
+        "endpointProfile": "endpoint.local-fake.v1",
+        "structuredOutputRoute": "responses_json_schema_v1",
+        "capabilityVersion": "capability.fake.structured-output.v1",
+        "reasoningMode": "bounded",
+        "supportsRequestIdempotency": True,
+    }
+    return {
+        **material,
+        "deploymentFingerprint": calculate_resolved_model_fingerprint(
+            deployment_profile_key="deployment.writer.chapter_selection.v1",
+            provider="fake",
+            model="fake-writer",
+            transport_profile="transport.fake.v1",
+            endpoint_profile="endpoint.local-fake.v1",
+            structured_output_route="responses_json_schema_v1",
+            capability_version="capability.fake.structured-output.v1",
+            reasoning_mode="bounded",
+            supports_request_idempotency=True,
+        ),
+    }
 
 
 def _response_schema(operation: dict[str, object], status_code: str) -> object:
@@ -122,14 +172,14 @@ def test_openapi_exposes_run_list_status_checkpoint_and_outcome_contracts() -> N
     }
     assert _response_schema(
         paths["/api/v1/writing/runs/{task_id}"]["get"], "200"
-    ) == {"$ref": "#/components/schemas/WritingRunStatusResponse"}
+    ) == {"$ref": "#/components/schemas/WritingRunStatusPublicResponse"}
 
     list_schema = schemas["WritingRunListResponse"]
     assert list_schema["additionalProperties"] is False
     assert set(list_schema["properties"]) == {"items", "nextCursor"}
     assert set(list_schema["required"]) == {"items", "nextCursor"}
     assert list_schema["properties"]["items"]["items"] == {
-        "$ref": "#/components/schemas/WritingRunListItem"
+        "$ref": "#/components/schemas/WritingRunPublicListItem"
     }
 
     status_properties = schemas["WritingRunStatusResponse"]["properties"]
@@ -173,6 +223,286 @@ def test_openapi_exposes_run_list_status_checkpoint_and_outcome_contracts() -> N
     assert outcome_schema["properties"]["result"] == {
         "$ref": "#/components/schemas/WritingRunOutcomeResult"
     }
+
+
+def test_openapi_run_responses_use_explicit_engine_discriminators() -> None:
+    document = create_app(testing=True).openapi()
+    schemas = document["components"]["schemas"]
+    paths = document["paths"]
+
+    expected_unions = {
+        "WritingRunStartResponse": "WritingRunResponse",
+        "WritingRunStatusPublicResponse": "WritingRunStatusResponse",
+        "WritingRunPublicListItem": "WritingRunListItem",
+        "CancelWritingRunPublicResponse": "CancelWritingRunResponse",
+    }
+    for union_name, v1_name in expected_unions.items():
+        schema = schemas[union_name]
+        assert schema["discriminator"] == {
+            "propertyName": "engineVersion",
+            "mapping": {
+                "1": f"#/components/schemas/{v1_name}",
+                "2": "#/components/schemas/WritingRunV2Response",
+            },
+        }
+        assert schema["oneOf"] == [
+            {"$ref": f"#/components/schemas/{v1_name}"},
+            {"$ref": "#/components/schemas/WritingRunV2Response"},
+        ]
+
+    assert _response_schema(paths["/api/v1/writing/runs"]["post"], "202") == {
+        "$ref": "#/components/schemas/WritingRunStartResponse"
+    }
+    assert _response_schema(
+        paths["/api/v1/writing/runs/{task_id}/cancel"]["post"], "202"
+    ) == {"$ref": "#/components/schemas/CancelWritingRunPublicResponse"}
+
+    for v1_name in (
+        "WritingRunResponse",
+        "WritingRunStatusResponse",
+        "WritingRunListItem",
+        "CancelWritingRunResponse",
+    ):
+        v1 = schemas[v1_name]
+        assert v1["properties"]["engineVersion"]["const"] == 1
+        assert {"engineVersion", "runId", "taskId"} <= set(v1["required"])
+        assert {"activeSteps", "currentStep", "modelProfile", "resolvedModel"}.isdisjoint(
+            v1["properties"]
+        )
+
+    v2 = schemas["WritingRunV2Response"]
+    v2_fields = {
+        "engineVersion",
+        "runId",
+        "taskId",
+        "workflow",
+        "operation",
+        "status",
+        "chapterId",
+        "activeSteps",
+        "currentStep",
+        "cancelRequestedAt",
+        "lastEventSequence",
+        "revision",
+        "artifact",
+        "error",
+        "commandId",
+        "commandStatus",
+    }
+    assert v2["additionalProperties"] is False
+    assert set(v2["properties"]) == v2_fields
+    assert set(v2["required"]) == {
+        "engineVersion",
+        "runId",
+        "taskId",
+        "workflow",
+        "status",
+        "chapterId",
+        "activeSteps",
+        "lastEventSequence",
+        "revision",
+        "commandId",
+        "commandStatus",
+    }
+    assert v2["properties"]["engineVersion"]["const"] == 2
+    assert v2["properties"]["commandId"]["enum"] == [None]
+    assert v2["properties"]["commandStatus"]["enum"] == [None]
+    assert schemas["WorkflowCurrentStepSnapshot"]["properties"]["status"]["enum"] == [
+        "pending",
+        "running",
+        "completed",
+        "failed",
+        "skipped",
+    ]
+    assert {"modelProfile", "resolvedModel", "latestProgress"} <= set(
+        schemas["WorkflowCurrentStepSnapshot"]["required"]
+    )
+    progress_snapshot = schemas["WorkflowStepProgressSnapshot"]
+    assert progress_snapshot["additionalProperties"] is False
+    assert set(progress_snapshot["required"]) == {
+        "progressSequence",
+        "phase",
+        "elapsedSeconds",
+        "waitingOnProvider",
+        "usageStatus",
+    }
+
+
+def test_openapi_review_artifact_list_is_bounded_and_detail_is_revision_conditional() -> None:
+    document = create_app(testing=True).openapi()
+    schemas = document["components"]["schemas"]
+    legacy_list_operation = document["paths"]["/api/v1/review-artifacts"]["get"]
+    summary_list_operation = document["paths"][
+        "/api/v1/review-artifact-summaries"
+    ]["get"]
+    detail_operation = document["paths"][
+        "/api/v1/review-artifacts/{artifact_id}"
+    ]["get"]
+
+    assert _response_schema(legacy_list_operation, "200") == {
+        "$ref": "#/components/schemas/ReviewArtifactListResponse"
+    }
+    assert schemas["ReviewArtifactListResponse"]["properties"]["items"]["items"] == {
+        "$ref": "#/components/schemas/ReviewArtifactResponse"
+    }
+    assert _response_schema(summary_list_operation, "200") == {
+        "$ref": "#/components/schemas/ReviewArtifactSummaryListResponse"
+    }
+    assert schemas["ReviewArtifactSummaryListResponse"]["properties"]["items"][
+        "items"
+    ] == {
+        "$ref": "#/components/schemas/ReviewArtifactSummaryResponse"
+    }
+    summary_fields = set(schemas["ReviewArtifactSummaryResponse"]["properties"])
+    assert {
+        "engineVersion",
+        "id",
+        "workflowRunId",
+        "revision",
+        "actionable",
+        "updatedAt",
+    } <= summary_fields
+    assert {"payload", "diff", "evaluations"}.isdisjoint(summary_fields)
+    assert "engineVersion" in schemas["ReviewArtifactResponse"]["required"]
+
+    parameters = {
+        (item["in"], item["name"]): item for item in detail_operation["parameters"]
+    }
+    revision_schema = parameters[("query", "revision")]["schema"]
+    assert any(item.get("minimum") == 1 for item in revision_schema["anyOf"])
+    assert ("header", "If-None-Match") in parameters
+    assert "ETag" in detail_operation["responses"]["200"]["headers"]
+    assert detail_operation["responses"]["304"]["description"]
+
+
+def test_openapi_artifact_decision_is_an_engine_discriminated_union() -> None:
+    document = create_app(testing=True).openapi()
+    schemas = document["components"]["schemas"]
+    operation = document["paths"][
+        "/api/v1/review-artifacts/{artifact_id}/decision"
+    ]["post"]
+
+    assert _response_schema(operation, "202") == {
+        "$ref": "#/components/schemas/ArtifactDecisionPublicResponse"
+    }
+    public_response = schemas["ArtifactDecisionPublicResponse"]
+    assert public_response == {
+        "oneOf": [
+            {"$ref": "#/components/schemas/ArtifactDecisionAcceptedResponse"},
+            {"$ref": "#/components/schemas/WritingRunV2Response"},
+        ],
+        "discriminator": {
+            "propertyName": "engineVersion",
+            "mapping": {
+                "1": "#/components/schemas/ArtifactDecisionAcceptedResponse",
+                "2": "#/components/schemas/WritingRunV2Response",
+            },
+        },
+    }
+    assert schemas["ArtifactDecisionAcceptedResponse"]["properties"][
+        "engineVersion"
+    ] == {
+        "const": 1,
+        "default": 1,
+        "title": "Engineversion",
+        "type": "integer",
+    }
+    decision_request = schemas["ReviewArtifactDecisionRequest"]
+    assert decision_request["properties"]["engineVersion"]["default"] == 1
+    assert (
+        "expectedArtifactRevision"
+        in decision_request["properties"]["expectedRevision"]["description"]
+    )
+
+
+def test_openapi_resume_is_explicitly_v1_only() -> None:
+    document = create_app(testing=True).openapi()
+    schemas = document["components"]["schemas"]
+    operation = document["paths"]["/api/v1/writing/runs/{task_id}/resume"]["post"]
+
+    assert _response_schema(operation, "202") == {
+        "$ref": "#/components/schemas/ResumeWritingRunResponse"
+    }
+    response = schemas["ResumeWritingRunResponse"]
+    assert response["properties"]["engineVersion"]["const"] == 1
+    assert {"engineVersion", "runId", "taskId"} <= set(response["required"])
+    assert "oneOf" not in response
+
+
+def test_openapi_documents_v2_sse_control_and_durable_frames() -> None:
+    operation = create_app(testing=True).openapi()["paths"][
+        "/api/v1/writing/runs/{task_id}/events"
+    ]["get"]
+    response = operation["responses"]["200"]
+
+    assert set(response["content"]) == {"text/event-stream"}
+    assert response["content"]["text/event-stream"]["schema"] == {"type": "string"}
+    assert response["x-inkforge-v2-sse"] == {
+        "firstFrame": {
+            "event": "run_snapshot",
+            "schema": "inkforge_contracts.workflow_events.RunSnapshot",
+        },
+        "subsequentFrames": {
+            "schema": "inkforge_contracts.workflow_events.WorkflowEventEnvelope",
+        },
+    }
+
+
+def test_v2_public_projection_never_fakes_a_command() -> None:
+    current_step = {
+        "stepId": "step-1",
+        "ordinal": 1,
+        "purpose": "generation",
+        "lane": "creative",
+        "modelProfile": _v2_model_profile(),
+        "resolvedModel": _v2_resolved_model(),
+        "status": "running",
+        "attemptCount": 1,
+        "fencingToken": 2,
+        "latestProgress": {
+            "progressSequence": 3,
+            "phase": "validating",
+            "elapsedSeconds": 12,
+            "waitingOnProvider": False,
+            "usageStatus": "complete",
+        },
+        "errorCode": None,
+    }
+    payload = {
+        "engineVersion": 2,
+        "runId": "run-2",
+        "taskId": "run-2",
+        "workflow": "long_serial",
+        "operation": "write_chapter",
+        "status": "running",
+        "chapterId": "chapter-1",
+        "activeSteps": [current_step],
+        "currentStep": current_step,
+        "cancelRequestedAt": datetime(2026, 9, 1, tzinfo=UTC),
+        "lastEventSequence": 7,
+        "revision": 3,
+        "artifact": None,
+        "error": None,
+        "commandId": None,
+        "commandStatus": None,
+    }
+
+    response = WritingRunV2Response.model_validate(payload)
+    assert response.currentStep is not None
+    assert response.currentStep.status == "running"
+    assert [step.stepId for step in response.activeSteps] == ["step-1"]
+    assert response.currentStep.modelProfile is not None
+    assert response.currentStep.modelProfile.profile == "writer.chapter_selection.v1"
+    assert response.currentStep.resolvedModel is not None
+    assert response.currentStep.resolvedModel.model == "fake-writer"
+    assert response.currentStep.latestProgress is not None
+    assert response.currentStep.latestProgress.progressSequence == 3
+    assert response.commandId is response.commandStatus is None
+
+    with pytest.raises(ValidationError, match="伪装"):
+        WritingRunV2Response.model_validate({**payload, "commandId": "step-1"})
+    with pytest.raises(ValidationError, match="兼容别名"):
+        WritingRunV2Response.model_validate({**payload, "taskId": "task-other"})
 
 
 def test_openapi_writing_run_paths_use_unified_error_response() -> None:

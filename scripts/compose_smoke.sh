@@ -52,6 +52,27 @@ if [ "$agent_required_successes" -gt "$agent_max_attempts" ]; then
 fi
 
 compose ps
+# 普通 Redis 保持可重建低延迟配置；execution journal 独立验证 AOF 与真实写入。
+compose exec -T redis sh -c '
+set -eu
+test "$(redis-cli --raw PING)" = PONG
+test "$(redis-cli --raw CONFIG GET appendonly | tail -n 1)" = no
+'
+compose exec -T execution-redis sh -c '
+set -eu
+test "$(redis-cli --raw PING)" = PONG
+test "$(redis-cli --raw CONFIG GET appendonly | tail -n 1)" = yes
+test "$(redis-cli --raw CONFIG GET appendfsync | tail -n 1)" = always
+test "$(redis-cli --raw CONFIG GET aof-load-truncated | tail -n 1)" = no
+test "$(redis-cli --raw CONFIG GET maxmemory-policy | tail -n 1)" = noeviction
+test "$(redis-cli --raw CONFIG GET maxmemory | tail -n 1)" = 33554432
+test "$(redis-cli --raw CONFIG GET hash-max-listpack-value | tail -n 1)" = 4096
+test "$(redis-cli --raw CONFIG GET hash-max-listpack-entries | tail -n 1)" = 64
+probe_key="inkforge:executions:deployment-write-probe"
+test "$(redis-cli --raw SET "$probe_key" 1)" = OK
+test "$(redis-cli --raw DEL "$probe_key")" = 1
+redis-cli --raw INFO persistence | grep -q "^aof_last_write_status:ok"
+'
 # 写探针只创建并删除专用空目录：同时验证卷权限，又不覆盖任何真实上传或日志。
 compose exec -T core-api sh -c '
 set -eu

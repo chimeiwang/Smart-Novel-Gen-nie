@@ -14,6 +14,8 @@ from .base import (
     ModelFinishReason,
     ModelInvalidToolCallCode,
     ModelMessage,
+    ModelStructuredOutputDiagnostic,
+    ModelStructuredOutputRoute,
     ModelToolCall,
     ModelToolRecoveryCode,
     ModelTurnRequest,
@@ -25,6 +27,8 @@ from .base import (
 )
 from .openai_compatible import (
     _append_missing_container_closers,
+    _is_official_deepseek_endpoint,
+    _parse_and_validate_structured_output,
     _resolve_deepseek_strict_base_url,
     normalize_finish_reason,
 )
@@ -61,6 +65,9 @@ class DeepSeekV4Provider:
 
     billable = True
     provider_name = "openai_compatible"
+    transport_profile = "transport.deepseek-v4.v1"
+    capability_version = "capability.deepseek-v4.chat-json.v1"
+    supports_request_idempotency = False
 
     def __init__(
         self,
@@ -71,6 +78,11 @@ class DeepSeekV4Provider:
         if settings.openai_api_key is None or not settings.openai_api_key.get_secret_value():
             raise ValueError("真实模型提供方缺少 OPENAI_API_KEY")
         self.model_name = settings.openai_model
+        self.endpoint_profile = (
+            "endpoint.deepseek-official.v1"
+            if _is_official_deepseek_endpoint(settings.openai_base_url)
+            else "endpoint.deepseek-custom.v1"
+        )
         self._endpoint = _completion_endpoint(settings.openai_base_url)
         strict_base_url = _resolve_deepseek_strict_base_url(settings)
         self._strict_endpoint = (
@@ -86,7 +98,21 @@ class DeepSeekV4Provider:
         if self._owns_client:
             await self._client.aclose()
 
+    def supports_structured_output(self, route: ModelStructuredOutputRoute) -> bool:
+        return route == "chat_json_output_v1"
+
     async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+        structured_output = request.structuredOutput
+        structured_validator: jsonschema_rs.Validator | None = None
+        if structured_output is not None:
+            if structured_output.route != "chat_json_output_v1":
+                raise ValueError("DeepSeek V4 原始适配器只支持 chat_json_output_v1")
+            if not any("json" in message.content.casefold() for message in request.messages):
+                raise ValueError("chat_json_output_v1 的消息正文必须显式包含 json")
+            try:
+                structured_validator = jsonschema_rs.validator_for(structured_output.jsonSchema)
+            except ValueError:
+                raise ValueError("structuredOutput.jsonSchema 不是有效的 JSON Schema") from None
         strict_tool_count = sum(tool.strict for tool in request.tools)
         if 0 < strict_tool_count < len(request.tools):
             raise ValueError("DeepSeek 工具请求不能混用 strict 与非 strict 函数")
@@ -104,6 +130,8 @@ class DeepSeekV4Provider:
             "messages": [_message_to_wire(message) for message in request.messages],
             "max_tokens": request.maxOutputTokens,
         }
+        if structured_output is not None:
+            payload["response_format"] = {"type": "json_object"}
         if request.tools:
             payload["tools"] = [
                 {
@@ -176,11 +204,48 @@ class DeepSeekV4Provider:
             status_code=response.status_code,
             request_id=_response_request_id(response),
         )
-        return (
-            _normalize_deepseek_quality_result(result)
-            if use_strict_endpoint
-            else result
-        )
+        if structured_output is not None:
+            if structured_validator is None:
+                raise RuntimeError("DeepSeek V4 结构化输出校验器缺失")
+            unexpected_tool_output = bool(
+                result.toolCalls or result.invalidToolCallCount or result.recoveredToolCallCount
+            )
+            parsed: dict[str, Any] | None
+            diagnostic: ModelStructuredOutputDiagnostic | None
+            recovery_code: str | None
+            if unexpected_tool_output:
+                parsed = None
+                recovery_code = None
+                diagnostic = ModelStructuredOutputDiagnostic(
+                    code="unexpected_output",
+                    jsonPointer="",
+                    keyword="toolCalls",
+                )
+            else:
+                parsed, diagnostic, recovery_code = _parse_and_validate_structured_output(
+                    raw_text=result.content,
+                    structured_output=structured_output,
+                    validator=structured_validator,
+                )
+            result = ModelTurnResult.model_validate(
+                result.model_dump(mode="python")
+                | {
+                    "content": "",
+                    "reasoningContent": None,
+                    "toolCalls": [],
+                    "invalidToolCallCount": 0,
+                    "invalidToolCallNames": [],
+                    "invalidToolCallCodes": [],
+                    "invalidToolCallArgumentCharacterCounts": [],
+                    "recoveredToolCallCount": 0,
+                    "recoveredToolCallCodes": [],
+                    "recoveredToolCallAppendedContainerCounts": [],
+                    "structuredOutput": parsed,
+                    "structuredOutputDiagnostic": diagnostic,
+                    "structuredOutputCorrectionCount": (1 if recovery_code is not None else 0),
+                }
+            )
+        return _normalize_deepseek_quality_result(result) if use_strict_endpoint else result
 
 
 def _project_deepseek_quality_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
@@ -207,10 +272,7 @@ def _inline_quality_schema_node(
     stack: tuple[str, ...],
 ) -> object:
     if isinstance(node, list):
-        return [
-            _inline_quality_schema_node(item, definitions, stack=stack)
-            for item in node
-        ]
+        return [_inline_quality_schema_node(item, definitions, stack=stack) for item in node]
     if not isinstance(node, Mapping):
         return deepcopy(node)
     if "$ref" in node:
@@ -352,9 +414,7 @@ def _normalize_deepseek_quality_arguments(
 
 def _normalize_deepseek_quality_result(result: ModelTurnResult) -> ModelTurnResult:
     calls = [
-        call.model_copy(
-            update={"arguments": _normalize_deepseek_quality_arguments(call.arguments)}
-        )
+        call.model_copy(update={"arguments": _normalize_deepseek_quality_arguments(call.arguments)})
         if call.name == _QUALITY_TOOL_NAME
         else call
         for call in result.toolCalls
@@ -634,14 +694,8 @@ def _parse_tool_calls(
             continue
         name = function.get("name")
         raw_arguments = function.get("arguments")
-        argument_character_count = (
-            len(raw_arguments) if isinstance(raw_arguments, str) else 0
-        )
-        safe_name = (
-            name
-            if isinstance(name, str) and name in requested_by_name
-            else "未知工具"
-        )
+        argument_character_count = len(raw_arguments) if isinstance(raw_arguments, str) else 0
+        safe_name = name if isinstance(name, str) and name in requested_by_name else "未知工具"
         if not isinstance(name, str) or not name.strip():
             result.add_invalid(
                 name="未知工具",
@@ -680,9 +734,7 @@ def _parse_tool_calls(
                 recovered_call, appended_container_count = recovery
                 result.calls.append(recovered_call)
                 result.recovered_codes.append("append_container_closers")
-                result.recovered_appended_container_counts.append(
-                    appended_container_count
-                )
+                result.recovered_appended_container_counts.append(appended_container_count)
                 continue
             result.add_invalid(
                 name=safe_name,

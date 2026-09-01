@@ -51,6 +51,7 @@ _AGENT_TO_CORE_SCOPES = frozenset(
         ServiceScope.VIDEO_WRITE,
         ServiceScope.BILLING_AUTHORIZE,
         ServiceScope.BILLING_USAGE_WRITE,
+        ServiceScope.BILLING_RECONCILE,
     }
 )
 _PUBLIC_MESSAGES = {

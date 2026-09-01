@@ -156,6 +156,722 @@
         "title": "AgentJobRequest",
         "type": "object"
       },
+      "EvidenceBundle": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceItem"
+            },
+            "maxItems": 4096,
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          },
+          "manifest": {
+            "$ref": "#/components/schemas/EvidenceManifest"
+          },
+          "manifestSha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Manifestsha256",
+            "type": "string"
+          },
+          "policyVersion": {
+            "description": "本 Step 对同一不可变 bundle 的授权视图；generation 使用捕获策略，review 可使用 Catalog 固定的 reviewer evidence policy，bundle id/items/manifest 不变",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Policyversion",
+            "type": "string"
+          },
+          "runId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Runid",
+            "type": "string"
+          },
+          "totalBytes": {
+            "minimum": 0.0,
+            "title": "Totalbytes",
+            "type": "integer"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "runId",
+          "version",
+          "policyVersion",
+          "manifest",
+          "manifestSha256",
+          "totalBytes",
+          "items"
+        ],
+        "title": "EvidenceBundle",
+        "type": "object"
+      },
+      "EvidenceItem": {
+        "additionalProperties": false,
+        "properties": {
+          "bundleId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Bundleid",
+            "type": "string"
+          },
+          "byteCount": {
+            "minimum": 0.0,
+            "title": "Bytecount",
+            "type": "integer"
+          },
+          "contentJson": {
+            "$ref": "#/components/schemas/JsonValue",
+            "nullable": true
+          },
+          "contentSha256": {
+            "nullable": true,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Contentsha256",
+            "type": "string"
+          },
+          "contentText": {
+            "nullable": true,
+            "title": "Contenttext",
+            "type": "string"
+          },
+          "contentType": {
+            "enum": [
+              "text",
+              "json"
+            ],
+            "nullable": true,
+            "title": "Contenttype",
+            "type": "string"
+          },
+          "exists": {
+            "title": "Exists",
+            "type": "boolean"
+          },
+          "id": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Id",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Metadata",
+            "type": "object"
+          },
+          "ordinal": {
+            "exclusiveMinimum": 0.0,
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "range": {
+            "$ref": "#/components/schemas/EvidenceRange",
+            "nullable": true
+          },
+          "resourceId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Resourceid",
+            "type": "string"
+          },
+          "resourceRevision": {
+            "exclusiveMinimum": 0.0,
+            "nullable": true,
+            "title": "Resourcerevision",
+            "type": "integer"
+          },
+          "resourceType": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Resourcetype",
+            "type": "string"
+          },
+          "resourceUpdatedAt": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Resourceupdatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "bundleId",
+          "ordinal",
+          "resourceType",
+          "resourceId",
+          "exists",
+          "byteCount"
+        ],
+        "title": "EvidenceItem",
+        "type": "object"
+      },
+      "EvidenceManifest": {
+        "additionalProperties": false,
+        "properties": {
+          "bundleId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Bundleid",
+            "type": "string"
+          },
+          "bundleVersion": {
+            "exclusiveMinimum": 0.0,
+            "title": "Bundleversion",
+            "type": "integer"
+          },
+          "itemCount": {
+            "exclusiveMinimum": 0.0,
+            "title": "Itemcount",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceManifestItem"
+            },
+            "maxItems": 4096,
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "bundleId",
+          "bundleVersion",
+          "itemCount",
+          "items"
+        ],
+        "title": "EvidenceManifest",
+        "type": "object"
+      },
+      "EvidenceManifestItem": {
+        "additionalProperties": false,
+        "properties": {
+          "byteCount": {
+            "minimum": 0.0,
+            "title": "Bytecount",
+            "type": "integer"
+          },
+          "contentSha256": {
+            "nullable": true,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Contentsha256",
+            "type": "string"
+          },
+          "contentType": {
+            "enum": [
+              "text",
+              "json"
+            ],
+            "nullable": true,
+            "title": "Contenttype",
+            "type": "string"
+          },
+          "exists": {
+            "title": "Exists",
+            "type": "boolean"
+          },
+          "itemId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Itemid",
+            "type": "string"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Metadata",
+            "type": "object"
+          },
+          "ordinal": {
+            "exclusiveMinimum": 0.0,
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "range": {
+            "$ref": "#/components/schemas/EvidenceRange",
+            "nullable": true
+          },
+          "resourceId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Resourceid",
+            "type": "string"
+          },
+          "resourceRevision": {
+            "exclusiveMinimum": 0.0,
+            "nullable": true,
+            "title": "Resourcerevision",
+            "type": "integer"
+          },
+          "resourceType": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Resourcetype",
+            "type": "string"
+          },
+          "resourceUpdatedAt": {
+            "format": "date-time",
+            "nullable": true,
+            "title": "Resourceupdatedat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "itemId",
+          "ordinal",
+          "resourceType",
+          "resourceId",
+          "exists",
+          "byteCount"
+        ],
+        "title": "EvidenceManifestItem",
+        "type": "object"
+      },
+      "EvidenceRange": {
+        "additionalProperties": false,
+        "description": "以 Unicode 码点计数的半开区间。",
+        "properties": {
+          "endCodePoint": {
+            "exclusiveMinimum": 0.0,
+            "title": "Endcodepoint",
+            "type": "integer"
+          },
+          "startCodePoint": {
+            "minimum": 0.0,
+            "title": "Startcodepoint",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "startCodePoint",
+          "endCodePoint"
+        ],
+        "title": "EvidenceRange",
+        "type": "object"
+      },
+      "ExecutionCancelAccepted": {
+        "additionalProperties": false,
+        "properties": {
+          "acceptedAt": {
+            "format": "date-time",
+            "title": "Acceptedat",
+            "type": "string"
+          },
+          "cancelRequestId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Cancelrequestid",
+            "type": "string"
+          },
+          "fencingToken": {
+            "exclusiveMinimum": 0.0,
+            "title": "Fencingtoken",
+            "type": "integer"
+          },
+          "jobId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Jobid",
+            "type": "string"
+          },
+          "novelId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "nullable": true,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Novelid",
+            "type": "string"
+          },
+          "protocolVersion": {
+            "title": "Protocolversion",
+            "type": "string",
+            "x-inkforge-const": "2.0"
+          },
+          "runId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Runid",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "accepted",
+              "already_cancelled",
+              "already_terminal",
+              "not_found"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "stepId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Stepid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocolVersion",
+          "cancelRequestId",
+          "runId",
+          "novelId",
+          "stepId",
+          "jobId",
+          "fencingToken",
+          "status",
+          "acceptedAt"
+        ],
+        "title": "ExecutionCancelAccepted",
+        "type": "object"
+      },
+      "ExecutionCancelRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "cancelRequestId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Cancelrequestid",
+            "type": "string"
+          },
+          "fencingToken": {
+            "exclusiveMinimum": 0.0,
+            "title": "Fencingtoken",
+            "type": "integer"
+          },
+          "jobId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Jobid",
+            "type": "string"
+          },
+          "novelId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "nullable": true,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Novelid",
+            "type": "string"
+          },
+          "protocolVersion": {
+            "title": "Protocolversion",
+            "type": "string",
+            "x-inkforge-const": "2.0"
+          },
+          "requestHash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Requesthash",
+            "type": "string"
+          },
+          "requestedAt": {
+            "format": "date-time",
+            "title": "Requestedat",
+            "type": "string"
+          },
+          "runId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Runid",
+            "type": "string"
+          },
+          "stepId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Stepid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocolVersion",
+          "cancelRequestId",
+          "runId",
+          "novelId",
+          "stepId",
+          "jobId",
+          "fencingToken",
+          "requestHash",
+          "requestedAt"
+        ],
+        "title": "ExecutionCancelRequest",
+        "type": "object"
+      },
+      "ExecutionStepAccepted": {
+        "additionalProperties": false,
+        "properties": {
+          "acceptedAt": {
+            "format": "date-time",
+            "title": "Acceptedat",
+            "type": "string"
+          },
+          "fencingToken": {
+            "exclusiveMinimum": 0.0,
+            "title": "Fencingtoken",
+            "type": "integer"
+          },
+          "jobId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Jobid",
+            "type": "string"
+          },
+          "novelId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "nullable": true,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Novelid",
+            "type": "string"
+          },
+          "protocolVersion": {
+            "title": "Protocolversion",
+            "type": "string",
+            "x-inkforge-const": "2.0"
+          },
+          "requestHash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Requesthash",
+            "type": "string"
+          },
+          "resolvedModel": {
+            "$ref": "#/components/schemas/ResolvedModelRef"
+          },
+          "runId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Runid",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "accepted",
+              "queued"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "stepId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Stepid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocolVersion",
+          "jobId",
+          "runId",
+          "novelId",
+          "stepId",
+          "fencingToken",
+          "requestHash",
+          "resolvedModel",
+          "status",
+          "acceptedAt"
+        ],
+        "title": "ExecutionStepAccepted",
+        "type": "object"
+      },
+      "ExecutionStepRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "artifactId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "nullable": true,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Artifactid",
+            "type": "string"
+          },
+          "artifactRevision": {
+            "exclusiveMinimum": 0.0,
+            "nullable": true,
+            "title": "Artifactrevision",
+            "type": "integer"
+          },
+          "budget": {
+            "$ref": "#/components/schemas/StepBudget"
+          },
+          "dispatchMode": {
+            "description": "transport/fencing 事实，不进入 requestHash；running_recovery 缺 journal 时必须 MODEL_OUTCOME_UNKNOWN",
+            "enum": [
+              "initial",
+              "pending_recovery",
+              "running_recovery"
+            ],
+            "title": "Dispatchmode",
+            "type": "string"
+          },
+          "evidenceBundle": {
+            "$ref": "#/components/schemas/EvidenceBundle"
+          },
+          "fencingToken": {
+            "exclusiveMinimum": 0.0,
+            "title": "Fencingtoken",
+            "type": "integer"
+          },
+          "idempotencyKey": {
+            "description": "Agent 必须把此键原样传给声明支持请求幂等的供应商",
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Idempotencykey",
+            "type": "string"
+          },
+          "input": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Input",
+            "type": "object"
+          },
+          "inputHash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Inputhash",
+            "type": "string"
+          },
+          "jobId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Jobid",
+            "type": "string"
+          },
+          "lane": {
+            "enum": [
+              "interactive",
+              "creative",
+              "batch_media"
+            ],
+            "title": "Lane",
+            "type": "string"
+          },
+          "modelProfile": {
+            "$ref": "#/components/schemas/ModelProfileRef"
+          },
+          "novelId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "nullable": true,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Novelid",
+            "type": "string"
+          },
+          "operation": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Operation",
+            "type": "string"
+          },
+          "outputSchema": {
+            "$ref": "#/components/schemas/OutputSchemaRef"
+          },
+          "protocolVersion": {
+            "title": "Protocolversion",
+            "type": "string",
+            "x-inkforge-const": "2.0"
+          },
+          "purpose": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Purpose",
+            "type": "string"
+          },
+          "requestHash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Requesthash",
+            "type": "string"
+          },
+          "runId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Runid",
+            "type": "string"
+          },
+          "stepId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Stepid",
+            "type": "string"
+          },
+          "submittedAt": {
+            "format": "date-time",
+            "title": "Submittedat",
+            "type": "string"
+          },
+          "workflow": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Workflow",
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocolVersion",
+          "jobId",
+          "runId",
+          "novelId",
+          "stepId",
+          "fencingToken",
+          "dispatchMode",
+          "idempotencyKey",
+          "requestHash",
+          "inputHash",
+          "input",
+          "workflow",
+          "operation",
+          "purpose",
+          "lane",
+          "evidenceBundle",
+          "modelProfile",
+          "outputSchema",
+          "budget",
+          "submittedAt"
+        ],
+        "title": "ExecutionStepRequest",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -170,6 +886,206 @@
         "type": "object"
       },
       "JsonValue": {},
+      "ModelProfileRef": {
+        "additionalProperties": false,
+        "description": "Core 授权的逻辑模型 Profile；不包含 Agent 部署配置。",
+        "properties": {
+          "deploymentProfileKey": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Deploymentprofilekey",
+            "type": "string"
+          },
+          "profile": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Profile",
+            "type": "string"
+          },
+          "promptProfile": {
+            "$ref": "#/components/schemas/PromptProfileRef"
+          },
+          "reasoningMode": {
+            "enum": [
+              "disabled",
+              "bounded"
+            ],
+            "title": "Reasoningmode",
+            "type": "string"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "profile",
+          "version",
+          "reasoningMode",
+          "deploymentProfileKey",
+          "promptProfile"
+        ],
+        "title": "ModelProfileRef",
+        "type": "object"
+      },
+      "OutputSchemaRef": {
+        "additionalProperties": false,
+        "properties": {
+          "jsonSchema": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "minProperties": 1,
+            "title": "Jsonschema",
+            "type": "object"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Name",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "sha256",
+          "jsonSchema"
+        ],
+        "title": "OutputSchemaRef",
+        "type": "object"
+      },
+      "PromptProfileRef": {
+        "additionalProperties": false,
+        "description": "Manifest 管理的静态 system prompt 身份；正文由双端 Registry 按哈希校验。",
+        "properties": {
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Name",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "sha256"
+        ],
+        "title": "PromptProfileRef",
+        "type": "object"
+      },
+      "ResolvedModelRef": {
+        "additionalProperties": false,
+        "description": "Agent 对逻辑 Profile 的一次可审计部署解析。",
+        "properties": {
+          "capabilityVersion": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Capabilityversion",
+            "type": "string"
+          },
+          "deploymentFingerprint": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Deploymentfingerprint",
+            "type": "string"
+          },
+          "deploymentProfileKey": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Deploymentprofilekey",
+            "type": "string"
+          },
+          "endpointProfile": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Endpointprofile",
+            "type": "string"
+          },
+          "model": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Provider",
+            "type": "string"
+          },
+          "reasoningMode": {
+            "enum": [
+              "disabled",
+              "bounded"
+            ],
+            "title": "Reasoningmode",
+            "type": "string"
+          },
+          "structuredOutputRoute": {
+            "enum": [
+              "responses_json_schema_v1",
+              "chat_json_output_v1"
+            ],
+            "title": "Structuredoutputroute",
+            "type": "string"
+          },
+          "supportsRequestIdempotency": {
+            "description": "仅当 Provider 确实原样传递 ExecutionStepRequest.idempotencyKey 时为 true",
+            "title": "Supportsrequestidempotency",
+            "type": "boolean"
+          },
+          "transportProfile": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Transportprofile",
+            "type": "string"
+          }
+        },
+        "required": [
+          "deploymentProfileKey",
+          "deploymentFingerprint",
+          "provider",
+          "model",
+          "transportProfile",
+          "endpointProfile",
+          "structuredOutputRoute",
+          "capabilityVersion",
+          "reasoningMode",
+          "supportsRequestIdempotency"
+        ],
+        "title": "ResolvedModelRef",
+        "type": "object"
+      },
       "SeedanceRenderError": {
         "additionalProperties": false,
         "properties": {
@@ -477,6 +1393,86 @@
         "title": "SeedanceRuntimeReference",
         "type": "object"
       },
+      "StepBudget": {
+        "additionalProperties": false,
+        "description": "一个耐久 Step 的完整、不可隐式扩张的执行预算。",
+        "properties": {
+          "maxCompletionTokens": {
+            "maximum": 10000000.0,
+            "minimum": 0.0,
+            "title": "Maxcompletiontokens",
+            "type": "integer"
+          },
+          "maxCostMicros": {
+            "maximum": 1000000000.0,
+            "minimum": 0.0,
+            "title": "Maxcostmicros",
+            "type": "integer"
+          },
+          "maxInputTokens": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 10000000.0,
+            "title": "Maxinputtokens",
+            "type": "integer"
+          },
+          "maxModelCalls": {
+            "title": "Maxmodelcalls",
+            "type": "integer",
+            "x-inkforge-const": 1
+          },
+          "maxPromptCacheMissTokens": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 10000000.0,
+            "title": "Maxpromptcachemisstokens",
+            "type": "integer"
+          },
+          "maxProtocolCorrections": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Maxprotocolcorrections",
+            "type": "integer"
+          },
+          "maxProviderRetries": {
+            "description": "当前单 Step 内的供应商重试上限；不是 RunBudget catalog 字段",
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Maxproviderretries",
+            "type": "integer"
+          },
+          "maxReasoningTokens": {
+            "maximum": 10000000.0,
+            "minimum": 0.0,
+            "title": "Maxreasoningtokens",
+            "type": "integer"
+          },
+          "maxVisibleOutputTokens": {
+            "maximum": 10000000.0,
+            "minimum": 0.0,
+            "title": "Maxvisibleoutputtokens",
+            "type": "integer"
+          },
+          "maxWallClockSeconds": {
+            "exclusiveMinimum": 0.0,
+            "maximum": 86400.0,
+            "title": "Maxwallclockseconds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "maxModelCalls",
+          "maxInputTokens",
+          "maxPromptCacheMissTokens",
+          "maxCompletionTokens",
+          "maxReasoningTokens",
+          "maxVisibleOutputTokens",
+          "maxCostMicros",
+          "maxWallClockSeconds",
+          "maxProviderRetries",
+          "maxProtocolCorrections"
+        ],
+        "title": "StepBudget",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -617,6 +1613,99 @@
           }
         },
         "summary": "Get Workflow Run",
+        "tags": [
+          "agent-service"
+        ]
+      }
+    },
+    "/internal/v1/executions": {
+      "post": {
+        "operationId": "submit_execution_internal_v1_executions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecutionStepRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionStepAccepted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Submit Execution",
+        "tags": [
+          "agent-service"
+        ]
+      }
+    },
+    "/internal/v1/executions/{job_id}/cancel": {
+      "put": {
+        "operationId": "cancel_execution_internal_v1_executions__job_id__cancel_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecutionCancelRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionCancelAccepted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Cancel Execution",
         "tags": [
           "agent-service"
         ]

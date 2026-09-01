@@ -22,6 +22,7 @@ from .auth.readiness import RedisReadiness
 from .auth.repository import AuthRepository
 from .auth.service import AuthService, RedisRateLimiter
 from .billing.grants import ModelGrantCodec
+from .billing.reconciliation_router import router as billing_reconciliation_router
 from .billing.repository import BillingRepository
 from .billing.router import internal_router as billing_internal_router
 from .billing.router import router as billing_router
@@ -106,6 +107,7 @@ from .video.repository import VideoRepository
 from .video.router import router as video_router
 from .video.service import VideoService
 from .video.storage import VideoAssetStorage
+from .workflows.router import router as workflow_execution_callback_router
 from .writing.callbacks import router as writing_callback_router
 from .writing.cancellation import WritingRunCancellationRepository, WritingRunCancellationService
 from .writing.command_dispatcher import WritingRunCommandDispatcher
@@ -614,8 +616,10 @@ def create_app(
     app.include_router(references_internal_router, include_in_schema=False)
     app.include_router(styles_internal_router, include_in_schema=False)
     app.include_router(billing_internal_router, include_in_schema=False)
+    app.include_router(billing_reconciliation_router, include_in_schema=False)
     app.include_router(tool_internal_router, include_in_schema=False)
     app.include_router(writing_callback_router, include_in_schema=False)
+    app.include_router(workflow_execution_callback_router, include_in_schema=False)
     app.include_router(reviews_internal_router, include_in_schema=False)
     app.include_router(video_internal_router, include_in_schema=False)
     app.include_router(video_adaptation_internal_router, include_in_schema=False)

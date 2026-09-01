@@ -172,6 +172,12 @@
             "title": "Deleted",
             "type": "boolean"
           },
+          "engineVersion": {
+            "const": 1,
+            "default": 1,
+            "title": "Engineversion",
+            "type": "integer"
+          },
           "savedCount": {
             "default": 0,
             "title": "Savedcount",
@@ -202,6 +208,23 @@
         ],
         "title": "ArtifactDecisionAcceptedResponse",
         "type": "object"
+      },
+      "ArtifactDecisionPublicResponse": {
+        "discriminator": {
+          "mapping": {
+            "1": "#/components/schemas/ArtifactDecisionAcceptedResponse",
+            "2": "#/components/schemas/WritingRunV2Response"
+          },
+          "propertyName": "engineVersion"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ArtifactDecisionAcceptedResponse"
+          },
+          {
+            "$ref": "#/components/schemas/WritingRunV2Response"
+          }
+        ]
       },
       "ArtifactEvaluationResponse": {
         "additionalProperties": false,
@@ -575,6 +598,23 @@
         "title": "Body_upload_reference_api_v1_styles__style_id__references_post",
         "type": "object"
       },
+      "CancelWritingRunPublicResponse": {
+        "discriminator": {
+          "mapping": {
+            "1": "#/components/schemas/CancelWritingRunResponse",
+            "2": "#/components/schemas/WritingRunV2Response"
+          },
+          "propertyName": "engineVersion"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/CancelWritingRunResponse"
+          },
+          {
+            "$ref": "#/components/schemas/WritingRunV2Response"
+          }
+        ]
+      },
       "CancelWritingRunRequest": {
         "additionalProperties": false,
         "properties": {
@@ -639,12 +679,23 @@
             "title": "Effective",
             "type": "boolean"
           },
+          "engineVersion": {
+            "const": 1,
+            "title": "Engineversion",
+            "type": "integer"
+          },
+          "runId": {
+            "title": "Runid",
+            "type": "string"
+          },
           "taskId": {
             "title": "Taskid",
             "type": "string"
           }
         },
         "required": [
+          "engineVersion",
+          "runId",
           "taskId",
           "commandId",
           "commandStatus",
@@ -8294,6 +8345,51 @@
         "title": "MessageResponse",
         "type": "object"
       },
+      "ModelProfileRef": {
+        "additionalProperties": false,
+        "description": "Core 授权的逻辑模型 Profile；不包含 Agent 部署配置。",
+        "properties": {
+          "deploymentProfileKey": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Deploymentprofilekey",
+            "type": "string"
+          },
+          "profile": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Profile",
+            "type": "string"
+          },
+          "promptProfile": {
+            "$ref": "#/components/schemas/PromptProfileRef"
+          },
+          "reasoningMode": {
+            "enum": [
+              "disabled",
+              "bounded"
+            ],
+            "title": "Reasoningmode",
+            "type": "string"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "profile",
+          "version",
+          "reasoningMode",
+          "deploymentProfileKey",
+          "promptProfile"
+        ],
+        "title": "ModelProfileRef",
+        "type": "object"
+      },
       "NovelResponse": {
         "additionalProperties": false,
         "properties": {
@@ -9379,6 +9475,36 @@
         "title": "PostProductionTakeResponse",
         "type": "object"
       },
+      "PromptProfileRef": {
+        "additionalProperties": false,
+        "description": "Manifest 管理的静态 system prompt 身份；正文由双端 Registry 按哈希校验。",
+        "properties": {
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Name",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "sha256"
+        ],
+        "title": "PromptProfileRef",
+        "type": "object"
+      },
       "QualityCheckDto": {
         "additionalProperties": false,
         "properties": {
@@ -10069,6 +10195,93 @@
         ],
         "type": "string"
       },
+      "ResolvedModelRef": {
+        "additionalProperties": false,
+        "description": "Agent 对逻辑 Profile 的一次可审计部署解析。",
+        "properties": {
+          "capabilityVersion": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Capabilityversion",
+            "type": "string"
+          },
+          "deploymentFingerprint": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Deploymentfingerprint",
+            "type": "string"
+          },
+          "deploymentProfileKey": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Deploymentprofilekey",
+            "type": "string"
+          },
+          "endpointProfile": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Endpointprofile",
+            "type": "string"
+          },
+          "model": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Provider",
+            "type": "string"
+          },
+          "reasoningMode": {
+            "enum": [
+              "disabled",
+              "bounded"
+            ],
+            "title": "Reasoningmode",
+            "type": "string"
+          },
+          "structuredOutputRoute": {
+            "enum": [
+              "responses_json_schema_v1",
+              "chat_json_output_v1"
+            ],
+            "title": "Structuredoutputroute",
+            "type": "string"
+          },
+          "supportsRequestIdempotency": {
+            "description": "仅当 Provider 确实原样传递 ExecutionStepRequest.idempotencyKey 时为 true",
+            "title": "Supportsrequestidempotency",
+            "type": "boolean"
+          },
+          "transportProfile": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Transportprofile",
+            "type": "string"
+          }
+        },
+        "required": [
+          "deploymentProfileKey",
+          "deploymentFingerprint",
+          "provider",
+          "model",
+          "transportProfile",
+          "endpointProfile",
+          "structuredOutputRoute",
+          "capabilityVersion",
+          "reasoningMode",
+          "supportsRequestIdempotency"
+        ],
+        "title": "ResolvedModelRef",
+        "type": "object"
+      },
       "ResumeWritingRunRequest": {
         "additionalProperties": false,
         "properties": {
@@ -10132,14 +10345,25 @@
             "title": "Commandstatus",
             "type": "string"
           },
+          "engineVersion": {
+            "const": 1,
+            "title": "Engineversion",
+            "type": "integer"
+          },
+          "runId": {
+            "title": "Runid",
+            "type": "string"
+          },
           "taskId": {
             "title": "Taskid",
             "type": "string"
           }
         },
         "required": [
-          "accepted",
+          "engineVersion",
+          "runId",
           "taskId",
+          "accepted",
           "commandId",
           "commandStatus"
         ],
@@ -10219,7 +10443,18 @@
             ],
             "title": "Editedreplacement"
           },
+          "engineVersion": {
+            "default": 1,
+            "description": "审核决定引擎版本；省略只兼容解释为 V1，V2 必须显式提交 2",
+            "enum": [
+              1,
+              2
+            ],
+            "title": "Engineversion",
+            "type": "integer"
+          },
           "expectedRevision": {
+            "description": "V1 为既有草案修订号；V2 为规范 expectedArtifactRevision wire 字段",
             "minimum": 1.0,
             "title": "Expectedrevision",
             "type": "integer"
@@ -10337,6 +10572,14 @@
                 "type": "null"
               }
             ]
+          },
+          "engineVersion": {
+            "enum": [
+              1,
+              2
+            ],
+            "title": "Engineversion",
+            "type": "integer"
           },
           "evaluations": {
             "items": {
@@ -10486,6 +10729,7 @@
           }
         },
         "required": [
+          "engineVersion",
           "id",
           "novelId",
           "chapterId",
@@ -10508,6 +10752,186 @@
           "updatedAt"
         ],
         "title": "ReviewArtifactResponse",
+        "type": "object"
+      },
+      "ReviewArtifactSummaryListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewArtifactSummaryResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "nextCursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextcursor"
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "title": "ReviewArtifactSummaryListResponse",
+        "type": "object"
+      },
+      "ReviewArtifactSummaryResponse": {
+        "additionalProperties": false,
+        "description": "集合查询使用的有界索引；完整内容必须按精确 revision 单独读取。",
+        "properties": {
+          "actionable": {
+            "title": "Actionable",
+            "type": "boolean"
+          },
+          "artifactKey": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Artifactkey"
+          },
+          "chapterId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapterid"
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "engineVersion": {
+            "enum": [
+              1,
+              2
+            ],
+            "title": "Engineversion",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "agent_updates",
+              "outline_draft",
+              "chapter_draft",
+              "lore_draft",
+              "revision_brief",
+              "beat_plan_draft",
+              "chapter_content",
+              "beat_plan",
+              "freeform_markdown"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "novelId": {
+            "title": "Novelid",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "under_review",
+              "awaiting_user",
+              "applying",
+              "applied"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "taskId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taskid"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          },
+          "workflowRunId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workflowrunid"
+          }
+        },
+        "required": [
+          "engineVersion",
+          "id",
+          "novelId",
+          "chapterId",
+          "taskId",
+          "workflowRunId",
+          "artifactKey",
+          "kind",
+          "status",
+          "title",
+          "summary",
+          "revision",
+          "actionable",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "ReviewArtifactSummaryResponse",
         "type": "object"
       },
       "RunQualityCheckRequest": {
@@ -15406,6 +15830,211 @@
         "title": "VisualCanonVersionResponse",
         "type": "object"
       },
+      "WorkflowArtifactSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "actionable": {
+            "title": "Actionable",
+            "type": "boolean"
+          },
+          "artifactId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Artifactid",
+            "type": "string"
+          },
+          "artifactRevision": {
+            "exclusiveMinimum": 0.0,
+            "title": "Artifactrevision",
+            "type": "integer"
+          },
+          "reviewAvailability": {
+            "anyOf": [
+              {
+                "enum": [
+                  "complete",
+                  "partial",
+                  "unavailable"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewavailability"
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "under_review",
+              "awaiting_user",
+              "applying",
+              "applied"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifactId",
+          "artifactRevision",
+          "status",
+          "actionable"
+        ],
+        "title": "WorkflowArtifactSnapshot",
+        "type": "object"
+      },
+      "WorkflowCurrentStepSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "attemptCount": {
+            "minimum": 0.0,
+            "title": "Attemptcount",
+            "type": "integer"
+          },
+          "errorCode": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Z][A-Z0-9_]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errorcode"
+          },
+          "fencingToken": {
+            "minimum": 0.0,
+            "title": "Fencingtoken",
+            "type": "integer"
+          },
+          "lane": {
+            "enum": [
+              "control",
+              "interactive",
+              "creative",
+              "batch_media"
+            ],
+            "title": "Lane",
+            "type": "string"
+          },
+          "latestProgress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowStepProgressSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "modelProfile": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelProfileRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ordinal": {
+            "exclusiveMinimum": 0.0,
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "purpose": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Purpose",
+            "type": "string"
+          },
+          "resolvedModel": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResolvedModelRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "completed",
+              "failed",
+              "skipped"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "stepId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Stepid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stepId",
+          "ordinal",
+          "purpose",
+          "lane",
+          "modelProfile",
+          "resolvedModel",
+          "status",
+          "attemptCount",
+          "fencingToken",
+          "latestProgress"
+        ],
+        "title": "WorkflowCurrentStepSnapshot",
+        "type": "object"
+      },
+      "WorkflowErrorSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "errorCode": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "title": "Errorcode",
+            "type": "string"
+          },
+          "failedStepId": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failedstepid"
+          },
+          "outcomeUnknown": {
+            "title": "Outcomeunknown",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "errorCode",
+          "outcomeUnknown"
+        ],
+        "title": "WorkflowErrorSnapshot",
+        "type": "object"
+      },
       "WorkflowRunDetailResponse": {
         "additionalProperties": false,
         "properties": {
@@ -15500,6 +16129,53 @@
           "status"
         ],
         "title": "WorkflowRunSummary",
+        "type": "object"
+      },
+      "WorkflowStepProgressSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "elapsedSeconds": {
+            "minimum": 0.0,
+            "title": "Elapsedseconds",
+            "type": "integer"
+          },
+          "phase": {
+            "enum": [
+              "preparing",
+              "waiting_provider",
+              "validating",
+              "reporting"
+            ],
+            "title": "Phase",
+            "type": "string"
+          },
+          "progressSequence": {
+            "exclusiveMinimum": 0.0,
+            "title": "Progresssequence",
+            "type": "integer"
+          },
+          "usageStatus": {
+            "enum": [
+              "complete",
+              "partial",
+              "unknown"
+            ],
+            "title": "Usagestatus",
+            "type": "string"
+          },
+          "waitingOnProvider": {
+            "title": "Waitingonprovider",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "progressSequence",
+          "phase",
+          "elapsedSeconds",
+          "waitingOnProvider",
+          "usageStatus"
+        ],
+        "title": "WorkflowStepProgressSnapshot",
         "type": "object"
       },
       "WorkspaceBootstrapResponse": {
@@ -16591,6 +17267,11 @@
             "title": "Createdat",
             "type": "string"
           },
+          "engineVersion": {
+            "const": 1,
+            "title": "Engineversion",
+            "type": "integer"
+          },
           "novelId": {
             "title": "Novelid",
             "type": "string"
@@ -16616,6 +17297,10 @@
           "recoverable": {
             "title": "Recoverable",
             "type": "boolean"
+          },
+          "runId": {
+            "title": "Runid",
+            "type": "string"
           },
           "scope": {
             "additionalProperties": {
@@ -16661,6 +17346,8 @@
           }
         },
         "required": [
+          "engineVersion",
+          "runId",
           "taskId",
           "novelId",
           "chapterId",
@@ -16684,7 +17371,7 @@
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/WritingRunListItem"
+              "$ref": "#/components/schemas/WritingRunPublicListItem"
             },
             "title": "Items",
             "type": "array"
@@ -16846,6 +17533,23 @@
         "title": "WritingRunOutcomeResult",
         "type": "object"
       },
+      "WritingRunPublicListItem": {
+        "discriminator": {
+          "mapping": {
+            "1": "#/components/schemas/WritingRunListItem",
+            "2": "#/components/schemas/WritingRunV2Response"
+          },
+          "propertyName": "engineVersion"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/WritingRunListItem"
+          },
+          {
+            "$ref": "#/components/schemas/WritingRunV2Response"
+          }
+        ]
+      },
       "WritingRunResponse": {
         "additionalProperties": false,
         "properties": {
@@ -16873,6 +17577,11 @@
             "title": "Createdat",
             "type": "string"
           },
+          "engineVersion": {
+            "const": 1,
+            "title": "Engineversion",
+            "type": "integer"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -16885,6 +17594,10 @@
             "title": "Phase",
             "type": "string"
           },
+          "runId": {
+            "title": "Runid",
+            "type": "string"
+          },
           "selectedAgents": {
             "items": {
               "type": "string"
@@ -16895,6 +17608,10 @@
           "targetWordCount": {
             "title": "Targetwordcount",
             "type": "integer"
+          },
+          "taskId": {
+            "title": "Taskid",
+            "type": "string"
           },
           "updatedAt": {
             "format": "date-time",
@@ -16914,6 +17631,9 @@
           }
         },
         "required": [
+          "engineVersion",
+          "runId",
+          "taskId",
           "id",
           "novelId",
           "chapterId",
@@ -16928,6 +17648,40 @@
         ],
         "title": "WritingRunResponse",
         "type": "object"
+      },
+      "WritingRunStartResponse": {
+        "discriminator": {
+          "mapping": {
+            "1": "#/components/schemas/WritingRunResponse",
+            "2": "#/components/schemas/WritingRunV2Response"
+          },
+          "propertyName": "engineVersion"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/WritingRunResponse"
+          },
+          {
+            "$ref": "#/components/schemas/WritingRunV2Response"
+          }
+        ]
+      },
+      "WritingRunStatusPublicResponse": {
+        "discriminator": {
+          "mapping": {
+            "1": "#/components/schemas/WritingRunStatusResponse",
+            "2": "#/components/schemas/WritingRunV2Response"
+          },
+          "propertyName": "engineVersion"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/WritingRunStatusResponse"
+          },
+          {
+            "$ref": "#/components/schemas/WritingRunV2Response"
+          }
+        ]
       },
       "WritingRunStatusResponse": {
         "additionalProperties": false,
@@ -17023,6 +17777,11 @@
             ],
             "title": "Createdat"
           },
+          "engineVersion": {
+            "const": 1,
+            "title": "Engineversion",
+            "type": "integer"
+          },
           "error": {
             "anyOf": [
               {
@@ -17087,6 +17846,10 @@
             ],
             "title": "Reviewreport"
           },
+          "runId": {
+            "title": "Runid",
+            "type": "string"
+          },
           "scope": {
             "anyOf": [
               {
@@ -17146,6 +17909,8 @@
           }
         },
         "required": [
+          "engineVersion",
+          "runId",
           "taskId",
           "novelId",
           "chapterId",
@@ -17160,6 +17925,178 @@
           "outcome"
         ],
         "title": "WritingRunStatusResponse",
+        "type": "object"
+      },
+      "WritingRunV2Response": {
+        "additionalProperties": false,
+        "properties": {
+          "activeSteps": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowCurrentStepSnapshot"
+            },
+            "maxItems": 32,
+            "title": "Activesteps",
+            "type": "array"
+          },
+          "artifact": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowArtifactSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cancelRequestedAt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cancelrequestedat"
+          },
+          "chapterId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chapterid"
+          },
+          "commandId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "enum": [
+              null
+            ],
+            "title": "Commandid"
+          },
+          "commandStatus": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "enum": [
+              null
+            ],
+            "title": "Commandstatus"
+          },
+          "currentStep": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowCurrentStepSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "engineVersion": {
+            "const": 2,
+            "title": "Engineversion",
+            "type": "integer"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowErrorSnapshot"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lastEventSequence": {
+            "minimum": 0.0,
+            "title": "Lasteventsequence",
+            "type": "integer"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[a-z][a-z0-9_.-]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation"
+          },
+          "revision": {
+            "exclusiveMinimum": 0.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "runId": {
+            "title": "Runid",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "waiting_user",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "taskId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taskid"
+          },
+          "workflow": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Workflow",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workflow",
+          "status",
+          "activeSteps",
+          "lastEventSequence",
+          "revision",
+          "engineVersion",
+          "runId",
+          "taskId",
+          "chapterId",
+          "commandId",
+          "commandStatus"
+        ],
+        "title": "WritingRunV2Response",
         "type": "object"
       },
       "WritingSessionDetail": {
@@ -31219,6 +32156,254 @@
         ]
       }
     },
+    "/api/v1/review-artifact-summaries": {
+      "get": {
+        "operationId": "list_review_artifact_summaries_api_v1_review_artifact_summaries_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "novelId",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Novelid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "chapterId",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Chapterid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "taskId",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Taskid"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 512,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "inkforge-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Inkforge-Token"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewArtifactSummaryListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          }
+        },
+        "summary": "List Review Artifact Summaries",
+        "tags": [
+          "待审核草案"
+        ]
+      }
+    },
     "/api/v1/review-artifacts": {
       "get": {
         "operationId": "list_review_artifacts_api_v1_review_artifacts_get",
@@ -31481,6 +32666,39 @@
             }
           },
           {
+            "in": "query",
+            "name": "revision",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Revision"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          },
+          {
             "in": "cookie",
             "name": "inkforge-token",
             "required": false,
@@ -31506,7 +32724,18 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "artifactId、精确 revision 与权威状态共同生成的强 ETag",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "精确 revision 详情与 If-None-Match 一致"
           },
           "400": {
             "content": {
@@ -31660,7 +32889,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ArtifactDecisionAcceptedResponse"
+                  "$ref": "#/components/schemas/ArtifactDecisionPublicResponse"
                 }
               }
             },
@@ -39047,7 +40276,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WritingRunResponse"
+                  "$ref": "#/components/schemas/WritingRunStartResponse"
                 }
               }
             },
@@ -39195,7 +40424,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WritingRunStatusResponse"
+                  "$ref": "#/components/schemas/WritingRunStatusPublicResponse"
                 }
               }
             },
@@ -39353,7 +40582,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CancelWritingRunResponse"
+                  "$ref": "#/components/schemas/CancelWritingRunPublicResponse"
                 }
               }
             },
@@ -39514,7 +40743,23 @@
         ],
         "responses": {
           "200": {
-            "description": "Successful Response"
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "持续输出 V1 事件；V2 首帧为 RunSnapshot，后续为 WorkflowEventEnvelope。",
+            "x-inkforge-v2-sse": {
+              "firstFrame": {
+                "event": "run_snapshot",
+                "schema": "inkforge_contracts.workflow_events.RunSnapshot"
+              },
+              "subsequentFrames": {
+                "schema": "inkforge_contracts.workflow_events.WorkflowEventEnvelope"
+              }
+            }
           },
           "400": {
             "content": {

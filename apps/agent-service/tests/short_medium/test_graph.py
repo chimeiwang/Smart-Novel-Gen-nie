@@ -30,7 +30,7 @@ from inkforge_agents.runtime.model_policy import (
     LEGACY_PROVIDER_DEFAULT,
     REPORT_NO_THINKING,
 )
-from inkforge_agents.runtime.model_runtime import ModelRuntime
+from inkforge_agents.runtime.model_runtime import ModelLane, ModelRuntime
 
 
 class Core:
@@ -757,15 +757,18 @@ async def test_model_generator_uses_configured_output_limit() -> None:
     class Runtime:
         def __init__(self) -> None:
             self.request: ModelTurnRequest | None = None
+            self.lane: ModelLane | None = None
 
         async def run_turn(
             self,
             request: ModelTurnRequest,
             *,
             context: object,
+            lane: ModelLane,
         ) -> ModelTurnResult:
             del context
             self.request = request
+            self.lane = lane
             return ModelTurnResult(
                 content="结果",
                 toolCalls=[],
@@ -794,6 +797,7 @@ async def test_model_generator_uses_configured_output_limit() -> None:
 
     assert runtime.request is not None
     assert runtime.request.maxOutputTokens == 12_345
+    assert runtime.lane == "creative"
 
 
 @pytest.mark.asyncio
@@ -813,15 +817,18 @@ async def test_short_medium_handler_passes_operation_policy_to_real_generator(
     class Runtime:
         def __init__(self) -> None:
             self.requests: list[ModelTurnRequest] = []
+            self.lanes: list[ModelLane] = []
 
         async def run_turn(
             self,
             request: ModelTurnRequest,
             *,
             context: object,
+            lane: ModelLane,
         ) -> ModelTurnResult:
             del context
             self.requests.append(request)
+            self.lanes.append(lane)
             content = "甲" * 6_000 if operation == "generate_manuscript" else "结果"
             return ModelTurnResult(
                 content=content,
@@ -882,6 +889,7 @@ async def test_short_medium_handler_passes_operation_policy_to_real_generator(
     await handler(job)
 
     assert len(runtime.requests) == 1
+    assert runtime.lanes == ["creative"]
     actual_policy = runtime.requests[0].policy
     assert actual_policy.policyId == expected_policy.policyId
     assert actual_policy.thinkingMode == expected_policy.thinkingMode

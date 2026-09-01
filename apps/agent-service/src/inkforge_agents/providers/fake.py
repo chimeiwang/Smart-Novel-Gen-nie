@@ -6,6 +6,7 @@ import re
 from pydantic import JsonValue
 
 from .base import (
+    ModelStructuredOutputRoute,
     ModelToolCall,
     ModelTurnRequest,
     ModelTurnResult,
@@ -18,8 +19,37 @@ class FakeModelProvider:
     billable = False
     provider_name = "fake"
     model_name = "fake"
+    transport_profile = "transport.fake.v1"
+    endpoint_profile = "endpoint.local-fake.v1"
+    capability_version = "capability.fake.structured-output.v1"
+    supports_request_idempotency = True
+
+    def supports_structured_output(self, route: ModelStructuredOutputRoute) -> bool:
+        return route in {"responses_json_schema_v1", "chat_json_output_v1"}
 
     async def complete_turn(self, request: ModelTurnRequest) -> ModelTurnResult:
+        if request.structuredOutput is not None:
+            output = _structured_output(request)
+            prompt_tokens = sum(len(message.content) for message in request.messages)
+            completion_tokens = len(json.dumps(output, ensure_ascii=False))
+            return ModelTurnResult(
+                content="",
+                toolCalls=[],
+                structuredOutput=output,
+                finishReason="stop",
+                rawFinishReason="stop",
+                usage=ModelUsage(
+                    promptTokens=prompt_tokens,
+                    cachedTokens=0,
+                    completionTokens=completion_tokens,
+                    totalTokens=prompt_tokens + completion_tokens,
+                ),
+                diagnostics=ModelUsageDiagnostics(
+                    promptCacheMissTokens=prompt_tokens,
+                    reasoningTokens=(0 if request.policy.thinkingMode == "disabled" else None),
+                ),
+                effectiveMaxOutputTokens=request.maxOutputTokens,
+            )
         content, tool_calls = _build_response(request)
         prompt_tokens = sum(len(message.content) for message in request.messages)
         completion_tokens = len(content)
@@ -36,6 +66,21 @@ class FakeModelProvider:
             ),
             diagnostics=ModelUsageDiagnostics(),
         )
+
+
+def _structured_output(request: ModelTurnRequest) -> dict[str, JsonValue]:
+    structured = request.structuredOutput
+    if structured is None:
+        raise ValueError("模拟结构化输出缺少 Schema")
+    properties = structured.jsonSchema.get("properties")
+    if not isinstance(properties, dict):
+        raise ValueError("模拟结构化输出 Schema 缺少 properties")
+    if "replacement" in properties:
+        replacement = "模拟选区替换文本"
+        return {"replacement": replacement}
+    if {"contentVerdict", "findings"} <= set(properties):
+        return {"contentVerdict": "pass", "findings": []}
+    raise ValueError("模拟 Provider 不支持该结构化输出 Schema")
 
 
 def _build_response(request: ModelTurnRequest) -> tuple[str, list[ModelToolCall]]:
@@ -177,9 +222,7 @@ def _select_tool(
 
 
 def _selection_context(message_text: str) -> dict[str, JsonValue] | None:
-    operation_match = re.search(
-        r"rewrite_(?:chapter|outline)_selection", message_text
-    )
+    operation_match = re.search(r"rewrite_(?:chapter|outline)_selection", message_text)
     if operation_match is None:
         return None
     operation = operation_match.group(0)

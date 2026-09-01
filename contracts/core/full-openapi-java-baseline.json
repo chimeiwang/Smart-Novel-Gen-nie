@@ -147,6 +147,37 @@
         "title": "ApplyStyleResponse",
         "type": "object"
       },
+      "ApplyingEventPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "artifactId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Artifactid",
+            "type": "string"
+          },
+          "artifactRevision": {
+            "exclusiveMinimum": 0,
+            "title": "Artifactrevision",
+            "type": "integer"
+          },
+          "decisionStepId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Decisionstepid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifactId",
+          "artifactRevision",
+          "decisionStepId"
+        ],
+        "title": "ApplyingEventPayload",
+        "type": "object"
+      },
       "ApproveVisualCanonRequest": {
         "additionalProperties": false,
         "properties": {
@@ -282,6 +313,12 @@
             "title": "Deleted",
             "type": "boolean"
           },
+          "engineVersion": {
+            "default": 1,
+            "title": "Engineversion",
+            "type": "integer",
+            "x-inkforge-const": 1
+          },
           "savedCount": {
             "default": 0,
             "title": "Savedcount",
@@ -312,6 +349,23 @@
         ],
         "title": "ArtifactDecisionAcceptedResponse",
         "type": "object"
+      },
+      "ArtifactDecisionPublicResponse": {
+        "discriminator": {
+          "mapping": {
+            "1": "#/components/schemas/ArtifactDecisionAcceptedResponse",
+            "2": "#/components/schemas/WritingRunV2Response"
+          },
+          "propertyName": "engineVersion"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ArtifactDecisionAcceptedResponse"
+          },
+          {
+            "$ref": "#/components/schemas/WritingRunV2Response"
+          }
+        ]
       },
       "ArtifactEvaluationResponse": {
         "additionalProperties": false,
@@ -639,6 +693,54 @@
         "title": "AuthorizeModelCallResponse",
         "type": "object"
       },
+      "AwaitingUserEventPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "allowedDecisions": {
+            "items": {
+              "enum": [
+                "approve",
+                "discard",
+                "revise"
+              ],
+              "type": "string"
+            },
+            "maxItems": 3,
+            "minItems": 1,
+            "title": "Alloweddecisions",
+            "type": "array"
+          },
+          "artifactId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Artifactid",
+            "type": "string"
+          },
+          "artifactRevision": {
+            "exclusiveMinimum": 0,
+            "title": "Artifactrevision",
+            "type": "integer"
+          },
+          "reviewAvailability": {
+            "enum": [
+              "complete",
+              "partial",
+              "unavailable"
+            ],
+            "title": "Reviewavailability",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifactId",
+          "artifactRevision",
+          "allowedDecisions",
+          "reviewAvailability"
+        ],
+        "title": "AwaitingUserEventPayload",
+        "type": "object"
+      },
       "BeatCoverageGoal": {
         "additionalProperties": false,
         "description": "一个节拍希望观众获得的内容，不预设必须使用哪类镜头完成。",
@@ -771,6 +873,166 @@
           "superseded"
         ],
         "type": "string"
+      },
+      "BillingReconciliationReceipt": {
+        "additionalProperties": false,
+        "description": "对账结算回执；duplicate 不得暗示再次扣费。",
+        "properties": {
+          "balanceAfterMicros": {
+            "format": "int64",
+            "maximum": 9e+18,
+            "minimum": 0.0,
+            "title": "Balanceaftermicros",
+            "type": "integer"
+          },
+          "chargedMicros": {
+            "format": "int64",
+            "maximum": 9e+18,
+            "minimum": 0.0,
+            "title": "Chargedmicros",
+            "type": "integer"
+          },
+          "decision": {
+            "enum": [
+              "exact_usage",
+              "proven_zero"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "duplicate": {
+            "title": "Duplicate",
+            "type": "boolean"
+          },
+          "protocolVersion": {
+            "title": "Protocolversion",
+            "type": "string",
+            "x-inkforge-const": "2.0"
+          },
+          "reconciliationId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Reconciliationid",
+            "type": "string"
+          },
+          "reservationRequestId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Reservationrequestid",
+            "type": "string"
+          },
+          "reservationStatus": {
+            "enum": [
+              "settled",
+              "released"
+            ],
+            "title": "Reservationstatus",
+            "type": "string"
+          },
+          "settledAt": {
+            "format": "date-time",
+            "title": "Settledat",
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocolVersion",
+          "reconciliationId",
+          "reservationRequestId",
+          "decision",
+          "reservationStatus",
+          "chargedMicros",
+          "balanceAfterMicros",
+          "settledAt",
+          "duplicate"
+        ],
+        "title": "BillingReconciliationReceipt",
+        "type": "object"
+      },
+      "BillingReconciliationRequest": {
+        "additionalProperties": false,
+        "description": "供应商账单证据驱动的 V2 预留对账命令。",
+        "properties": {
+          "decision": {
+            "enum": [
+              "exact_usage",
+              "proven_zero"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "novelId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "nullable": true,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Novelid",
+            "type": "string"
+          },
+          "protocolVersion": {
+            "title": "Protocolversion",
+            "type": "string",
+            "x-inkforge-const": "2.0"
+          },
+          "reconciliationId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Reconciliationid",
+            "type": "string"
+          },
+          "reservationRequestId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Reservationrequestid",
+            "type": "string"
+          },
+          "runId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Runid",
+            "type": "string"
+          },
+          "stepId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Stepid",
+            "type": "string"
+          },
+          "supplierEvidenceRef": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Supplierevidenceref",
+            "type": "string"
+          },
+          "supplierReportSha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Supplierreportsha256",
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/StepUsage"
+          }
+        },
+        "required": [
+          "protocolVersion",
+          "reconciliationId",
+          "runId",
+          "novelId",
+          "stepId",
+          "reservationRequestId",
+          "supplierEvidenceRef",
+          "supplierReportSha256",
+          "decision",
+          "usage"
+        ],
+        "title": "BillingReconciliationRequest",
+        "type": "object"
       },
       "BillingSummaryResponse": {
         "additionalProperties": false,
@@ -1454,6 +1716,23 @@
         "title": "CameraShotProgression",
         "type": "object"
       },
+      "CancelWritingRunPublicResponse": {
+        "discriminator": {
+          "mapping": {
+            "1": "#/components/schemas/CancelWritingRunResponse",
+            "2": "#/components/schemas/WritingRunV2Response"
+          },
+          "propertyName": "engineVersion"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/CancelWritingRunResponse"
+          },
+          {
+            "$ref": "#/components/schemas/WritingRunV2Response"
+          }
+        ]
+      },
       "CancelWritingRunRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1506,12 +1785,23 @@
             "title": "Effective",
             "type": "boolean"
           },
+          "engineVersion": {
+            "title": "Engineversion",
+            "type": "integer",
+            "x-inkforge-const": 1
+          },
+          "runId": {
+            "title": "Runid",
+            "type": "string"
+          },
           "taskId": {
             "title": "Taskid",
             "type": "string"
           }
         },
         "required": [
+          "engineVersion",
+          "runId",
           "taskId",
           "commandId",
           "commandStatus",
@@ -1521,6 +1811,63 @@
           "cancelledJobId"
         ],
         "title": "CancelWritingRunResponse",
+        "type": "object"
+      },
+      "CancelledEventPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "cancelRequestId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Cancelrequestid",
+            "type": "string"
+          },
+          "cancelledStepId": {
+            "default": null,
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Cancelledstepid",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          }
+        },
+        "required": [
+          "cancelRequestId"
+        ],
+        "title": "CancelledEventPayload",
+        "type": "object"
+      },
+      "CandidateReadyEventPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "artifactId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Artifactid",
+            "type": "string"
+          },
+          "artifactRevision": {
+            "exclusiveMinimum": 0,
+            "title": "Artifactrevision",
+            "type": "integer"
+          },
+          "stepId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Stepid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stepId",
+          "artifactId",
+          "artifactRevision"
+        ],
+        "title": "CandidateReadyEventPayload",
         "type": "object"
       },
       "ChapterAdaptationListResponse": {
@@ -3100,6 +3447,62 @@
         "title": "CinematographyBase",
         "type": "object"
       },
+      "ClarificationRequiredEventPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "clarificationCode": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Clarificationcode",
+            "type": "string"
+          },
+          "decisionStepId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Decisionstepid",
+            "type": "string"
+          },
+          "prompt": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Prompt",
+            "type": "string"
+          }
+        },
+        "required": [
+          "clarificationCode",
+          "prompt",
+          "decisionStepId"
+        ],
+        "title": "ClarificationRequiredEventPayload",
+        "type": "object"
+      },
+      "CommandClarification": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Code",
+            "type": "string"
+          },
+          "prompt": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Prompt",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "prompt"
+        ],
+        "title": "CommandClarification",
+        "type": "object"
+      },
       "CompiledAssetBinding": {
         "additionalProperties": false,
         "description": "本次供应商请求中的局部素材编号映射。",
@@ -3251,6 +3654,48 @@
           "embeddings"
         ],
         "title": "CompleteReferenceIndexRequest",
+        "type": "object"
+      },
+      "CompletedEventPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "artifactId": {
+            "default": null,
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Artifactid",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          },
+          "artifactRevision": {
+            "default": null,
+            "exclusiveMinimum": 0,
+            "title": "Artifactrevision",
+            "type": "integer",
+            "x-inkforge-source-nullable": true
+          },
+          "outcomeType": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Outcometype",
+            "type": "string"
+          },
+          "resultId": {
+            "default": null,
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Resultid",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          }
+        },
+        "required": [
+          "outcomeType"
+        ],
+        "title": "CompletedEventPayload",
         "type": "object"
       },
       "ConfirmAdaptationPlanRequest": {
@@ -6916,6 +7361,773 @@
         "title": "ErrorResponse",
         "type": "object"
       },
+      "EvaluationEvidenceReference": {
+        "additionalProperties": false,
+        "properties": {
+          "contentSha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Contentsha256",
+            "type": "string"
+          },
+          "evidenceItemId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Evidenceitemid",
+            "type": "string"
+          },
+          "range": {
+            "$ref": "#/components/schemas/EvidenceRange",
+            "nullable": true
+          }
+        },
+        "required": [
+          "evidenceItemId",
+          "contentSha256"
+        ],
+        "title": "EvaluationEvidenceReference",
+        "type": "object"
+      },
+      "EvaluationFinding": {
+        "additionalProperties": false,
+        "properties": {
+          "candidateRange": {
+            "$ref": "#/components/schemas/EvidenceRange",
+            "nullable": true
+          },
+          "claim": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Claim",
+            "type": "string"
+          },
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "dimension": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Dimension",
+            "type": "string"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/EvaluationEvidenceReference"
+            },
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Evidence",
+            "type": "array"
+          },
+          "severity": {
+            "enum": [
+              "info",
+              "warning",
+              "error"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "suggestion": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Suggestion",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dimension",
+          "severity",
+          "claim",
+          "evidence",
+          "suggestion",
+          "confidence"
+        ],
+        "title": "EvaluationFinding",
+        "type": "object"
+      },
+      "EvidenceEvaluation": {
+        "additionalProperties": false,
+        "properties": {
+          "artifactId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "nullable": true,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Artifactid",
+            "type": "string"
+          },
+          "artifactRevision": {
+            "exclusiveMinimum": 0.0,
+            "nullable": true,
+            "title": "Artifactrevision",
+            "type": "integer"
+          },
+          "contentVerdict": {
+            "enum": [
+              "pass",
+              "issues_found",
+              "cannot_assess"
+            ],
+            "title": "Contentverdict",
+            "type": "string"
+          },
+          "evaluationId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Evaluationid",
+            "type": "string"
+          },
+          "evaluatorProfile": {
+            "$ref": "#/components/schemas/ModelProfileRef"
+          },
+          "evidenceBundleId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Evidencebundleid",
+            "type": "string"
+          },
+          "executionStatus": {
+            "enum": [
+              "completed",
+              "incomplete",
+              "failed"
+            ],
+            "title": "Executionstatus",
+            "type": "string"
+          },
+          "findings": {
+            "items": {
+              "$ref": "#/components/schemas/EvaluationFinding"
+            },
+            "maxItems": 100,
+            "title": "Findings",
+            "type": "array"
+          },
+          "resolvedModel": {
+            "$ref": "#/components/schemas/ResolvedModelRef"
+          },
+          "rubricVersion": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Rubricversion",
+            "type": "string"
+          },
+          "runId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Runid",
+            "type": "string"
+          },
+          "stepId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Stepid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "evaluationId",
+          "runId",
+          "stepId",
+          "evidenceBundleId",
+          "evaluatorProfile",
+          "resolvedModel",
+          "rubricVersion",
+          "executionStatus",
+          "contentVerdict"
+        ],
+        "title": "EvidenceEvaluation",
+        "type": "object"
+      },
+      "EvidenceExpansionItem": {
+        "additionalProperties": false,
+        "properties": {
+          "purposeCode": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Purposecode",
+            "type": "string"
+          },
+          "range": {
+            "$ref": "#/components/schemas/EvidenceRange",
+            "nullable": true
+          },
+          "resourceId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Resourceid",
+            "type": "string"
+          },
+          "resourceType": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Resourcetype",
+            "type": "string"
+          }
+        },
+        "required": [
+          "resourceType",
+          "resourceId",
+          "purposeCode"
+        ],
+        "title": "EvidenceExpansionItem",
+        "type": "object"
+      },
+      "EvidenceExpansionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceExpansionItem"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          },
+          "maxAdditionalBytes": {
+            "exclusiveMinimum": 0.0,
+            "title": "Maxadditionalbytes",
+            "type": "integer"
+          },
+          "reasonCode": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Reasoncode",
+            "type": "string"
+          },
+          "requestId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Requestid",
+            "type": "string"
+          },
+          "sourceBundleId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Sourcebundleid",
+            "type": "string"
+          },
+          "sourceBundleVersion": {
+            "exclusiveMinimum": 0.0,
+            "title": "Sourcebundleversion",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "requestId",
+          "sourceBundleId",
+          "sourceBundleVersion",
+          "reasonCode",
+          "maxAdditionalBytes",
+          "items"
+        ],
+        "title": "EvidenceExpansionRequest",
+        "type": "object"
+      },
+      "EvidenceRange": {
+        "additionalProperties": false,
+        "description": "以 Unicode 码点计数的半开区间。",
+        "properties": {
+          "endCodePoint": {
+            "exclusiveMinimum": 0.0,
+            "title": "Endcodepoint",
+            "type": "integer"
+          },
+          "startCodePoint": {
+            "minimum": 0.0,
+            "title": "Startcodepoint",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "startCodePoint",
+          "endCodePoint"
+        ],
+        "title": "EvidenceRange",
+        "type": "object"
+      },
+      "EvidenceReadyEventPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "bundleId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Bundleid",
+            "type": "string"
+          },
+          "bundleVersion": {
+            "exclusiveMinimum": 0,
+            "title": "Bundleversion",
+            "type": "integer"
+          },
+          "manifestSha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Manifestsha256",
+            "type": "string"
+          },
+          "totalBytes": {
+            "minimum": 0,
+            "title": "Totalbytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "bundleId",
+          "bundleVersion",
+          "manifestSha256",
+          "totalBytes"
+        ],
+        "title": "EvidenceReadyEventPayload",
+        "type": "object"
+      },
+      "ExecutionCallbackReceipt": {
+        "additionalProperties": false,
+        "description": "Core 的回调收据；stale 保留终态，其他状态确认无需再投递。",
+        "properties": {
+          "fencingToken": {
+            "exclusiveMinimum": 0.0,
+            "title": "Fencingtoken",
+            "type": "integer"
+          },
+          "jobId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Jobid",
+            "type": "string"
+          },
+          "protocolVersion": {
+            "title": "Protocolversion",
+            "type": "string",
+            "x-inkforge-const": "2.0"
+          },
+          "receivedAt": {
+            "format": "date-time",
+            "title": "Receivedat",
+            "type": "string"
+          },
+          "requestHash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Requesthash",
+            "type": "string"
+          },
+          "runId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Runid",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "accepted",
+              "duplicate",
+              "stale",
+              "superseded"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "stepId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Stepid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocolVersion",
+          "runId",
+          "stepId",
+          "jobId",
+          "fencingToken",
+          "requestHash",
+          "status",
+          "receivedAt"
+        ],
+        "title": "ExecutionCallbackReceipt",
+        "type": "object"
+      },
+      "ExecutionStepFailure": {
+        "additionalProperties": false,
+        "properties": {
+          "cancelRequestId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "nullable": true,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Cancelrequestid",
+            "type": "string"
+          },
+          "errorCategory": {
+            "enum": [
+              "provider_transient",
+              "provider_terminal",
+              "protocol",
+              "validation",
+              "model_outcome_unknown",
+              "cancelled",
+              "internal"
+            ],
+            "title": "Errorcategory",
+            "type": "string"
+          },
+          "errorCode": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "title": "Errorcode",
+            "type": "string"
+          },
+          "failedAt": {
+            "format": "date-time",
+            "title": "Failedat",
+            "type": "string"
+          },
+          "fencingToken": {
+            "exclusiveMinimum": 0.0,
+            "title": "Fencingtoken",
+            "type": "integer"
+          },
+          "inputHash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Inputhash",
+            "type": "string"
+          },
+          "jobId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Jobid",
+            "type": "string"
+          },
+          "novelId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "nullable": true,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Novelid",
+            "type": "string"
+          },
+          "outcomeUnknown": {
+            "title": "Outcomeunknown",
+            "type": "boolean"
+          },
+          "protocolVersion": {
+            "title": "Protocolversion",
+            "type": "string",
+            "x-inkforge-const": "2.0"
+          },
+          "requestHash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Requesthash",
+            "type": "string"
+          },
+          "resolvedModel": {
+            "$ref": "#/components/schemas/ResolvedModelRef"
+          },
+          "resultHash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Resulthash",
+            "type": "string"
+          },
+          "retryable": {
+            "title": "Retryable",
+            "type": "boolean"
+          },
+          "runId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Runid",
+            "type": "string"
+          },
+          "stepId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Stepid",
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/StepUsage"
+          }
+        },
+        "required": [
+          "protocolVersion",
+          "jobId",
+          "runId",
+          "novelId",
+          "stepId",
+          "fencingToken",
+          "requestHash",
+          "inputHash",
+          "resolvedModel",
+          "errorCategory",
+          "errorCode",
+          "retryable",
+          "outcomeUnknown",
+          "resultHash",
+          "usage",
+          "failedAt"
+        ],
+        "title": "ExecutionStepFailure",
+        "type": "object"
+      },
+      "ExecutionStepProgress": {
+        "additionalProperties": false,
+        "properties": {
+          "elapsedSeconds": {
+            "minimum": 0.0,
+            "title": "Elapsedseconds",
+            "type": "integer"
+          },
+          "fencingToken": {
+            "exclusiveMinimum": 0.0,
+            "title": "Fencingtoken",
+            "type": "integer"
+          },
+          "jobId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Jobid",
+            "type": "string"
+          },
+          "novelId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "nullable": true,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Novelid",
+            "type": "string"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "title": "Occurredat",
+            "type": "string"
+          },
+          "phase": {
+            "enum": [
+              "preparing",
+              "waiting_provider",
+              "validating",
+              "reporting"
+            ],
+            "title": "Phase",
+            "type": "string"
+          },
+          "progressCode": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Progresscode",
+            "type": "string"
+          },
+          "progressId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Progressid",
+            "type": "string"
+          },
+          "protocolVersion": {
+            "title": "Protocolversion",
+            "type": "string",
+            "x-inkforge-const": "2.0"
+          },
+          "requestHash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Requesthash",
+            "type": "string"
+          },
+          "resolvedModel": {
+            "$ref": "#/components/schemas/ResolvedModelRef"
+          },
+          "runId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Runid",
+            "type": "string"
+          },
+          "sequence": {
+            "exclusiveMinimum": 0.0,
+            "title": "Sequence",
+            "type": "integer"
+          },
+          "stepId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Stepid",
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/StepUsage"
+          },
+          "waitingOnProvider": {
+            "title": "Waitingonprovider",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "protocolVersion",
+          "progressId",
+          "jobId",
+          "runId",
+          "novelId",
+          "stepId",
+          "fencingToken",
+          "requestHash",
+          "resolvedModel",
+          "sequence",
+          "phase",
+          "progressCode",
+          "elapsedSeconds",
+          "waitingOnProvider",
+          "usage",
+          "occurredAt"
+        ],
+        "title": "ExecutionStepProgress",
+        "type": "object"
+      },
+      "ExecutionStepResult": {
+        "additionalProperties": false,
+        "properties": {
+          "completedAt": {
+            "format": "date-time",
+            "title": "Completedat",
+            "type": "string"
+          },
+          "evaluation": {
+            "$ref": "#/components/schemas/EvidenceEvaluation",
+            "nullable": true
+          },
+          "evidenceExpansion": {
+            "$ref": "#/components/schemas/EvidenceExpansionRequest",
+            "nullable": true
+          },
+          "fencingToken": {
+            "exclusiveMinimum": 0.0,
+            "title": "Fencingtoken",
+            "type": "integer"
+          },
+          "inputHash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Inputhash",
+            "type": "string"
+          },
+          "jobId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Jobid",
+            "type": "string"
+          },
+          "novelId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "nullable": true,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Novelid",
+            "type": "string"
+          },
+          "output": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "nullable": true,
+            "title": "Output",
+            "type": "object"
+          },
+          "proposedCommand": {
+            "$ref": "#/components/schemas/ProposedCommand",
+            "nullable": true
+          },
+          "protocolVersion": {
+            "title": "Protocolversion",
+            "type": "string",
+            "x-inkforge-const": "2.0"
+          },
+          "requestHash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Requesthash",
+            "type": "string"
+          },
+          "resolvedModel": {
+            "$ref": "#/components/schemas/ResolvedModelRef"
+          },
+          "resultHash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Resulthash",
+            "type": "string"
+          },
+          "resultKind": {
+            "enum": [
+              "output",
+              "evidence_expansion",
+              "proposed_command",
+              "evaluation"
+            ],
+            "title": "Resultkind",
+            "type": "string"
+          },
+          "runId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Runid",
+            "type": "string"
+          },
+          "stepId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Stepid",
+            "type": "string"
+          },
+          "usage": {
+            "$ref": "#/components/schemas/StepUsage"
+          }
+        },
+        "required": [
+          "protocolVersion",
+          "jobId",
+          "runId",
+          "novelId",
+          "stepId",
+          "fencingToken",
+          "requestHash",
+          "inputHash",
+          "resolvedModel",
+          "resultKind",
+          "resultHash",
+          "usage",
+          "completedAt"
+        ],
+        "title": "ExecutionStepResult",
+        "type": "object"
+      },
       "ExperienceResponse": {
         "additionalProperties": false,
         "properties": {
@@ -7151,6 +8363,37 @@
           "message"
         ],
         "title": "FailReferenceIndexRequest",
+        "type": "object"
+      },
+      "FailedEventPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "errorCode": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "title": "Errorcode",
+            "type": "string"
+          },
+          "failedStepId": {
+            "default": null,
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Failedstepid",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          },
+          "outcomeUnknown": {
+            "title": "Outcomeunknown",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "errorCode",
+          "outcomeUnknown"
+        ],
+        "title": "FailedEventPayload",
         "type": "object"
       },
       "ForeshadowingResponse": {
@@ -7713,6 +8956,54 @@
           "updatedAt"
         ],
         "title": "GlossaryResponse",
+        "type": "object"
+      },
+      "IntentResolvedEventPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "confidence": {
+            "maximum": 1,
+            "minimum": 0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "operation": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Operation",
+            "type": "string"
+          },
+          "targetId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Targetid",
+            "type": "string"
+          },
+          "targetType": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Targettype",
+            "type": "string"
+          },
+          "workflow": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Workflow",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workflow",
+          "operation",
+          "targetType",
+          "targetId",
+          "confidence"
+        ],
+        "title": "IntentResolvedEventPayload",
         "type": "object"
       },
       "ItemDto": {
@@ -8519,6 +9810,51 @@
           "createdAt"
         ],
         "title": "MessageResponse",
+        "type": "object"
+      },
+      "ModelProfileRef": {
+        "additionalProperties": false,
+        "description": "Core 授权的逻辑模型 Profile；不包含 Agent 部署配置。",
+        "properties": {
+          "deploymentProfileKey": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Deploymentprofilekey",
+            "type": "string"
+          },
+          "profile": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Profile",
+            "type": "string"
+          },
+          "promptProfile": {
+            "$ref": "#/components/schemas/PromptProfileRef"
+          },
+          "reasoningMode": {
+            "enum": [
+              "disabled",
+              "bounded"
+            ],
+            "title": "Reasoningmode",
+            "type": "string"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "profile",
+          "version",
+          "reasoningMode",
+          "deploymentProfileKey",
+          "promptProfile"
+        ],
+        "title": "ModelProfileRef",
         "type": "object"
       },
       "NovelResponse": {
@@ -9563,6 +10899,103 @@
         "title": "PostProductionTakeResponse",
         "type": "object"
       },
+      "PromptProfileRef": {
+        "additionalProperties": false,
+        "description": "Manifest 管理的静态 system prompt 身份；正文由双端 Registry 按哈希校验。",
+        "properties": {
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Name",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          },
+          "version": {
+            "exclusiveMinimum": 0.0,
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "sha256"
+        ],
+        "title": "PromptProfileRef",
+        "type": "object"
+      },
+      "ProposedCommand": {
+        "additionalProperties": false,
+        "properties": {
+          "arguments": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/JsonValue"
+            },
+            "title": "Arguments",
+            "type": "object"
+          },
+          "clarification": {
+            "$ref": "#/components/schemas/CommandClarification",
+            "nullable": true
+          },
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "operation": {
+            "maxLength": 128,
+            "minLength": 1,
+            "nullable": true,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Operation",
+            "type": "string"
+          },
+          "scopeKind": {
+            "maxLength": 128,
+            "minLength": 1,
+            "nullable": true,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Scopekind",
+            "type": "string"
+          },
+          "targetId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "nullable": true,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Targetid",
+            "type": "string"
+          },
+          "targetType": {
+            "maxLength": 128,
+            "minLength": 1,
+            "nullable": true,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Targettype",
+            "type": "string"
+          },
+          "workflow": {
+            "maxLength": 128,
+            "minLength": 1,
+            "nullable": true,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Workflow",
+            "type": "string"
+          }
+        },
+        "required": [
+          "confidence"
+        ],
+        "title": "ProposedCommand",
+        "type": "object"
+      },
       "QualityCheckDto": {
         "additionalProperties": false,
         "properties": {
@@ -10469,6 +11902,93 @@
         "title": "ReportModelUsageRequest",
         "type": "object"
       },
+      "ResolvedModelRef": {
+        "additionalProperties": false,
+        "description": "Agent 对逻辑 Profile 的一次可审计部署解析。",
+        "properties": {
+          "capabilityVersion": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Capabilityversion",
+            "type": "string"
+          },
+          "deploymentFingerprint": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Deploymentfingerprint",
+            "type": "string"
+          },
+          "deploymentProfileKey": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Deploymentprofilekey",
+            "type": "string"
+          },
+          "endpointProfile": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Endpointprofile",
+            "type": "string"
+          },
+          "model": {
+            "maxLength": 2000,
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Provider",
+            "type": "string"
+          },
+          "reasoningMode": {
+            "enum": [
+              "disabled",
+              "bounded"
+            ],
+            "title": "Reasoningmode",
+            "type": "string"
+          },
+          "structuredOutputRoute": {
+            "enum": [
+              "responses_json_schema_v1",
+              "chat_json_output_v1"
+            ],
+            "title": "Structuredoutputroute",
+            "type": "string"
+          },
+          "supportsRequestIdempotency": {
+            "description": "仅当 Provider 确实原样传递 ExecutionStepRequest.idempotencyKey 时为 true",
+            "title": "Supportsrequestidempotency",
+            "type": "boolean"
+          },
+          "transportProfile": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Transportprofile",
+            "type": "string"
+          }
+        },
+        "required": [
+          "deploymentProfileKey",
+          "deploymentFingerprint",
+          "provider",
+          "model",
+          "transportProfile",
+          "endpointProfile",
+          "structuredOutputRoute",
+          "capabilityVersion",
+          "reasoningMode",
+          "supportsRequestIdempotency"
+        ],
+        "title": "ResolvedModelRef",
+        "type": "object"
+      },
       "ResumeWritingRunRequest": {
         "additionalProperties": false,
         "properties": {
@@ -10520,14 +12040,25 @@
             "title": "Commandstatus",
             "type": "string"
           },
+          "engineVersion": {
+            "title": "Engineversion",
+            "type": "integer",
+            "x-inkforge-const": 1
+          },
+          "runId": {
+            "title": "Runid",
+            "type": "string"
+          },
           "taskId": {
             "title": "Taskid",
             "type": "string"
           }
         },
         "required": [
-          "accepted",
+          "engineVersion",
+          "runId",
           "taskId",
+          "accepted",
           "commandId",
           "commandStatus"
         ],
@@ -10595,7 +12126,18 @@
             "title": "Editedreplacement",
             "type": "string"
           },
+          "engineVersion": {
+            "default": 1,
+            "description": "审核决定引擎版本；省略只兼容解释为 V1，V2 必须显式提交 2",
+            "enum": [
+              1,
+              2
+            ],
+            "title": "Engineversion",
+            "type": "integer"
+          },
           "expectedRevision": {
+            "description": "V1 为既有草案修订号；V2 为规范 expectedArtifactRevision wire 字段",
             "minimum": 1.0,
             "title": "Expectedrevision",
             "type": "integer"
@@ -10675,6 +12217,14 @@
               }
             ],
             "x-inkforge-source-nullable": true
+          },
+          "engineVersion": {
+            "enum": [
+              1,
+              2
+            ],
+            "title": "Engineversion",
+            "type": "integer"
           },
           "evaluations": {
             "items": {
@@ -10782,6 +12332,7 @@
           }
         },
         "required": [
+          "engineVersion",
           "id",
           "novelId",
           "chapterId",
@@ -10804,6 +12355,345 @@
           "updatedAt"
         ],
         "title": "ReviewArtifactResponse",
+        "type": "object"
+      },
+      "ReviewArtifactSummaryListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewArtifactSummaryResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "nextCursor": {
+            "title": "Nextcursor",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          }
+        },
+        "required": [
+          "items",
+          "nextCursor"
+        ],
+        "title": "ReviewArtifactSummaryListResponse",
+        "type": "object"
+      },
+      "ReviewArtifactSummaryResponse": {
+        "additionalProperties": false,
+        "description": "集合查询使用的有界索引；完整内容必须按精确 revision 单独读取。",
+        "properties": {
+          "actionable": {
+            "title": "Actionable",
+            "type": "boolean"
+          },
+          "artifactKey": {
+            "title": "Artifactkey",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          },
+          "chapterId": {
+            "title": "Chapterid",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          },
+          "createdAt": {
+            "format": "date-time",
+            "title": "Createdat",
+            "type": "string"
+          },
+          "engineVersion": {
+            "enum": [
+              1,
+              2
+            ],
+            "title": "Engineversion",
+            "type": "integer"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "agent_updates",
+              "outline_draft",
+              "chapter_draft",
+              "lore_draft",
+              "revision_brief",
+              "beat_plan_draft",
+              "chapter_content",
+              "beat_plan",
+              "freeform_markdown"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "novelId": {
+            "title": "Novelid",
+            "type": "string"
+          },
+          "revision": {
+            "title": "Revision",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "under_review",
+              "awaiting_user",
+              "applying",
+              "applied"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          },
+          "taskId": {
+            "title": "Taskid",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          },
+          "title": {
+            "title": "Title",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "title": "Updatedat",
+            "type": "string"
+          },
+          "workflowRunId": {
+            "title": "Workflowrunid",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          }
+        },
+        "required": [
+          "engineVersion",
+          "id",
+          "novelId",
+          "chapterId",
+          "taskId",
+          "workflowRunId",
+          "artifactKey",
+          "kind",
+          "status",
+          "title",
+          "summary",
+          "revision",
+          "actionable",
+          "createdAt",
+          "updatedAt"
+        ],
+        "title": "ReviewArtifactSummaryResponse",
+        "type": "object"
+      },
+      "ReviewCompletedEventPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "artifactId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Artifactid",
+            "type": "string"
+          },
+          "artifactRevision": {
+            "exclusiveMinimum": 0,
+            "title": "Artifactrevision",
+            "type": "integer"
+          },
+          "evaluationIds": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+              "type": "string"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Evaluationids",
+            "type": "array"
+          },
+          "mergedVerdict": {
+            "enum": [
+              "pass",
+              "issues_found",
+              "cannot_assess"
+            ],
+            "title": "Mergedverdict",
+            "type": "string"
+          },
+          "reviewAvailability": {
+            "enum": [
+              "complete",
+              "partial",
+              "unavailable"
+            ],
+            "title": "Reviewavailability",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifactId",
+          "artifactRevision",
+          "evaluationIds",
+          "mergedVerdict",
+          "reviewAvailability"
+        ],
+        "title": "ReviewCompletedEventPayload",
+        "type": "object"
+      },
+      "ReviewPendingStepSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "attemptCount": {
+            "title": "Attemptcount",
+            "type": "integer",
+            "x-inkforge-const": 0
+          },
+          "fencingToken": {
+            "title": "Fencingtoken",
+            "type": "integer",
+            "x-inkforge-const": 0
+          },
+          "lane": {
+            "enum": [
+              "control",
+              "interactive",
+              "creative",
+              "batch_media"
+            ],
+            "title": "Lane",
+            "type": "string"
+          },
+          "modelProfile": {
+            "$ref": "#/components/schemas/ModelProfileRef"
+          },
+          "ordinal": {
+            "exclusiveMinimum": 0,
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "purpose": {
+            "title": "Purpose",
+            "type": "string",
+            "x-inkforge-const": "review"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string",
+            "x-inkforge-const": "pending"
+          },
+          "stepId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Stepid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stepId",
+          "ordinal",
+          "purpose",
+          "lane",
+          "modelProfile",
+          "status",
+          "attemptCount",
+          "fencingToken"
+        ],
+        "title": "ReviewPendingStepSnapshot",
+        "type": "object"
+      },
+      "ReviewStartedEventPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "artifactId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Artifactid",
+            "type": "string"
+          },
+          "artifactRevision": {
+            "exclusiveMinimum": 0,
+            "title": "Artifactrevision",
+            "type": "integer"
+          },
+          "reviewerSteps": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewPendingStepSnapshot"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "title": "Reviewersteps",
+            "type": "array"
+          }
+        },
+        "required": [
+          "artifactId",
+          "artifactRevision",
+          "reviewerSteps"
+        ],
+        "title": "ReviewStartedEventPayload",
+        "type": "object"
+      },
+      "RunAcceptedEventPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "operation": {
+            "default": null,
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Operation",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          },
+          "runRevision": {
+            "exclusiveMinimum": 0,
+            "title": "Runrevision",
+            "type": "integer"
+          },
+          "targetId": {
+            "default": null,
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Targetid",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          },
+          "targetType": {
+            "default": null,
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Targettype",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          },
+          "workflow": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Workflow",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workflow",
+          "runRevision"
+        ],
+        "title": "RunAcceptedEventPayload",
         "type": "object"
       },
       "RunCompletionCallback": {
@@ -10981,6 +12871,45 @@
           "taskId"
         ],
         "title": "RunQualityCheckResponse",
+        "type": "object"
+      },
+      "RunSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "baseSequence": {
+            "minimum": 0,
+            "title": "Basesequence",
+            "type": "integer"
+          },
+          "engineVersion": {
+            "title": "Engineversion",
+            "type": "integer",
+            "x-inkforge-const": 2
+          },
+          "protocolVersion": {
+            "title": "Protocolversion",
+            "type": "string",
+            "x-inkforge-const": "2.0"
+          },
+          "runId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Runid",
+            "type": "string"
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/WorkflowRunSnapshot"
+          }
+        },
+        "required": [
+          "protocolVersion",
+          "engineVersion",
+          "runId",
+          "baseSequence",
+          "snapshot"
+        ],
+        "title": "RunSnapshot",
         "type": "object"
       },
       "SaveEpisodeEditVersionRequest": {
@@ -13355,6 +15284,311 @@
           "userMessage"
         ],
         "title": "StartWritingRunRequest",
+        "type": "object"
+      },
+      "StepFinishedEventPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "errorCode": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "title": "Errorcode",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          },
+          "fencingToken": {
+            "exclusiveMinimum": 0,
+            "title": "Fencingtoken",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "completed",
+              "failed",
+              "skipped"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "stepId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Stepid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stepId",
+          "fencingToken",
+          "status",
+          "errorCode"
+        ],
+        "title": "StepFinishedEventPayload",
+        "type": "object"
+      },
+      "StepProgressEventPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "elapsedSeconds": {
+            "minimum": 0,
+            "title": "Elapsedseconds",
+            "type": "integer"
+          },
+          "fencingToken": {
+            "exclusiveMinimum": 0,
+            "title": "Fencingtoken",
+            "type": "integer"
+          },
+          "modelProfile": {
+            "$ref": "#/components/schemas/ModelProfileRef"
+          },
+          "phase": {
+            "enum": [
+              "preparing",
+              "waiting_provider",
+              "validating",
+              "reporting"
+            ],
+            "title": "Phase",
+            "type": "string"
+          },
+          "progressSequence": {
+            "exclusiveMinimum": 0,
+            "title": "Progresssequence",
+            "type": "integer"
+          },
+          "resolvedModel": {
+            "$ref": "#/components/schemas/ResolvedModelRef"
+          },
+          "stepId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Stepid",
+            "type": "string"
+          },
+          "usageStatus": {
+            "enum": [
+              "complete",
+              "partial",
+              "unknown"
+            ],
+            "title": "Usagestatus",
+            "type": "string"
+          },
+          "waitingOnProvider": {
+            "title": "Waitingonprovider",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "progressSequence",
+          "phase",
+          "elapsedSeconds",
+          "waitingOnProvider",
+          "usageStatus",
+          "stepId",
+          "fencingToken",
+          "modelProfile",
+          "resolvedModel"
+        ],
+        "title": "StepProgressEventPayload",
+        "type": "object"
+      },
+      "StepQueuedEventPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "attemptCount": {
+            "exclusiveMinimum": 0,
+            "title": "Attemptcount",
+            "type": "integer"
+          },
+          "fencingToken": {
+            "exclusiveMinimum": 0,
+            "title": "Fencingtoken",
+            "type": "integer"
+          },
+          "lane": {
+            "enum": [
+              "control",
+              "interactive",
+              "creative",
+              "batch_media"
+            ],
+            "title": "Lane",
+            "type": "string"
+          },
+          "modelProfile": {
+            "$ref": "#/components/schemas/ModelProfileRef"
+          },
+          "ordinal": {
+            "exclusiveMinimum": 0,
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "purpose": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Purpose",
+            "type": "string"
+          },
+          "reason": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Reason",
+            "type": "string"
+          },
+          "stepId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Stepid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stepId",
+          "ordinal",
+          "purpose",
+          "lane",
+          "modelProfile",
+          "attemptCount",
+          "fencingToken",
+          "reason"
+        ],
+        "title": "StepQueuedEventPayload",
+        "type": "object"
+      },
+      "StepStartedEventPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "attemptCount": {
+            "exclusiveMinimum": 0,
+            "title": "Attemptcount",
+            "type": "integer"
+          },
+          "fencingToken": {
+            "exclusiveMinimum": 0,
+            "title": "Fencingtoken",
+            "type": "integer"
+          },
+          "modelProfile": {
+            "$ref": "#/components/schemas/ModelProfileRef"
+          },
+          "ordinal": {
+            "exclusiveMinimum": 0,
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "purpose": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Purpose",
+            "type": "string"
+          },
+          "stepId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Stepid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stepId",
+          "ordinal",
+          "purpose",
+          "modelProfile",
+          "attemptCount",
+          "fencingToken"
+        ],
+        "title": "StepStartedEventPayload",
+        "type": "object"
+      },
+      "StepUsage": {
+        "additionalProperties": false,
+        "properties": {
+          "cachedTokens": {
+            "minimum": 0.0,
+            "nullable": true,
+            "title": "Cachedtokens",
+            "type": "integer"
+          },
+          "completionTokens": {
+            "minimum": 0.0,
+            "nullable": true,
+            "title": "Completiontokens",
+            "type": "integer"
+          },
+          "costMicros": {
+            "minimum": 0.0,
+            "nullable": true,
+            "title": "Costmicros",
+            "type": "integer"
+          },
+          "inputTokens": {
+            "minimum": 0.0,
+            "nullable": true,
+            "title": "Inputtokens",
+            "type": "integer"
+          },
+          "promptCacheMissTokens": {
+            "minimum": 0.0,
+            "nullable": true,
+            "title": "Promptcachemisstokens",
+            "type": "integer"
+          },
+          "protocolCorrections": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Protocolcorrections",
+            "type": "integer"
+          },
+          "providerAttempts": {
+            "maximum": 3.0,
+            "minimum": 0.0,
+            "title": "Providerattempts",
+            "type": "integer"
+          },
+          "reasoningTokens": {
+            "minimum": 0.0,
+            "nullable": true,
+            "title": "Reasoningtokens",
+            "type": "integer"
+          },
+          "usageStatus": {
+            "enum": [
+              "complete",
+              "partial",
+              "unknown"
+            ],
+            "title": "Usagestatus",
+            "type": "string"
+          },
+          "visibleOutputTokens": {
+            "minimum": 0.0,
+            "nullable": true,
+            "title": "Visibleoutputtokens",
+            "type": "integer"
+          },
+          "wallTimeMillis": {
+            "minimum": 0.0,
+            "title": "Walltimemillis",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "usageStatus",
+          "providerAttempts",
+          "protocolCorrections",
+          "wallTimeMillis"
+        ],
+        "title": "StepUsage",
         "type": "object"
       },
       "StoryBeatPlanArguments": {
@@ -16831,6 +19065,256 @@
         "title": "VisualCanonVersionResponse",
         "type": "object"
       },
+      "WorkflowArtifactSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "actionable": {
+            "title": "Actionable",
+            "type": "boolean"
+          },
+          "artifactId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Artifactid",
+            "type": "string"
+          },
+          "artifactRevision": {
+            "exclusiveMinimum": 0.0,
+            "title": "Artifactrevision",
+            "type": "integer"
+          },
+          "reviewAvailability": {
+            "enum": [
+              "complete",
+              "partial",
+              "unavailable"
+            ],
+            "title": "Reviewavailability",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          },
+          "status": {
+            "enum": [
+              "draft",
+              "under_review",
+              "awaiting_user",
+              "applying",
+              "applied"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "artifactId",
+          "artifactRevision",
+          "status",
+          "actionable"
+        ],
+        "title": "WorkflowArtifactSnapshot",
+        "type": "object"
+      },
+      "WorkflowCurrentStepSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "attemptCount": {
+            "minimum": 0.0,
+            "title": "Attemptcount",
+            "type": "integer"
+          },
+          "errorCode": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "title": "Errorcode",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          },
+          "fencingToken": {
+            "minimum": 0.0,
+            "title": "Fencingtoken",
+            "type": "integer"
+          },
+          "lane": {
+            "enum": [
+              "control",
+              "interactive",
+              "creative",
+              "batch_media"
+            ],
+            "title": "Lane",
+            "type": "string"
+          },
+          "latestProgress": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowStepProgressSnapshot"
+              }
+            ],
+            "x-inkforge-source-nullable": true
+          },
+          "modelProfile": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ModelProfileRef"
+              }
+            ],
+            "x-inkforge-source-nullable": true
+          },
+          "ordinal": {
+            "exclusiveMinimum": 0.0,
+            "title": "Ordinal",
+            "type": "integer"
+          },
+          "purpose": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Purpose",
+            "type": "string"
+          },
+          "resolvedModel": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ResolvedModelRef"
+              }
+            ],
+            "x-inkforge-source-nullable": true
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "completed",
+              "failed",
+              "skipped"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "stepId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Stepid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "stepId",
+          "ordinal",
+          "purpose",
+          "lane",
+          "modelProfile",
+          "resolvedModel",
+          "status",
+          "attemptCount",
+          "fencingToken",
+          "latestProgress"
+        ],
+        "title": "WorkflowCurrentStepSnapshot",
+        "type": "object"
+      },
+      "WorkflowErrorSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "errorCode": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "title": "Errorcode",
+            "type": "string"
+          },
+          "failedStepId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Failedstepid",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          },
+          "outcomeUnknown": {
+            "title": "Outcomeunknown",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "errorCode",
+          "outcomeUnknown"
+        ],
+        "title": "WorkflowErrorSnapshot",
+        "type": "object"
+      },
+      "WorkflowEventEnvelope": {
+        "additionalProperties": false,
+        "properties": {
+          "engineVersion": {
+            "title": "Engineversion",
+            "type": "integer",
+            "x-inkforge-const": 2
+          },
+          "eventType": {
+            "enum": [
+              "run_accepted",
+              "intent_resolved",
+              "clarification_required",
+              "evidence_ready",
+              "step_queued",
+              "step_started",
+              "step_progress",
+              "step_finished",
+              "candidate_ready",
+              "review_started",
+              "review_completed",
+              "awaiting_user",
+              "applying",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Eventtype",
+            "type": "string"
+          },
+          "occurredAt": {
+            "format": "date-time",
+            "title": "Occurredat",
+            "type": "string"
+          },
+          "payload": {
+            "type": "object",
+            "x-inkforge-java-discriminated-by": "eventType"
+          },
+          "protocolVersion": {
+            "title": "Protocolversion",
+            "type": "string",
+            "x-inkforge-const": "2.0"
+          },
+          "runId": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+            "title": "Runid",
+            "type": "string"
+          },
+          "sequence": {
+            "exclusiveMinimum": 0,
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "protocolVersion",
+          "engineVersion",
+          "runId",
+          "sequence",
+          "eventType",
+          "occurredAt",
+          "payload"
+        ],
+        "title": "WorkflowEventEnvelope",
+        "type": "object"
+      },
       "WorkflowRunDetailResponse": {
         "additionalProperties": false,
         "properties": {
@@ -16864,6 +19348,100 @@
           "runs"
         ],
         "title": "WorkflowRunListResponse",
+        "type": "object"
+      },
+      "WorkflowRunSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "activeSteps": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowCurrentStepSnapshot"
+            },
+            "maxItems": 32,
+            "title": "Activesteps",
+            "type": "array"
+          },
+          "artifact": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowArtifactSnapshot"
+              }
+            ],
+            "default": null,
+            "x-inkforge-source-nullable": true
+          },
+          "cancelRequestedAt": {
+            "default": null,
+            "format": "date-time",
+            "title": "Cancelrequestedat",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          },
+          "currentStep": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowCurrentStepSnapshot"
+              }
+            ],
+            "default": null,
+            "x-inkforge-source-nullable": true
+          },
+          "error": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowErrorSnapshot"
+              }
+            ],
+            "default": null,
+            "x-inkforge-source-nullable": true
+          },
+          "lastEventSequence": {
+            "minimum": 0,
+            "title": "Lasteventsequence",
+            "type": "integer"
+          },
+          "operation": {
+            "default": null,
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Operation",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          },
+          "revision": {
+            "exclusiveMinimum": 0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "waiting_user",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "workflow": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Workflow",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workflow",
+          "status",
+          "activeSteps",
+          "lastEventSequence",
+          "revision"
+        ],
+        "title": "WorkflowRunSnapshot",
         "type": "object"
       },
       "WorkflowRunSummary": {
@@ -16919,6 +19497,53 @@
           "status"
         ],
         "title": "WorkflowRunSummary",
+        "type": "object"
+      },
+      "WorkflowStepProgressSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "elapsedSeconds": {
+            "minimum": 0.0,
+            "title": "Elapsedseconds",
+            "type": "integer"
+          },
+          "phase": {
+            "enum": [
+              "preparing",
+              "waiting_provider",
+              "validating",
+              "reporting"
+            ],
+            "title": "Phase",
+            "type": "string"
+          },
+          "progressSequence": {
+            "exclusiveMinimum": 0.0,
+            "title": "Progresssequence",
+            "type": "integer"
+          },
+          "usageStatus": {
+            "enum": [
+              "complete",
+              "partial",
+              "unknown"
+            ],
+            "title": "Usagestatus",
+            "type": "string"
+          },
+          "waitingOnProvider": {
+            "title": "Waitingonprovider",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "progressSequence",
+          "phase",
+          "elapsedSeconds",
+          "waitingOnProvider",
+          "usageStatus"
+        ],
+        "title": "WorkflowStepProgressSnapshot",
         "type": "object"
       },
       "WorkspaceBootstrapResponse": {
@@ -17741,6 +20366,11 @@
             "title": "Createdat",
             "type": "string"
           },
+          "engineVersion": {
+            "title": "Engineversion",
+            "type": "integer",
+            "x-inkforge-const": 1
+          },
           "novelId": {
             "title": "Novelid",
             "type": "string"
@@ -17760,6 +20390,10 @@
           "recoverable": {
             "title": "Recoverable",
             "type": "boolean"
+          },
+          "runId": {
+            "title": "Runid",
+            "type": "string"
           },
           "scope": {
             "additionalProperties": {
@@ -17799,6 +20433,8 @@
           }
         },
         "required": [
+          "engineVersion",
+          "runId",
           "taskId",
           "novelId",
           "chapterId",
@@ -17822,7 +20458,7 @@
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/WritingRunListItem"
+              "$ref": "#/components/schemas/WritingRunPublicListItem"
             },
             "title": "Items",
             "type": "array"
@@ -17970,6 +20606,23 @@
         "title": "WritingRunOutcomeResult",
         "type": "object"
       },
+      "WritingRunPublicListItem": {
+        "discriminator": {
+          "mapping": {
+            "1": "#/components/schemas/WritingRunListItem",
+            "2": "#/components/schemas/WritingRunV2Response"
+          },
+          "propertyName": "engineVersion"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/WritingRunListItem"
+          },
+          {
+            "$ref": "#/components/schemas/WritingRunV2Response"
+          }
+        ]
+      },
       "WritingRunResponse": {
         "additionalProperties": false,
         "properties": {
@@ -17997,6 +20650,11 @@
             "title": "Createdat",
             "type": "string"
           },
+          "engineVersion": {
+            "title": "Engineversion",
+            "type": "integer",
+            "x-inkforge-const": 1
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -18007,6 +20665,10 @@
           },
           "phase": {
             "title": "Phase",
+            "type": "string"
+          },
+          "runId": {
+            "title": "Runid",
             "type": "string"
           },
           "selectedAgents": {
@@ -18020,6 +20682,10 @@
             "title": "Targetwordcount",
             "type": "integer"
           },
+          "taskId": {
+            "title": "Taskid",
+            "type": "string"
+          },
           "updatedAt": {
             "format": "date-time",
             "title": "Updatedat",
@@ -18032,6 +20698,9 @@
           }
         },
         "required": [
+          "engineVersion",
+          "runId",
+          "taskId",
           "id",
           "novelId",
           "chapterId",
@@ -18046,6 +20715,40 @@
         ],
         "title": "WritingRunResponse",
         "type": "object"
+      },
+      "WritingRunStartResponse": {
+        "discriminator": {
+          "mapping": {
+            "1": "#/components/schemas/WritingRunResponse",
+            "2": "#/components/schemas/WritingRunV2Response"
+          },
+          "propertyName": "engineVersion"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/WritingRunResponse"
+          },
+          {
+            "$ref": "#/components/schemas/WritingRunV2Response"
+          }
+        ]
+      },
+      "WritingRunStatusPublicResponse": {
+        "discriminator": {
+          "mapping": {
+            "1": "#/components/schemas/WritingRunStatusResponse",
+            "2": "#/components/schemas/WritingRunV2Response"
+          },
+          "propertyName": "engineVersion"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/WritingRunStatusResponse"
+          },
+          {
+            "$ref": "#/components/schemas/WritingRunV2Response"
+          }
+        ]
       },
       "WritingRunStatusResponse": {
         "additionalProperties": false,
@@ -18103,6 +20806,11 @@
             "type": "string",
             "x-inkforge-source-nullable": true
           },
+          "engineVersion": {
+            "title": "Engineversion",
+            "type": "integer",
+            "x-inkforge-const": 1
+          },
           "error": {
             "additionalProperties": {
               "$ref": "#/components/schemas/JsonValue"
@@ -18149,6 +20857,10 @@
             "type": "string",
             "x-inkforge-source-nullable": true
           },
+          "runId": {
+            "title": "Runid",
+            "type": "string"
+          },
           "scope": {
             "additionalProperties": {
               "$ref": "#/components/schemas/JsonValue"
@@ -18190,6 +20902,8 @@
           }
         },
         "required": [
+          "engineVersion",
+          "runId",
           "taskId",
           "novelId",
           "chapterId",
@@ -18204,6 +20918,132 @@
           "outcome"
         ],
         "title": "WritingRunStatusResponse",
+        "type": "object"
+      },
+      "WritingRunV2Response": {
+        "additionalProperties": false,
+        "properties": {
+          "activeSteps": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowCurrentStepSnapshot"
+            },
+            "maxItems": 32,
+            "title": "Activesteps",
+            "type": "array"
+          },
+          "artifact": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowArtifactSnapshot"
+              }
+            ],
+            "x-inkforge-source-nullable": true
+          },
+          "cancelRequestedAt": {
+            "format": "date-time",
+            "title": "Cancelrequestedat",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          },
+          "chapterId": {
+            "title": "Chapterid",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          },
+          "commandId": {
+            "title": "Commandid",
+            "type": "string",
+            "x-inkforge-fixed-null": true,
+            "x-inkforge-source-nullable": true
+          },
+          "commandStatus": {
+            "title": "Commandstatus",
+            "type": "string",
+            "x-inkforge-fixed-null": true,
+            "x-inkforge-source-nullable": true
+          },
+          "currentStep": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowCurrentStepSnapshot"
+              }
+            ],
+            "x-inkforge-source-nullable": true
+          },
+          "engineVersion": {
+            "title": "Engineversion",
+            "type": "integer",
+            "x-inkforge-const": 2
+          },
+          "error": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowErrorSnapshot"
+              }
+            ],
+            "x-inkforge-source-nullable": true
+          },
+          "lastEventSequence": {
+            "minimum": 0.0,
+            "title": "Lasteventsequence",
+            "type": "integer"
+          },
+          "operation": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Operation",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          },
+          "revision": {
+            "exclusiveMinimum": 0.0,
+            "title": "Revision",
+            "type": "integer"
+          },
+          "runId": {
+            "title": "Runid",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "waiting_user",
+              "completed",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "taskId": {
+            "title": "Taskid",
+            "type": "string",
+            "x-inkforge-source-nullable": true
+          },
+          "workflow": {
+            "maxLength": 128,
+            "minLength": 1,
+            "pattern": "^[a-z][a-z0-9_.-]*$",
+            "title": "Workflow",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workflow",
+          "status",
+          "activeSteps",
+          "lastEventSequence",
+          "revision",
+          "engineVersion",
+          "runId",
+          "taskId",
+          "chapterId",
+          "commandId",
+          "commandStatus"
+        ],
+        "title": "WritingRunV2Response",
         "type": "object"
       },
       "WritingSessionDetail": {
@@ -31705,6 +34545,218 @@
         ]
       }
     },
+    "/api/v1/review-artifact-summaries": {
+      "get": {
+        "operationId": "list_review_artifact_summaries_api_v1_review_artifact_summaries_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "novelId",
+            "required": true,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "title": "Novelid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "chapterId",
+            "required": false,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "nullable": true,
+              "title": "Chapterid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "taskId",
+            "required": false,
+            "schema": {
+              "maxLength": 256,
+              "minLength": 1,
+              "nullable": true,
+              "title": "Taskid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "nullable": true,
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "nullable": true,
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "maxLength": 512,
+              "minLength": 1,
+              "nullable": true,
+              "title": "Cursor",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "cookie",
+            "name": "inkforge-token",
+            "required": false,
+            "schema": {
+              "nullable": true,
+              "title": "Inkforge-Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewArtifactSummaryListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          }
+        },
+        "summary": "List Review Artifact Summaries",
+        "tags": [
+          "reviews"
+        ]
+      }
+    },
     "/api/v1/review-artifacts": {
       "get": {
         "operationId": "list_review_artifacts_api_v1_review_artifacts_get",
@@ -31931,6 +34983,27 @@
             }
           },
           {
+            "in": "query",
+            "name": "revision",
+            "required": false,
+            "schema": {
+              "minimum": 1,
+              "nullable": true,
+              "title": "Revision",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "nullable": true,
+              "title": "If-None-Match",
+              "type": "string"
+            }
+          },
+          {
             "in": "cookie",
             "name": "inkforge-token",
             "required": false,
@@ -31950,7 +35023,18 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "artifactId、精确 revision 与权威状态共同生成的强 ETag",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "精确 revision 详情与 If-None-Match 一致"
           },
           "400": {
             "content": {
@@ -32098,7 +35182,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ArtifactDecisionAcceptedResponse"
+                  "$ref": "#/components/schemas/ArtifactDecisionPublicResponse"
                 }
               }
             },
@@ -39334,7 +42418,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WritingRunResponse"
+                  "$ref": "#/components/schemas/WritingRunStartResponse"
                 }
               }
             },
@@ -39476,7 +42560,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WritingRunStatusResponse"
+                  "$ref": "#/components/schemas/WritingRunStatusPublicResponse"
                 }
               }
             },
@@ -39628,7 +42712,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CancelWritingRunResponse"
+                  "$ref": "#/components/schemas/CancelWritingRunPublicResponse"
                 }
               }
             },
@@ -39784,7 +42868,16 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "持续输出 V1 事件；V2 首帧为 RunSnapshot，后续为 WorkflowEventEnvelope。",
+            "x-inkforge-v2-sse": {
+              "firstFrame": {
+                "event": "run_snapshot",
+                "schema": "inkforge_contracts.workflow_events.RunSnapshot"
+              },
+              "subsequentFrames": {
+                "schema": "inkforge_contracts.workflow_events.WorkflowEventEnvelope"
+              }
+            }
           },
           "400": {
             "content": {
@@ -44737,6 +47830,611 @@
         ]
       }
     },
+    "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/billing-reconciliation": {
+      "put": {
+        "description": "Python 回滚 Core 只保留同形契约与鉴权，不实现第二套结算。",
+        "operationId": "reconcile_workflow_billing_internal_v1_workflow_runs__run_id__steps__step_id__billing_reconciliation_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "step_id",
+            "required": true,
+            "schema": {
+              "title": "Step Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BillingReconciliationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BillingReconciliationReceipt"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          }
+        },
+        "summary": "Reconcile Workflow Billing",
+        "tags": [
+          "billing"
+        ]
+      }
+    },
+    "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/failure": {
+      "put": {
+        "operationId": "report_execution_failure_internal_v1_workflow_runs__run_id__steps__step_id__failure_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "step_id",
+            "required": true,
+            "schema": {
+              "title": "Step Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecutionStepFailure"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionCallbackReceipt"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          }
+        },
+        "summary": "Report Execution Failure",
+        "tags": [
+          "workflows"
+        ]
+      }
+    },
+    "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/progress": {
+      "put": {
+        "operationId": "report_execution_progress_internal_v1_workflow_runs__run_id__steps__step_id__progress_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "step_id",
+            "required": true,
+            "schema": {
+              "title": "Step Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecutionStepProgress"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionCallbackReceipt"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          }
+        },
+        "summary": "Report Execution Progress",
+        "tags": [
+          "workflows"
+        ]
+      }
+    },
+    "/internal/v1/workflow-runs/{run_id}/steps/{step_id}/result": {
+      "put": {
+        "operationId": "report_execution_result_internal_v1_workflow_runs__run_id__steps__step_id__result_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "step_id",
+            "required": true,
+            "schema": {
+              "title": "Step Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecutionStepResult"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExecutionCallbackReceipt"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "统一错误响应"
+          }
+        },
+        "summary": "Report Execution Result",
+        "tags": [
+          "workflows"
+        ]
+      }
+    },
     "/internal/v1/writing/runs/{run_id}/checkpoint": {
       "put": {
         "operationId": "save_checkpoint_internal_v1_writing_runs__run_id__checkpoint_put",
@@ -45348,6 +49046,9 @@
     },
     {
       "name": "video"
+    },
+    {
+      "name": "workflows"
     },
     {
       "name": "writing"

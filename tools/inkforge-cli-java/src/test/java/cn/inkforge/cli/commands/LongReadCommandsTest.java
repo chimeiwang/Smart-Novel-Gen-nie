@@ -51,7 +51,7 @@ class LongReadCommandsTest {
                 new Case("long.foreshadowing.list", "{\"novelId\":\"n1\"}", "/api/v1/novels/n1/foreshadowings", Map.of()),
                 new Case("long.task.list", "{\"novelId\":\"n1\",\"outcome\":\"waiting_user\",\"limit\":2}", "/api/v1/writing/runs", q("novelId", "n1", "outcome", "waiting_user", "limit", "2")),
                 new Case("long.task.get", "{\"taskId\":\"t1\"}", "/api/v1/writing/runs/t1", Map.of()),
-                new Case("long.artifact.list", "{\"novelId\":\"n1\",\"status\":\"draft\"}", "/api/v1/review-artifacts", q("novelId", "n1", "status", "draft")),
+                new Case("long.artifact.list", "{\"novelId\":\"n1\",\"status\":\"draft\"}", "/api/v1/review-artifact-summaries", q("novelId", "n1", "status", "draft")),
                 new Case("long.artifact.get", "{\"artifactId\":\"a1\"}", "/api/v1/review-artifacts/a1", Map.of()),
                 new Case("long.quality.get", "{\"checkId\":\"q1\"}", "/api/v1/quality-checks/q1", Map.of()));
 
@@ -61,6 +61,63 @@ class LongReadCommandsTest {
             assertThat(api.method).as(item.command()).isEqualTo("GET");
             assertThat(api.path).as(item.command()).isEqualTo(item.path());
             assertThat(api.query).as(item.command()).isEqualTo(item.query());
+        }
+    }
+
+    @Test
+    void Artifact有界列表与精确详情保留V1V2判别字段() {
+        RecordingApi api = new RecordingApi(json);
+        CliApplication application = application(api);
+
+        api.nextResponse = json.readTree("{\"items\":[{\"engineVersion\":2,\"id\":\"a2\","
+                + "\"revision\":7,\"actionable\":true}],\"nextCursor\":null}");
+        Result summaries = run(
+                application,
+                "long.artifact.list",
+                "{\"novelId\":\"n1\",\"status\":\"awaiting_user\"}");
+        assertThat(summaries.exit()).as(summaries.stdout()).isZero();
+        assertThat(api.path).isEqualTo("/api/v1/review-artifact-summaries");
+        assertThat(summaries.stdout())
+                .contains("\"engineVersion\":2", "\"revision\":7", "\"actionable\":true");
+
+        api.nextResponse = json.readTree("{\"engineVersion\":2,\"id\":\"a2\","
+                + "\"revision\":7,\"payload\":{\"replacement\":\"完整替换\"}}");
+        Result v2Detail = run(
+                application,
+                "long.artifact.get",
+                "{\"artifactId\":\"a2\",\"revision\":7}");
+        assertThat(v2Detail.exit()).as(v2Detail.stdout()).isZero();
+        assertThat(api.path).isEqualTo("/api/v1/review-artifacts/a2");
+        assertThat(api.query).isEqualTo(q("revision", "7"));
+        assertThat(v2Detail.stdout())
+                .contains("\"engineVersion\":2", "\"revision\":7", "完整替换");
+
+        api.nextResponse = json.readTree(
+                "{\"engineVersion\":1,\"id\":\"legacy-a1\",\"revision\":3}");
+        Result v1Compatible = run(
+                application,
+                "long.artifact.get",
+                "{\"artifactId\":\"legacy-a1\"}");
+        assertThat(v1Compatible.exit()).as(v1Compatible.stdout()).isZero();
+        assertThat(api.path).isEqualTo("/api/v1/review-artifacts/legacy-a1");
+        assertThat(api.query).isEmpty();
+        assertThat(v1Compatible.stdout()).contains("\"engineVersion\":1");
+    }
+
+    @Test
+    void Artifact精确详情在联网前拒绝非法revision() {
+        RecordingApi api = new RecordingApi(json);
+        CliApplication application = application(api);
+
+        for (String revision : List.of("null", "0", "-1", "true", "1.5", "\"1\"")) {
+            Result invalid = run(
+                    application,
+                    "long.artifact.get",
+                    "{\"artifactId\":\"a1\",\"revision\":" + revision + "}");
+            assertThat(invalid.exit()).as(revision).isEqualTo(2);
+            assertThat(invalid.stdout()).as(revision)
+                    .contains("INVALID_ARTIFACT_REVISION");
+            assertThat(api.calls).as(revision).isZero();
         }
     }
 
@@ -137,6 +194,7 @@ class LongReadCommandsTest {
         private String path;
         private Map<String, List<String>> query = Map.of();
         private int calls;
+        private JsonNode nextResponse;
 
         private RecordingApi(JsonMapper json) {
             this.json = json;
@@ -162,6 +220,11 @@ class LongReadCommandsTest {
             this.path = path;
             this.query = query;
             this.calls++;
+            if (nextResponse != null) {
+                JsonNode response = nextResponse;
+                nextResponse = null;
+                return response;
+            }
             return json.createObjectNode()
                     .put("id", "result")
                     .put("content", "完整正文\r\n末尾")

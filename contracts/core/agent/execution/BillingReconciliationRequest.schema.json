@@ -1,0 +1,224 @@
+{
+  "$defs": {
+    "StepUsage": {
+      "additionalProperties": false,
+      "properties": {
+        "cachedTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cachedtokens"
+        },
+        "completionTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completiontokens"
+        },
+        "costMicros": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Costmicros"
+        },
+        "inputTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Inputtokens"
+        },
+        "promptCacheMissTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Promptcachemisstokens"
+        },
+        "protocolCorrections": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Protocolcorrections",
+          "type": "integer"
+        },
+        "providerAttempts": {
+          "maximum": 3,
+          "minimum": 0,
+          "title": "Providerattempts",
+          "type": "integer"
+        },
+        "reasoningTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoningtokens"
+        },
+        "usageStatus": {
+          "enum": [
+            "complete",
+            "partial",
+            "unknown"
+          ],
+          "title": "Usagestatus",
+          "type": "string"
+        },
+        "visibleOutputTokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Visibleoutputtokens"
+        },
+        "wallTimeMillis": {
+          "minimum": 0,
+          "title": "Walltimemillis",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "usageStatus",
+        "providerAttempts",
+        "protocolCorrections",
+        "wallTimeMillis"
+      ],
+      "title": "StepUsage",
+      "type": "object"
+    }
+  },
+  "$id": "https://inkforge.local/contracts/agent/execution/BillingReconciliationRequest/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "供应商账单证据驱动的 V2 预留对账命令。",
+  "properties": {
+    "decision": {
+      "enum": [
+        "exact_usage",
+        "proven_zero"
+      ],
+      "title": "Decision",
+      "type": "string"
+    },
+    "novelId": {
+      "anyOf": [
+        {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "title": "Novelid"
+    },
+    "protocolVersion": {
+      "const": "2.0",
+      "title": "Protocolversion",
+      "type": "string"
+    },
+    "reconciliationId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Reconciliationid",
+      "type": "string"
+    },
+    "reservationRequestId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Reservationrequestid",
+      "type": "string"
+    },
+    "runId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Runid",
+      "type": "string"
+    },
+    "stepId": {
+      "maxLength": 128,
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "title": "Stepid",
+      "type": "string"
+    },
+    "supplierEvidenceRef": {
+      "maxLength": 2000,
+      "minLength": 1,
+      "title": "Supplierevidenceref",
+      "type": "string"
+    },
+    "supplierReportSha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Supplierreportsha256",
+      "type": "string"
+    },
+    "usage": {
+      "$ref": "#/$defs/StepUsage"
+    }
+  },
+  "required": [
+    "protocolVersion",
+    "reconciliationId",
+    "runId",
+    "novelId",
+    "stepId",
+    "reservationRequestId",
+    "supplierEvidenceRef",
+    "supplierReportSha256",
+    "decision",
+    "usage"
+  ],
+  "title": "BillingReconciliationRequest",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.BillingReconciliationRequest"
+}

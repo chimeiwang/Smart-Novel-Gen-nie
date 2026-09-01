@@ -3,7 +3,9 @@ export type MessageWithReviewArtifact<TArtifact> = {
 };
 
 export type ReviewArtifactWithTaskId = {
-  taskId?: string | null;
+  engineVersion: 1 | 2;
+  taskId: string | null;
+  workflowRunId: string | null;
 };
 
 export type TaskBoundReviewArtifact = ReviewArtifactWithTaskId & {
@@ -92,7 +94,26 @@ export function isTerminalReviewArtifact(
   taskId: string,
   transientArtifactIds: ReadonlySet<string>,
 ): boolean {
-  return artifact.taskId === taskId || transientArtifactIds.has(artifact.id);
+  return transientArtifactIds.has(artifact.id)
+    || resolveReviewArtifactExecutionRunId(artifact) === taskId;
+}
+
+export function resolveReviewArtifactExecutionRunId(
+  artifact: ReviewArtifactWithTaskId,
+): string | null {
+  const taskId = typeof artifact.taskId === "string" && artifact.taskId.length > 0
+    ? artifact.taskId
+    : null;
+  const workflowRunId = typeof artifact.workflowRunId === "string" && artifact.workflowRunId.length > 0
+    ? artifact.workflowRunId
+    : null;
+  if (artifact.engineVersion === 1) {
+    return taskId && workflowRunId === null ? taskId : null;
+  }
+  if (artifact.engineVersion === 2) {
+    return workflowRunId && taskId === null ? workflowRunId : null;
+  }
+  return null;
 }
 
 export function resolveVisibleReviewArtifact<TArtifact>(
@@ -107,14 +128,16 @@ export function resolveReviewArtifactTaskId(
   currentTaskId: string | null | undefined,
   artifact: ReviewArtifactWithTaskId | null | undefined
 ): string | null {
-  return currentTaskId ?? artifact?.taskId ?? null;
+  if (!artifact) return currentTaskId ?? null;
+  return resolveReviewArtifactExecutionRunId(artifact);
 }
 
 export function resolveReviewArtifactActionTaskId(
   currentTaskId: string | null | undefined,
   artifact: ReviewArtifactWithTaskId | null | undefined
 ): string | null {
-  return artifact?.taskId ?? currentTaskId ?? null;
+  if (!artifact) return currentTaskId ?? null;
+  return resolveReviewArtifactExecutionRunId(artifact);
 }
 
 export function applyOptimisticReviewArtifactDecision<

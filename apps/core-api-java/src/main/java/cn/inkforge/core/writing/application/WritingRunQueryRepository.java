@@ -1,12 +1,15 @@
 package cn.inkforge.core.writing.application;
 
 import cn.inkforge.contracts.api.WritingRunListResponse;
+import cn.inkforge.contracts.api.WritingRunStatusPublicResponse;
 import cn.inkforge.contracts.api.WritingRunStatusResponse;
 
 /** 写作运行统一状态的只读端口。 */
 public interface WritingRunQueryRepository {
 
     WritingRunStatusResponse get(String userId, String taskId);
+
+    WritingRunStatusPublicResponse getPublic(String userId, String taskId);
 
     WritingRunListResponse list(
             String userId,

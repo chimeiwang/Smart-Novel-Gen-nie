@@ -14,29 +14,61 @@ import tools.jackson.databind.node.ObjectNode;
 /** 将实时 PostgreSQL 结构与冻结契约逐字段比较。 */
 public final class SchemaVerifier {
 
-    private final SchemaContract expected;
+    private final List<SchemaContract> expectedContracts;
     private final PostgresSchemaInspector inspector;
     private final SchemaProfile profile;
 
     public SchemaVerifier(SchemaContract expected) {
-        this(expected, SchemaProfile.FULL);
+        this(List.of(expected), SchemaProfile.FULL);
     }
 
     public SchemaVerifier(SchemaContract expected, SchemaProfile profile) {
-        this(expected, new PostgresSchemaInspector(), profile);
+        this(List.of(expected), profile);
+    }
+
+    /**
+     * 兼容镜像只接受列出的完整契约之一。候选不会合并，也不会把新增结构解释为可忽略的 additive drift。
+     */
+    public SchemaVerifier(List<SchemaContract> expectedContracts, SchemaProfile profile) {
+        this(expectedContracts, new PostgresSchemaInspector(), profile);
     }
 
     SchemaVerifier(
             SchemaContract expected, PostgresSchemaInspector inspector, SchemaProfile profile) {
-        this.expected = SchemaContractProjector.project(expected, profile);
+        this(List.of(expected), inspector, profile);
+    }
+
+    SchemaVerifier(
+            List<SchemaContract> expectedContracts,
+            PostgresSchemaInspector inspector,
+            SchemaProfile profile) {
+        if (expectedContracts == null || expectedContracts.isEmpty()) {
+            throw new IllegalArgumentException("数据库结构契约候选不能为空");
+        }
+        this.expectedContracts = expectedContracts.stream()
+                .map(contract -> SchemaContractProjector.project(contract, profile))
+                .toList();
         this.inspector = inspector;
         this.profile = profile;
     }
 
     public SchemaVerificationResult verify(Connection connection, String schema) throws SQLException {
         SchemaContract actual = SchemaContractProjector.project(inspector.inspect(connection, schema), profile);
-        List<SchemaDiff> diffs = compare(structural(expected.document()), structural(actual.document()), "");
-        return new SchemaVerificationResult(diffs.isEmpty(), actual.fingerprint(), diffs);
+        List<SchemaDiff> nearestDiffs = null;
+        for (SchemaContract expected : expectedContracts) {
+            List<SchemaDiff> diffs = compare(
+                    structural(expected.document()), structural(actual.document()), "");
+            if (diffs.isEmpty()) {
+                return new SchemaVerificationResult(true, actual.fingerprint(), List.of());
+            }
+            if (nearestDiffs == null || diffs.size() < nearestDiffs.size()) {
+                nearestDiffs = diffs;
+            }
+        }
+        return new SchemaVerificationResult(
+                false,
+                actual.fingerprint(),
+                nearestDiffs == null ? List.of() : List.copyOf(nearestDiffs));
     }
 
     private static ObjectNode structural(JsonNode document) {

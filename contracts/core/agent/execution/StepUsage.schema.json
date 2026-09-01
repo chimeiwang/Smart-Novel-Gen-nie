@@ -1,0 +1,133 @@
+{
+  "$id": "https://inkforge.local/contracts/agent/execution/StepUsage/2.0",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "cachedTokens": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cachedtokens"
+    },
+    "completionTokens": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Completiontokens"
+    },
+    "costMicros": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Costmicros"
+    },
+    "inputTokens": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Inputtokens"
+    },
+    "promptCacheMissTokens": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Promptcachemisstokens"
+    },
+    "protocolCorrections": {
+      "maximum": 1,
+      "minimum": 0,
+      "title": "Protocolcorrections",
+      "type": "integer"
+    },
+    "providerAttempts": {
+      "maximum": 3,
+      "minimum": 0,
+      "title": "Providerattempts",
+      "type": "integer"
+    },
+    "reasoningTokens": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Reasoningtokens"
+    },
+    "usageStatus": {
+      "enum": [
+        "complete",
+        "partial",
+        "unknown"
+      ],
+      "title": "Usagestatus",
+      "type": "string"
+    },
+    "visibleOutputTokens": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Visibleoutputtokens"
+    },
+    "wallTimeMillis": {
+      "minimum": 0,
+      "title": "Walltimemillis",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "usageStatus",
+    "providerAttempts",
+    "protocolCorrections",
+    "wallTimeMillis"
+  ],
+  "title": "StepUsage",
+  "type": "object",
+  "x-inkforge-python-type": "inkforge_contracts.execution.StepUsage"
+}

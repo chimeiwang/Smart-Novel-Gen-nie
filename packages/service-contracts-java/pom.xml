@@ -75,6 +75,7 @@
                 <useJackson3>true</useJackson3>
                 <useBeanValidation>true</useBeanValidation>
                 <performBeanValidation>true</performBeanValidation>
+                <disableDiscriminatorJsonIgnoreProperties>true</disableDiscriminatorJsonIgnoreProperties>
                 <openApiNullable>true</openApiNullable>
                 <containerDefaultToNull>true</containerDefaultToNull>
                 <generatedConstructorWithRequiredArgs>true</generatedConstructorWithRequiredArgs>

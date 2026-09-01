@@ -104,6 +104,7 @@
         <directory>../../scripts/migrations</directory>
         <includes>
           <include>20260827_user_phone_identity.sql</include>
+          <include>20260831_durable_agent_execution.sql</include>
         </includes>
         <targetPath>migrations</targetPath>
       </testResource>
@@ -121,11 +122,11 @@
         <directory>src/main/resources</directory>
       </resource>
       <resource>
-        <directory>../core-api/src/inkforge_core/db</directory>
+        <directory>../../contracts/agent-execution</directory>
         <includes>
-          <include>schema-contract.json</include>
+          <include>*.json</include>
         </includes>
-        <targetPath>db</targetPath>
+        <targetPath>agent-execution</targetPath>
       </resource>
     </resources>
     <plugins>

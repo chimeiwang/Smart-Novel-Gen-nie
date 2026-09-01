@@ -825,6 +825,8 @@ final class JooqWritingCommandRepository implements WritingCommandRepository {
                 command.getId(),
                 CancelWritingRunResponse.CommandStatusEnum.fromValue(command.getStatus()),
                 effective,
+                1,
+                command.getTaskid(),
                 command.getTaskid());
     }
 
@@ -985,6 +987,8 @@ final class JooqWritingCommandRepository implements WritingCommandRepository {
                 true,
                 command.getId(),
                 ResumeWritingRunResponse.CommandStatusEnum.fromValue(command.getStatus()),
+                1,
+                command.getTaskid(),
                 command.getTaskid());
     }
 
@@ -1145,6 +1149,9 @@ final class JooqWritingCommandRepository implements WritingCommandRepository {
             WritingtaskRecord task, WritingruncommandRecord command) {
         WritingRunResponse result = new WritingRunResponse();
         result.setId(task.getId());
+        result.setEngineVersion(1);
+        result.setRunId(task.getId());
+        result.setTaskId(task.getId());
         result.setNovelId(task.getNovelid());
         result.setChapterId(task.getChapterid());
         result.setWritingSessionId(task.getWritingsessionid());

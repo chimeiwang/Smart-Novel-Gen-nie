@@ -128,6 +128,9 @@ class JooqWritingCommandRepositoryStartTest {
         var first = repository.start(fixture.userId(), request);
         var replay = repository.start(fixture.userId(), request);
 
+        assertThat(first.getEngineVersion()).isEqualTo(1);
+        assertThat(first.getRunId()).isEqualTo(first.getTaskId());
+        assertThat(first.getId()).isEqualTo(first.getTaskId());
         assertThat(replay.getId()).isEqualTo(first.getId());
         assertThat(replay.getCommandId()).isEqualTo(first.getCommandId());
         assertThat(first.getSelectedAgents())
@@ -283,6 +286,9 @@ class JooqWritingCommandRepositoryStartTest {
         var first = repository.resume(fixture.userId(), started.getId(), request);
         var replay = repository.resume(fixture.userId(), started.getId(), request);
 
+        assertThat(first.getEngineVersion()).isEqualTo(1);
+        assertThat(first.getRunId()).isEqualTo(started.getId());
+        assertThat(first.getTaskId()).isEqualTo(started.getId());
         assertThat(replay.getCommandId()).isEqualTo(first.getCommandId());
         String payload = database.dsl().select(WRITINGRUNCOMMAND.PAYLOADJSON)
                 .from(WRITINGRUNCOMMAND)
@@ -402,6 +408,9 @@ class JooqWritingCommandRepositoryStartTest {
         var first = repository.cancel(fixture.userId(), started.getId(), request);
         var replay = repository.cancel(fixture.userId(), started.getId(), request);
 
+        assertThat(first.getEngineVersion()).isEqualTo(1);
+        assertThat(first.getRunId()).isEqualTo(started.getId());
+        assertThat(first.getTaskId()).isEqualTo(started.getId());
         assertThat(replay.getCommandId()).isEqualTo(first.getCommandId());
         assertThat(first.getEffective()).isTrue();
         assertThat(first.getAlreadyTerminal()).isFalse();

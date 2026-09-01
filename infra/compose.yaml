@@ -108,6 +108,8 @@ services:
       CORE_SERVICE_KEY_ID: ${CORE_SERVICE_KEY_ID:-core-api-v1}
       AGENT_SERVICE_PUBLIC_KEY_PATH: /run/inkforge-keys/agent-to-core-jwks.json
       AGENT_SERVICE_URL: http://agent-service-internal:8001
+      # Core 的 PostgreSQL active lease 上限必须与 Agent 的模型并发上限同源。
+      AGENT_MAX_CONCURRENCY: ${AGENT_MAX_CONCURRENCY:-3}
       UPLOADS_ROOT: /data/uploads
       RAG_INDEX_ENABLED: ${RAG_INDEX_ENABLED:-false}
       # Core 只读取状态开关，绝不接收火山 API Key。
@@ -118,6 +120,10 @@ services:
       VIDEO_PROVIDER_MEDIA_TOKEN_SECRET: ${VIDEO_PROVIDER_MEDIA_TOKEN_SECRET:-}
       SEEDANCE_RESULT_ALLOWED_HOST_SUFFIXES: ${SEEDANCE_RESULT_ALLOWED_HOST_SUFFIXES:-.volces.com}
       WORKFLOW_EVENT_DEBUG_ENABLED: ${WORKFLOW_EVENT_DEBUG_ENABLED:-false}
+      DURABLE_AGENT_EXECUTION_SCHEMA_READY: ${DURABLE_AGENT_EXECUTION_SCHEMA_READY:-false}
+      DURABLE_AGENT_EXECUTION_ROUTE_MODE: ${DURABLE_AGENT_EXECUTION_ROUTE_MODE:-off}
+      DURABLE_AGENT_EXECUTION_USER_ALLOWLIST: ${DURABLE_AGENT_EXECUTION_USER_ALLOWLIST:-}
+      DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST: ${DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
@@ -166,7 +172,9 @@ services:
       MODEL_MAX_OUTPUT_TOKENS: ${MODEL_MAX_OUTPUT_TOKENS:-384000}
       AGENT_MAX_CONCURRENCY: ${AGENT_MAX_CONCURRENCY:-3}
       REDIS_URL: redis://redis:6379/0
+      EXECUTION_REDIS_URL: ${EXECUTION_REDIS_URL:?必须配置独立执行日志 Redis}
       QUEUE_TERMINAL_RETENTION_DAYS: ${QUEUE_TERMINAL_RETENTION_DAYS:-7}
+      EXECUTION_TERMINAL_RETENTION_HOURS: ${EXECUTION_TERMINAL_RETENTION_HOURS:-24}
       TRUSTED_CORE_CIDRS: 172.29.0.0/24
       CORE_SERVICE_PUBLIC_KEY_PATH: /run/inkforge-keys/core-to-agent-jwks.json
       AGENT_SERVICE_PRIVATE_KEY_PATH: /run/inkforge-keys/agent-to-core-private.pem
@@ -193,9 +201,12 @@ services:
       agent_net:
         aliases:
           - agent-service-internal
+      execution_net:
       provider_net:
     depends_on:
       redis:
+        condition: service_healthy
+      execution-redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/internal/v1/health/ready', timeout=3)"]
@@ -229,6 +240,34 @@ services:
     cpus: "0.10"
     mem_limit: 96m
 
+  execution-redis:
+    image: redis:7.4-alpine
+    user: "999:999"
+    restart: unless-stopped
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    command: ["redis-server", "/usr/local/etc/redis/execution-redis.conf"]
+    volumes:
+      - ./redis/execution-redis.conf:/usr/local/etc/redis/execution-redis.conf:ro
+      - execution_redis_data:/data
+    tmpfs:
+      - /tmp:size=8m,mode=1777
+    networks:
+      - execution_net
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          test "$$(redis-cli --raw PING)" = PONG &&
+          redis-cli --raw INFO persistence | grep -q '^aof_enabled:1' &&
+          redis-cli --raw INFO persistence | grep -q '^aof_last_write_status:ok'
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    cpus: "0.10"
+    mem_limit: 128m
+
 networks:
   public_net:
     ipam:
@@ -244,9 +283,15 @@ networks:
     ipam:
       config:
         - subnet: 172.30.0.0/24
+  execution_net:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.31.0.0/24
   # 仅 Agent 连接该受控出网网络，用于模型与视频供应商请求。
   provider_net:
 
 volumes:
   uploads:
   agent_logs:
+  execution_redis_data:

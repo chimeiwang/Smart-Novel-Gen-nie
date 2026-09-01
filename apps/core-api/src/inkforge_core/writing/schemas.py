@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
 from inkforge_contracts.long_serial import (
     ChapterTarget,
@@ -10,6 +10,7 @@ from inkforge_contracts.long_serial import (
     SelectionTarget,
 )
 from inkforge_contracts.operations import ExecutableCreativeOperationKind
+from inkforge_contracts.workflow_events import WorkflowRunSnapshot
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -259,7 +260,19 @@ class ResumeWritingRunRequest(WritingSchema):
     userMessage: str | None = None
 
 
-class WritingRunResponse(WritingSchema):
+class _WritingRunV1Identity(WritingSchema):
+    engineVersion: Literal[1]
+    runId: str
+    taskId: str
+
+    @model_validator(mode="after")
+    def validate_v1_identity(self) -> Self:
+        if self.runId != self.taskId:
+            raise ValueError("V1 runId 必须与 taskId 相同")
+        return self
+
+
+class WritingRunResponse(_WritingRunV1Identity):
     id: str
     novelId: str
     chapterId: str
@@ -272,10 +285,15 @@ class WritingRunResponse(WritingSchema):
     commandId: str
     commandStatus: WritingCommandStatus
 
+    @model_validator(mode="after")
+    def validate_start_identity(self) -> Self:
+        if self.id != self.taskId:
+            raise ValueError("V1 start response 的 id 必须与 taskId 相同")
+        return self
 
-class ResumeWritingRunResponse(WritingSchema):
+
+class ResumeWritingRunResponse(_WritingRunV1Identity):
     accepted: Literal[True]
-    taskId: str
     commandId: str
     commandStatus: WritingCommandStatus
 
@@ -284,14 +302,40 @@ class CancelWritingRunRequest(WritingSchema):
     clientRequestId: str = Field(min_length=16, max_length=128)
 
 
-class CancelWritingRunResponse(WritingSchema):
-    taskId: str
+class CancelWritingRunResponse(_WritingRunV1Identity):
     commandId: str
     commandStatus: WritingCommandStatus
     effective: bool
     alreadyTerminal: bool
     cancelledCommandId: str | None
     cancelledJobId: str | None
+
+
+class WritingRunV2Response(WorkflowRunSnapshot):
+    engineVersion: Literal[2]
+    runId: str
+    taskId: str | None
+    chapterId: str | None
+    commandId: str | None = Field(json_schema_extra={"enum": [None]})
+    commandStatus: str | None = Field(json_schema_extra={"enum": [None]})
+
+    @model_validator(mode="after")
+    def validate_v2_projection(self) -> Self:
+        if self.taskId is not None and self.taskId != self.runId:
+            raise ValueError("V2 taskId 兼容别名必须为空或等于 runId")
+        if self.commandId is not None or self.commandStatus is not None:
+            raise ValueError("V2 不得把 WorkflowStep 伪装成旧 Command")
+        return self
+
+
+type WritingRunStartResponse = Annotated[
+    WritingRunResponse | WritingRunV2Response,
+    Field(discriminator="engineVersion"),
+]
+type CancelWritingRunPublicResponse = Annotated[
+    CancelWritingRunResponse | WritingRunV2Response,
+    Field(discriminator="engineVersion"),
+]
 
 
 class WritingRunOutcomeCommand(WritingSchema):
@@ -339,8 +383,7 @@ class WritingRunCheckpointResponse(WritingSchema):
     operationStep: str | None
 
 
-class WritingRunListItem(WritingSchema):
-    taskId: str
+class WritingRunListItem(_WritingRunV1Identity):
     novelId: str
     chapterId: str
     writingSessionId: str | None
@@ -356,13 +399,18 @@ class WritingRunListItem(WritingSchema):
     updatedAt: datetime
 
 
+type WritingRunPublicListItem = Annotated[
+    WritingRunListItem | WritingRunV2Response,
+    Field(discriminator="engineVersion"),
+]
+
+
 class WritingRunListResponse(WritingSchema):
-    items: list[WritingRunListItem]
+    items: list[WritingRunPublicListItem]
     nextCursor: str | None
 
 
-class WritingRunStatusResponse(WritingSchema):
-    taskId: str
+class WritingRunStatusResponse(_WritingRunV1Identity):
     novelId: str
     chapterId: str
     writingSessionId: str | None = None
@@ -394,3 +442,9 @@ class WritingRunStatusResponse(WritingSchema):
     checkReport: dict[str, JsonValue] | None
     error: dict[str, JsonValue] | None
     outcome: WritingRunOutcome
+
+
+type WritingRunStatusPublicResponse = Annotated[
+    WritingRunStatusResponse | WritingRunV2Response,
+    Field(discriminator="engineVersion"),
+]

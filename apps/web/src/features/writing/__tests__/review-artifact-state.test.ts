@@ -7,6 +7,7 @@ import {
   clearReviewArtifactFromMessages,
   createReviewStateEpoch,
   isTerminalReviewArtifact,
+  resolveReviewArtifactExecutionRunId,
   resolveReviewArtifactActionTaskId,
   resolveReviewArtifactTaskId,
   resolveVisibleReviewArtifact,
@@ -15,6 +16,7 @@ import {
 type TestArtifact = {
   id: string;
   taskId?: string | null;
+  workflowRunId?: string | null;
   artifactKey?: string | null;
   revision?: number;
   status: string;
@@ -95,23 +97,72 @@ describe("review artifact state", () => {
 
   it("uses the artifact task id when no current task id is available", () => {
     assert.equal(
-      resolveReviewArtifactTaskId(null, { taskId: "task-from-artifact" }),
+      resolveReviewArtifactTaskId(null, {
+        engineVersion: 1,
+        taskId: "task-from-artifact",
+        workflowRunId: null,
+      }),
       "task-from-artifact"
     );
   });
 
-  it("keeps the current task id when it is already available", () => {
+  it("Artifact 归属覆盖不一致的当前任务，禁止跨 Run 猜测", () => {
     assert.equal(
-      resolveReviewArtifactTaskId("current-task", { taskId: "task-from-artifact" }),
-      "current-task"
+      resolveReviewArtifactTaskId("current-task", {
+        engineVersion: 1,
+        taskId: "task-from-artifact",
+        workflowRunId: null,
+      }),
+      "task-from-artifact"
     );
   });
 
   it("uses the artifact task id for review actions", () => {
     assert.equal(
-      resolveReviewArtifactActionTaskId("current-task", { taskId: "task-from-artifact" }),
+      resolveReviewArtifactActionTaskId("current-task", {
+        engineVersion: 1,
+        taskId: "task-from-artifact",
+        workflowRunId: null,
+      }),
       "task-from-artifact"
     );
+  });
+
+  it("V2 Artifact 优先使用 workflowRunId", () => {
+    const artifact = { engineVersion: 2 as const, workflowRunId: "run-v2", taskId: null };
+    assert.equal(resolveReviewArtifactTaskId(null, artifact), "run-v2");
+    assert.equal(resolveReviewArtifactActionTaskId("legacy-current", artifact), "run-v2");
+    assert.equal(
+      isTerminalReviewArtifact(
+        { id: "artifact-v2", engineVersion: 2, workflowRunId: "run-v2", taskId: null },
+        "run-v2",
+        new Set(),
+      ),
+      true,
+    );
+  });
+
+  it("拒绝 engineVersion 与 taskId/workflowRunId 不一致的 Artifact", () => {
+    assert.equal(resolveReviewArtifactExecutionRunId({
+      engineVersion: 1,
+      taskId: null,
+      workflowRunId: "run-v2",
+    }), null);
+    assert.equal(resolveReviewArtifactExecutionRunId({
+      engineVersion: 2,
+      taskId: "task-v1",
+      workflowRunId: null,
+    }), null);
+    assert.equal(resolveReviewArtifactExecutionRunId({
+      engineVersion: 2,
+      taskId: "task-v1",
+      workflowRunId: "run-v2",
+    }), null);
+    assert.equal(resolveReviewArtifactActionTaskId("current-task", {
+      engineVersion: 2,
+      taskId: "task-v1",
+      workflowRunId: null,
+    }), null);
   });
 
   it("can display an inspected artifact without attaching it to messages", () => {
@@ -164,7 +215,12 @@ describe("review artifact state", () => {
 
     assert.equal(
       isTerminalReviewArtifact(
-        { id: "artifact-by-task", taskId: "task-1" },
+        {
+          id: "artifact-by-task",
+          engineVersion: 1,
+          taskId: "task-1",
+          workflowRunId: null,
+        },
         "task-1",
         transientArtifactIds,
       ),
@@ -172,7 +228,12 @@ describe("review artifact state", () => {
     );
     assert.equal(
       isTerminalReviewArtifact(
-        { id: "artifact-without-task" },
+        {
+          id: "artifact-without-task",
+          engineVersion: 1,
+          taskId: null,
+          workflowRunId: null,
+        },
         "task-1",
         transientArtifactIds,
       ),
@@ -180,7 +241,12 @@ describe("review artifact state", () => {
     );
     assert.equal(
       isTerminalReviewArtifact(
-        { id: "artifact-other-task", taskId: "task-2" },
+        {
+          id: "artifact-other-task",
+          engineVersion: 1,
+          taskId: "task-2",
+          workflowRunId: null,
+        },
         "task-1",
         transientArtifactIds,
       ),

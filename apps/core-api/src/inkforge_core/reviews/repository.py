@@ -36,6 +36,7 @@ from .schemas import (
     CreateArtifactRequest,
     EvaluationVerdict,
     ReviewArtifactResponse,
+    ReviewArtifactSummaryResponse,
     SourceBindingStatus,
     SubmitArtifactEvaluationRequest,
     assert_status_transition,
@@ -207,7 +208,12 @@ class ReviewRepository:
                     )
                 return _record(artifact)
 
-    async def get_response(self, user_id: str, artifact_id: str) -> ReviewArtifactResponse:
+    async def get_response(
+        self,
+        user_id: str,
+        artifact_id: str,
+        revision: int | None = None,
+    ) -> ReviewArtifactResponse:
         async with self._session_factory() as session:
             artifact = await _owned_artifact(session, user_id, artifact_id)
             if artifact is None:
@@ -215,6 +221,16 @@ class ReviewRepository:
                     status_code=403,
                     code="REVIEW_ARTIFACT_FORBIDDEN",
                     message="无权访问该待审核草案",
+                )
+            if revision is not None and artifact.revision != revision:
+                raise ApiError(
+                    status_code=409,
+                    code="ARTIFACT_REVISION_CONFLICT",
+                    message="待审核草案修订号已变化",
+                    details={
+                        "expectedRevision": revision,
+                        "actualRevision": artifact.revision,
+                    },
                 )
             evaluations = (
                 await session.execute(
@@ -338,7 +354,13 @@ class ReviewRepository:
         cursor: str | None,
         limit: int,
     ) -> tuple[list[ReviewArtifactResponse], str | None]:
-        conditions = [ReviewArtifact.novelId == novel_id, Novel.userId == user_id]
+        """V1 已发布兼容入口；只返回 task 归属的旧 Artifact 完整响应。"""
+        conditions = [
+            ReviewArtifact.novelId == novel_id,
+            Novel.userId == user_id,
+            ReviewArtifact.taskId.is_not(None),
+            ReviewArtifact.workflowRunId.is_(None),
+        ]
         if chapter_id is not None:
             conditions.append(ReviewArtifact.chapterId == chapter_id)
         if task_id is not None:
@@ -380,6 +402,93 @@ class ReviewRepository:
                 for artifact in artifacts
             ]
         next_cursor = _encode_cursor(artifacts[-1]) if has_more and artifacts else None
+        return responses, next_cursor
+
+    async def list_artifact_summaries(
+        self,
+        user_id: str,
+        *,
+        novel_id: str,
+        chapter_id: str | None,
+        task_id: str | None,
+        status: str | None,
+        kind: str | None,
+        cursor: str | None,
+        limit: int,
+    ) -> tuple[list[ReviewArtifactSummaryResponse], str | None]:
+        conditions = [ReviewArtifact.novelId == novel_id, Novel.userId == user_id]
+        if chapter_id is not None:
+            conditions.append(ReviewArtifact.chapterId == chapter_id)
+        if task_id is not None:
+            conditions.append(ReviewArtifact.taskId == task_id)
+        if status is not None:
+            conditions.append(ReviewArtifact.status == status)
+        if kind is not None:
+            conditions.append(ReviewArtifact.kind == kind)
+        if cursor is not None:
+            created_at, artifact_id = _decode_cursor(cursor)
+            conditions.append(
+                or_(
+                    ReviewArtifact.createdAt < created_at,
+                    and_(ReviewArtifact.createdAt == created_at, ReviewArtifact.id < artifact_id),
+                )
+            )
+        async with self._session_factory() as session:
+            rows = list(
+                (
+                    await session.execute(
+                        select(
+                            ReviewArtifact.id,
+                            ReviewArtifact.novelId,
+                            ReviewArtifact.chapterId,
+                            ReviewArtifact.taskId,
+                            ReviewArtifact.workflowRunId,
+                            ReviewArtifact.artifactKey,
+                            ReviewArtifact.kind,
+                            ReviewArtifact.status,
+                            ReviewArtifact.title,
+                            ReviewArtifact.summary,
+                            ReviewArtifact.revision,
+                            ReviewArtifact.createdAt,
+                            ReviewArtifact.updatedAt,
+                        )
+                        .join(Novel, Novel.id == ReviewArtifact.novelId)
+                        .where(*conditions)
+                        .order_by(ReviewArtifact.createdAt.desc(), ReviewArtifact.id.desc())
+                        .limit(limit + 1)
+                    )
+                ).mappings()
+            )
+            has_more = len(rows) > limit
+            rows = rows[:limit]
+            responses = [
+                ReviewArtifactSummaryResponse(
+                    engineVersion=2 if row["workflowRunId"] is not None else 1,
+                    id=cast(str, row["id"]),
+                    novelId=cast(str, row["novelId"]),
+                    chapterId=cast(str | None, row["chapterId"]),
+                    taskId=cast(str | None, row["taskId"]),
+                    workflowRunId=cast(str | None, row["workflowRunId"]),
+                    artifactKey=cast(str | None, row["artifactKey"]),
+                    kind=cast(ArtifactKind, row["kind"]),
+                    status=cast(ArtifactStatus, row["status"]),
+                    title=cast(str | None, row["title"]),
+                    summary=cast(str | None, row["summary"]),
+                    revision=cast(int, row["revision"]),
+                    actionable=row["status"] == "awaiting_user",
+                    createdAt=cast(datetime, row["createdAt"]),
+                    updatedAt=cast(datetime, row["updatedAt"]),
+                )
+                for row in rows
+            ]
+        next_cursor = (
+            _encode_cursor_values(
+                cast(datetime, rows[-1]["createdAt"]),
+                cast(str, rows[-1]["id"]),
+            )
+            if has_more and rows
+            else None
+        )
         return responses, next_cursor
 
     async def transition(self, artifact_id: str, current: str, target: str) -> None:
@@ -1212,8 +1321,12 @@ async def _source_binding_views(
 
 
 def _encode_cursor(artifact: ReviewArtifact) -> str:
+    return _encode_cursor_values(artifact.createdAt, artifact.id)
+
+
+def _encode_cursor_values(created_at: datetime, artifact_id: str) -> str:
     payload = json.dumps(
-        {"createdAt": artifact.createdAt.isoformat(), "id": artifact.id},
+        {"createdAt": created_at.isoformat(), "id": artifact_id},
         separators=(",", ":"),
     ).encode()
     return base64.urlsafe_b64encode(payload).decode().rstrip("=")
@@ -1300,6 +1413,7 @@ def _response(
             else "not_yet_supported"
         )
     return ReviewArtifactResponse(
+        engineVersion=2 if record.workflow_run_id is not None else 1,
         id=record.id,
         novelId=record.novel_id,
         chapterId=record.chapter_id,

@@ -16,6 +16,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
 import tools.jackson.databind.JsonNode;
@@ -58,7 +59,12 @@ public final class ServiceTokenVerifier {
             ServiceScope.QUALITY_WRITE,
             ServiceScope.VIDEO_WRITE,
             ServiceScope.VIDEO_RENDER,
-            ServiceScope.BILLING_USAGE_WRITE);
+            ServiceScope.EXECUTION_SUBMIT,
+            ServiceScope.EXECUTION_CANCEL,
+            ServiceScope.EXECUTION_PROGRESS,
+            ServiceScope.EXECUTION_RESULT,
+            ServiceScope.BILLING_USAGE_WRITE,
+            ServiceScope.BILLING_RECONCILE);
 
     private final Map<String, PublicKey> publicKeys;
     private final String expectedIssuer;
@@ -251,7 +257,7 @@ public final class ServiceTokenVerifier {
                 scopes,
                 strictText(payload, "task_id"),
                 strictText(payload, "run_id"),
-                strictText(payload, "novel_id"),
+                nullableStrictText(payload, "novel_id"),
                 strictText(payload, "jti"),
                 issuedAt,
                 expiresAt,
@@ -309,7 +315,7 @@ public final class ServiceTokenVerifier {
     }
 
     private static void verifyResource(String field, String claim, String requested) {
-        if (!claim.equals(requested)) {
+        if (!Objects.equals(claim, requested)) {
             throw ServiceAuthException.resource(field);
         }
     }
@@ -361,6 +367,11 @@ public final class ServiceTokenVerifier {
             throw new IllegalArgumentException("服务令牌文本字段无效");
         }
         return value.asString();
+    }
+
+    private static String nullableStrictText(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        return value != null && value.isNull() ? null : strictText(node, field);
     }
 
     private static long strictLong(JsonNode node, String field) {
