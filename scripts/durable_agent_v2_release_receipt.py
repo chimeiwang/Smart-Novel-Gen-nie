@@ -137,7 +137,7 @@ def unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
-def validate(document: dict[str, Any]) -> None:
+def validate(document: dict[str, Any], *, allow_genesis: bool = False) -> None:
     require_keys(document, TOP_KEYS, "receipt")
     if document["format"] != FORMAT:
         raise ReceiptInvalid("receipt format 无效")
@@ -155,6 +155,8 @@ def validate(document: dict[str, Any]) -> None:
     ):
         require_hex(document[key], 64, key)
     previous = document["previousReceiptSha256"]
+    if previous is None and not allow_genesis:
+        raise ReceiptInvalid("previous=null 只能由受签名 bootstrap 信任链验证")
     if previous is not None:
         require_hex(previous, 64, "previous receipt SHA")
     images = require_keys(document["images"], {"agent", "core", "web"}, "images")
@@ -203,7 +205,12 @@ def validate(document: dict[str, Any]) -> None:
     require_hex(identity["boundaryLedgerSha256"], 64, "boundary ledger SHA")
 
 
-def verify(directory: Path, expected_sha: str | None = None) -> tuple[dict[str, Any], str]:
+def verify(
+    directory: Path,
+    expected_sha: str | None = None,
+    *,
+    allow_genesis: bool = False,
+) -> tuple[dict[str, Any], str]:
     if not directory.is_absolute() or directory.is_symlink() or not directory.is_dir():
         raise ReceiptInvalid("receipt 目录无效")
     if stat.S_IMODE(directory.stat().st_mode) != 0o700:
@@ -223,7 +230,7 @@ def verify(directory: Path, expected_sha: str | None = None) -> tuple[dict[str, 
         raise ReceiptInvalid("receipt JSON 无效") from error
     if not isinstance(document, dict):
         raise ReceiptInvalid("receipt 顶层无效")
-    validate(document)
+    validate(document, allow_genesis=allow_genesis)
     payload = receipt.read_bytes()
     if payload != canonical(document):
         raise ReceiptInvalid("receipt 不是 canonical JSON")

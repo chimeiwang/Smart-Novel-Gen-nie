@@ -209,15 +209,28 @@ readiness 只阻断抽帧和导出，不能阻断历史版本读取。成片必�
 
 宿主机 Nginx 是唯一可从公网直接到达的入口。公开证书由宿主机 Certbot 管理，证书及私钥只保存在 `/etc/letsencrypt`，不得进入 Git 仓库、应用镜像或 `.env`。`certbot.timer` 负责自动续期，续期成功后的 deploy hook 必须先执行 `nginx -t`，通过后才 reload 宿主机 Nginx。
 
-生产发布由 GitHub Actions 在 Runner 上构建带提交哈希标签的 Web、Core API 和 Agent Service 三张镜像，经 SSH 加载到服务器，再以 `--no-build` 启动 `infra/compose.yaml`。2 核 2 GB 服务器不得现场安装依赖或构建镜像；缺少 `.env`、四个服务密钥、宿主机 PostgreSQL 连接或可恢复备份时必须停止部署。
+生产候选由 GitHub Actions 在无生产权限的阶段构建带提交哈希标签的 Web、Core API 和 Agent Service 三张镜像；
+生产批准阶段只能消费同一受保护 run 冻结、复验过的不可变镜像与 control bundle，再通过版本化的最小权限 SSH
+broker 加载并以 `--no-build` 启动 `infra/compose.yaml`。普通 `build.yml` 只做 CI，不能自动部署。2 核 2 GB
+服务器不得现场安装依赖或构建镜像；缺少真实开发 evidence、`.env`、四个服务密钥、宿主机 PostgreSQL 连接、
+可恢复备份、受保护 current receipt 或 bootstrap attestation 时必须在首次生产 SSH 前停止。
 
 镜像上传必须先对远端 Docker 和相关文件系统可用容量执行只读预检，再把无法复用的镜像逐张归档、压缩、传输和导入。日志必须标明镜像名、阶段、压缩后大小和耗时；单镜像传输导入与工作流上传步骤都必须设置有界超时。临时归档只保存在一次性 Runner 并在退出时清理，不得为了腾出空间自动删除生产镜像、容器、卷或数据。
 
-生产 SSH 必须严格校验管理员离线核对过的主机公钥：
+生产 SSH 不只校验主机公钥，还必须把目标服务器、目标用户、主机键、新执行公钥/上传公钥、旧 key 撤销事实、
+forced-command broker 版本与权限证据绑定到有来源和时效的 canonical attestation：
 
 - GitHub `production` environment 必须配置 `DEPLOY_SSH_KNOWN_HOSTS` Secret；内容由管理员通过可信渠道取得并在线下比对，不能在部署时使用 `ssh-keyscan` 动态信任远端；
 - workflow 把该 Secret 写入权限为 600 的临时 `known_hosts` 文件，所有 SSH、SCP 和上传脚本统一使用 `StrictHostKeyChecking=yes`；
-- Secret 或文件缺失、不可读、为空时，必须在首次网络连接前停止部署；日志不得输出主机键、SSH 私钥、`.env` 或服务密钥内容。
+- Secret 或文件缺失、不可读、为空时，必须在首次网络连接前停止部署；日志不得输出主机键、SSH 私钥、`.env` 或服务密钥内容；
+- 任意三个互不相同的 SHA 字符串、截图或手工环境变量不能充当撤旧 key、forced-command 或最小权限证据；workflow
+  必须下载并语义校验独立来源的 canonical attestation，核对签发/到期、producer run、repository/environment、
+  server/key subject 与内容哈希；
+- 执行 key 只能进入固定协议 broker（operation enum + canonical stdin），禁止任意 shell、TTY、端口/Agent/X11
+  转发和未列入协议的路径；上传职责应使用独立受限 key/入口，不能让一把 key 同时获得通用 SFTP、`docker load`
+  stdin 和任意内联 shell；
+- 历史 `SERVER_SSH_KEY` 必须在 environment、repository 与 organization 三个 Secret scope 都证明不存在，旧 workflow
+  rerun 也不能恢复其能力。上述实现或外部事实缺任一项，生产 workflow 必须保持 SSH 调用次数为 0。
 
 生产 deploy job 使用独立 `production` 并发组，后续版本必须排队，不能取消正在执行的版本切换或自动回滚。部署脚本在切换前按 Compose project/service label 读取 `web`、`core-api` 和 `agent-service` 当前运行镜像：
 

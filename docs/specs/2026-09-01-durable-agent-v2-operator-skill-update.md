@@ -15,14 +15,30 @@
 
 截至 2026-09-01，本工作分支已经完成以下本地门禁；这些结果只证明实现与契约一致，不代表生产已开放：
 
-- Python CLI 全量测试 `578 passed`，相关架构门禁 `6 passed`；
+- Python CLI 与 CLI migration baseline 的最终全量门禁 `584 passed`，相关问答/Skill 契约架构门禁 `6 passed`；
 - Java CLI 变更定向测试 `23/23`，Java CLI 模块 `verify` 为 `61/61`；
 - `contracts/cli/parity-v2-contract-error-cases.json` 的 16 个错误场景与
   `contracts/cli/parity-watch-cases.json` 的 7 个 watcher 场景均由 Python/Java 跨语言测试读取；
 - Python Ruff、CLI 源码 Mypy 与 `git diff --check` 均通过。
 
-两个已安装 Skill 目前仍保持原版本。更新者必须在目标发布提交进入 `main`、本节测试由该提交复跑、下文生产
-启用门禁满足后，才按“Skill 文件更新清单”修改并重新安装；不得直接从当前工作树复制未发布行为。
+两个已安装 Skill 目前仍未开放 `answer_question`，但已经单独完成一项不扩大业务能力的凭据诊断收紧：macOS
+Keychain 原生调用失败时，wrapper 把受控 `MacOSKeychainError` 转成稳定的
+`SECURE_CREDENTIAL_BACKEND_REQUIRED`，不再把它吞成泛化 `UNEXPECTED_ERROR`。该变化没有增加命令白名单、
+不会读取或打印密码，也没有明文、环境变量或文件凭据回退。更新者必须在目标发布提交进入 `main`、本节测试由该提交
+复跑、下文生产启用门禁满足后，才按“Skill 文件更新清单”开放问答；不得直接从当前工作树复制未发布业务行为。
+
+### 凭据后端诊断契约
+
+- `auth.whoami`、业务命令或登录流程若无法使用 macOS Keychain，wrapper 稳定输出
+  `SECURE_CREDENTIAL_BACKEND_REQUIRED` 并以退出码 `3` 停止；不得自动切换到明文、环境变量、仓库文件或日志中的
+  token。
+- `auth.login` 的密码只允许用户在真实 TTY 的隐藏提示中输入。Skill、测试、文档和自动化不得把密码放入 argv、
+  stdin 管道、环境变量、JSON、证据目录或聊天记录，也不得代替用户输入。
+- 该错误只表示当前本机安全凭据后端不可用，不能被 Skill 解释为 `AUTH_REQUIRED` 后自动登录，也不能用浏览器 Cookie、
+  自拼 HTTP、SSH、数据库或内部 API 绕过。
+- 两个已安装 Skill 的离线回归必须分别覆盖：原生 Keychain backend error 被精确转换、错误文本不包含底层异常正文、
+  backend 不可用时零目标业务请求。当前本机门禁为 production Skill `13 tests OK`、local Skill `16 tests OK`，
+  两者各有 1 个只在当前宿主未提供原生 Keychain 测试条件时的显式 skip，且两份 `quick_validate.py` 均通过。
 
 ## 唯一行为变化
 
@@ -136,6 +152,11 @@ Skill 不得把这些本地输入错误自动改写成另一种 Operation、scop
 公共 Python/Java CLI 的命令名、参数和凭据边界没有因本次发布安全改造而变化；Skill 不需要新增 SSH、部署或
 数据库命令，也不得把下列服务器 driver 动作加入 wrapper 白名单。变化只发生在受保护 GitHub 发布工作流和
 服务器端控制面：
+
+- development evidence v2 与 SSH/genesis 信任根分别见
+  `docs/specs/2026-09-01-durable-agent-v2-development-evidence-v2.md`、
+  `docs/specs/2026-09-01-durable-agent-v2-ssh-genesis-trust-root.md`。其中新增的离线 helper/broker 都不是产品 CLI，
+  不得加入 Skill 命令清单；未来若真实 provider canary 的公共 CLI 输入、JSONL 或恢复语义变化，必须先改本文件再改 Skill。
 
 - allowlist 发布改为单个 `finalize-allowlist-transaction` 进程串行完成 route-off → 精确 allowlist、postflight、
   receipt prepare、current commit point 与锁清理；runner 断联后的恢复只调用同 owner 的

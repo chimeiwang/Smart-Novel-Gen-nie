@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import sqlite3
 import threading
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -120,6 +122,7 @@ class _Store:
                   action TEXT NOT NULL,
                   core_status INTEGER,
                   receipt_status TEXT,
+                  receipt_identity_matches INTEGER,
                   occurred_at TEXT NOT NULL
                 );
                 CREATE TABLE IF NOT EXISTS execution_submit_attempt (
@@ -180,6 +183,7 @@ class _Store:
         action: str,
         core_status: int | None = None,
         receipt_status: str | None = None,
+        receipt_identity_matches: bool | None = None,
     ) -> None:
         with self._lock, self._connection:
             self._connection.execute(
@@ -187,8 +191,8 @@ class _Store:
                 INSERT INTO callback_attempt (
                   callback_kind, run_id, step_id, job_id, fencing_token,
                   request_hash, result_hash, action, core_status, receipt_status,
-                  occurred_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  receipt_identity_matches, occurred_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     kind,
@@ -201,6 +205,7 @@ class _Store:
                     action,
                     core_status,
                     receipt_status,
+                    receipt_identity_matches,
                     _now(),
                 ),
             )
@@ -252,6 +257,10 @@ class _Store:
                     "SELECT * FROM callback_attempt ORDER BY id"
                 ).fetchall()
             ]
+            for callback in callbacks:
+                matched = callback.get("receipt_identity_matches")
+                if isinstance(matched, int):
+                    callback["receipt_identity_matches"] = bool(matched)
             submissions = [
                 {
                     **dict(row),
@@ -296,6 +305,7 @@ def create_app() -> FastAPI:
     store = _Store(database_path)
     provider_gate = _Gate()
     callback_gate = _Gate()
+    execution_gate = _Gate()
     callback_mode = {"value": "pass", "dropRemaining": 0}
     callback_mode_lock = asyncio.Lock()
     core_http = httpx.AsyncClient(
@@ -312,7 +322,7 @@ def create_app() -> FastAPI:
     )
 
     @asynccontextmanager
-    async def lifespan(_: FastAPI):
+    async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         try:
             yield
         finally:
@@ -437,6 +447,15 @@ def create_app() -> FastAPI:
         )
         return {"mode": body.mode}
 
+    @app.put("/control/execution-mode")
+    async def set_execution_mode(
+        body: GateRequest,
+        control_token: Annotated[str | None, Header(alias="X-InkForge-E2E-Token")] = None,
+    ) -> dict[str, str]:
+        authorize(control_token)
+        await execution_gate.configure(body.mode)
+        return {"mode": body.mode}
+
     @app.post("/control/provider-release")
     async def release_provider(
         body: ReleaseRequest,
@@ -457,6 +476,15 @@ def create_app() -> FastAPI:
             callback_mode["value"] = "pass"
         return {"released": True, "abort": body.abort}
 
+    @app.post("/control/execution-release")
+    async def release_execution(
+        body: ReleaseRequest,
+        control_token: Annotated[str | None, Header(alias="X-InkForge-E2E-Token")] = None,
+    ) -> dict[str, object]:
+        authorize(control_token)
+        await execution_gate.release(abort=body.abort)
+        return {"released": True, "abort": body.abort}
+
     @app.post("/control/reset")
     async def reset(
         control_token: Annotated[str | None, Header(alias="X-InkForge-E2E-Token")] = None,
@@ -465,6 +493,7 @@ def create_app() -> FastAPI:
         store.reset()
         await provider_gate.configure("pass")
         await callback_gate.configure("pass")
+        await execution_gate.configure("pass")
         async with callback_mode_lock:
             callback_mode["value"] = "pass"
             callback_mode["dropRemaining"] = 0
@@ -481,6 +510,7 @@ def create_app() -> FastAPI:
             **store.snapshot(),
             "providerGate": await provider_gate.snapshot(),
             "callbackGate": await callback_gate.snapshot(),
+            "executionGate": await execution_gate.snapshot(),
             "callbackMode": mode_snapshot,
         }
 
@@ -497,6 +527,18 @@ def create_app() -> FastAPI:
             key: payload.get(key) if isinstance(payload, dict) else None
             for key in ("runId", "stepId", "jobId", "fencingToken", "requestHash")
         }
+        body_sha256 = hashlib.sha256(body).hexdigest()
+        if await execution_gate.wait():
+            store.execution_submit(
+                identity=identity,
+                body_sha256=body_sha256,
+                agent_status=503,
+                validation_errors=[],
+            )
+            return JSONResponse(
+                status_code=503,
+                content={"detail": "E2E execution submit 已在转发前中止"},
+            )
         try:
             upstream_response = await agent_http.post(
                 request.url.path,
@@ -525,14 +567,30 @@ def create_app() -> FastAPI:
                         and isinstance(error_type, str)
                     ):
                         validation_errors.append({"loc": location, "type": error_type})
-        import hashlib
-
         store.execution_submit(
             identity=identity,
-            body_sha256=hashlib.sha256(body).hexdigest(),
+            body_sha256=body_sha256,
             agent_status=upstream_response.status_code,
             validation_errors=validation_errors,
         )
+        return Response(
+            status_code=upstream_response.status_code,
+            content=upstream_response.content,
+            headers=response_headers(upstream_response),
+        )
+
+    @app.put("/internal/v1/executions/{job_id}/cancel")
+    async def proxy_execution_cancel(job_id: str, request: Request) -> Response:
+        body = await request.body()
+        path = f"/internal/v1/executions/{job_id}/cancel"
+        try:
+            upstream_response = await agent_http.put(
+                path,
+                content=body,
+                headers=forwarded_headers(request),
+            )
+        except httpx.HTTPError:
+            return JSONResponse(status_code=503, content={"detail": "Agent 暂时不可用"})
         return Response(
             status_code=upstream_response.status_code,
             content=upstream_response.content,
@@ -599,17 +657,28 @@ def create_app() -> FastAPI:
             store.callback(kind=callback_kind, identity=identity, action="core_unavailable")
             return JSONResponse(status_code=503, content={"detail": "Core 暂时不可用"})
         receipt_status: str | None = None
+        receipt_identity_matches: bool | None = None
         try:
             receipt = upstream_response.json()
             value = receipt.get("status") if isinstance(receipt, dict) else None
             receipt_status = value if isinstance(value, str) else None
+            if isinstance(receipt, dict):
+                receipt_identity_matches = (
+                    receipt.get("protocolVersion") == "2.0"
+                    and receipt.get("runId") == identity["runId"]
+                    and receipt.get("stepId") == identity["stepId"]
+                    and receipt.get("jobId") == identity["jobId"]
+                    and receipt.get("fencingToken") == identity["fencingToken"]
+                    and receipt.get("requestHash") == identity["requestHash"]
+                )
         except ValueError:
             pass
 
         should_drop = False
         async with callback_mode_lock:
-            if terminal and int(callback_mode["dropRemaining"]) > 0:
-                callback_mode["dropRemaining"] = int(callback_mode["dropRemaining"]) - 1
+            remaining = callback_mode["dropRemaining"]
+            if terminal and isinstance(remaining, int) and remaining > 0:
+                callback_mode["dropRemaining"] = remaining - 1
                 callback_mode["value"] = "pass"
                 should_drop = True
         store.callback(
@@ -618,6 +687,7 @@ def create_app() -> FastAPI:
             action="dropped_after_forward" if should_drop else "forwarded",
             core_status=upstream_response.status_code,
             receipt_status=receipt_status,
+            receipt_identity_matches=receipt_identity_matches,
         )
         if should_drop:
             return JSONResponse(

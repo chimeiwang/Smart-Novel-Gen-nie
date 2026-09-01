@@ -64,6 +64,29 @@ def _canonical_sha256(value: object) -> str | None:
     ).hexdigest()
 
 
+def _runtime_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value or value == "none":
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else None
+
+
+def _runtime_has_fresh_successful_health(value: dict[str, object]) -> bool:
+    started_at = _runtime_timestamp(value.get("startedAt"))
+    checked_at = _runtime_timestamp(value.get("healthCheckedAt"))
+    return (
+        value.get("status") == "running"
+        and value.get("health") == "healthy"
+        and value.get("healthCheckExitCode") == 0
+        and started_at is not None
+        and checked_at is not None
+        and checked_at >= started_at
+    )
+
+
 def _safe_usage_summary(value: object) -> dict[str, object]:
     if not isinstance(value, dict):
         return {}
@@ -212,6 +235,13 @@ def _assert_fake_billing_evidence(value: object) -> None:
         raise AssertionError("Fake 问答计费证据不符合：" + ",".join(failed))
 
 
+def _assert_agent_restart_receipts(receipts: list[str]) -> None:
+    """旧连接可随进程退出消失；live replayer 只需取得一个合法终态回执。"""
+
+    if sorted(receipts) not in (["accepted"], ["accepted", "duplicate"]):
+        raise AssertionError(f"Agent 重启 callback receipt 无效：{receipts}")
+
+
 @dataclass(frozen=True, slots=True)
 class Scenario:
     name: str
@@ -248,6 +278,7 @@ class ComposeStack:
         }
         self.evidence_dir = evidence_dir
         self._started = False
+        self.last_service_restart: dict[str, object] = {}
 
     def _write_release_guard(
         self,
@@ -386,10 +417,15 @@ class ComposeStack:
             check=False,
         )
         if check and completed.returncode != 0:
-            safe_stderr = completed.stderr.strip().replace("\n", " | ")[-800:]
+            stderr = completed.stderr.encode("utf-8", errors="replace")
             raise RuntimeError(
                 f"Compose 动作失败：{arguments[0]}，退出码 {completed.returncode}"
-                + (f"，stderr={safe_stderr}" if safe_stderr else "")
+                + (
+                    f"，stderrBytes={len(stderr)}，"
+                    f"stderrSha256={hashlib.sha256(stderr).hexdigest()}"
+                    if stderr
+                    else ""
+                )
             )
         return completed
 
@@ -530,6 +566,95 @@ class ComposeStack:
     def restart(self, service: str) -> None:
         self.run(["restart", service], timeout=120)
 
+    def service_runtime(self, service: str) -> dict[str, object]:
+        container_id = self.run(["ps", "-q", service], timeout=30).stdout.strip()
+        if not container_id or "\n" in container_id:
+            raise RuntimeError(f"无法唯一定位 {service} 容器")
+        completed = subprocess.run(  # noqa: S603 - 固定只读容器运行事实
+            [
+                self.docker,
+                "inspect",
+                container_id,
+                "--format",
+                (
+                    "{{.Id}}|{{.RestartCount}}|{{.State.StartedAt}}|"
+                    "{{.State.Status}}|"
+                    "{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}|"
+                    "{{if .State.Health}}{{range .State.Health.Log}}"
+                    "{{.End}}@{{.ExitCode}},{{end}}{{else}}none{{end}}"
+                ),
+            ],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(f"无法读取 {service} 容器运行事实")
+        identity, restart_count, started_at, status, health, health_checks = (
+            completed.stdout.strip().split("|", 5)
+        )
+        latest_health_check = health_checks.rstrip(",").rsplit(",", 1)[-1]
+        health_checked_at: str | None = None
+        health_check_exit_code: int | None = None
+        if latest_health_check not in {"", "none"}:
+            health_checked_at, separator, raw_exit_code = latest_health_check.rpartition(
+                "@"
+            )
+            if not separator or not health_checked_at:
+                raise RuntimeError(f"无法读取 {service} 最近 healthcheck 事实")
+            try:
+                health_check_exit_code = int(raw_exit_code)
+            except ValueError:
+                raise RuntimeError(
+                    f"无法读取 {service} 最近 healthcheck 退出码"
+                ) from None
+        return {
+            "containerId": identity,
+            "restartCount": int(restart_count),
+            "startedAt": started_at,
+            "status": status,
+            "health": health,
+            "healthCheckedAt": health_checked_at,
+            "healthCheckExitCode": health_check_exit_code,
+        }
+
+    def restart_and_wait(self, service: str) -> dict[str, object]:
+        before = self.service_runtime(service)
+        self.last_service_restart = {
+            "service": service,
+            "before": before,
+            "after": None,
+        }
+        self.restart(service)
+        deadline = time.monotonic() + 180
+        after = self.service_runtime(service)
+        while (
+            after["containerId"] == before["containerId"]
+            and (
+                after["startedAt"] == before["startedAt"]
+                or not _runtime_has_fresh_successful_health(after)
+            )
+            and time.monotonic() < deadline
+        ):
+            time.sleep(0.2)
+            after = self.service_runtime(service)
+        runtime = {"service": service, "before": before, "after": after}
+        self.last_service_restart = runtime
+        before_restart_count = before.get("restartCount")
+        after_restart_count = after.get("restartCount")
+        if (
+            after["containerId"] != before["containerId"]
+            or not isinstance(before_restart_count, int)
+            or not isinstance(after_restart_count, int)
+            or after_restart_count < before_restart_count
+            or after["startedAt"] == before["startedAt"]
+            or not _runtime_has_fresh_successful_health(after)
+        ):
+            raise AssertionError(f"{service} 重启运行事实无效")
+        return runtime
+
     def wait_redis(self) -> None:
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
@@ -541,36 +666,124 @@ class ComposeStack:
             time.sleep(0.2)
         raise RuntimeError("execution Redis 重启后没有恢复")
 
-    def container_ids(self) -> list[str]:
+    def wait_service_healthy(
+        self,
+        service: str,
+        *,
+        expected_container_id: object,
+        expected_started_at: object,
+        minimum_health_checked_at: object | None = None,
+        timeout: float = 180,
+    ) -> dict[str, object]:
+        minimum_health_time = _runtime_timestamp(minimum_health_checked_at)
+        if minimum_health_checked_at is not None and minimum_health_time is None:
+            raise AssertionError(f"{service} 依赖恢复门禁时间无效")
+        deadline = time.monotonic() + timeout
+        last: dict[str, object] = {}
+        while time.monotonic() < deadline:
+            last = self.service_runtime(service)
+            if (
+                last.get("containerId") != expected_container_id
+                or last.get("startedAt") != expected_started_at
+            ):
+                raise AssertionError(f"{service} 在依赖恢复期间被意外重建或重启")
+            current_health_time = _runtime_timestamp(last.get("healthCheckedAt"))
+            health_is_fresh = (
+                minimum_health_time is None
+                or (
+                    current_health_time is not None
+                    and current_health_time >= minimum_health_time
+                )
+            )
+            if (
+                last.get("status") == "running"
+                and last.get("health") == "healthy"
+                and last.get("healthCheckExitCode") == 0
+                and health_is_fresh
+            ):
+                return last
+            time.sleep(0.2)
+        raise AssertionError(
+            f"{service} 未在依赖恢复门限内重新 healthy："
+            f"status={last.get('status')},health={last.get('health')},"
+            f"healthCheckExitCode={last.get('healthCheckExitCode')},"
+            f"healthFresh={health_is_fresh if last else False}"
+        )
+
+    def _project_resources(
+        self,
+        kind: str,
+        *,
+        identifier_format: str,
+    ) -> tuple[int, list[str]]:
+        list_arguments = [self.docker, kind, "ls"]
+        if kind == "container":
+            list_arguments.append("--all")
         result = subprocess.run(  # noqa: S603 - 固定只读 Docker label 查询
             [
-                self.docker,
-                "ps",
-                "-a",
+                *list_arguments,
                 "--filter",
                 f"label=com.docker.compose.project={self.project}",
                 "--format",
-                "{{.ID}}",
+                identifier_format,
             ],
             cwd=ROOT,
             text=True,
             capture_output=True,
             check=False,
+            timeout=30,
         )
-        return [line for line in result.stdout.splitlines() if line]
+        return (
+            result.returncode,
+            [line for line in result.stdout.splitlines() if line],
+        )
+
+    def container_ids(self) -> list[str]:
+        _exit_code, identifiers = self._project_resources(
+            "container",
+            identifier_format="{{.ID}}",
+        )
+        return identifiers
 
     def cleanup(self) -> dict[str, object]:
-        down = self.run(
-            ["down", "--volumes", "--remove-orphans", "--timeout", "10"],
-            timeout=180,
-            check=False,
-        )
-        down_code = down.returncode
-        residual_containers = self.container_ids()
+        try:
+            down = self.run(
+                ["down", "--volumes", "--remove-orphans", "--timeout", "10"],
+                timeout=180,
+                check=False,
+            )
+            down_code = down.returncode
+        except (OSError, subprocess.SubprocessError):
+            down_code = -1
+        try:
+            container_query, residual_containers = self._project_resources(
+                "container",
+                identifier_format="{{.ID}}",
+            )
+            network_query, residual_networks = self._project_resources(
+                "network",
+                identifier_format="{{.ID}}",
+            )
+            volume_query, residual_volumes = self._project_resources(
+                "volume",
+                identifier_format="{{.Name}}",
+            )
+        except (OSError, subprocess.SubprocessError):
+            container_query = network_query = volume_query = -1
+            residual_containers = []
+            residual_networks = []
+            residual_volumes = []
         shutil.rmtree(self.temp_dir, ignore_errors=True)
         return {
             "composeDownExitCode": down_code,
+            "resourceQueryExitCodes": {
+                "containers": container_query,
+                "networks": network_query,
+                "volumes": volume_query,
+            },
             "residualContainerCount": len(residual_containers),
+            "residualNetworkCount": len(residual_networks),
+            "residualVolumeCount": len(residual_volumes),
             "temporaryKeyDirectoryRemoved": not self.temp_dir.exists(),
         }
 
@@ -858,6 +1071,51 @@ class Acceptance:
             time.sleep(0.1)
         raise AssertionError("Provider gate 没有在门限内到达")
 
+    def wait_execution_gate(self, *, timeout: float = 30) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            state = self.control_state()
+            gate = state.get("executionGate")
+            if isinstance(gate, dict) and int(gate.get("reached", 0)) >= 1:
+                return
+            time.sleep(0.1)
+        raise AssertionError("Execution submit gate 没有在门限内到达")
+
+    def wait_callback_gate(
+        self,
+        run_id: str,
+        *,
+        minimum_reached: int,
+        timeout: float = 45,
+    ) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            state = self.control_state()
+            gate = state.get("callbackGate")
+            attempts = state.get("callbackAttempts")
+            matching = (
+                [
+                    item
+                    for item in attempts
+                    if isinstance(item, dict)
+                    and item.get("run_id") == run_id
+                    and item.get("callback_kind") in {"result", "failure"}
+                    and item.get("action") == "held_before_forward"
+                ]
+                if isinstance(attempts, list)
+                else []
+            )
+            if (
+                isinstance(gate, dict)
+                and int(gate.get("reached", 0)) >= minimum_reached
+                and len(matching) >= minimum_reached
+            ):
+                return
+            time.sleep(0.1)
+        raise AssertionError(
+            f"Callback gate 没有收到 {minimum_reached} 次 matching terminal"
+        )
+
     def first_snapshot_and_disconnect(
         self, run_id: str
     ) -> tuple[dict[str, object], dict[str, int]]:
@@ -977,6 +1235,86 @@ class Acceptance:
             "answerRunId": run_id,
         }
 
+    def journal_facts(self, step_id: str) -> dict[str, object]:
+        values = self.stack.redis("HGETALL", f"inkforge:executions:{step_id}")
+        entry = dict(zip(values[::2], values[1::2], strict=True))
+        raw_fence = entry.get("fencing_token")
+        try:
+            fencing_token = int(raw_fence) if raw_fence is not None else None
+        except ValueError:
+            fencing_token = None
+        return {
+            "present": bool(entry),
+            "state": entry.get("state"),
+            "callbackDelivery": entry.get("callback_delivery"),
+            "requestHash": entry.get("request_hash"),
+            "resultHash": entry.get("result_hash"),
+            "jobId": entry.get("job_id"),
+            "fencingToken": fencing_token,
+            "terminalPayloadPresent": "terminal_payload" in entry,
+        }
+
+    def wait_delivered_journal(
+        self,
+        step_id: str,
+        *,
+        timeout: float = 30,
+    ) -> dict[str, object]:
+        deadline = time.monotonic() + timeout
+        last: dict[str, object] = {}
+        while time.monotonic() < deadline:
+            last = self.journal_facts(step_id)
+            self.safe_diagnostics["executionJournal"] = {
+                "stepId": step_id,
+                **last,
+            }
+            if (
+                last.get("present") is True
+                and last.get("state") == "result"
+                and last.get("callbackDelivery") == "delivered"
+                and last.get("terminalPayloadPresent") is False
+            ):
+                return last
+            time.sleep(0.1)
+        raise AssertionError(
+            "terminal journal 未在门限内压缩为 delivered tombstone："
+            f"state={last.get('state')},delivery={last.get('callbackDelivery')}"
+        )
+
+    @staticmethod
+    def assert_callback_attempt_bindings(
+        *,
+        run_id: str,
+        step: dict[str, object],
+        journal: dict[str, object],
+        attempts: list[dict[str, object]],
+    ) -> None:
+        expected = (
+            run_id,
+            step.get("id"),
+            journal.get("jobId"),
+            step.get("fencingToken"),
+            step.get("requestHash"),
+            step.get("resultHash"),
+        )
+        for attempt in attempts:
+            actual = (
+                attempt.get("run_id"),
+                attempt.get("step_id"),
+                attempt.get("job_id"),
+                attempt.get("fencing_token"),
+                attempt.get("request_hash"),
+                attempt.get("result_hash"),
+            )
+            if actual != expected:
+                raise AssertionError("terminal callback 与 Core/journal 身份绑定不一致")
+            if attempt.get("action") in {"forwarded", "dropped_after_forward"} and (
+                attempt.get("core_status") != 200
+                or attempt.get("receipt_identity_matches") is not True
+                or attempt.get("receipt_status") not in {"accepted", "duplicate"}
+            ):
+                raise AssertionError("terminal callback 的 Core 回执或身份无效")
+
     def database_facts(self, run_id: str, session_id: str) -> dict[str, object]:
         sql = """
         SELECT json_build_object(
@@ -986,6 +1324,8 @@ class Acceptance:
             'engineVersion', "engineVersion",
             'lastEventSequence', "lastEventSequence",
             'errorCode', "errorCode",
+            'cancelRequestId', "cancelRequestId",
+            'cancelRequestedAtPresent', "cancelRequestedAt" IS NOT NULL,
             'writingSessionId', "writingSessionId"
           ) FROM public."WorkflowRun" WHERE id = :'e2e_run_id'),
           'steps', (SELECT json_agg(json_build_object(
@@ -993,6 +1333,8 @@ class Acceptance:
             'status', status::text,
             'purpose', purpose,
             'attemptCount', "attemptCount",
+            'fencingToken', "fencingToken",
+            'requestHash', "requestHash",
             'providerAttempts', ("usageJson"::jsonb->>'providerAttempts')::int,
             'usageRaw', "usageJson"::jsonb,
             'resultHash', "resultHash"
@@ -1055,8 +1397,7 @@ class Acceptance:
             WHERE "runId" = :'e2e_run_id' AND "eventType" = 'completed'),
           'events', (SELECT json_agg(json_build_object(
             'sequence', sequence,
-            'eventType', "eventType",
-            'payload', "payloadJson"::jsonb
+            'eventType', "eventType"
           ) ORDER BY sequence) FROM public."WorkflowEvent"
             WHERE "runId" = :'e2e_run_id')
         )::text;
@@ -1088,8 +1429,15 @@ class Acceptance:
             initial_balance_micros=self.initial_credit_balance_micros,
         )
         value["billing"] = billing
-        # 必须早于任何业务断言写入失败报告的脱敏诊断集合。
+        # 必须早于 journal 取证和任何业务断言写入失败报告的脱敏诊断集合。
         self.safe_diagnostics["billing"] = billing
+        if expected_step_id is not None:
+            journal = self.journal_facts(expected_step_id)
+            value["journal"] = journal
+            self.safe_diagnostics["executionJournal"] = {
+                "stepId": expected_step_id,
+                **journal,
+            }
         return value
 
     def assert_scenario_facts(
@@ -1121,6 +1469,8 @@ class Acceptance:
             "engineVersion": 2,
             "lastEventSequence": facts["run"]["lastEventSequence"],
             "errorCode": None,
+            "cancelRequestId": None,
+            "cancelRequestedAtPresent": False,
             "writingSessionId": session_id,
         }:
             raise AssertionError("Run 权威事实不符合 answer_question 完成态")
@@ -1131,6 +1481,9 @@ class Acceptance:
         if (
             step["status"] != "completed"
             or step["purpose"] != "generation"
+            or step["attemptCount"] != 1
+            or step["fencingToken"] != 1
+            or not isinstance(step["requestHash"], str)
             or step["providerAttempts"] != 1
             or not step["resultHash"]
         ):
@@ -1143,15 +1496,31 @@ class Acceptance:
         _assert_fake_billing_evidence(facts.get("billing"))
         if facts["completedEventCount"] != 1:
             raise AssertionError("Run 必须只有一个 completed Event")
+        journal = self.wait_delivered_journal(str(step["id"]))
+        facts["journal"] = journal
+        if (
+            journal.get("requestHash") != step.get("requestHash")
+            or journal.get("resultHash") != step.get("resultHash")
+            or journal.get("fencingToken") != step.get("fencingToken")
+            or not isinstance(journal.get("jobId"), str)
+        ):
+            raise AssertionError("Core Step 与 delivered journal 身份不一致")
         return facts, provider
 
     def provider_keys(self) -> set[str]:
-        providers = self.control_state()["providerCalls"]
+        providers = self.provider_facts()
         return {
             str(item["idempotency_key"])
             for item in providers
-            if isinstance(item, dict)
         }
+
+    def provider_facts(self) -> list[dict[str, object]]:
+        providers = self.control_state().get("providerCalls")
+        if not isinstance(providers, list) or not all(
+            isinstance(item, dict) for item in providers
+        ):
+            raise AssertionError("Provider 调用证据无效")
+        return providers
 
     def happy_and_idempotency(self) -> Scenario:
         self.control_request("PUT", "/control/provider-mode", {"mode": "hold"})
@@ -1294,20 +1663,20 @@ class Acceptance:
             time.sleep(0.1)
         actions = [item["action"] for item in matching]
         receipts = [item["receipt_status"] for item in matching]
+        self.safe_diagnostics["callbackReceiptLoss"] = {
+            "runId": run_id,
+            "callbackAttempts": matching,
+        }
         if actions[:2] != ["dropped_after_forward", "forwarded"]:
             raise AssertionError(f"callback 回执丢失/重放顺序无效：{actions}")
         if receipts[:2] != ["accepted", "duplicate"]:
             raise AssertionError(f"Core callback 幂等回执无效：{receipts}")
-        identities = {
-            (
-                item["request_hash"],
-                item["result_hash"],
-                item["fencing_token"],
-            )
-            for item in matching[:2]
-        }
-        if len(identities) != 1:
-            raise AssertionError("callback 重放漂移了 request/result hash 或 fence")
+        self.assert_callback_attempt_bindings(
+            run_id=run_id,
+            step=facts["steps"][0],
+            journal=facts["journal"],
+            attempts=matching[:2],
+        )
         return Scenario(
             name="callback_committed_receipt_lost",
             run_id=run_id,
@@ -1317,70 +1686,418 @@ class Acceptance:
             database_facts={**facts, "callbackAttempts": matching[:2]},
         )
 
+    def agent_restart_replays_terminal_journal(self) -> Scenario:
+        self.control_request(
+            "PUT", "/control/callback-mode", {"mode": "hold_before_forward"}
+        )
+        session_id = self.create_session("agent-restart-terminal-replay")
+        request_id = "e2e-agent-restart-0001"
+        before = self.provider_keys()
+        started = self.start_run(
+            self.run_body(
+                session_id=session_id,
+                client_request_id=request_id,
+                instruction="请说明当前章节中已经明确发生的一个决定。",
+            )
+        ).json()
+        run_id = str(started["runId"])
+        self.wait_callback_gate(run_id, minimum_reached=1)
+        runtime = self.stack.restart_and_wait("agent-service")
+        self.wait_callback_gate(run_id, minimum_reached=2, timeout=60)
+        self.control_request("POST", "/control/callback-release", {"abort": False})
+        terminal = self.wait_terminal(run_id, timeout=60)
+        if terminal["status"] != "completed":
+            raise AssertionError("Agent 重启后 terminal journal 没有收敛")
+        facts, provider = self.assert_scenario_facts(
+            run_id=run_id,
+            session_id=session_id,
+            provider_before=before,
+        )
+        deadline = time.monotonic() + 20
+        matching: list[dict[str, object]] = []
+        while time.monotonic() < deadline:
+            attempts = self.control_state()["callbackAttempts"]
+            matching = [
+                item
+                for item in attempts
+                if isinstance(item, dict)
+                and item.get("run_id") == run_id
+                and item.get("callback_kind") == "result"
+            ]
+            forwarded = [
+                item for item in matching if item.get("action") == "forwarded"
+            ]
+            if forwarded:
+                break
+            time.sleep(0.1)
+        held = [
+            item for item in matching if item.get("action") == "held_before_forward"
+        ]
+        forwarded = [item for item in matching if item.get("action") == "forwarded"]
+        receipts = [
+            receipt
+            for item in forwarded
+            if isinstance((receipt := item.get("receipt_status")), str)
+        ]
+        self.safe_diagnostics["agentRestart"] = {
+            "runId": run_id,
+            "serviceRestart": runtime,
+            "callbackAttempts": matching,
+            "executionJournal": facts["journal"],
+        }
+        if len(held) < 2:
+            raise AssertionError("Agent 重启前后没有形成两次 terminal callback 尝试")
+        _assert_agent_restart_receipts(receipts)
+        self.assert_callback_attempt_bindings(
+            run_id=run_id,
+            step=facts["steps"][0],
+            journal=facts["journal"],
+            attempts=matching,
+        )
+        return Scenario(
+            name="agent_restart_terminal_journal_replay",
+            run_id=run_id,
+            session_id=session_id,
+            client_request_id=request_id,
+            provider_identity=provider,
+            database_facts={
+                **facts,
+                "serviceRestart": runtime,
+                "callbackAttempts": matching,
+            },
+        )
+
+    def core_restart_before_terminal_callback(self) -> Scenario:
+        self.control_request(
+            "PUT", "/control/callback-mode", {"mode": "hold_before_forward"}
+        )
+        session_id = self.create_session("core-restart-before-callback")
+        request_id = "e2e-core-restart-0001"
+        before = self.provider_keys()
+        started = self.start_run(
+            self.run_body(
+                session_id=session_id,
+                client_request_id=request_id,
+                instruction="请概括当前章节中已经确认的地点事实。",
+            )
+        ).json()
+        run_id = str(started["runId"])
+        self.wait_callback_gate(run_id, minimum_reached=1)
+        runtime = self.stack.restart_and_wait("core-api")
+        self.control_request("POST", "/control/callback-release", {"abort": False})
+        terminal = self.wait_terminal(run_id, timeout=60)
+        if terminal["status"] != "completed":
+            raise AssertionError("Core 重启后 callback 没有收敛")
+        facts, provider = self.assert_scenario_facts(
+            run_id=run_id,
+            session_id=session_id,
+            provider_before=before,
+        )
+        attempts = [
+            item
+            for item in self.control_state()["callbackAttempts"]
+            if isinstance(item, dict)
+            and item.get("run_id") == run_id
+            and item.get("callback_kind") == "result"
+        ]
+        self.safe_diagnostics["coreRestart"] = {
+            "runId": run_id,
+            "serviceRestart": runtime,
+            "callbackAttempts": attempts,
+            "executionJournal": facts["journal"],
+        }
+        if not any(
+            item.get("action") == "forwarded"
+            and item.get("receipt_status") in {"accepted", "duplicate"}
+            for item in attempts
+        ):
+            raise AssertionError("Core 重启后没有合法 terminal callback receipt")
+        self.assert_callback_attempt_bindings(
+            run_id=run_id,
+            step=facts["steps"][0],
+            journal=facts["journal"],
+            attempts=attempts,
+        )
+        return Scenario(
+            name="core_restart_before_terminal_callback",
+            run_id=run_id,
+            session_id=session_id,
+            client_request_id=request_id,
+            provider_identity=provider,
+            database_facts={
+                **facts,
+                "serviceRestart": runtime,
+                "callbackAttempts": attempts,
+            },
+        )
+
+    def cancel_before_agent_submit(self) -> Scenario:
+        self.control_request("PUT", "/control/execution-mode", {"mode": "hold"})
+        session_id = self.create_session("cancel-before-agent-submit")
+        request_id = "e2e-cancel-before-submit-0001"
+        before = self.provider_facts()
+        started = self.start_run(
+            self.run_body(
+                session_id=session_id,
+                client_request_id=request_id,
+                instruction="这个问题不应抵达模型。",
+            )
+        ).json()
+        run_id = str(started["runId"])
+        self.wait_execution_gate()
+        self.request(
+            "POST",
+            f"/api/v1/writing/runs/{run_id}/cancel",
+            expected=202,
+            json_body={"clientRequestId": "e2e-cancel-command-0001"},
+        )
+        self.control_request("POST", "/control/execution-release", {"abort": True})
+        terminal = self.wait_terminal(run_id, timeout=60)
+        if terminal["status"] != "cancelled":
+            raise AssertionError("submit 前取消没有保持 cancelled 终态")
+        if self.provider_facts() != before:
+            raise AssertionError("submit 前取消仍调用了 Provider")
+        facts = self.database_facts(run_id, session_id)
+        self.safe_diagnostics["cancelBeforeSubmit"] = {
+            "runId": run_id,
+            "database": facts,
+        }
+        run = facts.get("run")
+        if (
+            not isinstance(run, dict)
+            or run.get("status") != "cancelled"
+            or run.get("operation") != "answer_question"
+            or run.get("engineVersion") != 2
+            or run.get("writingSessionId") != session_id
+            or run.get("cancelRequestedAtPresent") is not True
+            or not isinstance(run.get("cancelRequestId"), str)
+        ):
+            raise AssertionError("submit 前取消的 Run 权威身份或取消事实无效")
+        steps = facts.get("steps")
+        if (
+            not isinstance(steps, list)
+            or len(steps) != 1
+            or not isinstance(steps[0], dict)
+            or steps[0].get("status") != "skipped"
+            or steps[0].get("attemptCount") != 1
+            or steps[0].get("fencingToken") != 1
+            or not isinstance(steps[0].get("requestHash"), str)
+            or steps[0].get("providerAttempts") not in {None, 0}
+            or steps[0].get("resultHash") is not None
+            or steps[0].get("errorCode") != "RUN_CANCELLED"
+        ):
+            raise AssertionError("submit 前取消没有把唯一 Step 收敛为 skipped")
+        journal = facts.get("journal")
+        if not isinstance(journal, dict) or journal.get("present") is not False:
+            raise AssertionError("submit 前取消意外创建了 Agent execution journal")
+        if facts.get("messageRoles") != {"user": 1}:
+            raise AssertionError("取消场景生成了成功 Agent 消息或丢失用户消息")
+        if facts.get("artifactCount") != 0 or facts.get("evaluationCount") != 0:
+            raise AssertionError("取消场景产生了 Artifact 或 Evaluation")
+        billing = facts.get("billing")
+        if not isinstance(billing, dict) or {
+            "reservationCount": billing.get("reservationCount"),
+            "tokenUsageCount": billing.get("tokenUsageCount"),
+            "creditLedgerCount": billing.get("creditLedgerCount"),
+            "balanceUnchanged": billing.get("balanceUnchanged"),
+        } != {
+            "reservationCount": 0,
+            "tokenUsageCount": 0,
+            "creditLedgerCount": 0,
+            "balanceUnchanged": True,
+        }:
+            raise AssertionError("submit 前取消产生了计费副作用")
+        events = facts.get("events")
+        event_types = [
+            item.get("eventType")
+            for item in events
+            if isinstance(item, dict)
+        ] if isinstance(events, list) else []
+        if (
+            event_types.count("cancelled") != 1
+            or any(value in {"completed", "failed"} for value in event_types)
+        ):
+            raise AssertionError("取消场景事件终态无效")
+        event_sequences = [
+            item.get("sequence")
+            for item in events
+            if isinstance(item, dict)
+        ] if isinstance(events, list) else []
+        if event_sequences != list(range(1, len(event_sequences) + 1)) or run.get(
+            "lastEventSequence"
+        ) != len(event_sequences):
+            raise AssertionError("取消场景 Event sequence 不连续")
+        raw_attempts = self.control_state().get("executionSubmitAttempts")
+        attempts = [
+            item
+            for item in raw_attempts
+            if isinstance(item, dict) and item.get("run_id") == run_id
+        ] if isinstance(raw_attempts, list) else []
+        self.safe_diagnostics["cancelBeforeSubmit"] = {
+            "runId": run_id,
+            "database": facts,
+            "executionSubmitAttempts": attempts,
+        }
+        step = steps[0]
+        if (
+            len(attempts) != 1
+            or attempts[0].get("agent_status") != 503
+            or attempts[0].get("run_id") != run_id
+            or attempts[0].get("step_id") != step.get("id")
+            or attempts[0].get("fencing_token") != step.get("fencingToken")
+            or attempts[0].get("request_hash") != step.get("requestHash")
+            or attempts[0].get("validation_errors") != []
+        ):
+            raise AssertionError("submit gate 没有且仅有一次转发前中止")
+        return Scenario(
+            name="cancel_before_agent_submit",
+            run_id=run_id,
+            session_id=session_id,
+            client_request_id=request_id,
+            provider_identity={"physical_calls": 0, "completed_calls": 0},
+            database_facts={**facts, "executionSubmitAttempts": attempts},
+        )
+
     def aof_restart(self, scenarios: list[Scenario]) -> dict[str, object]:
-        before: dict[str, dict[str, str]] = {}
+        def persistence_facts() -> tuple[dict[str, str], dict[str, str]]:
+            persistence = dict(
+                line.split(":", 1)
+                for line in self.stack.redis("INFO", "persistence")
+                if ":" in line
+            )
+            config_lines = self.stack.redis(
+                "CONFIG",
+                "GET",
+                "appendonly",
+                "appendfsync",
+                "aof-load-truncated",
+                "maxmemory-policy",
+            )
+            config = dict(zip(config_lines[::2], config_lines[1::2], strict=True))
+            if (
+                persistence.get("aof_enabled") != "1"
+                or persistence.get("aof_last_write_status") != "ok"
+                or config
+                != {
+                    "aof-load-truncated": "no",
+                    "appendfsync": "always",
+                    "appendonly": "yes",
+                    "maxmemory-policy": "noeviction",
+                }
+            ):
+                raise AssertionError("execution Redis AOF 配置或写状态无效")
+            return persistence, config
+
+        before: dict[str, dict[str, object]] = {}
+        database_before: dict[str, str | None] = {}
         for scenario in scenarios:
             step_id = str(scenario.database_facts["steps"][0]["id"])
-            values = self.stack.redis("HGETALL", f"inkforge:executions:{step_id}")
-            entry = dict(zip(values[::2], values[1::2], strict=True))
+            entry = self.journal_facts(step_id)
             if (
                 entry.get("state") != "result"
-                or entry.get("callback_delivery") != "delivered"
-                or "terminal_payload" in entry
+                or entry.get("callbackDelivery") != "delivered"
+                or entry.get("terminalPayloadPresent") is not False
             ):
                 raise AssertionError("delivered journal 没有压缩成安全 tombstone")
-            before[step_id] = {
-                "requestHash": entry["request_hash"],
-                "resultHash": entry["result_hash"],
-                "callbackDelivery": entry["callback_delivery"],
+            before[step_id] = entry
+            database_before[scenario.run_id] = _canonical_sha256(
+                self.database_facts(scenario.run_id, scenario.session_id)
+            )
+        provider_before = self.control_state().get("providerCalls")
+        persistence_before, config_before = persistence_facts()
+        self.safe_diagnostics["executionRedisAof"] = {
+            "tombstonesBefore": before,
+            "databaseFactsSha256Before": database_before,
+            "providerCallFactsCaptured": isinstance(provider_before, list),
+        }
+
+        agent_before = self.stack.service_runtime("agent-service")
+        runtime = self.stack.restart_and_wait("execution-redis")
+        redis_after = runtime.get("after")
+        if not isinstance(redis_after, dict):
+            raise AssertionError("execution Redis 重启后运行事实无效")
+        redis_started_at = redis_after.get("startedAt")
+        if not isinstance(redis_started_at, str):
+            raise AssertionError("execution Redis 重启后缺少 StartedAt")
+        self.safe_diagnostics["executionRedisAof"] = {
+            **self.safe_diagnostics["executionRedisAof"],
+            "serviceRestart": runtime,
+            "agentRecovery": {"before": agent_before, "after": None},
+        }
+        try:
+            agent_after = self.stack.wait_service_healthy(
+                "agent-service",
+                expected_container_id=agent_before.get("containerId"),
+                expected_started_at=agent_before.get("startedAt"),
+                minimum_health_checked_at=redis_started_at,
+            )
+        except AssertionError:
+            try:
+                failed_agent_after: dict[str, object] = self.stack.service_runtime(
+                    "agent-service"
+                )
+            except (
+                AssertionError,
+                OSError,
+                RuntimeError,
+                ValueError,
+                subprocess.SubprocessError,
+            ):
+                failed_agent_after = {"collectionStatus": "unavailable"}
+            self.safe_diagnostics["executionRedisAof"] = {
+                **self.safe_diagnostics["executionRedisAof"],
+                "agentRecovery": {
+                    "before": agent_before,
+                    "after": failed_agent_after,
+                },
             }
-        persistence = dict(
-            line.split(":", 1)
-            for line in self.stack.redis("INFO", "persistence")
-            if ":" in line
-        )
-        config_lines = self.stack.redis(
-            "CONFIG",
-            "GET",
-            "appendonly",
-            "appendfsync",
-            "aof-load-truncated",
-            "maxmemory-policy",
-        )
-        config = dict(zip(config_lines[::2], config_lines[1::2], strict=True))
-        if (
-            persistence.get("aof_enabled") != "1"
-            or persistence.get("aof_last_write_status") != "ok"
-            or config
-            != {
-                "aof-load-truncated": "no",
-                "appendfsync": "always",
-                "appendonly": "yes",
-                "maxmemory-policy": "noeviction",
-            }
-        ):
-            raise AssertionError("execution Redis AOF 配置或写状态无效")
-        self.stack.restart("execution-redis")
-        self.stack.wait_redis()
-        after: dict[str, dict[str, str]] = {}
+            raise
+        persistence_after, config_after = persistence_facts()
+        after: dict[str, dict[str, object]] = {}
         for step_id in before:
-            values = self.stack.redis("HGETALL", f"inkforge:executions:{step_id}")
-            entry = dict(zip(values[::2], values[1::2], strict=True))
-            after[step_id] = {
-                "requestHash": entry["request_hash"],
-                "resultHash": entry["result_hash"],
-                "callbackDelivery": entry["callback_delivery"],
-            }
+            after[step_id] = self.journal_facts(step_id)
         if after != before:
             raise AssertionError("execution Redis 重启后 tombstone 漂移或丢失")
-        return {
-            "persistence": {
-                "aofEnabled": persistence.get("aof_enabled"),
-                "aofLastWriteStatus": persistence.get("aof_last_write_status"),
-            },
-            "config": config,
+        provider_after = self.control_state().get("providerCalls")
+        if provider_after != provider_before:
+            raise AssertionError("execution Redis 重启后 Provider 调用事实发生变化")
+        database_after = {
+            scenario.run_id: _canonical_sha256(
+                self.database_facts(scenario.run_id, scenario.session_id)
+            )
+            for scenario in scenarios
+        }
+        if database_after != database_before:
+            raise AssertionError("execution Redis 重启后 Core 业务事实发生变化")
+        self.safe_diagnostics["executionRedisAof"] = {
+            "serviceRestart": runtime,
+            "agentRecovery": {"before": agent_before, "after": agent_after},
             "tombstonesBefore": before,
             "tombstonesAfter": after,
+            "databaseFactsSha256Before": database_before,
+            "databaseFactsSha256After": database_after,
+            "providerFactsUnchanged": True,
+        }
+        return {
+            "serviceRestart": runtime,
+            "agentRecovery": {"before": agent_before, "after": agent_after},
+            "persistenceBefore": {
+                "aofEnabled": persistence_before.get("aof_enabled"),
+                "aofLastWriteStatus": persistence_before.get(
+                    "aof_last_write_status"
+                ),
+            },
+            "persistenceAfter": {
+                "aofEnabled": persistence_after.get("aof_enabled"),
+                "aofLastWriteStatus": persistence_after.get("aof_last_write_status"),
+            },
+            "configBefore": config_before,
+            "configAfter": config_after,
+            "tombstonesBefore": before,
+            "tombstonesAfter": after,
+            "databaseFactsSha256Before": database_before,
+            "databaseFactsSha256After": database_after,
+            "providerFactsUnchanged": True,
         }
 
 
@@ -1424,6 +2141,7 @@ def run(
         "rebuiltAgentImage": rebuild_agent,
         "composeProject": stack.project,
         "composeFileSha256": hashlib.sha256(COMPOSE_FILE.read_bytes()).hexdigest(),
+        "scenarios": [],
     }
     cleanup: dict[str, object] = {}
     try:
@@ -1441,21 +2159,31 @@ def run(
             user_id=acceptance.user_id,
             novel_id=acceptance.novel_id,
         )
-        scenarios = [acceptance.happy_and_idempotency()]
+        scenarios: list[Scenario] = []
+
+        def record_scenario(scenario: Scenario) -> None:
+            scenarios.append(scenario)
+            report_scenarios = report["scenarios"]
+            if not isinstance(report_scenarios, list):
+                raise AssertionError("E2E 报告 scenarios 容器无效")
+            report_scenarios.append(
+                {
+                    "name": scenario.name,
+                    "runId": scenario.run_id,
+                    "clientRequestId": scenario.client_request_id,
+                    "provider": scenario.provider_identity,
+                    "database": scenario.database_facts,
+                }
+            )
+
+        record_scenario(acceptance.happy_and_idempotency())
         if phase == "minimum":
-            scenarios.append(acceptance.callback_receipt_loss())
-        report["scenarios"] = [
-            {
-                "name": scenario.name,
-                "runId": scenario.run_id,
-                "clientRequestId": scenario.client_request_id,
-                "provider": scenario.provider_identity,
-                "database": scenario.database_facts,
-            }
-            for scenario in scenarios
-        ]
+            record_scenario(acceptance.callback_receipt_loss())
+            record_scenario(acceptance.agent_restart_replays_terminal_journal())
+            record_scenario(acceptance.core_restart_before_terminal_callback())
+            record_scenario(acceptance.cancel_before_agent_submit())
         if phase == "minimum":
-            report["executionRedisAof"] = acceptance.aof_restart(scenarios)
+            report["executionRedisAof"] = acceptance.aof_restart(scenarios[:-1])
         report["status"] = "passed"
     except Exception as exc:
         report["failureType"] = type(exc).__name__
@@ -1464,13 +2192,18 @@ def run(
             try:
                 control_state = acceptance.control_state()
                 report["failureDiagnostics"] = {
+                    "providerCalls": control_state.get("providerCalls", []),
+                    "callbackAttempts": control_state.get("callbackAttempts", []),
                     "executionSubmitAttempts": control_state.get(
                         "executionSubmitAttempts", []
                     ),
+                    "lastServiceRestart": stack.last_service_restart,
                     **acceptance.safe_diagnostics,
                 }
             except (AssertionError, httpx.HTTPError):
                 report["failureDiagnostics"] = {
+                    "providerCalls": [],
+                    "callbackAttempts": [],
                     "executionSubmitAttempts": [],
                     "collectionStatus": "unavailable",
                 }
@@ -1488,11 +2221,21 @@ def run(
         }
         cleanup = stack.cleanup()
         report["cleanup"] = cleanup
-        if (
-            cleanup["residualContainerCount"] != 0
+        resource_queries = cleanup.get("resourceQueryExitCodes")
+        cleanup_valid = not (
+            cleanup.get("composeDownExitCode") != 0
+            or cleanup["residualContainerCount"] != 0
+            or cleanup.get("residualNetworkCount") != 0
+            or cleanup.get("residualVolumeCount") != 0
             or not cleanup["temporaryKeyDirectoryRemoved"]
-        ):
+            or resource_queries
+            != {"containers": 0, "networks": 0, "volumes": 0}
+        )
+        cleanup["valid"] = cleanup_valid
+        if not cleanup_valid:
             report["status"] = "failed"
+            report.setdefault("failureType", "CleanupFailure")
+            report.setdefault("failureSummary", "隔离 Compose 资源清理证据无效")
         report["finishedAt"] = datetime.now(UTC).isoformat()
         destination = evidence_dir / "report.json"
         destination.write_text(
@@ -1510,7 +2253,10 @@ def main() -> int:
         "--phase",
         choices=("happy", "minimum"),
         default="minimum",
-        help="happy 只验成功/幂等/SSE；minimum 继续验 callback 丢回执与 AOF",
+        help=(
+            "happy 只验成功/幂等/SSE；minimum 继续验 callback 丢回执、"
+            "Agent/Core 重启、submit 前取消与 AOF"
+        ),
     )
     parser.add_argument(
         "--infrastructure-retry",

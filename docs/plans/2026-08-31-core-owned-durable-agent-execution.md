@@ -184,11 +184,16 @@
 
 ## Task 9：全量验证和预发布
 
-- [ ] `./mvnw verify`；
-- [ ] Agent/共享包全量 pytest、Ruff、Mypy；
-- [ ] Web 全量测试、typecheck、lint、build、API check；
-- [ ] 架构、迁移、Compose 与安全测试；
-- [ ] 完整 Compose 逐 Operation E2E；
+- [x] `./mvnw clean verify`：5/5 reactor、727 tests、0 failure/error，3 个外部条件显式 skip；本轮无 Java
+  源码变更，随后 Python 控制面改造未改变该证据边界；
+- [x] Agent/共享包及根 Python 全量 pytest、Ruff、Mypy：最新根套件 4130 passed、3 个外部条件 skip，Mypy
+  285 files、Ruff 全绿；
+- [x] Web 全量测试、typecheck、lint、API check 已在同一功能提交通过；本轮未修改 Web/生成客户端；
+- [x] 架构、迁移、Compose 静态与安全测试通过；新增 development evidence、SSH/genesis/broker、发布回归和
+  E2E harness 根级集成 238 passed；
+- [ ] 完整 Compose 逐 Operation E2E；`happy` 已有通过证据，但新 `minimum` 三次运行依次暴露 RestartCount、
+  accepted-only 和 `compose up` 重建容器的 harness 假设，三份 failed 报告均保留。静态修复 34 tests 通过，尚未
+  再次动态证明 Agent/Core 重启、取消与 AOF 全矩阵；
 - [ ] 每个昂贵边界的重启和网络故障注入；
 - [ ] 执行本计划末尾“生命周期协议专项测试清单”并保存逐项证据；
 - [ ] 三车道公平调度、2 核 2 GB、448 MiB Core 资源验证；
@@ -199,6 +204,8 @@
 - [ ] 真实供应商低额度预发布任务；
 - [ ] SLO、调用数、reasoning、成本、重复副作用和协议纠正指标满足规格；
 - [ ] 独立、受保护的 V2-aware route-off 回滚与 V1/V2 drain workflow 演练通过。
+- [x] 完成 development evidence v2 与 SSH/genesis 信任根的离线 strict schema/builder/verifier/broker 基础；
+  它们尚未接真实 producer、authorized_keys 或生产 Workflow，不能解除上一项与生产门禁；
 
 ## Task 10：生产迁移、canary 与全量切换
 
@@ -212,6 +219,10 @@
 - [ ] 演练“Java 兼容镜像在旧结构 ready → 在线迁移后仍 ready → 同镜像 schema ready=true 重启 →
   route-off 收敛”；Python V1-only 回滚只允许零 V2 数据并先做空数据 DDL rollback；
 - [ ] 生产备份与恢复清单验证；
+- [ ] 受保护 development producer 生成并复验一次性 migration qualification、每提交 fault/resource/provider
+  evidence；真实 2C2G、公共 CLI 真实供应商 canary 与 route-off 清理缺一不可；
+- [ ] 安装双角色 forced-command broker、签名 SSH attestation 和唯一 sealed genesis receipt，并让生产 Workflow
+  在任何 SSH 前语义复验；当前只完成离线协议与攻击测试；
 - [x] 固化 `docs/DURABLE_AGENT_V2_ROLLOUT.md` 与可执行阶段门禁：pre contract → 在线迁移后 route-off →
   schemaReady route-off → 用户/隔离小说交集 allowlist → V2-aware route-off drain；
 - [x] 部署入口在本地测试中拒绝 partial、迁移后 Python/V1-only 自动回滚、已有 V2 却 schemaReady=false，

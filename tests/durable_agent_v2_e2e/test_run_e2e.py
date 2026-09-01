@@ -9,10 +9,12 @@ from typing import cast
 
 import pytest
 
+from . import run_e2e
 from .run_e2e import (
     SSE_TIMEOUT,
     Acceptance,
     ComposeStack,
+    _assert_agent_restart_receipts,
     _assert_fake_billing_evidence,
     _safe_billing_evidence,
 )
@@ -65,6 +67,200 @@ def test_sse_only_extends_read_timeout() -> None:
     assert SSE_TIMEOUT.connect == 10.0
     assert SSE_TIMEOUT.write == 10.0
     assert SSE_TIMEOUT.pool == 10.0
+
+
+def test_manual_restart_uses_started_at_instead_of_restart_policy_count() -> None:
+    runtimes = iter(
+        (
+            {
+                "containerId": "container-1",
+                "restartCount": 0,
+                "startedAt": "2026-09-01T00:00:00Z",
+                "status": "running",
+                "health": "healthy",
+                "healthCheckedAt": "2026-09-01T00:00:00Z",
+                "healthCheckExitCode": 0,
+            },
+            {
+                "containerId": "container-1",
+                "restartCount": 0,
+                "startedAt": "2026-09-01T00:00:01Z",
+                "status": "running",
+                "health": "healthy",
+                "healthCheckedAt": "2026-09-01T00:00:02Z",
+                "healthCheckExitCode": 0,
+            },
+        )
+    )
+    calls: list[tuple[str, object]] = []
+    stack = cast(
+        ComposeStack,
+        SimpleNamespace(
+            service_runtime=lambda service: next(runtimes),
+            restart=lambda service: calls.append(("restart", service)),
+            run=lambda arguments, **kwargs: calls.append(("run", arguments)),
+        ),
+    )
+
+    result = ComposeStack.restart_and_wait(stack, "agent-service")
+
+    assert result["before"]["restartCount"] == 0
+    assert result["after"]["restartCount"] == 0
+    assert calls == [("restart", "agent-service")]
+
+
+def test_service_runtime_records_latest_healthcheck_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stack = cast(
+        ComposeStack,
+        SimpleNamespace(
+            docker="docker",
+            run=lambda *_args, **_kwargs: SimpleNamespace(stdout="container-1\n"),
+        ),
+    )
+    monkeypatch.setattr(
+        run_e2e.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=(
+                "container-1|0|2026-09-01T00:00:00Z|running|healthy|"
+                "2026-09-01T00:00:01Z@1,2026-09-01T00:00:02Z@0,\n"
+            ),
+        ),
+    )
+
+    runtime = ComposeStack.service_runtime(stack, "agent-service")
+
+    assert runtime["healthCheckedAt"] == "2026-09-01T00:00:02Z"
+    assert runtime["healthCheckExitCode"] == 0
+
+
+def test_restart_rejects_container_recreation() -> None:
+    runtimes = iter(
+        (
+            {
+                "containerId": "container-before",
+                "restartCount": 0,
+                "startedAt": "2026-09-01T00:00:00Z",
+                "status": "running",
+                "health": "healthy",
+                "healthCheckedAt": "2026-09-01T00:00:00Z",
+                "healthCheckExitCode": 0,
+            },
+            {
+                "containerId": "container-after",
+                "restartCount": 0,
+                "startedAt": "2026-09-01T00:00:01Z",
+                "status": "running",
+                "health": "healthy",
+                "healthCheckedAt": "2026-09-01T00:00:02Z",
+                "healthCheckExitCode": 0,
+            },
+        )
+    )
+    stack = cast(
+        ComposeStack,
+        SimpleNamespace(
+            service_runtime=lambda service: next(runtimes),
+            restart=lambda service: None,
+        ),
+    )
+
+    with pytest.raises(AssertionError, match="重启运行事实无效"):
+        ComposeStack.restart_and_wait(stack, "agent-service")
+
+
+def test_dependency_recovery_waits_for_same_service_instance() -> None:
+    runtimes = iter(
+        (
+            {
+                "containerId": "agent-1",
+                "restartCount": 0,
+                "startedAt": "2026-09-01T00:00:00Z",
+                "status": "running",
+                "health": "healthy",
+                "healthCheckedAt": "2026-09-01T00:00:01Z",
+                "healthCheckExitCode": 0,
+            },
+            {
+                "containerId": "agent-1",
+                "restartCount": 0,
+                "startedAt": "2026-09-01T00:00:00Z",
+                "status": "running",
+                "health": "healthy",
+                "healthCheckedAt": "2026-09-01T00:00:03Z",
+                "healthCheckExitCode": 1,
+            },
+            {
+                "containerId": "agent-1",
+                "restartCount": 0,
+                "startedAt": "2026-09-01T00:00:00Z",
+                "status": "running",
+                "health": "healthy",
+                "healthCheckedAt": "2026-09-01T00:00:04Z",
+                "healthCheckExitCode": 0,
+            },
+        )
+    )
+    stack = cast(
+        ComposeStack,
+        SimpleNamespace(service_runtime=lambda service: next(runtimes)),
+    )
+
+    runtime = ComposeStack.wait_service_healthy(
+        stack,
+        "agent-service",
+        expected_container_id="agent-1",
+        expected_started_at="2026-09-01T00:00:00Z",
+        minimum_health_checked_at="2026-09-01T00:00:02Z",
+        timeout=1,
+    )
+
+    assert runtime["health"] == "healthy"
+    assert runtime["healthCheckExitCode"] == 0
+
+
+def test_dependency_recovery_rejects_agent_recreation() -> None:
+    stack = cast(
+        ComposeStack,
+        SimpleNamespace(
+            service_runtime=lambda service: {
+                "containerId": "agent-2",
+                "startedAt": "2026-09-01T00:00:01Z",
+                "status": "running",
+                "health": "healthy",
+            }
+        ),
+    )
+
+    with pytest.raises(AssertionError, match="被意外重建或重启"):
+        ComposeStack.wait_service_healthy(
+            stack,
+            "agent-service",
+            expected_container_id="agent-1",
+            expected_started_at="2026-09-01T00:00:00Z",
+            timeout=1,
+        )
+
+
+@pytest.mark.parametrize(
+    "receipts",
+    (["accepted"], ["duplicate", "accepted"]),
+)
+def test_agent_restart_accepts_live_replayer_receipt_without_forcing_old_socket(
+    receipts: list[str],
+) -> None:
+    _assert_agent_restart_receipts(receipts)
+
+
+@pytest.mark.parametrize("receipts", ([], ["duplicate"], ["stale"]))
+def test_agent_restart_rejects_receipts_that_do_not_prove_first_commit(
+    receipts: list[str],
+) -> None:
+    with pytest.raises(AssertionError, match="Agent 重启 callback receipt 无效"):
+        _assert_agent_restart_receipts(receipts)
 
 
 def _usage() -> dict[str, object]:
@@ -183,6 +379,7 @@ def test_database_facts_saves_scrubbed_billing_before_business_assertion() -> No
             control_port=1,
             control_token=secrets.token_urlsafe(32),
             psql=lambda *_args, **_kwargs: json.dumps(raw),
+            redis=lambda *_args: [],
         ),
     )
     acceptance = Acceptance(stack)

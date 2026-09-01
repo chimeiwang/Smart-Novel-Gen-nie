@@ -100,7 +100,14 @@ Fake provider 调用计数必须保存在独立耐久测试事实中，按供应
 - ReviewArtifact、WorkflowEvaluation、TokenUsage、CreditLedger 与 BillingReservation 的相关计数；
 - execution Redis AOF 状态、pending/rejected/delivered journal 状态；
 - SSE snapshot、断线 cursor、重连事件序列与终态；
-- 每次重启前后的容器 ID、restart count 和故障 gate 到达/释放记录。
+- 每次重启前后的容器 ID、`StartedAt`、restart count 和故障 gate 到达/释放记录。手工
+  `docker restart` 不保证增加只统计重启策略的 `RestartCount`，因此必须要求同一容器 ID、`StartedAt` 已变化、
+  restart count 不倒退，且最近一次成功 healthcheck 的 `End` 不早于新 `StartedAt`；不得把计数不增长误判为未重启，
+  也不得把 Docker 遗留的总体 `healthy` 当作新进程已经就绪。
+
+报告中的 Event 只保存连续 `sequence + eventType`，不得把 `payloadJson` 原文写入证据。terminal callback 代理除请求
+身份外只保存 HTTP 状态、receipt 状态和 receipt 身份是否与请求完全一致；Agent 仍须实际校验完整 receipt 后把 journal
+压缩为 `delivered` tombstone，测试不能只看代理记录的状态字符串判绿。
 
 日志、报告和测试失败消息不得包含完整章节、完整回答、JWT、服务私钥、数据库密码或供应商请求正文。完整内容只在
 测试断言进程内按 SHA-256 比较，不写入持久报告。
@@ -130,8 +137,34 @@ generation Step 完成，公共会话恰为一问一答，同幂等键返回原 
 
 同一报告还证明 Fake 计费审计为一条 `settled` reservation 和一条 TokenUsage，reserved/charged 均为零、
 `settledAt` 存在、reservation 与 Step usage SHA 相同，全部 request/run/step/user/token 绑定为真；CreditLedger 为零且
-余额差为零。退出时 `down -v` 返回零，project 容器、网络、卷均为零，临时密钥目录已删除。该结果只完成本规格的
-`happy` 阶段；callback 丢回执/AOF、Core/Agent 重启、取消竞争、真实供应商与真实 2 核 2 GB 整机门禁仍未验证。
+余额差为零。退出时 `down -v` 返回零，旧报告直接记录 project 容器为零且临时密钥目录已删除；当时 runner 没有把
+network/volume 标签查询写入报告，因此该历史报告本身不能证明网络与卷为零，后续 runner 必须补齐三类资源的独立
+查询退出码和残留计数。该结果只完成本规格的
+`happy` 阶段；后续 `minimum` 必须在同一隔离栈继续证明 callback 丢回执/AOF、Agent 重启、Core 重启和取消竞争。
+真实供应商与真实 2 核 2 GB 整机门禁仍由独立 development evidence 解除，不能由本地 Fake 场景替代。
+
+### Minimum fault matrix 负面证据
+
+以下两份报告必须原样保留，不得覆盖、删除或改写成通过：
+
+- `output/durable-agent-v2-e2e/freeze-20260901-fault-matrix-01/report.json`：`minimum` 在 Agent 重启事实门禁失败。
+  runner 错误要求手工 `docker compose restart` 必须增加 `RestartCount`；Docker 的该字段只统计 restart policy
+  触发次数，手工重启可以保持为零。修复后以同一容器 ID、变化的 `StartedAt`、不倒退的 restart count 与最终
+  `running/healthy` 共同证明重启。
+- `output/durable-agent-v2-e2e/freeze-20260901-fault-matrix-02/report.json`：`minimum` 在 Agent journal replay
+  收据门禁失败，报告精确原因为只观察到 `accepted`，旧断言却强迫 `accepted + duplicate`。旧 Agent 的已断开
+  HTTP 请求不保证继续到达 Core；修复后仍要求重启前后至少两次同身份 `held_before_forward`，并要求 live Agent
+  已把同一身份 journal 压缩为 `delivered`，随后只接受 `accepted` 或 `accepted + duplicate`。独立的 callback
+  已提交但回执丢失场景继续精确要求 `accepted + duplicate`，不得借此放宽。
+- `output/durable-agent-v2-e2e/freeze-20260901-fault-matrix-03/report.json`：前两个场景已完成，Agent 重启场景
+  已记录重启前后两次同身份 `held_before_forward`，但等待健康的 `docker compose up --wait --no-deps` 把刚刚
+  restart 的容器重建，导致容器 ID 漂移并被门禁正确拒绝。修复后 `restart_and_wait` 只执行一次
+  `docker compose restart`，随后只读轮询同一容器的 `StartedAt/status/health`；不得再以 `up` 等待健康，也不得把
+  容器重建冒充同一实例重启。
+
+三份失败报告都记录了 `status=failed`、`composeDownExitCode=0`、残留容器为零和临时密钥目录已删除；前两版报告未记录
+network/volume 查询，第三版已证明容器、网络、卷查询成功且残留均为零。截至本规格本次静态收口，新的完整 `minimum` 动态矩阵
+尚未通过，不得宣称 Agent/Core 重启、取消与 AOF 已动态全绿。
 
 Java Core 实际 `ExecutionStepRequest` 还必须经过独立跨语言 wire golden：Java 从隔离 PostgreSQL fixture 领取
 `answer_question` Step，并由生产 `ObjectMapper` 写入临时 JSON；Python 只能使用
@@ -227,9 +260,24 @@ PostgreSQL 设置显式限制。验收期间周期采集 `docker stats --no-stre
 ```
 
 `happy` 只验证成功、同 `clientRequestId` 幂等、公共会话消息与 SSE 数字 cursor 断线重连；任一失败即清理并停止。
-`minimum` 才继续验证 callback 已提交后丢回执与 execution Redis AOF 重启。`--rebuild-agent` 只允许重建本地测试
+`minimum` 才继续验证 callback 已提交后丢回执、terminal callback 在 Agent 重启后的 journal 重放、callback 前 Core
+重启、Agent submit 前取消的零供应商调用，以及 execution Redis AOF 重启。重启场景必须记录服务容器 ID、restart
+count、`StartedAt`、同一 callback 身份与 Core receipt。Agent 重启场景须看到重启前后至少两次同身份的
+`held_before_forward`；旧 Agent 的 HTTP 连接可能随进程退出被代理取消，因此合法终态是新回放唯一获得
+`accepted`，或旧请求也已提交时得到 `accepted + duplicate`。不得强迫已断开的旧请求一定抵达 Core；
+accepted-only 只有在新 Agent 已校验完整 Core receipt 并把相同身份 journal 标为 `delivered` 后才合法；
+`duplicate` 的确定性证明由独立的“Core 已提交但回执丢失”场景承担。取消场景必须先在透明 execution submit proxy 的确定性 gate 停住请求，完成
+公共取消后再以 abort 释放该 submit，证明 Agent/provider 从未接收，而不是依赖调度快慢。`--rebuild-agent` 只允许重建本地测试
 Agent 镜像，且必须在启动栈前通过当前 `execution/journal.py`、`queue/repository.py` 与镜像内源码 SHA-256 精确相等
 门禁；`--reuse-built-images` 不得用于掩盖源码与镜像漂移。
+
+execution Redis AOF 场景必须对该容器使用同一套重启运行事实门禁，重启前后分别复验 AOF 配置与写状态，并证明全部
+已交付 tombstone、Provider 调用集合和 Core 脱敏业务事实哈希均未变化；只在重启后收到一次 `PING` 不构成完成证据。
+同时必须记录 Agent 容器 ID 与 `StartedAt`，Redis 恢复后只读等待同一 Agent 自行恢复 healthy；禁止调用
+`compose up agent-service` 重建或重启 Agent 来掩盖依赖恢复缺口。Docker 保存的旧 `healthy` 状态不能充当恢复证据；
+还必须从只读 inspect 事实证明 Agent 最近一次成功 healthcheck 的 `End` 不早于 execution Redis 重启后的
+`StartedAt`，且该条 healthcheck 的 `ExitCode=0`；Docker 在失败次数尚未达到 retries 门槛时保留的总体
+`healthy` 状态不能判绿。
 
 只有以下条件同时成立才可把本地跨进程验收标为完成：
 

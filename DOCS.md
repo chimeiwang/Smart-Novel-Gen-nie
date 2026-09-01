@@ -24,8 +24,11 @@
 - Core 与 Agent 使用版本化 Pydantic 契约和 Ed25519 服务身份通信。
 - 生产由 `infra/compose.yaml` 编排，Nginx 是唯一公网入口；普通 Redis 承担可重建队列/认证事实，独立 AOF
   execution Redis 只承担当次模型调用边界和未送达终态 journal。
-- 生产 SSH 只信任管理员离线核验的主机公钥；部署串行排队，切换前按运行容器的不可变镜像 ID 冻结三服务
-  精确回滚组合，新版本失败时由 `scripts/deploy-production.sh` 尝试恢复该组合。
+- 旧 `build.yml` 只执行 CI，不再自动部署生产。Durable Agent V2 生产发布只能从受保护 release workflow 进入；
+  当前该流程对真实开发 evidence、专用 SSH attestation/broker 和首个受保护 receipt 任一证据缺失都保持
+  fail closed，禁止用历史 workflow 重跑、直接 SSH、手工 Runbook 或单独调用 `deploy-production.sh` 绕过。
+  已进入受保护事务后，切换前按运行容器的不可变镜像 ID 冻结三服务精确回滚组合，新版本失败才由同一 control
+  bundle/事务锁内的补偿路径尝试恢复；容器恢复不等于事务证据已提交。
 - PostgreSQL schema 默认冻结并由只读 `schema-contract.json` 守卫。当前具名例外包括视频控制面与章节
   改编域迁移 `20260807_video_production_control_plane.sql`、`20260817_video_review_decision_command.sql`、
   `20260817_video_domain_ownership_chain.sql`、`20260818_video_chapter_adaptation_domain.sql`，它们只允许对
@@ -94,6 +97,10 @@
 - Agent 执行内核重构：`docs/specs/2026-08-31-core-owned-durable-agent-execution.md`
 - Agent 执行架构决策：`docs/architecture-decisions/004-core-owned-durable-agent-execution.md`
 - Agent 执行实施计划：`docs/plans/2026-08-31-core-owned-durable-agent-execution.md`
+- CLI 与 Operator Skill 更新契约：`docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md`
+- 开发证据 v2 离线契约：`docs/specs/2026-09-01-durable-agent-v2-development-evidence-v2.md`（当前未接真实 producer）
+- SSH 与 genesis 信任根：`docs/specs/2026-09-01-durable-agent-v2-ssh-genesis-trust-root.md`（当前未接生产 broker/receipt）
 - execution journal 容量与恢复演练：`docs/audits/2026-09-01-execution-journal-capacity.md`
 - 生产部署：`infra/compose.yaml`
-- 生产发布入口：`.github/workflows/build.yml`、`scripts/deploy-production.sh`
+- 生产发布入口：`.github/workflows/durable-agent-v2-release.yml`（当前缺外部证据时在 SSH 前失败）；
+  `.github/workflows/build.yml` 仅为 CI，`scripts/deploy-production.sh` 只能由受保护 control bundle 在有效事务锁内调用

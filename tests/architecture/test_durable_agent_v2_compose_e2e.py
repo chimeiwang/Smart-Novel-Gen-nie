@@ -154,6 +154,8 @@ def test_callback_proxy_records_complete_identity_and_can_drop_only_after_forwar
     )
     assert "held_before_forward" in source
     assert "aborted_before_forward" in source
+    assert "receipt_identity_matches INTEGER" in source
+    assert 'receipt.get("protocolVersion") == "2.0"' in source
 
 
 def test_execution_submit_proxy_records_only_safe_422_shape() -> None:
@@ -176,6 +178,51 @@ def test_execution_submit_proxy_records_only_safe_422_shape() -> None:
     assert 'Literal["live", "ready"]' in source
     assert '@app.post("/internal/v1/runs")' in source
     assert "response_headers(upstream_response)" in source
+
+
+def test_minimum_phase_uses_deterministic_restart_and_pre_submit_cancel_gates() -> None:
+    control = CONTROL.read_text(encoding="utf-8")
+    runner = RUNNER.read_text(encoding="utf-8")
+    assert '@app.put("/control/execution-mode")' in control
+    assert '@app.post("/control/execution-release")' in control
+    assert '@app.put("/internal/v1/executions/{job_id}/cancel")' in control
+    assert "if await execution_gate.wait():" in control
+    assert "E2E execution submit 已在转发前中止" in control
+    for scenario in (
+        "acceptance.agent_restart_replays_terminal_journal()",
+        "acceptance.core_restart_before_terminal_callback()",
+        "acceptance.cancel_before_agent_submit()",
+    ):
+        assert scenario in runner
+    assert "self.wait_callback_gate(run_id, minimum_reached=2" in runner
+    assert 'self.stack.restart_and_wait("agent-service")' in runner
+    assert 'self.stack.restart_and_wait("core-api")' in runner
+    assert 'or after["startedAt"] == before["startedAt"]' in runner
+    assert '_assert_agent_restart_receipts(receipts)' in runner
+    assert 'journal = self.wait_delivered_journal(str(step["id"]))' in runner
+    assert 'self.stack.restart_and_wait("execution-redis")' in runner
+    assert 'self.stack.wait_service_healthy(' in runner
+    assert 'minimum_health_checked_at=redis_started_at' in runner
+    assert '["up", "--detach", "--wait", "--no-deps", "agent-service"]' not in runner
+    assert '"databaseFactsSha256After": database_after' in runner
+    assert '"providerFactsUnchanged": True' in runner
+    assert runner.index("acceptance.cancel_before_agent_submit()") < runner.index(
+        'acceptance.aof_restart(scenarios[:-1])'
+    )
+
+
+def test_failure_report_is_incremental_and_cleanup_fails_closed_for_all_resources() -> None:
+    source = RUNNER.read_text(encoding="utf-8")
+    assert '"scenarios": []' in source
+    assert "record_scenario(acceptance.happy_and_idempotency())" in source
+    assert '"lastServiceRestart": stack.last_service_restart' in source
+    assert 'self.safe_diagnostics["coreRestart"]' in source
+    assert 'self.safe_diagnostics["cancelBeforeSubmit"]' in source
+    assert '"residualNetworkCount"' in source
+    assert '"residualVolumeCount"' in source
+    assert 'cleanup.get("composeDownExitCode") != 0' in source
+    assert 'report.setdefault("failureType", "CleanupFailure")' in source
+    assert '"payload", "payloadJson"::jsonb' not in source
 
 
 def test_production_compose_and_agent_openapi_have_no_e2e_control_plane() -> None:

@@ -1,10 +1,17 @@
 # 耐久 Agent V2 数据库迁移与分阶段发布 Runbook
 
-状态：实施期可执行门禁；尚未执行服务器开发库、正式库迁移或生产部署
+状态：受保护发布工作流内部参考；尚未执行服务器开发库、正式库迁移或生产部署，不是人工操作手册
 
 权威规格：`docs/specs/2026-08-31-core-owned-durable-agent-execution.md`
 
 ## 1. 适用边界
+
+生产唯一入口是受保护的 Durable Agent V2 GitHub release workflow，以及它验证并上传的不可变 control bundle。
+本文件中的服务器命令只用于解释 control bundle 内部状态机和停止条件，Operator Skill、开发者或值班人员不得在
+服务器 shell 手工复制执行，也不得直接调用迁移、Compose、route、boundary、receipt 或数据库子命令。当前开发证据、
+SSH attestation/broker 与 genesis receipt 任一门禁未满足时，工作流必须在 SSH 前失败；不能把本 Runbook 当作旁路。
+
+公共业务 canary 仍只能使用固定环境的公共 CLI/Operator Skill。发布控制面永远不得加入 Skill wrapper 白名单。
 
 本 Runbook 只操作具名迁移：
 
@@ -99,10 +106,13 @@ DURABLE_AGENT_EXECUTION_SCHEMA_READY=false
 DURABLE_AGENT_EXECUTION_ROUTE_MODE=off
 DURABLE_AGENT_EXECUTION_USER_ALLOWLIST=
 DURABLE_AGENT_EXECUTION_NOVEL_ALLOWLIST=
-V1_FRESH_AGENT_STARTS_ENABLED=true
+V1_FRESH_AGENT_STARTS_ENABLED=false
 ```
 
-先部署同一套 V2-aware 三服务镜像，但不迁移数据库、不装配 V2 repository/worker、不创建新 V2 Run。部署后执行：
+受保护工作流先部署同一套包含 V1 fresh-start gate 的 V2-aware 三服务镜像，但不迁移数据库、不装配 V2
+repository/worker、不创建新 V2 Run。`pre-contract` 门禁要求 `V1_FRESH_AGENT_STARTS_ENABLED=false`，与
+`durable-agent-v2-rollout-gate.sh` 的可执行契约一致；旧 Core 缺该门禁时必须先走受保护 bootstrap，不能把值改回
+`true` 维持可写。以下命令只表示 control bundle 内部执行的动作：
 
 ```sh
 APP_DIR=/srv/smart-novel-gen \
@@ -276,6 +286,9 @@ APP_DIR=/srv/smart-novel-gen \
 
 随后只通过公共 HTTPS 或受支持 CLI 验证指定账号与新建隔离小说，顺序为：身份只读、一次问答、一次完整候选
 discard、一次 approve、一次 cancel、SSE 重连和唯一用量。内部接口、数据库直写和旧作品均不得用于 canary。
+问答命令、V2 JSONL、权威消息关联、恢复竞态和凭据边界统一遵守
+`docs/specs/2026-09-01-durable-agent-v2-operator-skill-update.md`；canary 期间只允许发布流程冻结的 user/novel scope，
+不得因此提前把 `answer_question` 加入通用 Production Skill。
 观察至少 30～60 分钟或足量样本。任何协议错误、重复产物/计费、不可恢复 Step、终态缺失、manifest 漂移或
 SLO 硬失败立即停止新建路由。
 
